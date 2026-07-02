@@ -633,6 +633,13 @@ async function buildContainerArgs(
     if (value) args.push('-e', `${key}=${value}`);
   }
 
+  // KSM page-merge opt-in toggle. The runner enables it by default; forward
+  // an explicit host-side value (e.g. KSM_MERGE=0) so it can be disabled.
+  {
+    const ksm = resolveEnv('KSM_MERGE');
+    if (ksm) args.push('-e', `KSM_MERGE=${ksm}`);
+  }
+
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
     for (const [key, value] of Object.entries(providerContribution.env)) {

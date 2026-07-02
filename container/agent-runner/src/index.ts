@@ -27,6 +27,7 @@ import { fileURLToPath } from 'url';
 
 import { loadConfig } from './config.js';
 import { buildSystemPromptAddendum } from './destinations.js';
+import { maybeEnableKsm } from './ksm.js';
 import { ensureMemoryScaffold } from './memory-scaffold.js';
 // Providers barrel — each enabled provider self-registers on import.
 // Provider skills append imports to providers/index.ts.
@@ -42,6 +43,10 @@ function log(msg: string): void {
 const CWD = '/workspace/agent';
 
 async function main(): Promise<void> {
+  // Opt into KSM before any child processes spawn so opencode/MCP servers
+  // inherit mergeable pages. Cheap no-op when the host scanner is off.
+  maybeEnableKsm(log);
+
   const config = loadConfig();
   const providerName = config.provider.toLowerCase() as ProviderName;
 
