@@ -20,6 +20,11 @@ import {
   TIMEZONE,
 } from './config.js';
 import { materializeContainerJson } from './container-config.js';
+import {
+  decideAdmission,
+  maxConcurrentContainers,
+  snapshotRunning,
+} from './container-admission.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { updateContainerConfigScalars, updateContainerConfigJson } from './db/container-configs.js';
 import { readEnvFile } from './env.js';
@@ -102,8 +107,7 @@ export function wakeContainer(session: Session): Promise<boolean> {
     log.debug('Container wake already in-flight — joining existing promise', { sessionId: session.id });
     return existing;
   }
-  const promise = spawnContainer(session)
-    .then(() => true)
+  const promise = admitThenSpawn(session)
     .catch((err) => {
       log.warn('wakeContainer failed — host-sweep will retry', { sessionId: session.id, err });
       return false;
@@ -113,6 +117,65 @@ export function wakeContainer(session: Session): Promise<boolean> {
     });
   wakePromises.set(session.id, promise);
   return promise;
+}
+
+// Bound on eviction rounds per spawn attempt, so a pathological state can't
+// evict the whole fleet to admit one container.
+const MAX_EVICT_ROUNDS = 4;
+
+/**
+ * Admission gate in front of `spawnContainer`. Caps concurrent containers at
+ * the memory-derived limit (see container-admission.ts): evicts an idle
+ * container to make room when possible, or defers the spawn (returns false) —
+ * the inbound message stays pending and host-sweep re-wakes it on its next
+ * tick. A cap of 0 (memory unreadable) means always spawn.
+ */
+async function admitThenSpawn(session: Session): Promise<boolean> {
+  const cap = maxConcurrentContainers();
+  if (cap > 0) {
+    for (let round = 0; round <= MAX_EVICT_ROUNDS; round++) {
+      const decision = decideAdmission({
+        maxContainers: cap,
+        running: snapshotRunning(activeContainers.keys(), session.id),
+      });
+      if (decision.action === 'admit') break;
+      if (decision.action === 'evict') {
+        log.info('Admission evicting idle container to free a slot', {
+          evicting: decision.sessionId,
+          forSession: session.id,
+        });
+        await evictContainer(decision.sessionId);
+        continue;
+      }
+      log.info('Admission deferring spawn — host-sweep will retry', {
+        sessionId: session.id,
+        reason: decision.reason,
+      });
+      return false;
+    }
+  }
+  await spawnContainer(session);
+  return true;
+}
+
+/** Kill a container and resolve once it has actually exited (bounded wait). */
+function evictContainer(sessionId: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (!activeContainers.has(sessionId)) {
+      resolve();
+      return;
+    }
+    let done = false;
+    const finish = (): void => {
+      if (!done) {
+        done = true;
+        resolve();
+      }
+    };
+    killContainer(sessionId, 'admission-evict', finish);
+    // Safety net in case the exit signal never arrives.
+    setTimeout(finish, 8000);
+  });
 }
 
 async function spawnContainer(session: Session): Promise<void> {
