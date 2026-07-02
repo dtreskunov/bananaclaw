@@ -359,7 +359,18 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
     ...(model ? { model } : {}),
     ...(smallModel ? { small_model: smallModel } : {}),
     enabled_providers: [provider],
-    permission: 'allow',
+    // As of OpenCode 1.14+ `permission` is a per-tool object, not the bare
+    // string `'allow'` the 1.4.x schema accepted (the string is silently
+    // ignored by newer servers, which then fall back to "ask" and lean on
+    // our permission.updated auto-reply). Grant every gate so the agent runs
+    // unattended — same intent as the old string form.
+    permission: {
+      edit: 'allow',
+      bash: 'allow',
+      webfetch: 'allow',
+      doom_loop: 'allow',
+      external_directory: 'allow',
+    },
     autoupdate: false,
     snapshot: false,
     provider: providerOptions,

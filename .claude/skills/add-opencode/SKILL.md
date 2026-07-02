@@ -70,10 +70,10 @@ import './opencode.js';
 
 ### 4. Add the agent-runner dependency
 
-Pinned. Bump deliberately, not with `bun update`. Use `1.4.17` — must match the `opencode-ai` CLI version pinned in step 5. The 1.14.x SDK has a completely different API and is **incompatible** with the current provider code.
+Pinned. Bump deliberately, not with `bun update`. Use `1.17.13` — must match the `opencode-ai` CLI version pinned in step 5. Keep the SDK and CLI on the same version: the provider talks to the local `opencode serve` over HTTP, and matched versions guarantee the request/response and event shapes line up.
 
 ```bash
-cd container/agent-runner && bun add @opencode-ai/sdk@1.4.17 && cd -
+cd container/agent-runner && bun add @opencode-ai/sdk@1.17.13 && cd -
 ```
 
 ### 5. Add `opencode-ai` to the container Dockerfile
@@ -83,10 +83,10 @@ Two edits to `container/Dockerfile`, both idempotent (skip if already present):
 **(a)** In the "Pin CLI versions" ARG block (around line 22), add after `ARG VERCEL_VERSION=...`:
 
 ```dockerfile
-ARG OPENCODE_VERSION=1.4.17
+ARG OPENCODE_VERSION=1.17.13
 ```
 
-> **Do not use `latest`** — the CLI and SDK must be the same version. `latest` silently upgrades the CLI to 1.14.x which has a breaking session API change (UUID session IDs → `ses_` prefix) incompatible with SDK 1.4.x.
+> **Do not use `latest`** — pin an exact version and keep the CLI and SDK in lockstep. `latest` lets the CLI drift independently of the pinned SDK; if their HTTP API/event shapes ever diverge across a major bump, the provider breaks silently at runtime.
 
 **(b)** Add a new standalone `RUN` block for the OpenCode CLI, after the existing per-CLI install blocks (around line 111, right after the `@anthropic-ai/claude-code` block). The Dockerfile splits each global CLI into its own layer for cache granularity — keep that pattern; do not collapse them into a single combined `pnpm install -g` call:
 

@@ -39,7 +39,7 @@ In `container/Dockerfile`, remove both OpenCode edits (skip whichever is already
 **(a)** Delete the version ARG from the "Pin CLI versions" block:
 
 ```dockerfile
-ARG OPENCODE_VERSION=1.4.17
+ARG OPENCODE_VERSION=1.17.13
 ```
 
 **(b)** Delete the standalone OpenCode install layer:
