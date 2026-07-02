@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { formatMessages, stripInternalTags } from './formatter.js';
+import { formatMessages, stripInternalTags, stripThinkTags } from './formatter.js';
 import { TIMEZONE } from './timezone.js';
 
 beforeEach(() => {
@@ -192,5 +192,38 @@ describe('stripInternalTags', () => {
     expect(stripInternalTags('<internal>thinking</internal>The answer is 42')).toBe(
       'The answer is 42',
     );
+  });
+});
+
+describe('stripThinkTags', () => {
+  it('strips a balanced <think> block', () => {
+    expect(stripThinkTags('<think>reasoning here</think>The answer is 42')).toBe(
+      'The answer is 42',
+    );
+  });
+
+  it('strips multi-line and <thinking> variants, case-insensitively', () => {
+    expect(stripThinkTags('<Thinking>\na\nb\n</THINKING>\n\nHello')).toBe('Hello');
+  });
+
+  it('strips an orphaned leading close tag and everything before it', () => {
+    // The SSE stream dropped the opening <think>, leaving only the tail.
+    const leaked =
+      '` since the user asked from that channel.</think>\n\nShort answer: no.';
+    expect(stripThinkTags(leaked)).toBe('Short answer: no.');
+  });
+
+  it('strips an unclosed trailing open tag through end of text', () => {
+    expect(stripThinkTags('Real reply.<think>leftover reasoning that never closed')).toBe(
+      'Real reply.',
+    );
+  });
+
+  it('returns input unchanged when there are no think tags', () => {
+    expect(stripThinkTags('just a normal reply')).toBe('just a normal reply');
+  });
+
+  it('handles multiple balanced blocks', () => {
+    expect(stripThinkTags('<think>a</think>keep<think>b</think>')).toBe('keep');
   });
 });

@@ -353,6 +353,25 @@ export function stripInternalTags(text: string): string {
 }
 
 /**
+ * Strip inline chain-of-thought scaffolding bound for a user. Reasoning models
+ * via OpenCode emit `<think>…</think>` in the response text; SSE handling can
+ * also drop the opening tag, leaving an orphaned `</think>` tail. Removes
+ * balanced blocks, an orphaned leading close (and everything before it), and an
+ * unclosed trailing open (through end of text).
+ */
+export function stripThinkTags(text: string): string {
+  let out = text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+  // Orphaned leading close (no opening tag remains): the visible text is the
+  // tail of a block whose open was lost — drop up to and including that close.
+  if (!/<think(?:ing)?\b[^>]*>/i.test(out)) {
+    const close = out.match(/<\/think(?:ing)?>/i);
+    if (close?.index !== undefined) out = out.slice(close.index + close[0].length);
+  }
+  // Unclosed trailing open: drop from it to the end.
+  return out.replace(/<think(?:ing)?>[\s\S]*$/i, '').trim();
+}
+
+/**
  * Return the concatenated content of `<internal>...</internal>` blocks,
  * separated by blank lines. Empty string if none.
  */

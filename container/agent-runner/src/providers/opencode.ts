@@ -6,9 +6,27 @@ import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
+import { stripThinkTags } from '../formatter.js';
 
 function log(msg: string): void {
   console.error(`[opencode-provider] ${msg}`);
+}
+
+/**
+ * Normalize the assistant's final text before delivery. OpenCode's SSE stream
+ * drops the leading `<` of the response (breaking `<message>` parsing), so
+ * restore it when the text opens with a tag we emit (message/internal/think) —
+ * scoped to known tags to avoid corrupting a reply that starts with e.g.
+ * `code>`. Restoring first also makes an inline `<think>` whole, so
+ * stripThinkTags removes the chain-of-thought cleanly instead of leaking a
+ * fragment.
+ */
+export function normalizeAssistantText(raw: string): string {
+  let text = raw;
+  if (text && text[0] !== '<' && /^(?:message(?:\s+[\w-]+=|>)|internal>|think(?:ing)?>)/i.test(text)) {
+    text = '<' + text;
+  }
+  return stripThinkTags(text);
 }
 
 // ── Model parameters (model_params bag) ──────────────────────────────────
@@ -717,13 +735,9 @@ export class OpenCodeProvider implements AgentProvider {
             lastAssistantId = msgId;
           }
         }
-        // OpenCode's SSE stream strips the leading '<' from the assistant
-        // response text (first character only). If the response starts with
-        // something that looks like a stripped opening tag — a tag-name token
-        // followed by '>' or by an attribute (`word="`) — restore the '<'.
-        if (resultText && resultText[0] !== '<' && /^[a-zA-Z][\w-]*(\s+[\w-]+="|>)/.test(resultText)) {
-          resultText = '<' + resultText;
-        }
+        // Restore the leading '<' OpenCode's SSE strips and drop inline
+        // chain-of-thought before delivery. See normalizeAssistantText.
+        resultText = normalizeAssistantText(resultText);
         // Some providers (e.g. gemini-via-openrouter) finalize cost/tokens in a
         // `message.updated` that arrives *after* `session.idle` ends our loop,
         // so the values we captured from streaming events are still zero. Do a

@@ -11,6 +11,7 @@ import path from 'path';
 
 import { getCurrentInReplyTo } from '../current-batch.js';
 import { findByName, getAllDestinations } from '../destinations.js';
+import { stripThinkTags } from '../formatter.js';
 import { getMessageIdBySeq, getRoutingBySeq, writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
 import { registerTools } from './server.js';
@@ -109,7 +110,14 @@ export const sendMessage: McpToolDefinition = {
     },
   },
   async handler(args) {
-    const text = args.text as string;
+    const raw = args.text as string;
+    if (!raw) return err('text is required');
+
+    // Weak reasoning models (e.g. minimax-m3 via OpenCode) sometimes dump
+    // inline chain-of-thought or a stray <message> wrapper into the tool arg;
+    // strip both before writing outbound. This path bypasses the provider's
+    // normalizeAssistantText, so the sanitize has to happen here too.
+    const text = stripThinkTags(raw).replace(/<\/?message\b[^>]*>/gi, '').trim();
     if (!text) return err('text is required');
 
     const routing = resolveRouting(args.to as string | undefined);
