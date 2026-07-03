@@ -146,9 +146,19 @@ export function countDueMessages(db: Database.Database): number {
   return (
     db
       .prepare(
+        // `kind = 'system'` messages (question_response, delivery_failed, …)
+        // are drained by tools polling inside an already-running container
+        // (e.g. ask_user_question → findQuestionResponse); the poll loop never
+        // surfaces them to the agent. On their own they must NEVER justify
+        // waking a cold container or keeping an idle one alive — otherwise an
+        // orphaned system row (a late question answer, or a delivery_failed
+        // that has no consumer) stays `pending` forever, counts as "due" on
+        // every host-sweep, and pins its container's admission slot,
+        // starving every other agent group under the concurrency cap.
         `SELECT COUNT(*) as count FROM messages_in
        WHERE status = 'pending'
          AND trigger = 1
+         AND kind != 'system'
          AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))`,
       )
       .get() as { count: number }
