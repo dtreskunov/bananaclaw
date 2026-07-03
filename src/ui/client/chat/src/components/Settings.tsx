@@ -2,7 +2,7 @@
 import './Settings.css';
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { settingsOpen, notifMutedSig, progressSoundMutedSig, CHANNEL_META, me } from '../state';
+import { settingsOpen, notifMutedSig, progressSoundMutedSig, completionSoundMutedSig, CHANNEL_META, me } from '../state';
 import { toggleMute, shouldShowIosInstallHint } from '../notify';
 import { installAvailable, installCompleted, triggerInstall } from '../install';
 import { useBackButtonCloses } from '../modalBackButton';
@@ -262,6 +262,19 @@ export function Settings() {
               <span>Play a sound as the agent makes progress</span>
             </label>
             <p class="muted">A subtle tick when the agent runs a tool or moves to a new step.</p>
+          </section>
+
+          <section>
+            <h3>Completion sound</h3>
+            <label class="settings-row">
+              <input
+                type="checkbox"
+                checked={!completionSoundMutedSig.value}
+                onChange={() => { completionSoundMutedSig.value = !completionSoundMutedSig.value; }}
+              />
+              <span>Play a chime when the agent's reply arrives</span>
+            </label>
+            <p class="muted">A short chime each time the agent finishes and sends its response.</p>
           </section>
 
           <InstallSection />

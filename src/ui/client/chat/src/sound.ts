@@ -4,7 +4,7 @@
 // autoplay policy keeps the AudioContext suspended until a user gesture,
 // so we attach one-time unlock listeners and also resume lazily on play.
 import { effect } from '@preact/signals';
-import { progressSoundMutedSig, PROGRESS_SOUND_KEY } from './state';
+import { progressSoundMutedSig, PROGRESS_SOUND_KEY, completionSoundMutedSig, COMPLETION_SOUND_KEY } from './state';
 
 let ctx: AudioContext | null = null;
 let unlocked = false;
@@ -40,9 +40,17 @@ function loadBool(key: string, fallback: boolean): boolean {
 
 export function initSound(): void {
   progressSoundMutedSig.value = loadBool(PROGRESS_SOUND_KEY, false);
+  completionSoundMutedSig.value = loadBool(COMPLETION_SOUND_KEY, false);
   effect(() => {
     try {
       localStorage.setItem(PROGRESS_SOUND_KEY, progressSoundMutedSig.value ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  });
+  effect(() => {
+    try {
+      localStorage.setItem(COMPLETION_SOUND_KEY, completionSoundMutedSig.value ? '1' : '0');
     } catch {
       /* ignore */
     }
@@ -83,4 +91,11 @@ export function playProgressTick(): void {
   if (now - lastTick < TICK_MIN_INTERVAL_MS) return;
   lastTick = now;
   tone(660, 70, 0.04);
+}
+
+// Distinct two-note chime when the agent's final response arrives.
+export function playCompletionChime(): void {
+  if (completionSoundMutedSig.value) return;
+  tone(660, 120, 0.05);
+  setTimeout(() => tone(880, 180, 0.05), 110);
 }

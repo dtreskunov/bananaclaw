@@ -41,7 +41,7 @@ import {
 import { api, postJson } from './api';
 import { writeHash } from './hash';
 import { maybeNotify } from './notify';
-import { playProgressTick } from './sound';
+import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
 import type {
   Thread,
@@ -699,6 +699,7 @@ function connectChatWs(): void {
         // Final response arrived — the live activity trace has served its
         // purpose; clear it so it doesn't linger under the new bubble.
         activityLog.value = [];
+        playCompletionChime();
         maybeNotify(text, payload.files || []);
       }
       return;

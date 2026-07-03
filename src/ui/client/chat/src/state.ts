@@ -97,6 +97,7 @@ export const uploadItems: Signal<UploadItem[]> = signal<UploadItem[]>([]);
 export const me: Signal<string> = signal('');
 export const notifMutedSig: Signal<boolean> = signal(false);
 export const progressSoundMutedSig: Signal<boolean> = signal(false);
+export const completionSoundMutedSig: Signal<boolean> = signal(false);
 export const settingsOpen: Signal<boolean> = signal(false);
 export const groupAdminOpen: Signal<boolean> = signal(false);
 export const groupPickerOpen: Signal<boolean> = signal(false);
@@ -148,6 +149,7 @@ export const UPLOAD_MAX_FILES = 10;
 export const MOBILE_MQ = window.matchMedia('(max-width: 720px)');
 export const NOTIF_MUTE_KEY = 'nanoclaw:notif:muted';
 export const PROGRESS_SOUND_KEY = 'nanoclaw:sound:progress:muted';
+export const COMPLETION_SOUND_KEY = 'nanoclaw:sound:completion:muted';
 
 export const CHANNEL_META: Record<string, ChannelMetaEntry> = {
   web: { label: 'Web', icon: '\uD83D\uDCAC' },

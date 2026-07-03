@@ -15546,6 +15546,7 @@ var uploadItems = y3([]);
 var me = y3("");
 var notifMutedSig = y3(false);
 var progressSoundMutedSig = y3(false);
+var completionSoundMutedSig = y3(false);
 var settingsOpen = y3(false);
 var groupAdminOpen = y3(false);
 var groupPickerOpen = y3(false);
@@ -15577,6 +15578,7 @@ var UPLOAD_MAX_FILES = 10;
 var MOBILE_MQ = window.matchMedia("(max-width: 720px)");
 var NOTIF_MUTE_KEY = "nanoclaw:notif:muted";
 var PROGRESS_SOUND_KEY = "nanoclaw:sound:progress:muted";
+var COMPLETION_SOUND_KEY = "nanoclaw:sound:completion:muted";
 var CHANNEL_META = {
   web: { label: "Web", icon: "\u{1F4AC}" },
   resend: { label: "Email", icon: "\u{1F4E7}" },
@@ -17408,9 +17410,16 @@ function loadBool(key, fallback) {
 }
 function initSound() {
   progressSoundMutedSig.value = loadBool(PROGRESS_SOUND_KEY, false);
+  completionSoundMutedSig.value = loadBool(COMPLETION_SOUND_KEY, false);
   j3(() => {
     try {
       localStorage.setItem(PROGRESS_SOUND_KEY, progressSoundMutedSig.value ? "1" : "0");
+    } catch {
+    }
+  });
+  j3(() => {
+    try {
+      localStorage.setItem(COMPLETION_SOUND_KEY, completionSoundMutedSig.value ? "1" : "0");
     } catch {
     }
   });
@@ -17445,6 +17454,11 @@ function playProgressTick() {
   if (now - lastTick < TICK_MIN_INTERVAL_MS) return;
   lastTick = now;
   tone(660, 70, 0.04);
+}
+function playCompletionChime() {
+  if (completionSoundMutedSig.value) return;
+  tone(660, 120, 0.05);
+  setTimeout(() => tone(880, 180, 0.05), 110);
 }
 
 // src/actions.ts
@@ -17950,6 +17964,7 @@ function connectChatWs() {
       bumpActiveThread();
       if (dir === "out") {
         activityLog.value = [];
+        playCompletionChime();
         maybeNotify(text, payload.files || []);
       }
       return;
@@ -21659,6 +21674,23 @@ function Settings() {
           /* @__PURE__ */ u4("span", { children: "Play a sound as the agent makes progress" })
         ] }),
         /* @__PURE__ */ u4("p", { class: "muted", children: "A subtle tick when the agent runs a tool or moves to a new step." })
+      ] }),
+      /* @__PURE__ */ u4("section", { children: [
+        /* @__PURE__ */ u4("h3", { children: "Completion sound" }),
+        /* @__PURE__ */ u4("label", { class: "settings-row", children: [
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "checkbox",
+              checked: !completionSoundMutedSig.value,
+              onChange: () => {
+                completionSoundMutedSig.value = !completionSoundMutedSig.value;
+              }
+            }
+          ),
+          /* @__PURE__ */ u4("span", { children: "Play a chime when the agent's reply arrives" })
+        ] }),
+        /* @__PURE__ */ u4("p", { class: "muted", children: "A short chime each time the agent finishes and sends its response." })
       ] }),
       /* @__PURE__ */ u4(InstallSection, {}),
       /* @__PURE__ */ u4("section", { children: [
