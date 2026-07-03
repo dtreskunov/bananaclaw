@@ -123,6 +123,14 @@ export interface Refs {
   suppressHashCount: number;
   uploadDragDepth: number;
   newChatInFlight: boolean;
+  /**
+   * Live activity trace stashed at turn end so it can be attached to the
+   * outbound response bubble. The `typing:{on:false}` frame clears the
+   * live `activityLog` and can arrive before the outbound message, so we
+   * preserve the trace here and consume it on the next 'out' message.
+   * Reset at each turn boundary (new inbound / local send).
+   */
+  carryActivity: import('./types').ActivityLine[];
 }
 
 export const refs: Refs = {
@@ -135,6 +143,7 @@ export const refs: Refs = {
   suppressHashCount: 0,
   uploadDragDepth: 0,
   newChatInFlight: false,
+  carryActivity: [],
 };
 
 // ── constants ───────────────────────────────────────────────────────

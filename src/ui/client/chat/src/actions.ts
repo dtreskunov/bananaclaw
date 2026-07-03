@@ -360,11 +360,19 @@ function appendMsg(
   files: ChatMessageFile[] | null | undefined,
   ts: string,
   id?: string,
+  activity?: import('./types').ActivityLine[] | null,
 ): void {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
   if (key) refs.seenIds.add(key);
-  chatMessages.value = chatMessages.value.concat({ id, direction, text, files: files || null, ts });
+  chatMessages.value = chatMessages.value.concat({
+    id,
+    direction,
+    text,
+    files: files || null,
+    ts,
+    ...(activity && activity.length ? { activity } : {}),
+  });
 }
 
 function normDirection(d: string): Direction {
@@ -638,6 +646,10 @@ function connectChatWs(): void {
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || '';
       if (!payload.on) {
+        // Turn ended. This frame can arrive before the outbound response, so
+        // stash the live trace and let the 'out' handler attach it to the
+        // bubble; then clear the live log so the typing block unmounts clean.
+        if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
         activityLog.value = [];
       } else if (payload.items && payload.items.length) {
         // Append newly-forwarded steps; the server only sends deltas, so
@@ -651,6 +663,7 @@ function connectChatWs(): void {
       return;
     }
     if (payload.kind === 'inbound') {
+      refs.carryActivity = [];
       appendMsg('in', payload.text || '', payload.files || null, payload.timestamp || '', payload.id);
       updateActiveThreadTitleFromFirstMessage(payload.text || '');
       bumpActiveThread();
@@ -693,12 +706,23 @@ function connectChatWs(): void {
       const c = payload.content || {};
       const text = typeof c === 'string' ? c : c.text || c.markdown || '';
       const dir: Direction = payload.messageKind === 'internal' ? 'internal' : 'out';
-      appendMsg(dir, text, payload.files || [], payload.timestamp || '', payload.id);
+      // For the final response, carry the live-accumulated trace onto the
+      // message bubble so it stays visible immediately — the live outbound
+      // frame has no activity of its own, and otherwise the trace would only
+      // reappear after a reload (via /history's persisted turn_activity).
+      // The typing:{on:false} frame usually arrives first and moves the trace
+      // into refs.carryActivity, so prefer that; fall back to the live log if
+      // the outbound raced ahead of the typing-off frame.
+      const carriedActivity =
+        dir === 'out' ? (activityLog.value.length ? activityLog.value.slice() : refs.carryActivity) : null;
+      appendMsg(dir, text, payload.files || [], payload.timestamp || '', payload.id, carriedActivity);
       bumpActiveThread();
       if (dir === 'out') {
-        // Final response arrived — the live activity trace has served its
-        // purpose; clear it so it doesn't linger under the new bubble.
+        // Final response arrived — the live activity trace has been carried
+        // onto the message bubble above; clear the live log and carry buffer
+        // so it doesn't linger under the new bubble or leak into next turn.
         activityLog.value = [];
+        refs.carryActivity = [];
         playCompletionChime();
         maybeNotify(text, payload.files || []);
       }
@@ -725,6 +749,8 @@ function connectChatWs(): void {
 
 export async function sendChat(text: string, files: PendingFile[] | null | undefined): Promise<void> {
   if (!groupId.value || !threadId.value) return;
+  // New turn boundary — drop any trace stashed from the previous turn.
+  refs.carryActivity = [];
   // Scroll to bottom immediately so user sees their message area
   requestScrollToBottom();
   const isWeb = !channelType.value || channelType.value === 'web';

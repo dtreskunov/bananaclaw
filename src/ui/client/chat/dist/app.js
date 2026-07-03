@@ -15569,7 +15569,8 @@ var refs = {
   seenIds: /* @__PURE__ */ new Set(),
   suppressHashCount: 0,
   uploadDragDepth: 0,
-  newChatInFlight: false
+  newChatInFlight: false,
+  carryActivity: []
 };
 var SYNC_INTERVAL_MS = 1e4;
 var UPLOAD_MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -17668,11 +17669,18 @@ function historyUrl(gid, tid) {
   if (qs) u5 += "?" + qs;
   return u5;
 }
-function appendMsg(direction, text, files, ts, id) {
+function appendMsg(direction, text, files, ts, id, activity) {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
   if (key) refs.seenIds.add(key);
-  chatMessages.value = chatMessages.value.concat({ id, direction, text, files: files || null, ts });
+  chatMessages.value = chatMessages.value.concat({
+    id,
+    direction,
+    text,
+    files: files || null,
+    ts,
+    ...activity && activity.length ? { activity } : {}
+  });
 }
 function normDirection(d5) {
   return d5 === "in" ? "in" : d5 === "internal" ? "internal" : "out";
@@ -17913,6 +17921,7 @@ function connectChatWs() {
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || "";
       if (!payload.on) {
+        if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
         activityLog.value = [];
       } else if (payload.items && payload.items.length) {
         const prev = activityLog.value;
@@ -17923,6 +17932,7 @@ function connectChatWs() {
       return;
     }
     if (payload.kind === "inbound") {
+      refs.carryActivity = [];
       appendMsg("in", payload.text || "", payload.files || null, payload.timestamp || "", payload.id);
       updateActiveThreadTitleFromFirstMessage(payload.text || "");
       bumpActiveThread();
@@ -17960,10 +17970,12 @@ function connectChatWs() {
       const c4 = payload.content || {};
       const text = typeof c4 === "string" ? c4 : c4.text || c4.markdown || "";
       const dir = payload.messageKind === "internal" ? "internal" : "out";
-      appendMsg(dir, text, payload.files || [], payload.timestamp || "", payload.id);
+      const carriedActivity = dir === "out" ? activityLog.value.length ? activityLog.value.slice() : refs.carryActivity : null;
+      appendMsg(dir, text, payload.files || [], payload.timestamp || "", payload.id, carriedActivity);
       bumpActiveThread();
       if (dir === "out") {
         activityLog.value = [];
+        refs.carryActivity = [];
         playCompletionChime();
         maybeNotify(text, payload.files || []);
       }
@@ -17989,6 +18001,7 @@ function connectChatWs() {
 }
 async function sendChat(text, files) {
   if (!groupId.value || !threadId.value) return;
+  refs.carryActivity = [];
   requestScrollToBottom();
   const isWeb = !channelType.value || channelType.value === "web";
   const hasFiles = Array.isArray(files) && files.length > 0;
