@@ -47,6 +47,7 @@ interface McpStdioServerDto {
   args?: string[];
   env?: Record<string, string>;
   instructions?: string;
+  timeout?: number;
 }
 
 interface McpHttpServerDto {
@@ -54,6 +55,7 @@ interface McpHttpServerDto {
   url: string;
   headers?: Record<string, string>;
   instructions?: string;
+  timeout?: number;
 }
 
 type McpServerConfigDto = McpStdioServerDto | McpHttpServerDto;
@@ -1980,6 +1982,7 @@ function McpServerCard({
         ...(stdio.args ? { args: stdio.args } : {}),
         ...(stdio.env ? { env: stdio.env } : {}),
         ...(value.instructions ? { instructions: value.instructions } : {}),
+        ...(value.timeout ? { timeout: value.timeout } : {}),
       });
     } else {
       const http = value as McpHttpServerDto;
@@ -1988,6 +1991,7 @@ function McpServerCard({
         url: http.url ?? '',
         ...(http.headers ? { headers: http.headers } : {}),
         ...(value.instructions ? { instructions: value.instructions } : {}),
+        ...(value.timeout ? { timeout: value.timeout } : {}),
       });
     }
   }
@@ -2044,6 +2048,28 @@ function McpServerCard({
           onInput={(e: JSX.TargetedEvent<HTMLTextAreaElement>) => {
             const v = e.currentTarget.value;
             onChange({ ...value, instructions: v || undefined } as McpServerConfigDto);
+          }}
+        />
+      </label>
+
+      <label class="ga-mcp-row">
+        <span class="ga-mcp-row-label">timeout (ms)</span>
+        <input
+          type="number"
+          class="ga-mcp-input"
+          placeholder="default 60000"
+          min={1000}
+          max={600000}
+          step={1000}
+          value={value.timeout ?? ''}
+          disabled={disabled}
+          onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => {
+            const raw = e.currentTarget.value.trim();
+            const n = raw === '' ? undefined : Number(raw);
+            onChange({
+              ...value,
+              timeout: n != null && Number.isFinite(n) ? n : undefined,
+            } as McpServerConfigDto);
           }}
         />
       </label>

@@ -32,7 +32,7 @@ describe('mcpServersToOpenCodeConfig', () => {
         SESSION_HEARTBEAT_PATH: '/workspace/.heartbeat',
       },
       enabled: true,
-      timeout: 120_000,
+      timeout: 60_000,
     });
 
     expect(mcp.extra).toEqual({
@@ -40,7 +40,7 @@ describe('mcpServersToOpenCodeConfig', () => {
       command: ['npx', '-y', 'some-mcp'],
       environment: { FOO: 'bar' },
       enabled: true,
-      timeout: 120_000,
+      timeout: 60_000,
     });
   });
 
@@ -52,7 +52,7 @@ describe('mcpServersToOpenCodeConfig', () => {
       type: 'local',
       command: ['true'],
       enabled: true,
-      timeout: 120_000,
+      timeout: 60_000,
     });
   });
 
@@ -73,7 +73,7 @@ describe('mcpServersToOpenCodeConfig', () => {
       url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=tvly-test',
       headers: { Authorization: 'Bearer tvly-test' },
       enabled: true,
-      timeout: 120_000,
+      timeout: 60_000,
     });
   });
 
@@ -85,7 +85,7 @@ describe('mcpServersToOpenCodeConfig', () => {
       type: 'remote',
       url: 'https://example.com/sse',
       enabled: true,
-      timeout: 120_000,
+      timeout: 60_000,
     });
   });
 
@@ -97,7 +97,26 @@ describe('mcpServersToOpenCodeConfig', () => {
       type: 'local',
       command: ['echo', 'hi'],
       enabled: true,
-      timeout: 120_000,
+      timeout: 60_000,
+    });
+  });
+
+  it('honors a per-server timeout override', () => {
+    const mcp = mcpServersToOpenCodeConfig({
+      slow: { command: 'true', args: [], timeout: 180_000 },
+      remote: { type: 'http', url: 'https://example.com/mcp', timeout: 240_000 },
+    });
+    expect(mcp.slow).toEqual({
+      type: 'local',
+      command: ['true'],
+      enabled: true,
+      timeout: 180_000,
+    });
+    expect(mcp.remote).toEqual({
+      type: 'remote',
+      url: 'https://example.com/mcp',
+      enabled: true,
+      timeout: 240_000,
     });
   });
 });

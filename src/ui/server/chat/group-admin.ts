@@ -669,6 +669,8 @@ const PACKAGE_TOKEN_RE = /^[A-Za-z0-9@._/+=<>~^!*-]+$/;
 const MAX_MCP_SERVERS = 32;
 const MCP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 const MAX_MCP_NAME_LEN = 64;
+const MCP_MIN_TIMEOUT_MS = 1_000;
+const MCP_MAX_TIMEOUT_MS = 600_000;
 
 const SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const MAX_SKILL_SLUG_LEN = 64;
@@ -784,6 +786,7 @@ function cleanOneMcpServer(name: string, cfg: Record<string, unknown>): McpServe
   if (instructions !== undefined && instructions.length > 2000) {
     throw new BadRequest(`MCP server "${name}": instructions too long (max 2000)`);
   }
+  const timeout = cleanMcpTimeout(name, cfg.timeout);
 
   if (type === 'http' || type === 'sse') {
     if (typeof cfg.url !== 'string' || cfg.url.trim() === '') {
@@ -797,6 +800,7 @@ function cleanOneMcpServer(name: string, cfg: Record<string, unknown>): McpServe
     const out: McpServerConfig = { type, url };
     if (Object.keys(headers).length > 0) out.headers = headers;
     if (instructions !== undefined) out.instructions = instructions;
+    if (timeout !== undefined) out.timeout = timeout;
     return out;
   }
 
@@ -811,7 +815,22 @@ function cleanOneMcpServer(name: string, cfg: Record<string, unknown>): McpServe
   if (args.length > 0) out.args = args;
   if (Object.keys(env).length > 0) out.env = env;
   if (instructions !== undefined) out.instructions = instructions;
+  if (timeout !== undefined) out.timeout = timeout;
   return out;
+}
+
+function cleanMcpTimeout(name: string, raw: unknown): number | undefined {
+  if (raw == null || raw === '') return undefined;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    throw new BadRequest(`MCP server "${name}": timeout must be an integer number of milliseconds`);
+  }
+  if (n < MCP_MIN_TIMEOUT_MS || n > MCP_MAX_TIMEOUT_MS) {
+    throw new BadRequest(
+      `MCP server "${name}": timeout must be between ${MCP_MIN_TIMEOUT_MS} and ${MCP_MAX_TIMEOUT_MS} ms`,
+    );
+  }
+  return n;
 }
 
 function cleanStringArray(label: string, raw: unknown): string[] {

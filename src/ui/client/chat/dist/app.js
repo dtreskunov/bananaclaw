@@ -24205,7 +24205,8 @@ function McpServerCard({
         command: stdio.command ?? "",
         ...stdio.args ? { args: stdio.args } : {},
         ...stdio.env ? { env: stdio.env } : {},
-        ...value.instructions ? { instructions: value.instructions } : {}
+        ...value.instructions ? { instructions: value.instructions } : {},
+        ...value.timeout ? { timeout: value.timeout } : {}
       });
     } else {
       const http = value;
@@ -24213,7 +24214,8 @@ function McpServerCard({
         type: next,
         url: http.url ?? "",
         ...http.headers ? { headers: http.headers } : {},
-        ...value.instructions ? { instructions: value.instructions } : {}
+        ...value.instructions ? { instructions: value.instructions } : {},
+        ...value.timeout ? { timeout: value.timeout } : {}
       });
     }
   }
@@ -24274,6 +24276,30 @@ function McpServerCard({
           onInput: (e4) => {
             const v5 = e4.currentTarget.value;
             onChange({ ...value, instructions: v5 || void 0 });
+          }
+        }
+      )
+    ] }),
+    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
+      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "timeout (ms)" }),
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "number",
+          class: "ga-mcp-input",
+          placeholder: "default 60000",
+          min: 1e3,
+          max: 6e5,
+          step: 1e3,
+          value: value.timeout ?? "",
+          disabled,
+          onInput: (e4) => {
+            const raw = e4.currentTarget.value.trim();
+            const n3 = raw === "" ? void 0 : Number(raw);
+            onChange({
+              ...value,
+              timeout: n3 != null && Number.isFinite(n3) ? n3 : void 0
+            });
           }
         }
       )

@@ -1,19 +1,13 @@
 import type { McpHttpServerConfig, McpServerConfig, McpStdioServerConfig } from './types.js';
 
 /**
- * Default per-tool-call timeout for MCP servers. OpenCode's built-in default
- * is 5_000 ms (DEFAULT_TIMEOUT in its mcp/index.ts), which trips on any
- * non-trivial remote tool — Tavily search/extract/crawl, GitHub search,
- * Context7 lookup, etc. routinely take 10–60s. We pass the timeout through
- * to OpenCode's `mcp[name].timeout`, which it applies to both `tools/list`
- * and `tools/call`. OpenCode also passes `resetTimeoutOnProgress: true`, so
- * servers that emit progress notifications can run longer than this cap.
- *
- * Operator override: set MCP_TOOL_TIMEOUT in the host env (same var Claude
- * Code reads) to raise or lower the cap without editing source. Shared with
- * the claude provider so a single knob controls both.
+ * Shared MCP request-timeout default (ms). Governs connect, tools/list, and
+ * tools/call. 60s matches OpenCode's native tool-call default. Set
+ * MCP_TOOL_TIMEOUT in the host env to change it for every server across both
+ * providers (single shared knob). A per-server `timeout` in the MCP config
+ * overrides the env/default for that server.
  */
-const DEFAULT_MCP_TIMEOUT_MS = Number(process.env.MCP_TOOL_TIMEOUT) || 120_000;
+const DEFAULT_MCP_TIMEOUT_MS = Number(process.env.MCP_TOOL_TIMEOUT) || 60_000;
 
 /** OpenCode `mcp` entry shape (local stdio server). */
 export type OpenCodeMcpLocal = {
@@ -49,13 +43,14 @@ export function mcpServersToOpenCodeConfig(
   const out: Record<string, OpenCodeMcpEntry> = {};
   if (!servers) return out;
   for (const [name, cfg] of Object.entries(servers) as Array<[string, McpServerConfig]>) {
+    const timeout = cfg.timeout ?? DEFAULT_MCP_TIMEOUT_MS;
     if (isRemote(cfg)) {
       out[name] = {
         type: 'remote',
         url: cfg.url,
         ...(cfg.headers && Object.keys(cfg.headers).length > 0 ? { headers: cfg.headers } : {}),
         enabled: true,
-        timeout: DEFAULT_MCP_TIMEOUT_MS,
+        timeout,
       };
       continue;
     }
@@ -66,7 +61,7 @@ export function mcpServersToOpenCodeConfig(
       command: [stdio.command, ...(stdio.args ?? [])],
       ...(env && Object.keys(env).length > 0 ? { environment: env } : {}),
       enabled: true,
-      timeout: DEFAULT_MCP_TIMEOUT_MS,
+      timeout,
     };
   }
   return out;

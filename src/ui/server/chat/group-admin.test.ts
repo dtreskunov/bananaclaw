@@ -348,6 +348,26 @@ describe('PATCH /api/groups/:gid/admin/mcp-servers', () => {
     expect((stored.remote as { url: string }).url).toBe('https://example.com/mcp');
   });
 
+  it('persists a per-server timeout and rejects an out-of-range one', async () => {
+    seedOwnedGroup('ag-mcp-to', 'mcp-to-grp');
+
+    const ok = await call('PATCH', '/ui/chat/api/groups/ag-mcp-to/admin/mcp-servers', {
+      servers: {
+        slow: { command: 'npx', timeout: 180000 },
+        remote: { type: 'http', url: 'https://example.com/mcp', timeout: 240000 },
+      },
+    });
+    expect(ok.status()).toBe(200);
+    const stored = getJsonCol('ag-mcp-to', 'mcp_servers') as Record<string, { timeout?: number }>;
+    expect(stored.slow!.timeout).toBe(180000);
+    expect(stored.remote!.timeout).toBe(240000);
+
+    const bad = await call('PATCH', '/ui/chat/api/groups/ag-mcp-to/admin/mcp-servers', {
+      servers: { slow: { command: 'npx', timeout: 999999999 } },
+    });
+    expect(bad.status()).toBe(400);
+  });
+
   it('rejects an http server missing url', async () => {
     seedOwnedGroup('ag-mcp2', 'mcp2-grp');
     const res = await call('PATCH', '/ui/chat/api/groups/ag-mcp2/admin/mcp-servers', {

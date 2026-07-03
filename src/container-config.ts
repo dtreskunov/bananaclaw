@@ -23,6 +23,7 @@ export interface McpStdioServerConfig {
   args?: string[];
   env?: Record<string, string>;
   instructions?: string;
+  timeout?: number;
 }
 
 export interface McpHttpServerConfig {
@@ -30,6 +31,7 @@ export interface McpHttpServerConfig {
   url: string;
   headers?: Record<string, string>;
   instructions?: string;
+  timeout?: number;
 }
 
 export type McpServerConfig = McpStdioServerConfig | McpHttpServerConfig;

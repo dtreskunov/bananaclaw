@@ -131,12 +131,16 @@ export type McpStdioServerConfig = {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  /** Per-server request timeout (ms). Overrides the shared MCP_TOOL_TIMEOUT default. */
+  timeout?: number;
 };
 
 export type McpHttpServerConfig = {
   type: 'http' | 'sse';
   url: string;
   headers?: Record<string, string>;
+  /** Per-server request timeout (ms). Overrides the shared MCP_TOOL_TIMEOUT default. */
+  timeout?: number;
 };
 
 export type McpServerConfig = McpStdioServerConfig | McpHttpServerConfig;
