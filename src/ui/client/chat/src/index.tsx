@@ -6,6 +6,7 @@ import { api } from './api';
 import { me, groups, settingsOpen, chatLoading, isElevatedUser } from './state';
 import { App } from './components/App';
 import { initNotif, shouldShowIosInstallHint } from './notify';
+import { initSound } from './sound';
 import { initInstall } from './install';
 import { initBadge } from './badge';
 import { restorePanelState, applyPanelClasses } from './panels';
@@ -79,6 +80,7 @@ function maybeShowIosInstallHint(): void {
 
 async function init(): Promise<void> {
   initNotif();
+  initSound();
   initInstall();
   initBadge();
   setupViewportFit();

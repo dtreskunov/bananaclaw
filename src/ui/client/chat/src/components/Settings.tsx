@@ -2,7 +2,7 @@
 import './Settings.css';
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { settingsOpen, notifMutedSig, CHANNEL_META, me } from '../state';
+import { settingsOpen, notifMutedSig, progressSoundMutedSig, CHANNEL_META, me } from '../state';
 import { toggleMute, shouldShowIosInstallHint } from '../notify';
 import { installAvailable, installCompleted, triggerInstall } from '../install';
 import { useBackButtonCloses } from '../modalBackButton';
@@ -249,6 +249,19 @@ export function Settings() {
             <p class="muted">{muted
               ? 'Currently muted. New messages will not raise notifications.'
               : 'Enabled. Permission is requested on first toggle.'}</p>
+          </section>
+
+          <section>
+            <h3>Sounds</h3>
+            <label class="settings-row">
+              <input
+                type="checkbox"
+                checked={!progressSoundMutedSig.value}
+                onChange={() => { progressSoundMutedSig.value = !progressSoundMutedSig.value; }}
+              />
+              <span>Play a sound as the agent makes progress</span>
+            </label>
+            <p class="muted">A subtle tick when the agent runs a tool or moves to a new step.</p>
           </section>
 
           <InstallSection />

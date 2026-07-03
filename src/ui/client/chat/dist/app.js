@@ -15545,6 +15545,7 @@ var isMobile = y3(false);
 var uploadItems = y3([]);
 var me = y3("");
 var notifMutedSig = y3(false);
+var progressSoundMutedSig = y3(false);
 var settingsOpen = y3(false);
 var groupAdminOpen = y3(false);
 var groupPickerOpen = y3(false);
@@ -15575,6 +15576,7 @@ var UPLOAD_MAX_TOTAL_SIZE = 50 * 1024 * 1024;
 var UPLOAD_MAX_FILES = 10;
 var MOBILE_MQ = window.matchMedia("(max-width: 720px)");
 var NOTIF_MUTE_KEY = "nanoclaw:notif:muted";
+var PROGRESS_SOUND_KEY = "nanoclaw:sound:progress:muted";
 var CHANNEL_META = {
   web: { label: "Web", icon: "\u{1F4AC}" },
   resend: { label: "Email", icon: "\u{1F4E7}" },
@@ -17375,6 +17377,76 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+// src/sound.ts
+var ctx = null;
+var unlocked = false;
+function ensureCtx() {
+  if (ctx) return ctx;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    ctx = new AC();
+  } catch {
+    return null;
+  }
+  return ctx;
+}
+function unlock() {
+  const c4 = ensureCtx();
+  if (!c4) return;
+  if (c4.state === "suspended") void c4.resume().catch(() => {
+  });
+  unlocked = true;
+}
+function loadBool(key, fallback) {
+  try {
+    const v5 = localStorage.getItem(key);
+    return v5 == null ? fallback : v5 === "1";
+  } catch {
+    return fallback;
+  }
+}
+function initSound() {
+  progressSoundMutedSig.value = loadBool(PROGRESS_SOUND_KEY, false);
+  j3(() => {
+    try {
+      localStorage.setItem(PROGRESS_SOUND_KEY, progressSoundMutedSig.value ? "1" : "0");
+    } catch {
+    }
+  });
+  const opts = { once: true, passive: true };
+  for (const ev of ["pointerdown", "keydown", "touchstart"]) {
+    window.addEventListener(ev, unlock, opts);
+  }
+}
+function tone(freq, durMs, peak = 0.05, type = "sine") {
+  const c4 = ensureCtx();
+  if (!c4) return;
+  if (c4.state === "suspended") void c4.resume().catch(() => {
+  });
+  if (!unlocked && c4.state !== "running") return;
+  const now = c4.currentTime;
+  const osc = c4.createOscillator();
+  const gain = c4.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, now);
+  gain.gain.setValueAtTime(1e-4, now);
+  gain.gain.linearRampToValueAtTime(peak, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(1e-4, now + durMs / 1e3);
+  osc.connect(gain).connect(c4.destination);
+  osc.start(now);
+  osc.stop(now + durMs / 1e3 + 0.02);
+}
+var lastTick = 0;
+var TICK_MIN_INTERVAL_MS = 2e3;
+function playProgressTick() {
+  if (progressSoundMutedSig.value) return;
+  const now = Date.now();
+  if (now - lastTick < TICK_MIN_INTERVAL_MS) return;
+  lastTick = now;
+  tone(660, 70, 0.04);
+}
+
 // src/actions.ts
 function focusComposerSoon() {
   if (isMobile.value) return;
@@ -17832,6 +17904,7 @@ function connectChatWs() {
         const prev = activityLog.value;
         const merged = prev.concat(payload.items);
         activityLog.value = merged.length > 200 ? merged.slice(merged.length - 200) : merged;
+        playProgressTick();
       }
       return;
     }
@@ -19494,9 +19567,9 @@ function QuickCapture({ onCapture, onClose }) {
     setBusy(true);
     try {
       const canvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(w5, h5) : Object.assign(document.createElement("canvas"), { width: w5, height: h5 });
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("no 2d context");
-      ctx.drawImage(v5, 0, 0, w5, h5);
+      const ctx2 = canvas.getContext("2d");
+      if (!ctx2) throw new Error("no 2d context");
+      ctx2.drawImage(v5, 0, 0, w5, h5);
       let blob = null;
       if (canvas instanceof OffscreenCanvas) {
         blob = await canvas.convertToBlob({ type: "image/jpeg", quality: JPEG_QUALITY });
@@ -21569,6 +21642,23 @@ function Settings() {
           /* @__PURE__ */ u4("span", { children: "Browser notifications for new messages" })
         ] }),
         /* @__PURE__ */ u4("p", { class: "muted", children: muted ? "Currently muted. New messages will not raise notifications." : "Enabled. Permission is requested on first toggle." })
+      ] }),
+      /* @__PURE__ */ u4("section", { children: [
+        /* @__PURE__ */ u4("h3", { children: "Sounds" }),
+        /* @__PURE__ */ u4("label", { class: "settings-row", children: [
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "checkbox",
+              checked: !progressSoundMutedSig.value,
+              onChange: () => {
+                progressSoundMutedSig.value = !progressSoundMutedSig.value;
+              }
+            }
+          ),
+          /* @__PURE__ */ u4("span", { children: "Play a sound as the agent makes progress" })
+        ] }),
+        /* @__PURE__ */ u4("p", { class: "muted", children: "A subtle tick when the agent runs a tool or moves to a new step." })
       ] }),
       /* @__PURE__ */ u4(InstallSection, {}),
       /* @__PURE__ */ u4("section", { children: [
@@ -24807,6 +24897,7 @@ function maybeShowIosInstallHint() {
 }
 async function init() {
   initNotif();
+  initSound();
   initInstall();
   initBadge();
   setupViewportFit();
