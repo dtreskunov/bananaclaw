@@ -106,6 +106,6 @@ describe('createDeliveryBridge', () => {
     (adapter as unknown as { setTyping: typeof setTyping }).setTyping = setTyping;
     const bridge = createDeliveryBridge({ getChannelAdapter: () => adapter });
     await bridge.setTyping('mock', 'plat-1', 'thread-1');
-    expect(setTyping).toHaveBeenCalledWith('plat-1', 'thread-1', undefined);
+    expect(setTyping).toHaveBeenCalledWith('plat-1', 'thread-1', undefined, undefined);
   });
 });

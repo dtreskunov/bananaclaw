@@ -128,10 +128,13 @@ function shortHost(u: unknown): string {
   }
 }
 
-function clipOneLine(s: unknown, max = 60): string {
+// Flatten a value to a single line (collapse whitespace, trim). We keep the
+// WHOLE message — the activity trace stores it in full (bounded only by a
+// generous hard cap in appendActivity) and the web UI truncates for display
+// via CSS.
+function clipOneLine(s: unknown): string {
   if (typeof s !== 'string') return '';
-  const flat = s.replace(/\s+/g, ' ').trim();
-  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat;
+  return s.replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -187,10 +190,10 @@ export function formatProgressFromPart(
         case 'write': return inp.filePath ? `Writing \`${basename(inp.filePath)}\`` : null;
         case 'edit': return inp.filePath ? `Editing \`${basename(inp.filePath)}\`` : null;
         case 'bash': return inp.command ? `Running \`${clipOneLine(inp.command)}\`` : null;
-        case 'grep': return inp.pattern ? `Searching for \`${clipOneLine(inp.pattern, 40)}\`` : null;
-        case 'glob': return inp.pattern ? `Globbing \`${clipOneLine(inp.pattern, 40)}\`` : null;
+        case 'grep': return inp.pattern ? `Searching for \`${clipOneLine(inp.pattern)}\`` : null;
+        case 'glob': return inp.pattern ? `Globbing \`${clipOneLine(inp.pattern)}\`` : null;
         case 'webfetch': return inp.url ? `Fetching \`${shortHost(inp.url)}\`` : null;
-        case 'task': return (inp.description ?? inp.prompt) ? `Subagent: \`${clipOneLine(inp.description ?? inp.prompt, 40)}\`` : null;
+        case 'task': return (inp.description ?? inp.prompt) ? `Subagent: \`${clipOneLine(inp.description ?? inp.prompt)}\`` : null;
         case 'todowrite': return 'Updating todos';
         default: return `Running \`${tool}\``;
       }

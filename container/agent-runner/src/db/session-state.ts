@@ -121,50 +121,60 @@ export function clearFailedTurn(): void {
   deleteValue(FAILED_TURN_KEY);
 }
 
-import { writeProgressFile, clearProgressFile, appendActivityFile, clearActivityFile, writeTurnEndedFile, clearTurnEndedFile } from './connection.js';
+import { appendActivityFile, clearActivityFile, writeTurnEndedFile, clearTurnEndedFile } from './connection.js';
 
-/** Set the current progress hint (one-line human-readable string). Read by
- *  the host typing module on its refresh tick and forwarded to channel
- *  adapters that support a presence/typing hint. Best-effort — callers
- *  should swallow errors.
- *
- *  Written to a file (not outbound.db) to avoid write contention between
- *  the poll-loop process and the nanoclaw MCP server subprocess — both
- *  share outbound.db with journal_mode=DELETE (exclusive locks). */
-export function setProgress(message: string): void {
-  writeProgressFile(message);
+/** One step of a turn's activity trace: an emit-time timestamp (epoch ms as
+ *  a string) plus the whole progress text. */
+export interface ActivityLine {
+  ts: string;
+  text: string;
 }
 
-/** Clear the progress hint. Called when the turn produces a final result
- *  or errors out so a stale hint doesn't linger past the active work. */
-export function clearProgress(): void {
-  clearProgressFile();
-}
+// Generous per-line hard cap. We store the *whole* harness progress message
+// (no source-side clipping); the web UI truncates for display via CSS. This
+// cap only guards against a pathological multi-KB command/argument blob.
+const ACTIVITY_MAX_CHARS = 2000;
 
 /** Append one progress line to the per-turn activity trace. The host
- *  forwards the full ordered list to the web UI alongside the typing
- *  hint, so the user can see every tool call / progress step as it
- *  happens. Best-effort — callers should swallow errors.
+ *  forwards the full ordered list to the web UI (and derives the single
+ *  latest typing hint from the last line), so the user can see every tool
+ *  call / progress step as it happens. Best-effort — callers should
+ *  swallow errors.
  *
- *  Written to an append-only file (not outbound.db) — same rationale
- *  as setProgress. */
+ *  Written to an append-only file (not outbound.db) to avoid write
+ *  contention between the poll-loop process and the nanoclaw MCP server
+ *  subprocess — both share outbound.db with journal_mode=DELETE (exclusive
+ *  locks). Also buffered in memory so the poll-loop can persist the whole
+ *  trace to `turn_activity` at turn end. */
 // Last line appended to the activity trace this turn, for consecutive-dedup.
 // Providers re-emit the same hint across a tool's running/completed phases;
 // collapsing adjacent duplicates keeps the trace readable without dropping
 // genuinely distinct steps.
 let _lastActivity = '';
+// In-memory buffer of this turn's activity lines, snapshotted into
+// turn_activity at turn end. Reset by clearActivity().
+let _activityBuffer: ActivityLine[] = [];
 
 export function appendActivity(text: string): void {
-  const line = (text ?? '').replace(/\r?\n/g, ' ').trim();
+  let line = (text ?? '').replace(/\r?\n/g, ' ').trim();
   if (!line || line === _lastActivity) return;
+  if (line.length > ACTIVITY_MAX_CHARS) line = line.slice(0, ACTIVITY_MAX_CHARS - 1) + '…';
   _lastActivity = line;
-  appendActivityFile(line);
+  const ts = String(Date.now());
+  _activityBuffer.push({ ts, text: line });
+  appendActivityFile(`${ts}\t${line}`);
+}
+
+/** The activity lines buffered so far this turn (in append order). */
+export function getActivityBuffer(): ActivityLine[] {
+  return _activityBuffer;
 }
 
 /** Clear the activity trace. Called at turn start so each turn shows a
  *  fresh trace rather than accumulating across turns. */
 export function clearActivity(): void {
   _lastActivity = '';
+  _activityBuffer = [];
   clearActivityFile();
 }
 

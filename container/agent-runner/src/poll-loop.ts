@@ -2,8 +2,9 @@ import { findByName, getAllDestinations, type DestinationEntry } from './destina
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { writeTurnUsage } from './db/turn-usage.js';
+import { writeTurnActivity } from './db/turn-activity.js';
 import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
-import { clearContinuation, clearFailedTurn, clearProgress, clearTurnEnded, appendActivity, clearActivity, getContinuation, getFailedTurn, migrateLegacyContinuation, setContinuation, setFailedTurn, setProgress, setTurnEnded } from './db/session-state.js';
+import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, getActivityBuffer, getContinuation, getFailedTurn, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded } from './db/session-state.js';
 import { clearCurrentInReplyTo, setCurrentInReplyTo } from './current-batch.js';
 import {
   formatMessages,
@@ -607,6 +608,10 @@ async function processQuery(
   // Captured from the provider's `usage` event; flushed at end of turn so
   // it can be linked to the last outbound row written this turn.
   let pendingUsage: import('./providers/types.js').TurnUsage | null = null;
+  // Count of activity lines already persisted to turn_activity this batch.
+  // Advanced after each result flush so multiple results in one query don't
+  // re-persist earlier lines. Reset implicitly by clearActivity() above.
+  let activityFlushedCount = 0;
 
   // Per-push batch queue. Each push (initial + every follow-up) enqueues
   // its ids + routing. On `result` we drain the queue — only then are the
@@ -962,21 +967,38 @@ async function processQuery(
         // Flush captured usage, linking to the last outbound row written
         // this turn. If the turn produced no outbound rows (e.g. scratchpad
         // only), still record the usage with an empty message link so the
-        // numbers don't disappear.
-        if (pendingUsage) {
-          try {
-            const lastOutId = getOutboundDb()
-              .prepare('SELECT id FROM messages_out WHERE seq > ? ORDER BY seq DESC LIMIT 1')
-              .get(outboundMaxAtTurnStart) as { id: string } | undefined;
-            writeTurnUsage(
-              `tu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              lastOutId?.id ?? '',
-              pendingUsage,
-            );
-          } catch (e) {
-            log(`Failed to write turn_usage: ${e instanceof Error ? e.message : String(e)}`);
+        // numbers don't disappear. Also persist the activity trace against
+        // the same row so historical messages show the steps live viewers saw.
+        {
+          const lastOutId = (getOutboundDb()
+            .prepare('SELECT id FROM messages_out WHERE seq > ? ORDER BY seq DESC LIMIT 1')
+            .get(outboundMaxAtTurnStart) as { id: string } | undefined)?.id ?? '';
+          if (pendingUsage) {
+            try {
+              writeTurnUsage(
+                `tu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                lastOutId,
+                pendingUsage,
+              );
+            } catch (e) {
+              log(`Failed to write turn_usage: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            pendingUsage = null;
           }
-          pendingUsage = null;
+          // Persist activity lines emitted since the last flush (avoids
+          // overlap when one query yields multiple results). Linked to a
+          // real outbound row only — scratchpad-only turns have no bubble
+          // to attach a trace to.
+          if (lastOutId) {
+            try {
+              const buffer = getActivityBuffer();
+              const fresh = buffer.slice(activityFlushedCount);
+              writeTurnActivity(lastOutId, fresh, activityFlushedCount);
+              activityFlushedCount = buffer.length;
+            } catch (e) {
+              log(`Failed to write turn_activity: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
         }
         // Reset the per-turn baseline so a follow-up push within the same
         // query starts a fresh "did MCP write anything?" window.
@@ -1085,7 +1107,6 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       break;
     case 'result':
       log(`Result: ${event.text ? event.text.slice(0, 200) : '(empty)'}`);
-      try { clearProgress(); } catch { /* best-effort */ }
       // setTurnEnded is intentionally NOT called here — the caller (result
       // branch in processQuery) decides whether the turn is truly done
       // (queue empty) or another turn for a queued push is about to start.
@@ -1094,12 +1115,10 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       log(
         `Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`,
       );
-      try { clearProgress(); } catch { /* best-effort */ }
       try { setTurnEnded(); } catch { /* best-effort */ }
       break;
     case 'progress':
       log(`Progress: ${event.message}`);
-      try { setProgress(event.message); } catch { /* best-effort */ }
       try { appendActivity(event.message); } catch { /* best-effort */ }
       break;
   }

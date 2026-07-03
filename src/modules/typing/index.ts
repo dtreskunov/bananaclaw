@@ -31,6 +31,7 @@ import {
   readSessionActivity,
   readSessionProgress,
   readSessionTurnEndedAt,
+  type ActivityLine,
 } from '../../session-manager.js';
 
 const TYPING_REFRESH_MS = 4000;
@@ -56,7 +57,7 @@ interface TypingAdapter {
     threadId: string | null,
     hint?: string,
     instance?: string,
-    items?: string[],
+    items?: ActivityLine[],
   ): Promise<void>;
   clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
 }
@@ -98,9 +99,13 @@ async function triggerTyping(
   channelType: string,
   platformId: string,
   threadId: string | null,
+  startedAt: number,
   instance?: string,
 ): Promise<void> {
-  const hint = readSessionProgress(agentGroupId, sessionId) ?? undefined;
+  // Gate the hint on the activity file's mtime: suppress a stale hint left
+  // over from the previous turn until this turn's container writes a fresh
+  // line (the file isn't truncated until the waking container's first write).
+  const hint = readSessionProgress(agentGroupId, sessionId, startedAt) ?? undefined;
   const items = drainActivity(agentGroupId, sessionId);
   try {
     await adapter?.setTyping?.(channelType, platformId, threadId, hint, instance, items);
@@ -123,7 +128,7 @@ async function triggerClearTyping(channelType: string, platformId: string, threa
  * the container truncated the file for a new turn, so the cursor resets.
  * Returns undefined when there is nothing new so callers can omit the field.
  */
-function drainActivity(agentGroupId: string, sessionId: string): string[] | undefined {
+function drainActivity(agentGroupId: string, sessionId: string): ActivityLine[] | undefined {
   const lines = readSessionActivity(agentGroupId, sessionId);
   let sent = activityForwarded.get(sessionId) ?? 0;
   if (lines.length < sent) sent = 0; // file truncated — new turn started
@@ -161,7 +166,7 @@ export function startTypingRefresh(
     // the container-wake latency budget. Also clear any lingering
     // post-delivery pause: a new inbound means the user expects
     // typing to show immediately.
-    triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, instance).catch(() => {});
+    triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, Date.now(), instance).catch(() => {});
     existing.startedAt = Date.now();
     // Keep the stored entry self-consistent: a re-trigger can arrive from
     // a different chat address (agent-shared sessions span messaging
@@ -190,7 +195,7 @@ export function startTypingRefresh(
   // check so this turn's steps still stream from the top.
   activityForwarded.set(sessionId, readSessionActivity(agentGroupId, sessionId).length);
   // Immediate tick + periodic refresh.
-  triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, instance).catch(() => {});
+  triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, Date.now(), instance).catch(() => {});
   const startedAt = Date.now();
   const interval = setInterval(() => {
     const entry = typingRefreshers.get(sessionId);
@@ -210,6 +215,7 @@ export function startTypingRefresh(
         entry.channelType,
         entry.platformId,
         entry.threadId,
+        entry.startedAt,
         entry.instance,
       ).catch(() => {});
       return;
@@ -265,6 +271,7 @@ export function flushActivity(sessionId: string): void {
     entry.channelType,
     entry.platformId,
     entry.threadId,
+    entry.startedAt,
     entry.instance,
   ).catch(() => {});
 }

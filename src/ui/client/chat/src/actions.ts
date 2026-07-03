@@ -64,6 +64,7 @@ interface ServerMessage {
   files?: ChatMessageFile[] | null;
   timestamp: string;
   usage?: import('./types').TurnUsage;
+  activity?: import('./types').ActivityLine[];
 }
 
 /**
@@ -323,6 +324,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       files: m.files || null,
       ts,
       ...(m.usage ? { usage: m.usage } : {}),
+      ...(m.activity ? { activity: m.activity } : {}),
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -385,6 +387,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       files: m.files || null,
       ts: m.timestamp,
       ...(m.usage ? { usage: m.usage } : {}),
+      ...(m.activity ? { activity: m.activity } : {}),
     }));
     refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
     return;
@@ -403,6 +406,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       files: m.files || null,
       ts,
       ...(m.usage ? { usage: m.usage } : {}),
+      ...(m.activity ? { activity: m.activity } : {}),
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -484,6 +488,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
             files: m.files || null,
             ts: m.timestamp,
             ...(m.usage ? { usage: m.usage } : {}),
+            ...(m.activity ? { activity: m.activity } : {}),
           }));
           chatLoading.value = false;
           voiceMode.value = (data.voiceMode as typeof voiceMode.value) || 'off';

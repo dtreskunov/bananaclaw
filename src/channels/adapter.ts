@@ -5,6 +5,14 @@
  * Two patterns: native adapters (implement directly) or Chat SDK bridge (wrap a Chat SDK adapter).
  */
 
+/** One step of a turn's activity trace forwarded to typing-capable channels:
+ *  an emit-time timestamp (epoch ms as a string) plus the whole progress
+ *  text. The web UI accumulates these and renders an expandable trace. */
+export interface ActivityLine {
+  ts: string;
+  text: string;
+}
+
 /** Passed to the adapter at setup time. */
 export interface ChannelSetup {
   /** Called when an inbound message arrives from the platform. */
@@ -162,7 +170,7 @@ export interface ChannelAdapter {
   deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined>;
 
   // Optional
-  setTyping?(platformId: string, threadId: string | null, hint?: string, items?: string[]): Promise<void>;
+  setTyping?(platformId: string, threadId: string | null, hint?: string, items?: ActivityLine[]): Promise<void>;
   /** Explicit "stop typing" signal. Optional — most platforms expire the
    *  indicator on their own; the web channel uses this to avoid a client-side
    *  timeout. */

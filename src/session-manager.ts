@@ -16,7 +16,7 @@ import path from 'path';
 
 import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
-import type { OutboundFile } from './channels/adapter.js';
+import type { ActivityLine, OutboundFile } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
@@ -67,11 +67,6 @@ export function outboundDbPath(agentGroupId: string, sessionId: string): string 
 /** Path to the container heartbeat file (touched instead of DB writes). */
 export function heartbeatPath(agentGroupId: string, sessionId: string): string {
   return path.join(sessionDir(agentGroupId, sessionId), '.heartbeat');
-}
-
-/** Path to the container progress file (written instead of outbound.db). */
-export function progressPath(agentGroupId: string, sessionId: string): string {
-  return path.join(sessionDir(agentGroupId, sessionId), '.progress');
 }
 
 /** Path to the container turn-ended file (written instead of outbound.db). */
@@ -458,18 +453,55 @@ export function writeOutboundDirect(
 }
 
 /**
- * Read the container-side progress hint from the `.progress` file.
- * Used by the typing module to enrich the typing indicator with a
- * one-line activity string. Best-effort — returns null on any error.
+ * One step of a turn's activity trace: an emit-time timestamp (epoch ms as
+ * a string, may be empty for legacy lines) plus the whole progress text.
+ * Canonical type lives in the channel adapter layer; re-exported here for
+ * callers that only touch session-manager.
+ */
+export type { ActivityLine };
+
+/** Parse one `.activity` line (`<epochMs>\t<text>`) into an ActivityLine.
+ *  Legacy lines with no tab / non-numeric prefix are treated as text-only. */
+function parseActivityLine(line: string): ActivityLine {
+  const tab = line.indexOf('\t');
+  if (tab > 0) {
+    const ts = line.slice(0, tab);
+    if (/^\d+$/.test(ts)) return { ts, text: line.slice(tab + 1) };
+  }
+  return { ts: '', text: line };
+}
+
+/**
+ * Read the container-side typing hint: the text of the LAST line in the
+ * append-only `.activity` file. There is no separate `.progress` file — the
+ * latest activity line IS the hint. Used by the typing module to enrich the
+ * typing indicator with a one-line activity string.
+ *
+ * When `sinceMs` is provided, the hint is suppressed unless the `.activity`
+ * file was modified at or after that time. This prevents a stale hint from
+ * the previous turn from surfacing for one refresh tick at the start of a
+ * new turn (the file isn't cleared until the new container's first write).
+ * Best-effort — returns null on any error.
  *
  * Reads a file instead of outbound.db to avoid contention between the
  * host reader and the two container-side writers (poll-loop +
  * MCP server subprocess) that share outbound.db with journal_mode=DELETE.
  */
-export function readSessionProgress(agentGroupId: string, sessionId: string): string | null {
+export function readSessionProgress(
+  agentGroupId: string,
+  sessionId: string,
+  sinceMs?: number,
+): string | null {
   try {
-    const content = fs.readFileSync(progressPath(agentGroupId, sessionId), 'utf8');
-    return content || null;
+    const p = activityPath(agentGroupId, sessionId);
+    if (sinceMs !== undefined) {
+      if (fs.statSync(p).mtimeMs < sinceMs) return null;
+    }
+    const content = fs.readFileSync(p, 'utf8');
+    if (!content) return null;
+    const lines = content.split('\n').filter((l) => l.length > 0);
+    if (lines.length === 0) return null;
+    return parseActivityLine(lines[lines.length - 1]).text || null;
   } catch {
     return null;
   }
@@ -477,17 +509,16 @@ export function readSessionProgress(agentGroupId: string, sessionId: string): st
 
 /**
  * Read the container-side activity trace from the append-only `.activity`
- * file as an ordered list of one-line progress strings. Unlike
- * `readSessionProgress` (latest line only), this returns every progress
- * step recorded for the current turn so the web UI can show the full
- * trace. The container truncates the file at each turn start. Best-effort
- * — returns an empty array on any error.
+ * file as an ordered list of timestamped progress steps. Returns every
+ * progress step recorded for the current turn so the web UI can show the
+ * full trace. The container truncates the file at each turn start.
+ * Best-effort — returns an empty array on any error.
  */
-export function readSessionActivity(agentGroupId: string, sessionId: string): string[] {
+export function readSessionActivity(agentGroupId: string, sessionId: string): ActivityLine[] {
   try {
     const content = fs.readFileSync(activityPath(agentGroupId, sessionId), 'utf8');
     if (!content) return [];
-    return content.split('\n').filter((l) => l.length > 0);
+    return content.split('\n').filter((l) => l.length > 0).map(parseActivityLine);
   } catch {
     return [];
   }

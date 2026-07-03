@@ -607,6 +607,9 @@ export interface HistoryMessage {
   text: string;
   files?: { filename: string; size: number; path?: string; url?: string; contentType?: string }[];
   usage?: TurnUsageDto;
+  /** Persisted activity trace (tool calls / progress steps) for this turn,
+   *  in emit order. Present on outbound messages that recorded a trace. */
+  activity?: { ts: string; text: string }[];
 }
 
 /**
@@ -810,6 +813,32 @@ export function readChatHistory(
         }
       }
 
+      // Load turn_activity for all outbound messages in one query, grouped
+      // by message id in append order. Older outbound.db files predate the
+      // table — swallow the error and render without traces.
+      const activityMap = new Map<string, { ts: string; text: string }[]>();
+      if (outIds.length > 0) {
+        try {
+          const actRows = outDb
+            .prepare(
+              `SELECT message_out_id, ts, text FROM turn_activity
+                WHERE message_out_id IN (${outIds.map(() => '?').join(',')})
+                ORDER BY message_out_id, ordinal`,
+            )
+            .all(...outIds) as Array<{ message_out_id: string; ts: string; text: string }>;
+          for (const a of actRows) {
+            let arr = activityMap.get(a.message_out_id);
+            if (!arr) {
+              arr = [];
+              activityMap.set(a.message_out_id, arr);
+            }
+            arr.push({ ts: a.ts, text: a.text });
+          }
+        } catch {
+          // turn_activity table may not exist in older outbound.db files
+        }
+      }
+
       for (const r of rows) {
         if (r.kind === 'internal') {
           const parsed = parseOutboundContent(r.content);
@@ -855,6 +884,7 @@ export function readChatHistory(
         if (r.kind !== 'chat' && r.kind !== 'text') continue;
         const parsed = parseOutboundContent(r.content);
         const usage = usageMap.get(r.id);
+        const activity = activityMap.get(r.id);
         messages.push({
           direction: 'out',
           id: r.id,
@@ -862,6 +892,7 @@ export function readChatHistory(
           text: parsed.text,
           files: parsed.files,
           ...(usage ? { usage } : {}),
+          ...(activity && activity.length > 0 ? { activity } : {}),
         });
       }
     } finally {

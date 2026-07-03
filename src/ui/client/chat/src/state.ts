@@ -15,6 +15,7 @@ import type {
   PendingQuestionDto,
   ChannelMetaEntry,
   SearchResult,
+  ActivityLine,
 } from './types';
 
 // ── reactive state ──────────────────────────────────────────────────
@@ -63,7 +64,7 @@ export const typingHint: Signal<string> = signal('');
 // Ordered activity-trace lines (tool calls / progress steps) for the
 // in-flight turn. Accumulated from WS typing frames; cleared when the
 // turn ends or the response arrives.
-export const activityLog: Signal<string[]> = signal<string[]>([]);
+export const activityLog: Signal<ActivityLine[]> = signal<ActivityLine[]>([]);
 export const pending: Signal<PendingFile[]> = signal<PendingFile[]>([]);
 
 // Search

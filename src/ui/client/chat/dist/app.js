@@ -17556,7 +17556,8 @@ function mergeIncomingMessages(messages) {
       text: m6.text,
       files: m6.files || null,
       ts,
-      ...m6.usage ? { usage: m6.usage } : {}
+      ...m6.usage ? { usage: m6.usage } : {},
+      ...m6.activity ? { activity: m6.activity } : {}
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -17605,7 +17606,8 @@ async function refetchThreadHistory(appendNewOnly) {
       text: m6.text,
       files: m6.files || null,
       ts: m6.timestamp,
-      ...m6.usage ? { usage: m6.usage } : {}
+      ...m6.usage ? { usage: m6.usage } : {},
+      ...m6.activity ? { activity: m6.activity } : {}
     }));
     refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
     return;
@@ -17623,7 +17625,8 @@ async function refetchThreadHistory(appendNewOnly) {
       text: m6.text,
       files: m6.files || null,
       ts,
-      ...m6.usage ? { usage: m6.usage } : {}
+      ...m6.usage ? { usage: m6.usage } : {},
+      ...m6.activity ? { activity: m6.activity } : {}
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -17692,7 +17695,8 @@ async function openChat(gid, resumeTid, opts) {
             text: m6.text,
             files: m6.files || null,
             ts: m6.timestamp,
-            ...m6.usage ? { usage: m6.usage } : {}
+            ...m6.usage ? { usage: m6.usage } : {},
+            ...m6.activity ? { activity: m6.activity } : {}
           }));
           chatLoading.value = false;
           voiceMode.value = data.voiceMode || "off";
@@ -19568,6 +19572,41 @@ function fmtTok(n3) {
   if (n3 >= 1e3) return (n3 / 1e3).toFixed(1) + "k";
   return String(n3);
 }
+function fmtActivityTs(ts) {
+  if (!ts) return "";
+  const n3 = Number(ts);
+  if (!Number.isFinite(n3)) return "";
+  return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function ActivityTrace({ lines }) {
+  const [expanded, setExpanded] = h2(false);
+  if (!lines.length) return null;
+  return /* @__PURE__ */ u4("div", { class: `msg-activity${expanded ? " expanded" : ""}`, children: [
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "trace-toggle",
+        "aria-expanded": expanded,
+        "aria-label": expanded ? "Hide activity" : "Show activity",
+        title: expanded ? "Hide activity" : "Show activity",
+        onClick: () => setExpanded((v5) => !v5),
+        children: [
+          /* @__PURE__ */ u4("span", { class: `chevron${expanded ? " open" : ""}`, children: "\u203A" }),
+          /* @__PURE__ */ u4("span", { class: "trace-count", children: [
+            lines.length,
+            " step",
+            lines.length === 1 ? "" : "s"
+          ] })
+        ]
+      }
+    ),
+    expanded ? /* @__PURE__ */ u4("ul", { class: "activity-trace", children: lines.map((line, i5) => /* @__PURE__ */ u4("li", { title: line.text, children: [
+      line.ts ? /* @__PURE__ */ u4("span", { class: "ts", children: fmtActivityTs(line.ts) }) : null,
+      line.text
+    ] }, i5)) }) : null
+  ] });
+}
 function fmtCost(usd) {
   if (usd >= 1) return "$" + usd.toFixed(2);
   if (usd >= 0.01) return "$" + usd.toFixed(3);
@@ -19665,6 +19704,7 @@ function Message({ m: m6 }) {
       "\u{1F4CE} ",
       f5.filename
     ] }, f5.filename)) }) : null,
+    m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,
     m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
       m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null
@@ -19826,7 +19866,10 @@ function MessageLog() {
           }
         ) : null
       ] }),
-      traceExpanded && activityLog.value.length ? /* @__PURE__ */ u4("ul", { class: "activity-trace", children: activityLog.value.map((line, i5) => /* @__PURE__ */ u4("li", { children: line }, i5)) }) : null
+      traceExpanded && activityLog.value.length ? /* @__PURE__ */ u4("ul", { class: "activity-trace", children: activityLog.value.map((line, i5) => /* @__PURE__ */ u4("li", { title: line.text, children: [
+        line.ts ? /* @__PURE__ */ u4("span", { class: "ts", children: fmtActivityTs(line.ts) }) : null,
+        line.text
+      ] }, i5)) }) : null
     ] }) : null
   ] });
 }

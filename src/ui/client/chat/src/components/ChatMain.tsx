@@ -20,12 +20,56 @@ import { isRecording, recordingDuration, startRecording, stopRecording, cancelRe
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
-import type { ChatMessage, TurnUsage } from '../types';
+import type { ActivityLine, ChatMessage, TurnUsage } from '../types';
 
 function fmtTok(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
   return String(n);
+}
+
+/** Format an activity line's epoch-ms timestamp as a short wall-clock time.
+ *  Empty / non-numeric (legacy lines) render no timestamp. */
+function fmtActivityTs(ts: string): string {
+  if (!ts) return '';
+  const n = Number(ts);
+  if (!Number.isFinite(n)) return '';
+  return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/** A collapsible activity trace (chevron + timestamped step list). Used for
+ *  the persisted trace on historical outbound messages; the live typing
+ *  bubble renders its own copy coupled to autoscroll. */
+function ActivityTrace({ lines }: { lines: ActivityLine[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!lines.length) return null;
+  return (
+    <div class={`msg-activity${expanded ? ' expanded' : ''}`}>
+      <button
+        type="button"
+        class="trace-toggle"
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Hide activity' : 'Show activity'}
+        title={expanded ? 'Hide activity' : 'Show activity'}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span class={`chevron${expanded ? ' open' : ''}`}>{'\u203A'}</span>
+        <span class="trace-count">{lines.length} step{lines.length === 1 ? '' : 's'}</span>
+      </button>
+      {expanded
+        ? (
+          <ul class="activity-trace">
+            {lines.map((line, i) => (
+              <li key={i} title={line.text}>
+                {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
+                {line.text}
+              </li>
+            ))}
+          </ul>
+        )
+        : null}
+    </div>
+  );
 }
 
 function fmtCost(usd: number): string {
@@ -139,6 +183,9 @@ function Message({ m }: { m: ChatMessage }) {
               : <span class="file-chip inert" title="Source not in workspace" key={f.filename}>{'\uD83D\uDCCE '}{f.filename}</span>)}
           </div>
         )
+        : null}
+      {m.direction === 'out' && m.activity && m.activity.length
+        ? <ActivityTrace lines={m.activity} />
         : null}
       {m.ts ? <div class="meta">
         <RelativeTime ts={m.ts} />
@@ -347,7 +394,12 @@ function MessageLog() {
             {traceExpanded && activityLog.value.length
               ? (
                 <ul class="activity-trace">
-                  {activityLog.value.map((line, i) => <li key={i}>{line}</li>)}
+                  {activityLog.value.map((line, i) => (
+                    <li key={i} title={line.text}>
+                      {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
+                      {line.text}
+                    </li>
+                  ))}
                 </ul>
               )
               : null}

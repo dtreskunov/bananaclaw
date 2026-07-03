@@ -23,14 +23,12 @@ import fs from 'fs';
 const DEFAULT_INBOUND_PATH = '/workspace/inbound.db';
 const DEFAULT_OUTBOUND_PATH = '/workspace/outbound.db';
 const DEFAULT_HEARTBEAT_PATH = '/workspace/.heartbeat';
-const DEFAULT_PROGRESS_PATH = '/workspace/.progress';
 const DEFAULT_TURN_ENDED_PATH = '/workspace/.turn-ended';
 const DEFAULT_ACTIVITY_PATH = '/workspace/.activity';
 
 let _inbound: Database | null = null;
 let _outbound: Database | null = null;
 let _heartbeatPath: string = DEFAULT_HEARTBEAT_PATH;
-let _progressPath: string = DEFAULT_PROGRESS_PATH;
 let _turnEndedPath: string = DEFAULT_TURN_ENDED_PATH;
 let _activityPath: string = DEFAULT_ACTIVITY_PATH;
 let _testMode = false;
@@ -135,6 +133,21 @@ export function getOutboundDb(): Database {
         updated_at               TEXT NOT NULL
       );
     `);
+    // turn_activity: the ordered progress trace for a turn (one row per
+    // step), persisted at turn end so the web UI can show the full activity
+    // trace on historical messages, not just live. Linked to the turn's last
+    // outbound row via message_out_id; ordered by `ordinal` (append order) —
+    // timestamps are display-only and CAN collide, so never sort/key by them.
+    // Forward-compat for older outbound.db files.
+    _outbound.exec(`
+      CREATE TABLE IF NOT EXISTS turn_activity (
+        message_out_id TEXT NOT NULL,
+        ordinal        INTEGER NOT NULL,
+        ts             TEXT NOT NULL,
+        text           TEXT NOT NULL,
+        PRIMARY KEY (message_out_id, ordinal)
+      );
+    `);
   }
   return _outbound;
 }
@@ -195,48 +208,21 @@ export function touchHeartbeat(): void {
 }
 
 /**
- * Write the progress hint to a file instead of outbound.db.
- *
- * The nanoclaw MCP server runs as a separate bun subprocess (spawned by
- * OpenCode) and writes to the same outbound.db via writeMessageOut(). With
- * journal_mode=DELETE (required for cross-mount visibility — WAL's mmap
- * doesn't propagate on VirtioFS), every write takes an exclusive lock.
- * Progress writes from the poll-loop at ~1/sec contend with MCP tool
- * writes, causing "database is locked" errors after the 5s busy_timeout.
- *
- * File-based signaling avoids the contention entirely — same pattern as
- * the heartbeat file above.
- */
-export function writeProgressFile(message: string): void {
-  try {
-    fs.writeFileSync(_progressPath, message);
-  } catch {
-    // Best-effort — same as touchHeartbeat.
-  }
-}
-
-export function clearProgressFile(): void {
-  try {
-    fs.unlinkSync(_progressPath);
-  } catch {
-    // Already gone or parent dir missing — fine.
-  }
-}
-
-/**
  * Append one progress line to the append-only `.activity` file.
  *
- * Unlike `.progress` (latest-line only, read as the cross-channel typing
- * hint), this file accumulates every progress line for the current turn so
- * the host can forward the *full* ordered trace to the web UI. Same
- * file-based rationale as `writeProgressFile` — avoids outbound.db lock
- * contention with the MCP subprocess. Cleared at each turn start.
+ * This file accumulates every progress line for the current turn so the
+ * host can forward the *full* ordered trace to the web UI (and derive the
+ * single latest typing hint as the last line's text — there is no separate
+ * `.progress` file). Each line is `<epochMs>\t<text>`; the timestamp is the
+ * emit time. File-based signaling (not outbound.db) avoids lock contention
+ * with the MCP subprocess — both share outbound.db with journal_mode=DELETE
+ * (exclusive locks). Cleared at each turn start.
  */
 export function appendActivityFile(line: string): void {
   try {
     fs.appendFileSync(_activityPath, line.replace(/\r?\n/g, ' ') + '\n');
   } catch {
-    // Best-effort — same as writeProgressFile.
+    // Best-effort — same as touchHeartbeat.
   }
 }
 
@@ -361,6 +347,13 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       tool_declared_timeout_ms INTEGER,
       tool_started_at          TEXT,
       updated_at               TEXT NOT NULL
+    );
+    CREATE TABLE turn_activity (
+      message_out_id TEXT NOT NULL,
+      ordinal        INTEGER NOT NULL,
+      ts             TEXT NOT NULL,
+      text           TEXT NOT NULL,
+      PRIMARY KEY (message_out_id, ordinal)
     );
     CREATE TABLE turn_usage (
       id                  TEXT PRIMARY KEY,

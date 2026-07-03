@@ -16,7 +16,7 @@
  * only enabled when the UI is mounted. Messaging-group rows are
  * auto-provisioned on first use by the chat route handler.
  */
-import type { ChannelAdapter, ChannelSetup, InboundEvent, OutboundMessage } from './adapter.js';
+import type { ActivityLine, ChannelAdapter, ChannelSetup, InboundEvent, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { log } from '../log.js';
 import { sendToUser as sendPushToUser } from '../modules/push/sender.js';
@@ -35,7 +35,7 @@ export interface WebSubscriber {
    *  an optional one-line progress string from the container. `items` are
    *  activity-trace lines appended since the last call (the full ordered
    *  trace for the turn accumulates client-side). */
-  onTyping?(on: boolean, hint?: string, items?: string[]): void;
+  onTyping?(on: boolean, hint?: string, items?: ActivityLine[]): void;
 }
 
 let setupCallbacks: ChannelSetup | null = null;

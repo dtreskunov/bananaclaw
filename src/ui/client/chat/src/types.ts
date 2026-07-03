@@ -86,6 +86,15 @@ export interface ChatMessage {
   files: ChatMessageFile[] | null;
   ts: string;
   usage?: TurnUsage;
+  /** Persisted activity trace for an outbound turn, in emit order. */
+  activity?: ActivityLine[];
+}
+
+/** One step of a turn's activity trace: emit-time timestamp (epoch ms as a
+ *  string) plus the whole progress text. */
+export interface ActivityLine {
+  ts: string;
+  text: string;
 }
 
 export interface SearchResult {
@@ -200,7 +209,7 @@ export interface WsPayload {
   kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage';
   on?: boolean;
   hint?: string;
-  items?: string[] | null;
+  items?: ActivityLine[] | null;
   text?: string;
   content?: string | { text?: string; markdown?: string };
   files?: ChatMessageFile[] | null;

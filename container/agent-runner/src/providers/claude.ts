@@ -245,10 +245,9 @@ const postToolUseHook: HookCallback = async () => {
 // the host forwards to the web UI. Mirrors the OpenCode provider's
 // `formatProgressFromPart` so both providers surface the same style of trace.
 
-function clipHint(s: unknown, max = 60): string {
+function clipHint(s: unknown): string {
   if (typeof s !== 'string') return '';
-  const flat = s.replace(/\s+/g, ' ').trim();
-  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat;
+  return s.replace(/\s+/g, ' ').trim();
 }
 
 function baseNameHint(p: unknown): string {
@@ -280,11 +279,11 @@ export function formatClaudeToolUse(name: string, input: Record<string, unknown>
     case 'Edit':
     case 'MultiEdit': return `Editing \`${baseNameHint(input.file_path)}\``;
     case 'NotebookEdit': return `Editing \`${baseNameHint(input.notebook_path)}\``;
-    case 'Grep': return `Searching for \`${clipHint(input.pattern, 40)}\``;
-    case 'Glob': return `Globbing \`${clipHint(input.pattern, 40)}\``;
+    case 'Grep': return `Searching for \`${clipHint(input.pattern)}\``;
+    case 'Glob': return `Globbing \`${clipHint(input.pattern)}\``;
     case 'WebFetch': return `Fetching \`${hostHint(input.url)}\``;
-    case 'WebSearch': return `Searching the web for \`${clipHint(input.query, 40)}\``;
-    case 'Task': return `Subagent: \`${clipHint(input.description ?? input.prompt, 40)}\``;
+    case 'WebSearch': return `Searching the web for \`${clipHint(input.query)}\``;
+    case 'Task': return `Subagent: \`${clipHint(input.description ?? input.prompt)}\``;
     case 'TodoWrite': return 'Updating todos';
     default: return `Running \`${name}\``;
   }

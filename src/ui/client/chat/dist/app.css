@@ -1514,6 +1514,66 @@ nav.tab-bar-strip.group-strip {
   min-width: min(78%, 460px);
   flex-direction: column-reverse;
 }
+.chat-main .activity-trace li .ts {
+  margin-right: 6px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+.chat-main .msg .msg-activity {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.chat-main .msg .msg-activity .trace-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: var(--font-xs);
+}
+.chat-main .msg .msg-activity .trace-toggle:hover {
+  background: rgba(127, 127, 127, 0.15);
+  color: var(--fg);
+}
+.chat-main .msg .msg-activity .trace-toggle .chevron {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+.chat-main .msg .msg-activity .trace-toggle .chevron.open {
+  transform: rotate(90deg);
+}
+.chat-main .msg .msg-activity .trace-count {
+  font-style: italic;
+}
+.chat-main .msg .msg-activity .activity-trace {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.chat-main .msg .msg-activity .activity-trace li {
+  font-size: var(--font-xs);
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
 @keyframes typing-bounce {
   0%, 60%, 100% {
     transform: translateY(0);
