@@ -183,14 +183,14 @@ export function formatProgressFromPart(
         return `Calling \`${server}.${name.join('.') || rest}\``;
       }
       switch (tool) {
-        case 'read': return `Reading \`${basename(inp.filePath)}\``;
-        case 'write': return `Writing \`${basename(inp.filePath)}\``;
-        case 'edit': return `Editing \`${basename(inp.filePath)}\``;
-        case 'bash': return `Running \`${clipOneLine(inp.command)}\``;
-        case 'grep': return `Searching for \`${clipOneLine(inp.pattern, 40)}\``;
-        case 'glob': return `Globbing \`${clipOneLine(inp.pattern, 40)}\``;
-        case 'webfetch': return `Fetching \`${shortHost(inp.url)}\``;
-        case 'task': return `Subagent: \`${clipOneLine(inp.description ?? inp.prompt, 40)}\``;
+        case 'read': return inp.filePath ? `Reading \`${basename(inp.filePath)}\`` : null;
+        case 'write': return inp.filePath ? `Writing \`${basename(inp.filePath)}\`` : null;
+        case 'edit': return inp.filePath ? `Editing \`${basename(inp.filePath)}\`` : null;
+        case 'bash': return inp.command ? `Running \`${clipOneLine(inp.command)}\`` : null;
+        case 'grep': return inp.pattern ? `Searching for \`${clipOneLine(inp.pattern, 40)}\`` : null;
+        case 'glob': return inp.pattern ? `Globbing \`${clipOneLine(inp.pattern, 40)}\`` : null;
+        case 'webfetch': return inp.url ? `Fetching \`${shortHost(inp.url)}\`` : null;
+        case 'task': return (inp.description ?? inp.prompt) ? `Subagent: \`${clipOneLine(inp.description ?? inp.prompt, 40)}\`` : null;
         case 'todowrite': return 'Updating todos';
         default: return `Running \`${tool}\``;
       }

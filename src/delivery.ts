@@ -24,7 +24,7 @@ import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
 import { extractOutboundText, indexMessage } from './search-index.js';
-import { checkTurnEndedAndStop, setTypingAdapter } from './modules/typing/index.js';
+import { checkTurnEndedAndStop, flushActivity, setTypingAdapter } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 
@@ -74,7 +74,7 @@ export interface ChannelDeliveryAdapter {
      *  Host-internal only — containers never see instance. */
     instance?: string,
   ): Promise<string | undefined>;
-  setTyping?(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string): Promise<void>;
+  setTyping?(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string, items?: string[]): Promise<void>;
   clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
 }
 
@@ -142,10 +142,13 @@ async function pollActive(): Promise<void> {
     const sessions = getRunningSessions();
     for (const session of sessions) {
       await deliverSessionMessages(session);
-      // Drop the typing indicator as soon as the container marks the
-      // turn ended (set on the SDK's result/error event). This runs
-      // every active tick so the dots clear within ~1s of the agent
+      // Forward any new activity-trace lines to the web UI at the ~1s
+      // active cadence (no-op for non-web channels), then drop the typing
+      // indicator as soon as the container marks the turn ended (set on
+      // the SDK's result/error event). Both run every active tick so the
+      // trace stays live and the dots clear within ~1s of the agent
       // finishing — the in-module 4s refresh tick is the fallback.
+      flushActivity(session.id);
       checkTurnEndedAndStop(session.id);
     }
   } catch (err) {

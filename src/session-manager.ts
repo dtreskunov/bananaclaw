@@ -79,6 +79,11 @@ export function turnEndedPath(agentGroupId: string, sessionId: string): string {
   return path.join(sessionDir(agentGroupId, sessionId), '.turn-ended');
 }
 
+/** Path to the container activity file (append-only progress trace). */
+export function activityPath(agentGroupId: string, sessionId: string): string {
+  return path.join(sessionDir(agentGroupId, sessionId), '.activity');
+}
+
 /**
  * @deprecated Use inboundDbPath / outboundDbPath instead.
  * Kept temporarily for test compatibility during migration.
@@ -467,6 +472,24 @@ export function readSessionProgress(agentGroupId: string, sessionId: string): st
     return content || null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Read the container-side activity trace from the append-only `.activity`
+ * file as an ordered list of one-line progress strings. Unlike
+ * `readSessionProgress` (latest line only), this returns every progress
+ * step recorded for the current turn so the web UI can show the full
+ * trace. The container truncates the file at each turn start. Best-effort
+ * — returns an empty array on any error.
+ */
+export function readSessionActivity(agentGroupId: string, sessionId: string): string[] {
+  try {
+    const content = fs.readFileSync(activityPath(agentGroupId, sessionId), 'utf8');
+    if (!content) return [];
+    return content.split('\n').filter((l) => l.length > 0);
+  } catch {
+    return [];
   }
 }
 

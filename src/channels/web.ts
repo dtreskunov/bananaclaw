@@ -32,8 +32,10 @@ export interface WebSubscriber {
   onInboundEcho(id: string, text: string, files?: { filename: string; size: number }[]): void;
   /** Called when the typing indicator should turn on or off. The web channel
    *  uses explicit start/stop signals (no client-side timeout). `hint` is
-   *  an optional one-line progress string from the container. */
-  onTyping?(on: boolean, hint?: string): void;
+   *  an optional one-line progress string from the container. `items` are
+   *  activity-trace lines appended since the last call (the full ordered
+   *  trace for the turn accumulates client-side). */
+  onTyping?(on: boolean, hint?: string, items?: string[]): void;
 }
 
 let setupCallbacks: ChannelSetup | null = null;
@@ -173,12 +175,12 @@ function createAdapter(): ChannelAdapter {
       return undefined;
     },
 
-    async setTyping(platformId, threadId, hint): Promise<void> {
+    async setTyping(platformId, threadId, hint, items): Promise<void> {
       const set = subscribers.get(subKey(platformId, threadId));
       if (!set) return;
       for (const sub of set) {
         try {
-          sub.onTyping?.(true, hint);
+          sub.onTyping?.(true, hint, items);
         } catch (err) {
           log.warn('web subscriber onTyping threw', { err });
         }

@@ -4,7 +4,7 @@ import './ChatMain.css';
 import type { JSX } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
-  chatMessages, chatStatus, chatLoading, isTyping, typingHint, threadId, channelType, canSend, pending,
+  chatMessages, chatStatus, chatLoading, isTyping, typingHint, activityLog, threadId, channelType, canSend, pending,
   threads, groupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions, respondingQuestionIds,
   highlightMessageId, searchQuery, voiceMode, isMobile, scrollToBottomTick,
@@ -234,13 +234,32 @@ function MessageLog() {
   const prevMsgCountRef = useRef<number>(0);
   const wasTypingRef = useRef<boolean>(false);
   const prevScrollTickRef = useRef<number>(scrollToBottomTick.value);
+  const prevTraceLenRef = useRef<number>(0);
+  const prevExpandedRef = useRef<boolean>(false);
+  // Whether the user has expanded the activity trace. Collapsed by default:
+  // the bubble shows only the dots + latest hint + a chevron, and expands to
+  // the scrollable step list on demand.
+  const [traceExpanded, setTraceExpanded] = useState(false);
   const highlight = highlightMessageId.value;
   const msgCount = chatMessages.value.length;
   const typing = isTyping.value && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
+  // Subscribe to trace growth so the effect re-runs as steps stream in.
+  const traceLen = activityLog.value.length;
 
   const scrollToBottom = () => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  };
+
+  // Whether the user is pinned to the bottom of the log. Updated on every
+  // scroll so trace-follow can distinguish "following along" from "scrolled
+  // up to read history". Programmatic scrollToBottom also fires scroll, which
+  // keeps this true while we tail the trace.
+  const atBottomRef = useRef<boolean>(true);
+  const onLogScroll = () => {
+    const el = ref.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   };
 
   useEffect(() => {
@@ -268,19 +287,33 @@ function MessageLog() {
       appliedHighlightRef.current = null;
       const newMessages = msgCount !== prevMsgCountRef.current;
       const typingJustStarted = typing && !wasTypingRef.current;
-      // Scroll on new messages or when typing indicator first appears.
-      // Skip scroll for typing hint text changes (progress updates).
-      if (newMessages || typingJustStarted) {
+      const traceGrew = traceLen > prevTraceLenRef.current;
+      const justExpanded = traceExpanded && !prevExpandedRef.current;
+      // The trace is collapsed by default; only when expanded is it rendered
+      // as a bounded, internally-scrolling list. Keep its newest line visible
+      // as steps stream in while expanded.
+      if (traceExpanded && traceGrew) {
+        const ul = ref.current.querySelector('.activity-trace');
+        if (ul) ul.scrollTop = ul.scrollHeight;
+      }
+      // Follow the log to the bottom on new messages, when the typing
+      // indicator first appears, when the user just expanded the trace (the
+      // bubble grows), or as an expanded trace grows — the last only while
+      // the user is pinned to the bottom, so we never yank them down if
+      // they've scrolled up to read earlier messages.
+      if (newMessages || typingJustStarted || justExpanded || (traceExpanded && traceGrew && atBottomRef.current)) {
         prevMsgCountRef.current = msgCount;
         scrollToBottom();
       }
+      prevTraceLenRef.current = traceLen;
     }
     wasTypingRef.current = !!typing;
+    prevExpandedRef.current = traceExpanded;
   });
   const list = chatMessages.value;
   const groups = groupMessages(list);
   return (
-    <div class="log" id="chat-log" ref={ref}>
+    <div class="log" id="chat-log" ref={ref} onScroll={onLogScroll}>
       {chatLoading.value
         ? null
         : !threadId.value
@@ -292,9 +325,32 @@ function MessageLog() {
                 : <Message key={i} m={g.m} />)}
       {typing
         ? (
-          <div class="typing" aria-live="polite">
-            <span></span><span></span><span></span>
-            {typingHint.value ? <span class="hint">{typingHint.value}</span> : null}
+          <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
+            <div class="typing-dots">
+              <span></span><span></span><span></span>
+              {typingHint.value ? <span class="hint">{typingHint.value}</span> : null}
+              {activityLog.value.length
+                ? (
+                  <button
+                    type="button"
+                    class="trace-toggle"
+                    aria-expanded={traceExpanded}
+                    aria-label={traceExpanded ? 'Hide activity' : 'Show activity'}
+                    title={traceExpanded ? 'Hide activity' : 'Show activity'}
+                    onClick={() => setTraceExpanded((v) => !v)}
+                  >
+                    <span class={`chevron${traceExpanded ? ' open' : ''}`}>{'\u203A'}</span>
+                  </button>
+                )
+                : null}
+            </div>
+            {traceExpanded && activityLog.value.length
+              ? (
+                <ul class="activity-trace">
+                  {activityLog.value.map((line, i) => <li key={i}>{line}</li>)}
+                </ul>
+              )
+              : null}
           </div>
         )
         : null}

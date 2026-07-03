@@ -2254,9 +2254,9 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
         log.warn('web chat ws echo failed', { err });
       }
     },
-    onTyping(on, hint) {
+    onTyping(on, hint, items) {
       try {
-        ws.send(JSON.stringify({ kind: 'typing', on, hint: hint ?? null }));
+        ws.send(JSON.stringify({ kind: 'typing', on, hint: hint ?? null, items: items ?? null }));
       } catch (err) {
         log.warn('web chat ws typing send failed', { err });
       }

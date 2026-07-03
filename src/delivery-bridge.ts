@@ -54,9 +54,9 @@ export function createDeliveryBridge(opts: DeliveryBridgeOptions) {
       }
       return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files, id });
     },
-    async setTyping(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string): Promise<void> {
+    async setTyping(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string, items?: string[]): Promise<void> {
       const adapter = getChannelAdapter(instance ?? channelType);
-      await adapter?.setTyping?.(platformId, threadId, hint);
+      await adapter?.setTyping?.(platformId, threadId, hint, items);
     },
     async clearTyping(channelType: string, platformId: string, threadId: string | null): Promise<void> {
       const adapter = getChannelAdapter(channelType);

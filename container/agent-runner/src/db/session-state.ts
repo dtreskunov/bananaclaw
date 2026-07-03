@@ -121,7 +121,7 @@ export function clearFailedTurn(): void {
   deleteValue(FAILED_TURN_KEY);
 }
 
-import { writeProgressFile, clearProgressFile, writeTurnEndedFile, clearTurnEndedFile } from './connection.js';
+import { writeProgressFile, clearProgressFile, appendActivityFile, clearActivityFile, writeTurnEndedFile, clearTurnEndedFile } from './connection.js';
 
 /** Set the current progress hint (one-line human-readable string). Read by
  *  the host typing module on its refresh tick and forwarded to channel
@@ -139,6 +139,33 @@ export function setProgress(message: string): void {
  *  or errors out so a stale hint doesn't linger past the active work. */
 export function clearProgress(): void {
   clearProgressFile();
+}
+
+/** Append one progress line to the per-turn activity trace. The host
+ *  forwards the full ordered list to the web UI alongside the typing
+ *  hint, so the user can see every tool call / progress step as it
+ *  happens. Best-effort — callers should swallow errors.
+ *
+ *  Written to an append-only file (not outbound.db) — same rationale
+ *  as setProgress. */
+// Last line appended to the activity trace this turn, for consecutive-dedup.
+// Providers re-emit the same hint across a tool's running/completed phases;
+// collapsing adjacent duplicates keeps the trace readable without dropping
+// genuinely distinct steps.
+let _lastActivity = '';
+
+export function appendActivity(text: string): void {
+  const line = (text ?? '').replace(/\r?\n/g, ' ').trim();
+  if (!line || line === _lastActivity) return;
+  _lastActivity = line;
+  appendActivityFile(line);
+}
+
+/** Clear the activity trace. Called at turn start so each turn shows a
+ *  fresh trace rather than accumulating across turns. */
+export function clearActivity(): void {
+  _lastActivity = '';
+  clearActivityFile();
 }
 
 /** Mark that the SDK turn just ended (result/error event). The host

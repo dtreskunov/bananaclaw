@@ -238,6 +238,58 @@ const postToolUseHook: HookCallback = async () => {
   return { continue: true };
 };
 
+// ── Progress hints ────────────────────────────────────────────────────────
+// Translate the tool_use / thinking blocks the SDK streams in `assistant`
+// messages into one-line `progress` ProviderEvents. The poll-loop persists
+// these to the `.progress` (latest) and `.activity` (full trace) files, which
+// the host forwards to the web UI. Mirrors the OpenCode provider's
+// `formatProgressFromPart` so both providers surface the same style of trace.
+
+function clipHint(s: unknown, max = 60): string {
+  if (typeof s !== 'string') return '';
+  const flat = s.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat;
+}
+
+function baseNameHint(p: unknown): string {
+  if (typeof p !== 'string' || !p) return '';
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
+function hostHint(u: unknown): string {
+  if (typeof u !== 'string' || !u) return '';
+  try {
+    return new URL(u).hostname || u.slice(0, 40);
+  } catch {
+    return u.slice(0, 40);
+  }
+}
+
+/** Format a Claude tool_use block into a short human-readable hint. */
+export function formatClaudeToolUse(name: string, input: Record<string, unknown>): string {
+  if (name.startsWith('mcp__')) {
+    const rest = name.slice(5);
+    const [server, ...tail] = rest.split('__');
+    return `Calling \`${server}.${tail.join('.') || rest}\``;
+  }
+  switch (name) {
+    case 'Bash': return `Running \`${clipHint(input.command)}\``;
+    case 'Read': return `Reading \`${baseNameHint(input.file_path)}\``;
+    case 'Write': return `Writing \`${baseNameHint(input.file_path)}\``;
+    case 'Edit':
+    case 'MultiEdit': return `Editing \`${baseNameHint(input.file_path)}\``;
+    case 'NotebookEdit': return `Editing \`${baseNameHint(input.notebook_path)}\``;
+    case 'Grep': return `Searching for \`${clipHint(input.pattern, 40)}\``;
+    case 'Glob': return `Globbing \`${clipHint(input.pattern, 40)}\``;
+    case 'WebFetch': return `Fetching \`${hostHint(input.url)}\``;
+    case 'WebSearch': return `Searching the web for \`${clipHint(input.query, 40)}\``;
+    case 'Task': return `Subagent: \`${clipHint(input.description ?? input.prompt, 40)}\``;
+    case 'TodoWrite': return 'Updating todos';
+    default: return `Running \`${name}\``;
+  }
+}
+
 /**
  * Read a Claude transcript .jsonl, render a markdown summary, and drop it into
  * the agent's `conversations/` folder so context survives a compaction or a
@@ -508,6 +560,9 @@ export class ClaudeProvider implements AgentProvider {
       let prevOutput = 0;
       let prevCacheRead = 0;
       let prevCacheWrite = 0;
+      // Dedupe consecutive identical progress hints (e.g. repeated
+      // "Thinking…") so the activity trace stays readable.
+      let lastProgressMsg = '';
       for await (const message of sdkResult) {
         if (aborted) return;
         messageCount++;
@@ -517,6 +572,24 @@ export class ClaudeProvider implements AgentProvider {
 
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };
+        } else if (message.type === 'assistant') {
+          // Surface tool calls and thinking as progress hints.
+          const blocks = (message as { message?: { content?: unknown } }).message?.content;
+          if (Array.isArray(blocks)) {
+            for (const b of blocks) {
+              const blk = b as { type?: string; name?: string; input?: Record<string, unknown> };
+              let hint: string | null = null;
+              if (blk.type === 'tool_use' && blk.name) {
+                hint = formatClaudeToolUse(blk.name, blk.input ?? {});
+              } else if (blk.type === 'thinking' || blk.type === 'redacted_thinking') {
+                hint = 'Thinking…';
+              }
+              if (hint && hint !== lastProgressMsg) {
+                lastProgressMsg = hint;
+                yield { type: 'progress', message: hint };
+              }
+            }
+          }
         } else if (message.type === 'result') {
           const text = 'result' in message ? (message as { result?: string }).result ?? null : null;
           const m = message as { is_error?: boolean; subtype?: string };

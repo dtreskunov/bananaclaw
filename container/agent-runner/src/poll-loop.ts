@@ -3,7 +3,7 @@ import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } 
 import { writeMessageOut } from './db/messages-out.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
-import { clearContinuation, clearFailedTurn, clearProgress, clearTurnEnded, getContinuation, getFailedTurn, migrateLegacyContinuation, setContinuation, setFailedTurn, setProgress, setTurnEnded } from './db/session-state.js';
+import { clearContinuation, clearFailedTurn, clearProgress, clearTurnEnded, appendActivity, clearActivity, getContinuation, getFailedTurn, migrateLegacyContinuation, setContinuation, setFailedTurn, setProgress, setTurnEnded } from './db/session-state.js';
 import { clearCurrentInReplyTo, setCurrentInReplyTo } from './current-batch.js';
 import {
   formatMessages,
@@ -599,6 +599,9 @@ async function processQuery(
   // A fresh batch is being processed \u2014 wipe any turn-ended marker from
   // the previous turn so the host typing module re-arms cleanly.
   try { clearTurnEnded(); } catch { /* best-effort */ }
+  // Start each batch with a fresh activity trace so the web UI shows the
+  // work for this wake, not a stale trace from the previous turn.
+  try { clearActivity(); } catch { /* best-effort */ }
   let lastProviderError: { message: string; classification?: string } | null = null;
   let sentAny = false;
   // Captured from the provider's `usage` event; flushed at end of turn so
@@ -1097,6 +1100,7 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
     case 'progress':
       log(`Progress: ${event.message}`);
       try { setProgress(event.message); } catch { /* best-effort */ }
+      try { appendActivity(event.message); } catch { /* best-effort */ }
       break;
   }
 }

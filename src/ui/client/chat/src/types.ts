@@ -200,6 +200,7 @@ export interface WsPayload {
   kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage';
   on?: boolean;
   hint?: string;
+  items?: string[] | null;
   text?: string;
   content?: string | { text?: string; markdown?: string };
   files?: ChatMessageFile[] | null;

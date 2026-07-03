@@ -15525,6 +15525,7 @@ var chatStatus = y3("");
 var chatLoading = y3(false);
 var isTyping = y3(false);
 var typingHint = y3("");
+var activityLog = y3([]);
 var pending = y3([]);
 var searchQuery = y3("");
 var searchResults = y3(null);
@@ -17670,6 +17671,7 @@ async function openChat(gid, resumeTid, opts) {
     canSend.value = ct === "web" ? true : cs;
     isTyping.value = false;
     typingHint.value = "";
+    activityLog.value = [];
     if (resumeTid) {
       threadId.value = resumeTid;
       chatLoading.value = true;
@@ -17796,6 +17798,7 @@ function connectChatWs() {
     }
     isTyping.value = false;
     typingHint.value = "";
+    activityLog.value = [];
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
     const delay = Math.min(15e3, 500 * Math.pow(2, attempt - 1));
@@ -17819,6 +17822,13 @@ function connectChatWs() {
     if (payload.kind === "typing") {
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || "";
+      if (!payload.on) {
+        activityLog.value = [];
+      } else if (payload.items && payload.items.length) {
+        const prev = activityLog.value;
+        const merged = prev.concat(payload.items);
+        activityLog.value = merged.length > 200 ? merged.slice(merged.length - 200) : merged;
+      }
       return;
     }
     if (payload.kind === "inbound") {
@@ -17845,6 +17855,7 @@ function connectChatWs() {
           }
           isTyping.value = false;
           typingHint.value = "";
+          activityLog.value = [];
         } else {
           const c5 = payload.content || {};
           const text2 = typeof c5 === "string" ? c5 : c5.fallbackText || "";
@@ -17860,7 +17871,10 @@ function connectChatWs() {
       const dir = payload.messageKind === "internal" ? "internal" : "out";
       appendMsg(dir, text, payload.files || [], payload.timestamp || "", payload.id);
       bumpActiveThread();
-      if (dir === "out") maybeNotify(text, payload.files || []);
+      if (dir === "out") {
+        activityLog.value = [];
+        maybeNotify(text, payload.files || []);
+      }
       return;
     }
     if (payload.kind === "usage") {
@@ -19735,12 +19749,22 @@ function MessageLog() {
   const prevMsgCountRef = A2(0);
   const wasTypingRef = A2(false);
   const prevScrollTickRef = A2(scrollToBottomTick.value);
+  const prevTraceLenRef = A2(0);
+  const prevExpandedRef = A2(false);
+  const [traceExpanded, setTraceExpanded] = h2(false);
   const highlight = highlightMessageId.value;
   const msgCount = chatMessages.value.length;
   const typing = isTyping.value && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
+  const traceLen = activityLog.value.length;
   const scrollToBottom = () => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  };
+  const atBottomRef = A2(true);
+  const onLogScroll = () => {
+    const el = ref.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   };
   y2(() => {
     if (!ref.current) return;
@@ -19764,22 +19788,45 @@ function MessageLog() {
       appliedHighlightRef.current = null;
       const newMessages = msgCount !== prevMsgCountRef.current;
       const typingJustStarted = typing && !wasTypingRef.current;
-      if (newMessages || typingJustStarted) {
+      const traceGrew = traceLen > prevTraceLenRef.current;
+      const justExpanded = traceExpanded && !prevExpandedRef.current;
+      if (traceExpanded && traceGrew) {
+        const ul = ref.current.querySelector(".activity-trace");
+        if (ul) ul.scrollTop = ul.scrollHeight;
+      }
+      if (newMessages || typingJustStarted || justExpanded || traceExpanded && traceGrew && atBottomRef.current) {
         prevMsgCountRef.current = msgCount;
         scrollToBottom();
       }
+      prevTraceLenRef.current = traceLen;
     }
     wasTypingRef.current = !!typing;
+    prevExpandedRef.current = traceExpanded;
   });
   const list = chatMessages.value;
   const groups2 = groupMessages(list);
-  return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, children: [
+  return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, onScroll: onLogScroll, children: [
     chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
-    typing ? /* @__PURE__ */ u4("div", { class: "typing", "aria-live": "polite", children: [
-      /* @__PURE__ */ u4("span", {}),
-      /* @__PURE__ */ u4("span", {}),
-      /* @__PURE__ */ u4("span", {}),
-      typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null
+    typing ? /* @__PURE__ */ u4("div", { class: `typing${traceExpanded ? " expanded" : ""}`, "aria-live": "polite", children: [
+      /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
+        /* @__PURE__ */ u4("span", {}),
+        /* @__PURE__ */ u4("span", {}),
+        /* @__PURE__ */ u4("span", {}),
+        typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null,
+        activityLog.value.length ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "trace-toggle",
+            "aria-expanded": traceExpanded,
+            "aria-label": traceExpanded ? "Hide activity" : "Show activity",
+            title: traceExpanded ? "Hide activity" : "Show activity",
+            onClick: () => setTraceExpanded((v5) => !v5),
+            children: /* @__PURE__ */ u4("span", { class: `chevron${traceExpanded ? " open" : ""}`, children: "\u203A" })
+          }
+        ) : null
+      ] }),
+      traceExpanded && activityLog.value.length ? /* @__PURE__ */ u4("ul", { class: "activity-trace", children: activityLog.value.map((line, i5) => /* @__PURE__ */ u4("li", { children: line }, i5)) }) : null
     ] }) : null
   ] });
 }

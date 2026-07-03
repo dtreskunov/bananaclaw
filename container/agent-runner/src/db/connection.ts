@@ -25,12 +25,14 @@ const DEFAULT_OUTBOUND_PATH = '/workspace/outbound.db';
 const DEFAULT_HEARTBEAT_PATH = '/workspace/.heartbeat';
 const DEFAULT_PROGRESS_PATH = '/workspace/.progress';
 const DEFAULT_TURN_ENDED_PATH = '/workspace/.turn-ended';
+const DEFAULT_ACTIVITY_PATH = '/workspace/.activity';
 
 let _inbound: Database | null = null;
 let _outbound: Database | null = null;
 let _heartbeatPath: string = DEFAULT_HEARTBEAT_PATH;
 let _progressPath: string = DEFAULT_PROGRESS_PATH;
 let _turnEndedPath: string = DEFAULT_TURN_ENDED_PATH;
+let _activityPath: string = DEFAULT_ACTIVITY_PATH;
 let _testMode = false;
 
 /**
@@ -216,6 +218,31 @@ export function writeProgressFile(message: string): void {
 export function clearProgressFile(): void {
   try {
     fs.unlinkSync(_progressPath);
+  } catch {
+    // Already gone or parent dir missing — fine.
+  }
+}
+
+/**
+ * Append one progress line to the append-only `.activity` file.
+ *
+ * Unlike `.progress` (latest-line only, read as the cross-channel typing
+ * hint), this file accumulates every progress line for the current turn so
+ * the host can forward the *full* ordered trace to the web UI. Same
+ * file-based rationale as `writeProgressFile` — avoids outbound.db lock
+ * contention with the MCP subprocess. Cleared at each turn start.
+ */
+export function appendActivityFile(line: string): void {
+  try {
+    fs.appendFileSync(_activityPath, line.replace(/\r?\n/g, ' ') + '\n');
+  } catch {
+    // Best-effort — same as writeProgressFile.
+  }
+}
+
+export function clearActivityFile(): void {
+  try {
+    fs.unlinkSync(_activityPath);
   } catch {
     // Already gone or parent dir missing — fine.
   }

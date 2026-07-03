@@ -13,6 +13,7 @@ import {
   chatLoading,
   isTyping,
   typingHint,
+  activityLog,
   refs,
   treePath,
   filePath,
@@ -460,6 +461,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     canSend.value = ct === 'web' ? true : cs;
     isTyping.value = false;
     typingHint.value = '';
+    activityLog.value = [];
     if (resumeTid) {
       threadId.value = resumeTid;
       chatLoading.value = true;
@@ -605,6 +607,7 @@ function connectChatWs(): void {
     }
     isTyping.value = false;
     typingHint.value = '';
+    activityLog.value = [];
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
     const delay = Math.min(15000, 500 * Math.pow(2, attempt - 1));
@@ -628,6 +631,15 @@ function connectChatWs(): void {
     if (payload.kind === 'typing') {
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || '';
+      if (!payload.on) {
+        activityLog.value = [];
+      } else if (payload.items && payload.items.length) {
+        // Append newly-forwarded steps; the server only sends deltas, so
+        // dedupe defensively against the current tail before growing.
+        const prev = activityLog.value;
+        const merged = prev.concat(payload.items);
+        activityLog.value = merged.length > 200 ? merged.slice(merged.length - 200) : merged;
+      }
       return;
     }
     if (payload.kind === 'inbound') {
@@ -658,6 +670,7 @@ function connectChatWs(): void {
           // Also clear typing since the agent is now waiting for user input.
           isTyping.value = false;
           typingHint.value = '';
+          activityLog.value = [];
         } else {
           // send_card or unknown chat-sdk — render fallbackText as bubble.
           const c = payload.content || {};
@@ -674,7 +687,12 @@ function connectChatWs(): void {
       const dir: Direction = payload.messageKind === 'internal' ? 'internal' : 'out';
       appendMsg(dir, text, payload.files || [], payload.timestamp || '', payload.id);
       bumpActiveThread();
-      if (dir === 'out') maybeNotify(text, payload.files || []);
+      if (dir === 'out') {
+        // Final response arrived — the live activity trace has served its
+        // purpose; clear it so it doesn't linger under the new bubble.
+        activityLog.value = [];
+        maybeNotify(text, payload.files || []);
+      }
       return;
     }
     if (payload.kind === 'usage') {

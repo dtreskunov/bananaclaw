@@ -28,6 +28,7 @@ import { log } from '../../log.js';
 import {
   heartbeatPath,
   isSessionProcessing,
+  readSessionActivity,
   readSessionProgress,
   readSessionTurnEndedAt,
 } from '../../session-manager.js';
@@ -49,7 +50,14 @@ const TYPING_GRACE_MS = 15000;
 const HEARTBEAT_FRESH_MS = 6000;
 
 interface TypingAdapter {
-  setTyping?(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string): Promise<void>;
+  setTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    hint?: string,
+    instance?: string,
+    items?: string[],
+  ): Promise<void>;
   clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
 }
 
@@ -66,6 +74,12 @@ interface TypingTarget {
 
 let adapter: TypingAdapter | null = null;
 const typingRefreshers = new Map<string, TypingTarget>();
+
+// Per-session count of activity-trace lines already forwarded to the
+// adapter. The container's `.activity` file is append-only within a turn
+// and truncated at each turn start; we forward only newly-appended lines
+// so the web UI accumulates the full trace without re-receiving old steps.
+const activityForwarded = new Map<string, number>();
 
 /**
  * Bind the typing module to the channel delivery adapter so it can
@@ -87,8 +101,9 @@ async function triggerTyping(
   instance?: string,
 ): Promise<void> {
   const hint = readSessionProgress(agentGroupId, sessionId) ?? undefined;
+  const items = drainActivity(agentGroupId, sessionId);
   try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, hint, instance);
+    await adapter?.setTyping?.(channelType, platformId, threadId, hint, instance, items);
   } catch {
     // Typing is best-effort — don't let it fail delivery or routing.
   }
@@ -100,6 +115,25 @@ async function triggerClearTyping(channelType: string, platformId: string, threa
   } catch {
     // Best-effort — same as triggerTyping.
   }
+}
+
+/**
+ * Return the activity-trace lines appended since the last forward for this
+ * session, advancing the per-session cursor. A shrink in line count means
+ * the container truncated the file for a new turn, so the cursor resets.
+ * Returns undefined when there is nothing new so callers can omit the field.
+ */
+function drainActivity(agentGroupId: string, sessionId: string): string[] | undefined {
+  const lines = readSessionActivity(agentGroupId, sessionId);
+  let sent = activityForwarded.get(sessionId) ?? 0;
+  if (lines.length < sent) sent = 0; // file truncated — new turn started
+  if (lines.length <= sent) {
+    activityForwarded.set(sessionId, lines.length);
+    return undefined;
+  }
+  const next = lines.slice(sent);
+  activityForwarded.set(sessionId, lines.length);
+  return next;
 }
 
 function isHeartbeatFresh(agentGroupId: string, sessionId: string): boolean {
@@ -139,9 +173,22 @@ export function startTypingRefresh(
     existing.platformId = platformId;
     existing.threadId = threadId;
     existing.instance = instance;
+    // New inbound = new turn. Baseline the cursor at the current file length
+    // so any lines left over from the previous turn (the waking container
+    // hasn't truncated `.activity` yet) count as already-seen and are never
+    // forwarded. When the container truncates the file at batch start,
+    // drainActivity's shrink check resets the cursor to 0 and this turn's
+    // steps stream from the top.
+    activityForwarded.set(sessionId, readSessionActivity(agentGroupId, sessionId).length);
     return;
   }
 
+  // New turn with no live refresher. Baseline the activity cursor at the
+  // current `.activity` length so stale lines from a prior turn (or a file
+  // left behind across a host restart) are not re-forwarded; the container's
+  // truncation at batch start resets the cursor via drainActivity's shrink
+  // check so this turn's steps still stream from the top.
+  activityForwarded.set(sessionId, readSessionActivity(agentGroupId, sessionId).length);
   // Immediate tick + periodic refresh.
   triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, instance).catch(() => {});
   const startedAt = Date.now();
@@ -157,7 +204,14 @@ export function startTypingRefresh(
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
     if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
-      triggerTyping(sessionId, entry.agentGroupId, entry.channelType, entry.platformId, entry.threadId, entry.instance).catch(() => {});
+      triggerTyping(
+        sessionId,
+        entry.agentGroupId,
+        entry.channelType,
+        entry.platformId,
+        entry.threadId,
+        entry.instance,
+      ).catch(() => {});
       return;
     }
 
@@ -193,11 +247,34 @@ export function checkTurnEndedAndStop(sessionId: string): boolean {
   return stopIfTurnEnded(sessionId, entry);
 }
 
+/**
+ * Forward newly-appended activity-trace lines at the ~1s active delivery
+ * cadence instead of waiting for the 4s typing refresh tick. Only the web
+ * UI renders the trace, so this is a no-op for other channels to avoid
+ * hammering their typing APIs. Fires setTyping only when the file's line
+ * count changed (growth = new steps, shrink = new turn truncation).
+ */
+export function flushActivity(sessionId: string): void {
+  const entry = typingRefreshers.get(sessionId);
+  if (!entry || entry.channelType !== 'web') return;
+  const lineCount = readSessionActivity(entry.agentGroupId, sessionId).length;
+  if (lineCount === (activityForwarded.get(sessionId) ?? 0)) return;
+  triggerTyping(
+    sessionId,
+    entry.agentGroupId,
+    entry.channelType,
+    entry.platformId,
+    entry.threadId,
+    entry.instance,
+  ).catch(() => {});
+}
+
 function stopIfTurnEnded(sessionId: string, entry: TypingTarget): boolean {
   const turnEndedAt = readSessionTurnEndedAt(entry.agentGroupId, sessionId);
   if (turnEndedAt <= entry.startedAt) return false;
   clearInterval(entry.interval);
   typingRefreshers.delete(sessionId);
+  activityForwarded.delete(sessionId);
   triggerClearTyping(entry.channelType, entry.platformId, entry.threadId).catch(() => {});
   return true;
 }
@@ -207,6 +284,7 @@ export function stopTypingRefresh(sessionId: string): void {
   if (!entry) return;
   clearInterval(entry.interval);
   typingRefreshers.delete(sessionId);
+  activityForwarded.delete(sessionId);
   triggerClearTyping(entry.channelType, entry.platformId, entry.threadId).catch(() => {});
 }
 

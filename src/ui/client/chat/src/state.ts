@@ -60,6 +60,10 @@ export const chatStatus: Signal<string> = signal('');
 export const chatLoading: Signal<boolean> = signal(false);
 export const isTyping: Signal<boolean> = signal(false);
 export const typingHint: Signal<string> = signal('');
+// Ordered activity-trace lines (tool calls / progress steps) for the
+// in-flight turn. Accumulated from WS typing frames; cleared when the
+// turn ends or the response arrives.
+export const activityLog: Signal<string[]> = signal<string[]>([]);
 export const pending: Signal<PendingFile[]> = signal<PendingFile[]>([]);
 
 // Search
