@@ -1502,6 +1502,7 @@ nav.tab-bar-strip.group-strip {
   overflow-y: auto;
 }
 .chat-main .typing .activity-trace li {
+  flex: none;
   font-size: var(--font-xs);
   color: var(--muted);
   font-family: var(--font-mono, monospace);
@@ -1566,6 +1567,7 @@ nav.tab-bar-strip.group-strip {
   overflow-y: auto;
 }
 .chat-main .msg .msg-activity .activity-trace li {
+  flex: none;
   font-size: var(--font-xs);
   color: var(--muted);
   font-family: var(--font-mono, monospace);
