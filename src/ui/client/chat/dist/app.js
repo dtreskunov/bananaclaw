@@ -18052,6 +18052,7 @@ async function sendChat(text, files) {
   }
 }
 async function selectGroup(gid) {
+  clearChat();
   n2(() => {
     groupId.value = gid;
     treePath.value = "";

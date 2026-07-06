@@ -808,6 +808,18 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
 
 // ── files ───────────────────────────────────────────────────────────
 export async function selectGroup(gid: string): Promise<void> {
+  // Tear down the previous group's thread/WS state synchronously before we
+  // start awaiting the new group's thread list. selectGroup sets groupId
+  // immediately but only resolves the new threadId later (inside openChat,
+  // after two awaits). Without this reset, threadId still points at the
+  // *previous* group's open thread during that window, and the old WS is
+  // still 'connected' so the composer stays enabled. A message sent
+  // mid-switch would POST to groups/<newGroup>/chat/<oldGroupThread> — the
+  // server auto-creates an orphan session the client's WS never subscribes
+  // to, so neither the echo nor the reply appears live. Clearing threadId
+  // here makes sendChat early-return and disables the composer until
+  // openChat wires up the new group's thread.
+  clearChat();
   batch(() => {
     groupId.value = gid;
     treePath.value = '';
