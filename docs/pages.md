@@ -178,3 +178,42 @@ Notes:
 This is **separate** from the private file-sharing **link** feature (one-off
 expiring `/dl` links backed by `ui_download_tokens`). Use links for private,
 per-file shares; use Pages for a public site.
+
+## Data persistence (the file API)
+
+Pages is **static and public read-only** — no server-side runtime, no
+database, and anonymous visitors cannot write. When a site needs data that
+changes over time, keep it as files in the group folder and update them
+through the authenticated file API (part of the web UI under `/api/groups/…`,
+so it requires a logged-in **admin** UI session — never reachable by anonymous
+site visitors):
+
+| Method + path | Purpose |
+|---|---|
+| `GET /api/groups/<gid>/files/<rel>` | File bytes. Response includes an `ETag` (version token). |
+| `GET /api/groups/<gid>/files/<rel>?meta=1` | Metadata JSON: `size`, `mtime`, `etag`, … |
+| `POST /api/groups/<gid>/write` | Overwrite an existing file. Body `{ path, content }`. |
+| `POST /api/groups/<gid>/upload` | Multipart upload; `?mode=skip\|overwrite\|rename`. |
+
+A data file written into the FQDN publish folder is *also* served publicly as
+a static asset, so a page's client JS can `fetch()` it for reads while the
+agent/admin owns the writes.
+
+### Optimistic concurrency (safe overwrites)
+
+Reads (`GET …/files/<rel>` and `?meta=1`) return a strong `ETag` derived from
+the file's size + mtime. Overwrites accept it as a precondition so a client
+can only replace the exact version it last read:
+
+- `POST …/write` — pass the token as an `If-Match` header or an `ifMatch`
+  field in the JSON body.
+- `POST …/upload` with `mode=overwrite` — pass the token as an `If-Match`
+  header (applied per matching target).
+
+If the on-disk version no longer matches, the write is rejected with **`412
+Precondition Failed`** (the `write` op; the `upload` op reports
+`precondition_failed` in that file's result entry) and the response carries
+the current `ETag`. The precondition is opt-in: omit it for first-writer-wins
+behavior (the prior default). Implementation:
+[src/ui/server/chat/etag.ts](../src/ui/server/chat/etag.ts),
+[src/ui/server/chat/write.ts](../src/ui/server/chat/write.ts).

@@ -28,6 +28,7 @@ import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding
 import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js';
 import { uiBaseUrl } from '../server.js';
 import { classify, resolveSafe } from './classify.js';
+import { fileEtag } from './etag.js';
 import {
   handleChatRequest,
   handleChatUpgrade,
@@ -701,6 +702,9 @@ function handleFile(ctx: Ctx, userId: string, groupId: string, relPath: string):
     'Content-Type': mime.type,
     'Content-Length': stat.size,
     'Last-Modified': stat.mtime.toUTCString(),
+    // Strong validator a client echoes back as `If-Match` when it later
+    // overwrites this file via the write/upload API (optimistic concurrency).
+    ETag: fileEtag(stat),
     'X-Content-Type-Options': 'nosniff',
     'Cache-Control': 'private, max-age=0, must-revalidate',
   };
@@ -757,10 +761,14 @@ async function handleMeta(ctx: Ctx, userId: string, groupId: string, relPath: st
   if (!stat.isFile()) return json(ctx, 400, { error: 'not_a_file' });
 
   const ext = path.extname(abs).toLowerCase();
+  const etag = fileEtag(stat);
+  ctx.res.setHeader('ETag', etag);
   const out: Record<string, unknown> = {
     name: path.basename(abs),
     size: stat.size,
     mtime: stat.mtime.toISOString(),
+    // Version token for optimistic-concurrency writes (pass back as If-Match).
+    etag,
     mime: mimeFor(ext).type,
     ext,
   };

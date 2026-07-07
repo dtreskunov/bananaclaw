@@ -98,6 +98,54 @@ rewriting from memory.
 - **Soft size limit.** Individual files are capped at ~100 MB by the host.
   Keep total bytes reasonable; this is shared infra, not a CDN.
 
+## Need data persistence? Use the BananaClaw file API
+
+Pages itself is static — the served folder is public **read-only**, there is
+no database, and anonymous visitors cannot write anything. If the site needs
+data that changes over time (a JSON feed, a small dataset a page renders, a
+counter, saved state), keep that data as **files in your group folder** and
+maintain them yourself. Two complementary access paths:
+
+- **Publish for reading.** Write the data file into the publish directory
+  (`/workspace/agent/<siteFqdn>/data.json`) and the page's client-side JS can
+  `fetch('/data.json')` — it's served as a normal static asset. You can also
+  just write it directly to the workspace filesystem yourself as the agent.
+- **Update safely over HTTP.** The host exposes an authenticated file API for
+  the group at `/api/groups/<groupId>/…` (part of the web UI, so it requires a
+  logged-in UI session with **admin** rights — it is *not* reachable by
+  anonymous site visitors). Use it when you or an admin tool need to update a
+  file over HTTP rather than from inside the container:
+
+  | Method + path | Purpose |
+  |---|---|
+  | `GET /api/groups/<gid>/files/<rel>` | Read a file's bytes. Response carries an `ETag` header — the file's current version token. |
+  | `GET /api/groups/<gid>/files/<rel>?meta=1` | Read metadata JSON (`size`, `mtime`, `etag`, …) without downloading bytes. |
+  | `POST /api/groups/<gid>/write` | Overwrite an existing file. JSON body `{ "path": "<rel>", "content": "…" }`. |
+  | `POST /api/groups/<gid>/upload` | Multipart upload (new or existing files); `?mode=skip\|overwrite\|rename`. |
+
+- **Don't clobber concurrent edits — reference the version you read.** Reads
+  return an `ETag`. When you overwrite, echo it back so the write only lands
+  if nothing changed underneath you:
+
+  - `write`: send the token as an `If-Match` header **or** an `ifMatch` field
+    in the JSON body.
+  - `upload` (`mode=overwrite`): send it as an `If-Match` header.
+
+  If the file changed since you read it (the agent, another admin, or another
+  tab wrote it first), the server responds **`412 Precondition Failed`** with
+  the current `ETag`. Re-read, merge, and retry — never blindly re-send. Omit
+  the precondition only for a first-writer-wins overwrite you genuinely intend.
+
+Read-modify-write pattern:
+
+1. `GET …/files/state.json` → keep the response `ETag`.
+2. Modify the parsed content.
+3. `POST …/write` with `{ "path": "state.json", "content": "…", "ifMatch": "<etag>" }`.
+4. On `412`, go back to step 1 with the fresh copy.
+
+The same static-only rules still apply to anything you place under the publish
+directory: it's world-readable, so never persist secrets there.
+
 ## Common patterns
 
 - **Landing page from scratch.** Write `index.html` (and optional

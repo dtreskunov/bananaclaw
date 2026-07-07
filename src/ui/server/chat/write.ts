@@ -18,6 +18,7 @@ import { listAccessibleAgentGroups } from '../../../modules/permissions/access.j
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
 import { recordAccess } from '../auth.js';
 import { canWrite, resolveSafe } from './classify.js';
+import { fileEtag, ifMatchSatisfied } from './etag.js';
 
 const UPLOAD_MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB per file
 const UPLOAD_MAX_FILES = 50;
@@ -29,8 +30,9 @@ type Mode = 'skip' | 'overwrite' | 'rename';
 interface UploadResult {
   name: string;
   path?: string;
-  status: 'ok' | 'conflict' | 'forbidden' | 'too_large' | 'invalid_name' | 'error';
+  status: 'ok' | 'conflict' | 'forbidden' | 'too_large' | 'invalid_name' | 'precondition_failed' | 'error';
   size?: number;
+  etag?: string;
   reason?: string;
 }
 
@@ -123,6 +125,12 @@ async function handleUpload(
     return true;
   }
 
+  // Optional optimistic-concurrency precondition. When present, it only
+  // bites in `overwrite` mode: an existing target whose current ETag does
+  // not match yields `precondition_failed` for that file instead of being
+  // clobbered. `skip`/`rename` never overwrite, so the guard is moot there.
+  const ifMatch = req.headers['if-match'];
+
   const results: UploadResult[] = await new Promise((resolve, reject) => {
     const out: UploadResult[] = [];
     let bb: ReturnType<typeof Busboy>;
@@ -166,7 +174,14 @@ async function handleUpload(
       pending.push(
         writeOneFile(stream, targetAbs, mode).then(
           (r) => {
-            out.push({ name, status: r.status, path: r.finalRel ?? targetRel, size: r.size, reason: r.reason });
+            out.push({
+              name,
+              status: r.status,
+              path: r.finalRel ?? targetRel,
+              size: r.size,
+              etag: r.etag,
+              reason: r.reason,
+            });
             if (r.status === 'ok') {
               recordAccess({ userId, groupId, path: r.finalRel ?? targetRel, action: 'upload', req });
             }
@@ -194,13 +209,22 @@ async function handleUpload(
     stream: NodeJS.ReadableStream,
     targetAbs: string,
     writeMode: Mode,
-  ): Promise<{ status: UploadResult['status']; size?: number; finalRel?: string; reason?: string }> {
+  ): Promise<{ status: UploadResult['status']; size?: number; finalRel?: string; etag?: string; reason?: string }> {
     let finalAbs = targetAbs;
     const exists = safeExists(finalAbs);
     if (exists) {
       if (writeMode === 'skip') {
         stream.resume();
         return { status: 'conflict' };
+      }
+      if (writeMode === 'overwrite') {
+        // Optimistic-concurrency guard: reject if the caller's version token
+        // no longer matches what's on disk.
+        const current = fileEtag(fs.statSync(finalAbs));
+        if (ifMatchSatisfied(ifMatch, current) === false) {
+          stream.resume();
+          return { status: 'precondition_failed', etag: current };
+        }
       }
       if (writeMode === 'rename') {
         finalAbs = nextAvailableName(targetAbs);
@@ -228,7 +252,7 @@ async function handleUpload(
       await fs.promises.rename(tmpAbs, finalAbs);
       const st = await fs.promises.stat(finalAbs);
       const finalRel = path.relative(groupDir, finalAbs).split(path.sep).join('/');
-      return { status: 'ok', size: st.size, finalRel };
+      return { status: 'ok', size: st.size, finalRel, etag: fileEtag(st) };
     } catch (err) {
       await fs.promises.unlink(tmpAbs).catch(() => undefined);
       throw err;
@@ -370,6 +394,22 @@ async function handleFileWrite(
     writeJson(res, 400, { error: 'not_a_file' });
     return true;
   }
+  // Optimistic-concurrency precondition. Accept the standard `If-Match`
+  // header or an `ifMatch` field in the JSON body (ergonomic for a fetch
+  // client that already has the body open). When supplied and the file's
+  // current ETag no longer matches, refuse the write with 412 so a client
+  // can never blow away a version it hasn't seen.
+  const ifMatch =
+    req.headers['if-match'] ??
+    (typeof (body as Record<string, unknown>)?.ifMatch === 'string'
+      ? ((body as Record<string, unknown>).ifMatch as string)
+      : undefined);
+  const currentEtag = fileEtag(st);
+  if (ifMatchSatisfied(ifMatch, currentEtag) === false) {
+    res.setHeader('ETag', currentEtag);
+    writeJson(res, 412, { error: 'precondition_failed', etag: currentEtag });
+    return true;
+  }
   const buf = Buffer.from(content, 'utf8');
   if (buf.length > WRITE_MAX_BODY_SIZE) {
     writeJson(res, 413, { error: 'too_large' });
@@ -386,8 +426,10 @@ async function handleFileWrite(
     throw err;
   }
   const after = await fs.promises.stat(abs);
+  const etag = fileEtag(after);
+  res.setHeader('ETag', etag);
   recordAccess({ userId, groupId, path: relPath, action: 'write', req });
-  writeJson(res, 200, { ok: true, path: relPath, size: after.size, mtime: after.mtime.toISOString() });
+  writeJson(res, 200, { ok: true, path: relPath, size: after.size, mtime: after.mtime.toISOString(), etag });
   return true;
 }
 
