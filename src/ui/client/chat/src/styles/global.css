@@ -72,6 +72,10 @@
   /* Pane shell sizing (consumed by Pane.css and rail/files siblings). */
   --handle-h: 40px;
   --collapsed-w: 40px;
+  /* Threads rail width on desktop. Capped so a wide viewport doesn't
+     stretch the conversation list far past its (ellipsized) titles,
+     handing the freed space to the chat/files columns instead. */
+  --rail-w: minmax(220px, 320px);
   /* Visual height for the strip pinned to the bottom of each
      column (chat composer / files drop-hint / collapsed channel
      section). Mirrors --handle-h's role at the top. */
@@ -91,12 +95,12 @@ button:hover { background: var(--wash); }
 main {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: var(--rail-w) 1fr 1fr;
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 main.threads-collapsed { grid-template-columns: 40px 1fr 1fr; }
-main.files-collapsed { grid-template-columns: 1fr 1fr 40px; }
+main.files-collapsed { grid-template-columns: var(--rail-w) 1fr 40px; }
 main.threads-collapsed.files-collapsed { grid-template-columns: 40px 1fr 40px; }
 
 /* admin-only UI is hidden until JS adds .is-admin on body */
