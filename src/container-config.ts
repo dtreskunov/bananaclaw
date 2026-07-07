@@ -72,6 +72,15 @@ export interface ContainerConfig {
    * skill keys off this to derive the publish path and URL.
    */
   siteFqdn?: string;
+  /**
+   * External base URL of the web UI (`UI_BASE_URL`, e.g.
+   * `https://example.com/ui`), trailing slash stripped. Only present when an
+   * explicit external URL is configured — the localhost dev fallback is
+   * omitted since it's useless to a browser. The `site-website` skill uses it
+   * to build absolute file-API URLs (`<uiBaseUrl>/chat/api/groups/<id>/…`) for
+   * a Pages site's client-side JS, which calls the API cross-origin.
+   */
+  uiBaseUrl?: string;
 }
 
 /**
@@ -138,6 +147,7 @@ export function configFromDb(row: ContainerConfigRow, group: AgentGroup): Contai
       PAGES_BASE_DOMAIN && group.site_enabled && group.site_slug
         ? `${group.site_slug}.${PAGES_BASE_DOMAIN}`
         : undefined,
+    uiBaseUrl: envFallback('UI_BASE_URL')?.replace(/\/$/, '') || undefined,
   };
 }
 

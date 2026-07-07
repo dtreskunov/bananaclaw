@@ -41,15 +41,31 @@ export function parseIfMatch(header: string | string[] | undefined): '*' | strin
 }
 
 /**
+ * Strip an optional `W/` weak-validator prefix from an ETag.
+ *
+ * Our validators are always strong (see `fileEtag`), but a reverse proxy that
+ * compresses responses may downgrade the `ETag` it forwards to the weak form
+ * (`W/"…"`) per RFC 7232 §2.1. A browser then echoes that weak value back in
+ * `If-Match`, so we must compare ignoring the prefix or every write behind such
+ * a proxy fails with a spurious 412.
+ */
+function stripWeak(tag: string): string {
+  return tag.startsWith('W/') ? tag.slice(2) : tag;
+}
+
+/**
  * Evaluate an `If-Match` precondition against the current ETag.
  * - no header → not requested (caller decides default behavior)
  * - `*` → matches iff the resource exists (current non-null)
  * - list → matches iff one entry equals the current ETag
+ *
+ * Comparison ignores the `W/` weak prefix on either side (see `stripWeak`).
  */
 export function ifMatchSatisfied(header: string | string[] | undefined, current: string | null): boolean | null {
   const parsed = parseIfMatch(header);
   if (parsed == null) return null; // no precondition supplied
   if (parsed === '*') return current != null;
   if (current == null) return false;
-  return parsed.includes(current);
+  const cur = stripWeak(current);
+  return parsed.some((tag) => stripWeak(tag) === cur);
 }

@@ -143,6 +143,43 @@ Read-modify-write pattern:
 3. `POST …/write` with `{ "path": "state.json", "content": "…", "ifMatch": "<etag>" }`.
 4. On `412`, go back to step 1 with the fresh copy.
 
+**Calling the file API from a browser page on your Pages site.** Your site is
+served from its own subdomain (`https://<siteFqdn>`), a *different origin* from
+the file API, which lives on the main UI host under the `/ui/chat` mount. Read
+`/workspace/agent/container.json` for the two values you need to build the
+absolute URL: `uiBaseUrl` (e.g. `https://example.com/ui`) and `agentGroupId`.
+The API base is `<uiBaseUrl>/chat/api/groups/<agentGroupId>`. So from page
+JavaScript you must:
+
+- **Hard-code the absolute UI-host URL** into the page you publish (read
+  `uiBaseUrl` + `agentGroupId` from `container.json` at build time and bake the
+  full base into the JS). A relative `fetch('/api/…')` from the page would hit
+  your own static subdomain (404), not the API. If `uiBaseUrl` is absent from
+  `container.json`, no external UI is configured and this HTTP path isn't
+  available — persist from inside the container instead.
+- **Send credentials.** The API authenticates via the visitor's UI session
+  cookie, so every call needs `{ credentials: 'include' }`. Without it the
+  request is anonymous → `401`.
+
+  ```js
+  // Bake these from container.json (uiBaseUrl + agentGroupId) at publish time:
+  const API = 'https://example.com/ui/chat/api/groups/<agentGroupId>';
+  const r = await fetch(`${API}/files/state.json`, { credentials: 'include' });
+  const etag = r.headers.get('ETag');
+  await fetch(`${API}/write`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: 'state.json', content: next, ifMatch: etag }),
+  });
+  ```
+
+- **Only admins can write** (and read). A logged-in admin viewing the page can
+  persist; anonymous visitors get `401`/`403`. The browser is allowed to reach
+  the API only from your group's *own* Pages origin, and only for your *own*
+  group's files (CORS is scoped that tightly) — build a read-only fallback for
+  visitors who aren't signed in.
+
 The same static-only rules still apply to anything you place under the publish
 directory: it's world-readable, so never persist secrets there.
 
