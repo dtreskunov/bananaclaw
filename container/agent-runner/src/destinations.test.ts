@@ -36,7 +36,7 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
 
     const prompt = buildSystemPromptAddendum('Casa');
 
-    expect(prompt).toContain('default to addressing the destination it came `from`');
+    expect(prompt).toContain('Default to addressing the destination it came `from`');
     expect(prompt).toContain('from="name"');
     expect(prompt).toContain('`casa`');
     expect(prompt).toContain('`whatsapp-mg-17780`');
@@ -94,7 +94,7 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
 
     expect(prompt).toContain('Wrap each delivered message');
     expect(prompt).toContain('<message to="name">');
-    expect(prompt).toContain('default to addressing the destination it came `from`');
+    expect(prompt).toContain('Default to addressing the destination it came `from`');
     expect(prompt).toContain('`casa`');
   });
 });
