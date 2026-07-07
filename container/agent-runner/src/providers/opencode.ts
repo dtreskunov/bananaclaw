@@ -245,6 +245,97 @@ function wrapPromptWithContext(text: string, systemInstructions?: string): strin
   return out;
 }
 
+const SKILLS_DIR = '/app/skills';
+const SKILLS_INDEX_PATH = '/tmp/nanoclaw-skills-index.md';
+
+/**
+ * Parse the `name` and `description` from a SKILL.md YAML frontmatter block.
+ * Extracts the block between the leading `---` fences and hands it to Bun's
+ * native YAML parser, so folded/literal block scalars (`>-`, `|`) are handled
+ * correctly. Returns an empty object when there's no frontmatter or it fails
+ * to parse.
+ */
+export function parseSkillFrontmatter(md: string): { name?: string; description?: string } {
+  const lines = md.split('\n');
+  if (lines[0]?.trim() !== '---') return {};
+  let end = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') {
+      end = i;
+      break;
+    }
+  }
+  if (end === -1) return {};
+
+  const block = lines.slice(1, end).join('\n');
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(block);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== 'object' || parsed === null) return {};
+
+  const fm = parsed as Record<string, unknown>;
+  const out: { name?: string; description?: string } = {};
+  if (typeof fm.name === 'string') out.name = fm.name.trim();
+  if (typeof fm.description === 'string') out.description = fm.description.replace(/\s+/g, ' ').trim();
+  return out;
+}
+
+/**
+ * Emulate Claude's Skills progressive disclosure for OpenCode. Scans the
+ * mounted `/app/skills` tree, builds a compact index (name + description +
+ * absolute SKILL.md path), writes it to a container-local file, and returns
+ * that path so it can be added to OpenCode's `instructions`. Only the
+ * descriptions are always-loaded; the agent reads a skill's body on demand
+ * with its file tools. Returns null when no skills are mounted.
+ */
+export function generateSkillsIndex(skillsDir = SKILLS_DIR, outPath = SKILLS_INDEX_PATH): string | null {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(skillsDir);
+  } catch {
+    return null;
+  }
+
+  const skills: { name: string; description: string; path: string }[] = [];
+  for (const dir of entries.sort()) {
+    const skillFile = `${skillsDir}/${dir}/SKILL.md`;
+    let md: string;
+    try {
+      md = fs.readFileSync(skillFile, 'utf8');
+    } catch {
+      continue;
+    }
+    const fm = parseSkillFrontmatter(md);
+    const name = fm.name || dir;
+    if (!fm.description) continue;
+    skills.push({ name, description: fm.description, path: skillFile });
+  }
+
+  if (skills.length === 0) return null;
+
+  const body = [
+    '# Available skills',
+    '',
+    'You have access to skills — packaged instructions for specific tasks.',
+    'When a request matches a skill below, read that skill\'s SKILL.md with your',
+    'file/read tool BEFORE acting, then follow it. Only the summaries are shown',
+    'here; the full instructions live in each file.',
+    '',
+    ...skills.map((s) => `- **${s.name}** — ${s.description}\n  Read: \`${s.path}\``),
+    '',
+  ].join('\n');
+
+  try {
+    fs.writeFileSync(outPath, body);
+  } catch {
+    return null;
+  }
+  return outPath;
+}
+
 function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> {
   const provider = process.env.OPENCODE_PROVIDER || 'anthropic';
   const model = options.model || process.env.OPENCODE_MODEL;
@@ -303,6 +394,11 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
     '/workspace/agent/.claude-fragments/*.md',
     '/workspace/agent/CLAUDE.local.md',
   ];
+
+  // OpenCode has no native Skills feature, so surface the mounted skills as a
+  // generated index it can read on demand (progressive disclosure emulation).
+  const skillsIndex = generateSkillsIndex();
+  if (skillsIndex) instructions.push(skillsIndex);
 
   return {
     ...(model ? { model } : {}),
