@@ -20,6 +20,7 @@ import {
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import { isAudioMime, transcribeAudio } from './transcribe.js';
 import { getConfig } from './config.js';
+import { startTurnWatchdog } from './turn-watchdog.js';
 import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderExchange } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -305,6 +306,14 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const rawFiles = extractFileAttachments(keep);
     const { prompt: resolvedPrompt, files } = await transcribeAudioFiles(rawFiles, prompt);
     prompt = resolvedPrompt;
+    // Long-turn feedback: a turn can run for minutes. The ephemeral typing
+    // indicator is not persisted, so a user who reloads/reconnects sees only
+    // their message until the final answer lands — indistinguishable from a
+    // dead agent. The watchdog emits a durable "still working…" chat message
+    // if the turn stays silent past its threshold. Only for channel-bound
+    // turns; system/a2a turns without a channel target get nothing.
+    const watchdog =
+      routing.channelType && routing.platformId ? startTurnWatchdog(routing) : null;
     try {
       while (true) {
         const query = config.provider.query({
@@ -386,6 +395,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         }
       }
     } finally {
+      watchdog?.stop();
       clearCurrentInReplyTo();
     }
 

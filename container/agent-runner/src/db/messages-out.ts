@@ -76,6 +76,32 @@ export function writeMessageOut(msg: WriteMessageOut): number {
   return nextSeq;
 }
 
+/** Current highest outbound seq (0 when the table is empty). */
+export function maxOutboundSeq(): number {
+  return (getOutboundDb().prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
+}
+
+/**
+ * Highest outbound seq strictly greater than `sinceSeq`, ignoring any rows
+ * whose id is in `excludeIds`. Used by the long-turn watchdog to tell whether
+ * the agent has emitted a *real* user-visible message since a baseline —
+ * excluding the watchdog's own "still working" notices so they never count as
+ * progress. Returns 0 when there is no such row.
+ */
+export function maxForeignOutboundSeq(sinceSeq: number, excludeIds: Iterable<string>): number {
+  const ids = [...excludeIds];
+  const db = getOutboundDb();
+  if (ids.length === 0) {
+    return (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out WHERE seq > ?').get(sinceSeq) as { m: number }).m;
+  }
+  const placeholders = ids.map(() => '?').join(',');
+  return (
+    db
+      .prepare(`SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out WHERE seq > ? AND id NOT IN (${placeholders})`)
+      .get(sinceSeq, ...ids) as { m: number }
+  ).m;
+}
+
 /**
  * Look up a message's platform ID by seq number.
  * Searches both inbound and outbound DBs since seq spans both.
