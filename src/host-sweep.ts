@@ -37,7 +37,9 @@ import {
   deleteOrphanProcessingClaims,
   getContainerState,
   getMessageForRetry,
+  getMessageRouting,
   getProcessingClaims,
+  insertOutboundBounce,
   markMessageFailed,
   retryWithBackoff,
   syncProcessingAcks,
@@ -296,6 +298,11 @@ function resetStuckProcessingRows(
 ): void {
   const claims = getProcessingClaims(outDb);
   const now = Date.now();
+  // User-facing messages that were permanently abandoned this pass. The host
+  // is the only actor that can speak for them — the container that would have
+  // written an in-turn error notice is already gone. Bounced below via the
+  // writable outbound handle (safe: container confirmed not running).
+  const bounces: Array<{ id: string }> = [];
   for (const { message_id } of claims) {
     const msg = getMessageForRetry(inDb, message_id, 'pending');
     if (!msg) continue;
@@ -312,6 +319,7 @@ function resetStuckProcessingRows(
         sessionId: session.id,
         reason,
       });
+      bounces.push({ id: msg.id });
     } else {
       const backoffMs = BACKOFF_BASE_MS * Math.pow(2, msg.tries);
       const backoffSec = Math.floor(backoffMs / 1000);
@@ -333,6 +341,22 @@ function resetStuckProcessingRows(
   let useDb: Database.Database | null = writableOutDb ?? null;
   try {
     if (!useDb) useDb = openOutboundDbRw(session.agent_group_id, session.id);
+    // Bounce a "couldn't process your message" notice for each abandoned
+    // user-facing chat message so a dead-container failure is never silent.
+    for (const { id } of bounces) {
+      const routing = getMessageRouting(inDb, id);
+      if (!routing || (routing.kind !== 'chat' && routing.kind !== 'chat-sdk')) continue;
+      if (!routing.channel_type || !routing.platform_id) continue;
+      insertOutboundBounce(useDb, inDb, {
+        id: `bounce-${id}`,
+        inReplyTo: id,
+        platformId: routing.platform_id,
+        channelType: routing.channel_type,
+        threadId: routing.thread_id,
+        text: "⚠️ Your last message couldn't be processed after several attempts. Please try sending it again.",
+      });
+      log.warn('Bounced failure notice to user', { messageId: id, sessionId: session.id, reason });
+    }
     const cleared = deleteOrphanProcessingClaims(useDb);
     if (cleared > 0) {
       log.info('Cleared orphan processing claims', { sessionId: session.id, cleared, reason });

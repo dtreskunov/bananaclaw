@@ -195,6 +195,21 @@ function makeSessionDbs(): { inDb: Database.Database; outDb: Database.Database }
       status_changed TEXT NOT NULL
     );
   `);
+  outDb.exec(`
+    CREATE TABLE messages_out (
+      id            TEXT PRIMARY KEY,
+      seq           INTEGER UNIQUE,
+      in_reply_to   TEXT,
+      timestamp     TEXT NOT NULL,
+      deliver_after TEXT,
+      recurrence    TEXT,
+      kind          TEXT NOT NULL,
+      platform_id   TEXT,
+      channel_type  TEXT,
+      thread_id     TEXT,
+      content       TEXT NOT NULL
+    );
+  `);
   return { inDb, outDb };
 }
 
@@ -291,6 +306,103 @@ describe('resetStuckProcessingRows — orphan claim cleanup', () => {
     expect(getProcessingClaims(outDb)).toEqual([]);
     const row = inDb.prepare('SELECT tries FROM messages_in WHERE id = ?').get('m-2') as { tries: number };
     expect(row.tries).toBe(1); // not bumped, the skip path held
+  });
+});
+
+describe('resetStuckProcessingRows — failure bounce', () => {
+  function bounceRows(outDb: Database.Database) {
+    return outDb
+      .prepare("SELECT id, in_reply_to, kind, platform_id, channel_type, thread_id, content FROM messages_out")
+      .all() as Array<{
+      id: string;
+      in_reply_to: string | null;
+      kind: string;
+      platform_id: string | null;
+      channel_type: string | null;
+      thread_id: string | null;
+      content: string;
+    }>;
+  }
+
+  it('bounces a user notice when a chat message is abandoned after max retries', () => {
+    const { inDb, outDb } = makeSessionDbs();
+    const claimedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    inDb
+      .prepare(
+        "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, thread_id, content) VALUES ('m-3', 2, 'chat', ?, 'pending', 5, 'chan-1', 'web', 'thread-1', '{\"text\":\"hi\"}')",
+      )
+      .run(claimedAt);
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-3', 'processing', ?)").run(claimedAt);
+
+    _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
+
+    const status = (inDb.prepare('SELECT status FROM messages_in WHERE id = ?').get('m-3') as { status: string })
+      .status;
+    expect(status).toBe('failed');
+
+    const rows = bounceRows(outDb);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].in_reply_to).toBe('m-3');
+    expect(rows[0].kind).toBe('chat');
+    expect(rows[0].platform_id).toBe('chan-1');
+    expect(rows[0].channel_type).toBe('web');
+    expect(rows[0].thread_id).toBe('thread-1');
+    expect(JSON.parse(rows[0].content).text).toContain("couldn't be processed");
+
+    // Orphan claim still cleared.
+    expect(getProcessingClaims(outDb)).toEqual([]);
+  });
+
+  it('does not bounce for a non-chat (system) message', () => {
+    const { inDb, outDb } = makeSessionDbs();
+    const claimedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    inDb
+      .prepare(
+        "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, content) VALUES ('m-4', 2, 'system', ?, 'pending', 5, 'chan-1', 'web', '{}')",
+      )
+      .run(claimedAt);
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-4', 'processing', ?)").run(claimedAt);
+
+    _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
+
+    expect(bounceRows(outDb)).toHaveLength(0);
+  });
+
+  it('does not bounce when the message has no channel routing', () => {
+    const { inDb, outDb } = makeSessionDbs();
+    const claimedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    inDb
+      .prepare(
+        "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, content) VALUES ('m-5', 2, 'chat', ?, 'pending', 5, '{}')",
+      )
+      .run(claimedAt);
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-5', 'processing', ?)").run(claimedAt);
+
+    _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
+
+    expect(bounceRows(outDb)).toHaveLength(0);
+  });
+
+  it('does not bounce a message that is merely retried (below max)', () => {
+    const { inDb, outDb } = makeSessionDbs();
+    const claimedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    inDb
+      .prepare(
+        "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, content) VALUES ('m-6', 2, 'chat', ?, 'pending', 0, 'chan-1', 'web', '{}')",
+      )
+      .run(claimedAt);
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-6', 'processing', ?)").run(claimedAt);
+
+    _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
+
+    expect(bounceRows(outDb)).toHaveLength(0);
+    const status = (inDb.prepare('SELECT status FROM messages_in WHERE id = ?').get('m-6') as { status: string })
+      .status;
+    expect(status).toBe('pending');
   });
 });
 

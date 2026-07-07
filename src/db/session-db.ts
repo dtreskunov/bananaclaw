@@ -185,6 +185,57 @@ export function getMessageForRetry(
     .get(messageId, status) as { id: string; tries: number; processAfter: string | null } | undefined;
 }
 
+/** Routing fields for a message, used when the host must bounce a notice back. */
+export function getMessageRouting(
+  db: Database.Database,
+  messageId: string,
+): { kind: string; platform_id: string | null; channel_type: string | null; thread_id: string | null } | undefined {
+  return db
+    .prepare('SELECT kind, platform_id, channel_type, thread_id FROM messages_in WHERE id = ?')
+    .get(messageId) as
+    | { kind: string; platform_id: string | null; channel_type: string | null; thread_id: string | null }
+    | undefined;
+}
+
+/**
+ * Write a host-originated chat message into outbound.db so the delivery loop
+ * bounces it to the user. Only safe to call when no container is running (the
+ * container owns outbound.db) — callers gate on that. The seq is chosen
+ * strictly greater than every existing seq in BOTH session tables so it never
+ * collides with a container-written outbound row or a host-written inbound row
+ * (seq is looked up across both tables for edit/reaction targeting).
+ */
+export function insertOutboundBounce(
+  outDb: Database.Database,
+  inDb: Database.Database,
+  msg: {
+    id: string;
+    inReplyTo: string | null;
+    platformId: string | null;
+    channelType: string | null;
+    threadId: string | null;
+    text: string;
+  },
+): void {
+  const maxOut = (outDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
+  const maxIn = (inDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
+  const seq = Math.max(maxOut, maxIn) + 1;
+  outDb
+    .prepare(
+      `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, kind, platform_id, channel_type, thread_id, content)
+       VALUES (@id, @seq, @inReplyTo, datetime('now'), 'chat', @platformId, @channelType, @threadId, @content)`,
+    )
+    .run({
+      id: msg.id,
+      seq,
+      inReplyTo: msg.inReplyTo,
+      platformId: msg.platformId,
+      channelType: msg.channelType,
+      threadId: msg.threadId,
+      content: JSON.stringify({ text: msg.text }),
+    });
+}
+
 export function syncProcessingAcks(inDb: Database.Database, outDb: Database.Database): void {
   const completed = outDb
     .prepare("SELECT message_id FROM processing_ack WHERE status IN ('completed', 'failed')")
