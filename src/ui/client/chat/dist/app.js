@@ -19680,6 +19680,37 @@ function fmtActivityTs(ts) {
   if (!Number.isFinite(n3)) return "";
   return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
+function ActivityTraceRow({ line, open, onToggle }) {
+  const html = open ? renderMarkdown(line.text) : null;
+  return /* @__PURE__ */ u4("li", { class: `trace-row${open ? " open" : ""}`, children: [
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "trace-row-toggle",
+        "aria-expanded": open,
+        title: open ? "Collapse step" : line.text,
+        onClick: onToggle,
+        children: [
+          /* @__PURE__ */ u4("span", { class: `chevron${open ? " open" : ""}`, children: "\u203A" }),
+          line.ts ? /* @__PURE__ */ u4("span", { class: "ts", children: fmtActivityTs(line.ts) }) : null,
+          open ? null : /* @__PURE__ */ u4("span", { class: "trace-text", children: line.text })
+        ]
+      }
+    ),
+    open ? html != null ? /* @__PURE__ */ u4("div", { class: "trace-full markdown", dangerouslySetInnerHTML: { __html: html } }) : /* @__PURE__ */ u4("div", { class: "trace-full", children: line.text }) : null
+  ] });
+}
+function ActivityTraceList({ lines }) {
+  const [sel, setSel] = h2(null);
+  const last = lines.length - 1;
+  const openIdx = sel === null ? last : sel;
+  const toggle = (i5) => setSel((cur) => {
+    const open = cur === null ? last : cur;
+    return open === i5 ? -1 : i5;
+  });
+  return /* @__PURE__ */ u4("ul", { class: "activity-trace", children: lines.map((line, i5) => /* @__PURE__ */ u4(ActivityTraceRow, { line, open: i5 === openIdx, onToggle: () => toggle(i5) }, i5)) });
+}
 function ActivityTrace({ lines }) {
   const [expanded, setExpanded] = h2(false);
   if (!lines.length) return null;
@@ -19703,10 +19734,7 @@ function ActivityTrace({ lines }) {
         ]
       }
     ),
-    expanded ? /* @__PURE__ */ u4("ul", { class: "activity-trace", children: lines.map((line, i5) => /* @__PURE__ */ u4("li", { title: line.text, children: [
-      line.ts ? /* @__PURE__ */ u4("span", { class: "ts", children: fmtActivityTs(line.ts) }) : null,
-      line.text
-    ] }, i5)) }) : null
+    expanded ? /* @__PURE__ */ u4(ActivityTraceList, { lines }) : null
   ] });
 }
 function fmtCost(usd) {
@@ -19968,10 +19996,7 @@ function MessageLog() {
           }
         ) : null
       ] }),
-      traceExpanded && activityLog.value.length ? /* @__PURE__ */ u4("ul", { class: "activity-trace", children: activityLog.value.map((line, i5) => /* @__PURE__ */ u4("li", { title: line.text, children: [
-        line.ts ? /* @__PURE__ */ u4("span", { class: "ts", children: fmtActivityTs(line.ts) }) : null,
-        line.text
-      ] }, i5)) }) : null
+      traceExpanded && activityLog.value.length ? /* @__PURE__ */ u4(ActivityTraceList, { lines: activityLog.value }) : null
     ] }) : null
   ] });
 }

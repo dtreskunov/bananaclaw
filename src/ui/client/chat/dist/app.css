@@ -54,6 +54,7 @@
       #b07cff 100%);
   --handle-h: 40px;
   --collapsed-w: 40px;
+  --rail-w: minmax(220px, 320px);
   --bottom-row-h: 49px;
 }
 * {
@@ -107,7 +108,7 @@ button:hover {
 main {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: var(--rail-w) 1fr 1fr;
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
@@ -115,7 +116,7 @@ main.threads-collapsed {
   grid-template-columns: 40px 1fr 1fr;
 }
 main.files-collapsed {
-  grid-template-columns: 1fr 1fr 40px;
+  grid-template-columns: var(--rail-w) 1fr 40px;
 }
 main.threads-collapsed.files-collapsed {
   grid-template-columns: 40px 1fr 40px;
@@ -1503,13 +1504,6 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .typing .activity-trace li {
   flex: none;
-  font-size: var(--font-xs);
-  color: var(--muted);
-  font-family: var(--font-mono, monospace);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0.85;
 }
 .chat-main .typing.expanded {
   min-width: min(78%, 460px);
@@ -1568,13 +1562,79 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .msg .msg-activity .activity-trace li {
   flex: none;
+}
+.chat-main .activity-trace .trace-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chat-main .activity-trace .trace-row-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
   font-size: var(--font-xs);
   color: var(--muted);
   font-family: var(--font-mono, monospace);
+  opacity: 0.85;
+}
+.chat-main .activity-trace .trace-row-toggle:hover {
+  opacity: 1;
+  color: var(--fg);
+}
+.chat-main .activity-trace .trace-row-toggle .chevron {
+  flex: none;
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1.2;
+  transition: transform 0.15s ease;
+  opacity: 0.6;
+}
+.chat-main .activity-trace .trace-row-toggle .chevron.open {
+  transform: rotate(90deg);
+}
+.chat-main .activity-trace .trace-text {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  opacity: 0.85;
+}
+.chat-main .activity-trace .trace-full {
+  font-size: var(--font-xs);
+  color: var(--fg);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  padding: 2px 4px 4px 17px;
+  opacity: 0.95;
+}
+.chat-main .activity-trace .trace-full p {
+  margin: 0;
+}
+.chat-main .activity-trace .trace-full code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.95em;
+  background: rgba(127, 127, 127, 0.15);
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.chat-main .activity-trace .trace-full pre {
+  margin: 2px 0;
+  padding: 6px 8px;
+  background: rgba(127, 127, 127, 0.12);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+.chat-main .activity-trace .trace-full pre code {
+  background: none;
+  padding: 0;
 }
 @keyframes typing-bounce {
   0%, 60%, 100% {

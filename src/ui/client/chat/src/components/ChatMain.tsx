@@ -37,6 +37,58 @@ function fmtActivityTs(ts: string): string {
   return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+/** One accordion row of an activity trace. Collapsed shows a single
+ *  truncated line (timestamp + preview); expanded shows the full step text
+ *  rendered as Markdown so long commands wrap and inline code keeps its
+ *  monospace styling instead of being clipped with an ellipsis. */
+function ActivityTraceRow({ line, open, onToggle }: { line: ActivityLine; open: boolean; onToggle: () => void }) {
+  const html = open ? renderMarkdown(line.text) : null;
+  return (
+    <li class={`trace-row${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        class="trace-row-toggle"
+        aria-expanded={open}
+        title={open ? 'Collapse step' : line.text}
+        onClick={onToggle}
+      >
+        <span class={`chevron${open ? ' open' : ''}`}>{'\u203A'}</span>
+        {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
+        {open ? null : <span class="trace-text">{line.text}</span>}
+      </button>
+      {open
+        ? (html != null
+            ? <div class="trace-full markdown" dangerouslySetInnerHTML={{ __html: html }} />
+            : <div class="trace-full">{line.text}</div>)
+        : null}
+    </li>
+  );
+}
+
+/** A timestamped step list where each entry is an accordion row. The latest
+ *  entry is expanded by default; once the user focuses a specific entry it
+ *  stays put as new steps stream in (so a live turn doesn't yank the reader
+ *  off the row they're reading). Shared by the persisted trace and the live
+ *  typing bubble. */
+function ActivityTraceList({ lines }: { lines: ActivityLine[] }) {
+  // null → follow the latest entry; -1 → user collapsed the open row;
+  // >= 0 → user pinned a specific row.
+  const [sel, setSel] = useState<number | null>(null);
+  const last = lines.length - 1;
+  const openIdx = sel === null ? last : sel;
+  const toggle = (i: number) => setSel((cur) => {
+    const open = cur === null ? last : cur;
+    return open === i ? -1 : i;
+  });
+  return (
+    <ul class="activity-trace">
+      {lines.map((line, i) => (
+        <ActivityTraceRow key={i} line={line} open={i === openIdx} onToggle={() => toggle(i)} />
+      ))}
+    </ul>
+  );
+}
+
 /** A collapsible activity trace (chevron + timestamped step list). Used for
  *  the persisted trace on historical outbound messages; the live typing
  *  bubble renders its own copy coupled to autoscroll. */
@@ -56,18 +108,7 @@ function ActivityTrace({ lines }: { lines: ActivityLine[] }) {
         <span class={`chevron${expanded ? ' open' : ''}`}>{'\u203A'}</span>
         <span class="trace-count">{lines.length} step{lines.length === 1 ? '' : 's'}</span>
       </button>
-      {expanded
-        ? (
-          <ul class="activity-trace">
-            {lines.map((line, i) => (
-              <li key={i} title={line.text}>
-                {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
-                {line.text}
-              </li>
-            ))}
-          </ul>
-        )
-        : null}
+      {expanded ? <ActivityTraceList lines={lines} /> : null}
     </div>
   );
 }
@@ -392,16 +433,7 @@ function MessageLog() {
                 : null}
             </div>
             {traceExpanded && activityLog.value.length
-              ? (
-                <ul class="activity-trace">
-                  {activityLog.value.map((line, i) => (
-                    <li key={i} title={line.text}>
-                      {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
-                      {line.text}
-                    </li>
-                  ))}
-                </ul>
-              )
+              ? <ActivityTraceList lines={activityLog.value} />
               : null}
           </div>
         )
