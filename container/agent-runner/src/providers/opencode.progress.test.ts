@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'bun:test';
 
 import { formatProgressFromPart, ProgressThrottle } from './opencode.js';
+import type { ActivityStep } from './types.js';
+
+const tool = (t: string, detail?: string): ActivityStep =>
+  detail === undefined ? { kind: 'tool', tool: t } : { kind: 'tool', tool: t, detail };
 
 describe('formatProgressFromPart', () => {
   const seen = () => new Set<string>();
@@ -12,85 +16,87 @@ describe('formatProgressFromPart', () => {
     expect(formatProgressFromPart({ type: 'step-start' }, 0, seen())).toBeNull();
   });
 
-  it('formats core tool calls with basenamed file args', () => {
-    const cases: Array<[string, Record<string, unknown>, string]> = [
-      ['read', { filePath: '/workspace/agent/foo/bar.html' }, 'Reading `bar.html`'],
-      ['write', { filePath: '/workspace/agent/foo/bar.html' }, 'Writing `bar.html`'],
-      ['edit', { filePath: '/workspace/agent/foo/bar.html' }, 'Editing `bar.html`'],
-      ['grep', { pattern: 'foo.*bar' }, 'Searching for `foo.*bar`'],
-      ['glob', { pattern: '**/*.ts' }, 'Globbing `**/*.ts`'],
-      ['todowrite', {}, 'Updating todos'],
+  it('passes the raw tool name and primary argument through unformatted', () => {
+    const cases: Array<[string, Record<string, unknown>, ActivityStep]> = [
+      ['read', { filePath: '/workspace/agent/foo/bar.html' }, tool('read', '/workspace/agent/foo/bar.html')],
+      ['write', { filePath: '/workspace/agent/foo/bar.html' }, tool('write', '/workspace/agent/foo/bar.html')],
+      ['edit', { filePath: '/workspace/agent/foo/bar.html' }, tool('edit', '/workspace/agent/foo/bar.html')],
+      ['grep', { pattern: 'foo.*bar' }, tool('grep', 'foo.*bar')],
+      ['glob', { pattern: '**/*.ts' }, tool('glob', '**/*.ts')],
+      // No matching primary-arg key → no detail.
+      ['todowrite', {}, tool('todowrite')],
     ];
-    for (const [tool, input, expected] of cases) {
-      expect(formatProgressFromPart({ type: 'tool', tool, state: { input } }, 0, seen())).toBe(expected);
+    for (const [t, input, expected] of cases) {
+      expect(formatProgressFromPart({ type: 'tool', tool: t, state: { input } }, 0, seen())).toEqual(expected);
     }
   });
 
-  it('clips long bash commands to a single line', () => {
-    const long = 'pnpm exec tsx scripts/very-long-task.ts --flag value --other "with spaces"\nand newline';
-    const out = formatProgressFromPart({ type: 'tool', tool: 'bash', state: { input: { command: long } } }, 0, seen());
-    expect(out?.startsWith('Running `')).toBe(true);
-    expect(out).not.toContain('\n');
-    // 60-char cap + "Running `…`" wrapper.
-    expect((out ?? '').length).toBeLessThanOrEqual('Running ``'.length + 60);
+  it('preserves newlines in the tool detail (no single-line clipping)', () => {
+    const cmd = 'pnpm exec tsx scripts/very-long-task.ts --flag value\nand newline';
+    const out = formatProgressFromPart({ type: 'tool', tool: 'bash', state: { input: { command: cmd } } }, 0, seen());
+    expect(out).toEqual(tool('bash', cmd));
+    expect(out?.detail).toContain('\n');
   });
 
-  it('renders webfetch with the hostname only', () => {
+  it('passes the raw url through as detail (UI shortens for display)', () => {
     const out = formatProgressFromPart(
       { type: 'tool', tool: 'webfetch', state: { input: { url: 'https://example.com/path?q=1' } } },
       0,
       seen(),
     );
-    expect(out).toBe('Fetching `example.com`');
+    expect(out).toEqual(tool('webfetch', 'https://example.com/path?q=1'));
   });
 
-  it('renders MCP tool calls as server.name', () => {
+  it('passes MCP tool names through raw (UI renders server.name)', () => {
     const out = formatProgressFromPart({ type: 'tool', tool: 'mcp__tavily__search', state: {} }, 0, seen());
-    expect(out).toBe('Calling `tavily.search`');
+    expect(out).toEqual(tool('mcp__tavily__search'));
   });
 
-  it('falls back to generic running for unknown tools', () => {
+  it('emits a bare tool step for unknown tools with no primary arg', () => {
     const out = formatProgressFromPart({ type: 'tool', tool: 'mystery', state: {} }, 0, seen());
-    expect(out).toBe('Running `mystery`');
+    expect(out).toEqual(tool('mystery'));
   });
 
-  it('yields Thinking… once per reasoning part id', () => {
+  it('yields a thinking step once per reasoning part id', () => {
     const set = new Set<string>();
-    expect(formatProgressFromPart({ type: 'reasoning', id: 'r1' }, 0, set)).toBe('Thinking…');
+    expect(formatProgressFromPart({ type: 'reasoning', id: 'r1' }, 0, set)).toEqual({ kind: 'thinking' });
     expect(formatProgressFromPart({ type: 'reasoning', id: 'r1' }, 0, set)).toBeNull();
-    expect(formatProgressFromPart({ type: 'reasoning', id: 'r2' }, 0, set)).toBe('Thinking…');
+    expect(formatProgressFromPart({ type: 'reasoning', id: 'r2' }, 0, set)).toEqual({ kind: 'thinking' });
   });
 
-  it('yields Writing reply… only once textLen >= 500', () => {
+  it('yields a text step only once textLen >= 500', () => {
     expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'hi' }, 2, seen())).toBeNull();
     expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'x'.repeat(499) }, 499, seen())).toBeNull();
-    expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'x'.repeat(500) }, 500, seen())).toBe('Writing reply…');
+    expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'x'.repeat(500) }, 500, seen())).toEqual({ kind: 'text' });
   });
 });
 
 describe('ProgressThrottle', () => {
-  it('passes through the first message immediately', () => {
+  const edit = tool('edit', 'a.ts');
+  const read = tool('read', 'b.ts');
+
+  it('passes through the first step immediately', () => {
     let now = 1000;
     const t = new ProgressThrottle(1000, () => now);
-    expect(t.next('Editing `a.ts`')).toBe('Editing `a.ts`');
+    expect(t.next(edit)).toEqual(edit);
   });
 
-  it('suppresses identical messages within the interval', () => {
+  it('suppresses identical steps within the interval', () => {
     let now = 1000;
     const t = new ProgressThrottle(1000, () => now);
-    expect(t.next('Editing `a.ts`')).toBe('Editing `a.ts`');
+    expect(t.next(edit)).toEqual(edit);
     now = 1500;
-    expect(t.next('Editing `a.ts`')).toBeNull();
+    expect(t.next({ ...edit })).toBeNull();
     now = 2001;
-    expect(t.next('Editing `a.ts`')).toBe('Editing `a.ts`');
+    expect(t.next({ ...edit })).toEqual(edit);
   });
 
-  it('passes a different message through immediately', () => {
+  it('passes a different step through immediately', () => {
     let now = 1000;
     const t = new ProgressThrottle(1000, () => now);
-    expect(t.next('Editing `a.ts`')).toBe('Editing `a.ts`');
+    expect(t.next(edit)).toEqual(edit);
     now = 1100;
-    expect(t.next('Reading `b.ts`')).toBe('Reading `b.ts`');
+    expect(t.next(read)).toEqual(read);
   });
 
   it('ignores null inputs', () => {

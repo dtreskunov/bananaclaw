@@ -122,47 +122,60 @@ export function clearFailedTurn(): void {
 }
 
 import { appendActivityFile, clearActivityFile, writeTurnEndedFile, clearTurnEndedFile } from './connection.js';
+import type { ActivityStep } from '../providers/types.js';
 
 /** One step of a turn's activity trace: an emit-time timestamp (epoch ms as
- *  a string) plus the whole progress text. */
+ *  a string) plus a JSON-encoded {@link ActivityStep} in `text`. Older rows
+ *  (persisted before the structured refactor) hold a plain human string; the
+ *  UI parses non-JSON `text` as a legacy line. */
 export interface ActivityLine {
   ts: string;
   text: string;
 }
 
-// Generous per-line hard cap. We store the *whole* harness progress message
-// (no source-side clipping); the web UI truncates for display via CSS. This
-// cap only guards against a pathological multi-KB command/argument blob.
+// Generous per-line hard cap on the primary detail. We store the *whole*
+// structured step (no source-side human formatting); the web UI presents and
+// truncates for display via CSS. This cap only guards against a pathological
+// multi-KB command/argument blob.
 const ACTIVITY_MAX_CHARS = 2000;
 
-/** Append one progress line to the per-turn activity trace. The host
+/** Append one structured step to the per-turn activity trace. The host
  *  forwards the full ordered list to the web UI (and derives the single
  *  latest typing hint from the last line), so the user can see every tool
  *  call / progress step as it happens. Best-effort — callers should
  *  swallow errors.
+ *
+ *  The step is JSON-encoded into the line's `text`; because JSON escapes
+ *  newlines, the `<ts>\t<json>\n` file line format stays intact even when a
+ *  tool's `detail` (e.g. a multi-line bash command) contains newlines.
  *
  *  Written to an append-only file (not outbound.db) to avoid write
  *  contention between the poll-loop process and the nanoclaw MCP server
  *  subprocess — both share outbound.db with journal_mode=DELETE (exclusive
  *  locks). Also buffered in memory so the poll-loop can persist the whole
  *  trace to `turn_activity` at turn end. */
-// Last line appended to the activity trace this turn, for consecutive-dedup.
-// Providers re-emit the same hint across a tool's running/completed phases;
-// collapsing adjacent duplicates keeps the trace readable without dropping
-// genuinely distinct steps.
+// JSON of the last step appended this turn, for consecutive-dedup. Providers
+// re-emit the same step across a tool's running/completed phases; collapsing
+// adjacent duplicates keeps the trace readable without dropping genuinely
+// distinct steps.
 let _lastActivity = '';
 // In-memory buffer of this turn's activity lines, snapshotted into
 // turn_activity at turn end. Reset by clearActivity().
 let _activityBuffer: ActivityLine[] = [];
 
-export function appendActivity(text: string): void {
-  let line = (text ?? '').replace(/\r?\n/g, ' ').trim();
-  if (!line || line === _lastActivity) return;
-  if (line.length > ACTIVITY_MAX_CHARS) line = line.slice(0, ACTIVITY_MAX_CHARS - 1) + '…';
-  _lastActivity = line;
+export function appendActivity(step: ActivityStep): void {
+  if (!step || !step.kind) return;
+  // Cap only the primary detail; the rest of the step is tiny.
+  let s = step;
+  if (typeof s.detail === 'string' && s.detail.length > ACTIVITY_MAX_CHARS) {
+    s = { ...s, detail: s.detail.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
+  }
+  const text = JSON.stringify(s);
+  if (text === _lastActivity) return;
+  _lastActivity = text;
   const ts = String(Date.now());
-  _activityBuffer.push({ ts, text: line });
-  appendActivityFile(`${ts}\t${line}`);
+  _activityBuffer.push({ ts, text });
+  appendActivityFile(`${ts}\t${text}`);
 }
 
 /** The activity lines buffered so far this turn (in append order). */

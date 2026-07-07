@@ -116,11 +116,10 @@
 .chat-main .activity-trace .trace-row-toggle .chevron { flex: none; display: inline-block; font-size: 13px; line-height: 1.2; transition: transform 0.15s ease; opacity: 0.6; }
 .chat-main .activity-trace .trace-row-toggle .chevron.open { transform: rotate(90deg); }
 .chat-main .activity-trace .trace-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-main .activity-trace .trace-full { font-size: var(--font-xs); color: var(--fg); white-space: normal; overflow-wrap: anywhere; word-break: break-word; padding: 2px 4px 4px 17px; opacity: 0.95; }
-.chat-main .activity-trace .trace-full p { margin: 0; }
-.chat-main .activity-trace .trace-full code { font-family: var(--font-mono, monospace); font-size: 0.95em; background: rgba(127, 127, 127, 0.15); padding: 0 3px; border-radius: 3px; }
-.chat-main .activity-trace .trace-full pre { margin: 2px 0; padding: 6px 8px; background: rgba(127, 127, 127, 0.12); border-radius: var(--radius-md); overflow-x: auto; }
-.chat-main .activity-trace .trace-full pre code { background: none; padding: 0; }
+.chat-main .activity-trace .trace-prefix { flex: 1; min-width: 0; color: var(--fg); white-space: normal; overflow-wrap: anywhere; word-break: break-word; opacity: 0.95; }
+.chat-main .activity-trace .trace-prefix .trace-tool { font-family: var(--font-mono, monospace); font-size: var(--font-xs); padding: 0 4px; background: rgba(127, 127, 127, 0.15); border-radius: var(--radius-sm, 4px); }
+.chat-main .activity-trace .trace-code { margin: 2px 0 4px 17px; padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: var(--font-xs); color: var(--fg); background: rgba(127, 127, 127, 0.12); border-radius: var(--radius-md); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-height: 40vh; overflow: auto; }
+.chat-main .activity-trace .trace-code code { font-family: inherit; }
 @keyframes typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.35; } 30% { transform: translateY(-3px); opacity: 0.85; } }
 .chat-main .msg.markdown h1, .chat-main .msg.markdown h2, .chat-main .msg.markdown h3 { margin: 8px 0 4px; font-size: 1.05em; }
 .chat-main .msg.markdown a { color: inherit; text-decoration: underline; }

@@ -212,11 +212,17 @@ export function touchHeartbeat(): void {
  *
  * This file accumulates every progress line for the current turn so the
  * host can forward the *full* ordered trace to the web UI (and derive the
- * single latest typing hint as the last line's text — there is no separate
- * `.progress` file). Each line is `<epochMs>\t<text>`; the timestamp is the
- * emit time. File-based signaling (not outbound.db) avoids lock contention
- * with the MCP subprocess — both share outbound.db with journal_mode=DELETE
- * (exclusive locks). Cleared at each turn start.
+ * single latest typing hint as the last line — there is no separate
+ * `.progress` file). Each line is `<epochMs>\t<text>`, where `text` is a
+ * JSON-encoded ActivityStep (JSON escapes newlines, so the line format holds
+ * even for multi-line tool arguments). The timestamp is the emit time.
+ * File-based signaling (not outbound.db) avoids lock contention with the MCP
+ * subprocess — both share outbound.db with journal_mode=DELETE (exclusive
+ * locks). Cleared at each turn start.
+ *
+ * The newline-strip below is defensive only: callers pass single-line JSON,
+ * but stripping any stray newline keeps the one-line-per-step invariant that
+ * the host reader relies on.
  */
 export function appendActivityFile(line: string): void {
   try {

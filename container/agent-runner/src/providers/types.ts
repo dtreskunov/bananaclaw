@@ -179,11 +179,61 @@ export interface TurnUsage {
   max_output_tokens?: number;
 }
 
+/**
+ * One step of a turn's activity trace, in structured form. Providers emit
+ * these instead of pre-formatted human strings — the presentation ("Using
+ * `bash` tool", code block, truncation) is done in the UI layer, as late as
+ * possible. `detail` carries the primary raw argument (bash command, grep
+ * pattern, file path, url, …) with its newlines INTACT, so the UI can render
+ * a real multi-line code block.
+ */
+export interface ActivityStep {
+  kind: 'tool' | 'thinking' | 'text' | 'permission' | 'notification';
+  /** Raw tool name for kind === 'tool' (e.g. "bash", "Bash",
+   *  "mcp__server__name"). Not translated to a human phrase. */
+  tool?: string;
+  /** Primary raw argument, newlines preserved. Only set when meaningful. */
+  detail?: string;
+  /** Free-text message for kinds that carry one (notification). */
+  text?: string;
+}
+
+// Priority-ordered keys we consider the "primary argument" of a tool call.
+// Covers both provider naming conventions (opencode `filePath`, Claude
+// `file_path`) so neither provider needs a per-tool switch. `content` and
+// other bulky fields are deliberately absent — we never ship file bodies.
+const ACTIVITY_DETAIL_KEYS = [
+  'command', 'pattern', 'query', 'filePath', 'file_path',
+  'notebook_path', 'url', 'description', 'prompt', 'path',
+];
+
+/**
+ * Provider-agnostic: pick the first string-valued "primary argument" from a
+ * tool input, preserving internal newlines (only leading blank lines and
+ * trailing whitespace are trimmed). Returns undefined when nothing suitable
+ * is present (e.g. `todowrite`).
+ */
+export function pickActivityDetail(input: Record<string, unknown> | undefined): string | undefined {
+  if (!input) return undefined;
+  for (const k of ACTIVITY_DETAIL_KEYS) {
+    const v = input[k];
+    if (typeof v === 'string' && v.trim()) {
+      return v.replace(/^\n+/, '').replace(/\s+$/, '');
+    }
+  }
+  return undefined;
+}
+
+/** Stable key for consecutive-dedup / throttling of activity steps. */
+export function stepDedupKey(step: ActivityStep): string {
+  return `${step.kind}\u0000${step.tool ?? ''}\u0000${step.detail ?? ''}\u0000${step.text ?? ''}`;
+}
+
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   | { type: 'result'; text: string | null }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
-  | { type: 'progress'; message: string }
+  | { type: 'progress'; step: ActivityStep }
   /**
    * Per-turn usage data emitted just before the corresponding `result`
    * event. The poll-loop stashes this and writes it to `turn_usage` in

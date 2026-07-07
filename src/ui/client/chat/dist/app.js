@@ -19680,8 +19680,67 @@ function fmtActivityTs(ts) {
   if (!Number.isFinite(n3)) return "";
   return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
+function splitTraceText(text) {
+  const i5 = text.indexOf("`");
+  if (i5 < 0) return { prefix: text, code: null };
+  const prefix = text.slice(0, i5).trim();
+  const rest = text.slice(i5 + 1);
+  const j6 = rest.lastIndexOf("`");
+  const code = j6 >= 0 ? rest.slice(0, j6) : rest;
+  return { prefix, code };
+}
+function parseStep(text) {
+  const t4 = text.trim();
+  if (t4.startsWith("{")) {
+    try {
+      const o4 = JSON.parse(t4);
+      if (o4 && typeof o4 === "object" && typeof o4.kind === "string") return o4;
+    } catch {
+    }
+  }
+  return { legacy: text };
+}
+function cleanToolName(tool) {
+  if (tool.startsWith("mcp__")) {
+    const rest = tool.slice(5);
+    const [server, ...name] = rest.split("__");
+    return `${server}.${name.join(".") || rest}`;
+  }
+  return tool.toLowerCase();
+}
+function stepPhrase(s5) {
+  switch (s5.kind) {
+    case "thinking":
+      return "Thinking\u2026";
+    case "text":
+      return "Writing reply\u2026";
+    case "permission":
+      return "Requesting permission\u2026";
+    case "notification":
+      return s5.text || "Notification";
+    default:
+      return "";
+  }
+}
+function stepSummary(s5) {
+  if (s5.legacy != null) return s5.legacy;
+  if (s5.kind === "tool") {
+    const label = cleanToolName(s5.tool || "tool");
+    const d5 = s5.detail ? " " + s5.detail.replace(/\s+/g, " ").trim() : "";
+    return `Using ${label}${d5}`;
+  }
+  return stepPhrase(s5);
+}
 function ActivityTraceRow({ line, open, onToggle }) {
-  const html = open ? renderMarkdown(line.text) : null;
+  const step = parseStep(line.text);
+  const legacy = step.legacy != null ? splitTraceText(step.legacy) : null;
+  const isTool = step.kind === "tool";
+  const code = !open ? null : legacy ? legacy.code : isTool ? step.detail ?? null : null;
+  const prefix = legacy ? legacy.prefix ? /* @__PURE__ */ u4("span", { class: "trace-prefix", children: legacy.prefix }) : null : isTool ? /* @__PURE__ */ u4("span", { class: "trace-prefix", children: [
+    "Using ",
+    /* @__PURE__ */ u4("code", { class: "trace-tool", children: cleanToolName(step.tool || "") }),
+    " tool"
+  ] }) : /* @__PURE__ */ u4("span", { class: "trace-prefix", children: stepPhrase(step) });
   return /* @__PURE__ */ u4("li", { class: `trace-row${open ? " open" : ""}`, children: [
     /* @__PURE__ */ u4(
       "button",
@@ -19689,27 +19748,22 @@ function ActivityTraceRow({ line, open, onToggle }) {
         type: "button",
         class: "trace-row-toggle",
         "aria-expanded": open,
-        title: open ? "Collapse step" : line.text,
+        title: open ? "Collapse step" : stepSummary(step),
         onClick: onToggle,
         children: [
           /* @__PURE__ */ u4("span", { class: `chevron${open ? " open" : ""}`, children: "\u203A" }),
           line.ts ? /* @__PURE__ */ u4("span", { class: "ts", children: fmtActivityTs(line.ts) }) : null,
-          open ? null : /* @__PURE__ */ u4("span", { class: "trace-text", children: line.text })
+          open ? prefix : /* @__PURE__ */ u4("span", { class: "trace-text", children: stepSummary(step) })
         ]
       }
     ),
-    open ? html != null ? /* @__PURE__ */ u4("div", { class: "trace-full markdown", dangerouslySetInnerHTML: { __html: html } }) : /* @__PURE__ */ u4("div", { class: "trace-full", children: line.text }) : null
+    open && code != null ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: code }) }) : null
   ] });
 }
 function ActivityTraceList({ lines }) {
   const [sel, setSel] = h2(null);
-  const last = lines.length - 1;
-  const openIdx = sel === null ? last : sel;
-  const toggle = (i5) => setSel((cur) => {
-    const open = cur === null ? last : cur;
-    return open === i5 ? -1 : i5;
-  });
-  return /* @__PURE__ */ u4("ul", { class: "activity-trace", children: lines.map((line, i5) => /* @__PURE__ */ u4(ActivityTraceRow, { line, open: i5 === openIdx, onToggle: () => toggle(i5) }, i5)) });
+  const toggle = (i5) => setSel((cur) => cur === i5 ? null : i5);
+  return /* @__PURE__ */ u4("ul", { class: "activity-trace", children: lines.map((line, i5) => /* @__PURE__ */ u4(ActivityTraceRow, { line, open: i5 === sel, onToggle: () => toggle(i5) }, i5)) });
 }
 function ActivityTrace({ lines }) {
   const [expanded, setExpanded] = h2(false);
@@ -19982,7 +20036,7 @@ function MessageLog() {
         /* @__PURE__ */ u4("span", {}),
         /* @__PURE__ */ u4("span", {}),
         /* @__PURE__ */ u4("span", {}),
-        typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null,
+        !traceExpanded && typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null,
         activityLog.value.length ? /* @__PURE__ */ u4(
           "button",
           {

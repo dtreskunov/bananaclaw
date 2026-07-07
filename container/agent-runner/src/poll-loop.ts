@@ -1117,10 +1117,12 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       );
       try { setTurnEnded(); } catch { /* best-effort */ }
       break;
-    case 'progress':
-      log(`Progress: ${event.message}`);
-      try { appendActivity(event.message); } catch { /* best-effort */ }
+    case 'progress': {
+      const s = event.step;
+      log(`Progress: ${s.kind}${s.tool ? ` ${s.tool}` : ''}${s.text ? ` ${s.text}` : ''}`);
+      try { appendActivity(s); } catch { /* best-effort */ }
       break;
+    }
   }
 }
 

@@ -471,6 +471,44 @@ function parseActivityLine(line: string): ActivityLine {
   return { ts: '', text: line };
 }
 
+/** Strip the `mcp__<server>__<name>` prefix to a compact `server.name`, and
+ *  lower-case ordinary tool names, for the plain-text typing hint sent to
+ *  "dumb" channels. The web UI does its own richer rendering from the
+ *  structured step. */
+function cleanToolName(tool: string): string {
+  if (tool.startsWith('mcp__')) {
+    const rest = tool.slice(5);
+    const [server, ...name] = rest.split('__');
+    return `${server}.${name.join('.') || rest}`;
+  }
+  return tool.toLowerCase();
+}
+
+/** Derive a single-line typing hint from an activity line's `text`. New
+ *  lines carry a JSON-encoded ActivityStep; legacy lines carry a plain
+ *  human string, which is returned as-is. */
+function stepToHint(text: string): string | null {
+  const t = text.trim();
+  if (t.startsWith('{')) {
+    try {
+      const s = JSON.parse(t) as { kind?: string; tool?: string; text?: string };
+      if (s && typeof s.kind === 'string') {
+        switch (s.kind) {
+          case 'tool': return s.tool ? `Using ${cleanToolName(s.tool)}` : 'Working…';
+          case 'thinking': return 'Thinking…';
+          case 'text': return 'Writing reply…';
+          case 'permission': return 'Requesting permission…';
+          case 'notification': return s.text || 'Notification';
+          default: return null;
+        }
+      }
+    } catch {
+      // Fall through: legacy plain-text line.
+    }
+  }
+  return t || null;
+}
+
 /**
  * Read the container-side typing hint: the text of the LAST line in the
  * append-only `.activity` file. There is no separate `.progress` file — the
@@ -501,7 +539,7 @@ export function readSessionProgress(
     if (!content) return null;
     const lines = content.split('\n').filter((l) => l.length > 0);
     if (lines.length === 0) return null;
-    return parseActivityLine(lines[lines.length - 1]).text || null;
+    return stepToHint(parseActivityLine(lines[lines.length - 1]).text);
   } catch {
     return null;
   }

@@ -6,7 +6,8 @@ import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
-import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import type { ActivityStep, AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import { pickActivityDetail, stepDedupKey } from './types.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
@@ -240,53 +241,17 @@ const postToolUseHook: HookCallback = async () => {
 
 // ── Progress hints ────────────────────────────────────────────────────────
 // Translate the tool_use / thinking blocks the SDK streams in `assistant`
-// messages into one-line `progress` ProviderEvents. The poll-loop persists
-// these to the `.progress` (latest) and `.activity` (full trace) files, which
-// the host forwards to the web UI. Mirrors the OpenCode provider's
-// `formatProgressFromPart` so both providers surface the same style of trace.
+// messages into structured `progress` ProviderEvents. The poll-loop persists
+// these to the `.activity` file (and turn_activity), which the host forwards
+// to the web UI where the presentation happens. Mirrors the OpenCode
+// provider's `formatProgressFromPart` — no human-readable formatting here.
 
-function clipHint(s: unknown): string {
-  if (typeof s !== 'string') return '';
-  return s.replace(/\s+/g, ' ').trim();
-}
-
-function baseNameHint(p: unknown): string {
-  if (typeof p !== 'string' || !p) return '';
-  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
-  return i >= 0 ? p.slice(i + 1) : p;
-}
-
-function hostHint(u: unknown): string {
-  if (typeof u !== 'string' || !u) return '';
-  try {
-    return new URL(u).hostname || u.slice(0, 40);
-  } catch {
-    return u.slice(0, 40);
-  }
-}
-
-/** Format a Claude tool_use block into a short human-readable hint. */
-export function formatClaudeToolUse(name: string, input: Record<string, unknown>): string {
-  if (name.startsWith('mcp__')) {
-    const rest = name.slice(5);
-    const [server, ...tail] = rest.split('__');
-    return `Calling \`${server}.${tail.join('.') || rest}\``;
-  }
-  switch (name) {
-    case 'Bash': return `Running \`${clipHint(input.command)}\``;
-    case 'Read': return `Reading \`${baseNameHint(input.file_path)}\``;
-    case 'Write': return `Writing \`${baseNameHint(input.file_path)}\``;
-    case 'Edit':
-    case 'MultiEdit': return `Editing \`${baseNameHint(input.file_path)}\``;
-    case 'NotebookEdit': return `Editing \`${baseNameHint(input.notebook_path)}\``;
-    case 'Grep': return `Searching for \`${clipHint(input.pattern)}\``;
-    case 'Glob': return `Globbing \`${clipHint(input.pattern)}\``;
-    case 'WebFetch': return `Fetching \`${hostHint(input.url)}\``;
-    case 'WebSearch': return `Searching the web for \`${clipHint(input.query)}\``;
-    case 'Task': return `Subagent: \`${clipHint(input.description ?? input.prompt)}\``;
-    case 'TodoWrite': return 'Updating todos';
-    default: return `Running \`${name}\``;
-  }
+/** Map a Claude tool_use block to a structured activity step. Passes the raw
+ *  tool name through and picks the primary raw argument (newlines intact);
+ *  the UI renders "Using `<tool>` tool" and the argument as a code block. */
+export function formatClaudeToolUse(name: string, input: Record<string, unknown>): ActivityStep {
+  const detail = pickActivityDetail(input);
+  return { kind: 'tool', tool: name, ...(detail ? { detail } : {}) };
 }
 
 /**
@@ -559,9 +524,9 @@ export class ClaudeProvider implements AgentProvider {
       let prevOutput = 0;
       let prevCacheRead = 0;
       let prevCacheWrite = 0;
-      // Dedupe consecutive identical progress hints (e.g. repeated
-      // "Thinking…") so the activity trace stays readable.
-      let lastProgressMsg = '';
+      // Dedupe consecutive identical progress steps (e.g. repeated
+      // "thinking") so the activity trace stays readable.
+      let lastProgressKey = '';
       for await (const message of sdkResult) {
         if (aborted) return;
         messageCount++;
@@ -577,15 +542,18 @@ export class ClaudeProvider implements AgentProvider {
           if (Array.isArray(blocks)) {
             for (const b of blocks) {
               const blk = b as { type?: string; name?: string; input?: Record<string, unknown> };
-              let hint: string | null = null;
+              let step: ActivityStep | null = null;
               if (blk.type === 'tool_use' && blk.name) {
-                hint = formatClaudeToolUse(blk.name, blk.input ?? {});
+                step = formatClaudeToolUse(blk.name, blk.input ?? {});
               } else if (blk.type === 'thinking' || blk.type === 'redacted_thinking') {
-                hint = 'Thinking…';
+                step = { kind: 'thinking' };
               }
-              if (hint && hint !== lastProgressMsg) {
-                lastProgressMsg = hint;
-                yield { type: 'progress', message: hint };
+              if (step) {
+                const key = stepDedupKey(step);
+                if (key !== lastProgressKey) {
+                  lastProgressKey = key;
+                  yield { type: 'progress', step };
+                }
               }
             }
           }
@@ -672,7 +640,7 @@ export class ClaudeProvider implements AgentProvider {
           yield { type: 'result', text: `Context compacted${detail}.` };
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
           const tn = message as { summary?: string };
-          yield { type: 'progress', message: tn.summary || 'Task notification' };
+          yield { type: 'progress', step: { kind: 'notification', text: tn.summary || 'Task notification' } };
         }
       }
       log(`Query completed after ${messageCount} SDK messages`);

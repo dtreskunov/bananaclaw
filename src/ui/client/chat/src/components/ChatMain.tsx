@@ -37,53 +37,138 @@ function fmtActivityTs(ts: string): string {
   return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+/** Split an activity line into a plain-text prefix and an optional code
+ *  span. Legacy progress lines look like `Running \`<cmd>\`` — we show the
+ *  prefix ("Running") inline next to the timestamp and render the backtick
+ *  body as a multi-line code block. If OpenCode truncated the message the
+ *  closing backtick may be gone, so fall back to taking everything after the
+ *  opening backtick as code rather than relying on finding a matching pair. */
+function splitTraceText(text: string): { prefix: string; code: string | null } {
+  const i = text.indexOf('`');
+  if (i < 0) return { prefix: text, code: null };
+  const prefix = text.slice(0, i).trim();
+  const rest = text.slice(i + 1);
+  const j = rest.lastIndexOf('`');
+  const code = j >= 0 ? rest.slice(0, j) : rest;
+  return { prefix, code };
+}
+
+/** A parsed activity step. New lines carry a JSON-encoded ActivityStep;
+ *  lines persisted before the structured refactor carry a plain human string
+ *  and surface here as `{ legacy }`. */
+interface TraceStep {
+  kind?: 'tool' | 'thinking' | 'text' | 'permission' | 'notification';
+  tool?: string;
+  detail?: string;
+  text?: string;
+  legacy?: string;
+}
+
+function parseStep(text: string): TraceStep {
+  const t = text.trim();
+  if (t.startsWith('{')) {
+    try {
+      const o = JSON.parse(t) as TraceStep;
+      if (o && typeof o === 'object' && typeof o.kind === 'string') return o;
+    } catch {
+      // Not JSON — fall through to legacy.
+    }
+  }
+  return { legacy: text };
+}
+
+/** Turn a raw tool name into what we show the user: `mcp__server__name`
+ *  collapses to `server.name`; ordinary names lower-case. */
+function cleanToolName(tool: string): string {
+  if (tool.startsWith('mcp__')) {
+    const rest = tool.slice(5);
+    const [server, ...name] = rest.split('__');
+    return `${server}.${name.join('.') || rest}`;
+  }
+  return tool.toLowerCase();
+}
+
+/** Human phrase for a non-tool step kind. */
+function stepPhrase(s: TraceStep): string {
+  switch (s.kind) {
+    case 'thinking': return 'Thinking…';
+    case 'text': return 'Writing reply…';
+    case 'permission': return 'Requesting permission…';
+    case 'notification': return s.text || 'Notification';
+    default: return '';
+  }
+}
+
+/** One-line collapsed summary for a step (whitespace-collapsed so a
+ *  multi-line command still fits one truncated row). */
+function stepSummary(s: TraceStep): string {
+  if (s.legacy != null) return s.legacy;
+  if (s.kind === 'tool') {
+    const label = cleanToolName(s.tool || 'tool');
+    const d = s.detail ? ' ' + s.detail.replace(/\s+/g, ' ').trim() : '';
+    return `Using ${label}${d}`;
+  }
+  return stepPhrase(s);
+}
+
 /** One accordion row of an activity trace. Collapsed shows a single
- *  truncated line (timestamp + preview); expanded shows the full step text
- *  rendered as Markdown so long commands wrap and inline code keeps its
- *  monospace styling instead of being clipped with an ellipsis. */
+ *  truncated summary line (timestamp + summary). Expanded shows a rich
+ *  prefix inline next to the timestamp; a tool step additionally renders its
+ *  raw primary argument as a multi-line code block below, newlines intact. */
 function ActivityTraceRow({ line, open, onToggle }: { line: ActivityLine; open: boolean; onToggle: () => void }) {
-  const html = open ? renderMarkdown(line.text) : null;
+  const step = parseStep(line.text);
+  const legacy = step.legacy != null ? splitTraceText(step.legacy) : null;
+  const isTool = step.kind === 'tool';
+  // What renders in the expandable code block (only when open).
+  const code = !open
+    ? null
+    : legacy
+      ? legacy.code
+      : isTool
+        ? step.detail ?? null
+        : null;
+  const prefix = legacy
+    ? (legacy.prefix
+        ? <span class="trace-prefix">{legacy.prefix}</span>
+        : null)
+    : isTool
+      ? <span class="trace-prefix">Using <code class="trace-tool">{cleanToolName(step.tool || '')}</code> tool</span>
+      : <span class="trace-prefix">{stepPhrase(step)}</span>;
   return (
     <li class={`trace-row${open ? ' open' : ''}`}>
       <button
         type="button"
         class="trace-row-toggle"
         aria-expanded={open}
-        title={open ? 'Collapse step' : line.text}
+        title={open ? 'Collapse step' : stepSummary(step)}
         onClick={onToggle}
       >
         <span class={`chevron${open ? ' open' : ''}`}>{'\u203A'}</span>
         {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
-        {open ? null : <span class="trace-text">{line.text}</span>}
+        {open
+          ? prefix
+          : <span class="trace-text">{stepSummary(step)}</span>}
       </button>
-      {open
-        ? (html != null
-            ? <div class="trace-full markdown" dangerouslySetInnerHTML={{ __html: html }} />
-            : <div class="trace-full">{line.text}</div>)
+      {open && code != null
+        ? <pre class="trace-code"><code>{code}</code></pre>
         : null}
     </li>
   );
 }
 
-/** A timestamped step list where each entry is an accordion row. The latest
- *  entry is expanded by default; once the user focuses a specific entry it
- *  stays put as new steps stream in (so a live turn doesn't yank the reader
- *  off the row they're reading). Shared by the persisted trace and the live
- *  typing bubble. */
+/** A timestamped step list where each entry is an accordion row. Nothing is
+ *  expanded by default; expanding a row shows its prefix inline next to the
+ *  timestamp and, for a command step, the code body as a multi-line block.
+ *  Single-open accordion. Shared by the persisted trace and the live typing
+ *  bubble. */
 function ActivityTraceList({ lines }: { lines: ActivityLine[] }) {
-  // null → follow the latest entry; -1 → user collapsed the open row;
-  // >= 0 → user pinned a specific row.
+  // null → nothing expanded; >= 0 → that row is open (single-open accordion).
   const [sel, setSel] = useState<number | null>(null);
-  const last = lines.length - 1;
-  const openIdx = sel === null ? last : sel;
-  const toggle = (i: number) => setSel((cur) => {
-    const open = cur === null ? last : cur;
-    return open === i ? -1 : i;
-  });
+  const toggle = (i: number) => setSel((cur) => (cur === i ? null : i));
   return (
     <ul class="activity-trace">
       {lines.map((line, i) => (
-        <ActivityTraceRow key={i} line={line} open={i === openIdx} onToggle={() => toggle(i)} />
+        <ActivityTraceRow key={i} line={line} open={i === sel} onToggle={() => toggle(i)} />
       ))}
     </ul>
   );
@@ -416,7 +501,7 @@ function MessageLog() {
           <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
             <div class="typing-dots">
               <span></span><span></span><span></span>
-              {typingHint.value ? <span class="hint">{typingHint.value}</span> : null}
+              {!traceExpanded && typingHint.value ? <span class="hint">{typingHint.value}</span> : null}
               {activityLog.value.length
                 ? (
                   <button

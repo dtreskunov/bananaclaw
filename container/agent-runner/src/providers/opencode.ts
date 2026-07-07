@@ -4,7 +4,8 @@ import fs from 'fs';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
-import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import { pickActivityDetail, stepDedupKey } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { stripThinkTags } from '../formatter.js';
 
@@ -113,30 +114,6 @@ type OpenCodePart = {
  *  caller; module-level only because we keep the formatter pure-ish. */
 const TEXT_PROGRESS_STEP = 500;
 
-function basename(p: unknown): string {
-  if (typeof p !== 'string' || !p) return '';
-  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
-  return i >= 0 ? p.slice(i + 1) : p;
-}
-
-function shortHost(u: unknown): string {
-  if (typeof u !== 'string' || !u) return '';
-  try {
-    return new URL(u).hostname || u.slice(0, 40);
-  } catch {
-    return u.slice(0, 40);
-  }
-}
-
-// Flatten a value to a single line (collapse whitespace, trim). We keep the
-// WHOLE message — the activity trace stores it in full (bounded only by a
-// generous hard cap in appendActivity) and the web UI truncates for display
-// via CSS.
-function clipOneLine(s: unknown): string {
-  if (typeof s !== 'string') return '';
-  return s.replace(/\s+/g, ' ').trim();
-}
-
 /**
  * Map an OpenCode `finish` reason to a human-readable message used when the
  * turn ended with no user-visible text. Exported for tests.
@@ -159,76 +136,62 @@ export function describeFinishReason(finish: string): string {
 }
 
 /**
- * Map an OpenCode part-update to a short human hint, or null if the part
- * isn't progress-worthy. Pure function — exported for unit tests.
+ * Map an OpenCode part-update to a structured activity step, or null if the
+ * part isn't progress-worthy. Pure function — exported for unit tests. No
+ * human-readable formatting happens here: tool name + raw primary argument
+ * are passed through and the UI does the presentation.
  *
  * `textLen` is the running length of the assistant's text part (so we can
- * emit "Writing reply…" only when the streamed text crosses a 500-char
- * step). `seenReasoning` is the set of reasoning-part ids already
- * announced, so we yield "Thinking…" at most once per reasoning part.
+ * emit a `text` step only when the streamed text crosses a 500-char step).
+ * `seenReasoning` is the set of reasoning-part ids already announced, so we
+ * yield a `thinking` step at most once per reasoning part.
  */
 export function formatProgressFromPart(
   part: OpenCodePart | undefined,
   textLen: number,
   seenReasoning: Set<string>,
-): string | null {
+): ActivityStep | null {
   if (!part || !part.type) return null;
-  const inp = part.state?.input ?? {};
+  const inp = (part.state?.input ?? {}) as Record<string, unknown>;
   switch (part.type) {
     case 'tool': {
       const tool = part.tool || '';
       if (!tool) return null;
-      // MCP tools come through as `<server>_<name>` or `<server>__<name>`;
-      // we want a readable "server.name" rendering.
-      if (tool.startsWith('mcp__')) {
-        const rest = tool.slice(5);
-        const [server, ...name] = rest.split('__');
-        return `Calling \`${server}.${name.join('.') || rest}\``;
-      }
-      switch (tool) {
-        case 'read': return inp.filePath ? `Reading \`${basename(inp.filePath)}\`` : null;
-        case 'write': return inp.filePath ? `Writing \`${basename(inp.filePath)}\`` : null;
-        case 'edit': return inp.filePath ? `Editing \`${basename(inp.filePath)}\`` : null;
-        case 'bash': return inp.command ? `Running \`${clipOneLine(inp.command)}\`` : null;
-        case 'grep': return inp.pattern ? `Searching for \`${clipOneLine(inp.pattern)}\`` : null;
-        case 'glob': return inp.pattern ? `Globbing \`${clipOneLine(inp.pattern)}\`` : null;
-        case 'webfetch': return inp.url ? `Fetching \`${shortHost(inp.url)}\`` : null;
-        case 'task': return (inp.description ?? inp.prompt) ? `Subagent: \`${clipOneLine(inp.description ?? inp.prompt)}\`` : null;
-        case 'todowrite': return 'Updating todos';
-        default: return `Running \`${tool}\``;
-      }
+      const detail = pickActivityDetail(inp);
+      return { kind: 'tool', tool, ...(detail ? { detail } : {}) };
     }
     case 'reasoning': {
       const id = part.id || '';
       if (!id || seenReasoning.has(id)) return null;
       seenReasoning.add(id);
-      return 'Thinking…';
+      return { kind: 'thinking' };
     }
     case 'text': {
       if (!part.text || textLen <= 0) return null;
       // Yield once per 500-char step so we don't thrash on every delta.
       // The caller computes textLen *after* updating its running map.
       if (textLen < TEXT_PROGRESS_STEP) return null;
-      return 'Writing reply…';
+      return { kind: 'text' };
     }
     default:
       return null;
   }
 }
 
-/** Per-turn throttle: dedupe by message and rate-limit to ~1 yield/sec. */
+/** Per-turn throttle: dedupe by step content and rate-limit to ~1 yield/sec. */
 export class ProgressThrottle {
-  private lastMsg = '';
+  private lastKey = '';
   private lastAt = 0;
   constructor(private readonly minIntervalMs = 1000, private readonly now: () => number = Date.now) {}
 
-  next(msg: string | null): string | null {
-    if (!msg) return null;
+  next(step: ActivityStep | null): ActivityStep | null {
+    if (!step) return null;
+    const key = stepDedupKey(step);
     const t = this.now();
-    if (msg === this.lastMsg && t - this.lastAt < this.minIntervalMs) return null;
-    this.lastMsg = msg;
+    if (key === this.lastKey && t - this.lastAt < this.minIntervalMs) return null;
+    this.lastKey = key;
     this.lastAt = t;
-    return msg;
+    return step;
   }
 }
 
@@ -680,15 +643,15 @@ export class OpenCodeProvider implements AgentProvider {
                 const textLen = part?.type === 'text' && part?.messageID
                   ? (partTextByMessageId.get(part.messageID)?.length ?? 0)
                   : 0;
-                const hint = progress.next(formatProgressFromPart(part, textLen, seenReasoning));
-                if (hint) yield { type: 'progress', message: hint };
+                const step = progress.next(formatProgressFromPart(part, textLen, seenReasoning));
+                if (step) yield { type: 'progress', step };
                 break;
               }
               case 'permission.updated': {
                 const perm = ev.properties as { id?: string; sessionID?: string };
                 if (perm.sessionID === sessionId && perm.id) {
-                  const hint = progress.next('Requesting permission…');
-                  if (hint) yield { type: 'progress', message: hint };
+                  const step = progress.next({ kind: 'permission' });
+                  if (step) yield { type: 'progress', step };
                   try {
                     await client.postSessionIdPermissionsPermissionId({
                       path: { id: sessionId, permissionID: perm.id },
