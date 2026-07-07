@@ -2,14 +2,14 @@
 // preview body.
 import './FilesPane.css';
 import type { ComponentChildren, JSX, VNode } from 'preact';
-import { useRef, useEffect } from 'preact/hooks';
+import { useRef, useEffect, useState } from 'preact/hooks';
 import {
   treePath, treeEntries, treeError, filePath, isAdmin,
   previewBlock, uploadItems, threadId, pinnedContext,
 } from '../state';
 import { navTree, navFile, closePreview, togglePinnedFile, loadTree, selectFile } from '../actions';
 import {
-  uploadFiles, clearUploadStrip, resolveConflict, notifyAgent,
+  uploadFiles, clearUploadStrip, resolveConflict, notifyAgent, saveFile,
 } from '../uploads';
 import { fmtBytes, renderMarkdown, parentPath } from '../utils';
 import { Pane } from './Pane';
@@ -183,22 +183,80 @@ function renderMetaPanel(rows: [string, string][]): VNode {
 
 function Preview() {
   const ref = useRef<HTMLDivElement | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
   const p = previewBlock.value;
-  if (!p) return <div class="preview-body" id="preview" ref={ref}></div>;
   const fp = filePath.value;
+  // Leave edit mode whenever the previewed file changes.
+  useEffect(() => {
+    setEditing(false);
+    setSaving(false);
+  }, [fp]);
+  if (!p) return <div class="preview-body" id="preview" ref={ref}></div>;
   const pinned = !!fp && pinnedContext.value.includes(fp);
   const clippyTitle = pinned ? 'Detach from next message' : 'Attach to next message';
+  const editable = isAdmin.value && (p.kind === 'text' || p.kind === 'markdown');
+
+  const beginEdit = (): void => {
+    setDraft(p.text || '');
+    setEditing(true);
+  };
+  const cancelEdit = (): void => {
+    setEditing(false);
+  };
+  const commitEdit = async (): Promise<void> => {
+    if (!fp) return;
+    setSaving(true);
+    const res = await saveFile(fp, draft);
+    setSaving(false);
+    if (!res) return;
+    const cur = previewBlock.peek();
+    if (cur && cur.path === fp) {
+      previewBlock.value = { ...cur, text: draft, size: res.size ?? cur.size, mtime: res.mtime ?? cur.mtime };
+    }
+    setEditing(false);
+  };
+
+  const editActions = editing ? (
+    <>
+      <button
+        type="button"
+        class="text-btn save-btn"
+        onClick={() => { commitEdit().catch(console.error); }}
+        disabled={saving}
+        title="Save"
+      >{saving ? 'Saving\u2026' : 'Save'}</button>
+      <button
+        type="button"
+        class="text-btn cancel-btn"
+        onClick={cancelEdit}
+        disabled={saving}
+        title="Discard changes"
+      >Cancel</button>
+    </>
+  ) : editable ? (
+    <button
+      type="button"
+      class="text-btn edit-btn"
+      onClick={beginEdit}
+      title="Edit"
+      aria-label="Edit"
+    >{'\u270E'}</button>
+  ) : null;
+
   const toolbar = (
     <div class="preview-toolbar">
       <button
         class={'text-btn clippy' + (pinned ? ' active' : '')}
         onClick={() => togglePinnedFile(fp)}
-        disabled={!fp}
+        disabled={!fp || editing}
         title={clippyTitle}
         aria-pressed={pinned}
       >{'\uD83D\uDCCE'}</button>
       <span class="preview-spacer"></span>
       <span class="preview-actions">
+        {editActions}
         <button
           type="button"
           class="text-btn refresh-btn"
@@ -206,7 +264,7 @@ function Preview() {
             if (!p.name || !fp) return;
             selectFile({ path: fp, name: p.name }).catch(console.error);
           }}
-          disabled={!fp || !p.name}
+          disabled={!fp || !p.name || editing}
           title="Refresh"
           aria-label="Refresh"
         >{'\u21BB'}</button>
@@ -221,6 +279,7 @@ function Preview() {
       </span>
     </div>
   );
+
 
   const fileRows: [string, string][] = [];
   if (p.size != null) fileRows.push(['Size', fmtBytes(p.size)]);
@@ -240,7 +299,20 @@ function Preview() {
     : null;
   const lyrics = p.lyrics ? <LyricsPanel text={p.lyrics} /> : null;
   let body: ComponentChildren = null;
-  if (p.kind === 'image') body = <img alt={p.name} src={p.url} />;
+  if (editing) {
+    body = (
+      <textarea
+        class="file-editor"
+        value={draft}
+        spellcheck={false}
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        disabled={saving}
+        onInput={(ev: JSX.TargetedEvent<HTMLTextAreaElement>) => setDraft(ev.currentTarget.value)}
+      />
+    );
+  } else if (p.kind === 'image') body = <img alt={p.name} src={p.url} />;
   else if (p.kind === 'pdf') body = <iframe src={p.url} style="width:100%;height:90vh;border:0" />;
   else if (p.kind === 'markdown') {
     const md = renderMarkdown(p.text);

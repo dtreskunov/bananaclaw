@@ -2583,6 +2583,35 @@ body.is-admin .files-pane.collapsed .admin-only {
   cursor: default;
   background: transparent;
 }
+.files-pane .preview-toolbar .save-btn {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.files-pane .preview-toolbar .save-btn:hover:not(:disabled) {
+  color: white;
+  background: var(--accent);
+}
+.files-pane .file-editor {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60vh;
+  resize: vertical;
+  background: var(--wash-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: inherit;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+.files-pane .file-editor:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .files-pane .preview-meta {
   margin: 0 0 8px 0;
   padding: 6px 8px;

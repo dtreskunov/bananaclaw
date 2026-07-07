@@ -20561,6 +20561,15 @@ function dropPinned(paths) {
   if (paths.length === 0) return;
   pinnedContext.value = pinnedContext.value.filter((p5) => !paths.some((d5) => p5 === d5 || p5.startsWith(d5 + "/")));
 }
+async function saveFile(relPath, content) {
+  if (!groupId.value || !isAdmin.value) return null;
+  const r4 = await postJson(`api/groups/${groupId.value}/write`, { path: relPath, content });
+  if (!r4.ok || !r4.data.ok) {
+    showToast("save failed: " + (r4.data.error || r4.status), "err");
+    return null;
+  }
+  return { size: r4.data.size, mtime: r4.data.mtime };
+}
 async function mkdirPrompt() {
   if (!groupId.value || !isAdmin.value) return;
   const name = await requestInput({ title: "New folder", placeholder: "folder name", okLabel: "Create" });
@@ -21277,18 +21286,81 @@ function renderMetaPanel(rows) {
 }
 function Preview() {
   const ref = A2(null);
+  const [editing, setEditing] = h2(false);
+  const [draft, setDraft] = h2("");
+  const [saving, setSaving] = h2(false);
   const p5 = previewBlock.value;
-  if (!p5) return /* @__PURE__ */ u4("div", { class: "preview-body", id: "preview", ref });
   const fp = filePath.value;
+  y2(() => {
+    setEditing(false);
+    setSaving(false);
+  }, [fp]);
+  if (!p5) return /* @__PURE__ */ u4("div", { class: "preview-body", id: "preview", ref });
   const pinned = !!fp && pinnedContext.value.includes(fp);
   const clippyTitle = pinned ? "Detach from next message" : "Attach to next message";
+  const editable = isAdmin.value && (p5.kind === "text" || p5.kind === "markdown");
+  const beginEdit = () => {
+    setDraft(p5.text || "");
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+  };
+  const commitEdit = async () => {
+    if (!fp) return;
+    setSaving(true);
+    const res = await saveFile(fp, draft);
+    setSaving(false);
+    if (!res) return;
+    const cur = previewBlock.peek();
+    if (cur && cur.path === fp) {
+      previewBlock.value = { ...cur, text: draft, size: res.size ?? cur.size, mtime: res.mtime ?? cur.mtime };
+    }
+    setEditing(false);
+  };
+  const editActions = editing ? /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "text-btn save-btn",
+        onClick: () => {
+          commitEdit().catch(console.error);
+        },
+        disabled: saving,
+        title: "Save",
+        children: saving ? "Saving\u2026" : "Save"
+      }
+    ),
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "text-btn cancel-btn",
+        onClick: cancelEdit,
+        disabled: saving,
+        title: "Discard changes",
+        children: "Cancel"
+      }
+    )
+  ] }) : editable ? /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "text-btn edit-btn",
+      onClick: beginEdit,
+      title: "Edit",
+      "aria-label": "Edit",
+      children: "\u270E"
+    }
+  ) : null;
   const toolbar = /* @__PURE__ */ u4("div", { class: "preview-toolbar", children: [
     /* @__PURE__ */ u4(
       "button",
       {
         class: "text-btn clippy" + (pinned ? " active" : ""),
         onClick: () => togglePinnedFile(fp),
-        disabled: !fp,
+        disabled: !fp || editing,
         title: clippyTitle,
         "aria-pressed": pinned,
         children: "\u{1F4CE}"
@@ -21296,6 +21368,7 @@ function Preview() {
     ),
     /* @__PURE__ */ u4("span", { class: "preview-spacer" }),
     /* @__PURE__ */ u4("span", { class: "preview-actions", children: [
+      editActions,
       /* @__PURE__ */ u4(
         "button",
         {
@@ -21305,7 +21378,7 @@ function Preview() {
             if (!p5.name || !fp) return;
             selectFile({ path: fp, name: p5.name }).catch(console.error);
           },
-          disabled: !fp || !p5.name,
+          disabled: !fp || !p5.name || editing,
           title: "Refresh",
           "aria-label": "Refresh",
           children: "\u21BB"
@@ -21338,7 +21411,21 @@ function Preview() {
   const player = isAudio || isVideo ? /* @__PURE__ */ u4(MediaPlayer, { kind: p5.kind, url: p5.url || "", name: p5.name || "", floating: isAudio }) : null;
   const lyrics = p5.lyrics ? /* @__PURE__ */ u4(LyricsPanel, { text: p5.lyrics }) : null;
   let body = null;
-  if (p5.kind === "image") body = /* @__PURE__ */ u4("img", { alt: p5.name, src: p5.url });
+  if (editing) {
+    body = /* @__PURE__ */ u4(
+      "textarea",
+      {
+        class: "file-editor",
+        value: draft,
+        spellcheck: false,
+        autocomplete: "off",
+        autocapitalize: "off",
+        autocorrect: "off",
+        disabled: saving,
+        onInput: (ev) => setDraft(ev.currentTarget.value)
+      }
+    );
+  } else if (p5.kind === "image") body = /* @__PURE__ */ u4("img", { alt: p5.name, src: p5.url });
   else if (p5.kind === "pdf") body = /* @__PURE__ */ u4("iframe", { src: p5.url, style: "width:100%;height:90vh;border:0" });
   else if (p5.kind === "markdown") {
     const md = renderMarkdown(p5.text);

@@ -22,6 +22,7 @@ import { canWrite, resolveSafe } from './classify.js';
 const UPLOAD_MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB per file
 const UPLOAD_MAX_FILES = 50;
 const UPLOAD_MAX_FILENAME = 255;
+const WRITE_MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB per in-place edit
 
 type Mode = 'skip' | 'overwrite' | 'rename';
 
@@ -36,10 +37,10 @@ interface UploadResult {
 /** Match `/api/groups/<groupId>/<op>` for write ops. Returns null if not matched. */
 export function matchWritePath(
   pathname: string,
-): { kind: 'upload' | 'mkdir' | 'touch' | 'rename' | 'delete'; groupId: string } | null {
-  const m = pathname.match(/^\/api\/groups\/([^/]+)\/(upload|mkdir|touch|rename|delete)$/);
+): { kind: 'upload' | 'mkdir' | 'touch' | 'rename' | 'delete' | 'write'; groupId: string } | null {
+  const m = pathname.match(/^\/api\/groups\/([^/]+)\/(upload|mkdir|touch|rename|delete|write)$/);
   if (!m) return null;
-  return { kind: m[2] as 'upload' | 'mkdir' | 'touch' | 'rename' | 'delete', groupId: m[1] };
+  return { kind: m[2] as 'upload' | 'mkdir' | 'touch' | 'rename' | 'delete' | 'write', groupId: m[1] };
 }
 
 /** Dispatch a write op. Returns true if handled. */
@@ -72,6 +73,7 @@ export async function handleWriteRequest(
     if (m.kind === 'upload') return handleUpload(req, res, url, userId, group.id, groupDir);
     if (m.kind === 'mkdir') return handleMkdir(req, res, userId, group.id, groupDir);
     if (m.kind === 'touch') return handleTouch(req, res, userId, group.id, groupDir);
+    if (m.kind === 'write') return handleFileWrite(req, res, userId, group.id, groupDir);
     if (m.kind === 'rename') return handleRename(req, res, userId, group.id, groupDir);
     if (m.kind === 'delete') return handleDelete(req, res, userId, group.id, groupDir);
   } catch (err) {
@@ -324,6 +326,68 @@ async function handleTouch(
   }
   recordAccess({ userId, groupId, path: relPath, action: 'touch', req });
   writeJson(res, 200, { ok: true, path: relPath });
+  return true;
+}
+
+// ── write (overwrite an existing file's content) ─────────────────────
+
+async function handleFileWrite(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  userId: string,
+  groupId: string,
+  groupDir: string,
+): Promise<boolean> {
+  const body = await readJsonBody(req, WRITE_MAX_BODY_SIZE);
+  const relPath = stringField(body, 'path');
+  if (!relPath) {
+    writeJson(res, 400, { error: 'missing_path' });
+    return true;
+  }
+  const content = (body as Record<string, unknown>)?.content;
+  if (typeof content !== 'string') {
+    writeJson(res, 400, { error: 'missing_content' });
+    return true;
+  }
+  const check = canWrite(relPath, { isAdmin: true });
+  if (!check.ok) {
+    writeJson(res, 403, { error: 'forbidden', reason: check.reason });
+    return true;
+  }
+  const abs = resolveSafe(groupDir, relPath);
+  if (!abs) {
+    writeJson(res, 400, { error: 'invalid_path' });
+    return true;
+  }
+  let st: fs.Stats;
+  try {
+    st = await fs.promises.stat(abs);
+  } catch {
+    writeJson(res, 404, { error: 'not_found' });
+    return true;
+  }
+  if (!st.isFile()) {
+    writeJson(res, 400, { error: 'not_a_file' });
+    return true;
+  }
+  const buf = Buffer.from(content, 'utf8');
+  if (buf.length > WRITE_MAX_BODY_SIZE) {
+    writeJson(res, 413, { error: 'too_large' });
+    return true;
+  }
+  // Write via a sibling tmp file + atomic rename so a partial write never
+  // clobbers the original on error.
+  const tmpAbs = `${abs}.write-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    await fs.promises.writeFile(tmpAbs, buf, { flag: 'wx' });
+    await fs.promises.rename(tmpAbs, abs);
+  } catch (err) {
+    await fs.promises.unlink(tmpAbs).catch(() => undefined);
+    throw err;
+  }
+  const after = await fs.promises.stat(abs);
+  recordAccess({ userId, groupId, path: relPath, action: 'write', req });
+  writeJson(res, 200, { ok: true, path: relPath, size: after.size, mtime: after.mtime.toISOString() });
   return true;
 }
 

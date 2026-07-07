@@ -91,6 +91,23 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 .files-pane .preview-toolbar .clippy { font-size: var(--font-base); padding: 2px 6px; }
 .files-pane .preview-toolbar .clippy.active { color: inherit; background: var(--accent); }
 .files-pane .preview-toolbar button:disabled { opacity: 0.4; cursor: default; background: transparent; }
+.files-pane .preview-toolbar .save-btn { color: var(--accent); border-color: var(--accent); }
+.files-pane .preview-toolbar .save-btn:hover:not(:disabled) { color: white; background: var(--accent); }
+
+/* In-place text editor for the file preview. */
+.files-pane .file-editor {
+  display: block; width: 100%; box-sizing: border-box;
+  min-height: 60vh; resize: vertical;
+  background: var(--wash-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: inherit;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--font-sm); line-height: 1.5;
+  white-space: pre; tab-size: 2;
+}
+.files-pane .file-editor:focus { outline: none; border-color: var(--accent); }
 
 .files-pane .preview-meta {
   margin: 0 0 8px 0;

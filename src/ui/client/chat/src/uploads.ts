@@ -22,6 +22,26 @@ function dropPinned(paths: string[]): void {
   pinnedContext.value = pinnedContext.value.filter((p) => !paths.some((d) => p === d || p.startsWith(d + '/')));
 }
 
+interface WriteFileResponse extends ApiError {
+  ok?: boolean;
+  size?: number;
+  mtime?: string;
+}
+
+/**
+ * Overwrite an existing file's text content. Returns the new size/mtime on
+ * success, or null on failure (a toast is shown).
+ */
+export async function saveFile(relPath: string, content: string): Promise<{ size?: number; mtime?: string } | null> {
+  if (!groupId.value || !isAdmin.value) return null;
+  const r = await postJson<WriteFileResponse>(`api/groups/${groupId.value}/write`, { path: relPath, content });
+  if (!r.ok || !r.data.ok) {
+    showToast('save failed: ' + (r.data.error || r.status), 'err');
+    return null;
+  }
+  return { size: r.data.size, mtime: r.data.mtime };
+}
+
 export async function mkdirPrompt(): Promise<void> {
   if (!groupId.value || !isAdmin.value) return;
   const name = await requestInput({ title: 'New folder', placeholder: 'folder name', okLabel: 'Create' });
