@@ -229,6 +229,77 @@ export function stepDedupKey(step: ActivityStep): string {
   return `${step.kind}\u0000${step.tool ?? ''}\u0000${step.detail ?? ''}\u0000${step.text ?? ''}`;
 }
 
+/**
+ * Per-turn activity coalescer, shared by every provider.
+ *
+ * Two jobs:
+ *  1. Collapse the "streaming tool call" duplicate. Both the Claude Agent SDK
+ *     and OpenCode surface a tool call first in an early, argument-less form
+ *     (`{kind:'tool', tool:'bash'}`) and then in its complete form
+ *     (`{kind:'tool', tool:'bash', detail:'…'}`). Because `detail` is part of
+ *     the dedup key the two look distinct, so before this coalescer both got
+ *     appended as separate trace lines ("Using bash" then "Using bash <cmd>").
+ *     We buffer a detail-less tool step and, when the very next step is the
+ *     same tool carrying a detail, drop the buffered one and emit only the
+ *     rich version — one line, not two.
+ *  2. Suppress consecutive identical steps (same key) within `minIntervalMs`.
+ *     This folds OpenCode's repeated `message.part.updated` for a single
+ *     completed tool into one line, while still letting long text/thinking
+ *     emit a periodic "still working" tick.
+ *
+ * A buffered detail-less tool step is flushed the moment a *different* step
+ * arrives (it was a genuine argument-free tool call, e.g. `todowrite`), or by
+ * `flush()` at turn end. `push` returns the 0–2 steps to emit now.
+ */
+export class ProgressThrottle {
+  private pending: ActivityStep | null = null;
+  private lastKey = '';
+  private lastAt = 0;
+  constructor(private readonly minIntervalMs = 1000, private readonly now: () => number = Date.now) {}
+
+  private emit(step: ActivityStep, out: ActivityStep[]): void {
+    const key = stepDedupKey(step);
+    const t = this.now();
+    if (key === this.lastKey && t - this.lastAt < this.minIntervalMs) return;
+    this.lastKey = key;
+    this.lastAt = t;
+    out.push(step);
+  }
+
+  push(step: ActivityStep | null): ActivityStep[] {
+    if (!step) return [];
+    const out: ActivityStep[] = [];
+    if (step.kind === 'tool' && !step.detail) {
+      // Detail-less tool: buffer it. A later same-tool step with a detail will
+      // supersede it; any other step flushes it as a real bare tool call.
+      if (this.pending && this.pending.tool !== step.tool) this.emit(this.pending, out);
+      this.pending = step;
+      return out;
+    }
+    if (this.pending) {
+      if (step.kind === 'tool' && step.tool === this.pending.tool) {
+        // Rich version of the buffered tool call — drop the poorer one.
+        this.pending = null;
+      } else {
+        this.emit(this.pending, out);
+        this.pending = null;
+      }
+    }
+    this.emit(step, out);
+    return out;
+  }
+
+  /** Emit any still-buffered detail-less tool step. Call once per turn end. */
+  flush(): ActivityStep[] {
+    const out: ActivityStep[] = [];
+    if (this.pending) {
+      this.emit(this.pending, out);
+      this.pending = null;
+    }
+    return out;
+  }
+}
+
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   | { type: 'result'; text: string | null }

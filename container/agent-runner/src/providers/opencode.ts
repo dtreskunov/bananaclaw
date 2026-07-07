@@ -5,7 +5,7 @@ import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
 import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
-import { pickActivityDetail, stepDedupKey } from './types.js';
+import { pickActivityDetail, ProgressThrottle } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { stripThinkTags } from '../formatter.js';
 
@@ -175,23 +175,6 @@ export function formatProgressFromPart(
     }
     default:
       return null;
-  }
-}
-
-/** Per-turn throttle: dedupe by step content and rate-limit to ~1 yield/sec. */
-export class ProgressThrottle {
-  private lastKey = '';
-  private lastAt = 0;
-  constructor(private readonly minIntervalMs = 1000, private readonly now: () => number = Date.now) {}
-
-  next(step: ActivityStep | null): ActivityStep | null {
-    if (!step) return null;
-    const key = stepDedupKey(step);
-    const t = this.now();
-    if (key === this.lastKey && t - this.lastAt < this.minIntervalMs) return null;
-    this.lastKey = key;
-    this.lastAt = t;
-    return step;
   }
 }
 
@@ -643,15 +626,17 @@ export class OpenCodeProvider implements AgentProvider {
                 const textLen = part?.type === 'text' && part?.messageID
                   ? (partTextByMessageId.get(part.messageID)?.length ?? 0)
                   : 0;
-                const step = progress.next(formatProgressFromPart(part, textLen, seenReasoning));
-                if (step) yield { type: 'progress', step };
+                for (const step of progress.push(formatProgressFromPart(part, textLen, seenReasoning))) {
+                  yield { type: 'progress', step };
+                }
                 break;
               }
               case 'permission.updated': {
                 const perm = ev.properties as { id?: string; sessionID?: string };
                 if (perm.sessionID === sessionId && perm.id) {
-                  const step = progress.next({ kind: 'permission' });
-                  if (step) yield { type: 'progress', step };
+                  for (const step of progress.push({ kind: 'permission' })) {
+                    yield { type: 'progress', step };
+                  }
                   try {
                     await client.postSessionIdPermissionsPermissionId({
                       path: { id: sessionId, permissionID: perm.id },
@@ -765,6 +750,7 @@ export class OpenCodeProvider implements AgentProvider {
           const reasonMsg = describeFinishReason(lastFinish);
           yield { type: 'error', message: reasonMsg, retryable: false, classification: `opencode:finish:${lastFinish}` };
         }
+        for (const step of progress.flush()) yield { type: 'progress', step };
         yield { type: 'result', text: resultText || null };
       }
     }

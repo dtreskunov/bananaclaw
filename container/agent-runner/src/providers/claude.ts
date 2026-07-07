@@ -7,7 +7,7 @@ import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
 import type { ActivityStep, AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
-import { pickActivityDetail, stepDedupKey } from './types.js';
+import { pickActivityDetail, ProgressThrottle } from './types.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
@@ -524,9 +524,10 @@ export class ClaudeProvider implements AgentProvider {
       let prevOutput = 0;
       let prevCacheRead = 0;
       let prevCacheWrite = 0;
-      // Dedupe consecutive identical progress steps (e.g. repeated
-      // "thinking") so the activity trace stays readable.
-      let lastProgressKey = '';
+      // Coalesce consecutive activity steps (dropping the argument-less
+      // streaming form of a tool call and repeated identical steps) so the
+      // trace stays readable. See ProgressThrottle.
+      const progress = new ProgressThrottle();
       for await (const message of sdkResult) {
         if (aborted) return;
         messageCount++;
@@ -549,15 +550,14 @@ export class ClaudeProvider implements AgentProvider {
                 step = { kind: 'thinking' };
               }
               if (step) {
-                const key = stepDedupKey(step);
-                if (key !== lastProgressKey) {
-                  lastProgressKey = key;
-                  yield { type: 'progress', step };
+                for (const s of progress.push(step)) {
+                  yield { type: 'progress', step: s };
                 }
               }
             }
           }
         } else if (message.type === 'result') {
+          for (const s of progress.flush()) yield { type: 'progress', step: s };
           const text = 'result' in message ? (message as { result?: string }).result ?? null : null;
           const m = message as { is_error?: boolean; subtype?: string };
 

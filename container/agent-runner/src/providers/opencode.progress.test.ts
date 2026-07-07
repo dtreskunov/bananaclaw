@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 
-import { formatProgressFromPart, ProgressThrottle } from './opencode.js';
+import { formatProgressFromPart } from './opencode.js';
+import { ProgressThrottle } from './types.js';
 import type { ActivityStep } from './types.js';
 
 const tool = (t: string, detail?: string): ActivityStep =>
@@ -78,29 +79,66 @@ describe('ProgressThrottle', () => {
   it('passes through the first step immediately', () => {
     let now = 1000;
     const t = new ProgressThrottle(1000, () => now);
-    expect(t.next(edit)).toEqual(edit);
+    expect(t.push(edit)).toEqual([edit]);
   });
 
   it('suppresses identical steps within the interval', () => {
     let now = 1000;
     const t = new ProgressThrottle(1000, () => now);
-    expect(t.next(edit)).toEqual(edit);
+    expect(t.push(edit)).toEqual([edit]);
     now = 1500;
-    expect(t.next({ ...edit })).toBeNull();
+    expect(t.push({ ...edit })).toEqual([]);
     now = 2001;
-    expect(t.next({ ...edit })).toEqual(edit);
+    expect(t.push({ ...edit })).toEqual([edit]);
   });
 
   it('passes a different step through immediately', () => {
     let now = 1000;
     const t = new ProgressThrottle(1000, () => now);
-    expect(t.next(edit)).toEqual(edit);
+    expect(t.push(edit)).toEqual([edit]);
     now = 1100;
-    expect(t.next(read)).toEqual(read);
+    expect(t.push(read)).toEqual([read]);
   });
 
   it('ignores null inputs', () => {
     const t = new ProgressThrottle(1000, () => 1000);
-    expect(t.next(null)).toBeNull();
+    expect(t.push(null)).toEqual([]);
+  });
+
+  it('collapses the argument-less streaming form of a tool call', () => {
+    // The detail-less first form is buffered, then superseded by the rich
+    // form — only one line is emitted, and it carries the detail.
+    const t = new ProgressThrottle(1000, () => 1000);
+    expect(t.push(tool('bash'))).toEqual([]);
+    expect(t.push(tool('bash', 'ls -la'))).toEqual([tool('bash', 'ls -la')]);
+    expect(t.flush()).toEqual([]);
+  });
+
+  it('folds repeated full-detail updates for one tool into a single line', () => {
+    let now = 1000;
+    const t = new ProgressThrottle(1000, () => now);
+    expect(t.push(tool('bash'))).toEqual([]);
+    expect(t.push(tool('bash', 'ls'))).toEqual([tool('bash', 'ls')]);
+    now = 1100;
+    expect(t.push(tool('bash', 'ls'))).toEqual([]);
+  });
+
+  it('flushes a genuine argument-less tool call when a different step arrives', () => {
+    const t = new ProgressThrottle(1000, () => 1000);
+    expect(t.push(tool('todowrite'))).toEqual([]);
+    // A different tool flushes the buffered bare call, then emits itself.
+    expect(t.push(tool('read', 'a.ts'))).toEqual([tool('todowrite'), tool('read', 'a.ts')]);
+  });
+
+  it('flushes a trailing argument-less tool call at turn end', () => {
+    const t = new ProgressThrottle(1000, () => 1000);
+    expect(t.push(tool('todowrite'))).toEqual([]);
+    expect(t.flush()).toEqual([tool('todowrite')]);
+  });
+
+  it('flushes a buffered tool before a non-tool step', () => {
+    const t = new ProgressThrottle(1000, () => 1000);
+    expect(t.push(tool('bash'))).toEqual([]);
+    expect(t.push({ kind: 'thinking' })).toEqual([tool('bash'), { kind: 'thinking' }]);
   });
 });
