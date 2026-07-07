@@ -131,6 +131,10 @@ export interface PreviewBlock {
   size?: number | null;
   mtime?: string | null;
   path?: string;
+  // Version token for the currently-loaded file. Sent as `ifMatch` on save
+  // so an in-browser edit only lands if the file hasn't changed underneath.
+  // Absent when the version isn't known (non-file previews, load errors).
+  etag?: string;
   tags?: Record<string, unknown> | null;
   lyrics?: string | null;
 }

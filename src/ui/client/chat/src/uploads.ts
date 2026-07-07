@@ -26,20 +26,30 @@ interface WriteFileResponse extends ApiError {
   ok?: boolean;
   size?: number;
   mtime?: string;
+  etag?: string;
 }
 
+export type SaveResult = { ok: true; size?: number; mtime?: string; etag?: string } | { conflict: true; etag?: string };
+
 /**
- * Overwrite an existing file's text content. Returns the new size/mtime on
- * success, or null on failure (a toast is shown).
+ * Overwrite an existing file's text content. When `ifMatch` is supplied it is
+ * sent as an optimistic-concurrency precondition — the server refuses the
+ * write with 412 if the file changed underneath, surfaced here as
+ * `{ conflict: true, etag }` (the caller decides whether to reload or retry
+ * with the returned current etag). Returns the new size/mtime/etag on success,
+ * or null on any other failure (a toast is shown).
  */
-export async function saveFile(relPath: string, content: string): Promise<{ size?: number; mtime?: string } | null> {
+export async function saveFile(relPath: string, content: string, ifMatch?: string): Promise<SaveResult | null> {
   if (!groupId.value || !isAdmin.value) return null;
-  const r = await postJson<WriteFileResponse>(`api/groups/${groupId.value}/write`, { path: relPath, content });
+  const body: { path: string; content: string; ifMatch?: string } = { path: relPath, content };
+  if (ifMatch) body.ifMatch = ifMatch;
+  const r = await postJson<WriteFileResponse>(`api/groups/${groupId.value}/write`, body);
+  if (r.status === 412) return { conflict: true, etag: r.data.etag };
   if (!r.ok || !r.data.ok) {
     showToast('save failed: ' + (r.data.error || r.status), 'err');
     return null;
   }
-  return { size: r.data.size, mtime: r.data.mtime };
+  return { ok: true, size: r.data.size, mtime: r.data.mtime, etag: r.data.etag };
 }
 
 export async function mkdirPrompt(): Promise<void> {

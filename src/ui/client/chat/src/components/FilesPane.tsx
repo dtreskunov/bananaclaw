@@ -17,6 +17,7 @@ import { RelativeTime } from './RelativeTime';
 import { ActionsMenu } from './ActionsMenu';
 import { MediaPlayer } from './MediaPlayer';
 import { LyricsPanel } from './LyricsPanel';
+import { requestConfirm } from './PromptModal';
 import { highlightCode } from '../highlight';
 import type { TreeEntry, PreviewKind } from '../types';
 
@@ -208,12 +209,40 @@ function Preview() {
   const commitEdit = async (): Promise<void> => {
     if (!fp) return;
     setSaving(true);
-    const res = await saveFile(fp, draft);
+    // First attempt carries the etag of the version we loaded, so the write
+    // only lands if the file hasn't changed underneath us.
+    let res = await saveFile(fp, draft, previewBlock.peek()?.etag);
+    if (res && 'conflict' in res) {
+      // Someone else changed the file since we opened it. Let the user pick
+      // between reloading their copy or clobbering it.
+      const overwrite = await requestConfirm({
+        title: 'File changed on disk',
+        message: 'This file was modified since you opened it. Overwrite the newer version with your changes, or reload it?',
+        okLabel: 'Overwrite',
+        cancelLabel: 'Reload',
+        danger: true,
+      });
+      if (!overwrite) {
+        setSaving(false);
+        setEditing(false);
+        // Reload the current on-disk version (and its fresh etag).
+        if (fp) await selectFile({ path: fp, name: fp.slice(fp.lastIndexOf('/') + 1) });
+        return;
+      }
+      // Retry against the current version reported by the 412.
+      res = await saveFile(fp, draft, res.etag);
+    }
     setSaving(false);
-    if (!res) return;
+    if (!res || 'conflict' in res) return;
     const cur = previewBlock.peek();
     if (cur && cur.path === fp) {
-      previewBlock.value = { ...cur, text: draft, size: res.size ?? cur.size, mtime: res.mtime ?? cur.mtime };
+      previewBlock.value = {
+        ...cur,
+        text: draft,
+        size: res.size ?? cur.size,
+        mtime: res.mtime ?? cur.mtime,
+        etag: res.etag ?? cur.etag,
+      };
     }
     setEditing(false);
   };

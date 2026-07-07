@@ -18141,12 +18141,13 @@ async function selectFile(entry) {
         return;
       }
       const ctType = r4.headers.get("content-type") || "";
+      const etag = r4.headers.get("etag") ?? void 0;
       if (ctType.startsWith("text/") || ctType.includes("json") || ctType.includes("xml")) {
         const txt = await r4.text();
         const isMd = ext === "md" || ext === "markdown";
-        previewBlock.value = { kind: isMd ? "markdown" : "text", text: txt, ...meta };
+        previewBlock.value = { kind: isMd ? "markdown" : "text", text: txt, etag, ...meta };
       } else {
-        previewBlock.value = { kind: "binary", mime: ctType, ...meta };
+        previewBlock.value = { kind: "binary", mime: ctType, etag, ...meta };
       }
     } catch (err) {
       previewBlock.value = { kind: "error", text: String(err?.message || err), ...meta };
@@ -18171,7 +18172,8 @@ async function fetchAndAttachMeta(p5) {
     lyrics: data.lyrics || null,
     mime: data.mime || cur.mime,
     size: data.size ?? cur.size,
-    mtime: data.mtime || cur.mtime
+    mtime: data.mtime || cur.mtime,
+    etag: data.etag ?? cur.etag
   };
   previewBlock.value = next;
 }
@@ -20561,14 +20563,17 @@ function dropPinned(paths) {
   if (paths.length === 0) return;
   pinnedContext.value = pinnedContext.value.filter((p5) => !paths.some((d5) => p5 === d5 || p5.startsWith(d5 + "/")));
 }
-async function saveFile(relPath, content) {
+async function saveFile(relPath, content, ifMatch) {
   if (!groupId.value || !isAdmin.value) return null;
-  const r4 = await postJson(`api/groups/${groupId.value}/write`, { path: relPath, content });
+  const body = { path: relPath, content };
+  if (ifMatch) body.ifMatch = ifMatch;
+  const r4 = await postJson(`api/groups/${groupId.value}/write`, body);
+  if (r4.status === 412) return { conflict: true, etag: r4.data.etag };
   if (!r4.ok || !r4.data.ok) {
     showToast("save failed: " + (r4.data.error || r4.status), "err");
     return null;
   }
-  return { size: r4.data.size, mtime: r4.data.mtime };
+  return { ok: true, size: r4.data.size, mtime: r4.data.mtime, etag: r4.data.etag };
 }
 async function mkdirPrompt() {
   if (!groupId.value || !isAdmin.value) return;
@@ -21309,12 +21314,34 @@ function Preview() {
   const commitEdit = async () => {
     if (!fp) return;
     setSaving(true);
-    const res = await saveFile(fp, draft);
+    let res = await saveFile(fp, draft, previewBlock.peek()?.etag);
+    if (res && "conflict" in res) {
+      const overwrite = await requestConfirm({
+        title: "File changed on disk",
+        message: "This file was modified since you opened it. Overwrite the newer version with your changes, or reload it?",
+        okLabel: "Overwrite",
+        cancelLabel: "Reload",
+        danger: true
+      });
+      if (!overwrite) {
+        setSaving(false);
+        setEditing(false);
+        if (fp) await selectFile({ path: fp, name: fp.slice(fp.lastIndexOf("/") + 1) });
+        return;
+      }
+      res = await saveFile(fp, draft, res.etag);
+    }
     setSaving(false);
-    if (!res) return;
+    if (!res || "conflict" in res) return;
     const cur = previewBlock.peek();
     if (cur && cur.path === fp) {
-      previewBlock.value = { ...cur, text: draft, size: res.size ?? cur.size, mtime: res.mtime ?? cur.mtime };
+      previewBlock.value = {
+        ...cur,
+        text: draft,
+        size: res.size ?? cur.size,
+        mtime: res.mtime ?? cur.mtime,
+        etag: res.etag ?? cur.etag
+      };
     }
     setEditing(false);
   };

@@ -926,12 +926,13 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
         return;
       }
       const ctType = r.headers.get('content-type') || '';
+      const etag = r.headers.get('etag') ?? undefined;
       if (ctType.startsWith('text/') || ctType.includes('json') || ctType.includes('xml')) {
         const txt = await r.text();
         const isMd = ext === 'md' || ext === 'markdown';
-        previewBlock.value = { kind: isMd ? 'markdown' : 'text', text: txt, ...meta };
+        previewBlock.value = { kind: isMd ? 'markdown' : 'text', text: txt, etag, ...meta };
       } else {
-        previewBlock.value = { kind: 'binary', mime: ctType, ...meta };
+        previewBlock.value = { kind: 'binary', mime: ctType, etag, ...meta };
       }
     } catch (err) {
       previewBlock.value = { kind: 'error', text: String((err as Error)?.message || err), ...meta };
@@ -942,12 +943,18 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
   });
 }
 
+// Shape of the `?meta=1` file-metadata response. The server always emits
+// name/size/mtime/etag/mime/ext for a readable file; tags/lyrics are only
+// present for media with embedded metadata.
 interface FileMetaResponse {
+  name: string;
+  size: number;
+  mtime: string;
+  etag: string;
+  mime: string;
+  ext: string;
   tags?: Record<string, unknown> | null;
   lyrics?: string | null;
-  mime?: string;
-  size?: number;
-  mtime?: string;
 }
 
 async function fetchAndAttachMeta(p: string): Promise<void> {
@@ -970,6 +977,7 @@ async function fetchAndAttachMeta(p: string): Promise<void> {
     mime: data.mime || cur.mime,
     size: data.size ?? cur.size,
     mtime: data.mtime || cur.mtime,
+    etag: data.etag ?? cur.etag,
   };
   previewBlock.value = next;
 }
