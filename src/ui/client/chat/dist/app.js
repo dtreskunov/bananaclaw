@@ -22404,37 +22404,196 @@ function fmtNextRun(iso) {
   if (day < 7) return `in ${day}d`;
   return new Date(t4).toLocaleDateString();
 }
-function TaskView({ task }) {
+function TaskCard({ task, onOpen }) {
+  return /* @__PURE__ */ u4("div", { class: "task-card" + (task.status === "paused" ? " paused" : ""), "data-series-id": task.seriesId, children: [
+    /* @__PURE__ */ u4("button", { type: "button", class: "task-card-summary", onClick: onOpen, title: "Open task", children: task.summary || "(no prompt)" }),
+    /* @__PURE__ */ u4("div", { class: "task-meta", children: [
+      /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(task.recurrence) }),
+      task.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(task.nextRunAt).toLocaleString(), children: [
+        "next ",
+        fmtNextRun(task.nextRunAt)
+      ] }) : null,
+      /* @__PURE__ */ u4("span", { class: "task-status " + task.status, children: task.status })
+    ] })
+  ] });
+}
+function TaskSingle({
+  gid,
+  tid,
+  task,
+  onBack,
+  onTasks
+}) {
+  const [section, setSection] = h2(null);
+  const [draft, setDraft] = h2("");
+  const [busy, setBusy] = h2(false);
+  const [err, setErr] = h2(null);
+  function begin(sec, initial) {
+    setErr(null);
+    setDraft(initial);
+    setSection(sec);
+  }
+  async function save() {
+    if (!section) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const body = {};
+      if (section === "schedule") body.recurrence = draft.trim() ? draft.trim() : null;
+      else if (section === "prompt") body.prompt = draft;
+      else body.script = draft;
+      const r4 = await patchJson(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`), body);
+      if (!r4.ok) {
+        setErr(r4.data.error === "invalid_recurrence" ? "Invalid cron expression." : r4.data.error || `HTTP ${r4.status}`);
+        return;
+      }
+      onTasks(r4.data.tasks || []);
+      setSection(null);
+      showToast("Task updated", "ok");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function act(action) {
+    if (action === "cancel" && !window.confirm("Cancel this scheduled task? It will stop running.")) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r4 = await postJson(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}/${action}`));
+      if (!r4.ok) {
+        setErr(r4.data.error || `HTTP ${r4.status}`);
+        showToast("Action failed", "err");
+        return;
+      }
+      onTasks(r4.data.tasks || []);
+      showToast(action === "pause" ? "Task paused" : action === "resume" ? "Task resumed" : "Task cancelled", "ok");
+      if (action === "cancel") onBack();
+    } finally {
+      setBusy(false);
+    }
+  }
   const promptHtml = renderMarkdown(task.prompt);
   const hi = task.script ? highlightCode(task.script, "script.sh") : null;
-  return /* @__PURE__ */ u4("div", { class: "task-view", children: [
-    promptHtml ? /* @__PURE__ */ u4("div", { class: "task-summary markdown-preview", dangerouslySetInnerHTML: { __html: promptHtml } }) : /* @__PURE__ */ u4("div", { class: "task-summary muted", children: task.prompt || "(no prompt)" }),
-    task.script ? /* @__PURE__ */ u4("details", { class: "task-script-view", children: [
-      /* @__PURE__ */ u4("summary", { children: "Script" }),
-      hi ? /* @__PURE__ */ u4("pre", { class: "hljs", "data-lang": hi.language, children: /* @__PURE__ */ u4("code", { dangerouslySetInnerHTML: { __html: hi.html } }) }) : /* @__PURE__ */ u4("pre", { class: "hljs", children: /* @__PURE__ */ u4("code", { children: task.script }) })
-    ] }) : null
+  const lockOther = (sec) => busy || section !== null && section !== sec;
+  return /* @__PURE__ */ u4("div", { class: "task-single", children: [
+    /* @__PURE__ */ u4("div", { class: "task-single-head", children: [
+      /* @__PURE__ */ u4("button", { type: "button", class: "task-back", onClick: onBack, children: [
+        "\u2039",
+        " Tasks"
+      ] }),
+      /* @__PURE__ */ u4("span", { class: "task-status " + task.status, children: task.status })
+    ] }),
+    err ? /* @__PURE__ */ u4("div", { class: "settings-status err", children: err }) : null,
+    /* @__PURE__ */ u4("div", { class: "task-single-summary", children: task.summary || "(no prompt)" }),
+    /* @__PURE__ */ u4("div", { class: "task-sec", children: [
+      /* @__PURE__ */ u4("div", { class: "task-sec-head", children: [
+        /* @__PURE__ */ u4("span", { class: "task-sec-title", children: "Schedule" }),
+        section === "schedule" ? null : /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "task-sec-edit",
+            disabled: lockOther("schedule"),
+            onClick: () => begin("schedule", task.recurrence || ""),
+            children: "Edit"
+          }
+        )
+      ] }),
+      section === "schedule" ? /* @__PURE__ */ u4("div", { class: "task-sec-edit-body", children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "text",
+            placeholder: "30 10 * * *",
+            value: draft,
+            onInput: (e4) => setDraft(e4.currentTarget.value)
+          }
+        ),
+        /* @__PURE__ */ u4("span", { class: "muted task-cron-preview", children: humanizeCron(draft.trim() || null) }),
+        /* @__PURE__ */ u4("div", { class: "task-actions", children: [
+          /* @__PURE__ */ u4("button", { type: "button", onClick: save, disabled: busy, children: busy ? "Saving\u2026" : "Save" }),
+          /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setSection(null), disabled: busy, children: "Cancel" })
+        ] })
+      ] }) : /* @__PURE__ */ u4("div", { class: "task-sec-view task-meta", children: [
+        /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(task.recurrence) }),
+        task.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(task.nextRunAt).toLocaleString(), children: [
+          "next ",
+          fmtNextRun(task.nextRunAt)
+        ] }) : null
+      ] })
+    ] }),
+    /* @__PURE__ */ u4("details", { class: "task-sec task-collapsible", children: [
+      /* @__PURE__ */ u4("summary", { class: "task-sec-title", children: "Prompt" }),
+      section === "prompt" ? /* @__PURE__ */ u4("div", { class: "task-sec-edit-body", children: [
+        /* @__PURE__ */ u4(
+          "textarea",
+          {
+            rows: 6,
+            value: draft,
+            onInput: (e4) => setDraft(e4.currentTarget.value)
+          }
+        ),
+        /* @__PURE__ */ u4("div", { class: "task-actions", children: [
+          /* @__PURE__ */ u4("button", { type: "button", onClick: save, disabled: busy || !draft.trim(), children: busy ? "Saving\u2026" : "Save" }),
+          /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setSection(null), disabled: busy, children: "Cancel" })
+        ] })
+      ] }) : /* @__PURE__ */ u4("div", { class: "task-sec-view", children: [
+        promptHtml ? /* @__PURE__ */ u4("div", { class: "markdown-preview", dangerouslySetInnerHTML: { __html: promptHtml } }) : /* @__PURE__ */ u4("div", { class: "muted", children: task.prompt || "(no prompt)" }),
+        /* @__PURE__ */ u4("button", { type: "button", class: "task-sec-edit", disabled: lockOther("prompt"), onClick: () => begin("prompt", task.prompt), children: "Edit" })
+      ] })
+    ] }),
+    /* @__PURE__ */ u4("details", { class: "task-sec task-collapsible", children: [
+      /* @__PURE__ */ u4("summary", { class: "task-sec-title", children: "Script" }),
+      section === "script" ? /* @__PURE__ */ u4("div", { class: "task-sec-edit-body", children: [
+        /* @__PURE__ */ u4(
+          "textarea",
+          {
+            class: "task-mono",
+            rows: 8,
+            spellcheck: false,
+            placeholder: "#!/usr/bin/env bash",
+            value: draft,
+            onInput: (e4) => setDraft(e4.currentTarget.value)
+          }
+        ),
+        /* @__PURE__ */ u4("div", { class: "task-actions", children: [
+          /* @__PURE__ */ u4("button", { type: "button", onClick: save, disabled: busy, children: busy ? "Saving\u2026" : "Save" }),
+          /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setSection(null), disabled: busy, children: "Cancel" })
+        ] })
+      ] }) : /* @__PURE__ */ u4("div", { class: "task-sec-view", children: [
+        task.script ? hi ? /* @__PURE__ */ u4("pre", { class: "hljs", "data-lang": hi.language, children: /* @__PURE__ */ u4("code", { dangerouslySetInnerHTML: { __html: hi.html } }) }) : /* @__PURE__ */ u4("pre", { class: "hljs", children: /* @__PURE__ */ u4("code", { children: task.script }) }) : /* @__PURE__ */ u4("div", { class: "muted", children: "No script." }),
+        /* @__PURE__ */ u4("button", { type: "button", class: "task-sec-edit", disabled: lockOther("script"), onClick: () => begin("script", task.script), children: "Edit" })
+      ] })
+    ] }),
+    /* @__PURE__ */ u4("div", { class: "task-single-actions", children: [
+      task.status === "paused" ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => act("resume"), disabled: busy || section !== null, children: "Resume" }) : /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => act("pause"), disabled: busy || section !== null, children: "Pause" }),
+      /* @__PURE__ */ u4("button", { type: "button", class: "ghost danger", onClick: () => act("cancel"), disabled: busy || section !== null, children: "Cancel task" })
+    ] })
   ] });
 }
 function TaskPanel() {
   const req = taskPanelRequest.value;
   const [tasks, setTasks] = h2(null);
   const [error, setError] = h2(null);
-  const [busyId, setBusyId] = h2(null);
-  const [editId, setEditId] = h2(null);
-  const [editPrompt, setEditPrompt] = h2("");
-  const [editScript, setEditScript] = h2("");
-  const [editCron, setEditCron] = h2("");
+  const [mode, setMode] = h2("list");
+  const [activeId, setActiveId] = h2(null);
   y2(() => {
     if (!req) return;
     setTasks(null);
     setError(null);
-    setBusyId(null);
-    setEditId(null);
+    setMode("list");
+    setActiveId(null);
     let cancelled = false;
     (async () => {
       try {
         const data = await api(taskUrl(req.gid, req.tid));
-        if (!cancelled) setTasks(data.tasks || []);
+        if (cancelled) return;
+        const list = data.tasks || [];
+        setTasks(list);
+        if (req.focusSeriesId && list.some((t4) => t4.seriesId === req.focusSeriesId)) {
+          setActiveId(req.focusSeriesId);
+          setMode("single");
+        }
       } catch {
         if (!cancelled) setError("Failed to load tasks.");
       }
@@ -22442,72 +22601,30 @@ function TaskPanel() {
     return () => {
       cancelled = true;
     };
-  }, [req?.gid, req?.tid]);
-  y2(() => {
-    if (!req) return void 0;
-    const onKey = (e4) => {
-      if (e4.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [req]);
-  y2(() => {
-    if (!req?.focusSeriesId || !tasks) return;
-    const el = document.querySelector(
-      `.task-panel .task-row[data-series-id="${CSS.escape(req.focusSeriesId)}"]`
-    );
-    if (el) el.scrollIntoView({ block: "center" });
-  }, [tasks, req?.focusSeriesId]);
-  if (!req) return null;
-  const { gid, tid } = req;
-  const focusMissing = !!req.focusSeriesId && !!tasks && !tasks.some((t4) => t4.seriesId === req.focusSeriesId);
+  }, [req?.gid, req?.tid, req?.focusSeriesId]);
   function close() {
     taskPanelRequest.value = null;
   }
+  function back() {
+    setMode("list");
+    setActiveId(null);
+  }
+  y2(() => {
+    if (!req) return void 0;
+    const onKey = (e4) => {
+      if (e4.key !== "Escape") return;
+      if (mode === "single") back();
+      else close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [req, mode]);
+  if (!req) return null;
+  const { gid, tid } = req;
+  const focusMissing = !!req.focusSeriesId && !!tasks && !tasks.some((t4) => t4.seriesId === req.focusSeriesId);
+  const activeTask = mode === "single" && activeId ? tasks?.find((t4) => t4.seriesId === activeId) || null : null;
   function onBackdrop(e4) {
     if (e4.target.classList.contains("settings-backdrop")) close();
-  }
-  async function doAction(seriesId, action) {
-    if (action === "cancel" && !window.confirm("Cancel this scheduled task? It will stop running.")) return;
-    setBusyId(seriesId);
-    setError(null);
-    try {
-      const r4 = await postJson(taskUrl(gid, tid, `/${encodeURIComponent(seriesId)}/${action}`));
-      if (!r4.ok) {
-        setError(r4.data.error || `HTTP ${r4.status}`);
-        showToast("Action failed", "err");
-        return;
-      }
-      setTasks(r4.data.tasks || []);
-      showToast(action === "pause" ? "Task paused" : action === "resume" ? "Task resumed" : "Task cancelled", "ok");
-    } finally {
-      setBusyId(null);
-    }
-  }
-  function startEdit(t4) {
-    setEditId(t4.seriesId);
-    setEditPrompt(t4.prompt);
-    setEditScript(t4.script);
-    setEditCron(t4.recurrence || "");
-  }
-  async function saveEdit(seriesId) {
-    setBusyId(seriesId);
-    setError(null);
-    try {
-      const body = { prompt: editPrompt };
-      body.script = editScript;
-      body.recurrence = editCron.trim() ? editCron.trim() : null;
-      const r4 = await patchJson(taskUrl(gid, tid, `/${encodeURIComponent(seriesId)}`), body);
-      if (!r4.ok) {
-        setError(r4.data.error === "invalid_recurrence" ? "Invalid cron expression." : r4.data.error || `HTTP ${r4.status}`);
-        return;
-      }
-      setTasks(r4.data.tasks || []);
-      setEditId(null);
-      showToast("Task updated", "ok");
-    } finally {
-      setBusyId(null);
-    }
   }
   return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "settings-modal task-panel", role: "dialog", "aria-label": "Scheduled tasks", style: "max-width:560px", children: [
     /* @__PURE__ */ u4("header", { class: "settings-head", children: [
@@ -22523,80 +22640,21 @@ function TaskPanel() {
         "Loading",
         "\u2026"
       ] }) : null,
-      focusMissing ? /* @__PURE__ */ u4("p", { class: "muted", style: "margin-top:0", children: "That task has already completed and is no longer scheduled. Showing the thread's live tasks." }) : null,
-      tasks !== null && tasks.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", style: "margin-top:0", children: "No scheduled tasks in this thread." }) : null,
-      tasks?.map((t4) => {
-        const editing = editId === t4.seriesId;
-        const busy = busyId === t4.seriesId;
-        const focused = req.focusSeriesId === t4.seriesId;
-        return /* @__PURE__ */ u4(
-          "div",
+      activeTask ? /* @__PURE__ */ u4(TaskSingle, { gid, tid, task: activeTask, onBack: back, onTasks: (ts) => setTasks(ts) }) : /* @__PURE__ */ u4(k, { children: [
+        focusMissing ? /* @__PURE__ */ u4("p", { class: "muted", style: "margin-top:0", children: "That task has already completed and is no longer scheduled. Showing the thread's live tasks." }) : null,
+        tasks !== null && tasks.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", style: "margin-top:0", children: "No scheduled tasks in this thread." }) : null,
+        tasks?.map((t4) => /* @__PURE__ */ u4(
+          TaskCard,
           {
-            class: "task-row" + (t4.status === "paused" ? " paused" : "") + (focused ? " focused" : ""),
-            "data-series-id": t4.seriesId,
-            children: editing ? /* @__PURE__ */ u4("div", { class: "task-edit", children: [
-              /* @__PURE__ */ u4("label", { class: "task-field", children: [
-                /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Prompt" }),
-                /* @__PURE__ */ u4(
-                  "textarea",
-                  {
-                    rows: 4,
-                    value: editPrompt,
-                    onInput: (e4) => setEditPrompt(e4.currentTarget.value)
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ u4("label", { class: "task-field", children: [
-                /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Script (optional, runs before the prompt)" }),
-                /* @__PURE__ */ u4(
-                  "textarea",
-                  {
-                    class: "task-script-edit",
-                    rows: 6,
-                    spellcheck: false,
-                    placeholder: "#!/usr/bin/env bash",
-                    value: editScript,
-                    onInput: (e4) => setEditScript(e4.currentTarget.value)
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ u4("label", { class: "task-field", children: [
-                /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Schedule (cron, blank = one-off)" }),
-                /* @__PURE__ */ u4(
-                  "input",
-                  {
-                    type: "text",
-                    placeholder: "30 10 * * *",
-                    value: editCron,
-                    onInput: (e4) => setEditCron(e4.currentTarget.value)
-                  }
-                ),
-                /* @__PURE__ */ u4("span", { class: "muted task-cron-preview", children: humanizeCron(editCron.trim() || null) })
-              ] }),
-              /* @__PURE__ */ u4("div", { class: "task-actions", children: [
-                /* @__PURE__ */ u4("button", { type: "button", onClick: () => saveEdit(t4.seriesId), disabled: busy || !editPrompt.trim(), children: busy ? "Saving\u2026" : "Save" }),
-                /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setEditId(null), disabled: busy, children: "Cancel" })
-              ] })
-            ] }) : /* @__PURE__ */ u4(k, { children: [
-              /* @__PURE__ */ u4(TaskView, { task: t4 }),
-              /* @__PURE__ */ u4("div", { class: "task-meta", children: [
-                /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(t4.recurrence) }),
-                t4.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(t4.nextRunAt).toLocaleString(), children: [
-                  "next ",
-                  fmtNextRun(t4.nextRunAt)
-                ] }) : null,
-                /* @__PURE__ */ u4("span", { class: "task-status " + t4.status, children: t4.status })
-              ] }),
-              /* @__PURE__ */ u4("div", { class: "task-actions", children: [
-                t4.status === "paused" ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => doAction(t4.seriesId, "resume"), disabled: busy, children: "Resume" }) : /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => doAction(t4.seriesId, "pause"), disabled: busy, children: "Pause" }),
-                /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => startEdit(t4), disabled: busy, children: "Edit" }),
-                /* @__PURE__ */ u4("button", { type: "button", class: "ghost danger", onClick: () => doAction(t4.seriesId, "cancel"), disabled: busy, children: "Cancel" })
-              ] })
-            ] })
+            task: t4,
+            onOpen: () => {
+              setActiveId(t4.seriesId);
+              setMode("single");
+            }
           },
           t4.seriesId
-        );
-      })
+        ))
+      ] })
     ] }),
     /* @__PURE__ */ u4("div", { class: "settings-row", style: "padding:10px 16px;border-top:1px solid var(--border);justify-content:flex-end", children: /* @__PURE__ */ u4("button", { type: "button", onClick: close, children: "Done" }) })
   ] }) });

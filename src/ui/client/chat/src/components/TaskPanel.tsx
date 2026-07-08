@@ -68,32 +68,235 @@ function fmtNextRun(iso: string): string {
   return new Date(t).toLocaleDateString();
 }
 
-/** Read-only view of a task: prompt rendered as Markdown, plus a collapsible,
- *  syntax-highlighted script when present. */
-function TaskView({ task }: { task: TaskDetailDto }): JSX.Element {
+/** Compact, view-only task card for list mode. Clicking the summary opens
+ *  the focused single-task view. */
+function TaskCard({ task, onOpen }: { task: TaskDetailDto; onOpen: () => void }): JSX.Element {
+  return (
+    <div class={'task-card' + (task.status === 'paused' ? ' paused' : '')} data-series-id={task.seriesId}>
+      <button type="button" class="task-card-summary" onClick={onOpen} title="Open task">
+        {task.summary || '(no prompt)'}
+      </button>
+      <div class="task-meta">
+        <span class="task-schedule">{humanizeCron(task.recurrence)}</span>
+        {task.nextRunAt ? (
+          <span class="task-next" title={new Date(task.nextRunAt).toLocaleString()}>
+            next {fmtNextRun(task.nextRunAt)}
+          </span>
+        ) : null}
+        <span class={'task-status ' + task.status}>{task.status}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Focused single-task view. The summary is read-only (derived from the
+ * prompt); Schedule, Prompt, and Script each have their own inline edit
+ * affordance that saves independently and keeps you in this view. Prompt and
+ * Script are collapsed by default and render as Markdown / highlighted code
+ * respectively. Pause/Resume and Cancel live here too.
+ */
+function TaskSingle({
+  gid,
+  tid,
+  task,
+  onBack,
+  onTasks,
+}: {
+  gid: string;
+  tid: string;
+  task: TaskDetailDto;
+  onBack: () => void;
+  onTasks: (tasks: TaskDetailDto[]) => void;
+}): JSX.Element {
+  const [section, setSection] = useState<null | 'schedule' | 'prompt' | 'script'>(null);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function begin(sec: 'schedule' | 'prompt' | 'script', initial: string): void {
+    setErr(null);
+    setDraft(initial);
+    setSection(sec);
+  }
+
+  async function save(): Promise<void> {
+    if (!section) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const body: Record<string, unknown> = {};
+      if (section === 'schedule') body.recurrence = draft.trim() ? draft.trim() : null;
+      else if (section === 'prompt') body.prompt = draft;
+      else body.script = draft;
+      const r = await patchJson<TasksResponse>(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`), body);
+      if (!r.ok) {
+        setErr(r.data.error === 'invalid_recurrence' ? 'Invalid cron expression.' : r.data.error || `HTTP ${r.status}`);
+        return;
+      }
+      onTasks(r.data.tasks || []);
+      setSection(null);
+      showToast('Task updated', 'ok');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function act(action: 'pause' | 'resume' | 'cancel'): Promise<void> {
+    if (action === 'cancel' && !window.confirm('Cancel this scheduled task? It will stop running.')) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await postJson<TasksResponse>(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}/${action}`));
+      if (!r.ok) {
+        setErr(r.data.error || `HTTP ${r.status}`);
+        showToast('Action failed', 'err');
+        return;
+      }
+      onTasks(r.data.tasks || []);
+      showToast(action === 'pause' ? 'Task paused' : action === 'resume' ? 'Task resumed' : 'Task cancelled', 'ok');
+      if (action === 'cancel') onBack();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const promptHtml = renderMarkdown(task.prompt);
   const hi = task.script ? highlightCode(task.script, 'script.sh') : null;
+  const lockOther = (sec: string): boolean => busy || (section !== null && section !== sec);
+
   return (
-    <div class="task-view">
-      {promptHtml ? (
-        <div class="task-summary markdown-preview" dangerouslySetInnerHTML={{ __html: promptHtml }} />
-      ) : (
-        <div class="task-summary muted">{task.prompt || '(no prompt)'}</div>
-      )}
-      {task.script ? (
-        <details class="task-script-view">
-          <summary>Script</summary>
-          {hi ? (
-            <pre class="hljs" data-lang={hi.language}>
-              <code dangerouslySetInnerHTML={{ __html: hi.html }} />
-            </pre>
-          ) : (
-            <pre class="hljs">
-              <code>{task.script}</code>
-            </pre>
+    <div class="task-single">
+      <div class="task-single-head">
+        <button type="button" class="task-back" onClick={onBack}>{'\u2039'} Tasks</button>
+        <span class={'task-status ' + task.status}>{task.status}</span>
+      </div>
+
+      {err ? <div class="settings-status err">{err}</div> : null}
+
+      <div class="task-single-summary">{task.summary || '(no prompt)'}</div>
+
+      {/* Schedule — always visible */}
+      <div class="task-sec">
+        <div class="task-sec-head">
+          <span class="task-sec-title">Schedule</span>
+          {section === 'schedule' ? null : (
+            <button
+              type="button"
+              class="task-sec-edit"
+              disabled={lockOther('schedule')}
+              onClick={() => begin('schedule', task.recurrence || '')}
+            >
+              Edit
+            </button>
           )}
-        </details>
-      ) : null}
+        </div>
+        {section === 'schedule' ? (
+          <div class="task-sec-edit-body">
+            <input
+              type="text"
+              placeholder="30 10 * * *"
+              value={draft}
+              onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setDraft(e.currentTarget.value)}
+            />
+            <span class="muted task-cron-preview">{humanizeCron(draft.trim() || null)}</span>
+            <div class="task-actions">
+              <button type="button" onClick={save} disabled={busy}>{busy ? 'Saving\u2026' : 'Save'}</button>
+              <button type="button" class="ghost" onClick={() => setSection(null)} disabled={busy}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div class="task-sec-view task-meta">
+            <span class="task-schedule">{humanizeCron(task.recurrence)}</span>
+            {task.nextRunAt ? (
+              <span class="task-next" title={new Date(task.nextRunAt).toLocaleString()}>
+                next {fmtNextRun(task.nextRunAt)}
+              </span>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {/* Prompt — collapsible, Markdown-rendered */}
+      <details class="task-sec task-collapsible">
+        <summary class="task-sec-title">Prompt</summary>
+        {section === 'prompt' ? (
+          <div class="task-sec-edit-body">
+            <textarea
+              rows={6}
+              value={draft}
+              onInput={(e: JSX.TargetedEvent<HTMLTextAreaElement>) => setDraft(e.currentTarget.value)}
+            />
+            <div class="task-actions">
+              <button type="button" onClick={save} disabled={busy || !draft.trim()}>{busy ? 'Saving\u2026' : 'Save'}</button>
+              <button type="button" class="ghost" onClick={() => setSection(null)} disabled={busy}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div class="task-sec-view">
+            {promptHtml ? (
+              <div class="markdown-preview" dangerouslySetInnerHTML={{ __html: promptHtml }} />
+            ) : (
+              <div class="muted">{task.prompt || '(no prompt)'}</div>
+            )}
+            <button type="button" class="task-sec-edit" disabled={lockOther('prompt')} onClick={() => begin('prompt', task.prompt)}>
+              Edit
+            </button>
+          </div>
+        )}
+      </details>
+
+      {/* Script — collapsible, syntax-highlighted */}
+      <details class="task-sec task-collapsible">
+        <summary class="task-sec-title">Script</summary>
+        {section === 'script' ? (
+          <div class="task-sec-edit-body">
+            <textarea
+              class="task-mono"
+              rows={8}
+              spellcheck={false}
+              placeholder="#!/usr/bin/env bash"
+              value={draft}
+              onInput={(e: JSX.TargetedEvent<HTMLTextAreaElement>) => setDraft(e.currentTarget.value)}
+            />
+            <div class="task-actions">
+              <button type="button" onClick={save} disabled={busy}>{busy ? 'Saving\u2026' : 'Save'}</button>
+              <button type="button" class="ghost" onClick={() => setSection(null)} disabled={busy}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div class="task-sec-view">
+            {task.script ? (
+              hi ? (
+                <pre class="hljs" data-lang={hi.language}>
+                  <code dangerouslySetInnerHTML={{ __html: hi.html }} />
+                </pre>
+              ) : (
+                <pre class="hljs">
+                  <code>{task.script}</code>
+                </pre>
+              )
+            ) : (
+              <div class="muted">No script.</div>
+            )}
+            <button type="button" class="task-sec-edit" disabled={lockOther('script')} onClick={() => begin('script', task.script)}>
+              Edit
+            </button>
+          </div>
+        )}
+      </details>
+
+      {/* Lifecycle actions */}
+      <div class="task-single-actions">
+        {task.status === 'paused' ? (
+          <button type="button" onClick={() => act('resume')} disabled={busy || section !== null}>Resume</button>
+        ) : (
+          <button type="button" class="ghost" onClick={() => act('pause')} disabled={busy || section !== null}>Pause</button>
+        )}
+        <button type="button" class="ghost danger" onClick={() => act('cancel')} disabled={busy || section !== null}>
+          Cancel task
+        </button>
+      </div>
     </div>
   );
 }
@@ -102,23 +305,27 @@ export function TaskPanel() {
   const req = taskPanelRequest.value;
   const [tasks, setTasks] = useState<TaskDetailDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editPrompt, setEditPrompt] = useState('');
-  const [editScript, setEditScript] = useState('');
-  const [editCron, setEditCron] = useState('');
+  const [mode, setMode] = useState<'list' | 'single'>('list');
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!req) return;
     setTasks(null);
     setError(null);
-    setBusyId(null);
-    setEditId(null);
+    setMode('list');
+    setActiveId(null);
     let cancelled = false;
     (async () => {
       try {
         const data = await api<TasksResponse>(taskUrl(req.gid, req.tid));
-        if (!cancelled) setTasks(data.tasks || []);
+        if (cancelled) return;
+        const list = data.tasks || [];
+        setTasks(list);
+        // Deep-link (⏰ pill): open straight into the focused task.
+        if (req.focusSeriesId && list.some((t) => t.seriesId === req.focusSeriesId)) {
+          setActiveId(req.focusSeriesId);
+          setMode('single');
+        }
       } catch {
         if (!cancelled) setError('Failed to load tasks.');
       }
@@ -126,82 +333,34 @@ export function TaskPanel() {
     return () => {
       cancelled = true;
     };
-  }, [req?.gid, req?.tid]);
-
-  useEffect(() => {
-    if (!req) return undefined;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') close();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [req]);
-
-  // Scroll the focused task into view once the list renders.
-  useEffect(() => {
-    if (!req?.focusSeriesId || !tasks) return;
-    const el = document.querySelector(
-      `.task-panel .task-row[data-series-id="${CSS.escape(req.focusSeriesId)}"]`,
-    );
-    if (el) el.scrollIntoView({ block: 'center' });
-  }, [tasks, req?.focusSeriesId]);
-
-  if (!req) return null;
-  const { gid, tid } = req;
-  const focusMissing = !!req.focusSeriesId && !!tasks && !tasks.some((t) => t.seriesId === req.focusSeriesId);
+  }, [req?.gid, req?.tid, req?.focusSeriesId]);
 
   function close(): void {
     taskPanelRequest.value = null;
   }
+  function back(): void {
+    setMode('list');
+    setActiveId(null);
+  }
+
+  useEffect(() => {
+    if (!req) return undefined;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      if (mode === 'single') back();
+      else close();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [req, mode]);
+
+  if (!req) return null;
+  const { gid, tid } = req;
+  const focusMissing = !!req.focusSeriesId && !!tasks && !tasks.some((t) => t.seriesId === req.focusSeriesId);
+  const activeTask = mode === 'single' && activeId ? tasks?.find((t) => t.seriesId === activeId) || null : null;
+
   function onBackdrop(e: JSX.TargetedMouseEvent<HTMLDivElement>): void {
     if ((e.target as HTMLElement).classList.contains('settings-backdrop')) close();
-  }
-
-  async function doAction(seriesId: string, action: 'pause' | 'resume' | 'cancel'): Promise<void> {
-    if (action === 'cancel' && !window.confirm('Cancel this scheduled task? It will stop running.')) return;
-    setBusyId(seriesId);
-    setError(null);
-    try {
-      const r = await postJson<TasksResponse>(taskUrl(gid, tid, `/${encodeURIComponent(seriesId)}/${action}`));
-      if (!r.ok) {
-        setError(r.data.error || `HTTP ${r.status}`);
-        showToast('Action failed', 'err');
-        return;
-      }
-      setTasks(r.data.tasks || []);
-      showToast(action === 'pause' ? 'Task paused' : action === 'resume' ? 'Task resumed' : 'Task cancelled', 'ok');
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  function startEdit(t: TaskDetailDto): void {
-    setEditId(t.seriesId);
-    setEditPrompt(t.prompt);
-    setEditScript(t.script);
-    setEditCron(t.recurrence || '');
-  }
-
-  async function saveEdit(seriesId: string): Promise<void> {
-    setBusyId(seriesId);
-    setError(null);
-    try {
-      const body: Record<string, unknown> = { prompt: editPrompt };
-      // Empty script field clears the script; the server records it as null.
-      body.script = editScript;
-      // Empty cron field means "make it a one-off" (recurrence = null).
-      body.recurrence = editCron.trim() ? editCron.trim() : null;
-      const r = await patchJson<TasksResponse>(taskUrl(gid, tid, `/${encodeURIComponent(seriesId)}`), body);
-      if (!r.ok) {
-        setError(r.data.error === 'invalid_recurrence' ? 'Invalid cron expression.' : r.data.error || `HTTP ${r.status}`);
-        return;
-      }
-      setTasks(r.data.tasks || []);
-      setEditId(null);
-      showToast('Task updated', 'ok');
-    } finally {
-      setBusyId(null);
-    }
   }
 
   return (
@@ -214,98 +373,31 @@ export function TaskPanel() {
         <div class="settings-body">
           {error ? <div class="settings-status err">{error}</div> : null}
           {tasks === null && !error ? <p class="muted">Loading{'\u2026'}</p> : null}
-          {focusMissing ? (
-            <p class="muted" style="margin-top:0">
-              That task has already completed and is no longer scheduled. Showing the thread's live tasks.
-            </p>
-          ) : null}
-          {tasks !== null && tasks.length === 0 ? (
-            <p class="muted" style="margin-top:0">No scheduled tasks in this thread.</p>
-          ) : null}
-          {tasks?.map((t) => {
-            const editing = editId === t.seriesId;
-            const busy = busyId === t.seriesId;
-            const focused = req.focusSeriesId === t.seriesId;
-            return (
-              <div
-                class={'task-row' + (t.status === 'paused' ? ' paused' : '') + (focused ? ' focused' : '')}
-                data-series-id={t.seriesId}
-                key={t.seriesId}
-              >
-                {editing ? (
-                  <div class="task-edit">
-                    <label class="task-field">
-                      <span class="task-field-label">Prompt</span>
-                      <textarea
-                        rows={4}
-                        value={editPrompt}
-                        onInput={(e: JSX.TargetedEvent<HTMLTextAreaElement>) => setEditPrompt(e.currentTarget.value)}
-                      />
-                    </label>
-                    <label class="task-field">
-                      <span class="task-field-label">Script (optional, runs before the prompt)</span>
-                      <textarea
-                        class="task-script-edit"
-                        rows={6}
-                        spellcheck={false}
-                        placeholder="#!/usr/bin/env bash"
-                        value={editScript}
-                        onInput={(e: JSX.TargetedEvent<HTMLTextAreaElement>) => setEditScript(e.currentTarget.value)}
-                      />
-                    </label>
-                    <label class="task-field">
-                      <span class="task-field-label">Schedule (cron, blank = one-off)</span>
-                      <input
-                        type="text"
-                        placeholder="30 10 * * *"
-                        value={editCron}
-                        onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setEditCron(e.currentTarget.value)}
-                      />
-                      <span class="muted task-cron-preview">{humanizeCron(editCron.trim() || null)}</span>
-                    </label>
-                    <div class="task-actions">
-                      <button type="button" onClick={() => saveEdit(t.seriesId)} disabled={busy || !editPrompt.trim()}>
-                        {busy ? 'Saving\u2026' : 'Save'}
-                      </button>
-                      <button type="button" class="ghost" onClick={() => setEditId(null)} disabled={busy}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <TaskView task={t} />
-                    <div class="task-meta">
-                      <span class="task-schedule">{humanizeCron(t.recurrence)}</span>
-                      {t.nextRunAt ? (
-                        <span class="task-next" title={new Date(t.nextRunAt).toLocaleString()}>
-                          next {fmtNextRun(t.nextRunAt)}
-                        </span>
-                      ) : null}
-                      <span class={'task-status ' + t.status}>{t.status}</span>
-                    </div>
-                    <div class="task-actions">
-                      {t.status === 'paused' ? (
-                        <button type="button" onClick={() => doAction(t.seriesId, 'resume')} disabled={busy}>
-                          Resume
-                        </button>
-                      ) : (
-                        <button type="button" class="ghost" onClick={() => doAction(t.seriesId, 'pause')} disabled={busy}>
-                          Pause
-                        </button>
-                      )}
-                      <button type="button" class="ghost" onClick={() => startEdit(t)} disabled={busy}>
-                        Edit
-                      </button>
-                      <button type="button" class="ghost danger" onClick={() => doAction(t.seriesId, 'cancel')} disabled={busy}>
-                        Cancel
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
+
+          {activeTask ? (
+            <TaskSingle gid={gid} tid={tid} task={activeTask} onBack={back} onTasks={(ts) => setTasks(ts)} />
+          ) : (
+            <>
+              {focusMissing ? (
+                <p class="muted" style="margin-top:0">
+                  That task has already completed and is no longer scheduled. Showing the thread's live tasks.
+                </p>
+              ) : null}
+              {tasks !== null && tasks.length === 0 ? (
+                <p class="muted" style="margin-top:0">No scheduled tasks in this thread.</p>
+              ) : null}
+              {tasks?.map((t) => (
+                <TaskCard
+                  key={t.seriesId}
+                  task={t}
+                  onOpen={() => {
+                    setActiveId(t.seriesId);
+                    setMode('single');
+                  }}
+                />
+              ))}
+            </>
+          )}
         </div>
         <div class="settings-row" style="padding:10px 16px;border-top:1px solid var(--border);justify-content:flex-end">
           <button type="button" onClick={close}>Done</button>
