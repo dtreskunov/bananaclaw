@@ -618,6 +618,12 @@ async function processQuery(
   let resultSeen = false;
   let done = false;
   let unwrappedNudged = false;
+  // Set when a `result` event arrives with empty text (the model produced no
+  // final output at all — e.g. a reasoning model that emitted only
+  // <think>…</think>, which stripThinkTags reduces to nothing). Distinct from
+  // a non-empty-but-all-<internal> turn, where the model deliberately wrote
+  // scratchpad only; that leaves this false so we stay silent.
+  let emptyResultSeen = false;
   // A fresh batch is being processed \u2014 wipe any turn-ended marker from
   // the previous turn so the host typing module re-arms cleanly.
   try { clearTurnEnded(); } catch { /* best-effort */ }
@@ -992,6 +998,9 @@ async function processQuery(
           // queued so the retry archives against it, not the nudge text.
           if (!willRetryWrapping) archivePrompts.shift();
         } else {
+          // A result event with no text: the model finished the turn without
+          // producing any final output (neither a reply nor an error).
+          emptyResultSeen = true;
           archivePrompts.shift();
         }
         // One-shot calls (in-turn ack): end the stream immediately after
@@ -1115,6 +1124,30 @@ async function processQuery(
       });
     } catch (e) {
       log(`Failed to write generic delivery error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // Stream completed cleanly with a `result` event, but the model produced no
+  // final text at all — and reported no error. This is different from the
+  // malformed-wrap case above (there the model emitted text we couldn't
+  // deliver); here there was simply nothing. Common with reasoning models that
+  // emit only <think>…</think>, which strips to empty. Tell the user plainly so
+  // a silent turn doesn't look like the agent is still working or died.
+  else if (!sentAny && emptyResultSeen && !lastProviderError) {
+    log('Turn completed with an empty result and no error — notifying user');
+    try {
+      writeMessageOut({
+        id: generateId(),
+        kind: 'chat',
+        platform_id: routing.platformId,
+        channel_type: routing.channelType,
+        thread_id: routing.threadId,
+        content: JSON.stringify({
+          text: "⚠️ The agent finished without producing a response, and without reporting an error. Please try again.",
+        }),
+      });
+    } catch (e) {
+      log(`Failed to write empty-result notice: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

@@ -702,6 +702,54 @@ describe('poll loop — isolated task turns', () => {
   });
 });
 
+describe('poll loop — empty result notice', () => {
+  it('notifies the user when a turn ends with an empty result and no error', async () => {
+    // A reasoning model that emits only <think>…</think> strips to empty text.
+    // The stream completes cleanly (a `result` event, no error), but nothing
+    // was sent — the user must be told plainly rather than left with silence.
+    insertMessage('m-empty', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new EmptyResultProvider();
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    const text = JSON.parse(out[0].content).text;
+    expect(text).toContain('without producing a response');
+    expect(text).toContain('without reporting an error');
+  });
+});
+
+/**
+ * Yields one empty-text result then ends its stream — models a provider whose
+ * turn completes with no final output and no error (e.g. reasoning-only output
+ * stripped to empty).
+ */
+class EmptyResultProvider {
+  readonly supportsNativeSlashCommands = false;
+
+  isSessionInvalid(): boolean {
+    return false;
+  }
+
+  query() {
+    return {
+      push() {},
+      end() {},
+      abort() {},
+      events: (async function* () {
+        yield { type: 'init' as const, continuation: 'empty-session' };
+        yield { type: 'result' as const, text: '' };
+      })(),
+    };
+  }
+}
+
 /**
  * Records the continuation each query() call receives and delivers one result.
  * Used to assert task turns run with a fresh (undefined) continuation.
