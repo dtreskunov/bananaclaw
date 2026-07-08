@@ -68,6 +68,15 @@ function fmtNextRun(iso: string): string {
   return new Date(t).toLocaleDateString();
 }
 
+/** ISO → `YYYY-MM-DDTHH:mm` in the browser's local zone, for a
+ *  <input type="datetime-local">. Falls back to now when the time is missing. */
+function toDatetimeLocal(iso: string | null): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  const d = Number.isFinite(t) ? new Date(t) : new Date();
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** Compact, view-only task card for list mode. Clicking the summary opens
  *  the focused single-task view. */
 function TaskCard({ task, onOpen }: { task: TaskDetailDto; onOpen: () => void }): JSX.Element {
@@ -111,6 +120,9 @@ function TaskSingle({
 }): JSX.Element {
   const [section, setSection] = useState<null | 'schedule' | 'prompt' | 'script'>(null);
   const [draft, setDraft] = useState('');
+  const [schedKind, setSchedKind] = useState<'once' | 'cron'>('cron');
+  const [dtDraft, setDtDraft] = useState('');
+  const [infoOpen, setInfoOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -126,12 +138,30 @@ function TaskSingle({
     setErr(null);
     try {
       const body: Record<string, unknown> = {};
-      if (section === 'schedule') body.recurrence = draft.trim() ? draft.trim() : null;
-      else if (section === 'prompt') body.prompt = draft;
+      if (section === 'schedule') {
+        if (schedKind === 'once') {
+          const ms = Date.parse(dtDraft);
+          if (!Number.isFinite(ms)) {
+            setErr('Pick a valid date and time.');
+            return;
+          }
+          body.processAfter = new Date(ms).toISOString();
+          body.recurrence = null;
+        } else {
+          body.recurrence = draft.trim() ? draft.trim() : null;
+        }
+      } else if (section === 'prompt') body.prompt = draft;
       else body.script = draft;
       const r = await patchJson<TasksResponse>(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`), body);
       if (!r.ok) {
-        setErr(r.data.error === 'invalid_recurrence' ? 'Invalid cron expression.' : r.data.error || `HTTP ${r.status}`);
+        const e = r.data.error;
+        setErr(
+          e === 'invalid_recurrence'
+            ? 'Invalid cron expression.'
+            : e === 'invalid_process_after'
+              ? 'Invalid date/time.'
+              : e || `HTTP ${r.status}`,
+        );
         return;
       }
       onTasks(r.data.tasks || []);
@@ -161,6 +191,30 @@ function TaskSingle({
     }
   }
 
+  // Nudge the next run to "now" by rewriting process_after. Not truly instant:
+  // the host sweep polls for due tasks roughly once a minute (see the info
+  // popover). For a recurring series this fires one extra run; the normal
+  // cadence resumes because the next occurrence is recomputed from the cron.
+  async function runNow(): Promise<void> {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await patchJson<TasksResponse>(
+        taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`),
+        { processAfter: new Date().toISOString() },
+      );
+      if (!r.ok) {
+        setErr(r.data.error || `HTTP ${r.status}`);
+        showToast('Run now failed', 'err');
+        return;
+      }
+      onTasks(r.data.tasks || []);
+      showToast('Queued to run shortly', 'ok');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const promptHtml = renderMarkdown(task.prompt);
   const hi = task.script ? highlightCode(task.script, 'script.sh') : null;
   const lockOther = (sec: string): boolean => busy || (section !== null && section !== sec);
@@ -185,7 +239,13 @@ function TaskSingle({
               type="button"
               class="task-sec-edit"
               disabled={lockOther('schedule')}
-              onClick={() => begin('schedule', task.recurrence || '')}
+              onClick={() => {
+                setErr(null);
+                setSchedKind(task.recurrence ? 'cron' : 'once');
+                setDraft(task.recurrence || '');
+                setDtDraft(toDatetimeLocal(task.nextRunAt));
+                setSection('schedule');
+              }}
             >
               Edit
             </button>
@@ -193,13 +253,43 @@ function TaskSingle({
         </div>
         {section === 'schedule' ? (
           <div class="task-sec-edit-body">
-            <input
-              type="text"
-              placeholder="30 10 * * *"
-              value={draft}
-              onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setDraft(e.currentTarget.value)}
-            />
-            <span class="muted task-cron-preview">{humanizeCron(draft.trim() || null)}</span>
+            <div class="task-sched-kind">
+              <label>
+                <input
+                  type="radio"
+                  name="task-sched-kind"
+                  checked={schedKind === 'once'}
+                  onChange={() => setSchedKind('once')}
+                />
+                {' '}One-time
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="task-sched-kind"
+                  checked={schedKind === 'cron'}
+                  onChange={() => setSchedKind('cron')}
+                />
+                {' '}Recurring
+              </label>
+            </div>
+            {schedKind === 'once' ? (
+              <input
+                type="datetime-local"
+                value={dtDraft}
+                onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setDtDraft(e.currentTarget.value)}
+              />
+            ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder="30 10 * * *"
+                  value={draft}
+                  onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setDraft(e.currentTarget.value)}
+                />
+                <span class="muted task-cron-preview">{humanizeCron(draft.trim() || null)}</span>
+              </>
+            )}
             <div class="task-actions">
               <button type="button" onClick={save} disabled={busy}>{busy ? 'Saving\u2026' : 'Save'}</button>
               <button type="button" class="ghost" onClick={() => setSection(null)} disabled={busy}>Cancel</button>
@@ -288,6 +378,35 @@ function TaskSingle({
 
       {/* Lifecycle actions */}
       <div class="task-single-actions">
+        <div class="task-run-now">
+          <button
+            type="button"
+            onClick={runNow}
+            disabled={busy || section !== null || task.status === 'paused'}
+            title={task.status === 'paused' ? 'Resume the task before running it now' : undefined}
+          >
+            Run now
+          </button>
+          <button
+            type="button"
+            class="task-info-btn"
+            aria-label="About Run now"
+            aria-expanded={infoOpen}
+            onClick={() => setInfoOpen((v) => !v)}
+          >
+            i
+          </button>
+          {infoOpen ? (
+            <>
+              <div class="task-info-backdrop" onClick={() => setInfoOpen(false)} />
+              <div class="task-info-pop" role="tooltip">
+                Not truly instant. The scheduler checks for due tasks about once a
+                minute, so it may take up to ~60 seconds for the run to actually
+                start.
+              </div>
+            </>
+          ) : null}
+        </div>
         {task.status === 'paused' ? (
           <button type="button" onClick={() => act('resume')} disabled={busy || section !== null}>Resume</button>
         ) : (

@@ -22404,6 +22404,12 @@ function fmtNextRun(iso) {
   if (day < 7) return `in ${day}d`;
   return new Date(t4).toLocaleDateString();
 }
+function toDatetimeLocal(iso) {
+  const t4 = iso ? Date.parse(iso) : NaN;
+  const d5 = Number.isFinite(t4) ? new Date(t4) : /* @__PURE__ */ new Date();
+  const pad = (n3) => String(n3).padStart(2, "0");
+  return `${d5.getFullYear()}-${pad(d5.getMonth() + 1)}-${pad(d5.getDate())}T${pad(d5.getHours())}:${pad(d5.getMinutes())}`;
+}
 function TaskCard({ task, onOpen }) {
   return /* @__PURE__ */ u4("div", { class: "task-card" + (task.status === "paused" ? " paused" : ""), "data-series-id": task.seriesId, children: [
     /* @__PURE__ */ u4("button", { type: "button", class: "task-card-summary", onClick: onOpen, title: "Open task", children: task.summary || "(no prompt)" }),
@@ -22426,6 +22432,9 @@ function TaskSingle({
 }) {
   const [section, setSection] = h2(null);
   const [draft, setDraft] = h2("");
+  const [schedKind, setSchedKind] = h2("cron");
+  const [dtDraft, setDtDraft] = h2("");
+  const [infoOpen, setInfoOpen] = h2(false);
   const [busy, setBusy] = h2(false);
   const [err, setErr] = h2(null);
   function begin(sec, initial) {
@@ -22439,12 +22448,26 @@ function TaskSingle({
     setErr(null);
     try {
       const body = {};
-      if (section === "schedule") body.recurrence = draft.trim() ? draft.trim() : null;
-      else if (section === "prompt") body.prompt = draft;
+      if (section === "schedule") {
+        if (schedKind === "once") {
+          const ms = Date.parse(dtDraft);
+          if (!Number.isFinite(ms)) {
+            setErr("Pick a valid date and time.");
+            return;
+          }
+          body.processAfter = new Date(ms).toISOString();
+          body.recurrence = null;
+        } else {
+          body.recurrence = draft.trim() ? draft.trim() : null;
+        }
+      } else if (section === "prompt") body.prompt = draft;
       else body.script = draft;
       const r4 = await patchJson(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`), body);
       if (!r4.ok) {
-        setErr(r4.data.error === "invalid_recurrence" ? "Invalid cron expression." : r4.data.error || `HTTP ${r4.status}`);
+        const e4 = r4.data.error;
+        setErr(
+          e4 === "invalid_recurrence" ? "Invalid cron expression." : e4 === "invalid_process_after" ? "Invalid date/time." : e4 || `HTTP ${r4.status}`
+        );
         return;
       }
       onTasks(r4.data.tasks || []);
@@ -22472,6 +22495,25 @@ function TaskSingle({
       setBusy(false);
     }
   }
+  async function runNow() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r4 = await patchJson(
+        taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`),
+        { processAfter: (/* @__PURE__ */ new Date()).toISOString() }
+      );
+      if (!r4.ok) {
+        setErr(r4.data.error || `HTTP ${r4.status}`);
+        showToast("Run now failed", "err");
+        return;
+      }
+      onTasks(r4.data.tasks || []);
+      showToast("Queued to run shortly", "ok");
+    } finally {
+      setBusy(false);
+    }
+  }
   const promptHtml = renderMarkdown(task.prompt);
   const hi = task.script ? highlightCode(task.script, "script.sh") : null;
   const lockOther = (sec) => busy || section !== null && section !== sec;
@@ -22494,22 +22536,65 @@ function TaskSingle({
             type: "button",
             class: "task-sec-edit",
             disabled: lockOther("schedule"),
-            onClick: () => begin("schedule", task.recurrence || ""),
+            onClick: () => {
+              setErr(null);
+              setSchedKind(task.recurrence ? "cron" : "once");
+              setDraft(task.recurrence || "");
+              setDtDraft(toDatetimeLocal(task.nextRunAt));
+              setSection("schedule");
+            },
             children: "Edit"
           }
         )
       ] }),
       section === "schedule" ? /* @__PURE__ */ u4("div", { class: "task-sec-edit-body", children: [
-        /* @__PURE__ */ u4(
+        /* @__PURE__ */ u4("div", { class: "task-sched-kind", children: [
+          /* @__PURE__ */ u4("label", { children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "radio",
+                name: "task-sched-kind",
+                checked: schedKind === "once",
+                onChange: () => setSchedKind("once")
+              }
+            ),
+            " ",
+            "One-time"
+          ] }),
+          /* @__PURE__ */ u4("label", { children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "radio",
+                name: "task-sched-kind",
+                checked: schedKind === "cron",
+                onChange: () => setSchedKind("cron")
+              }
+            ),
+            " ",
+            "Recurring"
+          ] })
+        ] }),
+        schedKind === "once" ? /* @__PURE__ */ u4(
           "input",
           {
-            type: "text",
-            placeholder: "30 10 * * *",
-            value: draft,
-            onInput: (e4) => setDraft(e4.currentTarget.value)
+            type: "datetime-local",
+            value: dtDraft,
+            onInput: (e4) => setDtDraft(e4.currentTarget.value)
           }
-        ),
-        /* @__PURE__ */ u4("span", { class: "muted task-cron-preview", children: humanizeCron(draft.trim() || null) }),
+        ) : /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "text",
+              placeholder: "30 10 * * *",
+              value: draft,
+              onInput: (e4) => setDraft(e4.currentTarget.value)
+            }
+          ),
+          /* @__PURE__ */ u4("span", { class: "muted task-cron-preview", children: humanizeCron(draft.trim() || null) })
+        ] }),
         /* @__PURE__ */ u4("div", { class: "task-actions", children: [
           /* @__PURE__ */ u4("button", { type: "button", onClick: save, disabled: busy, children: busy ? "Saving\u2026" : "Save" }),
           /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setSection(null), disabled: busy, children: "Cancel" })
@@ -22566,6 +22651,33 @@ function TaskSingle({
       ] })
     ] }),
     /* @__PURE__ */ u4("div", { class: "task-single-actions", children: [
+      /* @__PURE__ */ u4("div", { class: "task-run-now", children: [
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            onClick: runNow,
+            disabled: busy || section !== null || task.status === "paused",
+            title: task.status === "paused" ? "Resume the task before running it now" : void 0,
+            children: "Run now"
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "task-info-btn",
+            "aria-label": "About Run now",
+            "aria-expanded": infoOpen,
+            onClick: () => setInfoOpen((v5) => !v5),
+            children: "i"
+          }
+        ),
+        infoOpen ? /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("div", { class: "task-info-backdrop", onClick: () => setInfoOpen(false) }),
+          /* @__PURE__ */ u4("div", { class: "task-info-pop", role: "tooltip", children: "Not truly instant. The scheduler checks for due tasks about once a minute, so it may take up to ~60 seconds for the run to actually start." })
+        ] }) : null
+      ] }),
       task.status === "paused" ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => act("resume"), disabled: busy || section !== null, children: "Resume" }) : /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => act("pause"), disabled: busy || section !== null, children: "Pause" }),
       /* @__PURE__ */ u4("button", { type: "button", class: "ghost danger", onClick: () => act("cancel"), disabled: busy || section !== null, children: "Cancel task" })
     ] })

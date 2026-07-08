@@ -192,6 +192,66 @@
   margin-left: auto;
 }
 
+/* Schedule editor: one-time vs recurring toggle. */
+.task-panel .task-sched-kind {
+  display: flex;
+  gap: 16px;
+  font-size: var(--font-xs, 12px);
+}
+.task-panel .task-sched-kind label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.task-panel .task-sec-edit-body input[type='datetime-local'] {
+  width: auto;
+}
+
+/* Run now + info popover. */
+.task-panel .task-run-now {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.task-panel .task-info-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--muted);
+  font: italic 600 11px/1 Georgia, 'Times New Roman', serif;
+  cursor: pointer;
+}
+.task-panel .task-info-btn:hover {
+  border-color: var(--accent, #4a90d9);
+  color: var(--accent, #4a90d9);
+}
+.task-panel .task-info-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.task-panel .task-info-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 41;
+  width: 240px;
+  max-width: 70vw;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, var(--bg, #fff));
+  color: var(--surface-fg, inherit);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  font-size: var(--font-xs, 12px);
+  line-height: 1.4;
+}
+
 /* Markdown-rendered prompt: tighten first/last margins so it sits flush. */
 .task-panel .markdown-preview > :first-child { margin-top: 0; }
 .task-panel .markdown-preview > :last-child { margin-bottom: 0; }
