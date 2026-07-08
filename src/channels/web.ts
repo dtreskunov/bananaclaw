@@ -20,8 +20,24 @@ import type { ActivityLine, ChannelAdapter, ChannelSetup, InboundEvent, Outbound
 import { registerChannelAdapter } from './channel-registry.js';
 import { log } from '../log.js';
 import { sendToUser as sendPushToUser } from '../modules/push/sender.js';
+import { onTaskRun as onTaskRunNotice, type TaskRunNotice } from '../task-events.js';
 
 export const WEB_CHANNEL_TYPE = 'web';
+
+/** A scheduled task firing — a completed `kind='task'` row in this session. */
+export interface WebTaskRunEvent {
+  /** messages_in.id of the completed task row (client dedup key). */
+  id: string;
+  /** ISO timestamp the run was due (process_after, falling back to the row
+   *  creation timestamp for legacy rows). */
+  timestamp: string;
+  /** Raw task content JSON (`{ prompt, script }`) for summary derivation. */
+  content: string;
+  /** Cron expression when recurring; null for a one-off. */
+  recurrence: string | null;
+  /** series_id grouping recurring occurrences (null for legacy one-offs). */
+  seriesId: string | null;
+}
 
 /** A live subscriber — typically a WebSocket connection. */
 export interface WebSubscriber {
@@ -36,13 +52,58 @@ export interface WebSubscriber {
    *  activity-trace lines appended since the last call (the full ordered
    *  trace for the turn accumulates client-side). */
   onTyping?(on: boolean, hint?: string, items?: ActivityLine[]): void;
+  /** Called when a scheduled task fires (a task row transitions to
+   *  `completed`), so the client can drop a timeline event without a reload. */
+  onTaskRun?(event: WebTaskRunEvent): void;
 }
 
 let setupCallbacks: ChannelSetup | null = null;
 const subscribers = new Map<string, Set<WebSubscriber>>();
+let unsubscribeTaskRun: (() => void) | null = null;
 
 function subKey(platformId: string, threadId: string | null): string {
   return `${platformId}::${threadId ?? ''}`;
+}
+
+/**
+ * Fan a scheduled-task firing out to any live subscribers on this session.
+ * No-op when no tab is attached (history backfills on reload).
+ *
+ * DM task rows store `thread_id = NULL`, but the DM socket subscribes under a
+ * synthetic `__dm:` thread key, so a null threadId fans out to every DM
+ * subscriber on this platform.
+ */
+function fanOutTaskRun(platformId: string, threadId: string | null, event: WebTaskRunEvent): void {
+  const deliver = (set: Set<WebSubscriber> | undefined): void => {
+    if (!set) return;
+    for (const sub of set) {
+      try {
+        sub.onTaskRun?.(event);
+      } catch (err) {
+        log.warn('web subscriber onTaskRun threw', { err });
+      }
+    }
+  };
+  if (threadId) {
+    deliver(subscribers.get(subKey(platformId, threadId)));
+    return;
+  }
+  const dmPrefix = `${platformId}::__dm:`;
+  for (const [key, set] of subscribers) {
+    if (key.startsWith(dmPrefix)) deliver(set);
+  }
+}
+
+/** Subscribe to the core task-run bus, filtering to web task rows. */
+function handleTaskRunNotice(notice: TaskRunNotice): void {
+  if (notice.channelType !== WEB_CHANNEL_TYPE) return;
+  fanOutTaskRun(notice.platformId, notice.threadId, {
+    id: notice.id,
+    timestamp: notice.timestamp,
+    content: notice.content,
+    recurrence: notice.recurrence,
+    seriesId: notice.seriesId,
+  });
 }
 
 /** Register a subscriber for live messages on this (platformId, threadId). */
@@ -129,11 +190,15 @@ function createAdapter(): ChannelAdapter {
 
     async setup(config: ChannelSetup): Promise<void> {
       setupCallbacks = config;
+      unsubscribeTaskRun?.();
+      unsubscribeTaskRun = onTaskRunNotice(handleTaskRunNotice);
       log.info('Web channel ready');
     },
 
     async teardown(): Promise<void> {
       setupCallbacks = null;
+      unsubscribeTaskRun?.();
+      unsubscribeTaskRun = null;
       subscribers.clear();
     },
 

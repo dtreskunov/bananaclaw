@@ -18033,6 +18033,31 @@ function connectChatWs() {
       if (changed) chatMessages.value = next;
       return;
     }
+    if (payload.kind === "task-run") {
+      const id = payload.id;
+      if (id) {
+        const key = `event:${id}`;
+        if (!refs.seenIds.has(key)) {
+          refs.seenIds.add(key);
+          const summary = payload.summary || "Scheduled task";
+          chatMessages.value = chatMessages.value.concat({
+            id,
+            direction: "event",
+            text: `Scheduled task ran: ${summary}`,
+            files: null,
+            ts: payload.timestamp || (/* @__PURE__ */ new Date()).toISOString(),
+            event: {
+              kind: "task-run",
+              summary,
+              ...payload.taskId ? { taskId: payload.taskId } : {},
+              ...payload.recurrence ? { recurrence: payload.recurrence } : {}
+            }
+          });
+        }
+      }
+      if (groupId.value) void loadThreads(groupId.value);
+      return;
+    }
   };
 }
 async function sendChat(text, files) {

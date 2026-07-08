@@ -248,9 +248,9 @@ export interface RouterApi {
   notFound: (msg: string) => void;
 }
 
-// Value sent by the chat WS in `kind: 'inbound'|'outbound'|'typing'|'ready'|'usage'`.
+// Value sent by the chat WS in `kind: 'inbound'|'outbound'|'typing'|'ready'|'usage'|'task-run'`.
 export interface WsPayload {
-  kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage';
+  kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'task-run';
   on?: boolean;
   hint?: string;
   items?: ActivityLine[] | null;
@@ -262,4 +262,8 @@ export interface WsPayload {
   messageKind?: 'internal' | 'final' | string;
   usage?: TurnUsage;
   question?: { questionId: string; title: string; options: { label: string; value: string }[] };
+  /** task-run frame fields. */
+  summary?: string;
+  taskId?: string;
+  recurrence?: string | null;
 }

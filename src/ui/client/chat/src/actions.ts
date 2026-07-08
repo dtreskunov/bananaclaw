@@ -775,6 +775,34 @@ function connectChatWs(): void {
       if (changed) chatMessages.value = next;
       return;
     }
+    if (payload.kind === 'task-run') {
+      // A scheduled task just fired. Drop a timeline event bubble (mirrors the
+      // /history event row) and refresh the thread list so the live-task pill's
+      // next-run label reflects the newly-cloned recurrence.
+      const id = payload.id;
+      if (id) {
+        const key = `event:${id}`;
+        if (!refs.seenIds.has(key)) {
+          refs.seenIds.add(key);
+          const summary = payload.summary || 'Scheduled task';
+          chatMessages.value = chatMessages.value.concat({
+            id,
+            direction: 'event',
+            text: `Scheduled task ran: ${summary}`,
+            files: null,
+            ts: payload.timestamp || new Date().toISOString(),
+            event: {
+              kind: 'task-run',
+              summary,
+              ...(payload.taskId ? { taskId: payload.taskId } : {}),
+              ...(payload.recurrence ? { recurrence: payload.recurrence } : {}),
+            },
+          });
+        }
+      }
+      if (groupId.value) void loadThreads(groupId.value);
+      return;
+    }
   };
 }
 

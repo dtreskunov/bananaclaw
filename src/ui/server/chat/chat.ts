@@ -2737,6 +2737,23 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
         log.warn('web chat ws typing send failed', { err });
       }
     },
+    onTaskRun(event) {
+      try {
+        const summary = summarizeTaskPrompt(event.content);
+        ws.send(
+          JSON.stringify({
+            kind: 'task-run',
+            id: event.id,
+            timestamp: event.timestamp,
+            summary,
+            ...(event.seriesId ? { taskId: event.seriesId } : {}),
+            ...(event.recurrence ? { recurrence: event.recurrence } : {}),
+          }),
+        );
+      } catch (err) {
+        log.warn('web chat ws task-run send failed', { err });
+      }
+    },
   };
   const unsubscribe = subscribeWeb(ctx.platformId, ctx.threadId, subscriber);
 

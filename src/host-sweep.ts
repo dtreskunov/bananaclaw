@@ -48,6 +48,7 @@ import {
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath, heartbeatPath } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
+import { publishTaskRun } from './task-events.js';
 import type { Session } from './types.js';
 
 /**
@@ -157,10 +158,54 @@ async function sweep(): Promise<void> {
   setTimeout(sweep, SWEEP_INTERVAL_MS);
 }
 
+/**
+ * Publish "scheduled task ran" notices for task rows among the ids that just
+ * transitioned to completed. Channel adapters subscribe via `onTaskRun` and
+ * decide whether/how to surface the firing; this stays channel-agnostic.
+ */
+function emitTaskRuns(inDb: Database.Database, completedIds: string[]): void {
+  try {
+    const placeholders = completedIds.map(() => '?').join(',');
+    const rows = inDb
+      .prepare(
+        `SELECT id, timestamp, process_after, content, recurrence, series_id, platform_id, channel_type, thread_id
+           FROM messages_in
+          WHERE kind = 'task' AND id IN (${placeholders})`,
+      )
+      .all(...completedIds) as Array<{
+      id: string;
+      timestamp: string;
+      process_after: string | null;
+      content: string;
+      recurrence: string | null;
+      series_id: string | null;
+      platform_id: string;
+      channel_type: string;
+      thread_id: string | null;
+    }>;
+    for (const r of rows) {
+      publishTaskRun({
+        channelType: r.channel_type,
+        platformId: r.platform_id,
+        threadId: r.thread_id,
+        id: r.id,
+        // Place the firing at the time it was due to run (process_after),
+        // matching the /history event bubble; fall back to the row creation
+        // timestamp for legacy rows that predate process_after.
+        timestamp: r.process_after ?? r.timestamp,
+        content: r.content,
+        recurrence: r.recurrence,
+        seriesId: r.series_id,
+      });
+    }
+  } catch (err) {
+    log.warn('emitTaskRuns failed', { err });
+  }
+}
+
 async function sweepSession(session: Session): Promise<void> {
   const agentGroup = getAgentGroup(session.agent_group_id);
   if (!agentGroup) return;
-
   const inPath = inboundDbPath(agentGroup.id, session.id);
   if (!fs.existsSync(inPath)) return;
 
@@ -181,7 +226,16 @@ async function sweepSession(session: Session): Promise<void> {
   try {
     // 1. Sync processing_ack → messages_in status
     if (outDb) {
-      syncProcessingAcks(inDb, outDb);
+      const justCompleted = syncProcessingAcks(inDb, outDb);
+      // Push a live "scheduled task ran" event for any web task row that just
+      // transitioned to completed, so an open chat tab drops the timeline
+      // bubble (and refreshes its next-run pill) without a reload. History
+      // backfills the same bubble on load, so a missed push (no live tab) is
+      // harmless. `syncProcessingAcks` returns only genuine transitions, so
+      // this fires exactly once per firing.
+      if (justCompleted.length > 0) {
+        emitTaskRuns(inDb, justCompleted);
+      }
     }
 
     // 2. Wake a container if work is due and nothing is running. Ordered
