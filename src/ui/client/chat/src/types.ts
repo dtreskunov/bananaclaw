@@ -60,6 +60,23 @@ export interface LiveTaskDto {
   paused: boolean;
 }
 
+/** Full per-series detail for the scheduled-tasks management panel. */
+export interface TaskDetailDto {
+  seriesId: string;
+  status: 'pending' | 'paused';
+  nextRunAt: string | null;
+  recurrence: string | null;
+  summary: string;
+  prompt: string;
+  hasScript: boolean;
+}
+
+/** Open-request for the task panel: which thread's tasks to manage. */
+export interface TaskPanelRequest {
+  gid: string;
+  tid: string;
+}
+
 export interface ThreadCtx {
   channelType: ChannelType;
   messagingGroupId: string | null;

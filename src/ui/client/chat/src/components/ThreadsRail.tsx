@@ -6,7 +6,7 @@ import {
   threads, threadId, groupId, drawerOpen, channelMeta,
   searchQuery, searchResults, searchLoading, searchOpen, highlightMessageId,
 } from '../state';
-import { openChat, deleteThread, searchThreads, clearSearch } from '../actions';
+import { openChat, deleteThread, searchThreads, clearSearch, openTaskPanel } from '../actions';
 import { requestConfirm } from './PromptModal';
 import { tsKey } from '../utils';
 import { Pane } from './Pane';
@@ -58,7 +58,18 @@ function ThreadRow({ t }: { t: Thread }) {
       <div class="title">
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
         {t.title}
-        {lt ? <span class={'task-badge' + (lt.paused ? ' paused' : '')} title={liveTaskTitle}>{'\u23F0'}</span> : null}
+        {lt ? (
+          <button
+            type="button"
+            class={'task-badge' + (lt.paused ? ' paused' : '')}
+            title={liveTaskTitle}
+            aria-label="Scheduled tasks"
+            onClick={(ev: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
+              ev.stopPropagation();
+              if (groupId.value) openTaskPanel(groupId.value, t.threadId);
+            }}
+          >{'\u23F0'}</button>
+        ) : null}
       </div>
       <div class="meta"><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</div>
       {ct === 'web'

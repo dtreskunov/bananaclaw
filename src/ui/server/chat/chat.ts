@@ -29,6 +29,8 @@ import {
 import { deleteSession, findSessionByAgentGroup, findSessionForAgent } from '../../../db/sessions.js';
 import { openInboundDb, openOutboundDb, sessionDir, writeSessionMessage } from '../../../session-manager.js';
 import { killContainer } from '../../../container-runner.js';
+import { cancelTask, pauseTask, resumeTask, updateTask, type TaskUpdate } from '../../../modules/scheduling/db.js';
+import { TIMEZONE } from '../../../config.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import { searchMessages, type SearchResultRow } from '../../../search-index.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
@@ -153,6 +155,9 @@ export function matchChatPath(
   | { kind: 'history'; groupId: string; threadId: string }
   | { kind: 'threads'; groupId: string }
   | { kind: 'search'; groupId: string }
+  | { kind: 'tasks'; groupId: string; threadId: string }
+  | { kind: 'task-action'; groupId: string; threadId: string; seriesId: string; action: 'pause' | 'resume' | 'cancel' }
+  | { kind: 'task-update'; groupId: string; threadId: string; seriesId: string }
   | { kind: 'delete'; groupId: string; threadId: string }
   | { kind: 'voice-transcribe'; groupId: string; threadId: string }
   | { kind: 'attachment'; groupId: string; threadId: string; attachmentPath: string }
@@ -182,6 +187,26 @@ export function matchChatPath(
   if (send) return { kind: 'send', groupId: decodeURIComponent(send[1]), threadId: decodeURIComponent(send[2]) };
   const hist = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/history$/);
   if (hist) return { kind: 'history', groupId: decodeURIComponent(hist[1]), threadId: decodeURIComponent(hist[2]) };
+  const tasksList = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks$/);
+  if (tasksList)
+    return { kind: 'tasks', groupId: decodeURIComponent(tasksList[1]), threadId: decodeURIComponent(tasksList[2]) };
+  const taskAction = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks\/([^/]+)\/(pause|resume|cancel)$/);
+  if (taskAction)
+    return {
+      kind: 'task-action',
+      groupId: decodeURIComponent(taskAction[1]),
+      threadId: decodeURIComponent(taskAction[2]),
+      seriesId: decodeURIComponent(taskAction[3]),
+      action: taskAction[4] as 'pause' | 'resume' | 'cancel',
+    };
+  const taskUpdate = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks\/([^/]+)$/);
+  if (taskUpdate)
+    return {
+      kind: 'task-update',
+      groupId: decodeURIComponent(taskUpdate[1]),
+      threadId: decodeURIComponent(taskUpdate[2]),
+      seriesId: decodeURIComponent(taskUpdate[3]),
+    };
   const del = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)$/);
   if (del) return { kind: 'delete', groupId: decodeURIComponent(del[1]), threadId: decodeURIComponent(del[2]) };
   return null;
@@ -578,6 +603,135 @@ export async function handleChatRequest(
     } catch (err) {
       log.warn('web chat thread delete failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
       writeJson(res, 500, { error: 'delete_failed' });
+    }
+    return true;
+  }
+
+  if (m.kind === 'tasks') {
+    if (req.method !== 'GET') {
+      writeJson(res, 405, { error: 'method_not_allowed' });
+      return true;
+    }
+    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, taskOverride(req));
+    if (!r) {
+      writeJson(res, 200, { tasks: [], timezone: TIMEZONE });
+      return true;
+    }
+    try {
+      const tasks = readLiveTaskDetails(m.groupId, r.sessionId, r.channelType, m.threadId, r.isDm);
+      writeJson(res, 200, { tasks, timezone: TIMEZONE });
+    } catch (err) {
+      log.warn('web chat task list failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
+      writeJson(res, 200, { tasks: [], timezone: TIMEZONE });
+    }
+    return true;
+  }
+
+  if (m.kind === 'task-action') {
+    if (req.method !== 'POST') {
+      writeJson(res, 405, { error: 'method_not_allowed' });
+      return true;
+    }
+    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, taskOverride(req));
+    if (!r) {
+      writeJson(res, 404, { error: 'thread_not_found' });
+      return true;
+    }
+    try {
+      const inDb = openInboundDb(m.groupId, r.sessionId);
+      try {
+        const exists = inDb
+          .prepare(
+            "SELECT 1 FROM messages_in WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status IN ('pending', 'paused') LIMIT 1",
+          )
+          .get(m.seriesId, m.seriesId);
+        if (!exists) {
+          writeJson(res, 404, { error: 'task_not_found' });
+          return true;
+        }
+        if (m.action === 'pause') pauseTask(inDb, m.seriesId);
+        else if (m.action === 'resume') resumeTask(inDb, m.seriesId);
+        else cancelTask(inDb, m.seriesId);
+      } finally {
+        inDb.close();
+      }
+      const tasks = readLiveTaskDetails(m.groupId, r.sessionId, r.channelType, m.threadId, r.isDm);
+      writeJson(res, 200, { ok: true, tasks });
+    } catch (err) {
+      log.warn('web chat task action failed', {
+        userId,
+        groupId: m.groupId,
+        threadId: m.threadId,
+        action: m.action,
+        err,
+      });
+      writeJson(res, 500, { error: 'task_action_failed' });
+    }
+    return true;
+  }
+
+  if (m.kind === 'task-update') {
+    if (req.method !== 'PATCH') {
+      writeJson(res, 405, { error: 'method_not_allowed' });
+      return true;
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      writeJson(res, 400, { error: 'invalid_body', detail: (err as Error).message });
+      return true;
+    }
+    const b = (body ?? {}) as Record<string, unknown>;
+    const update: TaskUpdate = {};
+    if (typeof b.prompt === 'string') {
+      if (!b.prompt.trim()) {
+        writeJson(res, 400, { error: 'empty_prompt' });
+        return true;
+      }
+      update.prompt = b.prompt;
+    }
+    if (typeof b.processAfter === 'string') {
+      if (Number.isNaN(Date.parse(b.processAfter))) {
+        writeJson(res, 400, { error: 'invalid_process_after' });
+        return true;
+      }
+      update.processAfter = b.processAfter;
+    }
+    if (b.recurrence === null || typeof b.recurrence === 'string') {
+      const cron = b.recurrence as string | null;
+      if (typeof cron === 'string' && cron.trim() && !(await isValidCron(cron))) {
+        writeJson(res, 400, { error: 'invalid_recurrence' });
+        return true;
+      }
+      update.recurrence = typeof cron === 'string' && !cron.trim() ? null : cron;
+    }
+    if (Object.keys(update).length === 0) {
+      writeJson(res, 400, { error: 'no_fields' });
+      return true;
+    }
+    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, taskOverride(req));
+    if (!r) {
+      writeJson(res, 404, { error: 'thread_not_found' });
+      return true;
+    }
+    try {
+      let touched = 0;
+      const inDb = openInboundDb(m.groupId, r.sessionId);
+      try {
+        touched = updateTask(inDb, m.seriesId, update);
+      } finally {
+        inDb.close();
+      }
+      if (touched === 0) {
+        writeJson(res, 404, { error: 'task_not_found' });
+        return true;
+      }
+      const tasks = readLiveTaskDetails(m.groupId, r.sessionId, r.channelType, m.threadId, r.isDm);
+      writeJson(res, 200, { ok: true, tasks });
+    } catch (err) {
+      log.warn('web chat task update failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
+      writeJson(res, 500, { error: 'task_update_failed' });
     }
     return true;
   }
@@ -1480,6 +1634,137 @@ export interface LiveTaskDto {
   summary: string;
   /** True when the soonest-next-run task is paused rather than pending. */
   paused: boolean;
+}
+
+/** Full per-series detail for the task-management panel. */
+export interface TaskDetailDto {
+  /** series_id — stable across recurrences; the mutation handle. */
+  seriesId: string;
+  status: 'pending' | 'paused';
+  /** ISO timestamp of the next run, or null for a one-off with no wait. */
+  nextRunAt: string | null;
+  /** Cron expression when recurring, else null (one-off). */
+  recurrence: string | null;
+  /** One-line summary of the prompt (for the collapsed row). */
+  summary: string;
+  /** Full prompt text (for the edit form). */
+  prompt: string;
+  /** True when the task also carries a pre-check/exec script. */
+  hasScript: boolean;
+}
+
+/** Parse a task row's content JSON into its prompt + script presence. */
+function parseTaskContent(content: string): { prompt: string; hasScript: boolean } {
+  try {
+    const o = JSON.parse(content) as { prompt?: unknown; script?: unknown };
+    return {
+      prompt: typeof o?.prompt === 'string' ? o.prompt : '',
+      hasScript: typeof o?.script === 'string' && o.script.length > 0,
+    };
+  } catch {
+    return { prompt: '', hasScript: false };
+  }
+}
+
+/** Validate a cron expression in the configured timezone. */
+async function isValidCron(expr: string): Promise<boolean> {
+  try {
+    const { CronExpressionParser } = await import('cron-parser');
+    CronExpressionParser.parse(expr, { tz: TIMEZONE });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `?channel=&mg=` override for locating a non-web thread's session. */
+function taskOverride(req: http.IncomingMessage): { channelType: string; messagingGroupId: string } | undefined {
+  const q = new URLSearchParams((req.url || '').split('?')[1] || '');
+  const channel = q.get('channel') || undefined;
+  const mg = q.get('mg') || undefined;
+  return channel && mg ? { channelType: channel, messagingGroupId: mg } : undefined;
+}
+
+/**
+ * Resolve the session backing a chat thread for task management. Mirrors the
+ * ownership/DM scoping of readChatHistory so a user can only reach tasks in
+ * a thread they may view.
+ */
+function resolveThreadSessionForTasks(
+  userId: string,
+  groupId: string,
+  threadId: string,
+  override: { channelType: string; messagingGroupId: string } | undefined,
+): { sessionId: string; channelType: string; isDm: boolean } | null {
+  const elevated = isElevated(userId);
+  const target = resolveTargetMessagingGroup(userId, groupId, override, elevated);
+  if (!target) return null;
+  const isDm = threadId.startsWith('__dm:');
+  const session = resolveSessionForMode(groupId, target.messagingGroupId, target.sessionMode, isDm ? '' : threadId);
+  if (!session) return null;
+  return { sessionId: session.id, channelType: target.channelType, isDm };
+}
+
+/** Read full detail of the live (pending/paused) tasks in a thread's session. */
+function readLiveTaskDetails(
+  groupId: string,
+  sessionId: string,
+  channelType: string,
+  threadId: string,
+  isDm: boolean,
+): TaskDetailDto[] {
+  const out: TaskDetailDto[] = [];
+  try {
+    const inDb = openInboundDb(groupId, sessionId);
+    try {
+      const rows = (
+        isDm
+          ? inDb
+              .prepare(
+                `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
+                   FROM messages_in
+                  WHERE kind = 'task' AND status IN ('pending', 'paused')
+                    AND channel_type = ? AND thread_id IS NULL
+                  GROUP BY series_id
+                  ORDER BY (process_after IS NULL) ASC, process_after ASC`,
+              )
+              .all(channelType)
+          : inDb
+              .prepare(
+                `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
+                   FROM messages_in
+                  WHERE kind = 'task' AND status IN ('pending', 'paused')
+                    AND channel_type = ? AND thread_id = ?
+                  GROUP BY series_id
+                  ORDER BY (process_after IS NULL) ASC, process_after ASC`,
+              )
+              .all(channelType, threadId)
+      ) as {
+        id: string;
+        status: string;
+        process_after: string | null;
+        recurrence: string | null;
+        content: string;
+      }[];
+      for (const r of rows) {
+        const { prompt, hasScript } = parseTaskContent(r.content);
+        out.push({
+          seriesId: r.id,
+          status: r.status === 'paused' ? 'paused' : 'pending',
+          nextRunAt: r.process_after,
+          recurrence: r.recurrence,
+          summary: summarizeTaskPrompt(r.content),
+          prompt,
+          hasScript,
+        });
+      }
+    } finally {
+      inDb.close();
+    }
+  } catch {
+    // inbound db missing or predates task columns
+  }
+  return out;
 }
 
 interface UserMessagingContext {

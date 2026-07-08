@@ -7,6 +7,7 @@ import { ChatMain } from './ChatMain';
 import { FilesPane } from './FilesPane';
 import { Settings } from './Settings';
 import { ShareLinkModal } from './ShareLinkModal';
+import { TaskPanel } from './TaskPanel';
 import { PromptModal, ConfirmModal } from './PromptModal';
 import { Toast } from './Toast';
 import { GroupPickerModal } from './GroupPicker';
@@ -51,6 +52,7 @@ export function App() {
       <div class={'backdrop' + (backdropShown ? ' show' : '')} id="backdrop" onClick={onBackdrop}></div>
       <Settings />
       <ShareLinkModal />
+      <TaskPanel />
       <PromptModal />
       <ConfirmModal />
       <GroupPickerModal />

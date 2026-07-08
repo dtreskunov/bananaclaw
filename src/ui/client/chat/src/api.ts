@@ -33,3 +33,19 @@ export async function postJson<T = Record<string, unknown>>(path: string, body?:
   }
   return { ok: r.ok, status: r.status, data };
 }
+
+export async function patchJson<T = Record<string, unknown>>(path: string, body?: unknown): Promise<PostJsonResult<T>> {
+  const r = await fetch(path, {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  let data: T = {} as T;
+  try {
+    data = (await r.json()) as T;
+  } catch {
+    /* ignore non-JSON */
+  }
+  return { ok: r.ok, status: r.status, data };
+}

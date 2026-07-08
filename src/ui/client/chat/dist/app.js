@@ -15493,6 +15493,20 @@ async function postJson(path, body) {
   }
   return { ok: r4.ok, status: r4.status, data };
 }
+async function patchJson(path, body) {
+  const r4 = await fetch(path, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {})
+  });
+  let data = {};
+  try {
+    data = await r4.json();
+  } catch {
+  }
+  return { ok: r4.ok, status: r4.status, data };
+}
 
 // src/state.ts
 var groups = y3([]);
@@ -15552,6 +15566,7 @@ var groupAdminOpen = y3(false);
 var groupPickerOpen = y3(false);
 var groupPickerMode = y3("all");
 var shareModalRequest = y3(null);
+var taskPanelRequest = y3(null);
 var toastMessage = y3(null);
 var previewBlock = y3(null);
 var nowTick = y3(Date.now());
@@ -17670,6 +17685,23 @@ function historyUrl(gid, tid) {
   if (qs) u5 += "?" + qs;
   return u5;
 }
+function taskUrl(gid, tid, suffix = "") {
+  let u5 = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/tasks${suffix}`;
+  const params = new URLSearchParams();
+  const t4 = threads.value.find((x6) => x6.threadId === tid);
+  const ct = t4?.channelType || channelType.value;
+  const mg = t4?.messagingGroupId || messagingGroupId.value;
+  if (mg && ct !== "web") {
+    params.set("channel", ct);
+    params.set("mg", mg);
+  }
+  const qs = params.toString();
+  if (qs) u5 += "?" + qs;
+  return u5;
+}
+function openTaskPanel(gid, tid) {
+  taskPanelRequest.value = { gid, tid };
+}
 function appendMsg(direction, text, files, ts, id, activity) {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
@@ -19046,7 +19078,20 @@ function ThreadRow({ t: t4 }) {
     /* @__PURE__ */ u4("div", { class: "title", children: [
       ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
       t4.title,
-      lt ? /* @__PURE__ */ u4("span", { class: "task-badge" + (lt.paused ? " paused" : ""), title: liveTaskTitle, children: "\u23F0" }) : null
+      lt ? /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "task-badge" + (lt.paused ? " paused" : ""),
+          title: liveTaskTitle,
+          "aria-label": "Scheduled tasks",
+          onClick: (ev) => {
+            ev.stopPropagation();
+            if (groupId.value) openTaskPanel(groupId.value, t4.threadId);
+          },
+          children: "\u23F0"
+        }
+      ) : null
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
@@ -22260,6 +22305,204 @@ function ShareLinkModal() {
   ] }) });
 }
 
+// src/components/TaskPanel.tsx
+function humanizeCron(expr) {
+  if (!expr) return "One-off";
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return expr;
+  const [min, hour, dom, mon, dow] = parts;
+  const at = (h5, m6) => {
+    const hh = Number(h5);
+    const mm = Number(m6);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return `${h5}:${m6}`;
+    const ampm = hh < 12 ? "am" : "pm";
+    const h12 = hh % 12 === 0 ? 12 : hh % 12;
+    return `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
+  };
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const numeric = (s5) => /^\d+$/.test(s5);
+  if (dom === "*" && mon === "*" && dow === "*" && numeric(min) && numeric(hour)) {
+    return `Daily at ${at(hour, min)}`;
+  }
+  if (dom === "*" && mon === "*" && numeric(dow) && numeric(min) && numeric(hour)) {
+    return `Weekly on ${DAYS[Number(dow) % 7]} at ${at(hour, min)}`;
+  }
+  if (mon === "*" && dow === "*" && numeric(dom) && numeric(min) && numeric(hour)) {
+    return `Monthly on day ${dom} at ${at(hour, min)}`;
+  }
+  if (min.startsWith("*/") && hour === "*" && dom === "*" && mon === "*" && dow === "*") {
+    return `Every ${min.slice(2)} min`;
+  }
+  return expr;
+}
+function fmtNextRun(iso) {
+  const t4 = Date.parse(iso);
+  if (!Number.isFinite(t4)) return "";
+  const diff = t4 - Date.now();
+  if (diff <= 30 * 1e3) return "now";
+  const min = Math.round(diff / 6e4);
+  if (min < 60) return `in ${min}m`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `in ${hr}h`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `in ${day}d`;
+  return new Date(t4).toLocaleDateString();
+}
+function TaskPanel() {
+  const req = taskPanelRequest.value;
+  const [tasks, setTasks] = h2(null);
+  const [error, setError] = h2(null);
+  const [busyId, setBusyId] = h2(null);
+  const [editId, setEditId] = h2(null);
+  const [editPrompt, setEditPrompt] = h2("");
+  const [editCron, setEditCron] = h2("");
+  y2(() => {
+    if (!req) return;
+    setTasks(null);
+    setError(null);
+    setBusyId(null);
+    setEditId(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api(taskUrl(req.gid, req.tid));
+        if (!cancelled) setTasks(data.tasks || []);
+      } catch {
+        if (!cancelled) setError("Failed to load tasks.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [req?.gid, req?.tid]);
+  y2(() => {
+    if (!req) return void 0;
+    const onKey = (e4) => {
+      if (e4.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [req]);
+  if (!req) return null;
+  const { gid, tid } = req;
+  function close() {
+    taskPanelRequest.value = null;
+  }
+  function onBackdrop(e4) {
+    if (e4.target.classList.contains("settings-backdrop")) close();
+  }
+  async function doAction(seriesId, action) {
+    if (action === "cancel" && !window.confirm("Cancel this scheduled task? It will stop running.")) return;
+    setBusyId(seriesId);
+    setError(null);
+    try {
+      const r4 = await postJson(taskUrl(gid, tid, `/${encodeURIComponent(seriesId)}/${action}`));
+      if (!r4.ok) {
+        setError(r4.data.error || `HTTP ${r4.status}`);
+        showToast("Action failed", "err");
+        return;
+      }
+      setTasks(r4.data.tasks || []);
+      showToast(action === "pause" ? "Task paused" : action === "resume" ? "Task resumed" : "Task cancelled", "ok");
+    } finally {
+      setBusyId(null);
+    }
+  }
+  function startEdit(t4) {
+    setEditId(t4.seriesId);
+    setEditPrompt(t4.prompt);
+    setEditCron(t4.recurrence || "");
+  }
+  async function saveEdit(seriesId) {
+    setBusyId(seriesId);
+    setError(null);
+    try {
+      const body = { prompt: editPrompt };
+      body.recurrence = editCron.trim() ? editCron.trim() : null;
+      const r4 = await patchJson(taskUrl(gid, tid, `/${encodeURIComponent(seriesId)}`), body);
+      if (!r4.ok) {
+        setError(r4.data.error === "invalid_recurrence" ? "Invalid cron expression." : r4.data.error || `HTTP ${r4.status}`);
+        return;
+      }
+      setTasks(r4.data.tasks || []);
+      setEditId(null);
+      showToast("Task updated", "ok");
+    } finally {
+      setBusyId(null);
+    }
+  }
+  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "settings-modal task-panel", role: "dialog", "aria-label": "Scheduled tasks", style: "max-width:560px", children: [
+    /* @__PURE__ */ u4("header", { class: "settings-head", children: [
+      /* @__PURE__ */ u4("span", { class: "title", children: [
+        "\u23F0",
+        " Scheduled tasks"
+      ] }),
+      /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: close, children: "\u2715" })
+    ] }),
+    /* @__PURE__ */ u4("div", { class: "settings-body", children: [
+      error ? /* @__PURE__ */ u4("div", { class: "settings-status err", children: error }) : null,
+      tasks === null && !error ? /* @__PURE__ */ u4("p", { class: "muted", children: [
+        "Loading",
+        "\u2026"
+      ] }) : null,
+      tasks !== null && tasks.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", style: "margin-top:0", children: "No scheduled tasks in this thread." }) : null,
+      tasks?.map((t4) => {
+        const editing = editId === t4.seriesId;
+        const busy = busyId === t4.seriesId;
+        return /* @__PURE__ */ u4("div", { class: "task-row" + (t4.status === "paused" ? " paused" : ""), children: editing ? /* @__PURE__ */ u4("div", { class: "task-edit", children: [
+          /* @__PURE__ */ u4("label", { class: "task-field", children: [
+            /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Prompt" }),
+            /* @__PURE__ */ u4(
+              "textarea",
+              {
+                rows: 4,
+                value: editPrompt,
+                onInput: (e4) => setEditPrompt(e4.currentTarget.value)
+              }
+            )
+          ] }),
+          /* @__PURE__ */ u4("label", { class: "task-field", children: [
+            /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Schedule (cron, blank = one-off)" }),
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "text",
+                placeholder: "30 10 * * *",
+                value: editCron,
+                onInput: (e4) => setEditCron(e4.currentTarget.value)
+              }
+            ),
+            /* @__PURE__ */ u4("span", { class: "muted task-cron-preview", children: humanizeCron(editCron.trim() || null) })
+          ] }),
+          /* @__PURE__ */ u4("div", { class: "task-actions", children: [
+            /* @__PURE__ */ u4("button", { type: "button", onClick: () => saveEdit(t4.seriesId), disabled: busy || !editPrompt.trim(), children: busy ? "Saving\u2026" : "Save" }),
+            /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setEditId(null), disabled: busy, children: "Cancel" })
+          ] })
+        ] }) : /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("div", { class: "task-summary", children: [
+            t4.summary || "(no prompt)",
+            t4.hasScript ? /* @__PURE__ */ u4("span", { class: "task-script-tag", title: "Has a pre-check/exec script", children: "script" }) : null
+          ] }),
+          /* @__PURE__ */ u4("div", { class: "task-meta", children: [
+            /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(t4.recurrence) }),
+            t4.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(t4.nextRunAt).toLocaleString(), children: [
+              "next ",
+              fmtNextRun(t4.nextRunAt)
+            ] }) : null,
+            /* @__PURE__ */ u4("span", { class: "task-status " + t4.status, children: t4.status })
+          ] }),
+          /* @__PURE__ */ u4("div", { class: "task-actions", children: [
+            t4.status === "paused" ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => doAction(t4.seriesId, "resume"), disabled: busy, children: "Resume" }) : /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => doAction(t4.seriesId, "pause"), disabled: busy, children: "Pause" }),
+            /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => startEdit(t4), disabled: busy, children: "Edit" }),
+            /* @__PURE__ */ u4("button", { type: "button", class: "ghost danger", onClick: () => doAction(t4.seriesId, "cancel"), disabled: busy, children: "Cancel" })
+          ] })
+        ] }) }, t4.seriesId);
+      })
+    ] }),
+    /* @__PURE__ */ u4("div", { class: "settings-row", style: "padding:10px 16px;border-top:1px solid var(--border);justify-content:flex-end", children: /* @__PURE__ */ u4("button", { type: "button", onClick: close, children: "Done" }) })
+  ] }) });
+}
+
 // node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
@@ -25136,6 +25379,7 @@ function App() {
     /* @__PURE__ */ u4("div", { class: "backdrop" + (backdropShown ? " show" : ""), id: "backdrop", onClick: onBackdrop }),
     /* @__PURE__ */ u4(Settings, {}),
     /* @__PURE__ */ u4(ShareLinkModal, {}),
+    /* @__PURE__ */ u4(TaskPanel, {}),
     /* @__PURE__ */ u4(PromptModal, {}),
     /* @__PURE__ */ u4(ConfirmModal, {}),
     /* @__PURE__ */ u4(GroupPickerModal, {}),

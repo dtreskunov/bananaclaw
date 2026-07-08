@@ -16,6 +16,7 @@ import type {
   ChannelMetaEntry,
   SearchResult,
   ActivityLine,
+  TaskPanelRequest,
 } from './types';
 
 // ── reactive state ──────────────────────────────────────────────────
@@ -103,6 +104,7 @@ export const groupAdminOpen: Signal<boolean> = signal(false);
 export const groupPickerOpen: Signal<boolean> = signal(false);
 export const groupPickerMode: Signal<'all' | 'non-members'> = signal('all');
 export const shareModalRequest: Signal<ShareModalRequest | null> = signal<ShareModalRequest | null>(null);
+export const taskPanelRequest: Signal<TaskPanelRequest | null> = signal<TaskPanelRequest | null>(null);
 export const toastMessage: Signal<ToastMessage | null> = signal<ToastMessage | null>(null);
 export const previewBlock: Signal<PreviewBlock | null> = signal<PreviewBlock | null>(null);
 export const nowTick: Signal<number> = signal(Date.now());

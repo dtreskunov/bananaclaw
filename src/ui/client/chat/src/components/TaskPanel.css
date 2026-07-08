@@ -1,0 +1,88 @@
+.task-panel .task-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-panel .task-row.paused {
+  opacity: 0.7;
+}
+.task-panel .task-summary {
+  font-size: var(--font-sm, 13px);
+  line-height: 1.35;
+  word-break: break-word;
+}
+.task-panel .task-script-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: var(--font-2xs, 10px);
+  color: var(--muted);
+  vertical-align: middle;
+}
+.task-panel .task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--font-xs, 12px);
+  color: var(--muted);
+}
+.task-panel .task-schedule {
+  font-weight: 600;
+  color: var(--fg, inherit);
+}
+.task-panel .task-status {
+  margin-left: auto;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  text-transform: capitalize;
+}
+.task-panel .task-status.paused {
+  color: var(--muted);
+}
+.task-panel .task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.task-panel .task-actions .danger {
+  color: var(--danger, #c0392b);
+}
+.task-panel .task-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.task-panel .task-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.task-panel .task-field-label {
+  font-size: var(--font-xs, 12px);
+  color: var(--muted);
+}
+.task-panel .task-field textarea,
+.task-panel .task-field input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+.task-panel .task-cron-preview {
+  font-size: var(--font-xs, 12px);
+}
+
+/* Mobile: stack meta and let actions wrap; the modal already goes full-width
+   below MOBILE_MQ via Settings.css. */
+@media (max-width: 720px) {
+  .task-panel .task-status {
+    margin-left: 0;
+  }
+}

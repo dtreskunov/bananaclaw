@@ -36,6 +36,7 @@ import {
   searchOpen,
   highlightMessageId,
   scrollToBottomTick,
+  taskPanelRequest,
   SYNC_INTERVAL_MS,
 } from './state';
 import { api, postJson } from './api';
@@ -354,6 +355,31 @@ function historyUrl(gid: string, tid: string): string {
   const qs = params.toString();
   if (qs) u += '?' + qs;
   return u;
+}
+
+/**
+ * Build a task-endpoint URL for a thread, appending the `channel`/`mg`
+ * override for non-web threads (same resolution as `historyUrl`). `suffix`
+ * is an extra path segment such as `/${seriesId}/pause`.
+ */
+export function taskUrl(gid: string, tid: string, suffix = ''): string {
+  let u = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/tasks${suffix}`;
+  const params = new URLSearchParams();
+  const t = threads.value.find((x) => x.threadId === tid);
+  const ct = t?.channelType || channelType.value;
+  const mg = t?.messagingGroupId || messagingGroupId.value;
+  if (mg && ct !== 'web') {
+    params.set('channel', ct);
+    params.set('mg', mg);
+  }
+  const qs = params.toString();
+  if (qs) u += '?' + qs;
+  return u;
+}
+
+/** Open the scheduled-tasks management panel for a thread. */
+export function openTaskPanel(gid: string, tid: string): void {
+  taskPanelRequest.value = { gid, tid };
 }
 
 function appendMsg(
