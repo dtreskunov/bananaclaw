@@ -494,10 +494,10 @@ function fmtNextShort(iso: string | null): string {
   return new Date(t).toLocaleDateString();
 }
 
-/** Persistent, always-visible banner shown while the open thread has live
- *  scheduled task(s). Discovering scheduled tasks used to require scrolling to
- *  the task-run bubble or expanding the threads rail to spot a tiny icon; this
- *  surfaces them at the top of the log and opens the task panel on click. */
+/** Persistent, always-visible pill shown while the open thread has live
+ *  scheduled task(s). Mirrors the task-run bubble style and sticks to the
+ *  bottom of the log so tasks are discoverable without scrolling to the
+ *  task-run bubble or expanding the threads rail. Opens the task panel. */
 function TaskIndicator() {
   const gid = groupId.value;
   const tid = threadId.value;
@@ -512,22 +512,13 @@ function TaskIndicator() {
   return (
     <button
       type="button"
-      class={'task-indicator' + (lt.paused ? ' paused' : '')}
+      class={'msg event events-summary task-indicator' + (lt.paused ? ' paused' : '')}
       title={lt.summary || 'Manage scheduled tasks'}
       onClick={() => openTaskPanel(gid, tid)}
     >
-      <span class="ti-icon" aria-hidden="true">{'\u23F0'}</span>
-      <span class="ti-label">{label}</span>
-      {trailer
-        ? (
-          <>
-            <span class="ti-dot" aria-hidden="true">{'\u00b7'}</span>
-            <span class="ti-meta">{trailer}</span>
-          </>
-        )
-        : null}
-      <span class="ti-spacer" />
-      <span class="ti-cta">Manage</span>
+      <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
+      <span class="event-text">{label}</span>
+      {trailer ? <span class="event-meta">{trailer}</span> : null}
     </button>
   );
 }
@@ -618,7 +609,6 @@ function MessageLog() {
   const groups = groupMessages(list);
   return (
     <div class="log" id="chat-log" ref={ref} onScroll={onLogScroll}>
-      <TaskIndicator />
       {chatLoading.value
         ? null
         : !threadId.value
@@ -657,6 +647,7 @@ function MessageLog() {
           </div>
         )
         : null}
+      <TaskIndicator />
     </div>
   );
 }
