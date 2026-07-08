@@ -478,6 +478,60 @@ function ApprovalsBanner() {
   );
 }
 
+/** Future-aware short label; fmtRelative clamps future times to "just now". */
+function fmtNextShort(iso: string | null): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const diff = t - Date.now();
+  if (diff <= 30_000) return 'now';
+  const min = Math.round(diff / 60000);
+  if (min < 60) return `in ${min}m`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `in ${hr}h`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `in ${day}d`;
+  return new Date(t).toLocaleDateString();
+}
+
+/** Persistent, always-visible banner shown while the open thread has live
+ *  scheduled task(s). Discovering scheduled tasks used to require scrolling to
+ *  the task-run bubble or expanding the threads rail to spot a tiny icon; this
+ *  surfaces them at the top of the log and opens the task panel on click. */
+function TaskIndicator() {
+  const gid = groupId.value;
+  const tid = threadId.value;
+  if (!gid || !tid) return null;
+  const t = threads.value.find((x) => x.threadId === tid);
+  const lt = t?.liveTask;
+  if (!lt) return null;
+  const label = lt.count > 1 ? `${lt.count} scheduled tasks` : 'Scheduled task';
+  const trailer = lt.paused
+    ? 'paused'
+    : (lt.nextRunAt ? `next ${fmtNextShort(lt.nextRunAt)}` : '');
+  return (
+    <button
+      type="button"
+      class={'task-indicator' + (lt.paused ? ' paused' : '')}
+      title={lt.summary || 'Manage scheduled tasks'}
+      onClick={() => openTaskPanel(gid, tid)}
+    >
+      <span class="ti-icon" aria-hidden="true">{'\u23F0'}</span>
+      <span class="ti-label">{label}</span>
+      {trailer
+        ? (
+          <>
+            <span class="ti-dot" aria-hidden="true">{'\u00b7'}</span>
+            <span class="ti-meta">{trailer}</span>
+          </>
+        )
+        : null}
+      <span class="ti-spacer" />
+      <span class="ti-cta">Manage</span>
+    </button>
+  );
+}
+
 function MessageLog() {
   const ref = useRef<HTMLDivElement | null>(null);
   const appliedHighlightRef = useRef<string | null>(null);
@@ -564,6 +618,7 @@ function MessageLog() {
   const groups = groupMessages(list);
   return (
     <div class="log" id="chat-log" ref={ref} onScroll={onLogScroll}>
+      <TaskIndicator />
       {chatLoading.value
         ? null
         : !threadId.value

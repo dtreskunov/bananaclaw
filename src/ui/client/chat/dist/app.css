@@ -1265,6 +1265,59 @@ nav.tab-bar-strip.group-strip {
   flex-direction: column;
   gap: 6px;
 }
+.chat-main .log .task-indicator {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--wash);
+  color: var(--fg, inherit);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  text-align: left;
+  transition: border-color 0.12s;
+}
+.chat-main .log .task-indicator:hover {
+  border-color: var(--accent);
+}
+.chat-main .log .task-indicator .ti-icon {
+  opacity: 0.9;
+  flex: none;
+}
+.chat-main .log .task-indicator .ti-label {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.chat-main .log .task-indicator .ti-dot {
+  color: var(--muted);
+  flex: none;
+}
+.chat-main .log .task-indicator .ti-meta {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chat-main .log .task-indicator .ti-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+.chat-main .log .task-indicator .ti-cta {
+  color: var(--accent);
+  font-weight: 500;
+  font-size: var(--font-xs);
+  flex: none;
+}
+.chat-main .log .task-indicator.paused .ti-icon {
+  opacity: 0.55;
+}
 .chat-main .msg {
   padding: 6px 10px;
   border-radius: var(--radius-lg);

@@ -20098,6 +20098,49 @@ function ApprovalsBanner() {
     ] }, a4.approvalId))
   ] });
 }
+function fmtNextShort(iso) {
+  if (!iso) return "";
+  const t4 = Date.parse(iso);
+  if (!Number.isFinite(t4)) return "";
+  const diff = t4 - Date.now();
+  if (diff <= 3e4) return "now";
+  const min = Math.round(diff / 6e4);
+  if (min < 60) return `in ${min}m`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `in ${hr}h`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `in ${day}d`;
+  return new Date(t4).toLocaleDateString();
+}
+function TaskIndicator() {
+  const gid = groupId.value;
+  const tid = threadId.value;
+  if (!gid || !tid) return null;
+  const t4 = threads.value.find((x6) => x6.threadId === tid);
+  const lt = t4?.liveTask;
+  if (!lt) return null;
+  const label = lt.count > 1 ? `${lt.count} scheduled tasks` : "Scheduled task";
+  const trailer = lt.paused ? "paused" : lt.nextRunAt ? `next ${fmtNextShort(lt.nextRunAt)}` : "";
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "task-indicator" + (lt.paused ? " paused" : ""),
+      title: lt.summary || "Manage scheduled tasks",
+      onClick: () => openTaskPanel(gid, tid),
+      children: [
+        /* @__PURE__ */ u4("span", { class: "ti-icon", "aria-hidden": "true", children: "\u23F0" }),
+        /* @__PURE__ */ u4("span", { class: "ti-label", children: label }),
+        trailer ? /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("span", { class: "ti-dot", "aria-hidden": "true", children: "\xB7" }),
+          /* @__PURE__ */ u4("span", { class: "ti-meta", children: trailer })
+        ] }) : null,
+        /* @__PURE__ */ u4("span", { class: "ti-spacer" }),
+        /* @__PURE__ */ u4("span", { class: "ti-cta", children: "Manage" })
+      ]
+    }
+  );
+}
 function MessageLog() {
   const ref = A2(null);
   const appliedHighlightRef = A2(null);
@@ -20161,6 +20204,7 @@ function MessageLog() {
   const list = chatMessages.value;
   const groups2 = groupMessages(list);
   return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, onScroll: onLogScroll, children: [
+    /* @__PURE__ */ u4(TaskIndicator, {}),
     chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
     typing ? /* @__PURE__ */ u4("div", { class: `typing${traceExpanded ? " expanded" : ""}`, "aria-live": "polite", children: [
       /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
