@@ -219,6 +219,22 @@ function formatTaskMessage(msg: MessageInRow): string {
   const from = originAttr(msg);
   const time = formatLocalTime(msg.timestamp, TIMEZONE);
   const parts: string[] = [];
+  // Execution framing. A scheduled task fires as its own turn but resumes the
+  // same conversation continuation — which may still show the exchange where
+  // this very task was scheduled and confirmed. Without an explicit cue, some
+  // models (notably reasoning models like minimax) treat the fired task as
+  // already-handled: they emit only chain-of-thought and no user-visible
+  // output, so nothing is sent. Make it unmistakable that this is the moment
+  // of execution, that the work has NOT been done yet, and that a reply is
+  // mandatory — internal reasoning alone does not count as carrying it out.
+  parts.push(
+    'The scheduled time for this task has now arrived. This is the execution ' +
+      'moment — not a reminder, a duplicate, or a re-scheduling. You have NOT ' +
+      'carried out the instruction below yet; any earlier turn only scheduled ' +
+      'it. Perform it now and actually send the resulting message(s). Do not ' +
+      'reply with internal reasoning only, and do not treat it as already done.',
+    '',
+  );
   if (content.scriptOutput) {
     parts.push('Script output:', JSON.stringify(content.scriptOutput, null, 2), '');
   }
