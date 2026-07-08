@@ -1075,36 +1075,45 @@ export function readChatHistory(
       const taskRows = isDm
         ? (inDb
             .prepare(
-              `SELECT id, timestamp, content, recurrence, series_id FROM messages_in
+              `SELECT id, timestamp, process_after, content, recurrence, series_id FROM messages_in
                 WHERE kind = 'task' AND status = 'completed'
                   AND channel_type = ? AND thread_id IS NULL ORDER BY seq`,
             )
             .all(target.channelType) as {
             id: string;
             timestamp: string;
+            process_after: string | null;
             content: string;
             recurrence: string | null;
             series_id: string | null;
           }[])
         : (inDb
             .prepare(
-              `SELECT id, timestamp, content, recurrence, series_id FROM messages_in
+              `SELECT id, timestamp, process_after, content, recurrence, series_id FROM messages_in
                 WHERE kind = 'task' AND status = 'completed'
                   AND channel_type = ? AND thread_id = ? ORDER BY seq`,
             )
             .all(target.channelType, threadId) as {
             id: string;
             timestamp: string;
+            process_after: string | null;
             content: string;
             recurrence: string | null;
             series_id: string | null;
           }[]);
       for (const r of taskRows) {
         const summary = summarizeTaskPrompt(r.content);
+        // Place the firing at the time it was actually due to run
+        // (`process_after`), not the row's creation `timestamp`. A recurring
+        // occurrence is cloned right after the *previous* run, so its
+        // `timestamp` can be a full cadence-interval before it fires (e.g. a
+        // daily task's row is created ~24h early); a Run-now nudge rewrites
+        // `process_after` to now while leaving `timestamp` untouched. Falling
+        // back to `timestamp` keeps legacy rows that predate process_after.
         messages.push({
           direction: 'event',
           id: r.id,
-          timestamp: r.timestamp,
+          timestamp: r.process_after ?? r.timestamp,
           text: `Scheduled task ran: ${summary}`,
           event: {
             kind: 'task-run',
