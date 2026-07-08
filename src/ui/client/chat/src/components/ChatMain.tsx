@@ -334,12 +334,31 @@ function Message({ m }: { m: ChatMessage }) {
 
 interface ThoughtsGroup { kind: 'thoughts'; thoughts: ChatMessage[]; answer: ChatMessage }
 interface SingleGroup { kind: 'single'; m: ChatMessage }
-type MsgGroup = ThoughtsGroup | SingleGroup;
+interface EventsGroup { kind: 'events'; events: ChatMessage[] }
+type MsgGroup = ThoughtsGroup | SingleGroup | EventsGroup;
 
 function groupMessages(list: ChatMessage[]): MsgGroup[] {
   const out: MsgGroup[] = [];
   let pendingMsgs: ChatMessage[] = [];
+  let events: ChatMessage[] = [];
+  // A run of consecutive task-run events (e.g. a daily job) collapses into a
+  // single expandable pill so it doesn't flood the transcript. A lone event
+  // renders inline as an ordinary single.
+  const flushEvents = () => {
+    if (events.length === 0) return;
+    if (events.length === 1) out.push({ kind: 'single', m: events[0]! });
+    else out.push({ kind: 'events', events });
+    events = [];
+  };
   for (const m of list) {
+    if (m.direction === 'event') {
+      // Keep timeline order: flush any buffered internal thoughts first.
+      for (const t of pendingMsgs) out.push({ kind: 'single', m: t });
+      pendingMsgs = [];
+      events.push(m);
+      continue;
+    }
+    flushEvents();
     if (m.direction === 'internal') {
       pendingMsgs.push(m);
     } else if (m.direction === 'out' && pendingMsgs.length > 0) {
@@ -349,8 +368,35 @@ function groupMessages(list: ChatMessage[]): MsgGroup[] {
       out.push({ kind: 'single', m });
     }
   }
+  flushEvents();
   for (const t of pendingMsgs) out.push({ kind: 'single', m: t });
   return out;
+}
+
+/** Collapsed run of consecutive task-run events. Shows a single summary pill
+ *  ("Scheduled task ran N×") that expands to reveal each individual run. */
+function EventsGroup({ events }: { events: ChatMessage[] }) {
+  const [open, setOpen] = useState(false);
+  const n = events.length;
+  const last = events[n - 1]!;
+  if (open) {
+    return (
+      <div class="events-group open">
+        <button type="button" class="events-collapse" onClick={() => setOpen(false)} title="Collapse runs">
+          <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
+          <span>{n}{' scheduled runs \u00b7 hide'}</span>
+        </button>
+        {events.map((e) => <Message key={e.id} m={e} />)}
+      </div>
+    );
+  }
+  return (
+    <button type="button" class="msg event events-summary" onClick={() => setOpen(true)} title="Show individual runs">
+      <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
+      <span class="event-text">Scheduled task ran {n}{'\u00d7'}</span>
+      <span class="event-meta">last&nbsp;<RelativeTime ts={last.ts} /></span>
+    </button>
+  );
 }
 
 function ThoughtGroup({ thoughts, answer }: { thoughts: ChatMessage[]; answer: ChatMessage }) {
@@ -506,7 +552,9 @@ function MessageLog() {
             ? <div class="empty">No messages yet.</div>
             : groups.map((g, i) => g.kind === 'thoughts'
                 ? <ThoughtGroup key={i} thoughts={g.thoughts} answer={g.answer} />
-                : <Message key={i} m={g.m} />)}
+                : g.kind === 'events'
+                  ? <EventsGroup key={i} events={g.events} />
+                  : <Message key={i} m={g.m} />)}
       {typing
         ? (
           <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">

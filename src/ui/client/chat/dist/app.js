@@ -19925,7 +19925,21 @@ function Message({ m: m6 }) {
 function groupMessages(list) {
   const out = [];
   let pendingMsgs = [];
+  let events = [];
+  const flushEvents = () => {
+    if (events.length === 0) return;
+    if (events.length === 1) out.push({ kind: "single", m: events[0] });
+    else out.push({ kind: "events", events });
+    events = [];
+  };
   for (const m6 of list) {
+    if (m6.direction === "event") {
+      for (const t4 of pendingMsgs) out.push({ kind: "single", m: t4 });
+      pendingMsgs = [];
+      events.push(m6);
+      continue;
+    }
+    flushEvents();
     if (m6.direction === "internal") {
       pendingMsgs.push(m6);
     } else if (m6.direction === "out" && pendingMsgs.length > 0) {
@@ -19935,8 +19949,38 @@ function groupMessages(list) {
       out.push({ kind: "single", m: m6 });
     }
   }
+  flushEvents();
   for (const t4 of pendingMsgs) out.push({ kind: "single", m: t4 });
   return out;
+}
+function EventsGroup({ events }) {
+  const [open, setOpen] = h2(false);
+  const n3 = events.length;
+  const last = events[n3 - 1];
+  if (open) {
+    return /* @__PURE__ */ u4("div", { class: "events-group open", children: [
+      /* @__PURE__ */ u4("button", { type: "button", class: "events-collapse", onClick: () => setOpen(false), title: "Collapse runs", children: [
+        /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
+        /* @__PURE__ */ u4("span", { children: [
+          n3,
+          " scheduled runs \xB7 hide"
+        ] })
+      ] }),
+      events.map((e4) => /* @__PURE__ */ u4(Message, { m: e4 }, e4.id))
+    ] });
+  }
+  return /* @__PURE__ */ u4("button", { type: "button", class: "msg event events-summary", onClick: () => setOpen(true), title: "Show individual runs", children: [
+    /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
+    /* @__PURE__ */ u4("span", { class: "event-text", children: [
+      "Scheduled task ran ",
+      n3,
+      "\xD7"
+    ] }),
+    /* @__PURE__ */ u4("span", { class: "event-meta", children: [
+      "last\xA0",
+      /* @__PURE__ */ u4(RelativeTime, { ts: last.ts })
+    ] })
+  ] });
 }
 function ThoughtGroup({ thoughts, answer }) {
   const [showThoughts, setShowThoughts] = h2(false);
@@ -20057,7 +20101,7 @@ function MessageLog() {
   const list = chatMessages.value;
   const groups2 = groupMessages(list);
   return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, onScroll: onLogScroll, children: [
-    chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
+    chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
     typing ? /* @__PURE__ */ u4("div", { class: `typing${traceExpanded ? " expanded" : ""}`, "aria-live": "polite", children: [
       /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
         /* @__PURE__ */ u4("span", {}),
