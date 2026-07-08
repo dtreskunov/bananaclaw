@@ -494,32 +494,36 @@ function fmtNextShort(iso: string | null): string {
   return new Date(t).toLocaleDateString();
 }
 
-/** Persistent pill shown while the open thread has live scheduled task(s).
- *  Mirrors the task-run bubble style and renders as the last entry in the log
- *  so tasks are discoverable without expanding the threads rail. Opens the
- *  task panel on click. */
+/** Persistent pills shown while the open thread has live scheduled task(s):
+ *  one pill per distinct task, rendered as the last entries in the log so
+ *  tasks are discoverable without expanding the threads rail. Mirrors the
+ *  task-run bubble style; clicking a pill opens that task in the panel. */
 function TaskIndicator() {
   const gid = groupId.value;
   const tid = threadId.value;
   if (!gid || !tid) return null;
   const t = threads.value.find((x) => x.threadId === tid);
-  const lt = t?.liveTask;
-  if (!lt) return null;
-  const label = lt.count > 1 ? `${lt.count} scheduled tasks` : 'Scheduled task';
-  const trailer = lt.paused
-    ? 'paused'
-    : (lt.nextRunAt ? `next ${fmtNextShort(lt.nextRunAt)}` : '');
+  const tasks = t?.liveTasks;
+  if (!tasks || tasks.length === 0) return null;
   return (
-    <button
-      type="button"
-      class={'msg event events-summary task-indicator' + (lt.paused ? ' paused' : '')}
-      title={lt.summary || 'Manage scheduled tasks'}
-      onClick={() => openTaskPanel(gid, tid)}
-    >
-      <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
-      <span class="event-text">{label}</span>
-      {trailer ? <span class="event-meta">{trailer}</span> : null}
-    </button>
+    <>
+      {tasks.map((lt) => {
+        const trailer = lt.paused ? 'paused' : lt.nextRunAt ? `next ${fmtNextShort(lt.nextRunAt)}` : '';
+        return (
+          <button
+            key={lt.seriesId}
+            type="button"
+            class={'msg event events-summary task-indicator' + (lt.paused ? ' paused' : '')}
+            title={lt.summary || 'Manage scheduled tasks'}
+            onClick={() => openTaskPanel(gid, tid, lt.seriesId)}
+          >
+            <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
+            <span class="event-text">{lt.summary || 'Scheduled task'}</span>
+            {trailer ? <span class="event-meta">{trailer}</span> : null}
+          </button>
+        );
+      })}
+    </>
   );
 }
 

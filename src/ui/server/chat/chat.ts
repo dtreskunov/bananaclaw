@@ -1615,24 +1615,24 @@ export interface ThreadSummary {
   /** Number of provider turns that have usage data. */
   turnCount?: number;
   /**
-   * Present when this thread's session has one or more pending/paused
-   * scheduled tasks keeping it alive. Drives the ⏰ badge in the rail so
-   * an auto-active thread reads differently from a conversational one.
+   * The live (pending/paused) scheduled tasks keeping this thread alive,
+   * soonest next-run first. Drives the ⏰ badge in the rail so an
+   * auto-active thread reads differently from a conversational one.
    */
-  liveTask?: LiveTaskDto;
+  liveTasks?: LiveTaskDto[];
 }
 
-/** Summary of the live (pending/paused) scheduled tasks in a thread. */
+/** One live (pending/paused) scheduled task in a thread. */
 export interface LiveTaskDto {
-  /** How many distinct task series are live in this thread. */
-  count: number;
-  /** ISO timestamp of the soonest next run across all live tasks. */
+  /** series_id — stable across recurrences; focuses the task panel. */
+  seriesId: string;
+  /** ISO timestamp of the next run, or null for a one-off with no wait. */
   nextRunAt: string | null;
-  /** Cron expression of the soonest-next-run task, if recurring. */
+  /** Cron expression when recurring, else null (one-off). */
   recurrence: string | null;
-  /** One-line summary of the soonest-next-run task's prompt. */
+  /** One-line summary of the task's prompt. */
   summary: string;
-  /** True when the soonest-next-run task is paused rather than pending. */
+  /** True when the task is paused rather than pending. */
   paused: boolean;
 }
 
@@ -2098,7 +2098,7 @@ function enumeratePerThread(
       ...(stats.turnCount > 0
         ? { totalCost: stats.totalCost, totalTokens: stats.totalTokens, turnCount: stats.turnCount }
         : {}),
-      ...(stats.liveTask ? { liveTask: stats.liveTask } : {}),
+      ...(stats.liveTasks ? { liveTasks: stats.liveTasks } : {}),
     });
   }
 }
@@ -2386,7 +2386,7 @@ function readThreadStats(
   totalCost: number;
   totalTokens: number;
   turnCount: number;
-  liveTask?: LiveTaskDto;
+  liveTasks?: LiveTaskDto[];
 } {
   let title = '';
   let count = 0;
@@ -2394,7 +2394,7 @@ function readThreadStats(
   let totalCost = 0;
   let totalTokens = 0;
   let turnCount = 0;
-  let liveTask: LiveTaskDto | undefined;
+  let liveTasks: LiveTaskDto[] | undefined;
   try {
     const inDb = openInboundDb(agentGroupId, sessionId);
     try {
@@ -2408,7 +2408,7 @@ function readThreadStats(
       count += c.n;
       if (c.t) maxTs = c.t;
       // Live scheduled tasks: one row per series (the pending/paused
-      // occurrence), soonest next-run first. The head row drives the badge.
+      // occurrence), soonest next-run first.
       try {
         const taskRows = inDb
           .prepare(
@@ -2427,14 +2427,13 @@ function readThreadStats(
           content: string;
         }[];
         if (taskRows.length > 0) {
-          const head = taskRows[0]!;
-          liveTask = {
-            count: taskRows.length,
-            nextRunAt: head.process_after,
-            recurrence: head.recurrence,
-            summary: summarizeTaskPrompt(head.content),
-            paused: head.status === 'paused',
-          };
+          liveTasks = taskRows.map((r) => ({
+            seriesId: r.id,
+            nextRunAt: r.process_after,
+            recurrence: r.recurrence,
+            summary: summarizeTaskPrompt(r.content),
+            paused: r.status === 'paused',
+          }));
         }
       } catch {
         // messages_in may predate the task columns
@@ -2477,7 +2476,7 @@ function readThreadStats(
   } catch {
     /* outbound db missing */
   }
-  return { title, count, maxTs, totalCost, totalTokens, turnCount, ...(liveTask ? { liveTask } : {}) };
+  return { title, count, maxTs, totalCost, totalTokens, turnCount, ...(liveTasks ? { liveTasks } : {}) };
 }
 
 /**

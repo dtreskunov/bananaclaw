@@ -27,14 +27,14 @@ function ThreadRow({ t }: { t: Thread }) {
   const costStr = t.totalCost != null && t.totalCost > 0
     ? ' · ' + (t.totalCost >= 1 ? '$' + t.totalCost.toFixed(2) : '$' + t.totalCost.toFixed(3))
     : '';
-  const lt = t.liveTask;
-  const liveTaskTitle = lt
+  const lt = t.liveTasks;
+  const head = lt && lt.length > 0 ? lt[0] : null;
+  const liveTaskTitle = head
     ? [
-        lt.paused ? 'Paused scheduled task' : 'Live scheduled task',
-        lt.recurrence ? `recurs ${lt.recurrence}` : null,
-        lt.nextRunAt ? `next ${new Date(lt.nextRunAt).toLocaleString()}` : null,
-        lt.count > 1 ? `+${lt.count - 1} more` : null,
-        lt.summary,
+        lt!.length > 1 ? `${lt!.length} scheduled tasks` : (head.paused ? 'Paused scheduled task' : 'Live scheduled task'),
+        head.recurrence ? `recurs ${head.recurrence}` : null,
+        head.nextRunAt ? `next ${new Date(head.nextRunAt).toLocaleString()}` : null,
+        head.summary,
       ].filter(Boolean).join(' · ')
     : undefined;
   const onOpen = (ev: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
@@ -58,10 +58,10 @@ function ThreadRow({ t }: { t: Thread }) {
       <div class="title">
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
         <span class="title-text">{t.title}</span>
-        {lt ? (
+        {head ? (
           <button
             type="button"
-            class={'task-badge' + (lt.paused ? ' paused' : '')}
+            class={'task-badge' + (lt!.every((x) => x.paused) ? ' paused' : '')}
             title={liveTaskTitle}
             aria-label="Scheduled tasks"
             onClick={(ev: JSX.TargetedMouseEvent<HTMLButtonElement>) => {

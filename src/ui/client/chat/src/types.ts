@@ -48,12 +48,12 @@ export interface Thread {
   totalCost?: number;
   totalTokens?: number;
   turnCount?: number;
-  liveTask?: LiveTaskDto;
+  liveTasks?: LiveTaskDto[];
 }
 
-/** Live (pending/paused) scheduled tasks keeping a thread active. */
+/** One live (pending/paused) scheduled task keeping a thread active. */
 export interface LiveTaskDto {
-  count: number;
+  seriesId: string;
   nextRunAt: string | null;
   recurrence: string | null;
   summary: string;

@@ -19048,13 +19048,13 @@ function ThreadRow({ t: t4 }) {
   const pillTitle = `${meta.label}${t4.counterparty ? " \xB7 " + t4.counterparty : ""}`;
   const subTrailer = t4.messageCount ? " \xB7 " + t4.messageCount + " msg" : "";
   const costStr = t4.totalCost != null && t4.totalCost > 0 ? " \xB7 " + (t4.totalCost >= 1 ? "$" + t4.totalCost.toFixed(2) : "$" + t4.totalCost.toFixed(3)) : "";
-  const lt = t4.liveTask;
-  const liveTaskTitle = lt ? [
-    lt.paused ? "Paused scheduled task" : "Live scheduled task",
-    lt.recurrence ? `recurs ${lt.recurrence}` : null,
-    lt.nextRunAt ? `next ${new Date(lt.nextRunAt).toLocaleString()}` : null,
-    lt.count > 1 ? `+${lt.count - 1} more` : null,
-    lt.summary
+  const lt = t4.liveTasks;
+  const head = lt && lt.length > 0 ? lt[0] : null;
+  const liveTaskTitle = head ? [
+    lt.length > 1 ? `${lt.length} scheduled tasks` : head.paused ? "Paused scheduled task" : "Live scheduled task",
+    head.recurrence ? `recurs ${head.recurrence}` : null,
+    head.nextRunAt ? `next ${new Date(head.nextRunAt).toLocaleString()}` : null,
+    head.summary
   ].filter(Boolean).join(" \xB7 ") : void 0;
   const onOpen = (ev) => {
     if (ev.target.classList.contains("del")) return;
@@ -19078,11 +19078,11 @@ function ThreadRow({ t: t4 }) {
     /* @__PURE__ */ u4("div", { class: "title", children: [
       ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
       /* @__PURE__ */ u4("span", { class: "title-text", children: t4.title }),
-      lt ? /* @__PURE__ */ u4(
+      head ? /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
-          class: "task-badge" + (lt.paused ? " paused" : ""),
+          class: "task-badge" + (lt.every((x6) => x6.paused) ? " paused" : ""),
           title: liveTaskTitle,
           "aria-label": "Scheduled tasks",
           onClick: (ev) => {
@@ -20117,24 +20117,26 @@ function TaskIndicator() {
   const tid = threadId.value;
   if (!gid || !tid) return null;
   const t4 = threads.value.find((x6) => x6.threadId === tid);
-  const lt = t4?.liveTask;
-  if (!lt) return null;
-  const label = lt.count > 1 ? `${lt.count} scheduled tasks` : "Scheduled task";
-  const trailer = lt.paused ? "paused" : lt.nextRunAt ? `next ${fmtNextShort(lt.nextRunAt)}` : "";
-  return /* @__PURE__ */ u4(
-    "button",
-    {
-      type: "button",
-      class: "msg event events-summary task-indicator" + (lt.paused ? " paused" : ""),
-      title: lt.summary || "Manage scheduled tasks",
-      onClick: () => openTaskPanel(gid, tid),
-      children: [
-        /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
-        /* @__PURE__ */ u4("span", { class: "event-text", children: label }),
-        trailer ? /* @__PURE__ */ u4("span", { class: "event-meta", children: trailer }) : null
-      ]
-    }
-  );
+  const tasks = t4?.liveTasks;
+  if (!tasks || tasks.length === 0) return null;
+  return /* @__PURE__ */ u4(k, { children: tasks.map((lt) => {
+    const trailer = lt.paused ? "paused" : lt.nextRunAt ? `next ${fmtNextShort(lt.nextRunAt)}` : "";
+    return /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "msg event events-summary task-indicator" + (lt.paused ? " paused" : ""),
+        title: lt.summary || "Manage scheduled tasks",
+        onClick: () => openTaskPanel(gid, tid, lt.seriesId),
+        children: [
+          /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
+          /* @__PURE__ */ u4("span", { class: "event-text", children: lt.summary || "Scheduled task" }),
+          trailer ? /* @__PURE__ */ u4("span", { class: "event-meta", children: trailer }) : null
+        ]
+      },
+      lt.seriesId
+    );
+  }) });
 }
 function MessageLog() {
   const ref = A2(null);
