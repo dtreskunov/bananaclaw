@@ -14,7 +14,7 @@ import { renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } f
 import {
   sendChat, addPendingFiles, removePending, clearPending,
   navFile, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
-  openChat,
+  openChat, openTaskPanel,
 } from '../actions';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
@@ -250,12 +250,21 @@ function Message({ m }: { m: ChatMessage }) {
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
+    const openTask = (): void => {
+      if (groupId.value && threadId.value) openTaskPanel(groupId.value, threadId.value, ev?.taskId);
+    };
     return (
-      <div class="msg event" data-msg-id={m.id} title={ev?.recurrence ? `Recurring: ${ev.recurrence}` : undefined}>
+      <button
+        type="button"
+        class="msg event event-clickable"
+        data-msg-id={m.id}
+        title={ev?.recurrence ? `Recurring: ${ev.recurrence} \u2014 open in task panel` : 'Open in task panel'}
+        onClick={openTask}
+      >
         <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
         <span class="event-text">{ev?.summary || m.text}</span>
         <span class="event-meta"><RelativeTime ts={m.ts} />{recur}</span>
-      </div>
+      </button>
     );
   }
   const md = renderMarkdown(m.text);

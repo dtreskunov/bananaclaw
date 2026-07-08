@@ -10,6 +10,10 @@
 .task-panel .task-row.paused {
   opacity: 0.7;
 }
+.task-panel .task-row.focused {
+  border-color: var(--accent, #4a90d9);
+  box-shadow: 0 0 0 1px var(--accent, #4a90d9) inset;
+}
 .task-panel .task-summary {
   font-size: var(--font-sm, 13px);
   line-height: 1.35;

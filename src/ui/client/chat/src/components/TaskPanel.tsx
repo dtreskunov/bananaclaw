@@ -104,8 +104,18 @@ export function TaskPanel() {
     return () => window.removeEventListener('keydown', onKey);
   }, [req]);
 
+  // Scroll the focused task into view once the list renders.
+  useEffect(() => {
+    if (!req?.focusSeriesId || !tasks) return;
+    const el = document.querySelector(
+      `.task-panel .task-row[data-series-id="${CSS.escape(req.focusSeriesId)}"]`,
+    );
+    if (el) el.scrollIntoView({ block: 'center' });
+  }, [tasks, req?.focusSeriesId]);
+
   if (!req) return null;
   const { gid, tid } = req;
+  const focusMissing = !!req.focusSeriesId && !!tasks && !tasks.some((t) => t.seriesId === req.focusSeriesId);
 
   function close(): void {
     taskPanelRequest.value = null;
@@ -168,14 +178,24 @@ export function TaskPanel() {
         <div class="settings-body">
           {error ? <div class="settings-status err">{error}</div> : null}
           {tasks === null && !error ? <p class="muted">Loading{'\u2026'}</p> : null}
+          {focusMissing ? (
+            <p class="muted" style="margin-top:0">
+              That task has already completed and is no longer scheduled. Showing the thread's live tasks.
+            </p>
+          ) : null}
           {tasks !== null && tasks.length === 0 ? (
             <p class="muted" style="margin-top:0">No scheduled tasks in this thread.</p>
           ) : null}
           {tasks?.map((t) => {
             const editing = editId === t.seriesId;
             const busy = busyId === t.seriesId;
+            const focused = req.focusSeriesId === t.seriesId;
             return (
-              <div class={'task-row' + (t.status === 'paused' ? ' paused' : '')} key={t.seriesId}>
+              <div
+                class={'task-row' + (t.status === 'paused' ? ' paused' : '') + (focused ? ' focused' : '')}
+                data-series-id={t.seriesId}
+                key={t.seriesId}
+              >
                 {editing ? (
                   <div class="task-edit">
                     <label class="task-field">

@@ -75,6 +75,8 @@ export interface TaskDetailDto {
 export interface TaskPanelRequest {
   gid: string;
   tid: string;
+  /** When set, the panel scrolls to and highlights this task series. */
+  focusSeriesId?: string;
 }
 
 export interface ThreadCtx {

@@ -378,8 +378,8 @@ export function taskUrl(gid: string, tid: string, suffix = ''): string {
 }
 
 /** Open the scheduled-tasks management panel for a thread. */
-export function openTaskPanel(gid: string, tid: string): void {
-  taskPanelRequest.value = { gid, tid };
+export function openTaskPanel(gid: string, tid: string, focusSeriesId?: string): void {
+  taskPanelRequest.value = { gid, tid, ...(focusSeriesId ? { focusSeriesId } : {}) };
 }
 
 function appendMsg(

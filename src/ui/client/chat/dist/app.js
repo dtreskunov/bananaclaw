@@ -17699,8 +17699,8 @@ function taskUrl(gid, tid, suffix = "") {
   if (qs) u5 += "?" + qs;
   return u5;
 }
-function openTaskPanel(gid, tid) {
-  taskPanelRequest.value = { gid, tid };
+function openTaskPanel(gid, tid, focusSeriesId) {
+  taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
 function appendMsg(direction, text, files, ts, id, activity) {
   const key = id ? `${direction}:${id}` : null;
@@ -19898,14 +19898,27 @@ function Message({ m: m6 }) {
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
-    return /* @__PURE__ */ u4("div", { class: "msg event", "data-msg-id": m6.id, title: ev?.recurrence ? `Recurring: ${ev.recurrence}` : void 0, children: [
-      /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
-      /* @__PURE__ */ u4("span", { class: "event-text", children: ev?.summary || m6.text }),
-      /* @__PURE__ */ u4("span", { class: "event-meta", children: [
-        /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-        recur
-      ] })
-    ] });
+    const openTask = () => {
+      if (groupId.value && threadId.value) openTaskPanel(groupId.value, threadId.value, ev?.taskId);
+    };
+    return /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "msg event event-clickable",
+        "data-msg-id": m6.id,
+        title: ev?.recurrence ? `Recurring: ${ev.recurrence} \u2014 open in task panel` : "Open in task panel",
+        onClick: openTask,
+        children: [
+          /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
+          /* @__PURE__ */ u4("span", { class: "event-text", children: ev?.summary || m6.text }),
+          /* @__PURE__ */ u4("span", { class: "event-meta", children: [
+            /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+            recur
+          ] })
+        ]
+      }
+    );
   }
   const md = renderMarkdown(m6.text);
   const q5 = searchQuery.value;
@@ -22383,8 +22396,16 @@ function TaskPanel() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [req]);
+  y2(() => {
+    if (!req?.focusSeriesId || !tasks) return;
+    const el = document.querySelector(
+      `.task-panel .task-row[data-series-id="${CSS.escape(req.focusSeriesId)}"]`
+    );
+    if (el) el.scrollIntoView({ block: "center" });
+  }, [tasks, req?.focusSeriesId]);
   if (!req) return null;
   const { gid, tid } = req;
+  const focusMissing = !!req.focusSeriesId && !!tasks && !tasks.some((t4) => t4.seriesId === req.focusSeriesId);
   function close() {
     taskPanelRequest.value = null;
   }
@@ -22445,58 +22466,68 @@ function TaskPanel() {
         "Loading",
         "\u2026"
       ] }) : null,
+      focusMissing ? /* @__PURE__ */ u4("p", { class: "muted", style: "margin-top:0", children: "That task has already completed and is no longer scheduled. Showing the thread's live tasks." }) : null,
       tasks !== null && tasks.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", style: "margin-top:0", children: "No scheduled tasks in this thread." }) : null,
       tasks?.map((t4) => {
         const editing = editId === t4.seriesId;
         const busy = busyId === t4.seriesId;
-        return /* @__PURE__ */ u4("div", { class: "task-row" + (t4.status === "paused" ? " paused" : ""), children: editing ? /* @__PURE__ */ u4("div", { class: "task-edit", children: [
-          /* @__PURE__ */ u4("label", { class: "task-field", children: [
-            /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Prompt" }),
-            /* @__PURE__ */ u4(
-              "textarea",
-              {
-                rows: 4,
-                value: editPrompt,
-                onInput: (e4) => setEditPrompt(e4.currentTarget.value)
-              }
-            )
-          ] }),
-          /* @__PURE__ */ u4("label", { class: "task-field", children: [
-            /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Schedule (cron, blank = one-off)" }),
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "text",
-                placeholder: "30 10 * * *",
-                value: editCron,
-                onInput: (e4) => setEditCron(e4.currentTarget.value)
-              }
-            ),
-            /* @__PURE__ */ u4("span", { class: "muted task-cron-preview", children: humanizeCron(editCron.trim() || null) })
-          ] }),
-          /* @__PURE__ */ u4("div", { class: "task-actions", children: [
-            /* @__PURE__ */ u4("button", { type: "button", onClick: () => saveEdit(t4.seriesId), disabled: busy || !editPrompt.trim(), children: busy ? "Saving\u2026" : "Save" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setEditId(null), disabled: busy, children: "Cancel" })
-          ] })
-        ] }) : /* @__PURE__ */ u4(k, { children: [
-          /* @__PURE__ */ u4("div", { class: "task-summary", children: [
-            t4.summary || "(no prompt)",
-            t4.hasScript ? /* @__PURE__ */ u4("span", { class: "task-script-tag", title: "Has a pre-check/exec script", children: "script" }) : null
-          ] }),
-          /* @__PURE__ */ u4("div", { class: "task-meta", children: [
-            /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(t4.recurrence) }),
-            t4.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(t4.nextRunAt).toLocaleString(), children: [
-              "next ",
-              fmtNextRun(t4.nextRunAt)
-            ] }) : null,
-            /* @__PURE__ */ u4("span", { class: "task-status " + t4.status, children: t4.status })
-          ] }),
-          /* @__PURE__ */ u4("div", { class: "task-actions", children: [
-            t4.status === "paused" ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => doAction(t4.seriesId, "resume"), disabled: busy, children: "Resume" }) : /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => doAction(t4.seriesId, "pause"), disabled: busy, children: "Pause" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => startEdit(t4), disabled: busy, children: "Edit" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "ghost danger", onClick: () => doAction(t4.seriesId, "cancel"), disabled: busy, children: "Cancel" })
-          ] })
-        ] }) }, t4.seriesId);
+        const focused = req.focusSeriesId === t4.seriesId;
+        return /* @__PURE__ */ u4(
+          "div",
+          {
+            class: "task-row" + (t4.status === "paused" ? " paused" : "") + (focused ? " focused" : ""),
+            "data-series-id": t4.seriesId,
+            children: editing ? /* @__PURE__ */ u4("div", { class: "task-edit", children: [
+              /* @__PURE__ */ u4("label", { class: "task-field", children: [
+                /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Prompt" }),
+                /* @__PURE__ */ u4(
+                  "textarea",
+                  {
+                    rows: 4,
+                    value: editPrompt,
+                    onInput: (e4) => setEditPrompt(e4.currentTarget.value)
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ u4("label", { class: "task-field", children: [
+                /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Schedule (cron, blank = one-off)" }),
+                /* @__PURE__ */ u4(
+                  "input",
+                  {
+                    type: "text",
+                    placeholder: "30 10 * * *",
+                    value: editCron,
+                    onInput: (e4) => setEditCron(e4.currentTarget.value)
+                  }
+                ),
+                /* @__PURE__ */ u4("span", { class: "muted task-cron-preview", children: humanizeCron(editCron.trim() || null) })
+              ] }),
+              /* @__PURE__ */ u4("div", { class: "task-actions", children: [
+                /* @__PURE__ */ u4("button", { type: "button", onClick: () => saveEdit(t4.seriesId), disabled: busy || !editPrompt.trim(), children: busy ? "Saving\u2026" : "Save" }),
+                /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setEditId(null), disabled: busy, children: "Cancel" })
+              ] })
+            ] }) : /* @__PURE__ */ u4(k, { children: [
+              /* @__PURE__ */ u4("div", { class: "task-summary", children: [
+                t4.summary || "(no prompt)",
+                t4.hasScript ? /* @__PURE__ */ u4("span", { class: "task-script-tag", title: "Has a pre-check/exec script", children: "script" }) : null
+              ] }),
+              /* @__PURE__ */ u4("div", { class: "task-meta", children: [
+                /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(t4.recurrence) }),
+                t4.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(t4.nextRunAt).toLocaleString(), children: [
+                  "next ",
+                  fmtNextRun(t4.nextRunAt)
+                ] }) : null,
+                /* @__PURE__ */ u4("span", { class: "task-status " + t4.status, children: t4.status })
+              ] }),
+              /* @__PURE__ */ u4("div", { class: "task-actions", children: [
+                t4.status === "paused" ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => doAction(t4.seriesId, "resume"), disabled: busy, children: "Resume" }) : /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => doAction(t4.seriesId, "pause"), disabled: busy, children: "Pause" }),
+                /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => startEdit(t4), disabled: busy, children: "Edit" }),
+                /* @__PURE__ */ u4("button", { type: "button", class: "ghost danger", onClick: () => doAction(t4.seriesId, "cancel"), disabled: busy, children: "Cancel" })
+              ] })
+            ] })
+          },
+          t4.seriesId
+        );
       })
     ] }),
     /* @__PURE__ */ u4("div", { class: "settings-row", style: "padding:10px 16px;border-top:1px solid var(--border);justify-content:flex-end", children: /* @__PURE__ */ u4("button", { type: "button", onClick: close, children: "Done" }) })
