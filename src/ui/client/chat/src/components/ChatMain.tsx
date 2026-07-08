@@ -494,10 +494,10 @@ function fmtNextShort(iso: string | null): string {
   return new Date(t).toLocaleDateString();
 }
 
-/** Persistent, always-visible pill shown while the open thread has live
- *  scheduled task(s). Mirrors the task-run bubble style and sticks to the
- *  bottom of the log so tasks are discoverable without scrolling to the
- *  task-run bubble or expanding the threads rail. Opens the task panel. */
+/** Persistent pill shown while the open thread has live scheduled task(s).
+ *  Mirrors the task-run bubble style and renders as the last entry in the log
+ *  so tasks are discoverable without expanding the threads rail. Opens the
+ *  task panel on click. */
 function TaskIndicator() {
   const gid = groupId.value;
   const tid = threadId.value;

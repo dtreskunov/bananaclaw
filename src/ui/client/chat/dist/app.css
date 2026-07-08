@@ -1265,13 +1265,6 @@ nav.tab-bar-strip.group-strip {
   flex-direction: column;
   gap: 6px;
 }
-.chat-main .log .task-indicator.msg.event {
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
-  margin-top: 4px;
-  background: var(--bg);
-}
 .chat-main .log .task-indicator.msg.event .event-meta {
   margin-left: 4px;
 }

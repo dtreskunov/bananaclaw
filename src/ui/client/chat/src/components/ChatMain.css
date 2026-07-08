@@ -26,16 +26,9 @@
   padding-inline: max(12px, calc((100% - var(--chat-max)) / 2));
 }
 .chat-main .log { overflow: auto; padding-block: 12px; display: flex; flex-direction: column; gap: 6px; }
-/* Persistent scheduled-task pill (same style as the task-run bubble) stuck to
-   the bottom of the log so tasks are discoverable without scrolling to the
-   task-run bubble or expanding the rail. */
-.chat-main .log .task-indicator.msg.event {
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
-  margin-top: 4px;
-  background: var(--bg);
-}
+/* Persistent scheduled-task pill (same style as the task-run bubble), rendered
+   as the last entry in the log so tasks are discoverable without expanding the
+   rail. */
 .chat-main .log .task-indicator.msg.event .event-meta { margin-left: 4px; }
 .chat-main .log .task-indicator.paused .event-icon { opacity: 0.55; }
 .chat-main .msg { padding: 6px 10px; border-radius: var(--radius-lg); max-width: 78%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
