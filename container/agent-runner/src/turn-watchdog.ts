@@ -23,8 +23,19 @@ import type { RoutingContext } from './formatter.js';
 
 /** Delay before the first "still working" notice, if the turn is still silent. */
 export const FIRST_NOTICE_MS = 90_000;
-/** Interval between subsequent notices while the turn remains silent. */
+/** Base interval between notices; grows with exponential backoff (see below). */
 export const REPEAT_NOTICE_MS = 180_000;
+/** Upper bound on the backed-off repeat interval. */
+export const MAX_REPEAT_NOTICE_MS = 1_800_000;
+/**
+ * Hard cap on how many notices a single turn may emit. A hung provider stream
+ * (e.g. a minimax turn that trickles reasoning events forever without ever
+ * completing) leaves the turn's `finally` — and thus `stop()` — unreachable,
+ * so the watchdog would otherwise re-notify indefinitely. After this many
+ * notices, stop re-arming: the turn's real result, if it ever lands, is still
+ * delivered independently. Reassurance past this point is only noise.
+ */
+export const MAX_NOTICES = 5;
 
 const DEFAULT_TEXT =
   "⏳ Still working on this — it's taking longer than usual. I'll follow up here as soon as it's done.";
@@ -37,6 +48,10 @@ export interface TurnWatchdog {
 export interface TurnWatchdogOptions {
   firstNoticeMs?: number;
   repeatMs?: number;
+  /** Upper bound on the backed-off repeat interval. */
+  maxRepeatMs?: number;
+  /** Stop re-arming after this many notices are emitted. */
+  maxNotices?: number;
   text?: string;
   /** Injected for tests; defaults to a msg-<ts>-<rand> id. */
   generateId?: () => string;
@@ -55,6 +70,8 @@ function defaultId(): string {
 export function startTurnWatchdog(routing: RoutingContext, opts: TurnWatchdogOptions = {}): TurnWatchdog {
   const firstMs = opts.firstNoticeMs ?? FIRST_NOTICE_MS;
   const repeatMs = opts.repeatMs ?? REPEAT_NOTICE_MS;
+  const maxRepeatMs = opts.maxRepeatMs ?? MAX_REPEAT_NOTICE_MS;
+  const maxNotices = opts.maxNotices ?? MAX_NOTICES;
   const text = opts.text ?? DEFAULT_TEXT;
   const genId = opts.generateId ?? defaultId;
   const log = opts.log ?? ((m: string) => console.error(`[turn-watchdog] ${m}`));
@@ -67,6 +84,11 @@ export function startTurnWatchdog(routing: RoutingContext, opts: TurnWatchdogOpt
   const mine = new Set<string>();
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // Notices count toward the cap and drive the backoff; only actually-emitted
+  // notices advance either (a silent round where the agent has spoken neither
+  // spends the budget nor lengthens the interval).
+  let noticesEmitted = 0;
+  let interval = repeatMs;
 
   const tick = (): void => {
     if (stopped) return;
@@ -86,13 +108,21 @@ export function startTurnWatchdog(routing: RoutingContext, opts: TurnWatchdogOpt
           content: JSON.stringify({ text }),
         });
         mine.add(id);
+        noticesEmitted += 1;
         log('Emitted long-turn progress notice');
+        // Back off before the next reassurance so a stuck turn can't spam.
+        interval = Math.min(interval * 2, maxRepeatMs);
       }
     } catch (err) {
       // Best-effort — a watchdog failure must never disrupt the turn.
       log(`tick failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    if (!stopped) timer = setTimeout(tick, repeatMs);
+    if (stopped) return;
+    if (noticesEmitted >= maxNotices) {
+      log(`Reached notice cap (${maxNotices}) — going silent for the rest of this turn`);
+      return;
+    }
+    timer = setTimeout(tick, interval);
   };
 
   timer = setTimeout(tick, firstMs);

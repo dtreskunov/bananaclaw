@@ -55,6 +55,38 @@ describe('startTurnWatchdog', () => {
     expect(outboundChatTexts().length).toBeGreaterThanOrEqual(2);
   });
 
+  it('stops re-notifying once the notice cap is reached', async () => {
+    // A hung turn never calls stop(); the cap must bound total notices.
+    const wd = startTurnWatchdog(ROUTING, {
+      firstNoticeMs: 10,
+      repeatMs: 10,
+      maxNotices: 2,
+      generateId: genId,
+    });
+    await sleep(200);
+    // Do NOT call stop() — simulate a turn whose finally never runs.
+    expect(outboundChatTexts().length).toBe(2);
+    wd.stop();
+  });
+
+  it('backs off the interval between successive notices', async () => {
+    // With base 10ms doubling each notice (10 → 20 → 40 …), a 55ms window
+    // fits the first two notices (at ~10 and ~30) but not a fixed-interval
+    // third (which a non-backoff 10ms cadence would place at ~30 too — this
+    // asserts the second gap widened past the window's remainder).
+    const wd = startTurnWatchdog(ROUTING, {
+      firstNoticeMs: 10,
+      repeatMs: 10,
+      maxNotices: 10,
+      generateId: genId,
+    });
+    await sleep(55);
+    wd.stop();
+    // Fixed 10ms cadence would emit ~5 notices in 55ms; backoff caps it low.
+    expect(outboundChatTexts().length).toBeLessThanOrEqual(3);
+    expect(outboundChatTexts().length).toBeGreaterThanOrEqual(2);
+  });
+
   it('stays quiet once the agent emits a real message', async () => {
     const wd = startTurnWatchdog(ROUTING, { firstNoticeMs: 15, repeatMs: 15, generateId: genId });
     // Real agent output arrives before the first notice fires.
