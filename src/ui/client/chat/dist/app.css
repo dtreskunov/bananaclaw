@@ -813,10 +813,17 @@ nav.tab-bar-strip.group-strip {
 }
 .threads-rail .thread .title {
   font-size: var(--font-base);
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-right: 18px;
+}
+.threads-rail .thread .title .title-text {
+  min-width: 0;
+  flex: 0 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 18px;
 }
 .threads-rail .thread .meta {
   font-size: var(--font-xs);
@@ -825,6 +832,7 @@ nav.tab-bar-strip.group-strip {
 }
 .threads-rail .thread .title .ch-pill {
   font-size: var(--font-base);
+  flex: none;
   margin-right: 5px;
   opacity: 0.85;
   display: inline-block;
@@ -832,6 +840,7 @@ nav.tab-bar-strip.group-strip {
 }
 .threads-rail .thread .title .task-badge {
   font-size: var(--font-xs);
+  flex: none;
   margin-left: 5px;
   opacity: 0.75;
   display: inline-block;

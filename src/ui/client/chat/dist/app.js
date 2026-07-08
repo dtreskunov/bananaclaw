@@ -19077,7 +19077,7 @@ function ThreadRow({ t: t4 }) {
   return /* @__PURE__ */ u4("div", { class: "thread" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
       ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
-      t4.title,
+      /* @__PURE__ */ u4("span", { class: "title-text", children: t4.title }),
       lt ? /* @__PURE__ */ u4(
         "button",
         {
@@ -19112,7 +19112,7 @@ function DmRow({ t: t4 }) {
   return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
       /* @__PURE__ */ u4("span", { class: "ch-pill dm", title: meta.label, children: meta.icon }),
-      meta.label
+      /* @__PURE__ */ u4("span", { class: "title-text", children: meta.label })
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),

@@ -38,10 +38,11 @@
 .threads-rail .thread { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--border); position: relative; }
 .threads-rail .thread:hover { background: var(--wash-soft); }
 .threads-rail .thread.active { background: var(--accent); }
-.threads-rail .thread .title { font-size: var(--font-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 18px; }
+.threads-rail .thread .title { font-size: var(--font-base); display: flex; align-items: center; min-width: 0; padding-right: 18px; }
+.threads-rail .thread .title .title-text { min-width: 0; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .threads-rail .thread .meta { font-size: var(--font-xs); color: var(--muted); margin-top: 2px; }
-.threads-rail .thread .title .ch-pill { font-size: var(--font-base); margin-right: 5px; opacity: 0.85; display: inline-block; vertical-align: -1px; }
-.threads-rail .thread .title .task-badge { font-size: var(--font-xs); margin-left: 5px; opacity: 0.75; display: inline-block; vertical-align: 0; cursor: pointer; padding: 0; border: none; background: none; line-height: 1; color: inherit; }
+.threads-rail .thread .title .ch-pill { font-size: var(--font-base); flex: none; margin-right: 5px; opacity: 0.85; display: inline-block; vertical-align: -1px; }
+.threads-rail .thread .title .task-badge { font-size: var(--font-xs); flex: none; margin-left: 5px; opacity: 0.75; display: inline-block; vertical-align: 0; cursor: pointer; padding: 0; border: none; background: none; line-height: 1; color: inherit; }
 .threads-rail .thread .title .task-badge:hover { opacity: 1; }
 .threads-rail .thread .title .task-badge.paused { opacity: 0.45; filter: grayscale(1); }
 .readonly-banner { padding: 10px 12px; border-top: 1px solid var(--border); background: var(--wash-soft); font-size: var(--font-sm); color: var(--muted); }

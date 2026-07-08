@@ -57,7 +57,7 @@ function ThreadRow({ t }: { t: Thread }) {
     <div class={'thread' + (active ? ' active' : '')} data-id={t.threadId} onClick={onOpen}>
       <div class="title">
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
-        {t.title}
+        <span class="title-text">{t.title}</span>
         {lt ? (
           <button
             type="button"
@@ -91,7 +91,7 @@ function DmRow({ t }: { t: Thread }) {
     <div class={'thread dm' + (active ? ' active' : '')} data-id={t.threadId} onClick={onOpen}>
       <div class="title">
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
-        {meta.label}
+        <span class="title-text">{meta.label}</span>
       </div>
       <div class="meta">
         <RelativeTime ts={t.lastActivityAt} />
