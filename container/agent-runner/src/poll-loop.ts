@@ -1002,6 +1002,20 @@ async function processQuery(
           // producing any final output (neither a reply nor an error).
           emptyResultSeen = true;
           archivePrompts.shift();
+          // Long-lived providers (OpenCode) keep the query open after a turn
+          // so rapid follow-ups reuse the warm session. That's fine when a
+          // reply was sent — the new outbound row silences the turn watchdog —
+          // but an empty turn sends nothing, so the query would sit open with
+          // the watchdog firing "Still working…" forever, and the post-stream
+          // empty-result notice (below the events loop) would never run. When
+          // nothing was sent and no follow-up batches are queued, end the
+          // stream now so the turn completes: the notice fires and the
+          // watchdog stops. The continuation was persisted at `init`, so the
+          // next message resumes the same session normally.
+          if (!sentAny && turnBatchQueue.length === 0 && !endedForCommand) {
+            endedForCommand = true;
+            query.end();
+          }
         }
         // One-shot calls (in-turn ack): end the stream immediately after
         // the first result. Without this, the query stays open waiting

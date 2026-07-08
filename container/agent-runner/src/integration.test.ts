@@ -722,29 +722,50 @@ describe('poll loop — empty result notice', () => {
     const text = JSON.parse(out[0].content).text;
     expect(text).toContain('without producing a response');
     expect(text).toContain('without reporting an error');
+    // The loop, not the provider, ended the otherwise-open stream.
+    expect(provider.ended).toBe(true);
   });
 });
 
 /**
- * Yields one empty-text result then ends its stream — models a provider whose
- * turn completes with no final output and no error (e.g. reasoning-only output
- * stripped to empty).
+ * Yields one empty-text result then blocks (does not self-end) — models a
+ * long-lived provider like OpenCode whose query stays open after a turn. The
+ * poll loop must end the stream itself when an empty turn sends nothing, so the
+ * turn completes, the notice fires, and the watchdog stops. `ended` records
+ * that end() was called.
  */
 class EmptyResultProvider {
   readonly supportsNativeSlashCommands = false;
+  ended = false;
 
   isSessionInvalid(): boolean {
     return false;
   }
 
   query() {
+    const owner = this;
+    let aborted = false;
+    let wake: (() => void) | null = null;
     return {
       push() {},
-      end() {},
-      abort() {},
+      end: () => {
+        owner.ended = true;
+        wake?.();
+      },
+      abort: () => {
+        aborted = true;
+        wake?.();
+      },
       events: (async function* () {
         yield { type: 'init' as const, continuation: 'empty-session' };
         yield { type: 'result' as const, text: '' };
+        // Block like OpenCode — only completes once the loop calls end().
+        while (!owner.ended && !aborted) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+          wake = null;
+        }
       })(),
     };
   }
