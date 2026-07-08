@@ -66,6 +66,7 @@ interface ServerMessage {
   timestamp: string;
   usage?: import('./types').TurnUsage;
   activity?: import('./types').ActivityLine[];
+  event?: import('./types').TimelineEvent;
 }
 
 /**
@@ -326,6 +327,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ts,
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
+      ...(m.event ? { event: m.event } : {}),
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -376,7 +378,7 @@ function appendMsg(
 }
 
 function normDirection(d: string): Direction {
-  return d === 'in' ? 'in' : d === 'internal' ? 'internal' : 'out';
+  return d === 'in' ? 'in' : d === 'internal' ? 'internal' : d === 'event' ? 'event' : 'out';
 }
 
 async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
@@ -397,6 +399,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       ts: m.timestamp,
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
+      ...(m.event ? { event: m.event } : {}),
     }));
     refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
     return;
@@ -416,6 +419,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       ts,
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
+      ...(m.event ? { event: m.event } : {}),
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -498,6 +502,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
             ts: m.timestamp,
             ...(m.usage ? { usage: m.usage } : {}),
             ...(m.activity ? { activity: m.activity } : {}),
+            ...(m.event ? { event: m.event } : {}),
           }));
           chatLoading.value = false;
           voiceMode.value = (data.voiceMode as typeof voiceMode.value) || 'off';

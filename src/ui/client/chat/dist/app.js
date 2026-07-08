@@ -17644,7 +17644,8 @@ function mergeIncomingMessages(messages) {
       files: m6.files || null,
       ts,
       ...m6.usage ? { usage: m6.usage } : {},
-      ...m6.activity ? { activity: m6.activity } : {}
+      ...m6.activity ? { activity: m6.activity } : {},
+      ...m6.event ? { event: m6.event } : {}
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -17683,7 +17684,7 @@ function appendMsg(direction, text, files, ts, id, activity) {
   });
 }
 function normDirection(d5) {
-  return d5 === "in" ? "in" : d5 === "internal" ? "internal" : "out";
+  return d5 === "in" ? "in" : d5 === "internal" ? "internal" : d5 === "event" ? "event" : "out";
 }
 async function refetchThreadHistory(appendNewOnly) {
   const gid = groupId.value, tid = threadId.value;
@@ -17701,7 +17702,8 @@ async function refetchThreadHistory(appendNewOnly) {
       files: m6.files || null,
       ts: m6.timestamp,
       ...m6.usage ? { usage: m6.usage } : {},
-      ...m6.activity ? { activity: m6.activity } : {}
+      ...m6.activity ? { activity: m6.activity } : {},
+      ...m6.event ? { event: m6.event } : {}
     }));
     refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
     return;
@@ -17720,7 +17722,8 @@ async function refetchThreadHistory(appendNewOnly) {
       files: m6.files || null,
       ts,
       ...m6.usage ? { usage: m6.usage } : {},
-      ...m6.activity ? { activity: m6.activity } : {}
+      ...m6.activity ? { activity: m6.activity } : {},
+      ...m6.event ? { event: m6.event } : {}
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -17790,7 +17793,8 @@ async function openChat(gid, resumeTid, opts) {
             files: m6.files || null,
             ts: m6.timestamp,
             ...m6.usage ? { usage: m6.usage } : {},
-            ...m6.activity ? { activity: m6.activity } : {}
+            ...m6.activity ? { activity: m6.activity } : {},
+            ...m6.event ? { event: m6.event } : {}
           }));
           chatLoading.value = false;
           voiceMode.value = data.voiceMode || "off";
@@ -19012,6 +19016,14 @@ function ThreadRow({ t: t4 }) {
   const pillTitle = `${meta.label}${t4.counterparty ? " \xB7 " + t4.counterparty : ""}`;
   const subTrailer = t4.messageCount ? " \xB7 " + t4.messageCount + " msg" : "";
   const costStr = t4.totalCost != null && t4.totalCost > 0 ? " \xB7 " + (t4.totalCost >= 1 ? "$" + t4.totalCost.toFixed(2) : "$" + t4.totalCost.toFixed(3)) : "";
+  const lt = t4.liveTask;
+  const liveTaskTitle = lt ? [
+    lt.paused ? "Paused scheduled task" : "Live scheduled task",
+    lt.recurrence ? `recurs ${lt.recurrence}` : null,
+    lt.nextRunAt ? `next ${new Date(lt.nextRunAt).toLocaleString()}` : null,
+    lt.count > 1 ? `+${lt.count - 1} more` : null,
+    lt.summary
+  ].filter(Boolean).join(" \xB7 ") : void 0;
   const onOpen = (ev) => {
     if (ev.target.classList.contains("del")) return;
     if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
@@ -19033,7 +19045,8 @@ function ThreadRow({ t: t4 }) {
   return /* @__PURE__ */ u4("div", { class: "thread" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
       ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
-      t4.title
+      t4.title,
+      lt ? /* @__PURE__ */ u4("span", { class: "task-badge" + (lt.paused ? " paused" : ""), title: liveTaskTitle, children: "\u23F0" }) : null
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
@@ -19837,6 +19850,18 @@ function UsageMeta({ u: u5 }) {
 function Message({ m: m6 }) {
   const ref = A2(null);
   const mdRef = A2(null);
+  if (m6.direction === "event") {
+    const ev = m6.event;
+    const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
+    return /* @__PURE__ */ u4("div", { class: "msg event", "data-msg-id": m6.id, title: ev?.recurrence ? `Recurring: ${ev.recurrence}` : void 0, children: [
+      /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
+      /* @__PURE__ */ u4("span", { class: "event-text", children: ev?.summary || m6.text }),
+      /* @__PURE__ */ u4("span", { class: "event-meta", children: [
+        /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+        recur
+      ] })
+    ] });
+  }
   const md = renderMarkdown(m6.text);
   const q5 = searchQuery.value;
   y2(() => {

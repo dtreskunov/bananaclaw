@@ -247,6 +247,17 @@ function UsageMeta({ u }: { u: TurnUsage }) {
 function Message({ m }: { m: ChatMessage }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
+  if (m.direction === 'event') {
+    const ev = m.event;
+    const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
+    return (
+      <div class="msg event" data-msg-id={m.id} title={ev?.recurrence ? `Recurring: ${ev.recurrence}` : undefined}>
+        <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
+        <span class="event-text">{ev?.summary || m.text}</span>
+        <span class="event-meta"><RelativeTime ts={m.ts} />{recur}</span>
+      </div>
+    );
+  }
   const md = renderMarkdown(m.text);
   const q = searchQuery.value;
   useEffect(() => {

@@ -599,7 +599,7 @@ export interface TurnUsageDto {
 }
 
 export interface HistoryMessage {
-  direction: 'in' | 'out' | 'internal';
+  direction: 'in' | 'out' | 'internal' | 'event';
   // messages_in.id / messages_out.id — stable per-row id the client uses
   // as the dedup key against live WS pushes.
   id: string;
@@ -610,6 +610,9 @@ export interface HistoryMessage {
   /** Persisted activity trace (tool calls / progress steps) for this turn,
    *  in emit order. Present on outbound messages that recorded a trace. */
   activity?: { ts: string; text: string }[];
+  /** Non-chat timeline event (e.g. a scheduled task firing). Present only
+   *  when `direction === 'event'`; drives distinct rendering client-side. */
+  event?: { kind: 'task-run'; taskId?: string; summary: string; recurrence?: string | null };
 }
 
 /**
@@ -902,6 +905,62 @@ export function readChatHistory(
     // outbound DB may not exist
   }
 
+  // Scheduled-task firings: completed `kind='task'` rows are the record of
+  // a schedule waking this session. They carry no chat text (parseInbound
+  // skips them), so surface each as a distinct timeline "event" bubble so
+  // the user can see why an otherwise-quiet thread keeps looking active.
+  try {
+    const inDb = openInboundDb(groupId, session.id);
+    try {
+      const taskRows = isDm
+        ? (inDb
+            .prepare(
+              `SELECT id, timestamp, content, recurrence, series_id FROM messages_in
+                WHERE kind = 'task' AND status = 'completed'
+                  AND channel_type = ? AND thread_id IS NULL ORDER BY seq`,
+            )
+            .all(target.channelType) as {
+            id: string;
+            timestamp: string;
+            content: string;
+            recurrence: string | null;
+            series_id: string | null;
+          }[])
+        : (inDb
+            .prepare(
+              `SELECT id, timestamp, content, recurrence, series_id FROM messages_in
+                WHERE kind = 'task' AND status = 'completed'
+                  AND channel_type = ? AND thread_id = ? ORDER BY seq`,
+            )
+            .all(target.channelType, threadId) as {
+            id: string;
+            timestamp: string;
+            content: string;
+            recurrence: string | null;
+            series_id: string | null;
+          }[]);
+      for (const r of taskRows) {
+        const summary = summarizeTaskPrompt(r.content);
+        messages.push({
+          direction: 'event',
+          id: r.id,
+          timestamp: r.timestamp,
+          text: `Scheduled task ran: ${summary}`,
+          event: {
+            kind: 'task-run',
+            ...(r.series_id ? { taskId: r.series_id } : {}),
+            summary,
+            ...(r.recurrence ? { recurrence: r.recurrence } : {}),
+          },
+        });
+      }
+    } finally {
+      inDb.close();
+    }
+  } catch {
+    // inbound DB may not exist
+  }
+
   messages.sort((a, b) => Date.parse(normTs(a.timestamp)) - Date.parse(normTs(b.timestamp)));
   return messages;
 }
@@ -1108,6 +1167,28 @@ async function sendViaChannelAdapter(args: {
 
 function normTs(s: string): string {
   return s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
+}
+
+/**
+ * Condense a scheduled-task prompt into a one-line label for the timeline
+ * event bubble / thread badge. Tasks store a JSON `{ prompt, script }`
+ * blob; we surface the first non-empty line of the prompt, trimmed.
+ */
+function summarizeTaskPrompt(content: string): string {
+  let prompt = '';
+  try {
+    const o = JSON.parse(content);
+    if (typeof o?.prompt === 'string') prompt = o.prompt;
+    else if (typeof o === 'string') prompt = o;
+  } catch {
+    prompt = content;
+  }
+  const firstLine =
+    prompt
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) || 'Scheduled task';
+  return firstLine.length > 80 ? firstLine.slice(0, 77) + '\u2026' : firstLine;
 }
 
 function encodedAttachmentUrl(groupId: string, threadId: string, localPath: string): string {
@@ -1379,6 +1460,26 @@ export interface ThreadSummary {
   totalTokens?: number;
   /** Number of provider turns that have usage data. */
   turnCount?: number;
+  /**
+   * Present when this thread's session has one or more pending/paused
+   * scheduled tasks keeping it alive. Drives the ⏰ badge in the rail so
+   * an auto-active thread reads differently from a conversational one.
+   */
+  liveTask?: LiveTaskDto;
+}
+
+/** Summary of the live (pending/paused) scheduled tasks in a thread. */
+export interface LiveTaskDto {
+  /** How many distinct task series are live in this thread. */
+  count: number;
+  /** ISO timestamp of the soonest next run across all live tasks. */
+  nextRunAt: string | null;
+  /** Cron expression of the soonest-next-run task, if recurring. */
+  recurrence: string | null;
+  /** One-line summary of the soonest-next-run task's prompt. */
+  summary: string;
+  /** True when the soonest-next-run task is paused rather than pending. */
+  paused: boolean;
 }
 
 interface UserMessagingContext {
@@ -1712,6 +1813,7 @@ function enumeratePerThread(
       ...(stats.turnCount > 0
         ? { totalCost: stats.totalCost, totalTokens: stats.totalTokens, turnCount: stats.turnCount }
         : {}),
+      ...(stats.liveTask ? { liveTask: stats.liveTask } : {}),
     });
   }
 }
@@ -1992,13 +2094,22 @@ function readThreadStats(
   sessionId: string,
   channelType: string,
   threadId: string,
-): { title: string; count: number; maxTs: string; totalCost: number; totalTokens: number; turnCount: number } {
+): {
+  title: string;
+  count: number;
+  maxTs: string;
+  totalCost: number;
+  totalTokens: number;
+  turnCount: number;
+  liveTask?: LiveTaskDto;
+} {
   let title = '';
   let count = 0;
   let maxTs = '';
   let totalCost = 0;
   let totalTokens = 0;
   let turnCount = 0;
+  let liveTask: LiveTaskDto | undefined;
   try {
     const inDb = openInboundDb(agentGroupId, sessionId);
     try {
@@ -2011,6 +2122,38 @@ function readThreadStats(
         .get(channelType, threadId) as { n: number; t: string | null };
       count += c.n;
       if (c.t) maxTs = c.t;
+      // Live scheduled tasks: one row per series (the pending/paused
+      // occurrence), soonest next-run first. The head row drives the badge.
+      try {
+        const taskRows = inDb
+          .prepare(
+            `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
+               FROM messages_in
+              WHERE kind = 'task' AND status IN ('pending', 'paused')
+                AND channel_type = ? AND thread_id = ?
+              GROUP BY series_id
+              ORDER BY (process_after IS NULL) ASC, process_after ASC`,
+          )
+          .all(channelType, threadId) as {
+          id: string;
+          status: string;
+          process_after: string | null;
+          recurrence: string | null;
+          content: string;
+        }[];
+        if (taskRows.length > 0) {
+          const head = taskRows[0]!;
+          liveTask = {
+            count: taskRows.length,
+            nextRunAt: head.process_after,
+            recurrence: head.recurrence,
+            summary: summarizeTaskPrompt(head.content),
+            paused: head.status === 'paused',
+          };
+        }
+      } catch {
+        // messages_in may predate the task columns
+      }
     } finally {
       inDb.close();
     }
@@ -2049,7 +2192,7 @@ function readThreadStats(
   } catch {
     /* outbound db missing */
   }
-  return { title, count, maxTs, totalCost, totalTokens, turnCount };
+  return { title, count, maxTs, totalCost, totalTokens, turnCount, ...(liveTask ? { liveTask } : {}) };
 }
 
 /**

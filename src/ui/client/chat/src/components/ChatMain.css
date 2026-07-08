@@ -33,6 +33,23 @@
 .chat-main .msg.internal, .chat-main .msg.internal * { font-style: italic; }
 .chat-main .msg.internal .internal-label { font-size: var(--font-2xs); font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; opacity: 0.7; }
 .chat-main .msg.internal pre, .chat-main .msg.internal code { background: transparent; }
+.chat-main .msg.event {
+  align-self: center;
+  background: transparent;
+  border: 1px solid var(--border, var(--muted));
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 92%;
+  padding: 3px 12px;
+  font-size: var(--font-xs, var(--font-2xs));
+  white-space: normal;
+}
+.chat-main .msg.event .event-icon { align-self: center; opacity: 0.8; }
+.chat-main .msg.event .event-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-main .msg.event .event-meta { opacity: 0.7; flex: 0 0 auto; }
 .chat-main .thought-group {
   position: relative;
   display: flex; flex-direction: column;

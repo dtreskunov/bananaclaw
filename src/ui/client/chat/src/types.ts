@@ -48,6 +48,16 @@ export interface Thread {
   totalCost?: number;
   totalTokens?: number;
   turnCount?: number;
+  liveTask?: LiveTaskDto;
+}
+
+/** Live (pending/paused) scheduled tasks keeping a thread active. */
+export interface LiveTaskDto {
+  count: number;
+  nextRunAt: string | null;
+  recurrence: string | null;
+  summary: string;
+  paused: boolean;
 }
 
 export interface ThreadCtx {
@@ -56,7 +66,7 @@ export interface ThreadCtx {
   canSend: boolean;
 }
 
-export type Direction = 'in' | 'out' | 'internal';
+export type Direction = 'in' | 'out' | 'internal' | 'event';
 
 export interface ChatMessageFile {
   filename: string;
@@ -88,6 +98,16 @@ export interface ChatMessage {
   usage?: TurnUsage;
   /** Persisted activity trace for an outbound turn, in emit order. */
   activity?: ActivityLine[];
+  /** Timeline event payload; present when direction === 'event'. */
+  event?: TimelineEvent;
+}
+
+/** Non-chat timeline marker (e.g. a scheduled task firing). */
+export interface TimelineEvent {
+  kind: 'task-run';
+  taskId?: string;
+  summary: string;
+  recurrence?: string | null;
 }
 
 /** One step of a turn's activity trace: emit-time timestamp (epoch ms as a
