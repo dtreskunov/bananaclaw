@@ -20015,13 +20015,19 @@ function EventsGroup({ events }) {
   const [open, setOpen] = h2(false);
   const n3 = events.length;
   const last = events[n3 - 1];
+  const taskCount = new Set(
+    events.map((e4) => e4.event?.taskId || e4.event?.summary || "").filter(Boolean)
+  ).size;
+  const multi = taskCount > 1;
   if (open) {
     return /* @__PURE__ */ u4("div", { class: "events-group open", children: [
       /* @__PURE__ */ u4("button", { type: "button", class: "events-collapse", onClick: () => setOpen(false), title: "Collapse runs", children: [
         /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
         /* @__PURE__ */ u4("span", { children: [
           n3,
-          " scheduled runs \xB7 hide"
+          " scheduled runs",
+          multi ? ` \xB7 ${taskCount} tasks` : "",
+          " \xB7 hide"
         ] })
       ] }),
       events.map((e4) => /* @__PURE__ */ u4(Message, { m: e4 }, e4.id))
@@ -20029,11 +20035,7 @@ function EventsGroup({ events }) {
   }
   return /* @__PURE__ */ u4("button", { type: "button", class: "msg event events-summary", onClick: () => setOpen(true), title: "Show individual runs", children: [
     /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
-    /* @__PURE__ */ u4("span", { class: "event-text", children: [
-      "Scheduled task ran ",
-      n3,
-      "\xD7"
-    ] }),
+    /* @__PURE__ */ u4("span", { class: "event-text", children: multi ? `${taskCount} scheduled tasks ran ${n3}\xD7` : `Scheduled task ran ${n3}\xD7` }),
     /* @__PURE__ */ u4("span", { class: "event-meta", children: [
       "last\xA0",
       /* @__PURE__ */ u4(RelativeTime, { ts: last.ts })

@@ -388,12 +388,19 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
   const [open, setOpen] = useState(false);
   const n = events.length;
   const last = events[n - 1]!;
+  // A collapsed run can span more than one distinct scheduled task (the
+  // grouping is positional). Reflect that so the pill doesn't imply a single
+  // task fired N times when it was actually several different tasks.
+  const taskCount = new Set(
+    events.map((e) => e.event?.taskId || e.event?.summary || '').filter(Boolean),
+  ).size;
+  const multi = taskCount > 1;
   if (open) {
     return (
       <div class="events-group open">
         <button type="button" class="events-collapse" onClick={() => setOpen(false)} title="Collapse runs">
           <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
-          <span>{n}{' scheduled runs \u00b7 hide'}</span>
+          <span>{n}{' scheduled runs'}{multi ? ` \u00b7 ${taskCount} tasks` : ''}{' \u00b7 hide'}</span>
         </button>
         {events.map((e) => <Message key={e.id} m={e} />)}
       </div>
@@ -402,7 +409,11 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
   return (
     <button type="button" class="msg event events-summary" onClick={() => setOpen(true)} title="Show individual runs">
       <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
-      <span class="event-text">Scheduled task ran {n}{'\u00d7'}</span>
+      <span class="event-text">
+        {multi
+          ? `${taskCount} scheduled tasks ran ${n}\u00d7`
+          : `Scheduled task ran ${n}\u00d7`}
+      </span>
       <span class="event-meta">last&nbsp;<RelativeTime ts={last.ts} /></span>
     </button>
   );
