@@ -635,6 +635,39 @@ describe('poll loop — slash command during active query', () => {
   });
 });
 
+describe('poll loop — scheduled task during active query', () => {
+  it('ends (not aborts) the active query so a due task runs as its own turn', async () => {
+    insertMessage('m-active', { sender: 'Alice', text: 'long running request' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new BlockingProvider();
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    // First turn is now blocking with its query held open.
+    await waitFor(() => provider.queries === 1, 2000);
+
+    // A scheduled task fires while that turn is still active. It must NOT be
+    // pushed into the live query — doing so contaminates the task with the
+    // in-flight conversation (the exact bug: the model treats the task as
+    // already-handled and no-ops). The follow-up poll instead ends the
+    // stream so the outer loop runs the task as a fresh, isolated turn.
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, platform_id, channel_type, content)
+         VALUES ('task-fired', 'task', datetime('now'), 'pending', datetime('now', '-1 minute'), 1, 'chan-1', 'discord', ?)`,
+      )
+      .run(JSON.stringify({ prompt: 'Send a message to discord-test containing exactly: scheduled msg' }));
+
+    // Graceful end (not abort), and a second query is started for the task.
+    await waitFor(() => provider.ends === 1, 2000);
+    await waitFor(() => provider.queries === 2, 2000);
+    expect(provider.aborts).toBe(0);
+
+    controller.abort();
+    await loopPromise.catch(() => {});
+  });
+});
+
 /**
  * Provider whose query never completes until ended/aborted — for testing how
  * the loop interrupts an active stream.

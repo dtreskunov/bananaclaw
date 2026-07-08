@@ -718,6 +718,25 @@ async function processQuery(
           return;
         }
 
+        // Scheduled tasks must never be folded into an active query. A task
+        // pushed as a follow-up inherits the in-flight conversation context —
+        // often the very exchange that just scheduled it — and the model
+        // treats it as already-handled, emitting an empty result: the task
+        // fires but nothing is sent. Instead, end the stream and leave the
+        // task rows pending so the outer loop runs each task as its own clean
+        // turn (fresh prompt + the pre-task script hook, which then runs
+        // exactly once). Unlike the command path we use end(), not abort():
+        // a task is not urgent, so let any in-flight reply finish rather than
+        // cutting it off. The follow-up poll only runs while a turn is active,
+        // so this fires only when a task lands mid-turn; a task arriving at an
+        // idle container is already handled directly by the outer loop.
+        if (pending.some((m) => m.kind === 'task')) {
+          log('Pending scheduled task — ending active stream so it runs as its own turn');
+          endedForCommand = true;
+          query.end();
+          return;
+        }
+
         // Skip system messages (MCP tool responses).
         // Thread routing is the router's concern — if a message landed in this
         // session, the agent should see it. Per-thread sessions already isolate
