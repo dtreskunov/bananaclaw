@@ -22404,6 +22404,17 @@ function fmtNextRun(iso) {
   if (day < 7) return `in ${day}d`;
   return new Date(t4).toLocaleDateString();
 }
+function TaskView({ task }) {
+  const promptHtml = renderMarkdown(task.prompt);
+  const hi = task.script ? highlightCode(task.script, "script.sh") : null;
+  return /* @__PURE__ */ u4("div", { class: "task-view", children: [
+    promptHtml ? /* @__PURE__ */ u4("div", { class: "task-summary markdown-preview", dangerouslySetInnerHTML: { __html: promptHtml } }) : /* @__PURE__ */ u4("div", { class: "task-summary muted", children: task.prompt || "(no prompt)" }),
+    task.script ? /* @__PURE__ */ u4("details", { class: "task-script-view", children: [
+      /* @__PURE__ */ u4("summary", { children: "Script" }),
+      hi ? /* @__PURE__ */ u4("pre", { class: "hljs", "data-lang": hi.language, children: /* @__PURE__ */ u4("code", { dangerouslySetInnerHTML: { __html: hi.html } }) }) : /* @__PURE__ */ u4("pre", { class: "hljs", children: /* @__PURE__ */ u4("code", { children: task.script }) })
+    ] }) : null
+  ] });
+}
 function TaskPanel() {
   const req = taskPanelRequest.value;
   const [tasks, setTasks] = h2(null);
@@ -22411,6 +22422,7 @@ function TaskPanel() {
   const [busyId, setBusyId] = h2(null);
   const [editId, setEditId] = h2(null);
   const [editPrompt, setEditPrompt] = h2("");
+  const [editScript, setEditScript] = h2("");
   const [editCron, setEditCron] = h2("");
   y2(() => {
     if (!req) return;
@@ -22475,6 +22487,7 @@ function TaskPanel() {
   function startEdit(t4) {
     setEditId(t4.seriesId);
     setEditPrompt(t4.prompt);
+    setEditScript(t4.script);
     setEditCron(t4.recurrence || "");
   }
   async function saveEdit(seriesId) {
@@ -22482,6 +22495,7 @@ function TaskPanel() {
     setError(null);
     try {
       const body = { prompt: editPrompt };
+      body.script = editScript;
       body.recurrence = editCron.trim() ? editCron.trim() : null;
       const r4 = await patchJson(taskUrl(gid, tid, `/${encodeURIComponent(seriesId)}`), body);
       if (!r4.ok) {
@@ -22533,6 +22547,20 @@ function TaskPanel() {
                 )
               ] }),
               /* @__PURE__ */ u4("label", { class: "task-field", children: [
+                /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Script (optional, runs before the prompt)" }),
+                /* @__PURE__ */ u4(
+                  "textarea",
+                  {
+                    class: "task-script-edit",
+                    rows: 6,
+                    spellcheck: false,
+                    placeholder: "#!/usr/bin/env bash",
+                    value: editScript,
+                    onInput: (e4) => setEditScript(e4.currentTarget.value)
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ u4("label", { class: "task-field", children: [
                 /* @__PURE__ */ u4("span", { class: "task-field-label", children: "Schedule (cron, blank = one-off)" }),
                 /* @__PURE__ */ u4(
                   "input",
@@ -22550,10 +22578,7 @@ function TaskPanel() {
                 /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setEditId(null), disabled: busy, children: "Cancel" })
               ] })
             ] }) : /* @__PURE__ */ u4(k, { children: [
-              /* @__PURE__ */ u4("div", { class: "task-summary", children: [
-                t4.summary || "(no prompt)",
-                t4.hasScript ? /* @__PURE__ */ u4("span", { class: "task-script-tag", title: "Has a pre-check/exec script", children: "script" }) : null
-              ] }),
+              /* @__PURE__ */ u4(TaskView, { task: t4 }),
               /* @__PURE__ */ u4("div", { class: "task-meta", children: [
                 /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(t4.recurrence) }),
                 t4.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(t4.nextRunAt).toLocaleString(), children: [

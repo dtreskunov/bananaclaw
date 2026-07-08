@@ -691,6 +691,12 @@ export async function handleChatRequest(
       }
       update.prompt = b.prompt;
     }
+    if (b.script === null || typeof b.script === 'string') {
+      // Empty/whitespace-only script clears the script (recorded as null so
+      // hasScript reads false); otherwise store the raw body verbatim.
+      const s = b.script as string | null;
+      update.script = typeof s === 'string' && s.trim().length > 0 ? s : null;
+    }
     if (typeof b.processAfter === 'string') {
       if (Number.isNaN(Date.parse(b.processAfter))) {
         writeJson(res, 400, { error: 'invalid_process_after' });
@@ -1651,18 +1657,20 @@ export interface TaskDetailDto {
   prompt: string;
   /** True when the task also carries a pre-check/exec script. */
   hasScript: boolean;
+  /** Full script text (empty string when the task has no script). */
+  script: string;
 }
 
-/** Parse a task row's content JSON into its prompt + script presence. */
-function parseTaskContent(content: string): { prompt: string; hasScript: boolean } {
+/** Parse a task row's content JSON into its prompt + script text. */
+function parseTaskContent(content: string): { prompt: string; script: string } {
   try {
     const o = JSON.parse(content) as { prompt?: unknown; script?: unknown };
     return {
       prompt: typeof o?.prompt === 'string' ? o.prompt : '',
-      hasScript: typeof o?.script === 'string' && o.script.length > 0,
+      script: typeof o?.script === 'string' ? o.script : '',
     };
   } catch {
-    return { prompt: '', hasScript: false };
+    return { prompt: '', script: '' };
   }
 }
 
@@ -1747,7 +1755,7 @@ function readLiveTaskDetails(
         content: string;
       }[];
       for (const r of rows) {
-        const { prompt, hasScript } = parseTaskContent(r.content);
+        const { prompt, script } = parseTaskContent(r.content);
         out.push({
           seriesId: r.id,
           status: r.status === 'paused' ? 'paused' : 'pending',
@@ -1755,7 +1763,8 @@ function readLiveTaskDetails(
           recurrence: r.recurrence,
           summary: summarizeTaskPrompt(r.content),
           prompt,
-          hasScript,
+          hasScript: script.length > 0,
+          script,
         });
       }
     } finally {

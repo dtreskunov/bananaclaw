@@ -69,6 +69,7 @@ export interface TaskDetailDto {
   summary: string;
   prompt: string;
   hasScript: boolean;
+  script: string;
 }
 
 /** Open-request for the task panel: which thread's tasks to manage. */

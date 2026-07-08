@@ -11,6 +11,8 @@ import { taskPanelRequest } from '../state';
 import { taskUrl } from '../actions';
 import { api, postJson, patchJson } from '../api';
 import { showToast } from './Toast';
+import { renderMarkdown } from '../utils';
+import { highlightCode } from '../highlight';
 import type { TaskDetailDto } from '../types';
 
 interface TasksResponse {
@@ -66,6 +68,36 @@ function fmtNextRun(iso: string): string {
   return new Date(t).toLocaleDateString();
 }
 
+/** Read-only view of a task: prompt rendered as Markdown, plus a collapsible,
+ *  syntax-highlighted script when present. */
+function TaskView({ task }: { task: TaskDetailDto }): JSX.Element {
+  const promptHtml = renderMarkdown(task.prompt);
+  const hi = task.script ? highlightCode(task.script, 'script.sh') : null;
+  return (
+    <div class="task-view">
+      {promptHtml ? (
+        <div class="task-summary markdown-preview" dangerouslySetInnerHTML={{ __html: promptHtml }} />
+      ) : (
+        <div class="task-summary muted">{task.prompt || '(no prompt)'}</div>
+      )}
+      {task.script ? (
+        <details class="task-script-view">
+          <summary>Script</summary>
+          {hi ? (
+            <pre class="hljs" data-lang={hi.language}>
+              <code dangerouslySetInnerHTML={{ __html: hi.html }} />
+            </pre>
+          ) : (
+            <pre class="hljs">
+              <code>{task.script}</code>
+            </pre>
+          )}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 export function TaskPanel() {
   const req = taskPanelRequest.value;
   const [tasks, setTasks] = useState<TaskDetailDto[] | null>(null);
@@ -73,6 +105,7 @@ export function TaskPanel() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [editPrompt, setEditPrompt] = useState('');
+  const [editScript, setEditScript] = useState('');
   const [editCron, setEditCron] = useState('');
 
   useEffect(() => {
@@ -145,6 +178,7 @@ export function TaskPanel() {
   function startEdit(t: TaskDetailDto): void {
     setEditId(t.seriesId);
     setEditPrompt(t.prompt);
+    setEditScript(t.script);
     setEditCron(t.recurrence || '');
   }
 
@@ -153,6 +187,8 @@ export function TaskPanel() {
     setError(null);
     try {
       const body: Record<string, unknown> = { prompt: editPrompt };
+      // Empty script field clears the script; the server records it as null.
+      body.script = editScript;
       // Empty cron field means "make it a one-off" (recurrence = null).
       body.recurrence = editCron.trim() ? editCron.trim() : null;
       const r = await patchJson<TasksResponse>(taskUrl(gid, tid, `/${encodeURIComponent(seriesId)}`), body);
@@ -207,6 +243,17 @@ export function TaskPanel() {
                       />
                     </label>
                     <label class="task-field">
+                      <span class="task-field-label">Script (optional, runs before the prompt)</span>
+                      <textarea
+                        class="task-script-edit"
+                        rows={6}
+                        spellcheck={false}
+                        placeholder="#!/usr/bin/env bash"
+                        value={editScript}
+                        onInput={(e: JSX.TargetedEvent<HTMLTextAreaElement>) => setEditScript(e.currentTarget.value)}
+                      />
+                    </label>
+                    <label class="task-field">
                       <span class="task-field-label">Schedule (cron, blank = one-off)</span>
                       <input
                         type="text"
@@ -227,10 +274,7 @@ export function TaskPanel() {
                   </div>
                 ) : (
                   <>
-                    <div class="task-summary">
-                      {t.summary || '(no prompt)'}
-                      {t.hasScript ? <span class="task-script-tag" title="Has a pre-check/exec script">script</span> : null}
-                    </div>
+                    <TaskView task={t} />
                     <div class="task-meta">
                       <span class="task-schedule">{humanizeCron(t.recurrence)}</span>
                       {t.nextRunAt ? (

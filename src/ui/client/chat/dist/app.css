@@ -3323,15 +3323,61 @@ body.is-admin .files-pane.collapsed .admin-only {
   line-height: 1.35;
   word-break: break-word;
 }
-.task-panel .task-script-tag {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 999px;
+.task-panel .task-summary.muted {
+  color: var(--muted);
+}
+.task-panel .task-view {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-panel .markdown-preview > :first-child {
+  margin-top: 0;
+}
+.task-panel .markdown-preview > :last-child {
+  margin-bottom: 0;
+}
+.task-panel .task-script-view > summary {
+  cursor: pointer;
+  font-size: var(--font-xs, 12px);
+  color: var(--muted);
+  user-select: none;
+}
+.task-panel .task-script-view > summary:hover {
+  color: var(--fg, inherit);
+}
+.task-panel .task-script-view pre.hljs {
+  background: var(--wash-soft);
   border: 1px solid var(--border);
+  padding: 10px;
+  margin: 6px 0 0;
+  border-radius: var(--radius-md, 6px);
+  overflow: auto;
+  position: relative;
+  font-size: var(--font-xs, 12px);
+  line-height: 1.5;
+}
+.task-panel .task-script-view pre.hljs code {
+  font-family: var(--font-mono);
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+.task-panel .task-script-view pre.hljs::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 4px;
+  right: 8px;
   font-size: var(--font-2xs, 10px);
   color: var(--muted);
-  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+.task-panel .task-field textarea.task-script-edit {
+  font-family: var(--font-mono);
+  white-space: pre;
+  font-size: var(--font-xs, 12px);
 }
 .task-panel .task-meta {
   display: flex;
