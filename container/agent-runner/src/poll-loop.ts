@@ -297,6 +297,17 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // *that* prompt as the failed turn — not the initial one, which
     // may have completed cleanly turns earlier in the same query.
     const promptTracker = { latest: prompt };
+    // Scheduled tasks run as isolated one-shot turns: a fresh provider
+    // session (no chat continuation) so the model doesn't inherit the very
+    // exchange that scheduled it — which made reasoning models treat the
+    // task as already-handled and emit an empty result: the task fired but
+    // nothing was sent. persistContinuation is also off, so the throwaway
+    // task session id never clobbers the chat continuation AND the query is
+    // ended right after the result (one-shot). Without that end, OpenCode's
+    // long-lived query stays open on the task session with no reply to
+    // silence the turn watchdog and no events to warm the heartbeat, which
+    // looked like a hung container.
+    const isTaskOnly = keep.every((m) => m.kind === 'task');
     // Stale-session retry: if the first attempt fails because the stored
     // continuation is unusable (Claude Code returns "No conversation found
     // with session ID …" when the server-side session has expired or the
@@ -318,7 +329,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       while (true) {
         const query = config.provider.query({
           prompt,
-          continuation,
+          continuation: isTaskOnly ? undefined : continuation,
           cwd: config.cwd,
           files: files.length > 0 ? files : undefined,
           systemContext: config.systemContext,
@@ -329,13 +340,13 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             routing,
             processingIds,
             config.providerName,
-            continuation,
-            true,
+            isTaskOnly ? undefined : continuation,
+            !isTaskOnly,
             promptTracker,
             config.provider.onExchangeComplete?.bind(config.provider),
             prompt,
           );
-          if (result.continuation && result.continuation !== continuation) {
+          if (!isTaskOnly && result.continuation && result.continuation !== continuation) {
             continuation = result.continuation;
             setContinuation(config.providerName, continuation);
           }

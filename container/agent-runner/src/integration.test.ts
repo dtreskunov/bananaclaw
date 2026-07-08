@@ -668,6 +668,84 @@ describe('poll loop — scheduled task during active query', () => {
   });
 });
 
+describe('poll loop — isolated task turns', () => {
+  it('runs a due task in a fresh session without clobbering the chat continuation', async () => {
+    // A prior chat turn left a persisted continuation. A scheduled task must
+    // NOT resume it — inheriting the exchange that scheduled the task made
+    // reasoning models treat it as already-handled and emit an empty result
+    // (the task fired but nothing was sent). It also must not overwrite the
+    // chat continuation with its throwaway session id.
+    setContinuation('mock', 'chat-session');
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, platform_id, channel_type, content)
+         VALUES ('task-only', 'task', datetime('now'), 'pending', datetime('now', '-1 minute'), 1, 'chan-1', 'discord', ?)`,
+      )
+      .run(JSON.stringify({ prompt: 'Send a message to discord-test containing exactly: scheduled msg' }));
+
+    const provider = new ContinuationRecordingProvider();
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    // The task ran in a fresh session — no chat continuation inherited.
+    expect(provider.continuations).toEqual([undefined]);
+    // The throwaway task session id did NOT overwrite the chat continuation.
+    expect(getContinuation('mock')).toBe('chat-session');
+    // The task actually produced and delivered its message.
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe('scheduled msg');
+  });
+});
+
+/**
+ * Records the continuation each query() call receives and delivers one result.
+ * Used to assert task turns run with a fresh (undefined) continuation.
+ */
+class ContinuationRecordingProvider {
+  readonly supportsNativeSlashCommands = false;
+  continuations: (string | undefined)[] = [];
+  queries = 0;
+
+  isSessionInvalid(): boolean {
+    return false;
+  }
+
+  query(input: { continuation?: string }) {
+    this.queries += 1;
+    this.continuations.push(input.continuation);
+    let ended = false;
+    let aborted = false;
+    let wake: (() => void) | null = null;
+
+    return {
+      push() {},
+      end: () => {
+        ended = true;
+        wake?.();
+      },
+      abort: () => {
+        aborted = true;
+        wake?.();
+      },
+      events: (async function* () {
+        yield { type: 'init' as const, continuation: `task-session-${Date.now()}` };
+        yield { type: 'result' as const, text: '<message to="discord-test">scheduled msg</message>' };
+        while (!ended && !aborted) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+          wake = null;
+        }
+      })(),
+    };
+  }
+}
+
 /**
  * Provider whose query never completes until ended/aborted — for testing how
  * the loop interrupts an active stream.
