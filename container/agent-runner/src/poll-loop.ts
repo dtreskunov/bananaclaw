@@ -20,7 +20,6 @@ import {
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import { isAudioMime, transcribeAudio } from './transcribe.js';
 import { getConfig } from './config.js';
-import { startTurnWatchdog } from './turn-watchdog.js';
 import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderExchange } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -320,9 +319,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // nothing was sent. persistContinuation is also off, so the throwaway
     // task session id never clobbers the chat continuation AND the query is
     // ended right after the result (one-shot). Without that end, OpenCode's
-    // long-lived query stays open on the task session with no reply to
-    // silence the turn watchdog and no events to warm the heartbeat, which
-    // looked like a hung container.
+    // long-lived query stays open on the task session with no events to warm
+    // the heartbeat, which looked like a hung container.
     const isTaskOnly = keep.every((m) => m.kind === 'task');
     // Stale-session retry: if the first attempt fails because the stored
     // continuation is unusable (Claude Code returns "No conversation found
@@ -333,14 +331,6 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const rawFiles = extractFileAttachments(keep);
     const { prompt: resolvedPrompt, files } = await transcribeAudioFiles(rawFiles, prompt);
     prompt = resolvedPrompt;
-    // Long-turn feedback: a turn can run for minutes. The ephemeral typing
-    // indicator is not persisted, so a user who reloads/reconnects sees only
-    // their message until the final answer lands — indistinguishable from a
-    // dead agent. The watchdog emits a durable "still working…" chat message
-    // if the turn stays silent past its threshold. Only for channel-bound
-    // turns; system/a2a turns without a channel target get nothing.
-    const watchdog =
-      routing.channelType && routing.platformId ? startTurnWatchdog(routing) : null;
     try {
       while (true) {
         const query = config.provider.query({
@@ -423,7 +413,6 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         }
       }
     } finally {
-      watchdog?.stop();
       clearCurrentInReplyTo();
       activeQuery = null;
     }
@@ -1034,14 +1023,12 @@ async function processQuery(
           archivePrompts.shift();
           // Long-lived providers (OpenCode) keep the query open after a turn
           // so rapid follow-ups reuse the warm session. That's fine when a
-          // reply was sent — the new outbound row silences the turn watchdog —
-          // but an empty turn sends nothing, so the query would sit open with
-          // the watchdog firing "Still working…" forever, and the post-stream
-          // empty-result notice (below the events loop) would never run. When
-          // nothing was sent and no follow-up batches are queued, end the
-          // stream now so the turn completes: the notice fires and the
-          // watchdog stops. The continuation was persisted at `init`, so the
-          // next message resumes the same session normally.
+          // reply was sent, but an empty turn sends nothing, so the query
+          // would sit open and the post-stream empty-result notice (below the
+          // events loop) would never run. When nothing was sent and no
+          // follow-up batches are queued, end the stream now so the turn
+          // completes and the notice fires. The continuation was persisted at
+          // `init`, so the next message resumes the same session normally.
           if (!sentAny && turnBatchQueue.length === 0 && !endedForCommand) {
             endedForCommand = true;
             query.end();

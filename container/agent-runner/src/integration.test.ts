@@ -798,8 +798,7 @@ describe('poll loop — empty result notice', () => {
  * Yields one empty-text result then blocks (does not self-end) — models a
  * long-lived provider like OpenCode whose query stays open after a turn. The
  * poll loop must end the stream itself when an empty turn sends nothing, so the
- * turn completes, the notice fires, and the watchdog stops. `ended` records
- * that end() was called.
+ * turn completes and the notice fires. `ended` records that end() was called.
  */
 class EmptyResultProvider {
   readonly supportsNativeSlashCommands = false;
