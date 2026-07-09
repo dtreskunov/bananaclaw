@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 
-import { formatProgressFromPart, isEventForSession, mergeReasoningPart } from './opencode.js';
+import {
+  extractThinkText,
+  formatProgressFromPart,
+  isEventForSession,
+  mergeReasoningPart,
+  mergeReasoningText,
+  reasoningStepsFromParts,
+} from './opencode.js';
 
 describe('formatProgressFromPart', () => {
   it('ignores missing, streaming text, snapshots, and unfinished reasoning', () => {
@@ -71,5 +78,40 @@ describe('mergeReasoningPart', () => {
     const first = { id: 'r1', type: 'reasoning', text: 'This is' };
     expect(mergeReasoningPart(first, { ...first, text: 'This is complete' }, ' complete').text)
       .toBe('This is complete');
+  });
+});
+
+describe('think-text reasoning recovery', () => {
+  it('extracts the complete thought from an unclosed think block', () => {
+    expect(extractThinkText('<think>\nThe user wants me to inspect `package.json`. I need to find it first.'))
+      .toBe('The user wants me to inspect `package.json`. I need to find it first.');
+  });
+
+  it('stops before a delivery block embedded after the thought', () => {
+    expect(extractThinkText('<think>The retry needs wrapping.<message to="web">Answer</message>'))
+      .toBe('The retry needs wrapping.');
+  });
+
+  it('replaces a truncated structured prefix with the complete think text', () => {
+    expect(mergeReasoningText(
+      'The user wants me to inspect `',
+      'The user wants me to inspect `package.json`. I need to find it first.',
+    )).toBe('The user wants me to inspect `package.json`. I need to find it first.');
+  });
+
+  it('treats an incomplete opening tag as not-yet-extractable', () => {
+    expect(extractThinkText('<thi')).toBeUndefined();
+    expect(extractThinkText('<think>')).toBeUndefined();
+  });
+
+  it('reconciles a final structured prefix with its complete companion think block', () => {
+    expect(reasoningStepsFromParts([
+      { id: 'r1', messageID: 'm1', type: 'reasoning', text: 'The user wants me to inspect `' },
+      { id: 't1', messageID: 'm1', type: 'text', text: '<think>\nThe user wants me to inspect `package.json`. I need to find it first.<message to="web">Done</message>' },
+      { id: 'end', messageID: 'm1', type: 'step-finish' },
+    ])).toEqual([{
+      kind: 'reasoning', id: 'r1',
+      text: 'The user wants me to inspect `package.json`. I need to find it first.',
+    }]);
   });
 });

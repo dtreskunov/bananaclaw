@@ -228,6 +228,64 @@ export function mergeReasoningPart(
   return { ...previous, ...part, text };
 }
 
+/** Some OpenRouter models emit only a short prefix in the structured
+ * reasoning part, then repeat the complete thought in the following text
+ * part's `<think>` block. Extract that block without including a delivery
+ * tag that may follow an unclosed think section. */
+export function extractThinkText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const open = /<think(?:ing)?(?:\s[^>]*)?>/i.exec(text);
+  if (!open) return undefined;
+  const tail = text.slice(open.index + open[0].length);
+  const close = /<\/think(?:ing)?\s*>/i.exec(tail);
+  const delivery = /<(?:message|internal)\b/i.exec(tail);
+  let end = tail.length;
+  if (close) end = Math.min(end, close.index);
+  if (delivery) end = Math.min(end, delivery.index);
+  const extracted = tail.slice(0, end).trim();
+  return extracted || undefined;
+}
+
+/** Merge a structured reasoning prefix with its fuller `<think>` copy. */
+export function mergeReasoningText(prefix: string | undefined, full: string): string {
+  const prior = prefix?.trim() ?? '';
+  const candidate = full.trim();
+  if (!prior || candidate.startsWith(prior)) return candidate;
+  if (prior.startsWith(candidate)) return prior;
+  const maxOverlap = Math.min(prior.length, candidate.length);
+  for (let n = maxOverlap; n > 0; n--) {
+    if (prior.slice(-n) === candidate.slice(0, n)) return prior + candidate.slice(n);
+  }
+  return candidate.length >= prior.length ? candidate : prior;
+}
+
+export function reasoningStepsFromParts(parts: OpenCodePart[]): ActivityStep[] {
+  const out: ActivityStep[] = [];
+  let pending: OpenCodePart | undefined;
+  for (const part of parts) {
+    if (part.type === 'reasoning' && part.id) {
+      if (pending?.id && pending.text?.trim()) {
+        out.push({ kind: 'reasoning', id: pending.id, text: pending.text.trim() });
+      }
+      pending = part;
+      continue;
+    }
+    if (part.type === 'text' && pending) {
+      const full = extractThinkText(part.text);
+      if (full) pending = { ...pending, text: mergeReasoningText(pending.text, full) };
+      continue;
+    }
+    if (pending?.id && pending.text?.trim()) {
+      out.push({ kind: 'reasoning', id: pending.id, text: pending.text.trim() });
+      pending = undefined;
+    }
+  }
+  if (pending?.id && pending.text?.trim()) {
+    out.push({ kind: 'reasoning', id: pending.id, text: pending.text.trim() });
+  }
+  return out;
+}
+
 function killProcessTree(proc: ChildProcess): void {
   if (!proc.pid) return;
   try {
@@ -778,6 +836,27 @@ export class OpenCodeProvider implements AgentProvider {
                   // part (or goes idle), then emit the complete reasoning once.
                   break;
                 }
+                if (part?.type === 'text') {
+                  const thinkText = extractThinkText(part.text);
+                  let isReasoningCompanion = false;
+                  for (const [id, reasoning] of pendingReasoning) {
+                    if (reasoning.messageID !== part.messageID) continue;
+                    isReasoningCompanion = true;
+                    if (thinkText) {
+                      pendingReasoning.set(id, {
+                        ...reasoning,
+                        text: mergeReasoningText(reasoning.text, thinkText),
+                      });
+                    }
+                  }
+                  if (isReasoningCompanion) {
+                    // The first text update can be only "<thi" or "<think>".
+                    // Keep the structured reasoning pending through every
+                    // companion text update; a later update carries the full
+                    // block. A non-text part marks the phase complete.
+                    break;
+                  }
+                }
                 for (const reasoning of pendingReasoning.values()) {
                   if (!reasoning.id || !reasoning.text?.trim()) continue;
                   yield { type: 'progress', step: { kind: 'reasoning', id: reasoning.id, text: reasoning.text.trim() } };
@@ -851,15 +930,30 @@ export class OpenCodeProvider implements AgentProvider {
 
         let resultText = '';
         let lastAssistantId: string | undefined;
+        const assistantMessageIds: string[] = [];
         for (const [msgId, role] of roleByMessageId) {
           if (role === 'assistant') {
             resultText = partTextByMessageId.get(msgId) ?? resultText;
             lastAssistantId = msgId;
+            assistantMessageIds.push(msgId);
           }
         }
         // Restore the leading '<' OpenCode's SSE strips and drop inline
         // chain-of-thought before delivery. See normalizeAssistantText.
         resultText = normalizeAssistantText(resultText);
+        // Streaming payloads can expose a truncated structured reasoning
+        // prefix while the final message's companion text part contains the
+        // complete `<think>` block. Reconcile every assistant message now;
+        // identical ids update the earlier trace row in the host reducer.
+        for (const messageID of assistantMessageIds) {
+          try {
+            const message = await client.session.message({ path: { id: sessionId, messageID } });
+            const parts = ((message.data as { parts?: OpenCodePart[] } | undefined)?.parts ?? []);
+            for (const step of reasoningStepsFromParts(parts)) yield { type: 'progress', step };
+          } catch (err) {
+            log(`Failed to refresh final reasoning: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         // Some providers (e.g. gemini-via-openrouter) finalize cost/tokens in a
         // `message.updated` that arrives *after* `session.idle` ends our loop,
         // so the values we captured from streaming events are still zero. Do a
