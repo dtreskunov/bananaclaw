@@ -253,6 +253,7 @@ export interface WsPayload {
   kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'task-run';
   on?: boolean;
   hint?: string;
+  /** Complete host-reduced activity snapshot for the current turn. */
   items?: ActivityLine[] | null;
   text?: string;
   content?: string | { text?: string; markdown?: string };

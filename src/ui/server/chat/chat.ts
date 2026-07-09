@@ -15,6 +15,7 @@ import path from 'path';
 import Busboy from 'busboy';
 import { WebSocketServer, type WebSocket } from 'ws';
 
+import { reduceActivityLines } from '../../../activity.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getContainerConfig } from '../../../db/container-configs.js';
 import { getDb } from '../../../db/connection.js';
@@ -1047,7 +1048,8 @@ export function readChatHistory(
         if (r.kind !== 'chat' && r.kind !== 'text') continue;
         const parsed = parseOutboundContent(r.content);
         const usage = usageMap.get(r.id);
-        const activity = activityMap.get(r.id);
+        const rawActivity = activityMap.get(r.id);
+        const activity = rawActivity ? reduceActivityLines(rawActivity) : undefined;
         messages.push({
           direction: 'out',
           id: r.id,

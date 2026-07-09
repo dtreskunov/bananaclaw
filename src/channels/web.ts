@@ -48,9 +48,8 @@ export interface WebSubscriber {
   onInboundEcho(id: string, text: string, files?: { filename: string; size: number }[]): void;
   /** Called when the typing indicator should turn on or off. The web channel
    *  uses explicit start/stop signals (no client-side timeout). `hint` is
-   *  an optional one-line progress string from the container. `items` are
-   *  activity-trace lines appended since the last call (the full ordered
-   *  trace for the turn accumulates client-side). */
+   *  an optional one-line progress string from the container. When present,
+   *  `items` is the complete host-reduced activity snapshot for this turn. */
   onTyping?(on: boolean, hint?: string, items?: ActivityLine[]): void;
   /** Called when a scheduled task fires (a task row transitions to
    *  `completed`), so the client can drop a timeline event without a reload. */

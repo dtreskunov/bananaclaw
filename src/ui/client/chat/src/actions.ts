@@ -682,14 +682,10 @@ function connectChatWs(): void {
         // bubble; then clear the live log so the typing block unmounts clean.
         if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
         activityLog.value = [];
-      } else if (payload.items && payload.items.length) {
-        // Append newly-forwarded steps; the server only sends deltas, so
-        // dedupe defensively against the current tail before growing.
-        const prev = activityLog.value;
-        const merged = prev.concat(payload.items);
-        activityLog.value = merged.length > 200 ? merged.slice(merged.length - 200) : merged;
-        // Audio cue on meaningful progress (rate-limited inside the util).
-        playProgressTick();
+      } else if (payload.items !== null && payload.items !== undefined) {
+        const changed = JSON.stringify(activityLog.value) !== JSON.stringify(payload.items);
+        activityLog.value = payload.items;
+        if (changed && payload.items.length) playProgressTick();
       }
       return;
     }
