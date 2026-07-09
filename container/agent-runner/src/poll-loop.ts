@@ -139,6 +139,22 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
   let pollCount = 0;
   let isFirstPoll = true;
+
+  // Honor the stop signal even while a warm, long-lived query is mid-flight.
+  // The while-loop below only checks `signal.aborted` between batches; a warm
+  // provider query (OpenCode/mock) blocks inside processQuery awaiting the next
+  // pushed follow-up, so an abort that arrives during a turn would otherwise
+  // never be noticed and the loop (plus its follow-up poller) would leak. In
+  // production no signal is passed (the loop runs until the container dies), so
+  // this only matters for tests — but a leaked poll loop there can steal
+  // freshly-inserted messages from the next test's loop. Aborting the active
+  // query wakes its generator, lets processQuery return, and the loop then sees
+  // `signal.aborted` and exits.
+  let activeQuery: AgentQuery | null = null;
+  config.signal?.addEventListener('abort', () => {
+    try { activeQuery?.abort(); } catch { /* best-effort */ }
+  });
+
   while (true) {
     if (config.signal?.aborted) return;
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
@@ -334,6 +350,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           files: files.length > 0 ? files : undefined,
           systemContext: config.systemContext,
         });
+        activeQuery = query;
         try {
           const result = await processQuery(
             query,
@@ -408,6 +425,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     } finally {
       watchdog?.stop();
       clearCurrentInReplyTo();
+      activeQuery = null;
     }
 
     // Ensure completed even if processQuery ended without a result event
