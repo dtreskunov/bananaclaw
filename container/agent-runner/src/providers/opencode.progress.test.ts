@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 
-import { formatProgressFromPart } from './opencode.js';
+import { formatProgressFromPart, isEventForSession } from './opencode.js';
 import { ProgressThrottle } from './types.js';
 import type { ActivityStep } from './types.js';
 
@@ -69,6 +69,14 @@ describe('formatProgressFromPart', () => {
     expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'hi' }, 2, seen())).toBeNull();
     expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'x'.repeat(499) }, 499, seen())).toBeNull();
     expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'x'.repeat(500) }, 500, seen())).toEqual({ kind: 'text' });
+  });
+});
+
+describe('isEventForSession', () => {
+  it('accepts only the active OpenCode session', () => {
+    expect(isEventForSession('ses-active', 'ses-active')).toBe(true);
+    expect(isEventForSession('ses-stale', 'ses-active')).toBe(false);
+    expect(isEventForSession(undefined, 'ses-active')).toBe(false);
   });
 });
 

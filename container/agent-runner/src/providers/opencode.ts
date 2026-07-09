@@ -108,12 +108,19 @@ const STALE_SESSION_RE =
 
 type OpenCodePart = {
   id?: string;
+  sessionID?: string;
   type?: string;
   messageID?: string;
   text?: string;
   tool?: string;
   state?: { input?: Record<string, unknown> };
 };
+
+/** OpenCode's subscription is process-wide, so delayed/background message
+ * events must not contaminate the active turn. */
+export function isEventForSession(eventSessionId: string | undefined, activeSessionId: string): boolean {
+  return eventSessionId === activeSessionId;
+}
 
 /** Reasoning-part ids we've already announced. Reset per-turn by the
  *  caller; module-level only because we keep the formatter pure-ish. */
@@ -692,13 +699,14 @@ export class OpenCodeProvider implements AgentProvider {
             switch (ev.type) {
               case 'message.updated': {
                 const info = ev.properties.info as {
-                  id?: string; role?: string;
+                  id?: string; sessionID?: string; role?: string;
                   cost?: number;
                   tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } };
                   providerID?: string;
                   modelID?: string;
                   finish?: string;
                 } | undefined;
+                if (!isEventForSession(info?.sessionID, sessionId)) break;
                 if (info?.id && info?.role) {
                   roleByMessageId.set(info.id, info.role);
                   if (info.finish) finishByMessageId.set(info.id, info.finish);
@@ -721,6 +729,7 @@ export class OpenCodeProvider implements AgentProvider {
               }
               case 'message.part.updated': {
                 const part = ev.properties.part as OpenCodePart | undefined;
+                if (!isEventForSession(part?.sessionID, sessionId)) break;
                 if (part?.type === 'text' && part.messageID && part.text) {
                   partTextByMessageId.set(part.messageID, part.text);
                 }
