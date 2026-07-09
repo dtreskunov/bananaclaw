@@ -226,4 +226,22 @@ describe('stripThinkTags', () => {
   it('handles multiple balanced blocks', () => {
     expect(stripThinkTags('<think>a</think>keep<think>b</think>')).toBe('keep');
   });
+
+  it('keeps a <message> reply emitted inside a never-closed <think>', () => {
+    // minimax forgets to close <think> and puts the real reply inside it.
+    const raw =
+      '<think>\nThe user asked what I can do. Keep it brief.<message to="web-0">Here is my reply.</message>';
+    expect(stripThinkTags(raw)).toBe('<message to="web-0">Here is my reply.</message>');
+  });
+
+  it('keeps an <internal> block emitted inside a never-closed <think>', () => {
+    const raw = '<think>reasoning that never closed<internal>scratch</internal>';
+    expect(stripThinkTags(raw)).toBe('<internal>scratch</internal>');
+  });
+
+  it('still strips an unclosed <think> with no delivery tag after it', () => {
+    expect(stripThinkTags('Real reply.<think>leftover reasoning that never closed')).toBe(
+      'Real reply.',
+    );
+  });
 });

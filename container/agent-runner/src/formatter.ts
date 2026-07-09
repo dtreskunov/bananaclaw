@@ -373,7 +373,10 @@ export function stripInternalTags(text: string): string {
  * via OpenCode emit `<think>…</think>` in the response text; SSE handling can
  * also drop the opening tag, leaving an orphaned `</think>` tail. Removes
  * balanced blocks, an orphaned leading close (and everything before it), and an
- * unclosed trailing open (through end of text).
+ * unclosed trailing open (through end of text) — except when the model forgot
+ * to close `<think>` but still emitted a delivery tag (`<message …>` /
+ * `<internal>`) after its reasoning, in which case the reasoning ends where
+ * that tag begins so the actual reply survives.
  */
 export function stripThinkTags(text: string): string {
   let out = text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
@@ -383,8 +386,20 @@ export function stripThinkTags(text: string): string {
     const close = out.match(/<\/think(?:ing)?>/i);
     if (close?.index !== undefined) out = out.slice(close.index + close[0].length);
   }
-  // Unclosed trailing open: drop from it to the end.
-  return out.replace(/<think(?:ing)?>[\s\S]*$/i, '').trim();
+  // Unclosed trailing open: the model never closed `<think>`. Normally the
+  // reasoning runs to the end of the text, so drop from the open tag onward.
+  // But reasoning models (e.g. minimax) sometimes emit the real reply as a
+  // `<message …>`/`<internal>` block *inside* a never-closed `<think>`; naively
+  // stripping to the end would delete the reply too. If a delivery tag follows
+  // the open tag, treat the reasoning as ending there and keep everything from
+  // the delivery tag on.
+  const open = out.match(/<think(?:ing)?>/i);
+  if (open?.index !== undefined) {
+    const after = out.slice(open.index + open[0].length);
+    const deliver = after.search(/<(?:message\b|internal\b)/i);
+    out = deliver >= 0 ? out.slice(0, open.index) + after.slice(deliver) : out.slice(0, open.index);
+  }
+  return out.trim();
 }
 
 /**
