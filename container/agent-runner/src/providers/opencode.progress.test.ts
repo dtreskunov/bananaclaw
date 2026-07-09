@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   extractThinkText,
+  finalTextFromParts,
   formatProgressFromPart,
   isEventForSession,
   reasoningStepsFromParts,
@@ -98,5 +99,24 @@ describe('think-text reasoning recovery', () => {
       { id: 't1', messageID: 'm1', type: 'text', text: '<message to="web">Done</message>' },
       { id: 'end', messageID: 'm1', type: 'step-finish' },
     ])).toEqual([{ kind: 'reasoning', id: 'r1', text: 'Structured thought' }]);
+  });
+});
+
+describe('finalTextFromParts', () => {
+  it('preserves all distinct finalized text parts in provider order', () => {
+    expect(finalTextFromParts([
+      { id: 't1', type: 'text', text: '<message to="web">one</message>' },
+      { id: 'tool', type: 'tool', tool: 'bash' },
+      { id: 't2', type: 'text', text: '<message to="web">two</message>' },
+    ])).toBe(
+      '<message to="web">one</message><message to="web">two</message>',
+    );
+  });
+
+  it('does not include structured reasoning as deliverable text', () => {
+    expect(finalTextFromParts([
+      { id: 'r1', type: 'reasoning', text: 'private' },
+      { id: 't1', type: 'text', text: '<message to="web">public</message>' },
+    ])).toBe('<message to="web">public</message>');
   });
 });

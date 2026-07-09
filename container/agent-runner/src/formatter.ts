@@ -359,63 +359,256 @@ function escapeXml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+export type OutputDiagnostic =
+  | 'missing-leading-angle'
+  | 'orphan-think-close'
+  | 'unclosed-think'
+  | 'unclosed-internal'
+  | 'unclosed-message';
+
+export type AssistantOutputSegment =
+  | { kind: 'message'; to: string; text: string }
+  | { kind: 'internal'; text: string }
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'unwrapped'; text: string };
+
+export interface ParsedAssistantOutput {
+  segments: AssistantOutputSegment[];
+  deliveries: Array<{ to: string; body: string }>;
+  internal: string[];
+  reasoning: string[];
+  unwrapped: string;
+  diagnostics: OutputDiagnostic[];
+  /** Input with reasoning removed and recoverable wrappers normalized. */
+  normalizedText: string;
+}
+
+type OpenSegment =
+  | { kind: 'message'; to: string; text: string; opener: string }
+  | { kind: 'internal'; text: string }
+  | { kind: 'reasoning'; text: string };
+
+const OUTPUT_TAG_RE =
+  /<message\s+to="([^"]+)"\s*>|<\/message\s*>|<internal\s*>|<\/internal\s*>|<think(?:ing)?\b[^>]*>|<\/think(?:ing)?\s*>/gi;
+
+function appendOutputSegment(segments: AssistantOutputSegment[], segment: AssistantOutputSegment): void {
+  if (!segment.text) return;
+  const prior = segments[segments.length - 1];
+  if (segment.kind === 'unwrapped' && prior?.kind === 'unwrapped') {
+    prior.text += segment.text;
+  } else {
+    segments.push(segment);
+  }
+}
+
+function serializeSegments(
+  segments: AssistantOutputSegment[],
+  include: (segment: AssistantOutputSegment) => boolean,
+): string {
+  return segments
+    .filter(include)
+    .map((segment) => {
+      if (segment.kind === 'message') return `<message to="${segment.to}">${segment.text}</message>`;
+      if (segment.kind === 'internal') return `<internal>${segment.text}</internal>`;
+      if (segment.kind === 'reasoning') return `<think>${segment.text}</think>`;
+      return segment.text;
+    })
+    .join('')
+    .trim();
+}
+
+/** Model reasoning frequently quotes the routing syntax in Markdown code
+ * spans. Tags inside those spans are examples, not structural output. */
+function isInsideMarkdownCode(text: string, index: number): boolean {
+  let activeTicks = 0;
+  for (let i = 0; i < index;) {
+    if (text[i] !== '`') {
+      i++;
+      continue;
+    }
+    let end = i + 1;
+    while (end < index && text[end] === '`') end++;
+    const run = end - i;
+    if (activeTicks === 0) activeTicks = run;
+    else if (run === activeTicks) activeTicks = 0;
+    i = end;
+  }
+  return activeTicks > 0;
+}
+
+function isDeliveryOnlySuffix(text: string, from: number): boolean {
+  let rest = text.slice(from);
+  let seen = false;
+  while (rest.trimStart()) {
+    rest = rest.trimStart();
+    const messageOpen = /^<message\s+to="[^"]+"\s*>/i.exec(rest);
+    if (messageOpen) {
+      const close = /<\/message\s*>/i.exec(rest.slice(messageOpen[0].length));
+      if (!close) return false;
+      rest = rest.slice(messageOpen[0].length + close.index + close[0].length);
+      seen = true;
+      continue;
+    }
+    const internalOpen = /^<internal\s*>/i.exec(rest);
+    if (internalOpen) {
+      const close = /<\/internal\s*>/i.exec(rest.slice(internalOpen[0].length));
+      if (!close) return false;
+      rest = rest.slice(internalOpen[0].length + close.index + close[0].length);
+      seen = true;
+      continue;
+    }
+    return false;
+  }
+  return seen;
+}
+
 /**
- * Strip `<internal>...</internal>` blocks from agent output, then trim.
- * Ported from v1 (src/v1/router.ts:25-27). Used to remove the agent's
- * own scratchpad/reasoning before a reply goes out over a channel.
+ * Parse the model's XML-like output in one tolerant pass. This deliberately is
+ * not an XML parser: model output can be truncated, lose its first `<`, or put
+ * a valid delivery block inside an unclosed `<think>`. Every character is
+ * assigned to exactly one message, internal, reasoning, or unwrapped segment.
  */
+export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
+  const diagnostics: OutputDiagnostic[] = [];
+  const leadingWhitespace = raw.match(/^\s*/)?.[0] ?? '';
+  let body = raw.slice(leadingWhitespace.length);
+  if (
+    body && body[0] !== '<' &&
+    /^(?:message(?:\s+[\w-]+=|>)|internal\s*>|think(?:ing)?(?:\s[^>]*)?>)/i.test(body)
+  ) {
+    body = '<' + body;
+    diagnostics.push('missing-leading-angle');
+  }
+  const text = leadingWhitespace + body;
+  const segments: AssistantOutputSegment[] = [];
+  let open: OpenSegment | undefined;
+  let cursor = 0;
+  OUTPUT_TAG_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  const appendText = (value: string) => {
+    if (!value) return;
+    if (open) open.text += value;
+    else appendOutputSegment(segments, { kind: 'unwrapped', text: value });
+  };
+  const finishOpen = () => {
+    if (!open) return;
+    if (open.kind === 'message') appendOutputSegment(segments, { kind: 'message', to: open.to, text: open.text });
+    else appendOutputSegment(segments, { kind: open.kind, text: open.text });
+    open = undefined;
+  };
+
+  while ((match = OUTPUT_TAG_RE.exec(text)) !== null) {
+    appendText(text.slice(cursor, match.index));
+    cursor = OUTPUT_TAG_RE.lastIndex;
+    const token = match[0];
+    const lower = token.toLowerCase();
+    const messageTo = match[1];
+    const isThinkClose = lower.startsWith('</think') || lower.startsWith('</thinking');
+
+    if (!isThinkClose && isInsideMarkdownCode(text, match.index)) {
+      appendText(token);
+      continue;
+    }
+
+    if (open?.kind === 'message') {
+      if (lower.startsWith('</message')) finishOpen();
+      else open.text += token;
+      continue;
+    }
+    if (open?.kind === 'internal') {
+      if (lower.startsWith('</internal')) finishOpen();
+      else if (messageTo !== undefined && isDeliveryOnlySuffix(text, match.index)) {
+        diagnostics.push('unclosed-internal');
+        finishOpen();
+        open = { kind: 'message', to: messageTo, text: '', opener: token };
+      } else open.text += token;
+      continue;
+    }
+    if (open?.kind === 'reasoning') {
+      if (isThinkClose) finishOpen();
+      else if (messageTo !== undefined && isDeliveryOnlySuffix(text, match.index)) {
+        diagnostics.push('unclosed-think');
+        finishOpen();
+        open = { kind: 'message', to: messageTo, text: '', opener: token };
+      } else if (lower.startsWith('<internal') && isDeliveryOnlySuffix(text, match.index)) {
+        diagnostics.push('unclosed-think');
+        finishOpen();
+        open = { kind: 'internal', text: '' };
+      } else open.text += token;
+      continue;
+    }
+
+    if (messageTo !== undefined) open = { kind: 'message', to: messageTo, text: '', opener: token };
+    else if (lower.startsWith('<internal')) open = { kind: 'internal', text: '' };
+    else if (lower.startsWith('<think') || lower.startsWith('<thinking')) open = { kind: 'reasoning', text: '' };
+    else if (isThinkClose) {
+      diagnostics.push('orphan-think-close');
+      // A lost opening tag leaves its reasoning prefix as unwrapped text.
+      // Reclassify that prefix unless a real delivery/internal segment was
+      // already completed before this stray close.
+      if (!segments.some((segment) => segment.kind === 'message' || segment.kind === 'internal')) {
+        const prefix = segments.map((segment) => segment.text).join('');
+        segments.length = 0;
+        if (prefix) appendOutputSegment(segments, { kind: 'reasoning', text: prefix });
+      }
+    } else {
+      appendOutputSegment(segments, { kind: 'unwrapped', text: token });
+    }
+  }
+  appendText(text.slice(cursor));
+
+  if (open?.kind === 'reasoning') {
+    diagnostics.push('unclosed-think');
+    finishOpen();
+  } else if (open?.kind === 'internal') {
+    diagnostics.push('unclosed-internal');
+    finishOpen();
+  } else if (open?.kind === 'message') {
+    diagnostics.push('unclosed-message');
+    appendOutputSegment(segments, { kind: 'unwrapped', text: open.opener + open.text });
+    open = undefined;
+  }
+
+  const deliveries = segments
+    .filter((segment): segment is Extract<AssistantOutputSegment, { kind: 'message' }> => segment.kind === 'message')
+    .map((segment) => ({ to: segment.to, body: segment.text.trim() }));
+  const internal = segments
+    .filter((segment) => segment.kind === 'internal')
+    .map((segment) => segment.text.trim())
+    .filter(Boolean);
+  const reasoning = segments
+    .filter((segment) => segment.kind === 'reasoning')
+    .map((segment) => segment.text.trim())
+    .filter(Boolean);
+  const unwrapped = segments
+    .filter((segment) => segment.kind === 'unwrapped')
+    .map((segment) => segment.text)
+    .join('')
+    .trim();
+
+  return {
+    segments,
+    deliveries,
+    internal,
+    reasoning,
+    unwrapped,
+    diagnostics,
+    normalizedText: serializeSegments(segments, (segment) => segment.kind !== 'reasoning'),
+  };
+}
+
+/** Strip `<internal>...</internal>` blocks from agent output, then trim. */
 export function stripInternalTags(text: string): string {
-  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+  return serializeSegments(parseAssistantOutput(text).segments, (segment) => segment.kind !== 'internal');
 }
 
-/**
- * Strip inline chain-of-thought scaffolding bound for a user. Reasoning models
- * via OpenCode emit `<think>…</think>` in the response text; SSE handling can
- * also drop the opening tag, leaving an orphaned `</think>` tail. Removes
- * balanced blocks, an orphaned leading close (and everything before it), and an
- * unclosed trailing open (through end of text) — except when the model forgot
- * to close `<think>` but still emitted a delivery tag (`<message …>` /
- * `<internal>`) after its reasoning, in which case the reasoning ends where
- * that tag begins so the actual reply survives.
- */
+/** Strip provider chain-of-thought while recovering delivery blocks from malformed wrappers. */
 export function stripThinkTags(text: string): string {
-  const balancedThink = /<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?\s*>/gi;
-  const openThink = /<think(?:ing)?\b[^>]*>/i;
-  const closeThink = /<\/think(?:ing)?\s*>/i;
-  let out = text.replace(balancedThink, '');
-  // Orphaned leading close (no opening tag remains): the visible text is the
-  // tail of a block whose open was lost — drop up to and including that close.
-  if (!openThink.test(out)) {
-    const close = out.match(closeThink);
-    if (close?.index !== undefined) out = out.slice(close.index + close[0].length);
-  }
-  // Unclosed trailing open: the model never closed `<think>`. Normally the
-  // reasoning runs to the end of the text, so drop from the open tag onward.
-  // But reasoning models (e.g. minimax) sometimes emit the real reply as a
-  // `<message …>`/`<internal>` block *inside* a never-closed `<think>`; naively
-  // stripping to the end would delete the reply too. If a delivery tag follows
-  // the open tag, treat the reasoning as ending there and keep everything from
-  // the delivery tag on.
-  const open = out.match(openThink);
-  if (open?.index !== undefined) {
-    const after = out.slice(open.index + open[0].length);
-    const deliver = after.search(/<(?:message\b|internal\b)/i);
-    out = deliver >= 0 ? out.slice(0, open.index) + after.slice(deliver) : out.slice(0, open.index);
-  }
-  return out.trim();
+  return parseAssistantOutput(text).normalizedText;
 }
 
-/**
- * Return the concatenated content of `<internal>...</internal>` blocks,
- * separated by blank lines. Empty string if none.
- */
+/** Return internal scratchpad blocks separated by blank lines. */
 export function extractInternalTags(text: string): string {
-  const re = /<internal>([\s\S]*?)<\/internal>/g;
-  const parts: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const inner = m[1].trim();
-    if (inner) parts.push(inner);
-  }
-  return parts.join('\n\n');
+  return parseAssistantOutput(text).internal.join('\n\n');
 }

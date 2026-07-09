@@ -7,32 +7,20 @@ import { registerProvider } from './provider-registry.js';
 import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import { pickActivityDetail } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
-import { stripThinkTags } from '../formatter.js';
+import { parseAssistantOutput } from '../formatter.js';
 
 function log(msg: string): void {
   console.error(`[opencode-provider] ${msg}`);
 }
 
 /**
- * Normalize the assistant's final text before delivery. OpenCode's SSE stream
- * drops the leading `<` of the response (breaking `<message>` parsing), so
- * restore it when the text opens with a tag we emit (message/internal/think) —
- * scoped to known tags to avoid corrupting a reply that starts with e.g.
- * `code>`. Restoring first also makes an inline `<think>` whole, so
- * stripThinkTags removes the chain-of-thought cleanly instead of leaking a
- * fragment.
+ * Normalize finalized assistant text before delivery. Some OpenCode/provider
+ * combinations drop the leading `<` of the first response tag, so the shared
+ * tolerant parser repairs known wrappers and removes provider reasoning. The
+ * same normalization also protects the SSE compatibility fallback.
  */
 export function normalizeAssistantText(raw: string): string {
-  let text = raw;
-  // Preserve leading whitespace while repairing the first non-whitespace
-  // character. Some providers put a newline before the tag and OpenCode still
-  // loses the tag's `<`, so checking only text[0] misses the same corruption.
-  const leadingWhitespace = text.match(/^\s*/)?.[0] ?? '';
-  const body = text.slice(leadingWhitespace.length);
-  if (body && body[0] !== '<' && /^(?:message(?:\s+[\w-]+=|>)|internal>|think(?:ing)?(?:\s[^>]*)?>)/i.test(body)) {
-    text = leadingWhitespace + '<' + body;
-  }
-  return stripThinkTags(text);
+  return parseAssistantOutput(raw).normalizedText;
 }
 
 // ── Model parameters (model_params bag) ──────────────────────────────────
@@ -219,16 +207,17 @@ function activityError(error: unknown): string | undefined {
  * tag that may follow an unclosed think section. */
 export function extractThinkText(text: string | undefined): string | undefined {
   if (!text) return undefined;
-  const open = /<think(?:ing)?(?:\s[^>]*)?>/i.exec(text);
-  if (!open) return undefined;
-  const tail = text.slice(open.index + open[0].length);
-  const close = /<\/think(?:ing)?\s*>/i.exec(tail);
-  const delivery = /<(?:message|internal)\b/i.exec(tail);
-  let end = tail.length;
-  if (close) end = Math.min(end, close.index);
-  if (delivery) end = Math.min(end, delivery.index);
-  const extracted = tail.slice(0, end).trim();
-  return extracted || undefined;
+  return parseAssistantOutput(text).reasoning[0];
+}
+
+/** Concatenate every distinct finalized text part in provider order. Streaming
+ * updates are snapshots of individual part ids; finalized parts are the only
+ * reliable source for the complete assistant response. */
+export function finalTextFromParts(parts: OpenCodePart[]): string {
+  return parts
+    .filter((part) => part.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text ?? '')
+    .join('');
 }
 
 /** Build one reasoning activity per finalized reasoning part. A companion
@@ -726,7 +715,9 @@ export class OpenCodeProvider implements AgentProvider {
           throw new Error(`OpenCode promptAsync: ${JSON.stringify(promptRes.error)}`);
         }
 
-        const partTextByMessageId = new Map<string, string>();
+        // Compatibility fallback only: preserve each distinct streaming text
+        // part rather than overwriting all text under its message id.
+        const textPartsByMessageId = new Map<string, Map<string, OpenCodePart>>();
         const roleByMessageId = new Map<string, string>();
         const finishByMessageId = new Map<string, string>();
         let lastAssistantUsage: import('./types.js').TurnUsage | null = null;
@@ -800,7 +791,12 @@ export class OpenCodeProvider implements AgentProvider {
                 const part = ev.properties.part as OpenCodePart | undefined;
                 if (!isEventForSession(part?.sessionID, sessionId)) break;
                 if (part?.type === 'text' && part.messageID && part.text) {
-                  partTextByMessageId.set(part.messageID, part.text);
+                  let messageParts = textPartsByMessageId.get(part.messageID);
+                  if (!messageParts) {
+                    messageParts = new Map();
+                    textPartsByMessageId.set(part.messageID, messageParts);
+                  }
+                  messageParts.set(part.id || '__unidentified_text_part__', part);
                 }
                 const step = formatProgressFromPart(part);
                 if (step) {
@@ -868,34 +864,46 @@ export class OpenCodeProvider implements AgentProvider {
         const assistantMessageIds: string[] = [];
         for (const [msgId, role] of roleByMessageId) {
           if (role === 'assistant') {
-            resultText = partTextByMessageId.get(msgId) ?? resultText;
             lastAssistantId = msgId;
             assistantMessageIds.push(msgId);
           }
         }
-        // Restore the leading '<' OpenCode's SSE strips and drop inline
-        // chain-of-thought before delivery. See normalizeAssistantText.
-        resultText = normalizeAssistantText(resultText);
-        // Finalized message parts are the sole reasoning source. Some models
-        // expose only a truncated structured prefix while the companion text
-        // part contains the complete `<think>` block.
+        // Finalized message parts are the sole normal source for response text
+        // and reasoning. Some models expose only a truncated structured prefix
+        // while a companion text part contains the complete `<think>` block.
+        // If a final fetch fails, fall back to the per-part SSE snapshots for
+        // that message rather than dropping an otherwise deliverable reply.
+        let lastAssistantMessageData: { info?: unknown; parts?: OpenCodePart[] } | undefined;
         for (const messageID of assistantMessageIds) {
+          let finalizedParts: OpenCodePart[] | undefined;
           try {
             const message = await client.session.message({ path: { id: sessionId, messageID } });
-            const parts = ((message.data as { parts?: OpenCodePart[] } | undefined)?.parts ?? []);
-            for (const step of reasoningStepsFromParts(parts)) yield { type: 'progress', step };
+            const data = message.data as { info?: unknown; parts?: OpenCodePart[] } | undefined;
+            finalizedParts = data?.parts;
+            if (messageID === lastAssistantId) lastAssistantMessageData = data;
           } catch (err) {
-            log(`Failed to refresh final reasoning: ${err instanceof Error ? err.message : String(err)}`);
+            log(`Failed to refresh final assistant message: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          const parts = finalizedParts ?? [...(textPartsByMessageId.get(messageID)?.values() ?? [])];
+          resultText += finalTextFromParts(parts);
+          for (const step of reasoningStepsFromParts(parts)) {
+            yield { type: 'progress', step };
           }
         }
+        // Repair known malformed wrappers and drop inline chain-of-thought.
+        resultText = normalizeAssistantText(resultText);
         // Some providers (e.g. gemini-via-openrouter) finalize cost/tokens in a
         // `message.updated` that arrives *after* `session.idle` ends our loop,
         // so the values we captured from streaming events are still zero. Do a
         // one-shot fetch of the assistant message to pick up the final values.
         if (lastAssistantId) {
           try {
-            const msgRes = await client.session.message({ path: { id: sessionId, messageID: lastAssistantId } });
-            const info = (msgRes.data?.info ?? msgRes.data) as {
+            let messageData = lastAssistantMessageData;
+            if (!messageData) {
+              const msgRes = await client.session.message({ path: { id: sessionId, messageID: lastAssistantId } });
+              messageData = msgRes.data as { info?: unknown; parts?: OpenCodePart[] } | undefined;
+            }
+            const info = (messageData?.info ?? messageData) as {
               cost?: number;
               tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } };
               providerID?: string;

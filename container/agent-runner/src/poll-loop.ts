@@ -13,8 +13,7 @@ import {
   categorizeMessage,
   isClearCommand,
   isRunnerCommand,
-  stripInternalTags,
-  extractInternalTags,
+  parseAssistantOutput,
   type RoutingContext,
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
@@ -1255,12 +1254,15 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
  * blocks, even with a single destination. Bare text is scratchpad only.
  */
 function dispatchResultText(text: string, routing: RoutingContext): { sent: number; hasUnwrapped: boolean } {
-  const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
+  const parsed = parseAssistantOutput(text);
+  if (parsed.diagnostics.length > 0) {
+    log(`Output recovery: ${[...new Set(parsed.diagnostics)].join(', ')}`);
+  }
 
   // Surface <internal>...</internal> reasoning to the web UI as a separate
   // messages_out row, BEFORE dispatching <message> blocks so the internal
   // bubble sequences ahead of the response in the UI's seq-ordered view.
-  const internalText = extractInternalTags(text);
+  const internalText = parsed.internal.join('\n\n');
   if (internalText && routing.channelType === 'web' && routing.platformId) {
     writeMessageOut({
       id: generateId(),
@@ -1273,18 +1275,12 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
     });
   }
 
-  let match: RegExpExecArray | null;
   let sent = 0;
-  let lastIndex = 0;
-  const scratchpadParts: string[] = [];
+  const scratchpadParts: string[] = parsed.unwrapped ? [parsed.unwrapped] : [];
 
-  while ((match = MESSAGE_RE.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      scratchpadParts.push(text.slice(lastIndex, match.index));
-    }
-    const toName = match[1];
-    const body = match[2].trim();
-    lastIndex = MESSAGE_RE.lastIndex;
+  for (const delivery of parsed.deliveries) {
+    const toName = delivery.to;
+    const body = delivery.body;
 
     // Weak reasoning models (e.g. minimax-m3) sometimes emit stray empty
     // <message to="..."></message> wrappers. Delivering them writes blank
@@ -1304,12 +1300,8 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
     sendToDestination(dest, body, routing);
     sent++;
   }
-  if (lastIndex < text.length) {
-    scratchpadParts.push(text.slice(lastIndex));
-  }
 
-  const rawScratchpad = scratchpadParts.join('');
-  const scratchpad = stripInternalTags(rawScratchpad);
+  const scratchpad = scratchpadParts.join('').trim();
 
   if (scratchpad) {
     log(`[scratchpad] ${scratchpad.slice(0, 500)}${scratchpad.length > 500 ? '…' : ''}`);

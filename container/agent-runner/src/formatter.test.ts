@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { formatMessages, stripInternalTags, stripThinkTags } from './formatter.js';
+import { formatMessages, parseAssistantOutput, stripInternalTags, stripThinkTags } from './formatter.js';
 import { TIMEZONE } from './timezone.js';
 
 beforeEach(() => {
@@ -252,5 +252,92 @@ describe('stripThinkTags', () => {
     expect(stripThinkTags('Real reply.<think>leftover reasoning that never closed')).toBe(
       'Real reply.',
     );
+  });
+});
+
+describe('parseAssistantOutput', () => {
+  it('classifies every output category in source order', () => {
+    const parsed = parseAssistantOutput(
+      'note<think>private</think><internal>operator note</internal>' +
+      '<message to="web">hello</message><message to="peer">world</message>',
+    );
+    expect(parsed.segments.map((segment) => segment.kind)).toEqual([
+      'unwrapped', 'reasoning', 'internal', 'message', 'message',
+    ]);
+    expect(parsed.deliveries).toEqual([
+      { to: 'web', body: 'hello' },
+      { to: 'peer', body: 'world' },
+    ]);
+    expect(parsed.internal).toEqual(['operator note']);
+    expect(parsed.reasoning).toEqual(['private']);
+    expect(parsed.unwrapped).toBe('note');
+    expect(parsed.normalizedText).toBe(
+      'note<internal>operator note</internal>' +
+      '<message to="web">hello</message><message to="peer">world</message>',
+    );
+  });
+
+  it('repairs a missing leading angle and reports the recovery', () => {
+    const parsed = parseAssistantOutput('  message to="web">hello</message>');
+    expect(parsed.deliveries).toEqual([{ to: 'web', body: 'hello' }]);
+    expect(parsed.diagnostics).toEqual(['missing-leading-angle']);
+  });
+
+  it('recovers delivery and internal blocks inside an unclosed think', () => {
+    const message = parseAssistantOutput(
+      '<think>private preamble<message to="web">answer</message>',
+    );
+    expect(message.reasoning).toEqual(['private preamble']);
+    expect(message.deliveries).toEqual([{ to: 'web', body: 'answer' }]);
+    expect(message.diagnostics).toContain('unclosed-think');
+
+    const internal = parseAssistantOutput('<think>private<internal>scratch</internal>');
+    expect(internal.reasoning).toEqual(['private']);
+    expect(internal.internal).toEqual(['scratch']);
+  });
+
+  it('does not deliver an unclosed message block', () => {
+    const parsed = parseAssistantOutput('<message to="web">partial answer');
+    expect(parsed.deliveries).toEqual([]);
+    expect(parsed.unwrapped).toBe('<message to="web">partial answer');
+    expect(parsed.diagnostics).toContain('unclosed-message');
+  });
+
+  it('treats recognized tags inside a message body as literal message content', () => {
+    const parsed = parseAssistantOutput(
+      '<message to="web">show <internal>literal</internal> and <think>x</think></message>',
+    );
+    expect(parsed.deliveries).toEqual([{
+      to: 'web',
+      body: 'show <internal>literal</internal> and <think>x</think>',
+    }]);
+    expect(parsed.internal).toEqual([]);
+    expect(parsed.reasoning).toEqual([]);
+  });
+
+  it('does not treat routing examples in Markdown code as structural tags', () => {
+    const parsed = parseAssistantOutput(
+      '<think>Use `<message to="name">` as documented, then answer.' +
+      '<message to="web">real answer</message>',
+    );
+    expect(parsed.reasoning).toEqual([
+      'Use `<message to="name">` as documented, then answer.',
+    ]);
+    expect(parsed.deliveries).toEqual([{ to: 'web', body: 'real answer' }]);
+    expect(parsed.normalizedText).toBe('<message to="web">real answer</message>');
+  });
+
+  it('ignores balanced routing examples before the final delivery-only suffix', () => {
+    const parsed = parseAssistantOutput(
+      '<think>Prompt says <message to="name">example</message>, but keep reasoning. ' +
+      '<message to="web">first</message><message to="peer">second</message>',
+    );
+    expect(parsed.reasoning).toEqual([
+      'Prompt says <message to="name">example</message>, but keep reasoning.',
+    ]);
+    expect(parsed.deliveries).toEqual([
+      { to: 'web', body: 'first' },
+      { to: 'peer', body: 'second' },
+    ]);
   });
 });
