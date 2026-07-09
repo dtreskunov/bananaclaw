@@ -379,11 +379,14 @@ export function stripInternalTags(text: string): string {
  * that tag begins so the actual reply survives.
  */
 export function stripThinkTags(text: string): string {
-  let out = text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+  const balancedThink = /<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?\s*>/gi;
+  const openThink = /<think(?:ing)?\b[^>]*>/i;
+  const closeThink = /<\/think(?:ing)?\s*>/i;
+  let out = text.replace(balancedThink, '');
   // Orphaned leading close (no opening tag remains): the visible text is the
   // tail of a block whose open was lost — drop up to and including that close.
-  if (!/<think(?:ing)?\b[^>]*>/i.test(out)) {
-    const close = out.match(/<\/think(?:ing)?>/i);
+  if (!openThink.test(out)) {
+    const close = out.match(closeThink);
     if (close?.index !== undefined) out = out.slice(close.index + close[0].length);
   }
   // Unclosed trailing open: the model never closed `<think>`. Normally the
@@ -393,7 +396,7 @@ export function stripThinkTags(text: string): string {
   // stripping to the end would delete the reply too. If a delivery tag follows
   // the open tag, treat the reasoning as ending there and keep everything from
   // the delivery tag on.
-  const open = out.match(/<think(?:ing)?>/i);
+  const open = out.match(openThink);
   if (open?.index !== undefined) {
     const after = out.slice(open.index + open[0].length);
     const deliver = after.search(/<(?:message\b|internal\b)/i);

@@ -24,8 +24,13 @@ function log(msg: string): void {
  */
 export function normalizeAssistantText(raw: string): string {
   let text = raw;
-  if (text && text[0] !== '<' && /^(?:message(?:\s+[\w-]+=|>)|internal>|think(?:ing)?>)/i.test(text)) {
-    text = '<' + text;
+  // Preserve leading whitespace while repairing the first non-whitespace
+  // character. Some providers put a newline before the tag and OpenCode still
+  // loses the tag's `<`, so checking only text[0] misses the same corruption.
+  const leadingWhitespace = text.match(/^\s*/)?.[0] ?? '';
+  const body = text.slice(leadingWhitespace.length);
+  if (body && body[0] !== '<' && /^(?:message(?:\s+[\w-]+=|>)|internal>|think(?:ing)?(?:\s[^>]*)?>)/i.test(body)) {
+    text = leadingWhitespace + '<' + body;
   }
   return stripThinkTags(text);
 }

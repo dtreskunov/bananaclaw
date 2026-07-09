@@ -138,6 +138,52 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
+  it('retries an opening <message> tag that has no close', async () => {
+    insertMessage('m1', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    let turn = 0;
+    const provider = new MockProvider({}, () => {
+      turn++;
+      return turn === 1
+        ? '<message to="discord-test">truncated reply'
+        : '<message to="discord-test">recovered reply</message>';
+    });
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const out = getUndeliveredMessages();
+    expect(turn).toBe(2);
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe('recovered reply');
+  });
+
+  it('retries a closing </message> tag that has no open', async () => {
+    insertMessage('m1', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    let turn = 0;
+    const provider = new MockProvider({}, () => {
+      turn++;
+      return turn === 1
+        ? 'truncated reply</message>'
+        : '<message to="discord-test">recovered reply</message>';
+    });
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const out = getUndeliveredMessages();
+    expect(turn).toBe(2);
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe('recovered reply');
+  });
+
   it('unknown destination is dropped, valid destination is sent', async () => {
     insertMessage('m1', { sender: 'Alice', text: 'hi' }, { platformId: 'chan-1', channelType: 'discord' });
 

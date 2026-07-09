@@ -206,6 +206,15 @@ describe('stripThinkTags', () => {
     expect(stripThinkTags('<Thinking>\na\nb\n</THINKING>\n\nHello')).toBe('Hello');
   });
 
+  it('strips think tags with attributes and whitespace before the close', () => {
+    expect(stripThinkTags('<think mode="deep">private</think   >public')).toBe('public');
+  });
+
+  it('handles mismatched think/thinking variants', () => {
+    expect(stripThinkTags('<think>private</thinking>public')).toBe('public');
+    expect(stripThinkTags('<thinking>private</think>public')).toBe('public');
+  });
+
   it('strips an orphaned leading close tag and everything before it', () => {
     // The SSE stream dropped the opening <think>, leaving only the tail.
     const leaked =
