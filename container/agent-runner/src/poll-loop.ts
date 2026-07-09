@@ -796,7 +796,19 @@ async function processQuery(
         const { prompt: resolvedFollowUp, files: followUpFiles } = await transcribeAudioFiles(rawFollowUpFiles, prompt);
         prompt = resolvedFollowUp;
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
+        // Reset the per-turn delivery/notice flags for the new turn. On a
+        // long-lived provider (OpenCode) the query stays open across turns, so
+        // these query-scoped flags would otherwise stay set from an earlier
+        // turn that DID deliver. That stickiness silently breaks the empty-turn
+        // safety net: `sentAny` staying true skips both the in-loop
+        // `query.end()` (below) and the post-stream "finished without producing
+        // a response" notice, so a later turn that strips to empty (e.g. a
+        // reasoning model emitting a mangled/unclosed <think> wrapper) leaves
+        // the user with total silence. Reset all three so the notices key off
+        // THIS turn's delivery, not the whole warm query's history.
         unwrappedNudged = false;
+        sentAny = false;
+        emptyResultSeen = false;
         if (promptTracker) promptTracker.latest = prompt;
         turnActive = true;
         turnStartTime = Date.now();

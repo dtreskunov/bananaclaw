@@ -746,6 +746,52 @@ describe('poll loop — empty result notice', () => {
     // The loop, not the provider, ended the otherwise-open stream.
     expect(provider.ended).toBe(true);
   });
+
+  it('still notifies on an empty turn after an earlier turn in the same warm query delivered', async () => {
+    // Regression: on a long-lived provider (OpenCode) the query stays open
+    // across turns. `sentAny`/`emptyResultSeen` are query-scoped, so an earlier
+    // turn that delivered used to leave `sentAny` stuck true — which skipped
+    // BOTH the empty-turn `query.end()` and the "finished without producing a
+    // response" notice on a later turn that stripped to empty (e.g. a reasoning
+    // model emitting a mangled/unclosed <think> wrapper). The user got total
+    // silence. The per-turn reset at follow-up push restores per-turn notices.
+    insertMessage('warm-1', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    let turn = 0;
+    const provider = new MockProvider({}, () => {
+      turn++;
+      // Turn 1 delivers a real reply; the follow-up turn strips to empty.
+      return turn === 1 ? '<message to="discord-test">first reply</message>' : '';
+    });
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 4000);
+
+    // Wait for the first turn's real reply to land.
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => {
+        try { return JSON.parse(m.content).text === 'first reply'; } catch { return false; }
+      }),
+      3000,
+    );
+
+    // Send a follow-up that produces an empty turn in the SAME warm query.
+    insertMessage('warm-2', { sender: 'Alice', text: 'again' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    // The empty-turn notice must still fire despite the earlier delivery.
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => {
+        try { return JSON.parse(m.content).text?.includes('without producing a response'); } catch { return false; }
+      }),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const notice = getUndeliveredMessages().find((m) => {
+      try { return JSON.parse(m.content).text?.includes('without producing a response'); } catch { return false; }
+    });
+    expect(notice).toBeDefined();
+  });
 });
 
 /**
