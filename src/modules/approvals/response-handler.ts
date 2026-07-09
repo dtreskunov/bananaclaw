@@ -118,6 +118,11 @@ async function handleRegisteredApproval(
 
 function namespacedUserId(payload: ResponsePayload): string | null {
   if (!payload.userId) return null;
+  // Web responses already carry the canonical central-DB user id (a bare UUID
+  // like "e5a1f280-..." or an existing "<channel>:<handle>"). Never re-namespace
+  // them — prefixing a colon-less UUID with "web:" would fail every role lookup,
+  // so an authorized approval click gets silently dropped and the card reappears.
+  if (payload.channelType === 'web') return payload.userId;
   return payload.userId.includes(':') ? payload.userId : `${payload.channelType}:${payload.userId}`;
 }
 

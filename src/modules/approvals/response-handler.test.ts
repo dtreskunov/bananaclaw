@@ -161,4 +161,43 @@ describe('approval response authorization', () => {
     expect(handler).toHaveBeenCalledTimes(1);
     expect(getPendingApproval('appr-3')).toBeUndefined();
   });
+
+  it('allows a web click carrying a canonical (non-namespaced) user id', async () => {
+    // Web responses pass the central-DB user id verbatim (a bare UUID here),
+    // with channelType 'web'. The handler must NOT re-namespace it as
+    // "web:<uuid>" — that would fail the role lookup, drop the click, and
+    // leave the card to reappear on every sync.
+    upsertUser({ id: 'e5a1f280-uuid', kind: 'resend', display_name: 'Web Owner', created_at: now() });
+    grantRole({ user_id: 'e5a1f280-uuid', role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
+
+    const { registerApprovalHandler } = await import('./primitive.js');
+    const { handleApprovalsResponse } = await import('./response-handler.js');
+    const handler = vi.fn().mockResolvedValue(undefined);
+    registerApprovalHandler('web_install_allowed', handler);
+
+    createPendingApproval({
+      approval_id: 'appr-4',
+      session_id: 'sess-1',
+      request_id: 'appr-4',
+      action: 'web_install_allowed',
+      payload: JSON.stringify({ packages: ['left-pad'] }),
+      created_at: now(),
+      title: 'Install packages',
+      options_json: JSON.stringify([]),
+    });
+
+    const claimed = await handleApprovalsResponse({
+      questionId: 'appr-4',
+      value: 'approve',
+      userId: 'e5a1f280-uuid',
+      channelType: 'web',
+      platformId: 'e5a1f280-uuid',
+      threadId: null,
+    });
+
+    expect(claimed).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ userId: 'e5a1f280-uuid' }));
+    expect(getPendingApproval('appr-4')).toBeUndefined();
+  });
 });
