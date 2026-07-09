@@ -644,8 +644,14 @@ async function processQuery(
   let pendingUsage: import('./providers/types.js').TurnUsage | null = null;
   // Count of activity lines already persisted to turn_activity this batch.
   // Advanced after each result flush so multiple results in one query don't
-  // re-persist earlier lines. Reset implicitly by clearActivity() above.
+  // re-persist earlier lines. Long-lived providers reuse this processQuery
+  // across user turns, so reset both the buffer and this cursor at every
+  // actual turn boundary rather than only when processQuery starts.
   let activityFlushedCount = 0;
+  const resetActivityForNextTurn = () => {
+    try { clearActivity(); } catch { /* best-effort */ }
+    activityFlushedCount = 0;
+  };
 
   // Per-push batch queue. Each push (initial + every follow-up) enqueues
   // its ids + routing. On `result` we drain the queue — only then are the
@@ -817,6 +823,11 @@ async function processQuery(
         sentAny = false;
         emptyResultSeen = false;
         if (promptTracker) promptTracker.latest = prompt;
+        // If the previous result already completed, this push starts a new
+        // turn immediately. Clear its trace before the provider can emit the
+        // first event. When a follow-up was queued during an active turn, the
+        // result handler below performs this reset at the precise boundary.
+        if (!turnActive) resetActivityForNextTurn();
         turnActive = true;
         turnStartTime = Date.now();
         try { clearTurnEnded(); } catch { /* best-effort */ }
@@ -1079,6 +1090,10 @@ async function processQuery(
               log(`Failed to write turn_activity: ${e instanceof Error ? e.message : String(e)}`);
             }
           }
+          // A queued user batch begins as soon as this result is consumed.
+          // Its provider events must replace, not extend, the completed
+          // turn's live snapshot. Persist first, then clear at the boundary.
+          if (turnBatchQueue.length > 0) resetActivityForNextTurn();
         }
         // Reset the per-turn baseline so a follow-up push within the same
         // query starts a fresh "did MCP write anything?" window.
