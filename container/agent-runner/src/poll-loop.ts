@@ -1223,7 +1223,8 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       break;
     case 'progress': {
       const s = event.step;
-      log(`Progress: ${s.kind}${s.tool ? ` ${s.tool}` : ''}${s.text ? ` ${s.text}` : ''}`);
+      const label = s.kind === 'tool' ? s.tool : 'text' in s ? s.text : '';
+      log(`Progress: ${s.kind}${label ? ` ${label}` : ''}`);
       try { appendActivity(s); } catch { /* best-effort */ }
       break;
     }

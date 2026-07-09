@@ -5,7 +5,7 @@ import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
 import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
-import { pickActivityDetail, ProgressThrottle } from './types.js';
+import { pickActivityDetail } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { stripThinkTags } from '../formatter.js';
 
@@ -113,7 +113,24 @@ type OpenCodePart = {
   messageID?: string;
   text?: string;
   tool?: string;
-  state?: { input?: Record<string, unknown> };
+  callID?: string;
+  filename?: string;
+  mime?: string;
+  source?: { path?: string };
+  files?: string[];
+  attempt?: number;
+  error?: unknown;
+  auto?: boolean;
+  agent?: string;
+  description?: string;
+  time?: { start?: number; end?: number };
+  state?: {
+    status?: 'pending' | 'running' | 'completed' | 'error';
+    input?: Record<string, unknown>;
+    title?: string;
+    error?: string;
+    time?: { start?: number; end?: number };
+  };
 };
 
 /** OpenCode's subscription is process-wide, so delayed/background message
@@ -121,10 +138,6 @@ type OpenCodePart = {
 export function isEventForSession(eventSessionId: string | undefined, activeSessionId: string): boolean {
   return eventSessionId === activeSessionId;
 }
-
-/** Reasoning-part ids we've already announced. Reset per-turn by the
- *  caller; module-level only because we keep the formatter pure-ish. */
-const TEXT_PROGRESS_STEP = 500;
 
 /**
  * Map an OpenCode `finish` reason to a human-readable message used when the
@@ -153,41 +166,55 @@ export function describeFinishReason(finish: string): string {
  * human-readable formatting happens here: tool name + raw primary argument
  * are passed through and the UI does the presentation.
  *
- * `textLen` is the running length of the assistant's text part (so we can
- * emit a `text` step only when the streamed text crosses a 500-char step).
- * `seenReasoning` is the set of reasoning-part ids already announced, so we
- * yield a `thinking` step at most once per reasoning part.
+ * Reasoning is emitted only once complete. Streaming text, snapshots, and
+ * permission events are deliberately excluded from the user-visible trace.
  */
 export function formatProgressFromPart(
   part: OpenCodePart | undefined,
-  textLen: number,
-  seenReasoning: Set<string>,
 ): ActivityStep | null {
-  if (!part || !part.type) return null;
+  if (!part?.type || !part.id) return null;
   const inp = (part.state?.input ?? {}) as Record<string, unknown>;
   switch (part.type) {
     case 'tool': {
       const tool = part.tool || '';
       if (!tool) return null;
       const detail = pickActivityDetail(inp);
-      return { kind: 'tool', tool, ...(detail ? { detail } : {}) };
+      const status = part.state?.status ?? 'pending';
+      const start = part.state?.time?.start;
+      const end = part.state?.time?.end;
+      return {
+        kind: 'tool', id: part.callID || part.id, tool, status,
+        ...(detail ? { detail } : {}),
+        ...(part.state?.title ? { title: part.state.title } : {}),
+        ...(status === 'error' && part.state?.error ? { error: part.state.error } : {}),
+        ...(typeof start === 'number' && typeof end === 'number' ? { durationMs: Math.max(0, end - start) } : {}),
+      };
     }
     case 'reasoning': {
-      const id = part.id || '';
-      if (!id || seenReasoning.has(id)) return null;
-      seenReasoning.add(id);
-      return { kind: 'thinking' };
+      if (!part.text?.trim() || typeof part.time?.end !== 'number') return null;
+      return { kind: 'reasoning', id: part.id, text: part.text.trim() };
     }
-    case 'text': {
-      if (!part.text || textLen <= 0) return null;
-      // Yield once per 500-char step so we don't thrash on every delta.
-      // The caller computes textLen *after* updating its running map.
-      if (textLen < TEXT_PROGRESS_STEP) return null;
-      return { kind: 'text' };
-    }
+    case 'file':
+      return { kind: 'file', id: part.id, ...(part.source?.path ? { path: part.source.path } : {}), ...(part.filename ? { name: part.filename } : {}), ...(part.mime ? { mime: part.mime } : {}) };
+    case 'patch':
+      return { kind: 'patch', id: part.id, files: (part.files ?? []).slice(0, 100) };
+    case 'retry':
+      return { kind: 'retry', id: part.id, attempt: part.attempt ?? 0, ...(activityError(part.error) ? { error: activityError(part.error) } : {}) };
+    case 'compaction':
+      return { kind: 'compaction', id: part.id, auto: part.auto };
+    case 'subtask':
+      return { kind: 'subtask', id: part.id, ...(part.agent ? { agent: part.agent } : {}), ...(part.description ? { description: part.description } : {}) };
     default:
       return null;
   }
+}
+
+function activityError(error: unknown): string | undefined {
+  if (typeof error === 'string') return error;
+  if (!error || typeof error !== 'object') return undefined;
+  const e = error as { message?: unknown; data?: { message?: unknown }; name?: unknown };
+  const value = e.data?.message ?? e.message ?? e.name;
+  return typeof value === 'string' ? value : undefined;
 }
 
 function killProcessTree(proc: ChildProcess): void {
@@ -658,8 +685,8 @@ export class OpenCodeProvider implements AgentProvider {
         const partTextByMessageId = new Map<string, string>();
         const roleByMessageId = new Map<string, string>();
         const finishByMessageId = new Map<string, string>();
-        const progress = new ProgressThrottle();
-        const seenReasoning = new Set<string>();
+        const emittedReasoning = new Set<string>();
+        const pendingReasoning = new Map<string, OpenCodePart>();
         let lastAssistantUsage: import('./types.js').TurnUsage | null = null;
         // Captured separately so the limits-lookup at yield-time has the
         // provider id (TurnUsage itself doesn't carry it).
@@ -733,10 +760,16 @@ export class OpenCodeProvider implements AgentProvider {
                 if (part?.type === 'text' && part.messageID && part.text) {
                   partTextByMessageId.set(part.messageID, part.text);
                 }
-                const textLen = part?.type === 'text' && part?.messageID
-                  ? (partTextByMessageId.get(part.messageID)?.length ?? 0)
-                  : 0;
-                for (const step of progress.push(formatProgressFromPart(part, textLen, seenReasoning))) {
+                if (part?.type === 'reasoning' && part.id && !emittedReasoning.has(part.id)) {
+                  pendingReasoning.set(part.id, part);
+                }
+                const step = formatProgressFromPart(part);
+                if (step) {
+                  if (step.kind === 'reasoning') {
+                    if (emittedReasoning.has(step.id)) break;
+                    emittedReasoning.add(step.id);
+                    pendingReasoning.delete(step.id);
+                  }
                   yield { type: 'progress', step };
                 }
                 break;
@@ -744,9 +777,6 @@ export class OpenCodeProvider implements AgentProvider {
               case 'permission.updated': {
                 const perm = ev.properties as { id?: string; sessionID?: string };
                 if (perm.sessionID === sessionId && perm.id) {
-                  for (const step of progress.push({ kind: 'permission' })) {
-                    yield { type: 'progress', step };
-                  }
                   try {
                     await client.postSessionIdPermissionsPermissionId({
                       path: { id: sessionId, permissionID: perm.id },
@@ -787,6 +817,11 @@ export class OpenCodeProvider implements AgentProvider {
               case 'session.idle': {
                 const sid = (ev.properties as { sessionID?: string }).sessionID;
                 if (sid === sessionId) {
+                  for (const part of pendingReasoning.values()) {
+                    if (!part.id || !part.text?.trim() || emittedReasoning.has(part.id)) continue;
+                    emittedReasoning.add(part.id);
+                    yield { type: 'progress', step: { kind: 'reasoning', id: part.id, text: part.text.trim() } };
+                  }
                   break turn;
                 }
                 break;
@@ -860,7 +895,6 @@ export class OpenCodeProvider implements AgentProvider {
           const reasonMsg = describeFinishReason(lastFinish);
           yield { type: 'error', message: reasonMsg, retryable: false, classification: `opencode:finish:${lastFinish}` };
         }
-        for (const step of progress.flush()) yield { type: 'progress', step };
         yield { type: 'result', text: resultText || null };
       }
     }

@@ -165,10 +165,16 @@ let _activityBuffer: ActivityLine[] = [];
 
 export function appendActivity(step: ActivityStep): void {
   if (!step || !step.kind) return;
-  // Cap only the primary detail; the rest of the step is tiny.
+  // Cap user/model/provider text fields before they leave the container.
   let s = step;
-  if (typeof s.detail === 'string' && s.detail.length > ACTIVITY_MAX_CHARS) {
+  if (s.kind === 'tool' && typeof s.detail === 'string' && s.detail.length > ACTIVITY_MAX_CHARS) {
     s = { ...s, detail: s.detail.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
+  }
+  if ('text' in s && typeof s.text === 'string' && s.text.length > ACTIVITY_MAX_CHARS) {
+    s = { ...s, text: s.text.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
+  }
+  if ('error' in s && typeof s.error === 'string' && s.error.length > ACTIVITY_MAX_CHARS) {
+    s = { ...s, error: s.error.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
   }
   const text = JSON.stringify(s);
   if (text === _lastActivity) return;

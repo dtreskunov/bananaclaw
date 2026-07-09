@@ -7,7 +7,7 @@ import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
 import type { ActivityStep, AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
-import { pickActivityDetail, ProgressThrottle } from './types.js';
+import { pickActivityDetail } from './types.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
@@ -249,9 +249,9 @@ const postToolUseHook: HookCallback = async () => {
 /** Map a Claude tool_use block to a structured activity step. Passes the raw
  *  tool name through and picks the primary raw argument (newlines intact);
  *  the UI renders "Using `<tool>` tool" and the argument as a code block. */
-export function formatClaudeToolUse(name: string, input: Record<string, unknown>): ActivityStep {
+export function formatClaudeToolUse(id: string, name: string, input: Record<string, unknown>): ActivityStep {
   const detail = pickActivityDetail(input);
-  return { kind: 'tool', tool: name, ...(detail ? { detail } : {}) };
+  return { kind: 'tool', id, tool: name, status: 'running', ...(detail ? { detail } : {}) };
 }
 
 /**
@@ -524,10 +524,6 @@ export class ClaudeProvider implements AgentProvider {
       let prevOutput = 0;
       let prevCacheRead = 0;
       let prevCacheWrite = 0;
-      // Coalesce consecutive activity steps (dropping the argument-less
-      // streaming form of a tool call and repeated identical steps) so the
-      // trace stays readable. See ProgressThrottle.
-      const progress = new ProgressThrottle();
       for await (const message of sdkResult) {
         if (aborted) return;
         messageCount++;
@@ -538,26 +534,18 @@ export class ClaudeProvider implements AgentProvider {
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };
         } else if (message.type === 'assistant') {
-          // Surface tool calls and thinking as progress hints.
+          // Surface identified tool calls. Generic thinking is intentionally
+          // omitted; only provider reasoning with actual text is trace-worthy.
           const blocks = (message as { message?: { content?: unknown } }).message?.content;
           if (Array.isArray(blocks)) {
             for (const b of blocks) {
-              const blk = b as { type?: string; name?: string; input?: Record<string, unknown> };
-              let step: ActivityStep | null = null;
-              if (blk.type === 'tool_use' && blk.name) {
-                step = formatClaudeToolUse(blk.name, blk.input ?? {});
-              } else if (blk.type === 'thinking' || blk.type === 'redacted_thinking') {
-                step = { kind: 'thinking' };
-              }
-              if (step) {
-                for (const s of progress.push(step)) {
-                  yield { type: 'progress', step: s };
-                }
+              const blk = b as { type?: string; id?: string; name?: string; input?: Record<string, unknown> };
+              if (blk.type === 'tool_use' && blk.id && blk.name) {
+                yield { type: 'progress', step: formatClaudeToolUse(blk.id, blk.name, blk.input ?? {}) };
               }
             }
           }
         } else if (message.type === 'result') {
-          for (const s of progress.flush()) yield { type: 'progress', step: s };
           const text = 'result' in message ? (message as { result?: string }).result ?? null : null;
           const m = message as { is_error?: boolean; subtype?: string };
 
@@ -639,8 +627,8 @@ export class ClaudeProvider implements AgentProvider {
           const detail = meta?.pre_tokens ? ` (${meta.pre_tokens.toLocaleString()} tokens compacted)` : '';
           yield { type: 'result', text: `Context compacted${detail}.` };
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-          const tn = message as { summary?: string };
-          yield { type: 'progress', step: { kind: 'notification', text: tn.summary || 'Task notification' } };
+          const tn = message as { task_id?: string; summary?: string };
+          yield { type: 'progress', step: { kind: 'notification', id: tn.task_id || `notification-${messageCount}`, text: tn.summary || 'Task notification' } };
         }
       }
       log(`Query completed after ${messageCount} SDK messages`);

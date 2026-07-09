@@ -1,74 +1,54 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 import { formatProgressFromPart, isEventForSession } from './opencode.js';
-import { ProgressThrottle } from './types.js';
-import type { ActivityStep } from './types.js';
-
-const tool = (t: string, detail?: string): ActivityStep =>
-  detail === undefined ? { kind: 'tool', tool: t } : { kind: 'tool', tool: t, detail };
 
 describe('formatProgressFromPart', () => {
-  const seen = () => new Set<string>();
-
-  it('returns null for missing or unknown parts', () => {
-    expect(formatProgressFromPart(undefined, 0, seen())).toBeNull();
-    expect(formatProgressFromPart({}, 0, seen())).toBeNull();
-    expect(formatProgressFromPart({ type: 'snapshot' }, 0, seen())).toBeNull();
-    expect(formatProgressFromPart({ type: 'step-start' }, 0, seen())).toBeNull();
+  it('ignores missing, streaming text, snapshots, and unfinished reasoning', () => {
+    expect(formatProgressFromPart(undefined)).toBeNull();
+    expect(formatProgressFromPart({ id: 't', type: 'text', text: 'reply' })).toBeNull();
+    expect(formatProgressFromPart({ id: 's', type: 'snapshot' })).toBeNull();
+    expect(formatProgressFromPart({ id: 'r', type: 'reasoning', text: 'working', time: { start: 1 } })).toBeNull();
   });
 
-  it('passes the raw tool name and primary argument through unformatted', () => {
-    const cases: Array<[string, Record<string, unknown>, ActivityStep]> = [
-      ['read', { filePath: '/workspace/agent/foo/bar.html' }, tool('read', '/workspace/agent/foo/bar.html')],
-      ['write', { filePath: '/workspace/agent/foo/bar.html' }, tool('write', '/workspace/agent/foo/bar.html')],
-      ['edit', { filePath: '/workspace/agent/foo/bar.html' }, tool('edit', '/workspace/agent/foo/bar.html')],
-      ['grep', { pattern: 'foo.*bar' }, tool('grep', 'foo.*bar')],
-      ['glob', { pattern: '**/*.ts' }, tool('glob', '**/*.ts')],
-      // No matching primary-arg key → no detail.
-      ['todowrite', {}, tool('todowrite')],
-    ];
-    for (const [t, input, expected] of cases) {
-      expect(formatProgressFromPart({ type: 'tool', tool: t, state: { input } }, 0, seen())).toEqual(expected);
-    }
+  it('maps identified tool lifecycle fields without output', () => {
+    expect(formatProgressFromPart({
+      id: 'part-1', callID: 'call-1', type: 'tool', tool: 'bash',
+      state: {
+        status: 'completed', input: { command: 'echo one\necho two' }, title: 'Run command',
+        time: { start: 100, end: 175 },
+      },
+    })).toEqual({
+      kind: 'tool', id: 'call-1', tool: 'bash', status: 'completed',
+      detail: 'echo one\necho two', title: 'Run command', durationMs: 75,
+    });
   });
 
-  it('preserves newlines in the tool detail (no single-line clipping)', () => {
-    const cmd = 'pnpm exec tsx scripts/very-long-task.ts --flag value\nand newline';
-    const out = formatProgressFromPart({ type: 'tool', tool: 'bash', state: { input: { command: cmd } } }, 0, seen());
-    expect(out).toEqual(tool('bash', cmd));
-    expect(out?.detail).toContain('\n');
+  it('maps tool errors but never includes raw output', () => {
+    expect(formatProgressFromPart({
+      id: 'tool-2', type: 'tool', tool: 'read',
+      state: { status: 'error', input: { filePath: '/tmp/a' }, error: 'not found' },
+    })).toEqual({
+      kind: 'tool', id: 'tool-2', tool: 'read', status: 'error', detail: '/tmp/a', error: 'not found',
+    });
   });
 
-  it('passes the raw url through as detail (UI shortens for display)', () => {
-    const out = formatProgressFromPart(
-      { type: 'tool', tool: 'webfetch', state: { input: { url: 'https://example.com/path?q=1' } } },
-      0,
-      seen(),
-    );
-    expect(out).toEqual(tool('webfetch', 'https://example.com/path?q=1'));
+  it('emits completed reasoning text', () => {
+    expect(formatProgressFromPart({
+      id: 'reason-1', type: 'reasoning', text: '  inspect the state  ', time: { start: 1, end: 2 },
+    })).toEqual({ kind: 'reasoning', id: 'reason-1', text: 'inspect the state' });
   });
 
-  it('passes MCP tool names through raw (UI renders server.name)', () => {
-    const out = formatProgressFromPart({ type: 'tool', tool: 'mcp__tavily__search', state: {} }, 0, seen());
-    expect(out).toEqual(tool('mcp__tavily__search'));
-  });
-
-  it('emits a bare tool step for unknown tools with no primary arg', () => {
-    const out = formatProgressFromPart({ type: 'tool', tool: 'mystery', state: {} }, 0, seen());
-    expect(out).toEqual(tool('mystery'));
-  });
-
-  it('yields a thinking step once per reasoning part id', () => {
-    const set = new Set<string>();
-    expect(formatProgressFromPart({ type: 'reasoning', id: 'r1' }, 0, set)).toEqual({ kind: 'thinking' });
-    expect(formatProgressFromPart({ type: 'reasoning', id: 'r1' }, 0, set)).toBeNull();
-    expect(formatProgressFromPart({ type: 'reasoning', id: 'r2' }, 0, set)).toEqual({ kind: 'thinking' });
-  });
-
-  it('yields a text step only once textLen >= 500', () => {
-    expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'hi' }, 2, seen())).toBeNull();
-    expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'x'.repeat(499) }, 499, seen())).toBeNull();
-    expect(formatProgressFromPart({ type: 'text', messageID: 'm1', text: 'x'.repeat(500) }, 500, seen())).toEqual({ kind: 'text' });
+  it('maps safe file, patch, retry, compaction, and subtask metadata', () => {
+    expect(formatProgressFromPart({ id: 'f', type: 'file', source: { path: '/tmp/a.ts' }, filename: 'a.ts', mime: 'text/plain' }))
+      .toEqual({ kind: 'file', id: 'f', path: '/tmp/a.ts', name: 'a.ts', mime: 'text/plain' });
+    expect(formatProgressFromPart({ id: 'p', type: 'patch', files: ['a.ts', 'b.ts'] }))
+      .toEqual({ kind: 'patch', id: 'p', files: ['a.ts', 'b.ts'] });
+    expect(formatProgressFromPart({ id: 'x', type: 'retry', attempt: 2, error: { data: { message: 'busy' } } }))
+      .toEqual({ kind: 'retry', id: 'x', attempt: 2, error: 'busy' });
+    expect(formatProgressFromPart({ id: 'c', type: 'compaction', auto: true }))
+      .toEqual({ kind: 'compaction', id: 'c', auto: true });
+    expect(formatProgressFromPart({ id: 'q', type: 'subtask', agent: 'explore', description: 'Find callers' }))
+      .toEqual({ kind: 'subtask', id: 'q', agent: 'explore', description: 'Find callers' });
   });
 });
 
@@ -77,76 +57,5 @@ describe('isEventForSession', () => {
     expect(isEventForSession('ses-active', 'ses-active')).toBe(true);
     expect(isEventForSession('ses-stale', 'ses-active')).toBe(false);
     expect(isEventForSession(undefined, 'ses-active')).toBe(false);
-  });
-});
-
-describe('ProgressThrottle', () => {
-  const edit = tool('edit', 'a.ts');
-  const read = tool('read', 'b.ts');
-
-  it('passes through the first step immediately', () => {
-    let now = 1000;
-    const t = new ProgressThrottle(1000, () => now);
-    expect(t.push(edit)).toEqual([edit]);
-  });
-
-  it('suppresses identical steps within the interval', () => {
-    let now = 1000;
-    const t = new ProgressThrottle(1000, () => now);
-    expect(t.push(edit)).toEqual([edit]);
-    now = 1500;
-    expect(t.push({ ...edit })).toEqual([]);
-    now = 2001;
-    expect(t.push({ ...edit })).toEqual([edit]);
-  });
-
-  it('passes a different step through immediately', () => {
-    let now = 1000;
-    const t = new ProgressThrottle(1000, () => now);
-    expect(t.push(edit)).toEqual([edit]);
-    now = 1100;
-    expect(t.push(read)).toEqual([read]);
-  });
-
-  it('ignores null inputs', () => {
-    const t = new ProgressThrottle(1000, () => 1000);
-    expect(t.push(null)).toEqual([]);
-  });
-
-  it('collapses the argument-less streaming form of a tool call', () => {
-    // The detail-less first form is buffered, then superseded by the rich
-    // form — only one line is emitted, and it carries the detail.
-    const t = new ProgressThrottle(1000, () => 1000);
-    expect(t.push(tool('bash'))).toEqual([]);
-    expect(t.push(tool('bash', 'ls -la'))).toEqual([tool('bash', 'ls -la')]);
-    expect(t.flush()).toEqual([]);
-  });
-
-  it('folds repeated full-detail updates for one tool into a single line', () => {
-    let now = 1000;
-    const t = new ProgressThrottle(1000, () => now);
-    expect(t.push(tool('bash'))).toEqual([]);
-    expect(t.push(tool('bash', 'ls'))).toEqual([tool('bash', 'ls')]);
-    now = 1100;
-    expect(t.push(tool('bash', 'ls'))).toEqual([]);
-  });
-
-  it('flushes a genuine argument-less tool call when a different step arrives', () => {
-    const t = new ProgressThrottle(1000, () => 1000);
-    expect(t.push(tool('todowrite'))).toEqual([]);
-    // A different tool flushes the buffered bare call, then emits itself.
-    expect(t.push(tool('read', 'a.ts'))).toEqual([tool('todowrite'), tool('read', 'a.ts')]);
-  });
-
-  it('flushes a trailing argument-less tool call at turn end', () => {
-    const t = new ProgressThrottle(1000, () => 1000);
-    expect(t.push(tool('todowrite'))).toEqual([]);
-    expect(t.flush()).toEqual([tool('todowrite')]);
-  });
-
-  it('flushes a buffered tool before a non-tool step', () => {
-    const t = new ProgressThrottle(1000, () => 1000);
-    expect(t.push(tool('bash'))).toEqual([]);
-    expect(t.push({ kind: 'thinking' })).toEqual([tool('bash'), { kind: 'thinking' }]);
   });
 });
