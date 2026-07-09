@@ -37,44 +37,31 @@ function fmtActivityTs(ts: string): string {
   return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-/** Split an activity line into a plain-text prefix and an optional code
- *  span. Legacy progress lines look like `Running \`<cmd>\`` — we show the
- *  prefix ("Running") inline next to the timestamp and render the backtick
- *  body as a multi-line code block. If OpenCode truncated the message the
- *  closing backtick may be gone, so fall back to taking everything after the
- *  opening backtick as code rather than relying on finding a matching pair. */
-function splitTraceText(text: string): { prefix: string; code: string | null } {
-  const i = text.indexOf('`');
-  if (i < 0) return { prefix: text, code: null };
-  const prefix = text.slice(0, i).trim();
-  const rest = text.slice(i + 1);
-  const j = rest.lastIndexOf('`');
-  const code = j >= 0 ? rest.slice(0, j) : rest;
-  return { prefix, code };
-}
-
-/** A parsed activity step. New lines carry a JSON-encoded ActivityStep;
- *  lines persisted before the structured refactor carry a plain human string
- *  and surface here as `{ legacy }`. */
 interface TraceStep {
-  kind?: 'tool' | 'thinking' | 'text' | 'permission' | 'notification';
+  kind?: 'tool' | 'reasoning' | 'file' | 'patch' | 'retry' | 'compaction' | 'subtask' | 'notification';
+  id?: string;
   tool?: string;
+  status?: 'pending' | 'running' | 'completed' | 'error';
   detail?: string;
+  title?: string;
+  error?: string;
+  durationMs?: number;
   text?: string;
-  legacy?: string;
+  path?: string;
+  name?: string;
+  mime?: string;
+  files?: string[];
+  attempt?: number;
+  auto?: boolean;
+  agent?: string;
+  description?: string;
 }
 
 function parseStep(text: string): TraceStep {
-  const t = text.trim();
-  if (t.startsWith('{')) {
-    try {
-      const o = JSON.parse(t) as TraceStep;
-      if (o && typeof o === 'object' && typeof o.kind === 'string') return o;
-    } catch {
-      // Not JSON — fall through to legacy.
-    }
-  }
-  return { legacy: text };
+  try {
+    const o = JSON.parse(text) as TraceStep;
+    return o && typeof o === 'object' ? o : {};
+  } catch { return {}; }
 }
 
 /** Turn a raw tool name into what we show the user: `mcp__server__name`
@@ -88,12 +75,20 @@ function cleanToolName(tool: string): string {
   return tool.toLowerCase();
 }
 
-/** Human phrase for a non-tool step kind. */
 function stepPhrase(s: TraceStep): string {
   switch (s.kind) {
-    case 'thinking': return 'Thinking…';
-    case 'text': return 'Writing reply…';
-    case 'permission': return 'Requesting permission…';
+    case 'tool': {
+      const label = cleanToolName(s.tool || 'tool');
+      if (s.status === 'error') return `${label} failed`;
+      if (s.status === 'completed') return s.title || `Used ${label}`;
+      return s.title || `Using ${label}…`;
+    }
+    case 'reasoning': return 'Reasoning';
+    case 'file': return `Opened ${s.name || s.path || 'file'}`;
+    case 'patch': return `Updated ${(s.files || []).length === 1 ? s.files![0] : `${(s.files || []).length} files`}`;
+    case 'retry': return `Retry attempt ${s.attempt ?? 0}`;
+    case 'compaction': return s.auto ? 'Compacted context automatically' : 'Compacted context';
+    case 'subtask': return s.description || (s.agent ? `${s.agent} subtask` : 'Subtask');
     case 'notification': return s.text || 'Notification';
     default: return '';
   }
@@ -102,13 +97,21 @@ function stepPhrase(s: TraceStep): string {
 /** One-line collapsed summary for a step (whitespace-collapsed so a
  *  multi-line command still fits one truncated row). */
 function stepSummary(s: TraceStep): string {
-  if (s.legacy != null) return s.legacy;
   if (s.kind === 'tool') {
-    const label = cleanToolName(s.tool || 'tool');
-    const d = s.detail ? ' ' + s.detail.replace(/\s+/g, ' ').trim() : '';
-    return `Using ${label}${d}`;
+    const phrase = stepPhrase(s);
+    const detail = s.detail?.replace(/\s+/g, ' ').trim();
+    return detail && detail !== phrase ? `${phrase} ${detail}` : phrase;
   }
   return stepPhrase(s);
+}
+
+function stepBody(s: TraceStep): string | null {
+  if (s.kind === 'tool') return [s.detail, s.error].filter(Boolean).join('\n\n') || null;
+  if (s.kind === 'reasoning') return s.text || null;
+  if (s.kind === 'patch') return s.files?.join('\n') || null;
+  if (s.kind === 'retry') return s.error || null;
+  if (s.kind === 'file') return s.path || null;
+  return null;
 }
 
 /** One accordion row of an activity trace. Collapsed shows a single
@@ -117,23 +120,11 @@ function stepSummary(s: TraceStep): string {
  *  raw primary argument as a multi-line code block below, newlines intact. */
 function ActivityTraceRow({ line, open, onToggle }: { line: ActivityLine; open: boolean; onToggle: () => void }) {
   const step = parseStep(line.text);
-  const legacy = step.legacy != null ? splitTraceText(step.legacy) : null;
   const isTool = step.kind === 'tool';
-  // What renders in the expandable code block (only when open).
-  const code = !open
-    ? null
-    : legacy
-      ? legacy.code
-      : isTool
-        ? step.detail ?? null
-        : null;
-  const prefix = legacy
-    ? (legacy.prefix
-        ? <span class="trace-prefix">{legacy.prefix}</span>
-        : null)
-    : isTool
-      ? <span class="trace-prefix">Using <code class="trace-tool">{cleanToolName(step.tool || '')}</code> tool</span>
-      : <span class="trace-prefix">{stepPhrase(step)}</span>;
+  const code = open ? stepBody(step) : null;
+  const prefix = isTool
+    ? <span class="trace-prefix">{stepPhrase(step)} <code class="trace-tool">{cleanToolName(step.tool || '')}</code>{typeof step.durationMs === 'number' ? ` · ${step.durationMs}ms` : ''}</span>
+    : <span class="trace-prefix">{stepPhrase(step)}</span>;
   return (
     <li class={`trace-row${open ? ' open' : ''}`}>
       <button

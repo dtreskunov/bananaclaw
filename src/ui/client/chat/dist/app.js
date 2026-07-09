@@ -17959,11 +17959,10 @@ function connectChatWs() {
       if (!payload.on) {
         if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
         activityLog.value = [];
-      } else if (payload.items && payload.items.length) {
-        const prev = activityLog.value;
-        const merged = prev.concat(payload.items);
-        activityLog.value = merged.length > 200 ? merged.slice(merged.length - 200) : merged;
-        playProgressTick();
+      } else if (payload.items !== null && payload.items !== void 0) {
+        const changed = JSON.stringify(activityLog.value) !== JSON.stringify(payload.items);
+        activityLog.value = payload.items;
+        if (changed && payload.items.length) playProgressTick();
       }
       return;
     }
@@ -19765,25 +19764,13 @@ function fmtActivityTs(ts) {
   if (!Number.isFinite(n3)) return "";
   return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-function splitTraceText(text) {
-  const i5 = text.indexOf("`");
-  if (i5 < 0) return { prefix: text, code: null };
-  const prefix = text.slice(0, i5).trim();
-  const rest = text.slice(i5 + 1);
-  const j6 = rest.lastIndexOf("`");
-  const code = j6 >= 0 ? rest.slice(0, j6) : rest;
-  return { prefix, code };
-}
 function parseStep(text) {
-  const t4 = text.trim();
-  if (t4.startsWith("{")) {
-    try {
-      const o4 = JSON.parse(t4);
-      if (o4 && typeof o4 === "object" && typeof o4.kind === "string") return o4;
-    } catch {
-    }
+  try {
+    const o4 = JSON.parse(text);
+    return o4 && typeof o4 === "object" ? o4 : {};
+  } catch {
+    return {};
   }
-  return { legacy: text };
 }
 function cleanToolName(tool) {
   if (tool.startsWith("mcp__")) {
@@ -19795,12 +19782,24 @@ function cleanToolName(tool) {
 }
 function stepPhrase(s5) {
   switch (s5.kind) {
-    case "thinking":
-      return "Thinking\u2026";
-    case "text":
-      return "Writing reply\u2026";
-    case "permission":
-      return "Requesting permission\u2026";
+    case "tool": {
+      const label = cleanToolName(s5.tool || "tool");
+      if (s5.status === "error") return `${label} failed`;
+      if (s5.status === "completed") return s5.title || `Used ${label}`;
+      return s5.title || `Using ${label}\u2026`;
+    }
+    case "reasoning":
+      return "Reasoning";
+    case "file":
+      return `Opened ${s5.name || s5.path || "file"}`;
+    case "patch":
+      return `Updated ${(s5.files || []).length === 1 ? s5.files[0] : `${(s5.files || []).length} files`}`;
+    case "retry":
+      return `Retry attempt ${s5.attempt ?? 0}`;
+    case "compaction":
+      return s5.auto ? "Compacted context automatically" : "Compacted context";
+    case "subtask":
+      return s5.description || (s5.agent ? `${s5.agent} subtask` : "Subtask");
     case "notification":
       return s5.text || "Notification";
     default:
@@ -19808,23 +19807,30 @@ function stepPhrase(s5) {
   }
 }
 function stepSummary(s5) {
-  if (s5.legacy != null) return s5.legacy;
   if (s5.kind === "tool") {
-    const label = cleanToolName(s5.tool || "tool");
-    const d5 = s5.detail ? " " + s5.detail.replace(/\s+/g, " ").trim() : "";
-    return `Using ${label}${d5}`;
+    const phrase = stepPhrase(s5);
+    const detail = s5.detail?.replace(/\s+/g, " ").trim();
+    return detail && detail !== phrase ? `${phrase} ${detail}` : phrase;
   }
   return stepPhrase(s5);
 }
+function stepBody(s5) {
+  if (s5.kind === "tool") return [s5.detail, s5.error].filter(Boolean).join("\n\n") || null;
+  if (s5.kind === "reasoning") return s5.text || null;
+  if (s5.kind === "patch") return s5.files?.join("\n") || null;
+  if (s5.kind === "retry") return s5.error || null;
+  if (s5.kind === "file") return s5.path || null;
+  return null;
+}
 function ActivityTraceRow({ line, open, onToggle }) {
   const step = parseStep(line.text);
-  const legacy = step.legacy != null ? splitTraceText(step.legacy) : null;
   const isTool = step.kind === "tool";
-  const code = !open ? null : legacy ? legacy.code : isTool ? step.detail ?? null : null;
-  const prefix = legacy ? legacy.prefix ? /* @__PURE__ */ u4("span", { class: "trace-prefix", children: legacy.prefix }) : null : isTool ? /* @__PURE__ */ u4("span", { class: "trace-prefix", children: [
-    "Using ",
+  const code = open ? stepBody(step) : null;
+  const prefix = isTool ? /* @__PURE__ */ u4("span", { class: "trace-prefix", children: [
+    stepPhrase(step),
+    " ",
     /* @__PURE__ */ u4("code", { class: "trace-tool", children: cleanToolName(step.tool || "") }),
-    " tool"
+    typeof step.durationMs === "number" ? ` \xB7 ${step.durationMs}ms` : ""
   ] }) : /* @__PURE__ */ u4("span", { class: "trace-prefix", children: stepPhrase(step) });
   return /* @__PURE__ */ u4("li", { class: `trace-row${open ? " open" : ""}`, children: [
     /* @__PURE__ */ u4(
