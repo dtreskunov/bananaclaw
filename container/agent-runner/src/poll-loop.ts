@@ -1253,6 +1253,15 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
     const body = match[2].trim();
     lastIndex = MESSAGE_RE.lastIndex;
 
+    // Weak reasoning models (e.g. minimax-m3) sometimes emit stray empty
+    // <message to="..."></message> wrappers. Delivering them writes blank
+    // {"text":""} chat rows that render as empty bubbles in the UI. Skip
+    // them (mirrors the empty-text guard in the send_message MCP tool).
+    if (!body) {
+      log(`Empty <message to="${toName}"> block, dropping`);
+      continue;
+    }
+
     const dest = findByName(toName);
     if (!dest) {
       log(`Unknown destination in <message to="${toName}">, dropping block`);

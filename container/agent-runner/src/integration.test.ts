@@ -160,6 +160,27 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
+  it('empty <message> block is dropped, valid destination is sent', async () => {
+    insertMessage('m1', { sender: 'Alice', text: 'hi' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new MockProvider(
+      {},
+      () => '<message to="discord-test"></message><message to="discord-test">delivered</message>',
+    );
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    controller.abort();
+
+    const out = getUndeliveredMessages();
+    // The empty block must not produce a blank {"text":""} bubble.
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe('delivered');
+
+    await loopPromise.catch(() => {});
+  });
+
   it('multiple <message> blocks each produce an outbound message', async () => {
     getInboundDb()
       .prepare(
