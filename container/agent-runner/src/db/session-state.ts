@@ -165,7 +165,17 @@ let _activityBuffer: ActivityLine[] = [];
 
 export function appendActivity(step: ActivityStep): void {
   if (!step || !step.kind) return;
-  // Cap user/model/provider text fields before they leave the container.
+  const s = truncateActivityStep(step);
+  const text = JSON.stringify(s);
+  if (text === _lastActivity) return;
+  _lastActivity = text;
+  const ts = String(Date.now());
+  _activityBuffer.push({ ts, text });
+  appendActivityFile(`${ts}\t${text}`);
+}
+
+/** Cap user/model/provider text fields before they leave the container. */
+export function truncateActivityStep(step: ActivityStep): ActivityStep {
   let s = step;
   if (s.kind === 'tool' && typeof s.detail === 'string' && s.detail.length > ACTIVITY_MAX_CHARS) {
     s = { ...s, detail: s.detail.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
@@ -176,12 +186,7 @@ export function appendActivity(step: ActivityStep): void {
   if ('error' in s && typeof s.error === 'string' && s.error.length > ACTIVITY_MAX_CHARS) {
     s = { ...s, error: s.error.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
   }
-  const text = JSON.stringify(s);
-  if (text === _lastActivity) return;
-  _lastActivity = text;
-  const ts = String(Date.now());
-  _activityBuffer.push({ ts, text });
-  appendActivityFile(`${ts}\t${text}`);
+  return s;
 }
 
 /** The activity lines buffered so far this turn (in append order). */
