@@ -166,8 +166,8 @@ export function describeFinishReason(finish: string): string {
  * human-readable formatting happens here: tool name + raw primary argument
  * are passed through and the UI does the presentation.
  *
- * Reasoning is emitted only once complete. Streaming text, snapshots, and
- * permission events are deliberately excluded from the user-visible trace.
+ * Reasoning, streaming text, snapshots, and permission events are deliberately
+ * excluded here. Reasoning is derived once from finalized message parts.
  */
 export function formatProgressFromPart(
   part: OpenCodePart | undefined,
@@ -189,10 +189,6 @@ export function formatProgressFromPart(
         ...(status === 'error' && part.state?.error ? { error: part.state.error } : {}),
         ...(typeof start === 'number' && typeof end === 'number' ? { durationMs: Math.max(0, end - start) } : {}),
       };
-    }
-    case 'reasoning': {
-      if (!part.text?.trim() || typeof part.time?.end !== 'number') return null;
-      return { kind: 'reasoning', id: part.id, text: part.text.trim() };
     }
     case 'file':
       return { kind: 'file', id: part.id, ...(part.source?.path ? { path: part.source.path } : {}), ...(part.filename ? { name: part.filename } : {}), ...(part.mime ? { mime: part.mime } : {}) };
@@ -217,17 +213,6 @@ function activityError(error: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-export function mergeReasoningPart(
-  previous: OpenCodePart | undefined,
-  part: OpenCodePart,
-  delta: string | undefined,
-): OpenCodePart {
-  const previousText = previous?.text ?? '';
-  let text = part.text ?? previousText;
-  if (text.length <= previousText.length && delta) text = previousText + delta;
-  return { ...previous, ...part, text };
-}
-
 /** Some OpenRouter models emit only a short prefix in the structured
  * reasoning part, then repeat the complete thought in the following text
  * part's `<think>` block. Extract that block without including a delivery
@@ -246,19 +231,9 @@ export function extractThinkText(text: string | undefined): string | undefined {
   return extracted || undefined;
 }
 
-/** Merge a structured reasoning prefix with its fuller `<think>` copy. */
-export function mergeReasoningText(prefix: string | undefined, full: string): string {
-  const prior = prefix?.trim() ?? '';
-  const candidate = full.trim();
-  if (!prior || candidate.startsWith(prior)) return candidate;
-  if (prior.startsWith(candidate)) return prior;
-  const maxOverlap = Math.min(prior.length, candidate.length);
-  for (let n = maxOverlap; n > 0; n--) {
-    if (prior.slice(-n) === candidate.slice(0, n)) return prior + candidate.slice(n);
-  }
-  return candidate.length >= prior.length ? candidate : prior;
-}
-
+/** Build one reasoning activity per finalized reasoning part. A companion
+ * `<think>` block is authoritative when present because some OpenRouter
+ * models truncate the structured reasoning field to a short prefix. */
 export function reasoningStepsFromParts(parts: OpenCodePart[]): ActivityStep[] {
   const out: ActivityStep[] = [];
   let pending: OpenCodePart | undefined;
@@ -272,7 +247,7 @@ export function reasoningStepsFromParts(parts: OpenCodePart[]): ActivityStep[] {
     }
     if (part.type === 'text' && pending) {
       const full = extractThinkText(part.text);
-      if (full) pending = { ...pending, text: mergeReasoningText(pending.text, full) };
+      if (full) pending = { ...pending, text: full };
       continue;
     }
     if (pending?.id && pending.text?.trim()) {
@@ -754,7 +729,6 @@ export class OpenCodeProvider implements AgentProvider {
         const partTextByMessageId = new Map<string, string>();
         const roleByMessageId = new Map<string, string>();
         const finishByMessageId = new Map<string, string>();
-        const pendingReasoning = new Map<string, OpenCodePart>();
         let lastAssistantUsage: import('./types.js').TurnUsage | null = null;
         // Captured separately so the limits-lookup at yield-time has the
         // provider id (TurnUsage itself doesn't carry it).
@@ -823,45 +797,11 @@ export class OpenCodeProvider implements AgentProvider {
                 break;
               }
               case 'message.part.updated': {
-                const props = ev.properties as { part?: OpenCodePart; delta?: string };
-                const part = props.part;
+                const part = ev.properties.part as OpenCodePart | undefined;
                 if (!isEventForSession(part?.sessionID, sessionId)) break;
                 if (part?.type === 'text' && part.messageID && part.text) {
                   partTextByMessageId.set(part.messageID, part.text);
                 }
-                if (part?.type === 'reasoning' && part.id) {
-                  pendingReasoning.set(part.id, mergeReasoningPart(pendingReasoning.get(part.id), part, props.delta));
-                  // OpenCode may set time.end before the final text update.
-                  // Hold the latest form until the stream advances to another
-                  // part (or goes idle), then emit the complete reasoning once.
-                  break;
-                }
-                if (part?.type === 'text') {
-                  const thinkText = extractThinkText(part.text);
-                  let isReasoningCompanion = false;
-                  for (const [id, reasoning] of pendingReasoning) {
-                    if (reasoning.messageID !== part.messageID) continue;
-                    isReasoningCompanion = true;
-                    if (thinkText) {
-                      pendingReasoning.set(id, {
-                        ...reasoning,
-                        text: mergeReasoningText(reasoning.text, thinkText),
-                      });
-                    }
-                  }
-                  if (isReasoningCompanion) {
-                    // The first text update can be only "<thi" or "<think>".
-                    // Keep the structured reasoning pending through every
-                    // companion text update; a later update carries the full
-                    // block. A non-text part marks the phase complete.
-                    break;
-                  }
-                }
-                for (const reasoning of pendingReasoning.values()) {
-                  if (!reasoning.id || !reasoning.text?.trim()) continue;
-                  yield { type: 'progress', step: { kind: 'reasoning', id: reasoning.id, text: reasoning.text.trim() } };
-                }
-                pendingReasoning.clear();
                 const step = formatProgressFromPart(part);
                 if (step) {
                   yield { type: 'progress', step };
@@ -911,11 +851,6 @@ export class OpenCodeProvider implements AgentProvider {
               case 'session.idle': {
                 const sid = (ev.properties as { sessionID?: string }).sessionID;
                 if (sid === sessionId) {
-                  for (const part of pendingReasoning.values()) {
-                    if (!part.id || !part.text?.trim()) continue;
-                    yield { type: 'progress', step: { kind: 'reasoning', id: part.id, text: part.text.trim() } };
-                  }
-                  pendingReasoning.clear();
                   break turn;
                 }
                 break;
@@ -941,10 +876,9 @@ export class OpenCodeProvider implements AgentProvider {
         // Restore the leading '<' OpenCode's SSE strips and drop inline
         // chain-of-thought before delivery. See normalizeAssistantText.
         resultText = normalizeAssistantText(resultText);
-        // Streaming payloads can expose a truncated structured reasoning
-        // prefix while the final message's companion text part contains the
-        // complete `<think>` block. Reconcile every assistant message now;
-        // identical ids update the earlier trace row in the host reducer.
+        // Finalized message parts are the sole reasoning source. Some models
+        // expose only a truncated structured prefix while the companion text
+        // part contains the complete `<think>` block.
         for (const messageID of assistantMessageIds) {
           try {
             const message = await client.session.message({ path: { id: sessionId, messageID } });

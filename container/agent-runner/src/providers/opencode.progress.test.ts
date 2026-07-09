@@ -4,8 +4,6 @@ import {
   extractThinkText,
   formatProgressFromPart,
   isEventForSession,
-  mergeReasoningPart,
-  mergeReasoningText,
   reasoningStepsFromParts,
 } from './opencode.js';
 
@@ -39,10 +37,10 @@ describe('formatProgressFromPart', () => {
     });
   });
 
-  it('emits completed reasoning text', () => {
+  it('ignores completed reasoning because finalized message parts are authoritative', () => {
     expect(formatProgressFromPart({
       id: 'reason-1', type: 'reasoning', text: '  inspect the state  ', time: { start: 1, end: 2 },
-    })).toEqual({ kind: 'reasoning', id: 'reason-1', text: 'inspect the state' });
+    })).toBeNull();
   });
 
   it('maps safe file, patch, retry, compaction, and subtask metadata', () => {
@@ -67,20 +65,6 @@ describe('isEventForSession', () => {
   });
 });
 
-describe('mergeReasoningPart', () => {
-  it('accumulates deltas when OpenCode keeps returning the initial text fragment', () => {
-    const first = mergeReasoningPart(undefined, { id: 'r1', type: 'reasoning', text: 'This is' }, 'This is');
-    const second = mergeReasoningPart(first, { id: 'r1', type: 'reasoning', text: 'This is' }, ' the full thought');
-    expect(second.text).toBe('This is the full thought');
-  });
-
-  it('prefers a newer cumulative text value without duplicating its delta', () => {
-    const first = { id: 'r1', type: 'reasoning', text: 'This is' };
-    expect(mergeReasoningPart(first, { ...first, text: 'This is complete' }, ' complete').text)
-      .toBe('This is complete');
-  });
-});
-
 describe('think-text reasoning recovery', () => {
   it('extracts the complete thought from an unclosed think block', () => {
     expect(extractThinkText('<think>\nThe user wants me to inspect `package.json`. I need to find it first.'))
@@ -90,13 +74,6 @@ describe('think-text reasoning recovery', () => {
   it('stops before a delivery block embedded after the thought', () => {
     expect(extractThinkText('<think>The retry needs wrapping.<message to="web">Answer</message>'))
       .toBe('The retry needs wrapping.');
-  });
-
-  it('replaces a truncated structured prefix with the complete think text', () => {
-    expect(mergeReasoningText(
-      'The user wants me to inspect `',
-      'The user wants me to inspect `package.json`. I need to find it first.',
-    )).toBe('The user wants me to inspect `package.json`. I need to find it first.');
   });
 
   it('treats an incomplete opening tag as not-yet-extractable', () => {
@@ -113,5 +90,13 @@ describe('think-text reasoning recovery', () => {
       kind: 'reasoning', id: 'r1',
       text: 'The user wants me to inspect `package.json`. I need to find it first.',
     }]);
+  });
+
+  it('falls back to finalized structured reasoning when no think block exists', () => {
+    expect(reasoningStepsFromParts([
+      { id: 'r1', messageID: 'm1', type: 'reasoning', text: 'Structured thought' },
+      { id: 't1', messageID: 'm1', type: 'text', text: '<message to="web">Done</message>' },
+      { id: 'end', messageID: 'm1', type: 'step-finish' },
+    ])).toEqual([{ kind: 'reasoning', id: 'r1', text: 'Structured thought' }]);
   });
 });
