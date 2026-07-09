@@ -217,6 +217,17 @@ function activityError(error: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+export function mergeReasoningPart(
+  previous: OpenCodePart | undefined,
+  part: OpenCodePart,
+  delta: string | undefined,
+): OpenCodePart {
+  const previousText = previous?.text ?? '';
+  let text = part.text ?? previousText;
+  if (text.length <= previousText.length && delta) text = previousText + delta;
+  return { ...previous, ...part, text };
+}
+
 function killProcessTree(proc: ChildProcess): void {
   if (!proc.pid) return;
   try {
@@ -685,7 +696,6 @@ export class OpenCodeProvider implements AgentProvider {
         const partTextByMessageId = new Map<string, string>();
         const roleByMessageId = new Map<string, string>();
         const finishByMessageId = new Map<string, string>();
-        const emittedReasoning = new Set<string>();
         const pendingReasoning = new Map<string, OpenCodePart>();
         let lastAssistantUsage: import('./types.js').TurnUsage | null = null;
         // Captured separately so the limits-lookup at yield-time has the
@@ -755,21 +765,26 @@ export class OpenCodeProvider implements AgentProvider {
                 break;
               }
               case 'message.part.updated': {
-                const part = ev.properties.part as OpenCodePart | undefined;
+                const props = ev.properties as { part?: OpenCodePart; delta?: string };
+                const part = props.part;
                 if (!isEventForSession(part?.sessionID, sessionId)) break;
                 if (part?.type === 'text' && part.messageID && part.text) {
                   partTextByMessageId.set(part.messageID, part.text);
                 }
-                if (part?.type === 'reasoning' && part.id && !emittedReasoning.has(part.id)) {
-                  pendingReasoning.set(part.id, part);
+                if (part?.type === 'reasoning' && part.id) {
+                  pendingReasoning.set(part.id, mergeReasoningPart(pendingReasoning.get(part.id), part, props.delta));
+                  // OpenCode may set time.end before the final text update.
+                  // Hold the latest form until the stream advances to another
+                  // part (or goes idle), then emit the complete reasoning once.
+                  break;
                 }
+                for (const reasoning of pendingReasoning.values()) {
+                  if (!reasoning.id || !reasoning.text?.trim()) continue;
+                  yield { type: 'progress', step: { kind: 'reasoning', id: reasoning.id, text: reasoning.text.trim() } };
+                }
+                pendingReasoning.clear();
                 const step = formatProgressFromPart(part);
                 if (step) {
-                  if (step.kind === 'reasoning') {
-                    if (emittedReasoning.has(step.id)) break;
-                    emittedReasoning.add(step.id);
-                    pendingReasoning.delete(step.id);
-                  }
                   yield { type: 'progress', step };
                 }
                 break;
@@ -818,10 +833,10 @@ export class OpenCodeProvider implements AgentProvider {
                 const sid = (ev.properties as { sessionID?: string }).sessionID;
                 if (sid === sessionId) {
                   for (const part of pendingReasoning.values()) {
-                    if (!part.id || !part.text?.trim() || emittedReasoning.has(part.id)) continue;
-                    emittedReasoning.add(part.id);
+                    if (!part.id || !part.text?.trim()) continue;
                     yield { type: 'progress', step: { kind: 'reasoning', id: part.id, text: part.text.trim() } };
                   }
+                  pendingReasoning.clear();
                   break turn;
                 }
                 break;

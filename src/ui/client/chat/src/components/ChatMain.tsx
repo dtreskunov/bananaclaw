@@ -79,11 +79,11 @@ function stepPhrase(s: TraceStep): string {
   switch (s.kind) {
     case 'tool': {
       const label = cleanToolName(s.tool || 'tool');
-      if (s.status === 'error') return `${label} failed`;
-      if (s.status === 'completed') return s.title || `Used ${label}`;
-      return s.title || `Using ${label}…`;
+      if (s.status === 'error') return `Used ${label} ✕`;
+      if (s.status === 'completed') return `Used ${label} ✓`;
+      return `Using ${label}…`;
     }
-    case 'reasoning': return 'Reasoning';
+    case 'reasoning': return 'Reasoning…';
     case 'file': return `Opened ${s.name || s.path || 'file'}`;
     case 'patch': return `Updated ${(s.files || []).length === 1 ? s.files![0] : `${(s.files || []).length} files`}`;
     case 'retry': return `Retry attempt ${s.attempt ?? 0}`;
@@ -97,11 +97,6 @@ function stepPhrase(s: TraceStep): string {
 /** One-line collapsed summary for a step (whitespace-collapsed so a
  *  multi-line command still fits one truncated row). */
 function stepSummary(s: TraceStep): string {
-  if (s.kind === 'tool') {
-    const phrase = stepPhrase(s);
-    const detail = s.detail?.replace(/\s+/g, ' ').trim();
-    return detail && detail !== phrase ? `${phrase} ${detail}` : phrase;
-  }
   return stepPhrase(s);
 }
 
@@ -114,17 +109,32 @@ function stepBody(s: TraceStep): string | null {
   return null;
 }
 
+function toolMeta(s: TraceStep): string | null {
+  if (s.kind !== 'tool') return null;
+  const status = s.status === 'error'
+    ? 'Failed'
+    : s.status === 'completed'
+      ? 'Completed'
+      : s.status === 'running'
+        ? 'Running'
+        : 'Pending';
+  return `${status}${typeof s.durationMs === 'number' ? ` · ${formatDuration(s.durationMs)}` : ''}`;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
 /** One accordion row of an activity trace. Collapsed shows a single
  *  truncated summary line (timestamp + summary). Expanded shows a rich
  *  prefix inline next to the timestamp; a tool step additionally renders its
  *  raw primary argument as a multi-line code block below, newlines intact. */
 function ActivityTraceRow({ line, open, onToggle }: { line: ActivityLine; open: boolean; onToggle: () => void }) {
   const step = parseStep(line.text);
-  const isTool = step.kind === 'tool';
   const code = open ? stepBody(step) : null;
-  const prefix = isTool
-    ? <span class="trace-prefix">{stepPhrase(step)} <code class="trace-tool">{cleanToolName(step.tool || '')}</code>{typeof step.durationMs === 'number' ? ` · ${step.durationMs}ms` : ''}</span>
-    : <span class="trace-prefix">{stepPhrase(step)}</span>;
+  const meta = open ? toolMeta(step) : null;
   return (
     <li class={`trace-row${open ? ' open' : ''}`}>
       <button
@@ -136,10 +146,9 @@ function ActivityTraceRow({ line, open, onToggle }: { line: ActivityLine; open: 
       >
         <span class={`chevron${open ? ' open' : ''}`}>{'\u203A'}</span>
         {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
-        {open
-          ? prefix
-          : <span class="trace-text">{stepSummary(step)}</span>}
+        <span class="trace-text">{stepSummary(step)}</span>
       </button>
+      {meta ? <div class="trace-meta">{meta}</div> : null}
       {open && code != null
         ? <pre class="trace-code"><code>{code}</code></pre>
         : null}
@@ -163,6 +172,11 @@ function ActivityTraceList({ lines }: { lines: ActivityLine[] }) {
       ))}
     </ul>
   );
+}
+
+function latestActivityPhrase(lines: ActivityLine[]): string {
+  if (!lines.length) return '';
+  return stepPhrase(parseStep(lines[lines.length - 1].text));
 }
 
 /** A collapsible activity trace (chevron + timestamped step list). Used for
@@ -620,7 +634,9 @@ function MessageLog() {
           <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
             <div class="typing-dots">
               <span></span><span></span><span></span>
-              {!traceExpanded && typingHint.value ? <span class="hint">{typingHint.value}</span> : null}
+              {!traceExpanded && (latestActivityPhrase(activityLog.value) || typingHint.value)
+                ? <span class="hint">{latestActivityPhrase(activityLog.value) || typingHint.value}</span>
+                : null}
               {activityLog.value.length
                 ? (
                   <button

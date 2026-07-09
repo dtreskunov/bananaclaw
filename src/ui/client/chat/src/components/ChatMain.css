@@ -175,6 +175,7 @@
 .chat-main .activity-trace .trace-row-toggle .chevron { flex: none; display: inline-block; font-size: 13px; line-height: 1.2; transition: transform 0.15s ease; opacity: 0.6; }
 .chat-main .activity-trace .trace-row-toggle .chevron.open { transform: rotate(90deg); }
 .chat-main .activity-trace .trace-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-main .activity-trace .trace-meta { margin: 0 0 0 17px; color: var(--muted); font-family: var(--font-mono, monospace); font-size: var(--font-xs); opacity: 0.8; }
 .chat-main .activity-trace .trace-prefix { flex: 1; min-width: 0; color: var(--fg); white-space: normal; overflow-wrap: anywhere; word-break: break-word; opacity: 0.95; }
 .chat-main .activity-trace .trace-prefix .trace-tool { font-family: var(--font-mono, monospace); font-size: var(--font-xs); padding: 0 4px; background: rgba(127, 127, 127, 0.15); border-radius: var(--radius-sm, 4px); }
 .chat-main .activity-trace .trace-code { margin: 2px 0 4px 17px; padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: var(--font-xs); color: var(--fg); background: rgba(127, 127, 127, 0.12); border-radius: var(--radius-md); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-height: 40vh; overflow: auto; }

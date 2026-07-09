@@ -40,7 +40,17 @@ export function reduceActivityLines(lines: ActivityLine[]): ActivityLine[] {
       continue;
     }
     const prior = reduced[position];
-    const merged = { ...prior.step, ...step } as ActivityStep;
+    let merged = { ...prior.step, ...step } as ActivityStep;
+    if (
+      merged.kind === 'tool' &&
+      (merged.status === 'completed' || merged.status === 'error')
+    ) {
+      const startedAt = Number(prior.ts);
+      const endedAt = Number(line.ts);
+      if (Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt) {
+        merged = { ...merged, durationMs: endedAt - startedAt };
+      }
+    }
     reduced[position] = { ts: prior.ts, text: JSON.stringify(merged), step: merged };
   }
 
@@ -52,19 +62,36 @@ export function activityHint(lines: ActivityLine[]): string | null {
   for (let i = reduced.length - 1; i >= 0; i--) {
     const step = parseStep(reduced[i].text);
     if (!step) continue;
-    switch (step.kind) {
-      case 'tool':
-        if (step.status === 'error') return `${step.tool} failed`;
-        if (step.status === 'completed') return `Used ${step.tool}`;
-        return `Using ${step.tool}…`;
+    const label = activityLabel(step);
+    if (label) return label;
+  }
+  return null;
+}
+
+function cleanToolName(tool: string): string {
+  if (tool.startsWith('mcp__')) {
+    const rest = tool.slice(5);
+    const [server, ...name] = rest.split('__');
+    return `${server}.${name.join('.') || rest}`;
+  }
+  return tool.toLowerCase();
+}
+
+/** Canonical plain-text primary label used by typing hints. */
+export function activityLabel(step: ActivityStep): string {
+  switch (step.kind) {
+      case 'tool': {
+        const tool = cleanToolName(step.tool);
+        if (step.status === 'error') return `Used ${tool} ✕`;
+        if (step.status === 'completed') return `Used ${tool} ✓`;
+        return `Using ${tool}…`;
+      }
+      case 'reasoning': return 'Reasoning…';
       case 'file': return `Opened ${step.name || step.path || 'a file'}`;
       case 'patch': return `Updated ${step.files.length === 1 ? step.files[0] : `${step.files.length} files`}`;
       case 'retry': return `Retrying (attempt ${step.attempt})…`;
       case 'compaction': return 'Compacting context…';
       case 'subtask': return step.description || (step.agent ? `Running ${step.agent} subtask…` : 'Running subtask…');
       case 'notification': return step.text;
-      case 'reasoning': break;
-    }
   }
-  return null;
 }

@@ -1713,6 +1713,13 @@ nav.tab-bar-strip.group-strip {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.chat-main .activity-trace .trace-meta {
+  margin: 0 0 0 17px;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-xs);
+  opacity: 0.8;
+}
 .chat-main .activity-trace .trace-prefix {
   flex: 1;
   min-width: 0;

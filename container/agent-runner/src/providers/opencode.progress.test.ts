@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { formatProgressFromPart, isEventForSession } from './opencode.js';
+import { formatProgressFromPart, isEventForSession, mergeReasoningPart } from './opencode.js';
 
 describe('formatProgressFromPart', () => {
   it('ignores missing, streaming text, snapshots, and unfinished reasoning', () => {
@@ -57,5 +57,19 @@ describe('isEventForSession', () => {
     expect(isEventForSession('ses-active', 'ses-active')).toBe(true);
     expect(isEventForSession('ses-stale', 'ses-active')).toBe(false);
     expect(isEventForSession(undefined, 'ses-active')).toBe(false);
+  });
+});
+
+describe('mergeReasoningPart', () => {
+  it('accumulates deltas when OpenCode keeps returning the initial text fragment', () => {
+    const first = mergeReasoningPart(undefined, { id: 'r1', type: 'reasoning', text: 'This is' }, 'This is');
+    const second = mergeReasoningPart(first, { id: 'r1', type: 'reasoning', text: 'This is' }, ' the full thought');
+    expect(second.text).toBe('This is the full thought');
+  });
+
+  it('prefers a newer cumulative text value without duplicating its delta', () => {
+    const first = { id: 'r1', type: 'reasoning', text: 'This is' };
+    expect(mergeReasoningPart(first, { ...first, text: 'This is complete' }, ' complete').text)
+      .toBe('This is complete');
   });
 });

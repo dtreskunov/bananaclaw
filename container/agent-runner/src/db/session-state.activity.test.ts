@@ -3,11 +3,11 @@ import { describe, expect, it } from 'bun:test';
 import { truncateActivityStep } from './session-state.js';
 
 describe('truncateActivityStep', () => {
-  it('caps structured reasoning at 2,000 characters', () => {
-    const step = truncateActivityStep({ kind: 'reasoning', id: 'r1', text: 'x'.repeat(3000) });
+  it('allows longer reasoning and caps it at 8,000 characters', () => {
+    const step = truncateActivityStep({ kind: 'reasoning', id: 'r1', text: 'x'.repeat(9000) });
     expect(step.kind).toBe('reasoning');
     if (step.kind !== 'reasoning') throw new Error('unexpected kind');
-    expect(step.text.length).toBe(2000);
+    expect(step.text.length).toBe(8000);
     expect(step.text.endsWith('…')).toBe(true);
   });
 

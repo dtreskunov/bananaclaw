@@ -19784,12 +19784,12 @@ function stepPhrase(s5) {
   switch (s5.kind) {
     case "tool": {
       const label = cleanToolName(s5.tool || "tool");
-      if (s5.status === "error") return `${label} failed`;
-      if (s5.status === "completed") return s5.title || `Used ${label}`;
-      return s5.title || `Using ${label}\u2026`;
+      if (s5.status === "error") return `Used ${label} \u2715`;
+      if (s5.status === "completed") return `Used ${label} \u2713`;
+      return `Using ${label}\u2026`;
     }
     case "reasoning":
-      return "Reasoning";
+      return "Reasoning\u2026";
     case "file":
       return `Opened ${s5.name || s5.path || "file"}`;
     case "patch":
@@ -19807,11 +19807,6 @@ function stepPhrase(s5) {
   }
 }
 function stepSummary(s5) {
-  if (s5.kind === "tool") {
-    const phrase = stepPhrase(s5);
-    const detail = s5.detail?.replace(/\s+/g, " ").trim();
-    return detail && detail !== phrase ? `${phrase} ${detail}` : phrase;
-  }
   return stepPhrase(s5);
 }
 function stepBody(s5) {
@@ -19822,16 +19817,20 @@ function stepBody(s5) {
   if (s5.kind === "file") return s5.path || null;
   return null;
 }
+function toolMeta(s5) {
+  if (s5.kind !== "tool") return null;
+  const status = s5.status === "error" ? "Failed" : s5.status === "completed" ? "Completed" : s5.status === "running" ? "Running" : "Pending";
+  return `${status}${typeof s5.durationMs === "number" ? ` \xB7 ${formatDuration(s5.durationMs)}` : ""}`;
+}
+function formatDuration(ms) {
+  if (ms < 1e3) return `${Math.round(ms)}ms`;
+  if (ms < 1e4) return `${(ms / 1e3).toFixed(1)}s`;
+  return `${Math.round(ms / 1e3)}s`;
+}
 function ActivityTraceRow({ line, open, onToggle }) {
   const step = parseStep(line.text);
-  const isTool = step.kind === "tool";
   const code = open ? stepBody(step) : null;
-  const prefix = isTool ? /* @__PURE__ */ u4("span", { class: "trace-prefix", children: [
-    stepPhrase(step),
-    " ",
-    /* @__PURE__ */ u4("code", { class: "trace-tool", children: cleanToolName(step.tool || "") }),
-    typeof step.durationMs === "number" ? ` \xB7 ${step.durationMs}ms` : ""
-  ] }) : /* @__PURE__ */ u4("span", { class: "trace-prefix", children: stepPhrase(step) });
+  const meta = open ? toolMeta(step) : null;
   return /* @__PURE__ */ u4("li", { class: `trace-row${open ? " open" : ""}`, children: [
     /* @__PURE__ */ u4(
       "button",
@@ -19844,10 +19843,11 @@ function ActivityTraceRow({ line, open, onToggle }) {
         children: [
           /* @__PURE__ */ u4("span", { class: `chevron${open ? " open" : ""}`, children: "\u203A" }),
           line.ts ? /* @__PURE__ */ u4("span", { class: "ts", children: fmtActivityTs(line.ts) }) : null,
-          open ? prefix : /* @__PURE__ */ u4("span", { class: "trace-text", children: stepSummary(step) })
+          /* @__PURE__ */ u4("span", { class: "trace-text", children: stepSummary(step) })
         ]
       }
     ),
+    meta ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: meta }) : null,
     open && code != null ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: code }) }) : null
   ] });
 }
@@ -19855,6 +19855,10 @@ function ActivityTraceList({ lines }) {
   const [sel, setSel] = h2(null);
   const toggle = (i5) => setSel((cur) => cur === i5 ? null : i5);
   return /* @__PURE__ */ u4("ul", { class: "activity-trace", children: lines.map((line, i5) => /* @__PURE__ */ u4(ActivityTraceRow, { line, open: i5 === sel, onToggle: () => toggle(i5) }, i5)) });
+}
+function latestActivityPhrase(lines) {
+  if (!lines.length) return "";
+  return stepPhrase(parseStep(lines[lines.length - 1].text));
 }
 function ActivityTrace({ lines }) {
   const [expanded, setExpanded] = h2(false);
@@ -20238,7 +20242,7 @@ function MessageLog() {
         /* @__PURE__ */ u4("span", {}),
         /* @__PURE__ */ u4("span", {}),
         /* @__PURE__ */ u4("span", {}),
-        !traceExpanded && typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null,
+        !traceExpanded && (latestActivityPhrase(activityLog.value) || typingHint.value) ? /* @__PURE__ */ u4("span", { class: "hint", children: latestActivityPhrase(activityLog.value) || typingHint.value }) : null,
         activityLog.value.length ? /* @__PURE__ */ u4(
           "button",
           {
