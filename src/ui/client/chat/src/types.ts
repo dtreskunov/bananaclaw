@@ -248,9 +248,9 @@ export interface RouterApi {
   notFound: (msg: string) => void;
 }
 
-// Value sent by the chat WS in `kind: 'inbound'|'outbound'|'typing'|'ready'|'usage'|'task-run'`.
+// Value sent by the chat WS.
 export interface WsPayload {
-  kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'task-run';
+  kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'activity' | 'task-run';
   on?: boolean;
   hint?: string;
   /** Complete host-reduced activity snapshot for the current turn. */

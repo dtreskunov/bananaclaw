@@ -18032,6 +18032,22 @@ function connectChatWs() {
       if (changed) chatMessages.value = next;
       return;
     }
+    if (payload.kind === "activity") {
+      const mid = payload.id;
+      const activity = payload.items;
+      if (!mid || !activity) return;
+      const list = chatMessages.value;
+      let changed = false;
+      const next = list.map((m6) => {
+        if (m6.id === mid && m6.direction === "out") {
+          changed = true;
+          return { ...m6, activity };
+        }
+        return m6;
+      });
+      if (changed) chatMessages.value = next;
+      return;
+    }
     if (payload.kind === "task-run") {
       const id = payload.id;
       if (id) {

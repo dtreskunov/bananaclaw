@@ -771,6 +771,22 @@ function connectChatWs(): void {
       if (changed) chatMessages.value = next;
       return;
     }
+    if (payload.kind === 'activity') {
+      const mid = payload.id;
+      const activity = payload.items;
+      if (!mid || !activity) return;
+      const list = chatMessages.value;
+      let changed = false;
+      const next = list.map((m) => {
+        if (m.id === mid && m.direction === 'out') {
+          changed = true;
+          return { ...m, activity };
+        }
+        return m;
+      });
+      if (changed) chatMessages.value = next;
+      return;
+    }
     if (payload.kind === 'task-run') {
       // A scheduled task just fired. Drop a timeline event bubble (mirrors the
       // /history event row) and refresh the thread list so the live-task pill's

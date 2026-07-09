@@ -833,6 +833,34 @@ export function readTurnUsageForOutbound(
   }
 }
 
+/** Look up and reduce the finalized activity trace for one outbound message.
+ * The container can append final reasoning immediately before completing the
+ * turn, too late for the periodic typing snapshot to observe it. */
+export function readTurnActivityForOutbound(
+  agentGroupId: string,
+  sessionId: string,
+  messageOutId: string,
+): { ts: string; text: string }[] | undefined {
+  try {
+    const outDb = openOutboundDb(agentGroupId, sessionId);
+    try {
+      const rows = outDb
+        .prepare(
+          `SELECT ts, text FROM turn_activity
+            WHERE message_out_id = ? ORDER BY ordinal`,
+        )
+        .all(messageOutId) as { ts: string; text: string }[];
+      if (rows.length === 0) return undefined;
+      return reduceActivityLines(rows);
+    } finally {
+      outDb.close();
+    }
+  } catch {
+    // outbound DB or turn_activity table may not exist
+    return undefined;
+  }
+}
+
 /**
  * Read merged inbound + outbound history for a (user, group, thread) from
  * the session DBs. Returns [] if no session exists yet.
@@ -2664,6 +2692,25 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
     }
   }
 
+  function pushActivityFrame(messageId: string, attempt: number): void {
+    try {
+      const sid = resolveSessionIdForUsage();
+      if (sid) {
+        const activity = readTurnActivityForOutbound(ctx.groupId, sid, messageId);
+        if (activity) {
+          ws.send(JSON.stringify({ kind: 'activity', id: messageId, items: activity }));
+          return;
+        }
+      }
+      // The outbound row is normally delivered just before the container
+      // persists turn_activity. Retry briefly so final reasoning reaches the
+      // already-rendered live bubble without requiring a page reload.
+      if (attempt < 2) setTimeout(() => pushActivityFrame(messageId, attempt + 1), 500);
+    } catch (err) {
+      log.warn('web chat ws activity send failed', { err });
+    }
+  }
+
   const subscriber: WebSubscriber = {
     onOutbound(message) {
       try {
@@ -2711,6 +2758,7 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
       }
       if (message.id && (message.kind === 'chat' || message.kind === 'text')) {
         pushUsageFrame(message.id, 0);
+        pushActivityFrame(message.id, 0);
       }
     },
     onInboundEcho(id, text, files) {
