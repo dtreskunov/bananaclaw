@@ -75,9 +75,29 @@ function cleanToolName(tool: string): string {
   return tool.toLowerCase();
 }
 
+/** File-operation tools carry the target path but no verb (and OpenCode's
+ *  title is just the path), so map the tool name to a verb to make read vs.
+ *  write vs. edit explicit. Case-insensitive to cover Claude (`Read`/`Write`/
+ *  `Edit`) and OpenCode (`read`/`write`/`edit`). */
+const FILE_OP_VERBS: Record<string, { present: string; past: string }> = {
+  read: { present: 'Reading', past: 'Read' },
+  write: { present: 'Writing', past: 'Wrote' },
+  edit: { present: 'Editing', past: 'Edited' },
+};
+
 function stepPhrase(s: TraceStep): string {
   switch (s.kind) {
     case 'tool': {
+      // File-operation tools (read/write/edit) carry the path but no verb;
+      // make the operation explicit so a read is distinguishable from a write.
+      const fileOp = FILE_OP_VERBS[(s.tool || '').toLowerCase()];
+      if (fileOp) {
+        const target = s.title || s.detail || '';
+        const suffix = target ? ` ${target}` : '';
+        if (s.status === 'error') return `${fileOp.past}${suffix} ✕`;
+        if (s.status === 'completed') return `${fileOp.past}${suffix} ✓`;
+        return `${fileOp.present}${suffix}…`;
+      }
       // Prefer a provider-supplied title (e.g. "Loaded skill: agent-browser")
       // over the bare tool name ("skill"), which is often uninformative.
       if (s.title) {

@@ -78,10 +78,30 @@ function cleanToolName(tool: string): string {
   return tool.toLowerCase();
 }
 
+/** File-operation tools carry the target path but no verb (and OpenCode's
+ *  title is just the path), so map the tool name to a verb to make read vs.
+ *  write vs. edit explicit in the label. Case-insensitive so it covers both
+ *  Claude (`Read`/`Write`/`Edit`) and OpenCode (`read`/`write`/`edit`). */
+const FILE_OP_VERBS: Record<string, { present: string; past: string }> = {
+  read: { present: 'Reading', past: 'Read' },
+  write: { present: 'Writing', past: 'Wrote' },
+  edit: { present: 'Editing', past: 'Edited' },
+};
+
 /** Canonical plain-text primary label used by typing hints. */
 export function activityLabel(step: ActivityStep): string {
   switch (step.kind) {
       case 'tool': {
+        // File-operation tools (read/write/edit) carry the path but no verb;
+        // make the operation explicit so a read is distinguishable from a write.
+        const fileOp = FILE_OP_VERBS[(step.tool || '').toLowerCase()];
+        if (fileOp) {
+          const target = step.title || step.detail || '';
+          const suffix = target ? ` ${target}` : '';
+          if (step.status === 'error') return `${fileOp.past}${suffix} ✕`;
+          if (step.status === 'completed') return `${fileOp.past}${suffix} ✓`;
+          return `${fileOp.present}${suffix}…`;
+        }
         // A provider-supplied title (e.g. "Loaded skill: agent-browser") is
         // far more descriptive than the bare tool name ("skill"), so prefer it
         // for the label; fall back to the verb + tool-name form otherwise.

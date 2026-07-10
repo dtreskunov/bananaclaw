@@ -69,4 +69,17 @@ describe('activityHint', () => {
       line('2', { kind: 'tool', id: 'a', tool: 'skill', status: 'completed', title: 'Loaded skill: agent-browser' }),
     ])).toBe('Loaded skill: agent-browser ✓');
   });
+
+  it('shows the operation verb for file tools (read/write/edit)', () => {
+    // OpenCode-style: title is the path; the verb comes from the tool name.
+    expect(activityHint([
+      line('1', { kind: 'tool', id: 'a', tool: 'write', status: 'running', detail: '/workspace/agent/notes.md' }),
+      line('2', { kind: 'tool', id: 'a', tool: 'write', status: 'completed', detail: '/workspace/agent/notes.md', title: 'workspace/agent/notes.md' }),
+    ])).toBe('Wrote workspace/agent/notes.md ✓');
+    // Claude-style: no title, path comes from detail.
+    expect(activityHint([line('1', { kind: 'tool', id: 'b', tool: 'Read', status: 'running', detail: '/workspace/agent/notes.md' })]))
+      .toBe('Reading /workspace/agent/notes.md…');
+    expect(activityHint([line('1', { kind: 'tool', id: 'c', tool: 'Edit', status: 'error', detail: '/workspace/agent/notes.md' })]))
+      .toBe('Edited /workspace/agent/notes.md ✕');
+  });
 });

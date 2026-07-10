@@ -19796,9 +19796,22 @@ function cleanToolName(tool) {
   }
   return tool.toLowerCase();
 }
+var FILE_OP_VERBS = {
+  read: { present: "Reading", past: "Read" },
+  write: { present: "Writing", past: "Wrote" },
+  edit: { present: "Editing", past: "Edited" }
+};
 function stepPhrase(s5) {
   switch (s5.kind) {
     case "tool": {
+      const fileOp = FILE_OP_VERBS[(s5.tool || "").toLowerCase()];
+      if (fileOp) {
+        const target = s5.title || s5.detail || "";
+        const suffix = target ? ` ${target}` : "";
+        if (s5.status === "error") return `${fileOp.past}${suffix} \u2715`;
+        if (s5.status === "completed") return `${fileOp.past}${suffix} \u2713`;
+        return `${fileOp.present}${suffix}\u2026`;
+      }
       if (s5.title) {
         if (s5.status === "error") return `${s5.title} \u2715`;
         if (s5.status === "completed") return `${s5.title} \u2713`;
