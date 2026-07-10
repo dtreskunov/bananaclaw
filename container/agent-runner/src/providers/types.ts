@@ -193,6 +193,7 @@ export type ActivityStep =
       status: 'pending' | 'running' | 'completed' | 'error';
       detail?: string; title?: string; error?: string; durationMs?: number;
     }
+  | { kind: 'internal'; id: string; text: string }
   | { kind: 'file'; id: string; path?: string; name?: string; mime?: string }
   | { kind: 'patch'; id: string; files: string[] }
   | { kind: 'retry'; id: string; attempt: number; error?: string }

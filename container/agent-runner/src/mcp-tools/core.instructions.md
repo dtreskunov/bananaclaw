@@ -28,4 +28,4 @@ Use `mcp__nanoclaw__add_reaction({ messageId, emoji })` to react to a specific i
 
 ### Internal thoughts
 
-Wrap reasoning in `<internal>...</internal>` tags to mark it as scratchpad — logged but not sent.
+Wrap reasoning in `<internal>...</internal>` tags to mark it as scratchpad — shown in the activity trace but not sent to the destination.

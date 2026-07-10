@@ -1259,20 +1259,17 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
     log(`Output recovery: ${[...new Set(parsed.diagnostics)].join(', ')}`);
   }
 
-  // Surface <internal>...</internal> reasoning to the web UI as a separate
-  // messages_out row, BEFORE dispatching <message> blocks so the internal
-  // bubble sequences ahead of the response in the UI's seq-ordered view.
-  const internalText = parsed.internal.join('\n\n');
-  if (internalText && routing.channelType === 'web' && routing.platformId) {
-    writeMessageOut({
-      id: generateId(),
-      in_reply_to: routing.inReplyTo,
-      kind: 'internal',
-      platform_id: routing.platformId,
-      channel_type: routing.channelType,
-      thread_id: routing.threadId,
-      content: JSON.stringify({ text: internalText }),
-    });
+  // Internal blocks are operator-visible trace entries, never channel
+  // deliveries. Emit one identified step per block so repeated blocks remain
+  // distinct and the host can reduce the trace normally.
+  for (let i = 0; i < parsed.internal.length; i++) {
+    try {
+      appendActivity({
+        kind: 'internal',
+        id: `internal:${generateId()}:${i}`,
+        text: parsed.internal[i],
+      });
+    } catch { /* best-effort */ }
   }
 
   let sent = 0;

@@ -51,6 +51,9 @@ describe('activityHint', () => {
       line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running' }),
       line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
     ])).toBe('Used bash ✓');
+    expect(activityHint([
+      line('1', { kind: 'internal', id: 'i1', text: 'Checking constraints' }),
+    ])).toBe('Internal…');
   });
 
   it('uses the same success and error labels shown in trace rows', () => {

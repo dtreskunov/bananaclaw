@@ -49,6 +49,7 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
 
     expect(prompt).toContain('Wrap each delivered message');
     expect(prompt).toContain('<message to="name">');
+    expect(prompt).toContain('show in the activity trace');
     expect(prompt).toContain('`casa`');
   });
 

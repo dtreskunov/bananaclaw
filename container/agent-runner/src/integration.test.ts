@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
 import { getUndeliveredMessages, writeMessageOut } from './db/messages-out.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { getContinuation, setContinuation } from './db/session-state.js';
+import { getActivityBuffer, getContinuation, setContinuation } from './db/session-state.js';
 import { MockProvider } from './providers/mock.js';
 import type { ProviderExchange } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
@@ -324,7 +324,7 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
-  it('internal tags between message blocks are stripped from scratchpad', async () => {
+  it('internal tags become activity steps and are not delivered', async () => {
     insertMessage('m1', { sender: 'Alice', text: 'hi' }, { platformId: 'chan-1', channelType: 'discord' });
 
     const provider = new MockProvider(
@@ -340,6 +340,10 @@ describe('poll loop integration', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toBe('answer');
+    expect(getActivityBuffer().map((line) => JSON.parse(line.text))).toEqual([
+      expect.objectContaining({ kind: 'internal', text: 'thinking about this...' }),
+      expect.objectContaining({ kind: 'internal', text: 'done thinking' }),
+    ]);
 
     await loopPromise.catch(() => {});
   });

@@ -132,7 +132,7 @@ function buildDestinationsSection(): string {
   }
   lines.push('');
   lines.push(
-    'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking you don\'t want sent.',
+    'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking to show in the activity trace but not send to a destination.',
   );
   lines.push('');
   lines.push(

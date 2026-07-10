@@ -38,7 +38,7 @@ function fmtActivityTs(ts: string): string {
 }
 
 interface TraceStep {
-  kind?: 'tool' | 'file' | 'patch' | 'retry' | 'compaction' | 'subtask' | 'notification';
+  kind?: 'tool' | 'internal' | 'file' | 'patch' | 'retry' | 'compaction' | 'subtask' | 'notification';
   id?: string;
   tool?: string;
   status?: 'pending' | 'running' | 'completed' | 'error';
@@ -83,6 +83,7 @@ function stepPhrase(s: TraceStep): string {
       if (s.status === 'completed') return `Used ${label} ✓`;
       return `Using ${label}…`;
     }
+    case 'internal': return 'Internal…';
     case 'file': return `Opened ${s.name || s.path || 'file'}`;
     case 'patch': return `Updated ${(s.files || []).length === 1 ? s.files![0] : `${(s.files || []).length} files`}`;
     case 'retry': return `Retry attempt ${s.attempt ?? 0}`;
@@ -101,6 +102,7 @@ function stepSummary(s: TraceStep): string {
 
 function stepBody(s: TraceStep): string | null {
   if (s.kind === 'tool') return [s.detail, s.error].filter(Boolean).join('\n\n') || null;
+  if (s.kind === 'internal') return s.text || null;
   if (s.kind === 'patch') return s.files?.join('\n') || null;
   if (s.kind === 'retry') return s.error || null;
   if (s.kind === 'file') return s.path || null;
