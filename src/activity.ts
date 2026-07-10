@@ -2,7 +2,6 @@ import type { ActivityLine } from './channels/adapter.js';
 
 export type ActivityStep =
   | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error'; detail?: string; title?: string; error?: string; durationMs?: number }
-  | { kind: 'reasoning'; id: string; text: string }
   | { kind: 'file'; id: string; path?: string; name?: string; mime?: string }
   | { kind: 'patch'; id: string; files: string[] }
   | { kind: 'retry'; id: string; attempt: number; error?: string }
@@ -18,6 +17,7 @@ function parseStep(text: string): ActivityStep | null {
   try {
     const value = JSON.parse(text) as Partial<ActivityStep>;
     if (!value || typeof value.kind !== 'string' || typeof value.id !== 'string' || !value.id) return null;
+    if (!['tool', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification'].includes(value.kind)) return null;
     return value as ActivityStep;
   } catch {
     return null;
@@ -86,7 +86,6 @@ export function activityLabel(step: ActivityStep): string {
         if (step.status === 'completed') return `Used ${tool} ✓`;
         return `Using ${tool}…`;
       }
-      case 'reasoning': return 'Reasoning…';
       case 'file': return `Opened ${step.name || step.path || 'a file'}`;
       case 'patch': return `Updated ${step.files.length === 1 ? step.files[0] : `${step.files.length} files`}`;
       case 'retry': return `Retrying (attempt ${step.attempt})…`;

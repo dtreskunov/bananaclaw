@@ -833,9 +833,7 @@ export function readTurnUsageForOutbound(
   }
 }
 
-/** Look up and reduce the finalized activity trace for one outbound message.
- * The container can append final reasoning immediately before completing the
- * turn, too late for the periodic typing snapshot to observe it. */
+/** Look up and reduce the finalized activity trace for one outbound message. */
 export function readTurnActivityForOutbound(
   agentGroupId: string,
   sessionId: string,
@@ -2703,8 +2701,8 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
         }
       }
       // The outbound row is normally delivered just before the container
-      // persists turn_activity. Retry briefly so final reasoning reaches the
-      // already-rendered live bubble without requiring a page reload.
+      // persists turn_activity. Retry briefly so the finalized trace reaches
+      // the already-rendered live bubble without requiring a page reload.
       if (attempt < 2) setTimeout(() => pushActivityFrame(messageId, attempt + 1), 500);
     } catch (err) {
       log.warn('web chat ws activity send failed', { err });

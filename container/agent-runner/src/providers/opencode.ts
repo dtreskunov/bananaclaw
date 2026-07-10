@@ -87,7 +87,7 @@ const STALE_SESSION_RE =
   /no conversation found|ENOENT.*\.jsonl|session.*not found|NotFoundError|connection reset|ECONNRESET|404|event timeout/i;
 
 // ── Progress hints ────────────────────────────────────────────────────────
-// OpenCode emits very chatty SSE (tool calls, reasoning, streaming text).
+// OpenCode emits very chatty SSE (tool calls, private thinking, streaming text).
 // We translate selected events into one-line `progress` ProviderEvents that
 // the poll-loop persists to session_state.progress, which the host typing
 // module reads as a hint next to the typing dots. This is the only signal
@@ -154,8 +154,8 @@ export function describeFinishReason(finish: string): string {
  * human-readable formatting happens here: tool name + raw primary argument
  * are passed through and the UI does the presentation.
  *
- * Reasoning, streaming text, snapshots, and permission events are deliberately
- * excluded here. Reasoning is derived once from finalized message parts.
+ * Private thinking, streaming text, snapshots, and permission events are
+ * deliberately excluded from user-visible activity.
  */
 export function formatProgressFromPart(
   part: OpenCodePart | undefined,
@@ -201,15 +201,6 @@ function activityError(error: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-/** Some OpenRouter models emit only a short prefix in the structured
- * reasoning part, then repeat the complete thought in the following text
- * part's `<think>` block. Extract that block without including a delivery
- * tag that may follow an unclosed think section. */
-export function extractThinkText(text: string | undefined): string | undefined {
-  if (!text) return undefined;
-  return parseAssistantOutput(text).reasoning[0];
-}
-
 /** Concatenate every distinct finalized text part in provider order. Streaming
  * updates are snapshots of individual part ids; finalized parts are the only
  * reliable source for the complete assistant response. */
@@ -218,36 +209,6 @@ export function finalTextFromParts(parts: OpenCodePart[]): string {
     .filter((part) => part.type === 'text' && typeof part.text === 'string')
     .map((part) => part.text ?? '')
     .join('');
-}
-
-/** Build one reasoning activity per finalized reasoning part. A companion
- * `<think>` block is authoritative when present because some OpenRouter
- * models truncate the structured reasoning field to a short prefix. */
-export function reasoningStepsFromParts(parts: OpenCodePart[]): ActivityStep[] {
-  const out: ActivityStep[] = [];
-  let pending: OpenCodePart | undefined;
-  for (const part of parts) {
-    if (part.type === 'reasoning' && part.id) {
-      if (pending?.id && pending.text?.trim()) {
-        out.push({ kind: 'reasoning', id: pending.id, text: pending.text.trim() });
-      }
-      pending = part;
-      continue;
-    }
-    if (part.type === 'text' && pending) {
-      const full = extractThinkText(part.text);
-      if (full) pending = { ...pending, text: full };
-      continue;
-    }
-    if (pending?.id && pending.text?.trim()) {
-      out.push({ kind: 'reasoning', id: pending.id, text: pending.text.trim() });
-      pending = undefined;
-    }
-  }
-  if (pending?.id && pending.text?.trim()) {
-    out.push({ kind: 'reasoning', id: pending.id, text: pending.text.trim() });
-  }
-  return out;
 }
 
 function killProcessTree(proc: ChildProcess): void {
@@ -868,9 +829,7 @@ export class OpenCodeProvider implements AgentProvider {
             assistantMessageIds.push(msgId);
           }
         }
-        // Finalized message parts are the sole normal source for response text
-        // and reasoning. Some models expose only a truncated structured prefix
-        // while a companion text part contains the complete `<think>` block.
+        // Finalized message parts are the sole normal source for response text.
         // If a final fetch fails, fall back to the per-part SSE snapshots for
         // that message rather than dropping an otherwise deliverable reply.
         let lastAssistantMessageData: { info?: unknown; parts?: OpenCodePart[] } | undefined;
@@ -886,9 +845,6 @@ export class OpenCodeProvider implements AgentProvider {
           }
           const parts = finalizedParts ?? [...(textPartsByMessageId.get(messageID)?.values() ?? [])];
           resultText += finalTextFromParts(parts);
-          for (const step of reasoningStepsFromParts(parts)) {
-            yield { type: 'progress', step };
-          }
         }
         // Repair known malformed wrappers and drop inline chain-of-thought.
         resultText = normalizeAssistantText(resultText);

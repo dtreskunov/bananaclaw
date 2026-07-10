@@ -19804,8 +19804,6 @@ function stepPhrase(s5) {
       if (s5.status === "completed") return `Used ${label} \u2713`;
       return `Using ${label}\u2026`;
     }
-    case "reasoning":
-      return "Reasoning\u2026";
     case "file":
       return `Opened ${s5.name || s5.path || "file"}`;
     case "patch":
@@ -19827,7 +19825,6 @@ function stepSummary(s5) {
 }
 function stepBody(s5) {
   if (s5.kind === "tool") return [s5.detail, s5.error].filter(Boolean).join("\n\n") || null;
-  if (s5.kind === "reasoning") return s5.text || null;
   if (s5.kind === "patch") return s5.files?.join("\n") || null;
   if (s5.kind === "retry") return s5.error || null;
   if (s5.kind === "file") return s5.path || null;

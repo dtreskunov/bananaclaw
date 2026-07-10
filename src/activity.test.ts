@@ -8,13 +8,13 @@ describe('reduceActivityLines', () => {
   it('merges lifecycle updates by kind and id in first-seen order', () => {
     const result = reduceActivityLines([
       line('10', { kind: 'tool', id: 'call-1', tool: 'bash', status: 'pending' }),
-      line('20', { kind: 'reasoning', id: 'r1', text: 'Checked state' }),
+      line('20', { kind: 'file', id: 'f1', path: '/tmp/a' }),
       line('30', { kind: 'tool', id: 'call-1', tool: 'bash', status: 'completed', title: 'Run', durationMs: 1 }),
     ]);
 
     expect(result).toEqual([
       line('10', { kind: 'tool', id: 'call-1', tool: 'bash', status: 'completed', title: 'Run', durationMs: 20 }),
-      line('20', { kind: 'reasoning', id: 'r1', text: 'Checked state' }),
+      line('20', { kind: 'file', id: 'f1', path: '/tmp/a' }),
     ]);
   });
 
@@ -34,6 +34,15 @@ describe('reduceActivityLines', () => {
       line('4', { kind: 'tool', id: 'b', tool: 'read', status: 'running' }),
     ])).toHaveLength(2);
   });
+
+  it('drops legacy reasoning activity rows', () => {
+    expect(reduceActivityLines([
+      line('1', { kind: 'reasoning', id: 'r1', text: 'private detail' }),
+      line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
+    ])).toEqual([
+      line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
+    ]);
+  });
 });
 
 describe('activityHint', () => {
@@ -42,10 +51,6 @@ describe('activityHint', () => {
       line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running' }),
       line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
     ])).toBe('Used bash ✓');
-    expect(activityHint([
-      line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'running' }),
-      line('3', { kind: 'reasoning', id: 'r', text: 'private detail' }),
-    ])).toBe('Reasoning…');
   });
 
   it('uses the same success and error labels shown in trace rows', () => {

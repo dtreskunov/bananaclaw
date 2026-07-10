@@ -138,7 +138,6 @@ export interface ActivityLine {
 // truncates for display via CSS. This cap only guards against a pathological
 // multi-KB command/argument blob.
 const ACTIVITY_MAX_CHARS = 2000;
-const REASONING_MAX_CHARS = 8000;
 
 /** Append one structured step to the per-turn activity trace. The host
  *  forwards the full ordered list to the web UI (and derives the single
@@ -182,9 +181,8 @@ export function truncateActivityStep(step: ActivityStep): ActivityStep {
     s = { ...s, detail: s.detail.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
   }
   if ('text' in s && typeof s.text === 'string') {
-    const maxChars = s.kind === 'reasoning' ? REASONING_MAX_CHARS : ACTIVITY_MAX_CHARS;
-    if (s.text.length > maxChars) {
-      s = { ...s, text: s.text.slice(0, maxChars - 1) + '…' };
+    if (s.text.length > ACTIVITY_MAX_CHARS) {
+      s = { ...s, text: s.text.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
     }
   }
   if ('error' in s && typeof s.error === 'string' && s.error.length > ACTIVITY_MAX_CHARS) {

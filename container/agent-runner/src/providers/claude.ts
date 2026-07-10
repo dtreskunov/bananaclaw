@@ -534,8 +534,8 @@ export class ClaudeProvider implements AgentProvider {
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };
         } else if (message.type === 'assistant') {
-          // Surface identified tool calls. Generic thinking is intentionally
-          // omitted; only provider reasoning with actual text is trace-worthy.
+          // Surface identified tool calls. Private thinking is intentionally
+          // omitted from user-visible activity.
           const blocks = (message as { message?: { content?: unknown } }).message?.content;
           if (Array.isArray(blocks)) {
             for (const b of blocks) {

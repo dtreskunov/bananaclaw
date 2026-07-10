@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
-  extractThinkText,
   finalTextFromParts,
   formatProgressFromPart,
   isEventForSession,
-  reasoningStepsFromParts,
 } from './opencode.js';
 
 describe('formatProgressFromPart', () => {
-  it('ignores missing, streaming text, snapshots, and unfinished reasoning', () => {
+  it('ignores missing, streaming text, snapshots, and private thinking', () => {
     expect(formatProgressFromPart(undefined)).toBeNull();
     expect(formatProgressFromPart({ id: 't', type: 'text', text: 'reply' })).toBeNull();
     expect(formatProgressFromPart({ id: 's', type: 'snapshot' })).toBeNull();
@@ -38,7 +36,7 @@ describe('formatProgressFromPart', () => {
     });
   });
 
-  it('ignores completed reasoning because finalized message parts are authoritative', () => {
+  it('ignores completed provider reasoning', () => {
     expect(formatProgressFromPart({
       id: 'reason-1', type: 'reasoning', text: '  inspect the state  ', time: { start: 1, end: 2 },
     })).toBeNull();
@@ -63,42 +61,6 @@ describe('isEventForSession', () => {
     expect(isEventForSession('ses-active', 'ses-active')).toBe(true);
     expect(isEventForSession('ses-stale', 'ses-active')).toBe(false);
     expect(isEventForSession(undefined, 'ses-active')).toBe(false);
-  });
-});
-
-describe('think-text reasoning recovery', () => {
-  it('extracts the complete thought from an unclosed think block', () => {
-    expect(extractThinkText('<think>\nThe user wants me to inspect `package.json`. I need to find it first.'))
-      .toBe('The user wants me to inspect `package.json`. I need to find it first.');
-  });
-
-  it('stops before a delivery block embedded after the thought', () => {
-    expect(extractThinkText('<think>The retry needs wrapping.<message to="web">Answer</message>'))
-      .toBe('The retry needs wrapping.');
-  });
-
-  it('treats an incomplete opening tag as not-yet-extractable', () => {
-    expect(extractThinkText('<thi')).toBeUndefined();
-    expect(extractThinkText('<think>')).toBeUndefined();
-  });
-
-  it('reconciles a final structured prefix with its complete companion think block', () => {
-    expect(reasoningStepsFromParts([
-      { id: 'r1', messageID: 'm1', type: 'reasoning', text: 'The user wants me to inspect `' },
-      { id: 't1', messageID: 'm1', type: 'text', text: '<think>\nThe user wants me to inspect `package.json`. I need to find it first.<message to="web">Done</message>' },
-      { id: 'end', messageID: 'm1', type: 'step-finish' },
-    ])).toEqual([{
-      kind: 'reasoning', id: 'r1',
-      text: 'The user wants me to inspect `package.json`. I need to find it first.',
-    }]);
-  });
-
-  it('falls back to finalized structured reasoning when no think block exists', () => {
-    expect(reasoningStepsFromParts([
-      { id: 'r1', messageID: 'm1', type: 'reasoning', text: 'Structured thought' },
-      { id: 't1', messageID: 'm1', type: 'text', text: '<message to="web">Done</message>' },
-      { id: 'end', messageID: 'm1', type: 'step-finish' },
-    ])).toEqual([{ kind: 'reasoning', id: 'r1', text: 'Structured thought' }]);
   });
 });
 

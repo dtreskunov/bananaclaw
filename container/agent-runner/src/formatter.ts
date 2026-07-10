@@ -369,14 +369,13 @@ export type OutputDiagnostic =
 export type AssistantOutputSegment =
   | { kind: 'message'; to: string; text: string }
   | { kind: 'internal'; text: string }
-  | { kind: 'reasoning'; text: string }
+  | { kind: 'think'; text: string }
   | { kind: 'unwrapped'; text: string };
 
 export interface ParsedAssistantOutput {
   segments: AssistantOutputSegment[];
   deliveries: Array<{ to: string; body: string }>;
   internal: string[];
-  reasoning: string[];
   unwrapped: string;
   diagnostics: OutputDiagnostic[];
   /** Input with reasoning removed and recoverable wrappers normalized. */
@@ -386,7 +385,7 @@ export interface ParsedAssistantOutput {
 type OpenSegment =
   | { kind: 'message'; to: string; text: string; opener: string }
   | { kind: 'internal'; text: string }
-  | { kind: 'reasoning'; text: string };
+  | { kind: 'think'; text: string };
 
 const OUTPUT_TAG_RE =
   /<message\s+to="([^"]+)"\s*>|<\/message\s*>|<internal\s*>|<\/internal\s*>|<think(?:ing)?\b[^>]*>|<\/think(?:ing)?\s*>/gi;
@@ -410,7 +409,7 @@ function serializeSegments(
     .map((segment) => {
       if (segment.kind === 'message') return `<message to="${segment.to}">${segment.text}</message>`;
       if (segment.kind === 'internal') return `<internal>${segment.text}</internal>`;
-      if (segment.kind === 'reasoning') return `<think>${segment.text}</think>`;
+      if (segment.kind === 'think') return `<think>${segment.text}</think>`;
       return segment.text;
     })
     .join('')
@@ -466,7 +465,7 @@ function isDeliveryOnlySuffix(text: string, from: number): boolean {
  * Parse the model's XML-like output in one tolerant pass. This deliberately is
  * not an XML parser: model output can be truncated, lose its first `<`, or put
  * a valid delivery block inside an unclosed `<think>`. Every character is
- * assigned to exactly one message, internal, reasoning, or unwrapped segment.
+ * assigned to exactly one message, internal, private-think, or unwrapped segment.
  */
 export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
   const diagnostics: OutputDiagnostic[] = [];
@@ -525,7 +524,7 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
       } else open.text += token;
       continue;
     }
-    if (open?.kind === 'reasoning') {
+    if (open?.kind === 'think') {
       if (isThinkClose) finishOpen();
       else if (messageTo !== undefined && isDeliveryOnlySuffix(text, match.index)) {
         diagnostics.push('unclosed-think');
@@ -541,7 +540,7 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
 
     if (messageTo !== undefined) open = { kind: 'message', to: messageTo, text: '', opener: token };
     else if (lower.startsWith('<internal')) open = { kind: 'internal', text: '' };
-    else if (lower.startsWith('<think') || lower.startsWith('<thinking')) open = { kind: 'reasoning', text: '' };
+    else if (lower.startsWith('<think') || lower.startsWith('<thinking')) open = { kind: 'think', text: '' };
     else if (isThinkClose) {
       diagnostics.push('orphan-think-close');
       // A lost opening tag leaves its reasoning prefix as unwrapped text.
@@ -550,7 +549,7 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
       if (!segments.some((segment) => segment.kind === 'message' || segment.kind === 'internal')) {
         const prefix = segments.map((segment) => segment.text).join('');
         segments.length = 0;
-        if (prefix) appendOutputSegment(segments, { kind: 'reasoning', text: prefix });
+        if (prefix) appendOutputSegment(segments, { kind: 'think', text: prefix });
       }
     } else {
       appendOutputSegment(segments, { kind: 'unwrapped', text: token });
@@ -558,7 +557,7 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
   }
   appendText(text.slice(cursor));
 
-  if (open?.kind === 'reasoning') {
+  if (open?.kind === 'think') {
     diagnostics.push('unclosed-think');
     finishOpen();
   } else if (open?.kind === 'internal') {
@@ -577,10 +576,6 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
     .filter((segment) => segment.kind === 'internal')
     .map((segment) => segment.text.trim())
     .filter(Boolean);
-  const reasoning = segments
-    .filter((segment) => segment.kind === 'reasoning')
-    .map((segment) => segment.text.trim())
-    .filter(Boolean);
   const unwrapped = segments
     .filter((segment) => segment.kind === 'unwrapped')
     .map((segment) => segment.text)
@@ -591,10 +586,9 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
     segments,
     deliveries,
     internal,
-    reasoning,
     unwrapped,
     diagnostics,
-    normalizedText: serializeSegments(segments, (segment) => segment.kind !== 'reasoning'),
+    normalizedText: serializeSegments(segments, (segment) => segment.kind !== 'think'),
   };
 }
 
