@@ -62,4 +62,11 @@ describe('activityHint', () => {
     expect(activityHint([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'error' })]))
       .toBe('Used bash ✕');
   });
+
+  it('prefers a provider tool title over the bare tool name', () => {
+    expect(activityHint([
+      line('1', { kind: 'tool', id: 'a', tool: 'skill', status: 'running' }),
+      line('2', { kind: 'tool', id: 'a', tool: 'skill', status: 'completed', title: 'Loaded skill: agent-browser' }),
+    ])).toBe('Loaded skill: agent-browser ✓');
+  });
 });

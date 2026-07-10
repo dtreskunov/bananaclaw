@@ -19799,6 +19799,11 @@ function cleanToolName(tool) {
 function stepPhrase(s5) {
   switch (s5.kind) {
     case "tool": {
+      if (s5.title) {
+        if (s5.status === "error") return `${s5.title} \u2715`;
+        if (s5.status === "completed") return `${s5.title} \u2713`;
+        return `${s5.title}\u2026`;
+      }
       const label = cleanToolName(s5.tool || "tool");
       if (s5.status === "error") return `Used ${label} \u2715`;
       if (s5.status === "completed") return `Used ${label} \u2713`;

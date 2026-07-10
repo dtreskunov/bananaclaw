@@ -78,6 +78,13 @@ function cleanToolName(tool: string): string {
 function stepPhrase(s: TraceStep): string {
   switch (s.kind) {
     case 'tool': {
+      // Prefer a provider-supplied title (e.g. "Loaded skill: agent-browser")
+      // over the bare tool name ("skill"), which is often uninformative.
+      if (s.title) {
+        if (s.status === 'error') return `${s.title} ✕`;
+        if (s.status === 'completed') return `${s.title} ✓`;
+        return `${s.title}…`;
+      }
       const label = cleanToolName(s.tool || 'tool');
       if (s.status === 'error') return `Used ${label} ✕`;
       if (s.status === 'completed') return `Used ${label} ✓`;

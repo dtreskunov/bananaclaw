@@ -82,6 +82,14 @@ function cleanToolName(tool: string): string {
 export function activityLabel(step: ActivityStep): string {
   switch (step.kind) {
       case 'tool': {
+        // A provider-supplied title (e.g. "Loaded skill: agent-browser") is
+        // far more descriptive than the bare tool name ("skill"), so prefer it
+        // for the label; fall back to the verb + tool-name form otherwise.
+        if (step.title) {
+          if (step.status === 'error') return `${step.title} ✕`;
+          if (step.status === 'completed') return `${step.title} ✓`;
+          return `${step.title}…`;
+        }
         const tool = cleanToolName(step.tool);
         if (step.status === 'error') return `Used ${tool} ✕`;
         if (step.status === 'completed') return `Used ${tool} ✓`;
