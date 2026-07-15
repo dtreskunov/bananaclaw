@@ -126,6 +126,9 @@
 .chat-main .msg .inline-media video { max-height: 320px; background: #000; }
 .chat-main .msg .inline-media-name { font-size: var(--font-2xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-main .msg .meta { font-size: var(--font-2xs); color: var(--muted); margin-top: 4px; opacity: 0.7; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.chat-main .msg .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chat-main .msg.in .reactions { justify-content: flex-end; }
+.chat-main .msg .reaction-chip { font-size: var(--font-sm); line-height: 1; background: var(--wash-strong); border: 1px solid var(--border, transparent); border-radius: 999px; padding: 2px 6px; }
 .chat-main .msg.in .meta { text-align: right; justify-content: flex-end; }
 .chat-main .msg .usage { cursor: pointer; border-bottom: 1px dotted var(--muted); }
 .chat-main .msg .usage:hover { opacity: 1; color: var(--fg); }

@@ -365,6 +365,15 @@ function Message({ m }: { m: ChatMessage }) {
       {m.direction === 'out' && m.activity && m.activity.length
         ? <ActivityTrace lines={m.activity} />
         : null}
+      {m.reactions && m.reactions.length
+        ? (
+          <div class="reactions">
+            {m.reactions.map((r, i) => (
+              <span class="reaction-chip" key={i} title={`Reacted ${r.emoji}`}>{r.emoji}</span>
+            ))}
+          </div>
+        )
+        : null}
       {m.ts ? <div class="meta">
         <RelativeTime ts={m.ts} />
         {m.usage && m.direction === 'out' ? <UsageMeta u={m.usage} /> : null}

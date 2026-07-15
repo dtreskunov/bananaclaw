@@ -68,6 +68,7 @@ interface ServerMessage {
   usage?: import('./types').TurnUsage;
   activity?: import('./types').ActivityLine[];
   event?: import('./types').TimelineEvent;
+  reactions?: import('./types').MessageReaction[];
 }
 
 /**
@@ -329,6 +330,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
+      ...(m.reactions ? { reactions: m.reactions } : {}),
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -407,6 +409,24 @@ function normDirection(d: string): Direction {
   return d === 'in' ? 'in' : d === 'internal' ? 'internal' : d === 'event' ? 'event' : 'out';
 }
 
+/**
+ * Attach an emoji reaction to the message with `targetId`, matched against
+ * either an inbound or outbound bubble id. Dedupes identical emoji so a
+ * live frame that races the /history backfill doesn't double up. No-op when
+ * the target isn't loaded (history will surface it on the next fetch).
+ */
+function applyReaction(targetId: string, emoji: string, ts: string): void {
+  let changed = false;
+  const next = chatMessages.value.map((m) => {
+    if (m.id !== targetId) return m;
+    const existing = m.reactions || [];
+    if (existing.some((r) => r.emoji === emoji)) return m;
+    changed = true;
+    return { ...m, reactions: [...existing, { emoji, ts }] };
+  });
+  if (changed) chatMessages.value = next;
+}
+
 async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
   const gid = groupId.value,
     tid = threadId.value;
@@ -426,6 +446,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
+      ...(m.reactions ? { reactions: m.reactions } : {}),
     }));
     refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
     return;
@@ -446,6 +467,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
+      ...(m.reactions ? { reactions: m.reactions } : {}),
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -529,6 +551,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
             ...(m.usage ? { usage: m.usage } : {}),
             ...(m.activity ? { activity: m.activity } : {}),
             ...(m.event ? { event: m.event } : {}),
+            ...(m.reactions ? { reactions: m.reactions } : {}),
           }));
           chatLoading.value = false;
           voiceMode.value = (data.voiceMode as typeof voiceMode.value) || 'off';
@@ -696,6 +719,12 @@ function connectChatWs(): void {
       bumpActiveThread();
       return;
     }
+    if (payload.kind === 'reaction') {
+      const targetId = payload.targetId;
+      const emoji = payload.emoji;
+      if (targetId && emoji) applyReaction(targetId, emoji, payload.timestamp || new Date().toISOString());
+      return;
+    }
     if (payload.kind === 'outbound') {
       // chat-sdk messages (ask_question, send_card) need special handling.
       if (payload.messageKind === 'chat-sdk') {
@@ -731,6 +760,16 @@ function connectChatWs(): void {
         return;
       }
       const c = payload.content || {};
+      // Defensive: a reaction row should arrive as a dedicated `reaction`
+      // frame, but if one slips through as `outbound`, fold it onto its
+      // target instead of rendering an empty bubble.
+      if (typeof c === 'object' && (c as { operation?: string }).operation === 'reaction') {
+        const rc = c as { messageId?: string; emoji?: string };
+        if (rc.messageId && rc.emoji) {
+          applyReaction(rc.messageId, rc.emoji, payload.timestamp || new Date().toISOString());
+        }
+        return;
+      }
       const text = typeof c === 'string' ? c : c.text || c.markdown || '';
       const dir: Direction = payload.messageKind === 'internal' ? 'internal' : 'out';
       // For the final response, carry the live-accumulated trace onto the

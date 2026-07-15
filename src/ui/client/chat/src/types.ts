@@ -120,6 +120,15 @@ export interface ChatMessage {
   activity?: ActivityLine[];
   /** Timeline event payload; present when direction === 'event'. */
   event?: TimelineEvent;
+  /** Emoji reactions the agent added to this message (already resolved to
+   *  unicode), in emit order. Rendered as chips under the bubble. */
+  reactions?: MessageReaction[];
+}
+
+/** One emoji reaction attached to a message. */
+export interface MessageReaction {
+  emoji: string;
+  ts: string;
 }
 
 /** Non-chat timeline marker (e.g. a scheduled task firing). */
@@ -250,8 +259,12 @@ export interface RouterApi {
 
 // Value sent by the chat WS.
 export interface WsPayload {
-  kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'activity' | 'task-run';
+  kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'activity' | 'task-run' | 'reaction';
   on?: boolean;
+  /** reaction frame: target message id the emoji attaches to. */
+  targetId?: string;
+  /** reaction frame: unicode emoji (server already resolved the shortcode). */
+  emoji?: string;
   hint?: string;
   /** Complete host-reduced activity snapshot for the current turn. */
   items?: ActivityLine[] | null;

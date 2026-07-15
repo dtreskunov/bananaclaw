@@ -17660,7 +17660,8 @@ function mergeIncomingMessages(messages) {
       ts,
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.activity ? { activity: m6.activity } : {},
-      ...m6.event ? { event: m6.event } : {}
+      ...m6.event ? { event: m6.event } : {},
+      ...m6.reactions ? { reactions: m6.reactions } : {}
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -17718,6 +17719,17 @@ function appendMsg(direction, text, files, ts, id, activity) {
 function normDirection(d5) {
   return d5 === "in" ? "in" : d5 === "internal" ? "internal" : d5 === "event" ? "event" : "out";
 }
+function applyReaction(targetId, emoji, ts) {
+  let changed = false;
+  const next = chatMessages.value.map((m6) => {
+    if (m6.id !== targetId) return m6;
+    const existing = m6.reactions || [];
+    if (existing.some((r4) => r4.emoji === emoji)) return m6;
+    changed = true;
+    return { ...m6, reactions: [...existing, { emoji, ts }] };
+  });
+  if (changed) chatMessages.value = next;
+}
 async function refetchThreadHistory(appendNewOnly) {
   const gid = groupId.value, tid = threadId.value;
   if (!gid || !tid) return;
@@ -17735,7 +17747,8 @@ async function refetchThreadHistory(appendNewOnly) {
       ts: m6.timestamp,
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.activity ? { activity: m6.activity } : {},
-      ...m6.event ? { event: m6.event } : {}
+      ...m6.event ? { event: m6.event } : {},
+      ...m6.reactions ? { reactions: m6.reactions } : {}
     }));
     refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
     return;
@@ -17755,7 +17768,8 @@ async function refetchThreadHistory(appendNewOnly) {
       ts,
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.activity ? { activity: m6.activity } : {},
-      ...m6.event ? { event: m6.event } : {}
+      ...m6.event ? { event: m6.event } : {},
+      ...m6.reactions ? { reactions: m6.reactions } : {}
     });
     if (key) refs.seenIds.add(key);
     if (ts > maxTs) maxTs = ts;
@@ -17826,7 +17840,8 @@ async function openChat(gid, resumeTid, opts) {
             ts: m6.timestamp,
             ...m6.usage ? { usage: m6.usage } : {},
             ...m6.activity ? { activity: m6.activity } : {},
-            ...m6.event ? { event: m6.event } : {}
+            ...m6.event ? { event: m6.event } : {},
+            ...m6.reactions ? { reactions: m6.reactions } : {}
           }));
           chatLoading.value = false;
           voiceMode.value = data.voiceMode || "off";
@@ -17973,6 +17988,12 @@ function connectChatWs() {
       bumpActiveThread();
       return;
     }
+    if (payload.kind === "reaction") {
+      const targetId = payload.targetId;
+      const emoji = payload.emoji;
+      if (targetId && emoji) applyReaction(targetId, emoji, payload.timestamp || (/* @__PURE__ */ new Date()).toISOString());
+      return;
+    }
     if (payload.kind === "outbound") {
       if (payload.messageKind === "chat-sdk") {
         if (payload.question) {
@@ -18003,6 +18024,13 @@ function connectChatWs() {
         return;
       }
       const c4 = payload.content || {};
+      if (typeof c4 === "object" && c4.operation === "reaction") {
+        const rc = c4;
+        if (rc.messageId && rc.emoji) {
+          applyReaction(rc.messageId, rc.emoji, payload.timestamp || (/* @__PURE__ */ new Date()).toISOString());
+        }
+        return;
+      }
       const text = typeof c4 === "string" ? c4 : c4.text || c4.markdown || "";
       const dir = payload.messageKind === "internal" ? "internal" : "out";
       const carriedActivity = dir === "out" ? activityLog.value.length ? activityLog.value.slice() : refs.carryActivity : null;
@@ -20043,6 +20071,7 @@ function Message({ m: m6 }) {
       f5.filename
     ] }, f5.filename)) }) : null,
     m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,
+    m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
     m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
       m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null

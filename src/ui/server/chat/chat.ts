@@ -50,6 +50,7 @@ function isElevated(userId: string): boolean {
 }
 import { log } from '../../../log.js';
 import { getChannelAdapter } from '../../../channels/channel-registry.js';
+import { shortcodeToEmoji } from './emoji.js';
 import { subscribeWeb, submitWebInbound, WEB_CHANNEL_TYPE, type WebSubscriber } from '../../../channels/web.js';
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from '../../../channels/homeassistant.js';
 import { setResendPendingWebOverride } from '../../../channels/resend.js';
@@ -774,6 +775,10 @@ export interface HistoryMessage {
   /** Non-chat timeline event (e.g. a scheduled task firing). Present only
    *  when `direction === 'event'`; drives distinct rendering client-side. */
   event?: { kind: 'task-run'; taskId?: string; summary: string; recurrence?: string | null };
+  /** Emoji reactions the agent added to this message, resolved to unicode
+   *  and in the order they were emitted. Folded in from `operation:'reaction'`
+   *  outbound rows targeting this message id. */
+  reactions?: { emoji: string; ts: string }[];
 }
 
 /**
@@ -1029,6 +1034,11 @@ export function readChatHistory(
         }
       }
 
+      // Reactions are `chat` rows with `operation:'reaction'` targeting a
+      // prior message id. Collect them keyed by target so they fold onto the
+      // target bubble after the loop instead of rendering as empty bubbles.
+      const reactionsByTarget = new Map<string, { emoji: string; ts: string }[]>();
+
       for (const r of rows) {
         if (r.kind === 'internal') {
           const parsed = parseOutboundContent(r.content);
@@ -1072,6 +1082,24 @@ export function readChatHistory(
           continue;
         }
         if (r.kind !== 'chat' && r.kind !== 'text') continue;
+        // Fold reaction rows onto their target bubble rather than rendering
+        // a standalone (empty-text) message.
+        try {
+          const c = JSON.parse(r.content) as { operation?: string; messageId?: string; emoji?: string };
+          if (c?.operation === 'reaction' && c.messageId && c.emoji) {
+            // Inbound ids are de-namespaced for the client (the `:<groupId>`
+            // suffix is stripped above); match that so reactions on the
+            // user's own messages find their target bubble.
+            const suffix = `:${groupId}`;
+            const target = c.messageId.endsWith(suffix) ? c.messageId.slice(0, -suffix.length) : c.messageId;
+            const arr = reactionsByTarget.get(target) ?? [];
+            arr.push({ emoji: shortcodeToEmoji(c.emoji), ts: r.timestamp });
+            reactionsByTarget.set(target, arr);
+            continue;
+          }
+        } catch {
+          /* not JSON — treat as a normal text bubble below */
+        }
         const parsed = parseOutboundContent(r.content);
         const usage = usageMap.get(r.id);
         const rawActivity = activityMap.get(r.id);
@@ -1085,6 +1113,16 @@ export function readChatHistory(
           ...(usage ? { usage } : {}),
           ...(activity && activity.length > 0 ? { activity } : {}),
         });
+      }
+
+      // Attach collected reactions to their target messages. Targets may be
+      // inbound (user) or outbound (agent) bubbles already pushed above.
+      if (reactionsByTarget.size > 0) {
+        for (const m of messages) {
+          if (!m.id) continue;
+          const rx = reactionsByTarget.get(m.id);
+          if (rx && rx.length) m.reactions = rx;
+        }
       }
     } finally {
       outDb.close();
@@ -2712,6 +2750,27 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
   const subscriber: WebSubscriber = {
     onOutbound(message) {
       try {
+        // Reactions are `chat` rows carrying `operation:'reaction'`. Emit a
+        // dedicated frame so the client folds the emoji onto the target
+        // bubble instead of running the empty-bubble outbound path.
+        if (typeof message.content === 'object' && message.content) {
+          const op = message.content as { operation?: string; messageId?: string; emoji?: string };
+          if (op.operation === 'reaction' && op.messageId && op.emoji) {
+            // De-namespace the target id to match the client's bubble id
+            // (inbound echoes/history strip the `:<groupId>` suffix).
+            const suffix = `:${ctx.groupId}`;
+            const targetId = op.messageId.endsWith(suffix) ? op.messageId.slice(0, -suffix.length) : op.messageId;
+            ws.send(
+              JSON.stringify({
+                kind: 'reaction',
+                targetId,
+                emoji: shortcodeToEmoji(op.emoji),
+                timestamp: new Date().toISOString(),
+              }),
+            );
+            return;
+          }
+        }
         // send_file writes a `file_paths` array parallel to `files` with
         // workspace-relative source paths so the chat UI can link the
         // attachment chip into the FILES panel. Fish it out of the

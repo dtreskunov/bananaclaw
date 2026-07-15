@@ -1484,6 +1484,23 @@ nav.tab-bar-strip.group-strip {
   align-items: center;
   flex-wrap: wrap;
 }
+.chat-main .msg .reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.chat-main .msg.in .reactions {
+  justify-content: flex-end;
+}
+.chat-main .msg .reaction-chip {
+  font-size: var(--font-sm);
+  line-height: 1;
+  background: var(--wash-strong);
+  border: 1px solid var(--border, transparent);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
 .chat-main .msg.in .meta {
   text-align: right;
   justify-content: flex-end;
