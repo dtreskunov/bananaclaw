@@ -144,6 +144,7 @@ export function formatMessages(messages: MessageInRow[]): string {
   const taskMessages = messages.filter((m) => m.kind === 'task');
   const webhookMessages = messages.filter((m) => m.kind === 'webhook');
   const systemMessages = messages.filter((m) => m.kind === 'system');
+  const interactiveResponses = messages.filter((m) => m.kind === 'interactive_response');
 
   const parts: string[] = [];
 
@@ -158,6 +159,9 @@ export function formatMessages(messages: MessageInRow[]): string {
   }
   if (systemMessages.length > 0) {
     parts.push(...systemMessages.map(formatSystemMessage));
+  }
+  if (interactiveResponses.length > 0) {
+    parts.push(...interactiveResponses.map(formatInteractiveResponse));
   }
 
   return header + parts.join('\n\n');
@@ -254,6 +258,12 @@ function formatSystemMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const from = originAttr(msg);
   return `<system_response${from} action="${escapeXml(content.action || 'unknown')}" status="${escapeXml(content.status || 'unknown')}">${JSON.stringify(content.result || null)}</system_response>`;
+}
+
+function formatInteractiveResponse(msg: MessageInRow): string {
+  const content = parseContent(msg.content);
+  const from = originAttr(msg);
+  return `<question_response${from} question_id="${escapeXml(content.questionId || '')}" response_type="${escapeXml(content.responseType || 'text')}"><question>${escapeXml(content.question || '')}</question><answer>${escapeXml(content.value || '')}</answer></question_response>`;
 }
 
 /**

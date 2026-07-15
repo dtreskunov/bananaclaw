@@ -9,7 +9,7 @@ import { getDb, hasTable } from './connection.js';
 
 export interface CascadeCounts {
   sessions: number;
-  pending_questions: number;
+  questions: number;
   pending_approvals: number;
   agent_destinations_owned: number;
   agent_destinations_pointing: number;
@@ -43,7 +43,7 @@ export function cascadeDeleteAgentGroup(id: string): CascadeCounts {
   const cascade = db.transaction((groupId: string): CascadeCounts => {
     const counts: CascadeCounts = {
       sessions: 0,
-      pending_questions: 0,
+      questions: 0,
       pending_approvals: 0,
       agent_destinations_owned: 0,
       agent_destinations_pointing: 0,
@@ -63,8 +63,8 @@ export function cascadeDeleteAgentGroup(id: string): CascadeCounts {
         .prepare('DELETE FROM agent_destinations WHERE target_type = ? AND target_id = ?')
         .run('agent', groupId).changes;
     }
-    counts.pending_questions = db
-      .prepare('DELETE FROM pending_questions WHERE session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)')
+    counts.questions = db
+      .prepare('DELETE FROM questions WHERE session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)')
       .run(groupId).changes;
     if (hasPendingApprovals) {
       counts.pending_approvals = db

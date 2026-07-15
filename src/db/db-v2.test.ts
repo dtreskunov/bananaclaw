@@ -28,9 +28,9 @@ import {
   getRunningSessions,
   updateSession,
   deleteSession,
-  createPendingQuestion,
-  getPendingQuestion,
-  deletePendingQuestion,
+  createQuestion,
+  getQuestion,
+  answerQuestion,
 } from './index.js';
 
 function now() {
@@ -371,7 +371,7 @@ describe('sessions', () => {
 
 // ── Pending Questions ──
 
-describe('pending questions', () => {
+describe('durable questions', () => {
   beforeEach(() => {
     createAgentGroup({
       id: 'ag-1',
@@ -394,37 +394,61 @@ describe('pending questions', () => {
   });
 
   it('should create and retrieve', () => {
-    createPendingQuestion({
+    createQuestion({
       question_id: 'q-1',
       session_id: 'sess-1',
       message_out_id: 'msg-out-1',
+      in_reply_to: 'msg-in-1',
       platform_id: 'chan-1',
       channel_type: 'discord',
       thread_id: null,
       title: 'Test',
+      question_text: 'Choose one',
+      response_mode: 'choice',
       options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
+      status: 'pending',
+      answer_value: null,
+      answer_type: null,
+      answered_by: null,
+      answered_at: null,
+      cancelled_at: null,
       created_at: now(),
     });
-    const result = getPendingQuestion('q-1');
+    const result = getQuestion('q-1');
     expect(result).toBeDefined();
     expect(result!.session_id).toBe('sess-1');
     expect(result!.title).toBe('Test');
     expect(result!.options[0].value).toBe('yes');
   });
 
-  it('should delete', () => {
-    createPendingQuestion({
+  it('retains the answer', () => {
+    createQuestion({
       question_id: 'q-1',
       session_id: 'sess-1',
       message_out_id: 'msg-out-1',
+      in_reply_to: null,
       platform_id: null,
       channel_type: null,
       thread_id: null,
       title: 'Test',
+      question_text: 'What should happen?',
+      response_mode: 'choice_or_text',
       options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
+      status: 'pending',
+      answer_value: null,
+      answer_type: null,
+      answered_by: null,
+      answered_at: null,
+      cancelled_at: null,
       created_at: now(),
     });
-    deletePendingQuestion('q-1');
-    expect(getPendingQuestion('q-1')).toBeUndefined();
+    expect(answerQuestion('q-1', { value: 'Something else', type: 'text', userId: 'user-1', answeredAt: now() })).toBe(
+      true,
+    );
+    const result = getQuestion('q-1');
+    expect(result?.status).toBe('answered');
+    expect(result?.answer_value).toBe('Something else');
+    expect(result?.answer_type).toBe('text');
+    expect(answerQuestion('q-1', { value: 'yes', type: 'choice', userId: 'user-1', answeredAt: now() })).toBe(false);
   });
 });

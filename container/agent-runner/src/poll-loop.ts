@@ -48,6 +48,10 @@ export function isCorruptionError(msg: string): boolean {
   );
 }
 
+export function shouldDeferInteractiveResponse(messages: MessageInRow[], turnActive: boolean): boolean {
+  return turnActive && messages.some((message) => message.kind === 'interactive_response');
+}
+
 /**
  * True for SQLite errors that indicate the DB file has been removed
  * (e.g. the host deleted the chat thread / session dir). The container
@@ -779,7 +783,7 @@ async function processQuery(
           return;
         }
 
-        // Skip system messages (MCP tool responses).
+        // Skip legacy system messages (MCP tool responses).
         // Thread routing is the router's concern — if a message landed in this
         // session, the agent should see it. Per-thread sessions already isolate
         // threads into separate containers; shared sessions intentionally merge
@@ -788,6 +792,12 @@ async function processQuery(
         // host-generated welcome trigger with null thread vs a Discord DM reply).
         const newMessages = pending.filter((m) => m.kind !== 'system');
         if (newMessages.length === 0) return;
+
+        // A user can answer as soon as the card is delivered, before the
+        // provider has emitted the result that safely closes the asking turn.
+        // Persist the answer immediately, but do not push it into that active
+        // turn. The next poll after the result resumes it as a distinct turn.
+        if (shouldDeferInteractiveResponse(newMessages, turnActive)) return;
 
         const newIds = newMessages.map((m) => m.id);
         markProcessing(newIds);

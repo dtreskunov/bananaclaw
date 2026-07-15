@@ -35,7 +35,7 @@ export interface RestoreResult {
     pending_sender_approvals: number;
     pending_channel_approvals: number;
     pending_approvals: number;
-    pending_questions: number;
+    questions: number;
   };
 }
 
@@ -117,7 +117,7 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
     pending_sender_approvals: 0,
     pending_channel_approvals: 0,
     pending_approvals: 0,
-    pending_questions: 0,
+    questions: 0,
   };
 
   const tx = db.transaction(() => {
@@ -169,9 +169,9 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
           counts.pending_approvals += 1;
         }
       }
-      for (const q of dump.pending_questions) {
-        insertRow('pending_questions', q);
-        counts.pending_questions += 1;
+      for (const q of dump.questions) {
+        insertRow('questions', q);
+        counts.questions += 1;
       }
     }
   });

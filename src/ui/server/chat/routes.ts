@@ -37,6 +37,7 @@ import {
   listAllThreadsForAgentGroup,
   listAllThreadsForUser,
   readChatHistory,
+  readTurnActivityForOutbound,
   viewerHasContent,
 } from './chat.js';
 import type { ThreadSummary, HistoryMessage } from './chat.js';
@@ -388,7 +389,7 @@ interface ApprovalDto {
   action: string;
   title: string;
   details: string | null;
-  options: { label: string; value: string }[];
+  options: { label: string; selectedLabel: string; value: string }[];
   agentGroupId: string | null;
   agentGroupName: string | null;
   createdAt: string;
@@ -468,13 +469,17 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
         groupNameCache.set(displayGroupId, groupName);
       }
     }
-    let options: { label: string; value: string }[] = [];
+    let options: { label: string; selectedLabel: string; value: string }[] = [];
     try {
-      const parsed = JSON.parse(r.options_json) as { label?: string; value?: string }[];
+      const parsed = JSON.parse(r.options_json) as { label?: string; selectedLabel?: string; value?: string }[];
       if (Array.isArray(parsed)) {
         options = parsed
           .filter((o) => o && typeof o.label === 'string' && typeof o.value === 'string')
-          .map((o) => ({ label: o.label as string, value: o.value as string }));
+          .map((o) => ({
+            label: o.label as string,
+            selectedLabel: typeof o.selectedLabel === 'string' ? o.selectedLabel : (o.label as string),
+            value: o.value as string,
+          }));
       }
     } catch {
       // ignore — fall back to empty options
@@ -501,16 +506,22 @@ interface QuestionDto {
   questionId: string;
   title: string;
   question: string;
-  options: { label: string; value: string }[];
+  responseMode: 'choice' | 'text' | 'choice_or_text';
+  options: { label: string; selectedLabel: string; value: string }[];
+  status: 'pending' | 'answered' | 'cancelled';
+  answerValue: string | null;
+  answerType: 'choice' | 'text' | null;
+  answeredAt: string | null;
+  activity?: { ts: string; text: string }[];
   threadId: string | null;
   agentGroupId: string;
   createdAt: string;
 }
 
-function listPendingQuestionsForUser(userId: string, filterGroupId?: string, filterThreadId?: string): QuestionDto[] {
+function listQuestionsForUser(userId: string, filterGroupId?: string, filterThreadId?: string): QuestionDto[] {
   const rows = getDb()
     .prepare(
-      'SELECT pq.*, s.agent_group_id FROM pending_questions pq JOIN sessions s ON pq.session_id = s.id ORDER BY pq.created_at DESC',
+      'SELECT q.*, s.agent_group_id FROM questions q JOIN sessions s ON q.session_id = s.id ORDER BY q.created_at ASC',
     )
     .all() as Array<{
     question_id: string;
@@ -520,7 +531,13 @@ function listPendingQuestionsForUser(userId: string, filterGroupId?: string, fil
     channel_type: string | null;
     thread_id: string | null;
     title: string;
+    question_text: string;
+    response_mode: 'choice' | 'text' | 'choice_or_text';
     options_json: string;
+    status: 'pending' | 'answered' | 'cancelled';
+    answer_value: string | null;
+    answer_type: 'choice' | 'text' | null;
+    answered_at: string | null;
     created_at: string;
     agent_group_id: string;
   }>;
@@ -529,22 +546,33 @@ function listPendingQuestionsForUser(userId: string, filterGroupId?: string, fil
     if (!canAccessAgentGroup(userId, r.agent_group_id).allowed) continue;
     if (filterGroupId && r.agent_group_id !== filterGroupId) continue;
     if (filterThreadId && r.thread_id !== filterThreadId) continue;
-    let options: { label: string; value: string }[] = [];
+    let options: { label: string; selectedLabel: string; value: string }[] = [];
     try {
-      const parsed = JSON.parse(r.options_json) as { label?: string; value?: string }[];
+      const parsed = JSON.parse(r.options_json) as { label?: string; selectedLabel?: string; value?: string }[];
       if (Array.isArray(parsed)) {
         options = parsed
           .filter((o) => o && typeof o.label === 'string' && typeof o.value === 'string')
-          .map((o) => ({ label: o.label as string, value: o.value as string }));
+          .map((o) => ({
+            label: o.label as string,
+            selectedLabel: typeof o.selectedLabel === 'string' ? o.selectedLabel : (o.label as string),
+            value: o.value as string,
+          }));
       }
     } catch {
       /* ignore */
     }
+    const activity = readTurnActivityForOutbound(r.agent_group_id, r.session_id, r.message_out_id);
     visible.push({
       questionId: r.question_id,
       title: r.title,
-      question: r.title, // title is the display question text
+      question: r.question_text,
+      responseMode: r.response_mode,
       options,
+      status: r.status,
+      answerValue: r.answer_value,
+      answerType: r.answer_type,
+      answeredAt: r.answered_at,
+      ...(activity ? { activity } : {}),
       threadId: r.thread_id,
       agentGroupId: r.agent_group_id,
       createdAt: r.created_at,
@@ -582,8 +610,8 @@ function handleSync(ctx: Ctx, userId: string): void {
         log.warn('sync history read failed', { userId, gid, tid, err });
       }
     }
-    // Include pending questions for the active thread.
-    out.questions = listPendingQuestionsForUser(userId, gid, tid || undefined);
+    // Include the durable question history for the active thread.
+    out.questions = listQuestionsForUser(userId, gid, tid || undefined);
   }
   json(ctx, 200, out);
 }

@@ -253,6 +253,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
           questionId: approvalId,
           title,
           question,
+          responseMode: 'choice',
           options: APPROVAL_OPTIONS,
         }),
       );

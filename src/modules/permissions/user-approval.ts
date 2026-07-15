@@ -293,6 +293,7 @@ export async function requestUserApproval(pendingId: string): Promise<void> {
         questionId: pendingId,
         title,
         question,
+        responseMode: 'choice',
         options,
       }),
     );

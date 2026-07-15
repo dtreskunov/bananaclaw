@@ -197,17 +197,26 @@ export interface MessageOut {
   content: string; // JSON blob
 }
 
-// ── Pending questions (central DB) ──
+// ── Durable questions (central DB) ──
 
-export interface PendingQuestion {
+export interface Question {
   question_id: string;
   session_id: string;
   message_out_id: string;
+  in_reply_to: string | null;
   platform_id: string | null;
   channel_type: string | null;
   thread_id: string | null;
   title: string;
+  question_text: string;
+  response_mode: 'choice' | 'text' | 'choice_or_text';
   options: import('./channels/ask-question.js').NormalizedOption[];
+  status: 'pending' | 'answered' | 'cancelled';
+  answer_value: string | null;
+  answer_type: 'choice' | 'text' | null;
+  answered_by: string | null;
+  answered_at: string | null;
+  cancelled_at: string | null;
   created_at: string;
 }
 

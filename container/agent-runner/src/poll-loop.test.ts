@@ -4,7 +4,12 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
-import { isCorruptionError, isMissingDbError, friendlyProviderErrorFallback } from './poll-loop.js';
+import {
+  isCorruptionError,
+  isMissingDbError,
+  friendlyProviderErrorFallback,
+  shouldDeferInteractiveResponse,
+} from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 
 beforeEach(() => {
@@ -74,6 +79,26 @@ describe('formatter', () => {
     const prompt = formatMessages(messages);
     expect(prompt).toContain('<system_response');
     expect(prompt).toContain('action="register_group"');
+  });
+
+  it('formats an interactive response as an explicit question response', () => {
+    insertMessage('answer-1', 'interactive_response', {
+      questionId: 'question-1',
+      question: 'Which environment?',
+      responseType: 'text',
+      value: 'Staging',
+    });
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<question_response');
+    expect(prompt).toContain('question_id="question-1"');
+    expect(prompt).toContain('Staging');
+  });
+
+  it('defers a fast interactive response until the asking turn ends', () => {
+    insertMessage('answer-1', 'interactive_response', { questionId: 'question-1', value: 'A' });
+    const messages = getPendingMessages();
+    expect(shouldDeferInteractiveResponse(messages, true)).toBe(true);
+    expect(shouldDeferInteractiveResponse(messages, false)).toBe(false);
   });
 
   it('should handle mixed kinds', () => {

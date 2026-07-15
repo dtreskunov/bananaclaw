@@ -100,8 +100,9 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     ).run(GID, MGID, now());
 
     db.prepare(
-      `INSERT INTO pending_questions (question_id, session_id, message_out_id, title, options_json, created_at)
-       VALUES (?, ?, 'mout-1', 'q', '[]', ?)`,
+      `INSERT INTO questions
+         (question_id, session_id, message_out_id, title, question_text, response_mode, options_json, status, created_at)
+       VALUES (?, ?, 'mout-1', 'q', 'question', 'choice', '[]', 'pending', ?)`,
     ).run('q-1', SID, now());
 
     db.prepare(
@@ -147,7 +148,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     expect(data.deleted).toBe(GID);
     expect(data.removed).toMatchObject({
       sessions: 1,
-      pending_questions: 1,
+      questions: 1,
       pending_approvals: 1,
       agent_destinations_owned: 1,
       agent_destinations_pointing: 0,
@@ -162,7 +163,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     // The group and every dependent row must be gone.
     expect(count('SELECT COUNT(*) AS c FROM agent_groups WHERE id = ?', GID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM sessions WHERE agent_group_id = ?', GID)).toBe(0);
-    expect(count('SELECT COUNT(*) AS c FROM pending_questions WHERE session_id = ?', SID)).toBe(0);
+    expect(count('SELECT COUNT(*) AS c FROM questions WHERE session_id = ?', SID)).toBe(0);
     expect(
       count('SELECT COUNT(*) AS c FROM pending_approvals WHERE agent_group_id = ? OR session_id = ?', GID, SID),
     ).toBe(0);

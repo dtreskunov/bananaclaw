@@ -363,6 +363,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
           questionId: row.messaging_group_id,
           title,
           question: 'Which agent should handle this channel?',
+          responseMode: 'choice',
           options,
         }),
       );

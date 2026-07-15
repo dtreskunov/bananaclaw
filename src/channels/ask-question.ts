@@ -42,5 +42,6 @@ export interface AskQuestionPayload {
   questionId: string;
   title: string;
   question: string;
+  responseMode: 'choice' | 'text' | 'choice_or_text';
   options: NormalizedOption[];
 }

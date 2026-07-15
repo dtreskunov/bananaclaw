@@ -162,6 +162,7 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
         questionId: approvalId,
         title: onecliTitle,
         question,
+        responseMode: 'choice',
         options: onecliOptions,
       }),
     );

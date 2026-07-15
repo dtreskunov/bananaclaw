@@ -1,6 +1,7 @@
 // Chat main: message log, status, context chip, pending tray, readonly
 // banner, composer.
 import './ChatMain.css';
+import { signal } from '@preact/signals';
 import type { JSX } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
@@ -17,10 +18,13 @@ import {
   openChat, openTaskPanel,
 } from '../actions';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
+import { mergeQuestionTimeline } from '../question-timeline';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
-import type { ActivityLine, ChatMessage, TurnUsage } from '../types';
+import type { ActivityLine, ChatMessage, PendingQuestionDto, TurnUsage } from '../types';
+
+const activeRecordingTarget = signal<string | null>(null);
 
 function fmtTok(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
@@ -152,6 +156,12 @@ function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.round(ms / 1000)}s`;
+}
+
+function formatRecordingDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
 
 /** One accordion row of an activity trace. Collapsed shows a single
@@ -297,6 +307,14 @@ function Message({ m }: { m: ChatMessage }) {
         <span class="event-text">{ev?.summary || m.text}</span>
         <span class="event-meta"><RelativeTime ts={m.ts} />{recur}</span>
       </button>
+    );
+  }
+  if (m.direction === 'question' && m.question) {
+    return (
+      <QuestionCardItem
+        question={m.question}
+        busy={respondingQuestionIds.value.has(m.question.questionId)}
+      />
     );
   }
   const md = renderMarkdown(m.text);
@@ -581,7 +599,8 @@ function MessageLog() {
   // the scrollable step list on demand.
   const [traceExpanded, setTraceExpanded] = useState(false);
   const highlight = highlightMessageId.value;
-  const msgCount = chatMessages.value.length;
+  const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
+  const msgCount = timeline.length;
   const typing = isTyping.value && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
   // Subscribe to trace growth so the effect re-runs as steps stream in.
@@ -650,7 +669,7 @@ function MessageLog() {
     wasTypingRef.current = !!typing;
     prevExpandedRef.current = traceExpanded;
   });
-  const list = chatMessages.value;
+  const list = timeline;
   const groups = groupMessages(list);
   return (
     <div class="log" id="chat-log" ref={ref} onScroll={onLogScroll}>
@@ -730,31 +749,233 @@ function PendingTray() {
   );
 }
 
-function QuestionCard() {
-  const questions = pendingQuestions.value;
-  const tid = threadId.value;
-  // Only show questions for the current thread.
-  const visible = questions.filter((q) => !q.threadId || q.threadId === tid);
-  if (visible.length === 0) return null;
-  const busy = respondingQuestionIds.value;
+function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto; busy: boolean }) {
+  const [answer, setAnswer] = useState('');
+  const answerRef = useRef('');
+  const target = `question:${q.questionId}`;
+  const recording = isRecording.value && activeRecordingTarget.value === target;
+  const recorderBusy = isRecording.value;
+  const serverTranscribeAvailable = voiceMode.value !== 'off';
+  const micCapable = hasGetUserMedia() && (serverTranscribeAvailable || hasSpeechRecognition());
+  const [transcribeStatus, setTranscribeStatus] = useState('');
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdModeRef = useRef(false);
+  const submitAfterTranscriptRef = useRef(false);
+  const canType = q.responseMode === 'text' || q.responseMode === 'choice_or_text';
+  const answered = q.status === 'answered';
+
+  const submitAnswer = (value = answerRef.current): void => {
+    const trimmed = value.trim();
+    if (trimmed) respondQuestion(q.questionId, trimmed).catch(console.error);
+  };
+
+  const insertTranscript = (text: string): void => {
+    const current = answerRef.current;
+    const next = current && !/\s$/.test(current) ? `${current} ${text}` : current + text;
+    answerRef.current = next;
+    setAnswer(next);
+    if (submitAfterTranscriptRef.current) {
+      submitAfterTranscriptRef.current = false;
+      submitAnswer(next);
+    }
+  };
+
+  const finishQuestionRecording = async (): Promise<void> => {
+    if (activeRecordingTarget.value !== target) return;
+    const result = await stopRecording();
+    activeRecordingTarget.value = null;
+    if (!result) {
+      submitAfterTranscriptRef.current = false;
+      chatStatus.value = 'too short — discarded';
+      setTimeout(() => { if (chatStatus.value === 'too short — discarded') chatStatus.value = 'connected'; }, 2000);
+      return;
+    }
+    if (result.transcript) {
+      insertTranscript(result.transcript);
+      return;
+    }
+    if (!serverTranscribeAvailable || !groupId.value || !threadId.value) {
+      submitAfterTranscriptRef.current = false;
+      chatStatus.value = 'transcription unavailable';
+      setTimeout(() => { if (chatStatus.value === 'transcription unavailable') chatStatus.value = 'connected'; }, 3000);
+      return;
+    }
+    setTranscribeStatus('transcribing…');
+    transcribeViaServer(result.blob, groupId.value, threadId.value, {
+      onPartial: (delta) => {
+        setTranscribeStatus((previous) => (previous === 'transcribing…' ? '' : previous) + delta);
+      },
+      onDone: (fullText) => {
+        setTranscribeStatus('');
+        const trimmed = fullText.trim();
+        if (!trimmed || trimmed === '[inaudible]') {
+          submitAfterTranscriptRef.current = false;
+          return;
+        }
+        if (looksLikeRefusal(trimmed)) {
+          submitAfterTranscriptRef.current = false;
+          chatStatus.value = 'transcription unclear — try again';
+          setTimeout(() => { if (chatStatus.value === 'transcription unclear — try again') chatStatus.value = 'connected'; }, 3000);
+          return;
+        }
+        insertTranscript(trimmed);
+      },
+      onError: (error) => {
+        submitAfterTranscriptRef.current = false;
+        setTranscribeStatus('');
+        chatStatus.value = `transcription failed: ${error}`;
+        setTimeout(() => { if (chatStatus.value.startsWith('transcription failed')) chatStatus.value = 'connected'; }, 3000);
+      },
+    });
+  };
+
+  const startQuestionRecording = async (): Promise<void> => {
+    if (recorderBusy) return;
+    activeRecordingTarget.value = target;
+    const started = await startRecording(true);
+    if (!started) {
+      activeRecordingTarget.value = null;
+      chatStatus.value = 'microphone unavailable';
+      setTimeout(() => { if (chatStatus.value === 'microphone unavailable') chatStatus.value = 'connected'; }, 3000);
+    }
+  };
+
+  const onMicPointerDown = (event: PointerEvent): void => {
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    holdModeRef.current = false;
+    holdTimerRef.current = setTimeout(() => {
+      holdModeRef.current = true;
+      startQuestionRecording().catch(console.error);
+    }, 300);
+  };
+
+  const onMicPointerUp = (): void => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    if (holdModeRef.current || recording) {
+      holdModeRef.current = false;
+      finishQuestionRecording().catch(console.error);
+    } else {
+      startQuestionRecording().catch(console.error);
+    }
+  };
+
+  const onMicPointerCancel = (): void => {
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+    holdModeRef.current = false;
+    if (recording) {
+      cancelRecording();
+      activeRecordingTarget.value = null;
+    }
+  };
+
+  useEffect(() => {
+    if (q.status !== 'pending' && activeRecordingTarget.value === target) {
+      cancelRecording();
+      activeRecordingTarget.value = null;
+    }
+    return () => {
+      if (activeRecordingTarget.value === target) {
+        cancelRecording();
+        activeRecordingTarget.value = null;
+      }
+    };
+  }, [q.status, target]);
+
   return (
-    <div class="question-card-tray">
-      {visible.map((q) => (
-        <div class="question-card" key={q.questionId}>
-          <div class="question-card-title">{q.title}</div>
-          <div class="question-card-actions">
-            {q.options.map((o) => (
-              <button
-                type="button"
-                class="question-card-btn"
-                disabled={busy.has(q.questionId)}
-                onClick={() => respondQuestion(q.questionId, o.value).catch(console.error)}
-                key={o.value}
-              >{o.label}</button>
-            ))}
-          </div>
+    <div class={`msg ${answered ? 'in question-card-answered' : 'out'} question-card`} data-msg-id={q.questionId}>
+      <div class="question-card-heading">{q.title}</div>
+      <div class="question-card-title">{q.question}</div>
+      {answered ? (
+        <div class="question-card-answer">
+          {q.options.find((option) => option.value === q.answerValue)?.selectedLabel ?? q.answerValue}
         </div>
-      ))}
+      ) : q.status === 'cancelled' ? (
+        <div class="question-card-answer">Cancelled</div>
+      ) : (
+        <>
+          {q.options.length > 0 && (
+            <div class="question-card-actions">
+              {q.options.map((o) => (
+                <button
+                  type="button"
+                  class="question-card-btn"
+                  disabled={busy}
+                  onClick={() => respondQuestion(q.questionId, o.value).catch(console.error)}
+                  key={o.value}
+                >{o.label}</button>
+              ))}
+            </div>
+          )}
+          {canType && (
+            <form
+              class="question-card-text-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (recording) {
+                  submitAfterTranscriptRef.current = true;
+                  finishQuestionRecording().catch(console.error);
+                  return;
+                }
+                if (transcribeStatus) {
+                  submitAfterTranscriptRef.current = true;
+                  return;
+                }
+                submitAnswer();
+              }}
+            >
+              <div class={`composer-input-wrap question-response-input-wrap${recording ? ' recording' : ''}${transcribeStatus ? ' transcribing' : ''}`}>
+                <textarea
+                  class="question-card-input"
+                  rows={1}
+                  value={answer}
+                  disabled={busy}
+                  aria-label="Your answer"
+                  placeholder="Type your answer…"
+                  onInput={(event) => {
+                    answerRef.current = event.currentTarget.value;
+                    setAnswer(event.currentTarget.value);
+                  }}
+                />
+                {micCapable ? (
+                  <button
+                    type="button"
+                    class={`mic-overlay question-response-mic${recording ? ' recording' : ''}${transcribeStatus ? ' transcribing' : ''}`}
+                    title={recording ? 'Tap to stop and transcribe' : transcribeStatus ? 'Transcribing…' : 'Hold to record, tap to toggle'}
+                    aria-label={recording ? 'Stop recording answer' : transcribeStatus ? 'Transcribing answer' : 'Record voice answer'}
+                    disabled={busy || !!transcribeStatus || (recorderBusy && !recording)}
+                    onPointerDown={onMicPointerDown as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
+                    onPointerUp={onMicPointerUp as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
+                    onPointerCancel={onMicPointerCancel as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
+                  >
+                    {recording
+                      ? <span class="recording-time">{formatRecordingDuration(recordingDuration.value)}</span>
+                      : transcribeStatus
+                        ? <span class="mic-spinner" aria-hidden="true"></span>
+                        : '\uD83C\uDF99\uFE0F'}
+                  </button>
+                ) : null}
+                <button
+                  type="submit"
+                  class="question-response-send"
+                  aria-label="Send answer"
+                  title={recording || transcribeStatus ? 'Stop, transcribe, and send' : 'Send answer'}
+                  disabled={busy || (!answer.trim() && !recording && !transcribeStatus)}
+                  onMouseDown={(event) => event.preventDefault()}
+                >{'\u2191'}</button>
+              </div>
+            </form>
+          )}
+        </>
+      )}
+      {q.activity?.length ? <ActivityTrace lines={q.activity} /> : null}
+      <div class="meta question-card-meta">
+        <RelativeTime ts={answered && q.answeredAt ? q.answeredAt : q.createdAt} />
+      </div>
     </div>
   );
 }
@@ -785,7 +1006,9 @@ function Composer() {
   // HTTP and don't care about chatStatus.
   const wsDown = isWeb && chatStatus.value !== 'connected';
   // Disable composer while a question card is awaiting user response.
-  const hasQuestion = pendingQuestions.value.some((q) => !q.threadId || q.threadId === threadId.value);
+  const hasQuestion = pendingQuestions.value.some(
+    (q) => q.status === 'pending' && (!q.threadId || q.threadId === threadId.value),
+  );
   const composerDisabled = wsDown || hasQuestion;
   const autosize = (): void => {
     const el = inputRef.current;
@@ -903,7 +1126,8 @@ function Composer() {
   const vm = voiceMode.value;
   const serverTranscribeAvailable = vm !== 'off';
   const micCapable = hasGetUserMedia() && (serverTranscribeAvailable || hasSpeechRecognition());
-  const recording = isRecording.value;
+  const recorderBusy = isRecording.value;
+  const recording = recorderBusy && activeRecordingTarget.value === 'composer';
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdModeRef = useRef(false);
   // 'mic' = transcribe-to-composer; 'attach' = blob-only attachment.
@@ -980,9 +1204,11 @@ function Composer() {
   };
 
   const finishRecording = async (): Promise<void> => {
+    if (activeRecordingTarget.value !== 'composer') return;
     const mode = recordingModeRef.current;
     recordingModeRef.current = null;
     const result = await stopRecording();
+    activeRecordingTarget.value = null;
     if (!result) {
       chatStatus.value = 'too short — discarded';
       setTimeout(() => { if (chatStatus.value === 'too short — discarded') chatStatus.value = 'connected'; }, 2000);
@@ -1052,7 +1278,10 @@ function Composer() {
       // Held > 300ms → hold mode
       holdModeRef.current = true;
       recordingModeRef.current = 'mic';
-      startRecording(true).catch(console.error);
+      activeRecordingTarget.value = 'composer';
+      startRecording(true).then((started) => {
+        if (!started) activeRecordingTarget.value = null;
+      }).catch(console.error);
     }, 300);
   };
 
@@ -1071,7 +1300,10 @@ function Composer() {
     } else {
       // Short tap → toggle mode start
       recordingModeRef.current = 'mic';
-      startRecording(true).catch(console.error);
+      activeRecordingTarget.value = 'composer';
+      startRecording(true).then((started) => {
+        if (!started) activeRecordingTarget.value = null;
+      }).catch(console.error);
     }
   };
 
@@ -1082,17 +1314,20 @@ function Composer() {
     }
     if (holdModeRef.current || recording) {
       cancelRecording();
+      activeRecordingTarget.value = null;
       recordingModeRef.current = null;
       holdModeRef.current = false;
     }
   };
 
   const startAudioAttachRecording = async (): Promise<void> => {
-    if (recording) return;
+    if (recorderBusy) return;
     recordingModeRef.current = 'attach';
+    activeRecordingTarget.value = 'composer';
     const ok = await startRecording(false);
     if (!ok) {
       recordingModeRef.current = null;
+      activeRecordingTarget.value = null;
       chatStatus.value = 'microphone unavailable';
       setTimeout(() => { if (chatStatus.value === 'microphone unavailable') chatStatus.value = 'connected'; }, 3000);
     }
@@ -1101,13 +1336,6 @@ function Composer() {
   const stopAttachRecording = (): void => {
     if (recordingModeRef.current !== 'attach') return;
     finishRecording().catch(console.error);
-  };
-
-  const fmtDuration = (ms: number): string => {
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -1128,7 +1356,7 @@ function Composer() {
           title="Tap to stop recording"
         >
           <span class="recording-dot"></span>
-          <span class="recording-time">{fmtDuration(recordingDuration.value)}</span>
+          <span class="recording-time">{formatRecordingDuration(recordingDuration.value)}</span>
           <span class="recording-stop-label">Stop</span>
         </button>
       ) : (
@@ -1171,13 +1399,13 @@ function Composer() {
                     ? 'Disconnected'
                     : 'Hold to record, tap to toggle'}
               aria-label={recording ? 'Stop recording' : transcribeStatus ? 'Transcribing' : 'Record voice message'}
-              disabled={(composerDisabled && !recording) || !!transcribeStatus}
+              disabled={(composerDisabled && !recording) || !!transcribeStatus || (recorderBusy && !recording)}
               onPointerDown={onMicPointerDown as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
               onPointerUp={onMicPointerUp as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
               onPointerCancel={onMicPointerCancel as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
             >
               {recording
-                ? <span class="recording-time">{fmtDuration(recordingDuration.value)}</span>
+                ? <span class="recording-time">{formatRecordingDuration(recordingDuration.value)}</span>
                 : transcribeStatus
                   ? <span class="mic-spinner" aria-hidden="true"></span>
                   : '\uD83C\uDF99\uFE0F'}
@@ -1258,7 +1486,6 @@ export function ChatMain() {
       <div class="status" id="chat-status">{chatStatus.value}</div>
       <ContextChip />
       <PendingTray />
-      <QuestionCard />
       <ReadonlyBanner />
       <Subnotice />
       <Composer />

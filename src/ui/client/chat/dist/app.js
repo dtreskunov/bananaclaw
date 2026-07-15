@@ -18000,8 +18000,13 @@ function connectChatWs() {
           const q5 = {
             questionId: payload.question.questionId,
             title: payload.question.title,
-            question: payload.question.title,
+            question: payload.question.question,
+            responseMode: payload.question.responseMode,
             options: payload.question.options,
+            status: "pending",
+            answerValue: null,
+            answerType: null,
+            answeredAt: null,
             threadId: threadId.value,
             agentGroupId: groupId.value || "",
             createdAt: payload.timestamp || (/* @__PURE__ */ new Date()).toISOString()
@@ -18389,7 +18394,9 @@ async function respondQuestion(questionId, value) {
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);
   respondingQuestionIds.value = next;
-  pendingQuestions.value = pendingQuestions.value.filter((q5) => q5.questionId !== questionId);
+  pendingQuestions.value = pendingQuestions.value.map(
+    (q5) => q5.questionId === questionId ? { ...q5, status: "answered", answerValue: value, answeredAt: (/* @__PURE__ */ new Date()).toISOString() } : q5
+  );
   try {
     const res = await postJson(
       `api/approvals/${encodeURIComponent(questionId)}/respond`,
@@ -19581,6 +19588,28 @@ function transcribeViaServer(blob, groupId2, threadId2, callbacks) {
   return controller;
 }
 
+// src/question-timeline.ts
+function timestampMs(timestamp) {
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
+  const value = Date.parse(normalized);
+  return Number.isNaN(value) ? 0 : value;
+}
+function mergeQuestionTimeline(messages, questions, currentThreadId) {
+  const questionMessages = questions.filter((question) => !question.threadId || question.threadId === currentThreadId).map((question) => ({
+    id: question.questionId,
+    direction: "question",
+    text: question.question,
+    files: null,
+    ts: question.status === "answered" && question.answeredAt ? question.answeredAt : question.createdAt,
+    question
+  }));
+  return [...messages, ...questionMessages].sort((left, right) => {
+    const byTime = timestampMs(left.ts) - timestampMs(right.ts);
+    if (byTime !== 0) return byTime;
+    return left.direction === "question" ? 1 : right.direction === "question" ? -1 : 0;
+  });
+}
+
 // src/components/ComposerPlusMenu.tsx
 function ComposerPlusMenu({
   disabled,
@@ -19797,6 +19826,7 @@ function QuickCapture({ onCapture, onClose }) {
 }
 
 // src/components/ChatMain.tsx
+var activeRecordingTarget = y3(null);
 function fmtTok(n3) {
   if (n3 >= 1e6) return (n3 / 1e6).toFixed(1) + "M";
   if (n3 >= 1e3) return (n3 / 1e3).toFixed(1) + "k";
@@ -19888,6 +19918,11 @@ function formatDuration(ms) {
   if (ms < 1e3) return `${Math.round(ms)}ms`;
   if (ms < 1e4) return `${(ms / 1e3).toFixed(1)}s`;
   return `${Math.round(ms / 1e3)}s`;
+}
+function formatRecordingDuration(ms) {
+  const seconds = Math.floor(ms / 1e3);
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
 function ActivityTraceRow({ line, open, onToggle }) {
   const step = parseStep(line.text);
@@ -20014,6 +20049,15 @@ function Message({ m: m6 }) {
             recur
           ] })
         ]
+      }
+    );
+  }
+  if (m6.direction === "question" && m6.question) {
+    return /* @__PURE__ */ u4(
+      QuestionCardItem,
+      {
+        question: m6.question,
+        busy: respondingQuestionIds.value.has(m6.question.questionId)
       }
     );
   }
@@ -20246,7 +20290,8 @@ function MessageLog() {
   const prevExpandedRef = A2(false);
   const [traceExpanded, setTraceExpanded] = h2(false);
   const highlight = highlightMessageId.value;
-  const msgCount = chatMessages.value.length;
+  const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
+  const msgCount = timeline.length;
   const typing = isTyping.value && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
   const traceLen = activityLog.value.length;
@@ -20296,7 +20341,7 @@ function MessageLog() {
     wasTypingRef.current = !!typing;
     prevExpandedRef.current = traceExpanded;
   });
-  const list = chatMessages.value;
+  const list = timeline;
   const groups2 = groupMessages(list);
   return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, onScroll: onLogScroll, children: [
     chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
@@ -20345,26 +20390,225 @@ function PendingTray() {
     /* @__PURE__ */ u4("button", { type: "button", title: "Remove", onClick: () => removePending(i5), children: "\xD7" })
   ] }, i5)) });
 }
-function QuestionCard() {
-  const questions = pendingQuestions.value;
-  const tid = threadId.value;
-  const visible = questions.filter((q5) => !q5.threadId || q5.threadId === tid);
-  if (visible.length === 0) return null;
-  const busy = respondingQuestionIds.value;
-  return /* @__PURE__ */ u4("div", { class: "question-card-tray", children: visible.map((q5) => /* @__PURE__ */ u4("div", { class: "question-card", children: [
-    /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.title }),
-    /* @__PURE__ */ u4("div", { class: "question-card-actions", children: q5.options.map((o4) => /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "question-card-btn",
-        disabled: busy.has(q5.questionId),
-        onClick: () => respondQuestion(q5.questionId, o4.value).catch(console.error),
-        children: o4.label
+function QuestionCardItem({ question: q5, busy }) {
+  const [answer, setAnswer] = h2("");
+  const answerRef = A2("");
+  const target = `question:${q5.questionId}`;
+  const recording = isRecording.value && activeRecordingTarget.value === target;
+  const recorderBusy = isRecording.value;
+  const serverTranscribeAvailable = voiceMode.value !== "off";
+  const micCapable = hasGetUserMedia() && (serverTranscribeAvailable || hasSpeechRecognition());
+  const [transcribeStatus, setTranscribeStatus] = h2("");
+  const holdTimerRef = A2(null);
+  const holdModeRef = A2(false);
+  const submitAfterTranscriptRef = A2(false);
+  const canType = q5.responseMode === "text" || q5.responseMode === "choice_or_text";
+  const answered = q5.status === "answered";
+  const submitAnswer = (value = answerRef.current) => {
+    const trimmed = value.trim();
+    if (trimmed) respondQuestion(q5.questionId, trimmed).catch(console.error);
+  };
+  const insertTranscript = (text) => {
+    const current = answerRef.current;
+    const next = current && !/\s$/.test(current) ? `${current} ${text}` : current + text;
+    answerRef.current = next;
+    setAnswer(next);
+    if (submitAfterTranscriptRef.current) {
+      submitAfterTranscriptRef.current = false;
+      submitAnswer(next);
+    }
+  };
+  const finishQuestionRecording = async () => {
+    if (activeRecordingTarget.value !== target) return;
+    const result = await stopRecording();
+    activeRecordingTarget.value = null;
+    if (!result) {
+      submitAfterTranscriptRef.current = false;
+      chatStatus.value = "too short \u2014 discarded";
+      setTimeout(() => {
+        if (chatStatus.value === "too short \u2014 discarded") chatStatus.value = "connected";
+      }, 2e3);
+      return;
+    }
+    if (result.transcript) {
+      insertTranscript(result.transcript);
+      return;
+    }
+    if (!serverTranscribeAvailable || !groupId.value || !threadId.value) {
+      submitAfterTranscriptRef.current = false;
+      chatStatus.value = "transcription unavailable";
+      setTimeout(() => {
+        if (chatStatus.value === "transcription unavailable") chatStatus.value = "connected";
+      }, 3e3);
+      return;
+    }
+    setTranscribeStatus("transcribing\u2026");
+    transcribeViaServer(result.blob, groupId.value, threadId.value, {
+      onPartial: (delta) => {
+        setTranscribeStatus((previous) => (previous === "transcribing\u2026" ? "" : previous) + delta);
       },
-      o4.value
-    )) })
-  ] }, q5.questionId)) });
+      onDone: (fullText) => {
+        setTranscribeStatus("");
+        const trimmed = fullText.trim();
+        if (!trimmed || trimmed === "[inaudible]") {
+          submitAfterTranscriptRef.current = false;
+          return;
+        }
+        if (looksLikeRefusal(trimmed)) {
+          submitAfterTranscriptRef.current = false;
+          chatStatus.value = "transcription unclear \u2014 try again";
+          setTimeout(() => {
+            if (chatStatus.value === "transcription unclear \u2014 try again") chatStatus.value = "connected";
+          }, 3e3);
+          return;
+        }
+        insertTranscript(trimmed);
+      },
+      onError: (error) => {
+        submitAfterTranscriptRef.current = false;
+        setTranscribeStatus("");
+        chatStatus.value = `transcription failed: ${error}`;
+        setTimeout(() => {
+          if (chatStatus.value.startsWith("transcription failed")) chatStatus.value = "connected";
+        }, 3e3);
+      }
+    });
+  };
+  const startQuestionRecording = async () => {
+    if (recorderBusy) return;
+    activeRecordingTarget.value = target;
+    const started = await startRecording(true);
+    if (!started) {
+      activeRecordingTarget.value = null;
+      chatStatus.value = "microphone unavailable";
+      setTimeout(() => {
+        if (chatStatus.value === "microphone unavailable") chatStatus.value = "connected";
+      }, 3e3);
+    }
+  };
+  const onMicPointerDown = (event) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    holdModeRef.current = false;
+    holdTimerRef.current = setTimeout(() => {
+      holdModeRef.current = true;
+      startQuestionRecording().catch(console.error);
+    }, 300);
+  };
+  const onMicPointerUp = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    if (holdModeRef.current || recording) {
+      holdModeRef.current = false;
+      finishQuestionRecording().catch(console.error);
+    } else {
+      startQuestionRecording().catch(console.error);
+    }
+  };
+  const onMicPointerCancel = () => {
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+    holdModeRef.current = false;
+    if (recording) {
+      cancelRecording();
+      activeRecordingTarget.value = null;
+    }
+  };
+  y2(() => {
+    if (q5.status !== "pending" && activeRecordingTarget.value === target) {
+      cancelRecording();
+      activeRecordingTarget.value = null;
+    }
+    return () => {
+      if (activeRecordingTarget.value === target) {
+        cancelRecording();
+        activeRecordingTarget.value = null;
+      }
+    };
+  }, [q5.status, target]);
+  return /* @__PURE__ */ u4("div", { class: `msg ${answered ? "in question-card-answered" : "out"} question-card`, "data-msg-id": q5.questionId, children: [
+    /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
+    /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.question }),
+    answered ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: q5.options.find((option) => option.value === q5.answerValue)?.selectedLabel ?? q5.answerValue }) : q5.status === "cancelled" ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: "Cancelled" }) : /* @__PURE__ */ u4(k, { children: [
+      q5.options.length > 0 && /* @__PURE__ */ u4("div", { class: "question-card-actions", children: q5.options.map((o4) => /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "question-card-btn",
+          disabled: busy,
+          onClick: () => respondQuestion(q5.questionId, o4.value).catch(console.error),
+          children: o4.label
+        },
+        o4.value
+      )) }),
+      canType && /* @__PURE__ */ u4(
+        "form",
+        {
+          class: "question-card-text-form",
+          onSubmit: (event) => {
+            event.preventDefault();
+            if (recording) {
+              submitAfterTranscriptRef.current = true;
+              finishQuestionRecording().catch(console.error);
+              return;
+            }
+            if (transcribeStatus) {
+              submitAfterTranscriptRef.current = true;
+              return;
+            }
+            submitAnswer();
+          },
+          children: /* @__PURE__ */ u4("div", { class: `composer-input-wrap question-response-input-wrap${recording ? " recording" : ""}${transcribeStatus ? " transcribing" : ""}`, children: [
+            /* @__PURE__ */ u4(
+              "textarea",
+              {
+                class: "question-card-input",
+                rows: 1,
+                value: answer,
+                disabled: busy,
+                "aria-label": "Your answer",
+                placeholder: "Type your answer\u2026",
+                onInput: (event) => {
+                  answerRef.current = event.currentTarget.value;
+                  setAnswer(event.currentTarget.value);
+                }
+              }
+            ),
+            micCapable ? /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "button",
+                class: `mic-overlay question-response-mic${recording ? " recording" : ""}${transcribeStatus ? " transcribing" : ""}`,
+                title: recording ? "Tap to stop and transcribe" : transcribeStatus ? "Transcribing\u2026" : "Hold to record, tap to toggle",
+                "aria-label": recording ? "Stop recording answer" : transcribeStatus ? "Transcribing answer" : "Record voice answer",
+                disabled: busy || !!transcribeStatus || recorderBusy && !recording,
+                onPointerDown: onMicPointerDown,
+                onPointerUp: onMicPointerUp,
+                onPointerCancel: onMicPointerCancel,
+                children: recording ? /* @__PURE__ */ u4("span", { class: "recording-time", children: formatRecordingDuration(recordingDuration.value) }) : transcribeStatus ? /* @__PURE__ */ u4("span", { class: "mic-spinner", "aria-hidden": "true" }) : "\u{1F399}\uFE0F"
+              }
+            ) : null,
+            /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "submit",
+                class: "question-response-send",
+                "aria-label": "Send answer",
+                title: recording || transcribeStatus ? "Stop, transcribe, and send" : "Send answer",
+                disabled: busy || !answer.trim() && !recording && !transcribeStatus,
+                onMouseDown: (event) => event.preventDefault(),
+                children: "\u2191"
+              }
+            )
+          ] })
+        }
+      )
+    ] }),
+    q5.activity?.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: q5.activity }) : null,
+    /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }) })
+  ] });
 }
 var REFUSAL_PATTERNS = [
   /^i'?m sorry,? (but )?i (can'?t|cannot)/i,
@@ -20384,7 +20628,9 @@ function Composer() {
   const isWeb = !channelType.value || channelType.value === "web";
   const showComposer = isWeb || canSend.value;
   const wsDown = isWeb && chatStatus.value !== "connected";
-  const hasQuestion = pendingQuestions.value.some((q5) => !q5.threadId || q5.threadId === threadId.value);
+  const hasQuestion = pendingQuestions.value.some(
+    (q5) => q5.status === "pending" && (!q5.threadId || q5.threadId === threadId.value)
+  );
   const composerDisabled = wsDown || hasQuestion;
   const autosize = () => {
     const el = inputRef.current;
@@ -20466,7 +20712,8 @@ function Composer() {
   const vm = voiceMode.value;
   const serverTranscribeAvailable = vm !== "off";
   const micCapable = hasGetUserMedia() && (serverTranscribeAvailable || hasSpeechRecognition());
-  const recording = isRecording.value;
+  const recorderBusy = isRecording.value;
+  const recording = recorderBusy && activeRecordingTarget.value === "composer";
   const holdTimerRef = A2(null);
   const holdModeRef = A2(false);
   const recordingModeRef = A2(null);
@@ -20518,9 +20765,11 @@ function Composer() {
     addPendingFiles([file], UPLOAD_MAX_FILES, UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE);
   };
   const finishRecording = async () => {
+    if (activeRecordingTarget.value !== "composer") return;
     const mode = recordingModeRef.current;
     recordingModeRef.current = null;
     const result = await stopRecording();
+    activeRecordingTarget.value = null;
     if (!result) {
       chatStatus.value = "too short \u2014 discarded";
       setTimeout(() => {
@@ -20594,7 +20843,10 @@ function Composer() {
     holdTimerRef.current = setTimeout(() => {
       holdModeRef.current = true;
       recordingModeRef.current = "mic";
-      startRecording(true).catch(console.error);
+      activeRecordingTarget.value = "composer";
+      startRecording(true).then((started) => {
+        if (!started) activeRecordingTarget.value = null;
+      }).catch(console.error);
     }, 300);
   };
   const onMicPointerUp = () => {
@@ -20609,7 +20861,10 @@ function Composer() {
       finishRecording().catch(console.error);
     } else {
       recordingModeRef.current = "mic";
-      startRecording(true).catch(console.error);
+      activeRecordingTarget.value = "composer";
+      startRecording(true).then((started) => {
+        if (!started) activeRecordingTarget.value = null;
+      }).catch(console.error);
     }
   };
   const onMicPointerCancel = () => {
@@ -20619,16 +20874,19 @@ function Composer() {
     }
     if (holdModeRef.current || recording) {
       cancelRecording();
+      activeRecordingTarget.value = null;
       recordingModeRef.current = null;
       holdModeRef.current = false;
     }
   };
   const startAudioAttachRecording = async () => {
-    if (recording) return;
+    if (recorderBusy) return;
     recordingModeRef.current = "attach";
+    activeRecordingTarget.value = "composer";
     const ok = await startRecording(false);
     if (!ok) {
       recordingModeRef.current = null;
+      activeRecordingTarget.value = null;
       chatStatus.value = "microphone unavailable";
       setTimeout(() => {
         if (chatStatus.value === "microphone unavailable") chatStatus.value = "connected";
@@ -20638,12 +20896,6 @@ function Composer() {
   const stopAttachRecording = () => {
     if (recordingModeRef.current !== "attach") return;
     finishRecording().catch(console.error);
-  };
-  const fmtDuration = (ms) => {
-    const s5 = Math.floor(ms / 1e3);
-    const m6 = Math.floor(s5 / 60);
-    const sec = s5 % 60;
-    return `${m6}:${sec.toString().padStart(2, "0")}`;
   };
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(
@@ -20665,7 +20917,7 @@ function Composer() {
               title: "Tap to stop recording",
               children: [
                 /* @__PURE__ */ u4("span", { class: "recording-dot" }),
-                /* @__PURE__ */ u4("span", { class: "recording-time", children: fmtDuration(recordingDuration.value) }),
+                /* @__PURE__ */ u4("span", { class: "recording-time", children: formatRecordingDuration(recordingDuration.value) }),
                 /* @__PURE__ */ u4("span", { class: "recording-stop-label", children: "Stop" })
               ]
             }
@@ -20706,11 +20958,11 @@ function Composer() {
                 class: "mic-overlay" + (recording ? " recording" : "") + (transcribeStatus ? " transcribing" : ""),
                 title: recording ? "Tap to stop and transcribe" : transcribeStatus ? "Transcribing\u2026" : wsDown ? "Disconnected" : "Hold to record, tap to toggle",
                 "aria-label": recording ? "Stop recording" : transcribeStatus ? "Transcribing" : "Record voice message",
-                disabled: composerDisabled && !recording || !!transcribeStatus,
+                disabled: composerDisabled && !recording || !!transcribeStatus || recorderBusy && !recording,
                 onPointerDown: onMicPointerDown,
                 onPointerUp: onMicPointerUp,
                 onPointerCancel: onMicPointerCancel,
-                children: recording ? /* @__PURE__ */ u4("span", { class: "recording-time", children: fmtDuration(recordingDuration.value) }) : transcribeStatus ? /* @__PURE__ */ u4("span", { class: "mic-spinner", "aria-hidden": "true" }) : "\u{1F399}\uFE0F"
+                children: recording ? /* @__PURE__ */ u4("span", { class: "recording-time", children: formatRecordingDuration(recordingDuration.value) }) : transcribeStatus ? /* @__PURE__ */ u4("span", { class: "mic-spinner", "aria-hidden": "true" }) : "\u{1F399}\uFE0F"
               }
             ) : null,
             /* @__PURE__ */ u4(
@@ -20813,7 +21065,6 @@ function ChatMain() {
     /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", children: chatStatus.value }),
     /* @__PURE__ */ u4(ContextChip, {}),
     /* @__PURE__ */ u4(PendingTray, {}),
-    /* @__PURE__ */ u4(QuestionCard, {}),
     /* @__PURE__ */ u4(ReadonlyBanner, {}),
     /* @__PURE__ */ u4(Subnotice, {}),
     /* @__PURE__ */ u4(Composer, {})

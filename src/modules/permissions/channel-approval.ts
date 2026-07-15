@@ -233,6 +233,7 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
         questionId: messagingGroupId,
         title,
         question,
+        responseMode: 'choice',
         options,
       }),
     );

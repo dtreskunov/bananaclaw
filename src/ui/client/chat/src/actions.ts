@@ -734,8 +734,13 @@ function connectChatWs(): void {
           const q: PendingQuestionDto = {
             questionId: payload.question.questionId,
             title: payload.question.title,
-            question: payload.question.title,
+            question: payload.question.question,
+            responseMode: payload.question.responseMode,
             options: payload.question.options,
+            status: 'pending',
+            answerValue: null,
+            answerType: null,
+            answeredAt: null,
             threadId: threadId.value,
             agentGroupId: groupId.value || '',
             createdAt: payload.timestamp || new Date().toISOString(),
@@ -1229,8 +1234,12 @@ export async function respondQuestion(questionId: string, value: string): Promis
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);
   respondingQuestionIds.value = next;
-  // Optimistically remove the question card.
-  pendingQuestions.value = pendingQuestions.value.filter((q) => q.questionId !== questionId);
+  // Keep the question visible and optimistically show its durable answer.
+  pendingQuestions.value = pendingQuestions.value.map((q) =>
+    q.questionId === questionId
+      ? { ...q, status: 'answered', answerValue: value, answeredAt: new Date().toISOString() }
+      : q,
+  );
   try {
     // Reuse the approval respond endpoint — dispatchResponse routes to both handlers.
     const res = await postJson<{ ok?: boolean; error?: string }>(

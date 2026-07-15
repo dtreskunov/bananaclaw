@@ -25,6 +25,7 @@ import { migration024 } from './024-pending-user-approvals-partial-unique.js';
 import { migration025 } from './025-site-website.js';
 import { migration026 } from './026-user-onboarded.js';
 import { migration027 } from './027-messaging-group-instance.js';
+import { migration028 } from './028-durable-questions.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 import { moduleContainerConfigsPip } from './module-container-configs-pip.js';
@@ -76,6 +77,7 @@ export const migrations: Migration[] = [
   migration025,
   migration026,
   migration027,
+  migration028,
   moduleResendThreadRoots,
   moduleContainerConfigsPip,
   moduleContainerConfigsVoiceMode,

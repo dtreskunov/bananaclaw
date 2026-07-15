@@ -9,7 +9,7 @@
  */
 import type Database from 'better-sqlite3';
 
-import { getRunningSessions, getActiveSessions, createPendingQuestion } from './db/sessions.js';
+import { getRunningSessions, getActiveSessions, createQuestion } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
@@ -462,27 +462,38 @@ async function deliverMessage(
     deliverInstance = mg.instance;
   }
 
-  // Track pending questions for ask_user_question flow.
-  // Guarded: without the interactive module, `pending_questions` doesn't
+  // Track durable questions for ask_user_question flow.
+  // Guarded: without the interactive module, `questions` doesn't
   // exist and we skip persistence — the card still delivers to the user,
   // but the response path has nowhere to land and will log unclaimed.
-  if (content.type === 'ask_question' && content.questionId && hasTable(getDb(), 'pending_questions')) {
+  if (content.type === 'ask_question' && content.questionId && hasTable(getDb(), 'questions')) {
     const title = content.title as string | undefined;
+    const questionText = content.question as string | undefined;
+    const responseMode = content.responseMode as 'choice' | 'text' | 'choice_or_text' | undefined;
     const rawOptions = content.options as unknown;
-    if (!title || !Array.isArray(rawOptions)) {
-      log.error('ask_question missing required title/options — not persisting', {
+    if (!title || !questionText || !responseMode || !Array.isArray(rawOptions)) {
+      log.error('ask_question missing required fields — not persisting', {
         questionId: content.questionId,
       });
     } else {
-      const inserted = createPendingQuestion({
+      const inserted = createQuestion({
         question_id: content.questionId,
         session_id: session.id,
         message_out_id: msg.id,
+        in_reply_to: msg.in_reply_to,
         platform_id: msg.platform_id,
         channel_type: msg.channel_type,
         thread_id: msg.thread_id,
         title,
+        question_text: questionText,
+        response_mode: responseMode,
         options: normalizeOptions(rawOptions as never),
+        status: 'pending',
+        answer_value: null,
+        answer_type: null,
+        answered_by: null,
+        answered_at: null,
+        cancelled_at: null,
         created_at: new Date().toISOString(),
       });
       if (inserted) {

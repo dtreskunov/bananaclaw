@@ -1,4 +1,4 @@
-import type { PendingApproval, PendingQuestion, Session } from '../types.js';
+import type { PendingApproval, Question, Session } from '../types.js';
 import { getDb, hasTable } from './connection.js';
 
 // ── Sessions ──
@@ -95,7 +95,7 @@ export function deleteSession(id: string): void {
   getDb().prepare('DELETE FROM sessions WHERE id = ?').run(id);
 }
 
-// ── Pending Questions ──
+// ── Durable Questions ──
 
 /**
  * Insert a pending question row. Idempotent: when delivery fails and retries,
@@ -103,44 +103,54 @@ export function deleteSession(id: string): void {
  * IGNORE` that would throw UNIQUE and prevent the retry from reaching the
  * actual send step. Returns true if a new row was inserted.
  */
-export function createPendingQuestion(pq: PendingQuestion): boolean {
+export function createQuestion(question: Question): boolean {
   const result = getDb()
     .prepare(
-      `INSERT OR IGNORE INTO pending_questions (question_id, session_id, message_out_id, platform_id, channel_type, thread_id, title, options_json, created_at)
-       VALUES (@question_id, @session_id, @message_out_id, @platform_id, @channel_type, @thread_id, @title, @options_json, @created_at)`,
+      `INSERT OR IGNORE INTO questions
+         (question_id, session_id, message_out_id, in_reply_to, platform_id, channel_type, thread_id,
+          title, question_text, response_mode, options_json, status, answer_value, answer_type,
+          answered_by, answered_at, cancelled_at, created_at)
+       VALUES
+         (@question_id, @session_id, @message_out_id, @in_reply_to, @platform_id, @channel_type, @thread_id,
+          @title, @question_text, @response_mode, @options_json, @status, @answer_value, @answer_type,
+          @answered_by, @answered_at, @cancelled_at, @created_at)`,
     )
     .run({
-      question_id: pq.question_id,
-      session_id: pq.session_id,
-      message_out_id: pq.message_out_id,
-      platform_id: pq.platform_id,
-      channel_type: pq.channel_type,
-      thread_id: pq.thread_id,
-      title: pq.title,
-      options_json: JSON.stringify(pq.options),
-      created_at: pq.created_at,
+      ...question,
+      options_json: JSON.stringify(question.options),
     });
   return result.changes > 0;
 }
 
-export function getPendingQuestion(questionId: string): PendingQuestion | undefined {
-  const row = getDb().prepare('SELECT * FROM pending_questions WHERE question_id = ?').get(questionId) as
-    | (Omit<PendingQuestion, 'options'> & { options_json: string })
+export function getQuestion(questionId: string): Question | undefined {
+  const row = getDb().prepare('SELECT * FROM questions WHERE question_id = ?').get(questionId) as
+    | (Omit<Question, 'options'> & { options_json: string })
     | undefined;
   if (!row) return undefined;
   const { options_json, ...rest } = row;
   return { ...rest, options: JSON.parse(options_json) };
 }
 
-export function deletePendingQuestion(questionId: string): void {
-  getDb().prepare('DELETE FROM pending_questions WHERE question_id = ?').run(questionId);
+export function answerQuestion(
+  questionId: string,
+  answer: { value: string; type: 'choice' | 'text'; userId: string | null; answeredAt: string },
+): boolean {
+  const result = getDb()
+    .prepare(
+      `UPDATE questions
+          SET status = 'answered', answer_value = @value, answer_type = @type,
+              answered_by = @userId, answered_at = @answeredAt
+        WHERE question_id = @questionId AND status = 'pending'`,
+    )
+    .run({ questionId, ...answer });
+  return result.changes > 0;
 }
 
 // ── Pending Approvals ──
 
 /**
  * Insert a pending approval row. Idempotent for the same reason as
- * createPendingQuestion: delivery retries with the same approval_id must not
+ * createQuestion: delivery retries with the same approval_id must not
  * fail on UNIQUE before the send step gets a chance to succeed.
  */
 export function createPendingApproval(
@@ -194,13 +204,13 @@ export function getPendingApprovalsByAction(action: string): PendingApproval[] {
 
 /**
  * Resolve ask_question render metadata (title + normalized options) for any
- * card, regardless of whether it was persisted as a pending_question (generic
+ * card, regardless of whether it was persisted as a question (generic
  * ask_user_question) or a pending_approval (self-mod / OneCLI credential).
  */
 export function getAskQuestionRender(
   id: string,
 ): { title: string; options: import('../channels/ask-question.js').NormalizedOption[] } | undefined {
-  const q = getPendingQuestion(id);
+  const q = getQuestion(id);
   if (q) return { title: q.title, options: q.options };
   const a = getDb().prepare('SELECT title, options_json FROM pending_approvals WHERE approval_id = ?').get(id) as
     | { title: string; options_json: string }

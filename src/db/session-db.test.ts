@@ -135,6 +135,13 @@ describe('countDueMessages', () => {
     db.close();
   });
 
+  it('counts an interactive response as wake-eligible', () => {
+    const db = freshMessagesInDb();
+    addRow(db, { id: 'answer-1', seq: 2, kind: 'interactive_response' });
+    expect(countDueMessages(db)).toBe(1);
+    db.close();
+  });
+
   it('excludes kind=system rows so orphaned system messages never pin a slot', () => {
     const db = freshMessagesInDb();
     // A stale question_response / delivery_failed the container never acked.

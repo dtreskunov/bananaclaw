@@ -1052,24 +1052,10 @@ export function readChatHistory(
           continue;
         }
         if (r.kind === 'chat-sdk') {
-          // Structured interactive messages (ask_question, send_card).
-          // Render as a plain text bubble using the question text or card fallback.
-          let text = '';
-          try {
-            const c = JSON.parse(r.content) as {
-              type?: string;
-              title?: string;
-              question?: string;
-              fallbackText?: string;
-            };
-            if (c?.type === 'ask_question') {
-              text = c.question || c.title || '';
-            } else if (c?.type === 'card') {
-              text = c.fallbackText || '';
-            }
-          } catch {
-            /* ignore */
-          }
+          // Durable ask_question rows render through the question lifecycle
+          // returned by /sync. Adding a history bubble here duplicates the
+          // card after reload. Fire-and-forget cards still need their fallback.
+          const text = chatSdkHistoryText(r.content);
           if (text) {
             messages.push({
               direction: 'out',
@@ -1198,6 +1184,15 @@ export function readChatHistory(
 
   messages.sort((a, b) => Date.parse(normTs(a.timestamp)) - Date.parse(normTs(b.timestamp)));
   return messages;
+}
+
+export function chatSdkHistoryText(content: string): string {
+  try {
+    const parsed = JSON.parse(content) as { type?: string; fallbackText?: string };
+    return parsed.type === 'card' ? parsed.fallbackText || '' : '';
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -2781,16 +2776,39 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
         // For chat-sdk messages (ask_question, send_card), include the
         // structured content so the client can render interactive cards
         // without an extra sync round-trip.
-        let question: { questionId: string; title: string; options: { label: string; value: string }[] } | undefined;
+        let question:
+          | {
+              questionId: string;
+              title: string;
+              question: string;
+              responseMode: 'choice' | 'text' | 'choice_or_text';
+              options: { label: string; selectedLabel: string; value: string }[];
+            }
+          | undefined;
         if (message.kind === 'chat-sdk' && typeof message.content === 'object' && message.content) {
           const sdk = message.content as {
             type?: string;
             questionId?: string;
             title?: string;
-            options?: { label: string; value: string }[];
+            question?: string;
+            responseMode?: 'choice' | 'text' | 'choice_or_text';
+            options?: { label: string; selectedLabel: string; value: string }[];
           };
-          if (sdk.type === 'ask_question' && sdk.questionId && sdk.title && Array.isArray(sdk.options)) {
-            question = { questionId: sdk.questionId, title: sdk.title, options: sdk.options };
+          if (
+            sdk.type === 'ask_question' &&
+            sdk.questionId &&
+            sdk.title &&
+            sdk.question &&
+            sdk.responseMode &&
+            Array.isArray(sdk.options)
+          ) {
+            question = {
+              questionId: sdk.questionId,
+              title: sdk.title,
+              question: sdk.question,
+              responseMode: sdk.responseMode,
+              options: sdk.options,
+            };
           }
         }
 

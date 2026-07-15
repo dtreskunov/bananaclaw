@@ -120,18 +120,28 @@ CREATE TABLE sessions (
 CREATE INDEX idx_sessions_agent_group ON sessions(agent_group_id);
 CREATE INDEX idx_sessions_lookup ON sessions(messaging_group_id, thread_id);
 
--- Pending interactive questions
-CREATE TABLE pending_questions (
-  question_id    TEXT PRIMARY KEY,
-  session_id     TEXT NOT NULL REFERENCES sessions(id),
-  message_out_id TEXT NOT NULL,
-  platform_id    TEXT,
-  channel_type   TEXT,
-  thread_id      TEXT,
-  title          TEXT NOT NULL,
-  options_json   TEXT NOT NULL,
-  created_at     TEXT NOT NULL
+-- Durable interactive questions and their answers
+CREATE TABLE questions (
+  question_id     TEXT PRIMARY KEY,
+  session_id      TEXT NOT NULL REFERENCES sessions(id),
+  message_out_id  TEXT NOT NULL,
+  in_reply_to     TEXT,
+  platform_id     TEXT,
+  channel_type    TEXT,
+  thread_id       TEXT,
+  title           TEXT NOT NULL,
+  question_text   TEXT NOT NULL,
+  response_mode   TEXT NOT NULL CHECK(response_mode IN ('choice', 'text', 'choice_or_text')),
+  options_json    TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'answered', 'cancelled')),
+  answer_value    TEXT,
+  answer_type     TEXT CHECK(answer_type IS NULL OR answer_type IN ('choice', 'text')),
+  answered_by     TEXT,
+  answered_at     TEXT,
+  cancelled_at    TEXT,
+  created_at      TEXT NOT NULL
 );
+CREATE INDEX idx_questions_session_status ON questions(session_id, status);
 
 -- Pending approvals for unknown senders (unknown_sender_policy='request_approval').
 -- In-flight dedup via UNIQUE(messaging_group_id, sender_identity): a second

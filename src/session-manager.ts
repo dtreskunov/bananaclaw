@@ -240,6 +240,8 @@ export function writeSessionMessage(
      * that don't have a user identity to attribute.
      */
     senderUserId?: string | null;
+    /** Treat an existing message id as a successful replay. */
+    idempotent?: boolean;
   },
 ): void {
   // Extract base64 attachment data, save to inbox, replace with file paths
@@ -261,6 +263,7 @@ export function writeSessionMessage(
       sourceSessionId: message.sourceSessionId ?? null,
       onWake: message.onWake ?? 0,
       senderUserId: message.senderUserId ?? null,
+      idempotent: message.idempotent,
     });
   } finally {
     db.close();

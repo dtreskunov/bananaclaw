@@ -126,11 +126,13 @@ export function insertMessage(
      * users row was resolved. Authoritative source for the container.
      */
     senderUserId?: string | null;
+    /** Treat an existing message id as a successful replay. */
+    idempotent?: boolean;
   },
 ): void {
   assertUserUuid(message.senderUserId, 'insertMessage.senderUserId');
   db.prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake, sender_user_id)
+    `${message.idempotent ? 'INSERT OR IGNORE' : 'INSERT'} INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake, sender_user_id)
      VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake, @senderUserId)`,
   ).run({
     ...message,
@@ -146,10 +148,8 @@ export function countDueMessages(db: Database.Database): number {
   return (
     db
       .prepare(
-        // `kind = 'system'` messages (question_response, delivery_failed, …)
-        // are drained by tools polling inside an already-running container
-        // (e.g. ask_user_question → findQuestionResponse); the poll loop never
-        // surfaces them to the agent. On their own they must NEVER justify
+        // `kind = 'system'` messages (delivery_failed, legacy tool responses, …)
+        // are not surfaced to the agent. On their own they must NEVER justify
         // waking a cold container or keeping an idle one alive — otherwise an
         // orphaned system row (a late question answer, or a delivery_failed
         // that has no consumer) stays `pending` forever, counts as "due" on

@@ -129,6 +129,7 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
         questionId: approvalId,
         title,
         question,
+        responseMode: 'choice',
         options,
       }),
     );

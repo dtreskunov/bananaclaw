@@ -1,10 +1,11 @@
 /**
  * Interactive MCP tools: ask_user_question, send_card.
  *
- * ask_user_question is a blocking tool call — it writes a messages_out row
- * with a question card, then polls messages_in for the response.
+ * ask_user_question writes a durable question card and returns immediately.
+ * The answer arrives as a future interactive_response provider turn.
  */
-import { findQuestionResponse, markCompleted } from '../db/messages-in.js';
+import { getCurrentInReplyTo } from '../current-batch.js';
+import { openInboundDb, getOutboundDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
 import { registerTools } from './server.js';
@@ -30,20 +31,53 @@ function err(text: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${text}` }], isError: true };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function hasOutstandingQuestion(): boolean {
+  const outbound = getOutboundDb();
+  const inbound = openInboundDb();
+  try {
+    const questions = outbound
+      .prepare("SELECT content FROM messages_out WHERE kind = 'chat-sdk' AND content LIKE '%\"type\":\"ask_question\"%'")
+      .all() as Array<{ content: string }>;
+    const answered = new Set(
+      (inbound
+        .prepare("SELECT content FROM messages_in WHERE kind = 'interactive_response'")
+        .all() as Array<{ content: string }>).flatMap((row) => {
+          try {
+            const content = JSON.parse(row.content) as { questionId?: string };
+            return content.questionId ? [content.questionId] : [];
+          } catch {
+            return [];
+          }
+        }),
+    );
+    return questions.some((row) => {
+      try {
+        const content = JSON.parse(row.content) as { questionId?: string };
+        return !!content.questionId && !answered.has(content.questionId);
+      } catch {
+        return false;
+      }
+    });
+  } finally {
+    inbound.close();
+  }
 }
 
 export const askUserQuestion: McpToolDefinition = {
   tool: {
     name: 'ask_user_question',
     description:
-      'Ask the user a multiple-choice question and wait for their response. This is a blocking call — execution pauses until the user responds or the timeout expires. Provide a short card title (e.g. "Confirm deletion") and an array of options — each option may be a plain string (used as both button label and result value) or an object { label, selectedLabel?, value? } where selectedLabel is the text shown on the card after the user clicks.',
+      'Ask the user a durable question. The tool returns immediately; the answer arrives in a later turn. Supports choice, text, and choice_or_text responses.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         title: { type: 'string', description: 'Short card title shown above the question' },
         question: { type: 'string', description: 'The question to ask' },
+        responseMode: {
+          type: 'string',
+          enum: ['choice', 'text', 'choice_or_text'],
+          description: 'How the user may answer',
+        },
         options: {
           type: 'array',
           items: {
@@ -60,20 +94,27 @@ export const askUserQuestion: McpToolDefinition = {
               },
             ],
           },
-          description: 'Options for the user to choose from (string or {label, selectedLabel?, value?})',
+          description: 'Options for choice and choice_or_text questions',
         },
-        timeout: { type: 'number', description: 'Timeout in seconds (default: 300)' },
+        placeholder: { type: 'string', description: 'Placeholder for text input' },
+        multiline: { type: 'boolean', description: 'Whether text input should allow multiple lines' },
       },
-      required: ['title', 'question', 'options'],
+      required: ['title', 'question', 'responseMode'],
     },
   },
   async handler(args) {
     const title = args.title as string;
     const question = args.question as string;
-    const rawOptions = args.options as unknown[];
-    const timeout = ((args.timeout as number) || 300) * 1000;
-    if (!title || !question || !rawOptions?.length) {
-      return err('title, question, and options are required');
+    const responseMode = args.responseMode as 'choice' | 'text' | 'choice_or_text';
+    const rawOptions = (args.options as unknown[] | undefined) ?? [];
+    if (!title || !question || !['choice', 'text', 'choice_or_text'].includes(responseMode)) {
+      return err('title, question, and responseMode are required');
+    }
+    if (responseMode !== 'text' && rawOptions.length === 0) {
+      return err('options are required for choice questions');
+    }
+    if (hasOutstandingQuestion()) {
+      return err('A question is already awaiting the user response');
     }
 
     const options = rawOptions.map((o) => {
@@ -92,6 +133,7 @@ export const askUserQuestion: McpToolDefinition = {
     // Write question card to outbound.db
     writeMessageOut({
       id: questionId,
+      in_reply_to: getCurrentInReplyTo(),
       kind: 'chat-sdk',
       platform_id: r.platform_id,
       channel_type: r.channel_type,
@@ -101,31 +143,19 @@ export const askUserQuestion: McpToolDefinition = {
         questionId,
         title,
         question,
+        responseMode,
         options,
+        placeholder: (args.placeholder as string) || undefined,
+        multiline: args.multiline === true,
       }),
     });
 
-    log(`ask_user_question: ${questionId} → "${question}" [${options.join(', ')}]`);
-
-    // Poll for response in inbound.db (host writes the response there)
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      const response = findQuestionResponse(questionId);
-
-      if (response) {
-        const parsed = JSON.parse(response.content);
-        // Mark the response as completed via processing_ack (outbound.db)
-        markCompleted([response.id]);
-
-        log(`ask_user_question response: ${questionId} → ${parsed.selectedOption}`);
-        return ok(parsed.selectedOption);
-      }
-
-      await sleep(1000);
-    }
-
-    log(`ask_user_question timeout: ${questionId}`);
-    return err(`Question timed out after ${timeout / 1000}s`);
+    log(`ask_user_question: ${questionId} → "${question}"`);
+    return ok(JSON.stringify({
+      status: 'awaiting_user',
+      questionId,
+      message: 'The question was queued. Its answer will arrive in a later turn.',
+    }));
   },
 };
 

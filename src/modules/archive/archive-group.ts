@@ -42,7 +42,7 @@ export interface ArchiveDump {
   pending_channel_approvals: Array<Record<string, unknown>>;
   pending_approvals: Array<Record<string, unknown>>;
   sessions: Array<Record<string, unknown>>;
-  pending_questions: Array<Record<string, unknown>>;
+  questions: Array<Record<string, unknown>>;
 }
 
 /**
@@ -113,7 +113,7 @@ function dumpRows(
     Record<string, unknown>
   >;
   const questions = db
-    .prepare('SELECT * FROM pending_questions WHERE session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)')
+    .prepare('SELECT * FROM questions WHERE session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)')
     .all(groupId) as Array<Record<string, unknown>>;
 
   return {
@@ -128,7 +128,7 @@ function dumpRows(
     pending_channel_approvals: channelApprovals,
     pending_approvals: pendingApprovals,
     sessions,
-    pending_questions: questions,
+    questions,
   } as Omit<ArchiveDump, 'archived_at' | 'archived_by' | 'version'>;
 }
 

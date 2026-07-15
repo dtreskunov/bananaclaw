@@ -86,7 +86,7 @@ export interface ThreadCtx {
   canSend: boolean;
 }
 
-export type Direction = 'in' | 'out' | 'internal' | 'event';
+export type Direction = 'in' | 'out' | 'internal' | 'event' | 'question';
 
 export interface ChatMessageFile {
   filename: string;
@@ -123,6 +123,8 @@ export interface ChatMessage {
   /** Emoji reactions the agent added to this message (already resolved to
    *  unicode), in emit order. Rendered as chips under the bubble. */
   reactions?: MessageReaction[];
+  /** Durable interactive question rendered at its chronological position. */
+  question?: PendingQuestionDto;
 }
 
 /** One emoji reaction attached to a message. */
@@ -231,7 +233,7 @@ export interface PendingApprovalDto {
   action: string;
   title: string;
   details: string | null;
-  options: { label: string; value: string }[];
+  options: { label: string; selectedLabel: string; value: string }[];
   agentGroupId: string | null;
   agentGroupName: string | null;
   createdAt: string;
@@ -241,7 +243,13 @@ export interface PendingQuestionDto {
   questionId: string;
   title: string;
   question: string;
-  options: { label: string; value: string }[];
+  responseMode: 'choice' | 'text' | 'choice_or_text';
+  options: { label: string; selectedLabel: string; value: string }[];
+  status: 'pending' | 'answered' | 'cancelled';
+  answerValue: string | null;
+  answerType: 'choice' | 'text' | null;
+  answeredAt: string | null;
+  activity?: ActivityLine[];
   threadId: string | null;
   agentGroupId: string;
   createdAt: string;
@@ -275,7 +283,13 @@ export interface WsPayload {
   id?: string;
   messageKind?: 'internal' | 'final' | string;
   usage?: TurnUsage;
-  question?: { questionId: string; title: string; options: { label: string; value: string }[] };
+  question?: {
+    questionId: string;
+    title: string;
+    question: string;
+    responseMode: 'choice' | 'text' | 'choice_or_text';
+    options: { label: string; selectedLabel: string; value: string }[];
+  };
   /** task-run frame fields. */
   summary?: string;
   taskId?: string;
