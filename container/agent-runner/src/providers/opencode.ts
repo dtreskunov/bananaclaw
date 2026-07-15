@@ -847,6 +847,11 @@ export class OpenCodeProvider implements AgentProvider {
           resultText += finalTextFromParts(parts);
         }
         // Repair known malformed wrappers and drop inline chain-of-thought.
+        // Capture whether the model produced ANY raw text first: if it did but
+        // normalization strips it to nothing, the reply was swallowed (e.g. an
+        // unclosed `<think>` with no `<message>`), not genuinely absent. The
+        // poll-loop keys its recovery nudge off this distinction.
+        const rawResultNonEmpty = resultText.trim().length > 0;
         resultText = normalizeAssistantText(resultText);
         // Some providers (e.g. gemini-via-openrouter) finalize cost/tokens in a
         // `message.updated` that arrives *after* `session.idle` ends our loop,
@@ -902,7 +907,8 @@ export class OpenCodeProvider implements AgentProvider {
           const reasonMsg = describeFinishReason(lastFinish);
           yield { type: 'error', message: reasonMsg, retryable: false, classification: `opencode:finish:${lastFinish}` };
         }
-        yield { type: 'result', text: resultText || null };
+        const strippedToEmpty = rawResultNonEmpty && resultText.trim().length === 0;
+        yield { type: 'result', text: resultText || null, strippedToEmpty };
       }
     }
 

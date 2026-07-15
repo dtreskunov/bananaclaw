@@ -623,12 +623,25 @@ async function processQuery(
   let queryContinuation: string | undefined;
   let resultSeen = false;
   let done = false;
-  let unwrappedNudged = false;
-  // Set when a `result` event arrives with empty text (the model produced no
-  // final output at all — e.g. a reasoning model that emitted only
-  // <think>…</think>, which stripThinkTags reduces to nothing). Distinct from
-  // a non-empty-but-all-<internal> turn, where the model deliberately wrote
-  // scratchpad only; that leaves this false so we stay silent.
+  // Set once we've pushed the recovery nudge this turn — a self-correction
+  // retry asking the model to re-send its reply properly wrapped. Fires for
+  // BOTH failure shapes: (a) the model emitted bare top-level text it forgot
+  // to wrap (`hasUnwrapped`), and (b) the model buried its whole reply inside
+  // reasoning that normalized to empty (`event.strippedToEmpty`). One-shot:
+  // if the retry still delivers nothing we surface a generic error rather
+  // than nudging again. Reset at every turn boundary (warm-query safety).
+  let nudgedForDelivery = false;
+  // Set when the post-nudge retry comes back as an `<internal>` note (the
+  // model confirming, via the escape hatch in the nudge text, that it meant
+  // to stay silent). Suppresses BOTH terminal notices — a deliberate no-op
+  // must not surface as an error.
+  let silenceConfirmed = false;
+  // Set when a `result` event arrives with empty text AND we did not nudge on
+  // it — i.e. the turn produced genuinely nothing recoverable (no bare reply,
+  // no reasoning that stripped away). Distinct from `event.strippedToEmpty`
+  // (a swallowed reply → nudged, above) and from a non-empty-but-all-<internal>
+  // turn (deliberate scratchpad, stays silent). This is the shape of a
+  // legitimately silent autonomous/task turn, so it is NOT nudged.
   let emptyResultSeen = false;
   // A fresh batch is being processed \u2014 wipe any turn-ended marker from
   // the previous turn so the host typing module re-arms cleanly.
@@ -818,9 +831,10 @@ async function processQuery(
         // reasoning model emitting a mangled/unclosed <think> wrapper) leaves
         // the user with total silence. Reset all three so the notices key off
         // THIS turn's delivery, not the whole warm query's history.
-        unwrappedNudged = false;
+        nudgedForDelivery = false;
         sentAny = false;
         emptyResultSeen = false;
+        silenceConfirmed = false;
         if (promptTracker) promptTracker.latest = prompt;
         // If the previous result already completed, this push starts a new
         // turn immediately. Clear its trace before the provider can emit the
@@ -909,6 +923,39 @@ async function processQuery(
   // loop doesn't touch the heartbeat either).
   let turnActive = true;
   let turnStartTime = Date.now();
+  // Push the recovery nudge: a self-correction retry within the same warm
+  // query. Used for both failure shapes — bare unwrapped text and a reply
+  // swallowed by reasoning that normalized to empty. The nudge offers an
+  // explicit escape hatch (re-send wrapped, OR emit <internal> to confirm
+  // intentional silence) so a genuinely silent turn is never prodded into
+  // fabricating a reply. One-shot: callers gate on `!nudgedForDelivery`.
+  const pushDeliveryNudge = (): void => {
+    nudgedForDelivery = true;
+    log('Recovery nudge: turn delivered nothing — asking the agent to re-send it wrapped');
+    // Surface the recovery in the web-UI activity trace. The buffer carries
+    // across the nudge→retry boundary (no reset without a queued user batch)
+    // and flushes onto the recovered reply's row.
+    try {
+      appendActivity({
+        kind: 'notification',
+        id: `nudge:${generateId()}`,
+        text: 'Reply wasn’t formatted for delivery — asked the agent to re-send it.',
+      });
+    } catch { /* best-effort */ }
+    const names = getAllDestinations().map((d) => d.name).join(', ');
+    turnActive = true;
+    try { clearTurnEnded(); } catch { /* best-effort */ }
+    query.push(
+      `<system>Your reply was not delivered. Either it was not wrapped in ` +
+        `<message to="name">...</message> blocks, or it was left inside your ` +
+        `reasoning. All delivered output must be wrapped: use <message to="name"> ` +
+        `for content to send, or <internal> for scratchpad. ` +
+        `Your destinations: ${names}. ` +
+        `If you have a response, re-send it now with the correct wrapping. ` +
+        `If you intentionally have nothing to send, reply with a brief ` +
+        `<internal>…</internal> note explaining why (it will not be delivered).</system>`,
+    );
+  };
   const liveHandle = setInterval(() => {
     if (!turnActive) return;
     try { touchHeartbeat(); } catch { /* best-effort */ }
@@ -998,9 +1045,13 @@ async function processQuery(
         setCurrentInReplyTo(resultRouting.inReplyTo);
         if (event.text) {
           const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
-          const { sent, hasUnwrapped } = dispatchResultText(event.text, resultRouting);
+          const { sent, hasUnwrapped, internalCount } = dispatchResultText(event.text, resultRouting);
           if (sent > 0) sentAny = true;
-          const willRetryWrapping = !mcpWroteReply && hasUnwrapped && !unwrappedNudged;
+          // A post-nudge retry that delivers nothing but writes an <internal>
+          // note is the model taking the escape hatch — confirming it meant to
+          // stay silent. Treat as intentional silence, not a delivery failure.
+          if (nudgedForDelivery && sent === 0 && internalCount > 0) silenceConfirmed = true;
+          const willRetryWrapping = !mcpWroteReply && hasUnwrapped && !nudgedForDelivery;
           notifyExchangeComplete(onExchangeComplete, {
             prompt: archivePrompts[0] ?? initialPrompt,
             result: event.text,
@@ -1010,38 +1061,46 @@ async function processQuery(
           if (mcpWroteReply) {
             sentAny = true;
           } else if (willRetryWrapping) {
-            unwrappedNudged = true;
             log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
-            const destinations = getAllDestinations();
-            const names = destinations.map((d) => d.name).join(', ');
-            turnActive = true;
-            try { clearTurnEnded(); } catch { /* best-effort */ }
-            query.push(
-              `<system>Your response was not delivered — it was not wrapped in <message to="name">...</message> blocks. ` +
-                `All output must be wrapped: use <message to="name"> for content to send, or <internal> for scratchpad. ` +
-                `Your destinations: ${names}. ` +
-                `Please re-send your response with the correct wrapping.</system>`,
-            );
+            pushDeliveryNudge();
           }
           // The wrapping-retry result answers the SAME user prompt — keep it
           // queued so the retry archives against it, not the nudge text.
           if (!willRetryWrapping) archivePrompts.shift();
         } else {
-          // A result event with no text: the model finished the turn without
-          // producing any final output (neither a reply nor an error).
-          emptyResultSeen = true;
-          archivePrompts.shift();
-          // Long-lived providers (OpenCode) keep the query open after a turn
-          // so rapid follow-ups reuse the warm session. That's fine when a
-          // reply was sent, but an empty turn sends nothing, so the query
-          // would sit open and the post-stream empty-result notice (below the
-          // events loop) would never run. When nothing was sent and no
-          // follow-up batches are queued, end the stream now so the turn
-          // completes and the notice fires. The continuation was persisted at
-          // `init`, so the next message resumes the same session normally.
-          if (!sentAny && turnBatchQueue.length === 0 && !endedForCommand) {
-            endedForCommand = true;
-            query.end();
+          // A result event with no final text. Two sub-cases:
+          //  (a) `strippedToEmpty` — the model produced raw text that
+          //      normalized to nothing (its reply was swallowed by reasoning
+          //      with no <message> wrapper). Recoverable: nudge once, exactly
+          //      like bare unwrapped text above.
+          //  (b) genuinely nothing — no reasoning to strip, nothing to
+          //      recover. This is the shape of a legitimately silent
+          //      autonomous/task turn, so it is NOT nudged; it falls through
+          //      to the terminal empty-result notice.
+          const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
+          const willNudge =
+            !mcpWroteReply && event.strippedToEmpty === true &&
+            !nudgedForDelivery && !lastProviderError;
+          if (mcpWroteReply) sentAny = true;
+          if (willNudge) {
+            log('Result stripped to empty (reply swallowed by reasoning) — nudging');
+            pushDeliveryNudge();
+            // Keep the prompt queued: the retry answers the same user prompt.
+          } else {
+            emptyResultSeen = true;
+            archivePrompts.shift();
+            // Long-lived providers (OpenCode) keep the query open after a turn
+            // so rapid follow-ups reuse the warm session. That's fine when a
+            // reply was sent, but an empty turn sends nothing, so the query
+            // would sit open and the post-stream empty-result notice (below the
+            // events loop) would never run. When nothing was sent and no
+            // follow-up batches are queued, end the stream now so the turn
+            // completes and the notice fires. The continuation was persisted at
+            // `init`, so the next message resumes the same session normally.
+            if (!sentAny && turnBatchQueue.length === 0 && !endedForCommand) {
+              endedForCommand = true;
+              query.end();
+            }
           }
         }
         // One-shot calls (in-turn ack): end the stream immediately after
@@ -1149,13 +1208,30 @@ async function processQuery(
     }
   }
 
-  // Stream completed cleanly, no provider error, but the agent emitted text
-  // we couldn't deliver — typically a malformed `<message>` wrap (missing
-  // closing tag, wrong destination, or pure scratchpad even after the nudge).
-  // Without this the user just sees nothing on a turn the agent thought it
-  // had answered. Surface a generic error so the conversation doesn't stall.
-  if (!sentAny && unwrappedNudged && !lastProviderError) {
-    log('Turn produced no deliverable output after wrap nudge — surfacing generic error');
+  // Three mutually-exclusive terminal outcomes for a turn that delivered
+  // nothing (all gated on `!sentAny && !lastProviderError`). Ordered by
+  // specificity — the first match wins:
+  //
+  //  1. silenceConfirmed → deliver NOTHING. We nudged a turn that produced no
+  //     deliverable, and the retry came back as an <internal> note: the model
+  //     took the escape hatch and confirmed it meant to stay quiet. A
+  //     deliberate no-op must not surface as an error.
+  //
+  //  2. nudgedForDelivery (and not silence-confirmed) → generic error. The
+  //     model left evidence it was trying to reply — bare unwrapped text, or a
+  //     reply swallowed by reasoning — we asked it to re-send wrapped, and it
+  //     STILL delivered nothing. That's a genuine malfunction.
+  //
+  //  3. emptyResultSeen (never nudged) → "finished without producing a
+  //     response". The turn produced genuinely nothing recoverable: no bare
+  //     reply and no reasoning that stripped away. We deliberately did NOT
+  //     nudge this (see the result handler) because it is indistinguishable
+  //     from a legitimately silent autonomous/task turn, and nudging every
+  //     such turn would tax that hot path and fight the one-shot task query.
+  if (!sentAny && silenceConfirmed && !lastProviderError) {
+    log('Turn confirmed intentional silence after nudge — delivering nothing');
+  } else if (!sentAny && nudgedForDelivery && !lastProviderError) {
+    log('Turn produced no deliverable output after recovery nudge — surfacing generic error');
     try {
       writeMessageOut({
         id: generateId(),
@@ -1173,11 +1249,10 @@ async function processQuery(
   }
 
   // Stream completed cleanly with a `result` event, but the model produced no
-  // final text at all — and reported no error. This is different from the
-  // malformed-wrap case above (there the model emitted text we couldn't
-  // deliver); here there was simply nothing. Common with reasoning models that
-  // emit only <think>…</think>, which strips to empty. Tell the user plainly so
-  // a silent turn doesn't look like the agent is still working or died.
+  // final text at all — and reported no error, and there was nothing to
+  // recover (so we never nudged). Common with reasoning models that emit only
+  // <think>…</think> AND leave no answer buried inside. Tell the user plainly
+  // so a silent turn doesn't look like the agent is still working or died.
   else if (!sentAny && emptyResultSeen && !lastProviderError) {
     log('Turn completed with an empty result and no error — notifying user');
     try {
@@ -1253,7 +1328,10 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
  * The agent must always wrap output in <message to="name">...</message>
  * blocks, even with a single destination. Bare text is scratchpad only.
  */
-function dispatchResultText(text: string, routing: RoutingContext): { sent: number; hasUnwrapped: boolean } {
+function dispatchResultText(
+  text: string,
+  routing: RoutingContext,
+): { sent: number; hasUnwrapped: boolean; internalCount: number } {
   const parsed = parseAssistantOutput(text);
   if (parsed.diagnostics.length > 0) {
     log(`Output recovery: ${[...new Set(parsed.diagnostics)].join(', ')}`);
@@ -1305,7 +1383,7 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
   }
 
   const hasUnwrapped = sent === 0 && !!scratchpad;
-  return { sent, hasUnwrapped };
+  return { sent, hasUnwrapped, internalCount: parsed.internal.length };
 }
 
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {

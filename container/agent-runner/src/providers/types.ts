@@ -229,7 +229,16 @@ export function pickActivityDetail(input: Record<string, unknown> | undefined): 
 
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
-  | { type: 'result'; text: string | null }
+  /**
+   * Final turn output. `strippedToEmpty` marks the case where the model's
+   * RAW assistant text was non-empty but provider normalization reduced it
+   * to nothing (e.g. a reasoning model that buried its whole reply inside an
+   * unclosed `<think>` with no `<message>` wrapper — the answer exists but is
+   * unrecoverable as-is). The poll-loop uses this to distinguish a swallowed
+   * reply (nudge-worthy) from a genuinely silent turn (nothing to recover).
+   * Only OpenCode sets it; Claude strips in-loop, so it stays undefined there.
+   */
+  | { type: 'result'; text: string | null; strippedToEmpty?: boolean }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
   | { type: 'progress'; step: ActivityStep }
   /**

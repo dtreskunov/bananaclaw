@@ -844,6 +844,158 @@ describe('poll loop — empty result notice', () => {
   });
 });
 
+describe('poll loop — recovery nudge on stripped-to-empty', () => {
+  // A reply swallowed by reasoning (raw text present, but normalization strips
+  // it to empty) arrives as a `result` with empty text AND strippedToEmpty=true.
+  // Unlike a genuinely empty turn, this is recoverable: the loop nudges once,
+  // and the retry usually re-emits the reply properly wrapped.
+  it('nudges a swallowed reply and delivers the wrapped retry', async () => {
+    insertMessage('m-swallow', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true },
+      { text: '<message to="discord-test">recovered reply</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => {
+        try { return JSON.parse(m.content).text === 'recovered reply'; } catch { return false; }
+      }),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    // The recovered reply is the only delivery — no error notice.
+    const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
+    expect(texts).toContain('recovered reply');
+    expect(texts.some((t: string) => t?.includes('⚠️'))).toBe(false);
+    // Exactly one nudge was pushed (one-shot).
+    expect(provider.pushes).toHaveLength(1);
+    // The recovery is surfaced in the web-UI activity trace.
+    expect(
+      getActivityBuffer()
+        .map((line) => JSON.parse(line.text))
+        .some((s) => s.kind === 'notification' && /re-send/i.test(s.text)),
+    ).toBe(true);
+  });
+
+  it('stays silent when the nudge retry confirms intentional silence via <internal>', async () => {
+    insertMessage('m-silent', { sender: 'Alice', text: 'do not respond' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true },
+      { text: '<internal>The user asked me not to reply.</internal>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    // Wait until the retry's <internal> note is processed (its activity step
+    // is appended in the same synchronous handler that sets silenceConfirmed).
+    await waitFor(
+      () => getActivityBuffer()
+        .map((line) => JSON.parse(line.text))
+        .some((s) => s.kind === 'internal' && /not to reply/i.test(s.text)),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    // Confirmed intentional silence → nothing delivered, no error notice.
+    expect(getUndeliveredMessages()).toHaveLength(0);
+    expect(provider.pushes).toHaveLength(1);
+  });
+
+  it('surfaces a generic error when the nudge retry is still undeliverable', async () => {
+    insertMessage('m-broken', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true },
+      { text: '', strippedToEmpty: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => {
+        try { return JSON.parse(m.content).text?.includes('Something went wrong producing a reply'); } catch { return false; }
+      }),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
+    expect(texts.some((t: string) => t?.includes('Something went wrong producing a reply'))).toBe(true);
+    // Not the truly-empty notice — this turn HAD recoverable content.
+    expect(texts.some((t: string) => t?.includes('without producing a response'))).toBe(false);
+    expect(provider.pushes).toHaveLength(1);
+  });
+});
+
+/**
+ * Scripted provider for the recovery-nudge tests. Emits a pre-set sequence of
+ * result turns (each with optional `strippedToEmpty`); the initial turn plays
+ * on start, and each push() (e.g. the recovery nudge) advances to the next.
+ * Records pushes so tests can assert the nudge is one-shot. Stays open between
+ * turns like a long-lived provider (OpenCode) — the loop or the test drives
+ * completion.
+ */
+class ScriptedProvider {
+  readonly supportsNativeSlashCommands = false;
+  ended = false;
+  readonly pushes: string[] = [];
+
+  constructor(private readonly turns: Array<{ text: string; strippedToEmpty?: boolean }>) {}
+
+  isSessionInvalid(): boolean {
+    return false;
+  }
+
+  query() {
+    const owner = this;
+    let idx = 0;
+    const pending: string[] = [];
+    let aborted = false;
+    let wake: (() => void) | null = null;
+    const nextTurn = () => owner.turns[idx++] ?? { text: '' };
+    return {
+      push(message: string) {
+        owner.pushes.push(message);
+        pending.push(message);
+        wake?.();
+      },
+      end: () => {
+        owner.ended = true;
+        wake?.();
+      },
+      abort: () => {
+        aborted = true;
+        wake?.();
+      },
+      events: (async function* () {
+        yield { type: 'init' as const, continuation: 'scripted-session' };
+        const first = nextTurn();
+        yield { type: 'result' as const, text: first.text || null, strippedToEmpty: first.strippedToEmpty };
+        while (!owner.ended && !aborted) {
+          if (pending.length > 0) {
+            pending.shift();
+            const t = nextTurn();
+            yield { type: 'result' as const, text: t.text || null, strippedToEmpty: t.strippedToEmpty };
+            continue;
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+          wake = null;
+        }
+      })(),
+    };
+  }
+}
+
 /**
  * Yields one empty-text result then blocks (does not self-end) — models a
  * long-lived provider like OpenCode whose query stays open after a turn. The
