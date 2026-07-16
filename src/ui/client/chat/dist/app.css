@@ -1561,6 +1561,8 @@ nav.tab-bar-strip.group-strip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+  min-width: 0;
 }
 .chat-main .typing .typing-dots > span:not(.hint) {
   width: 5px;
@@ -1577,6 +1579,7 @@ nav.tab-bar-strip.group-strip {
   animation-delay: 0.3s;
 }
 .chat-main .typing .hint {
+  flex: 1;
   font-size: var(--font-xs);
   color: var(--muted);
   font-style: italic;
