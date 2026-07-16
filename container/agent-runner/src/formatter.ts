@@ -575,7 +575,11 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
     finishOpen();
   } else if (open?.kind === 'message') {
     diagnostics.push('unclosed-message');
-    appendOutputSegment(segments, { kind: 'unwrapped', text: open.opener + open.text });
+    // A malformed unclosed delivery can contain a later <think> block. While
+    // tags in a complete message are literal body text, this block is not safe
+    // to deliver; sanitize its body before returning it as undelivered output.
+    const sanitizedBody = parseAssistantOutput(open.text).normalizedText;
+    appendOutputSegment(segments, { kind: 'unwrapped', text: open.opener + sanitizedBody });
     open = undefined;
   }
 

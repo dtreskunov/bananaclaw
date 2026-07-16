@@ -300,6 +300,19 @@ describe('parseAssistantOutput', () => {
     expect(parsed.diagnostics).toContain('unclosed-message');
   });
 
+  it('strips reasoning nested inside an unclosed message block', () => {
+    const parsed = parseAssistantOutput(
+      'Starting now.<message to="web">Starting now.<think>private chain of thought' +
+      '<message to="web">Done.',
+    );
+    expect(parsed.deliveries).toEqual([]);
+    expect(parsed.normalizedText).toBe(
+      'Starting now.<message to="web">Starting now.',
+    );
+    expect(parsed.normalizedText).not.toContain('private chain of thought');
+    expect(parsed.diagnostics).toContain('unclosed-message');
+  });
+
   it('treats recognized tags inside a message body as literal message content', () => {
     const parsed = parseAssistantOutput(
       '<message to="web">show <internal>literal</internal> and <think>x</think></message>',
