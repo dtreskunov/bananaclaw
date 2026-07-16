@@ -13,6 +13,14 @@ export interface ActivityLine {
   text: string;
 }
 
+/** Stable metadata for one in-flight turn. Web clients use `startedAt` to
+ * resume elapsed timing after a WebSocket reconnect; other channels may
+ * ignore it. `model` is the effective configured model for the agent group. */
+export interface TypingMetadata {
+  startedAt: number;
+  model?: string;
+}
+
 /** Passed to the adapter at setup time. */
 export interface ChannelSetup {
   /** Called when an inbound message arrives from the platform. */
@@ -170,7 +178,13 @@ export interface ChannelAdapter {
   deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined>;
 
   // Optional
-  setTyping?(platformId: string, threadId: string | null, hint?: string, items?: ActivityLine[]): Promise<void>;
+  setTyping?(
+    platformId: string,
+    threadId: string | null,
+    hint?: string,
+    items?: ActivityLine[],
+    metadata?: TypingMetadata,
+  ): Promise<void>;
   /** Explicit "stop typing" signal. Optional — most platforms expire the
    *  indicator on their own; the web channel uses this to avoid a client-side
    *  timeout. */

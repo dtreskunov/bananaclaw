@@ -13,16 +13,26 @@ vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
   return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-typing' };
 });
+vi.mock('../../container-config.js', () => ({ configFromDb: () => ({ model: 'openrouter/minimax/minimax-m3' }) }));
+vi.mock('../../db/agent-groups.js', () => ({ getAgentGroup: () => ({ id: 'ag-1' }) }));
+vi.mock('../../db/container-configs.js', () => ({ getContainerConfig: () => ({ agent_group_id: 'ag-1' }) }));
 
 import { setTypingAdapter, startTypingRefresh, stopTypingRefresh } from './index.js';
+import type { TypingMetadata } from '../../channels/adapter.js';
 
-type Call = { channelType: string; platformId: string; threadId: string | null; instance?: string };
+type Call = {
+  channelType: string;
+  platformId: string;
+  threadId: string | null;
+  instance?: string;
+  metadata?: TypingMetadata;
+};
 
 function captureAdapter() {
   const calls: Call[] = [];
   setTypingAdapter({
-    async setTyping(channelType, platformId, threadId, _hint, instance) {
-      calls.push({ channelType, platformId, threadId, instance });
+    async setTyping(channelType, platformId, threadId, _hint, instance, _items, metadata) {
+      calls.push({ channelType, platformId, threadId, instance, metadata });
     },
   });
   return calls;
@@ -48,6 +58,7 @@ describe('startTypingRefresh — instance forwarding', () => {
       platformId: 'slack:C1',
       threadId: null,
       instance: 'slack-tester',
+      metadata: { startedAt: expect.any(Number), model: 'openrouter/minimax/minimax-m3' },
     });
   });
 
@@ -55,6 +66,7 @@ describe('startTypingRefresh — instance forwarding', () => {
     const calls = captureAdapter();
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', 'T1', 'slack-tester');
     await vi.advanceTimersByTimeAsync(0);
+    const startedAt = calls[0].metadata?.startedAt;
     calls.length = 0;
 
     // Two 4s ticks — well inside the 15s grace window, so they fire
@@ -64,6 +76,7 @@ describe('startTypingRefresh — instance forwarding', () => {
     for (const c of calls) {
       expect(c.instance).toBe('slack-tester');
       expect(c.threadId).toBe('T1');
+      expect(c.metadata?.startedAt).toBe(startedAt);
     }
   });
 
@@ -71,13 +84,16 @@ describe('startTypingRefresh — instance forwarding', () => {
     const calls = captureAdapter();
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-tester');
     await vi.advanceTimersByTimeAsync(0);
+    const firstStartedAt = calls[0].metadata?.startedAt;
     calls.length = 0;
+    await vi.advanceTimersByTimeAsync(100);
 
     // Second call for the same session: immediate tick with the new value.
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-worker');
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toHaveLength(1);
     expect(calls[0].instance).toBe('slack-worker');
+    expect(calls[0].metadata?.startedAt).toBeGreaterThan(firstStartedAt!);
 
     // And the stored entry was updated — subsequent interval ticks carry it.
     calls.length = 0;
@@ -104,6 +120,7 @@ describe('startTypingRefresh — instance forwarding', () => {
       platformId: 'tg:99',
       threadId: null,
       instance: 'telegram',
+      metadata: { startedAt: expect.any(Number), model: 'openrouter/minimax/minimax-m3' },
     });
 
     // Interval ticks fire from the stored entry — all four fields must
@@ -117,6 +134,7 @@ describe('startTypingRefresh — instance forwarding', () => {
         platformId: 'tg:99',
         threadId: null,
         instance: 'telegram',
+        metadata: { startedAt: expect.any(Number), model: 'openrouter/minimax/minimax-m3' },
       });
     }
   });

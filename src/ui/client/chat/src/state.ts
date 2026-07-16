@@ -62,6 +62,8 @@ export const chatStatus: Signal<string> = signal('');
 export const chatLoading: Signal<boolean> = signal(false);
 export const isTyping: Signal<boolean> = signal(false);
 export const typingHint: Signal<string> = signal('');
+export const typingStartedAt: Signal<number | null> = signal<number | null>(null);
+export const typingModel: Signal<string> = signal('');
 // Ordered activity-trace lines (tool calls / progress steps) for the
 // in-flight turn. Accumulated from WS typing frames; cleared when the
 // turn ends or the response arrives.

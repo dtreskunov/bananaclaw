@@ -289,6 +289,10 @@ export interface WsPayload {
   /** reaction frame: unicode emoji (server already resolved the shortcode). */
   emoji?: string;
   hint?: string;
+  /** Stable host timestamp for the current turn, preserved across WS reconnects. */
+  startedAt?: number;
+  /** Effective configured model for the current turn. */
+  model?: string;
   /** Complete host-reduced activity snapshot for the current turn. */
   items?: ActivityLine[] | null;
   text?: string;

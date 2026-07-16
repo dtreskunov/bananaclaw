@@ -25,7 +25,7 @@ import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
 import { extractOutboundText, indexMessage } from './search-index.js';
 import { checkTurnEndedAndStop, flushActivity, setTypingAdapter } from './modules/typing/index.js';
-import type { ActivityLine, OutboundFile } from './channels/adapter.js';
+import type { ActivityLine, OutboundFile, TypingMetadata } from './channels/adapter.js';
 import type { Session } from './types.js';
 
 const ACTIVE_POLL_MS = 1000;
@@ -74,7 +74,7 @@ export interface ChannelDeliveryAdapter {
      *  Host-internal only — containers never see instance. */
     instance?: string,
   ): Promise<string | undefined>;
-  setTyping?(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string, items?: ActivityLine[]): Promise<void>;
+  setTyping?(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string, items?: ActivityLine[], metadata?: TypingMetadata): Promise<void>;
   clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
 }
 

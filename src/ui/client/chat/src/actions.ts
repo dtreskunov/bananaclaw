@@ -13,6 +13,8 @@ import {
   chatLoading,
   isTyping,
   typingHint,
+  typingStartedAt,
+  typingModel,
   activityLog,
   refs,
   treePath,
@@ -217,6 +219,11 @@ export function clearChat(): void {
     messagingGroupId.value = null;
     canSend.value = true;
     highlightMessageId.value = null;
+    isTyping.value = false;
+    typingHint.value = '';
+    typingStartedAt.value = null;
+    typingModel.value = '';
+    activityLog.value = [];
   });
   if (refs.ws) {
     try {
@@ -533,6 +540,8 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     canSend.value = ct === 'web' ? true : cs;
     isTyping.value = false;
     typingHint.value = '';
+    typingStartedAt.value = null;
+    typingModel.value = '';
     activityLog.value = [];
     if (resumeTid) {
       threadId.value = resumeTid;
@@ -683,6 +692,8 @@ function connectChatWs(): void {
     }
     isTyping.value = false;
     typingHint.value = '';
+    typingStartedAt.value = null;
+    typingModel.value = '';
     activityLog.value = [];
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
@@ -708,6 +719,8 @@ function connectChatWs(): void {
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || '';
       if (!payload.on) {
+        typingStartedAt.value = null;
+        typingModel.value = '';
         // Turn ended. This frame can arrive before the outbound response, so
         // stash the live trace and let the 'out' handler attach it to the
         // bubble; then clear the live log so the typing block unmounts clean.
@@ -717,6 +730,12 @@ function connectChatWs(): void {
         const changed = JSON.stringify(activityLog.value) !== JSON.stringify(payload.items);
         activityLog.value = payload.items;
         if (changed && payload.items.length) playProgressTick();
+      }
+      if (payload.on) {
+        if (typeof payload.startedAt === 'number' && Number.isFinite(payload.startedAt)) {
+          typingStartedAt.value = payload.startedAt;
+        }
+        if (typeof payload.model === 'string') typingModel.value = payload.model;
       }
       return;
     }
@@ -760,6 +779,8 @@ function connectChatWs(): void {
           // Also clear typing since the agent is now waiting for user input.
           isTyping.value = false;
           typingHint.value = '';
+          typingStartedAt.value = null;
+          typingModel.value = '';
           activityLog.value = [];
         } else {
           // Display cards keep fallbackText for notifications/degradation while

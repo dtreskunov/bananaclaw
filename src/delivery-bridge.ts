@@ -11,7 +11,7 @@
  * Lives in its own module (not inline in index.ts) so the split logic is
  * unit-testable without booting the whole host.
  */
-import type { ActivityLine, ChannelAdapter, OutboundFile } from './channels/adapter.js';
+import type { ActivityLine, ChannelAdapter, OutboundFile, TypingMetadata } from './channels/adapter.js';
 import { log } from './log.js';
 
 export interface DeliveryBridgeOptions {
@@ -54,9 +54,9 @@ export function createDeliveryBridge(opts: DeliveryBridgeOptions) {
       }
       return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files, id });
     },
-    async setTyping(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string, items?: ActivityLine[]): Promise<void> {
+    async setTyping(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string, items?: ActivityLine[], metadata?: TypingMetadata): Promise<void> {
       const adapter = getChannelAdapter(instance ?? channelType);
-      await adapter?.setTyping?.(platformId, threadId, hint, items);
+      await adapter?.setTyping?.(platformId, threadId, hint, items, metadata);
     },
     async clearTyping(channelType: string, platformId: string, threadId: string | null): Promise<void> {
       const adapter = getChannelAdapter(channelType);

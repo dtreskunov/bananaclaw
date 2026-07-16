@@ -1557,6 +1557,14 @@ nav.tab-bar-strip.group-strip {
   border-radius: var(--radius-lg);
   max-width: 78%;
 }
+.chat-main .typing .typing-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
 .chat-main .typing .typing-dots {
   display: inline-flex;
   align-items: center;
@@ -1588,6 +1596,12 @@ nav.tab-bar-strip.group-strip {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+.chat-main .typing .typing-meta {
+  font-size: var(--font-2xs);
+  color: var(--muted);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 .chat-main .typing .trace-toggle {
   flex: none;

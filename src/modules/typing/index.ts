@@ -22,6 +22,9 @@
  */
 import fs from 'fs';
 
+import { configFromDb } from '../../container-config.js';
+import { getAgentGroup } from '../../db/agent-groups.js';
+import { getContainerConfig } from '../../db/container-configs.js';
 import { getRunningSessions } from '../../db/sessions.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { log } from '../../log.js';
@@ -33,6 +36,7 @@ import {
   readSessionTurnEndedAt,
   type ActivityLine,
 } from '../../session-manager.js';
+import type { TypingMetadata } from '../../channels/adapter.js';
 
 const TYPING_REFRESH_MS = 4000;
 /**
@@ -58,6 +62,7 @@ interface TypingAdapter {
     hint?: string,
     instance?: string,
     items?: ActivityLine[],
+    metadata?: TypingMetadata,
   ): Promise<void>;
   clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
 }
@@ -71,6 +76,7 @@ interface TypingTarget {
   instance?: string;
   interval: NodeJS.Timeout;
   startedAt: number;
+  model?: string;
 }
 
 let adapter: TypingAdapter | null = null;
@@ -98,6 +104,7 @@ async function triggerTyping(
   platformId: string,
   threadId: string | null,
   startedAt: number,
+  model?: string,
   instance?: string,
 ): Promise<void> {
   // Gate the hint on the activity file's mtime: suppress a stale hint left
@@ -109,9 +116,20 @@ async function triggerTyping(
   const items = activitySnapshotHashes.get(sessionId) === hash ? undefined : snapshot;
   activitySnapshotHashes.set(sessionId, hash);
   try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, hint, instance, items);
+    await adapter?.setTyping?.(channelType, platformId, threadId, hint, instance, items, { startedAt, model });
   } catch {
     // Typing is best-effort — don't let it fail delivery or routing.
+  }
+}
+
+function configuredModel(agentGroupId: string): string | undefined {
+  try {
+    const group = getAgentGroup(agentGroupId);
+    const config = getContainerConfig(agentGroupId);
+    if (!group || !config) return undefined;
+    return configFromDb(config, group).model;
+  } catch {
+    return undefined;
   }
 }
 
@@ -148,8 +166,10 @@ export function startTypingRefresh(
     // the container-wake latency budget. Also clear any lingering
     // post-delivery pause: a new inbound means the user expects
     // typing to show immediately.
-    triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, Date.now(), instance).catch(() => {});
-    existing.startedAt = Date.now();
+    const startedAt = Date.now();
+    const model = configuredModel(agentGroupId);
+    existing.startedAt = startedAt;
+    existing.model = model;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
     // a different chat address (agent-shared sessions span messaging
     // groups, possibly on different platforms/instances), so the address
@@ -161,13 +181,17 @@ export function startTypingRefresh(
     existing.threadId = threadId;
     existing.instance = instance;
     activitySnapshotHashes.delete(sessionId);
+    triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, startedAt, model, instance).catch(
+      () => {},
+    );
     return;
   }
 
   activitySnapshotHashes.delete(sessionId);
   // Immediate tick + periodic refresh.
-  triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, Date.now(), instance).catch(() => {});
   const startedAt = Date.now();
+  const model = configuredModel(agentGroupId);
+  triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, startedAt, model, instance).catch(() => {});
   const interval = setInterval(() => {
     const entry = typingRefreshers.get(sessionId);
     if (!entry) return; // stopped externally since this tick was scheduled
@@ -187,6 +211,7 @@ export function startTypingRefresh(
         entry.platformId,
         entry.threadId,
         entry.startedAt,
+        entry.model,
         entry.instance,
       ).catch(() => {});
       return;
@@ -207,6 +232,7 @@ export function startTypingRefresh(
     instance,
     interval,
     startedAt,
+    model,
   });
 }
 
@@ -242,6 +268,7 @@ export function flushActivity(sessionId: string): void {
     entry.platformId,
     entry.threadId,
     entry.startedAt,
+    entry.model,
     entry.instance,
   ).catch(() => {});
 }

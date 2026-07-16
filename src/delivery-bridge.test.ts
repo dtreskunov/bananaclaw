@@ -105,7 +105,8 @@ describe('createDeliveryBridge', () => {
     const setTyping = vi.fn().mockResolvedValue(undefined);
     (adapter as unknown as { setTyping: typeof setTyping }).setTyping = setTyping;
     const bridge = createDeliveryBridge({ getChannelAdapter: () => adapter });
-    await bridge.setTyping('mock', 'plat-1', 'thread-1');
-    expect(setTyping).toHaveBeenCalledWith('plat-1', 'thread-1', undefined, undefined);
+    const metadata = { startedAt: 1234, model: 'configured-model' };
+    await bridge.setTyping('mock', 'plat-1', 'thread-1', 'Working', undefined, [], metadata);
+    expect(setTyping).toHaveBeenCalledWith('plat-1', 'thread-1', 'Working', [], metadata);
   });
 });

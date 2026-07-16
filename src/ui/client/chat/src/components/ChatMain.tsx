@@ -5,7 +5,7 @@ import { signal } from '@preact/signals';
 import type { JSX } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
-  chatMessages, chatStatus, chatLoading, isTyping, typingHint, activityLog, threadId, channelType, canSend, pending,
+  chatMessages, chatStatus, chatLoading, isTyping, typingHint, typingStartedAt, typingModel, activityLog, threadId, channelType, canSend, pending,
   threads, groupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions, respondingQuestionIds,
   highlightMessageId, searchQuery, voiceMode, isMobile, scrollToBottomTick,
@@ -205,7 +205,7 @@ function formatRecordingDuration(ms: number): string {
  *  truncated summary line (timestamp + summary). Expanded shows a rich
  *  prefix inline next to the timestamp; a tool step additionally renders its
  *  raw primary argument as a multi-line code block below, newlines intact. */
-function ActivityTraceRow({ line, open, live, onToggle }: { line: ActivityLine; open: boolean; live: boolean; onToggle: () => void }) {
+function ActivityTraceRow({ line, open, live, now, onToggle }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void }) {
   const parsedStep = parseStep(line.text);
   const step = !live && parsedStep.kind === 'tool' && (parsedStep.status === 'pending' || parsedStep.status === 'running')
     ? { ...parsedStep, status: 'completed' as const }
@@ -214,15 +214,8 @@ function ActivityTraceRow({ line, open, live, onToggle }: { line: ActivityLine; 
   const running = live && step.kind === 'tool' && step.status === 'running';
   const startedAt = Number(line.ts);
   const hasStartedAt = Number.isFinite(startedAt);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!open || !running || !hasStartedAt) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [open, running, hasStartedAt, line.ts]);
   const code = open ? stepBody(step) : null;
-  const elapsedMs = running && hasStartedAt ? Math.max(0, now - startedAt) : null;
+  const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
   const meta = open ? stepMeta(step, elapsedMs) : null;
   return (
     <li class={`trace-row${open ? ' open' : ''}`}>
@@ -250,14 +243,14 @@ function ActivityTraceRow({ line, open, live, onToggle }: { line: ActivityLine; 
  *  timestamp and, for a command step, the code body as a multi-line block.
  *  Single-open accordion. Shared by the persisted trace and the live typing
  *  bubble. */
-function ActivityTraceList({ lines, live = false }: { lines: ActivityLine[]; live?: boolean }) {
+function ActivityTraceList({ lines, live = false, now = null }: { lines: ActivityLine[]; live?: boolean; now?: number | null }) {
   const [sel, setSel] = useState<string | null>(null);
   const toggle = (id: string) => setSel((cur) => (cur === id ? null : id));
   return (
     <ul class="activity-trace">
       {lines.map((line, i) => {
         const id = parseStep(line.text).id || `activity-${i}`;
-        return <ActivityTraceRow key={id} line={line} open={id === sel} live={live} onToggle={() => toggle(id)} />;
+        return <ActivityTraceRow key={id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(id)} />;
       })}
     </ul>
   );
@@ -675,6 +668,51 @@ function TaskIndicator() {
   );
 }
 
+function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: boolean; onToggleTrace: () => void }) {
+  const stableStartedAt = typingStartedAt.value;
+  const fallbackStartedAt = useRef(Date.now());
+  const startedAt = stableStartedAt ?? fallbackStartedAt.current;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  const model = typingModel.value ? shortModel(typingModel.value) : '';
+  const metadata = [fmtDur(Math.max(0, now - startedAt)), model].filter(Boolean).join(' \u00b7 ');
+  const liveHeadline = latestActivityHeadline(activityLog.value);
+  return (
+    <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
+      <div class="typing-summary">
+        <div class="typing-dots">
+          <span></span><span></span><span></span>
+          {!traceExpanded && (liveHeadline || typingHint.value)
+            ? <span class="hint">{liveHeadline ? <StepHeadlineContent headline={liveHeadline} /> : typingHint.value}</span>
+            : null}
+          {activityLog.value.length
+            ? (
+              <button
+                type="button"
+                class="trace-toggle"
+                aria-expanded={traceExpanded}
+                aria-label={traceExpanded ? 'Hide activity' : 'Show activity'}
+                title={traceExpanded ? 'Hide activity' : 'Show activity'}
+                onClick={onToggleTrace}
+              >
+                <span class={`chevron${traceExpanded ? ' open' : ''}`}>{'\u203A'}</span>
+              </button>
+            )
+            : null}
+        </div>
+        <div class="typing-meta">{metadata}</div>
+      </div>
+      {traceExpanded && activityLog.value.length
+        ? <ActivityTraceList lines={activityLog.value} live now={now} />
+        : null}
+    </div>
+  );
+}
+
 function MessageLog() {
   const ref = useRef<HTMLDivElement | null>(null);
   const appliedHighlightRef = useRef<string | null>(null);
@@ -694,7 +732,6 @@ function MessageLog() {
   const scrollTick = scrollToBottomTick.value;
   // Subscribe to trace growth so the effect re-runs as steps stream in.
   const traceLen = activityLog.value.length;
-  const liveHeadline = latestActivityHeadline(activityLog.value);
 
   const scrollToBottom = () => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -775,33 +812,7 @@ function MessageLog() {
                   ? <EventsGroup key={i} events={g.events} />
                   : <Message key={i} m={g.m} />)}
       {typing
-        ? (
-          <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
-            <div class="typing-dots">
-              <span></span><span></span><span></span>
-              {!traceExpanded && (liveHeadline || typingHint.value)
-                ? <span class="hint">{liveHeadline ? <StepHeadlineContent headline={liveHeadline} /> : typingHint.value}</span>
-                : null}
-              {activityLog.value.length
-                ? (
-                  <button
-                    type="button"
-                    class="trace-toggle"
-                    aria-expanded={traceExpanded}
-                    aria-label={traceExpanded ? 'Hide activity' : 'Show activity'}
-                    title={traceExpanded ? 'Hide activity' : 'Show activity'}
-                    onClick={() => setTraceExpanded((v) => !v)}
-                  >
-                    <span class={`chevron${traceExpanded ? ' open' : ''}`}>{'\u203A'}</span>
-                  </button>
-                )
-                : null}
-            </div>
-            {traceExpanded && activityLog.value.length
-              ? <ActivityTraceList lines={activityLog.value} live />
-              : null}
-          </div>
-        )
+        ? <TypingIndicator traceExpanded={traceExpanded} onToggleTrace={() => setTraceExpanded((v) => !v)} />
         : null}
       <TaskIndicator />
     </div>

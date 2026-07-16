@@ -15539,6 +15539,8 @@ var chatStatus = y3("");
 var chatLoading = y3(false);
 var isTyping = y3(false);
 var typingHint = y3("");
+var typingStartedAt = y3(null);
+var typingModel = y3("");
 var activityLog = y3([]);
 var pending = y3([]);
 var searchQuery = y3("");
@@ -17596,6 +17598,11 @@ function clearChat() {
     messagingGroupId.value = null;
     canSend.value = true;
     highlightMessageId.value = null;
+    isTyping.value = false;
+    typingHint.value = "";
+    typingStartedAt.value = null;
+    typingModel.value = "";
+    activityLog.value = [];
   });
   if (refs.ws) {
     try {
@@ -17829,6 +17836,8 @@ async function openChat(gid, resumeTid, opts) {
     canSend.value = ct === "web" ? true : cs;
     isTyping.value = false;
     typingHint.value = "";
+    typingStartedAt.value = null;
+    typingModel.value = "";
     activityLog.value = [];
     if (resumeTid) {
       threadId.value = resumeTid;
@@ -17960,6 +17969,8 @@ function connectChatWs() {
     }
     isTyping.value = false;
     typingHint.value = "";
+    typingStartedAt.value = null;
+    typingModel.value = "";
     activityLog.value = [];
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
@@ -17985,12 +17996,20 @@ function connectChatWs() {
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || "";
       if (!payload.on) {
+        typingStartedAt.value = null;
+        typingModel.value = "";
         if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
         activityLog.value = [];
       } else if (payload.items !== null && payload.items !== void 0) {
         const changed = JSON.stringify(activityLog.value) !== JSON.stringify(payload.items);
         activityLog.value = payload.items;
         if (changed && payload.items.length) playProgressTick();
+      }
+      if (payload.on) {
+        if (typeof payload.startedAt === "number" && Number.isFinite(payload.startedAt)) {
+          typingStartedAt.value = payload.startedAt;
+        }
+        if (typeof payload.model === "string") typingModel.value = payload.model;
       }
       return;
     }
@@ -18030,6 +18049,8 @@ function connectChatWs() {
           }
           isTyping.value = false;
           typingHint.value = "";
+          typingStartedAt.value = null;
+          typingModel.value = "";
           activityLog.value = [];
         } else {
           const c5 = payload.content || {};
@@ -19977,22 +19998,15 @@ function formatRecordingDuration(ms) {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
-function ActivityTraceRow({ line, open, live, onToggle }) {
+function ActivityTraceRow({ line, open, live, now, onToggle }) {
   const parsedStep = parseStep(line.text);
   const step = !live && parsedStep.kind === "tool" && (parsedStep.status === "pending" || parsedStep.status === "running") ? { ...parsedStep, status: "completed" } : parsedStep;
   const headline = stepHeadline(step);
   const running = live && step.kind === "tool" && step.status === "running";
   const startedAt = Number(line.ts);
   const hasStartedAt = Number.isFinite(startedAt);
-  const [now, setNow] = h2(() => Date.now());
-  y2(() => {
-    if (!open || !running || !hasStartedAt) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1e3);
-    return () => window.clearInterval(timer);
-  }, [open, running, hasStartedAt, line.ts]);
   const code = open ? stepBody(step) : null;
-  const elapsedMs = running && hasStartedAt ? Math.max(0, now - startedAt) : null;
+  const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
   const meta = open ? stepMeta(step, elapsedMs) : null;
   return /* @__PURE__ */ u4("li", { class: `trace-row${open ? " open" : ""}`, children: [
     /* @__PURE__ */ u4(
@@ -20014,12 +20028,12 @@ function ActivityTraceRow({ line, open, live, onToggle }) {
     open && code != null ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: code }) }) : null
   ] });
 }
-function ActivityTraceList({ lines, live = false }) {
+function ActivityTraceList({ lines, live = false, now = null }) {
   const [sel, setSel] = h2(null);
   const toggle = (id) => setSel((cur) => cur === id ? null : id);
   return /* @__PURE__ */ u4("ul", { class: "activity-trace", children: lines.map((line, i5) => {
     const id = parseStep(line.text).id || `activity-${i5}`;
-    return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id === sel, live, onToggle: () => toggle(id) }, id);
+    return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id === sel, live, now, onToggle: () => toggle(id) }, id);
   }) });
 }
 function latestActivityHeadline(lines) {
@@ -20377,6 +20391,44 @@ function TaskIndicator() {
     );
   }) });
 }
+function TypingIndicator({ traceExpanded, onToggleTrace }) {
+  const stableStartedAt = typingStartedAt.value;
+  const fallbackStartedAt = A2(Date.now());
+  const startedAt = stableStartedAt ?? fallbackStartedAt.current;
+  const [now, setNow] = h2(() => Date.now());
+  y2(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1e3);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  const model = typingModel.value ? shortModel(typingModel.value) : "";
+  const metadata = [fmtDur(Math.max(0, now - startedAt)), model].filter(Boolean).join(" \xB7 ");
+  const liveHeadline = latestActivityHeadline(activityLog.value);
+  return /* @__PURE__ */ u4("div", { class: `typing${traceExpanded ? " expanded" : ""}`, "aria-live": "polite", children: [
+    /* @__PURE__ */ u4("div", { class: "typing-summary", children: [
+      /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
+        /* @__PURE__ */ u4("span", {}),
+        /* @__PURE__ */ u4("span", {}),
+        /* @__PURE__ */ u4("span", {}),
+        !traceExpanded && (liveHeadline || typingHint.value) ? /* @__PURE__ */ u4("span", { class: "hint", children: liveHeadline ? /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline }) : typingHint.value }) : null,
+        activityLog.value.length ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "trace-toggle",
+            "aria-expanded": traceExpanded,
+            "aria-label": traceExpanded ? "Hide activity" : "Show activity",
+            title: traceExpanded ? "Hide activity" : "Show activity",
+            onClick: onToggleTrace,
+            children: /* @__PURE__ */ u4("span", { class: `chevron${traceExpanded ? " open" : ""}`, children: "\u203A" })
+          }
+        ) : null
+      ] }),
+      /* @__PURE__ */ u4("div", { class: "typing-meta", children: metadata })
+    ] }),
+    traceExpanded && activityLog.value.length ? /* @__PURE__ */ u4(ActivityTraceList, { lines: activityLog.value, live: true, now }) : null
+  ] });
+}
 function MessageLog() {
   const ref = A2(null);
   const appliedHighlightRef = A2(null);
@@ -20392,7 +20444,6 @@ function MessageLog() {
   const typing = isTyping.value && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
   const traceLen = activityLog.value.length;
-  const liveHeadline = latestActivityHeadline(activityLog.value);
   const scrollToBottom = () => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   };
@@ -20443,27 +20494,7 @@ function MessageLog() {
   const groups2 = groupMessages(list);
   return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, onScroll: onLogScroll, children: [
     chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
-    typing ? /* @__PURE__ */ u4("div", { class: `typing${traceExpanded ? " expanded" : ""}`, "aria-live": "polite", children: [
-      /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
-        /* @__PURE__ */ u4("span", {}),
-        /* @__PURE__ */ u4("span", {}),
-        /* @__PURE__ */ u4("span", {}),
-        !traceExpanded && (liveHeadline || typingHint.value) ? /* @__PURE__ */ u4("span", { class: "hint", children: liveHeadline ? /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline }) : typingHint.value }) : null,
-        activityLog.value.length ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "trace-toggle",
-            "aria-expanded": traceExpanded,
-            "aria-label": traceExpanded ? "Hide activity" : "Show activity",
-            title: traceExpanded ? "Hide activity" : "Show activity",
-            onClick: () => setTraceExpanded((v5) => !v5),
-            children: /* @__PURE__ */ u4("span", { class: `chevron${traceExpanded ? " open" : ""}`, children: "\u203A" })
-          }
-        ) : null
-      ] }),
-      traceExpanded && activityLog.value.length ? /* @__PURE__ */ u4(ActivityTraceList, { lines: activityLog.value, live: true }) : null
-    ] }) : null,
+    typing ? /* @__PURE__ */ u4(TypingIndicator, { traceExpanded, onToggleTrace: () => setTraceExpanded((v5) => !v5) }) : null,
     /* @__PURE__ */ u4(TaskIndicator, {})
   ] });
 }
