@@ -17145,6 +17145,15 @@ async function applyHash(router2) {
   }
 }
 
+// src/history-url.ts
+function buildHistoryUrl(groupId2, threadId2, channelType2, messagingGroupId2) {
+  let url = `api/groups/${encodeURIComponent(groupId2)}/chat/${encodeURIComponent(threadId2)}/history`;
+  if (!messagingGroupId2) return url;
+  const params = new URLSearchParams({ channel: channelType2, mg: messagingGroupId2 });
+  url += "?" + params.toString();
+  return url;
+}
+
 // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
@@ -17689,18 +17698,10 @@ function mergeIncomingMessages(messages) {
   }
 }
 function historyUrl(gid, tid) {
-  let u5 = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/history`;
-  const params = new URLSearchParams();
   const t4 = threads.value.find((x6) => x6.threadId === tid);
   const ct = t4?.channelType || channelType.value;
   const mg = t4?.messagingGroupId || messagingGroupId.value;
-  if (mg && ct !== "web") {
-    params.set("channel", ct);
-    params.set("mg", mg);
-  }
-  const qs = params.toString();
-  if (qs) u5 += "?" + qs;
-  return u5;
+  return buildHistoryUrl(gid, tid, ct, mg);
 }
 function taskUrl(gid, tid, suffix = "") {
   let u5 = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/tasks${suffix}`;

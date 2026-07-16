@@ -43,6 +43,7 @@ import {
 } from './state';
 import { api, postJson } from './api';
 import { writeHash } from './hash';
+import { buildHistoryUrl } from './history-url';
 import { maybeNotify } from './notify';
 import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
@@ -353,20 +354,12 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
 }
 
 function historyUrl(gid: string, tid: string): string {
-  let u = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/history`;
-  const params = new URLSearchParams();
-  // For non-web threads, look up the thread to get its owning mg/channel
-  // so the server can resolve the correct session DB.
+  // Look up the thread's owning mg/channel so the server can resolve the
+  // correct session DB, including web threads visible to elevated users.
   const t = threads.value.find((x) => x.threadId === tid);
   const ct = t?.channelType || channelType.value;
   const mg = t?.messagingGroupId || messagingGroupId.value;
-  if (mg && ct !== 'web') {
-    params.set('channel', ct);
-    params.set('mg', mg);
-  }
-  const qs = params.toString();
-  if (qs) u += '?' + qs;
-  return u;
+  return buildHistoryUrl(gid, tid, ct, mg);
 }
 
 /**
