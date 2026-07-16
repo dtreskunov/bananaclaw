@@ -15,6 +15,13 @@ import { bumpUnread } from './badge';
 
 let registration: ServiceWorkerRegistration | null = null;
 let updatePromptShown = false;
+let updateReloadStarted = false;
+
+function reloadForUpdate(): void {
+  if (updateReloadStarted) return;
+  updateReloadStarted = true;
+  location.reload();
+}
 
 export function loadMuted(): boolean {
   try {
@@ -58,15 +65,11 @@ async function registerServiceWorker(): Promise<void> {
 }
 
 // Prompt the user to reload when a new SW version is waiting. The new
-// worker only takes control after the client posts SKIP_WAITING and we
-// observe a controllerchange (then reload).
+// worker only takes control after the client posts SKIP_WAITING; reload
+// when either the controller changes or that worker finishes activating.
 function watchForUpdates(reg: ServiceWorkerRegistration): void {
-  // Reload exactly once when control hands over to the new worker.
-  let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloading) return;
-    reloading = true;
-    location.reload();
+    reloadForUpdate();
   });
 
   const onNewWorker = (worker: ServiceWorker): void => {
@@ -94,8 +97,12 @@ function promptForUpdate(worker: ServiceWorker): void {
   showStickyToast('New version available', {
     label: 'Reload',
     onClick: () => {
+      const reloadWhenActivated = (): void => {
+        if (worker.state === 'activated') reloadForUpdate();
+      };
+      worker.addEventListener('statechange', reloadWhenActivated);
       worker.postMessage({ type: 'SKIP_WAITING' });
-      // controllerchange handler above will reload once the new worker takes over.
+      reloadWhenActivated();
     },
   });
 }

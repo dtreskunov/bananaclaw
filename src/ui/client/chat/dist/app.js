@@ -17239,6 +17239,12 @@ function bumpUnread() {
 // src/notify.ts
 var registration = null;
 var updatePromptShown = false;
+var updateReloadStarted = false;
+function reloadForUpdate() {
+  if (updateReloadStarted) return;
+  updateReloadStarted = true;
+  location.reload();
+}
 function loadMuted() {
   try {
     return localStorage.getItem(NOTIF_MUTE_KEY) === "1";
@@ -17276,11 +17282,8 @@ async function registerServiceWorker() {
   }
 }
 function watchForUpdates(reg) {
-  let reloading = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloading) return;
-    reloading = true;
-    location.reload();
+    reloadForUpdate();
   });
   const onNewWorker = (worker) => {
     worker.addEventListener("statechange", () => {
@@ -17302,7 +17305,12 @@ function promptForUpdate(worker) {
   showStickyToast("New version available", {
     label: "Reload",
     onClick: () => {
+      const reloadWhenActivated = () => {
+        if (worker.state === "activated") reloadForUpdate();
+      };
+      worker.addEventListener("statechange", reloadWhenActivated);
       worker.postMessage({ type: "SKIP_WAITING" });
+      reloadWhenActivated();
     }
   });
 }
