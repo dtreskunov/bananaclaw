@@ -17656,6 +17656,7 @@ function mergeIncomingMessages(messages) {
       id: m6.id,
       direction,
       text: m6.text,
+      ...m6.card ? { card: m6.card } : {},
       files: m6.files || null,
       ts,
       ...m6.usage ? { usage: m6.usage } : {},
@@ -17703,7 +17704,7 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-function appendMsg(direction, text, files, ts, id, activity) {
+function appendMsg(direction, text, files, ts, id, activity, card) {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
   if (key) refs.seenIds.add(key);
@@ -17711,6 +17712,7 @@ function appendMsg(direction, text, files, ts, id, activity) {
     id,
     direction,
     text,
+    ...card ? { card } : {},
     files: files || null,
     ts,
     ...activity && activity.length ? { activity } : {}
@@ -17743,6 +17745,7 @@ async function refetchThreadHistory(appendNewOnly) {
       id: m6.id,
       direction: normDirection(m6.direction),
       text: m6.text,
+      ...m6.card ? { card: m6.card } : {},
       files: m6.files || null,
       ts: m6.timestamp,
       ...m6.usage ? { usage: m6.usage } : {},
@@ -17764,6 +17767,7 @@ async function refetchThreadHistory(appendNewOnly) {
       id: m6.id,
       direction,
       text: m6.text,
+      ...m6.card ? { card: m6.card } : {},
       files: m6.files || null,
       ts,
       ...m6.usage ? { usage: m6.usage } : {},
@@ -17836,6 +17840,7 @@ async function openChat(gid, resumeTid, opts) {
             id: m6.id,
             direction: normDirection(m6.direction),
             text: m6.text,
+            ...m6.card ? { card: m6.card } : {},
             files: m6.files || null,
             ts: m6.timestamp,
             ...m6.usage ? { usage: m6.usage } : {},
@@ -18021,8 +18026,9 @@ function connectChatWs() {
         } else {
           const c5 = payload.content || {};
           const text2 = typeof c5 === "string" ? c5 : c5.fallbackText || "";
-          if (text2) {
-            appendMsg("out", text2, payload.files || [], payload.timestamp || "", payload.id);
+          if (payload.card || text2) {
+            const cardActivity = activityLog.value.length ? activityLog.value.slice() : null;
+            appendMsg("out", text2, payload.files || [], payload.timestamp || "", payload.id, cardActivity, payload.card);
             bumpActiveThread();
           }
         }
@@ -20101,6 +20107,7 @@ function Message({ m: m6 }) {
       }
     );
   }
+  if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card });
   const md = renderMarkdown(m6.text);
   const q5 = searchQuery.value;
   y2(() => {
@@ -20160,6 +20167,33 @@ function Message({ m: m6 }) {
       /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
       m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null
     ] }) : null
+  ] });
+}
+function DisplayCardMessage({ message, card }) {
+  return /* @__PURE__ */ u4("div", { class: "msg out display-card", "data-msg-id": message.id, children: [
+    card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
+    card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
+    card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
+    card.actions.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-actions", children: card.actions.map((action) => /* @__PURE__ */ u4(
+      "a",
+      {
+        class: `display-card-action display-card-action-${action.style || "default"}`,
+        href: action.url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        children: [
+          action.label,
+          /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: [
+            " ",
+            "\u2197"
+          ] })
+        ]
+      },
+      `${action.label}:${action.url}`
+    )) }) : null,
+    message.activity?.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: message.activity }) : null,
+    message.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
+    message.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: message.ts }) }) : null
   ] });
 }
 function groupMessages(list) {

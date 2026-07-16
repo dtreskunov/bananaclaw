@@ -306,7 +306,11 @@ describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
         type: 'card',
         card: {
           title: 'Docs',
-          actions: [{ label: 'Open', url: 'https://example.com' }, { label: 'No-link' }],
+          actions: [
+            { label: 'Open', url: 'https://example.com' },
+            { label: 'Unsafe', url: 'javascript:alert(1)' },
+            { label: 'No-link' },
+          ],
         },
       },
     });
@@ -319,6 +323,20 @@ describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
     expect(buttons).toHaveLength(1);
     expect(buttons[0].type).toBe('link-button');
     expect(buttons[0].url).toBe('https://example.com');
+  });
+
+  it('posts fallback text when no structured card content is valid', async () => {
+    const { calls, postMessage } = makePostCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+    });
+    await bridge.deliver('telegram:42', null, {
+      kind: 'chat-sdk',
+      content: { type: 'card', card: {}, fallbackText: 'Plain fallback' },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].message).toEqual({ markdown: 'Plain fallback' });
   });
 
   it('skips delivery when the card has neither title nor body content', async () => {

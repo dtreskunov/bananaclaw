@@ -50,6 +50,7 @@ function isElevated(userId: string): boolean {
 }
 import { log } from '../../../log.js';
 import { getChannelAdapter } from '../../../channels/channel-registry.js';
+import { normalizeDisplayCardPayload, type DisplayCard } from '../../../channels/display-card.js';
 import { shortcodeToEmoji } from './emoji.js';
 import { subscribeWeb, submitWebInbound, WEB_CHANNEL_TYPE, type WebSubscriber } from '../../../channels/web.js';
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from '../../../channels/homeassistant.js';
@@ -767,6 +768,8 @@ export interface HistoryMessage {
   id: string;
   timestamp: string;
   text: string;
+  /** Normalized fire-and-forget display card. `text` remains its fallback. */
+  card?: DisplayCard;
   files?: { filename: string; size: number; path?: string; url?: string; contentType?: string }[];
   usage?: TurnUsageDto;
   /** Persisted activity trace (tool calls / progress steps) for this turn,
@@ -965,7 +968,9 @@ export function readChatHistory(
             .all(target.channelType, threadId) as { id: string; timestamp: string; kind: string; content: string }[]);
 
       // Load turn_usage for all outbound messages in one query.
-      const outIds = rows.filter((r) => r.kind === 'chat' || r.kind === 'text').map((r) => r.id);
+      const outIds = rows
+        .filter((r) => r.kind === 'chat' || r.kind === 'text' || r.kind === 'chat-sdk')
+        .map((r) => r.id);
       const usageMap = new Map<string, TurnUsageDto>();
       if (outIds.length > 0) {
         try {
@@ -1055,14 +1060,18 @@ export function readChatHistory(
           // Durable ask_question rows render through the question lifecycle
           // returned by /sync. Adding a history bubble here duplicates the
           // card after reload. Fire-and-forget cards still need their fallback.
-          const text = chatSdkHistoryText(r.content);
-          if (text) {
+          const content = chatSdkHistoryContent(r.content);
+          if (content) {
+            const rawActivity = activityMap.get(r.id);
+            const activity = rawActivity ? reduceActivityLines(rawActivity) : undefined;
             messages.push({
               direction: 'out',
               id: r.id,
               timestamp: r.timestamp,
-              text,
+              text: content.text,
+              ...(content.card ? { card: content.card } : {}),
               files: undefined,
+              ...(activity && activity.length > 0 ? { activity } : {}),
             });
           }
           continue;
@@ -1186,12 +1195,16 @@ export function readChatHistory(
   return messages;
 }
 
-export function chatSdkHistoryText(content: string): string {
+export function chatSdkHistoryContent(content: string): { text: string; card?: DisplayCard } | null {
   try {
-    const parsed = JSON.parse(content) as { type?: string; fallbackText?: string };
-    return parsed.type === 'card' ? parsed.fallbackText || '' : '';
+    const normalized = normalizeDisplayCardPayload(JSON.parse(content));
+    if (!normalized || (!normalized.card && !normalized.fallbackText)) return null;
+    return {
+      text: normalized.fallbackText,
+      ...(normalized.card ? { card: normalized.card } : {}),
+    };
   } catch {
-    return '';
+    return null;
   }
 }
 
@@ -2785,6 +2798,7 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
               options: { label: string; selectedLabel: string; value: string }[];
             }
           | undefined;
+        let card: DisplayCard | undefined;
         if (message.kind === 'chat-sdk' && typeof message.content === 'object' && message.content) {
           const sdk = message.content as {
             type?: string;
@@ -2809,6 +2823,8 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
               responseMode: sdk.responseMode,
               options: sdk.options,
             };
+          } else {
+            card = normalizeDisplayCardPayload(message.content)?.card ?? undefined;
           }
         }
 
@@ -2818,6 +2834,7 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
             id: message.id,
             messageKind: message.kind,
             content: message.content,
+            card,
             files:
               message.files?.map((f, i) => ({
                 filename: f.filename,

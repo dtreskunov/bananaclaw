@@ -109,6 +109,19 @@ export interface TurnUsage {
   duration_ms?: number;
 }
 
+export interface DisplayCardAction {
+  label: string;
+  url: string;
+  style?: 'primary' | 'danger' | 'default';
+}
+
+export interface DisplayCard {
+  title: string;
+  description: string;
+  children: string[];
+  actions: DisplayCardAction[];
+}
+
 export interface ChatMessage {
   id?: string;
   direction: Direction;
@@ -116,6 +129,8 @@ export interface ChatMessage {
   files: ChatMessageFile[] | null;
   ts: string;
   usage?: TurnUsage;
+  /** Normalized fire-and-forget display card. `text` remains its fallback. */
+  card?: DisplayCard;
   /** Persisted activity trace for an outbound turn, in emit order. */
   activity?: ActivityLine[];
   /** Timeline event payload; present when direction === 'event'. */
@@ -277,7 +292,8 @@ export interface WsPayload {
   /** Complete host-reduced activity snapshot for the current turn. */
   items?: ActivityLine[] | null;
   text?: string;
-  content?: string | { text?: string; markdown?: string };
+  content?: string | { text?: string; markdown?: string; fallbackText?: string };
+  card?: DisplayCard;
   files?: ChatMessageFile[] | null;
   timestamp?: string;
   id?: string;

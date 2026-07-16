@@ -22,7 +22,7 @@ import { mergeQuestionTimeline } from '../question-timeline';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
-import type { ActivityLine, ChatMessage, PendingQuestionDto, TurnUsage } from '../types';
+import type { ActivityLine, ChatMessage, DisplayCard, PendingQuestionDto, TurnUsage } from '../types';
 
 const activeRecordingTarget = signal<string | null>(null);
 
@@ -369,6 +369,7 @@ function Message({ m }: { m: ChatMessage }) {
       />
     );
   }
+  if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
   const md = renderMarkdown(m.text);
   const q = searchQuery.value;
   useEffect(() => {
@@ -448,6 +449,42 @@ function Message({ m }: { m: ChatMessage }) {
         <RelativeTime ts={m.ts} />
         {m.usage && m.direction === 'out' ? <UsageMeta u={m.usage} /> : null}
       </div> : null}
+    </div>
+  );
+}
+
+function DisplayCardMessage({ message, card }: { message: ChatMessage; card: DisplayCard }) {
+  return (
+    <div class="msg out display-card" data-msg-id={message.id}>
+      {card.title ? <div class="display-card-title">{card.title}</div> : null}
+      {card.description ? <div class="display-card-description">{card.description}</div> : null}
+      {card.children.length > 0 ? (
+        <div class="display-card-blocks">
+          {card.children.map((child, index) => <div class="display-card-block" key={index}>{child}</div>)}
+        </div>
+      ) : null}
+      {card.actions.length > 0 ? (
+        <div class="display-card-actions">
+          {card.actions.map((action) => (
+            <a
+              class={`display-card-action display-card-action-${action.style || 'default'}`}
+              href={action.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              key={`${action.label}:${action.url}`}
+            >{action.label}<span aria-hidden="true"> {'\u2197'}</span></a>
+          ))}
+        </div>
+      ) : null}
+      {message.activity?.length ? <ActivityTrace lines={message.activity} /> : null}
+      {message.reactions?.length ? (
+        <div class="reactions">
+          {message.reactions.map((reaction, index) => (
+            <span class="reaction-chip" key={index} title={`Reacted ${reaction.emoji}`}>{reaction.emoji}</span>
+          ))}
+        </div>
+      ) : null}
+      {message.ts ? <div class="meta"><RelativeTime ts={message.ts} /></div> : null}
     </div>
   );
 }

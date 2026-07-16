@@ -24,6 +24,7 @@ import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
+import { normalizeDisplayCardPayload } from './display-card.js';
 
 /** Adapter with optional gateway support (e.g., Discord). */
 interface GatewayAdapter extends Adapter {
@@ -462,53 +463,36 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // Display card (send_card MCP tool) — returns immediately, no callback flow.
       // Non-URL actions are dropped: send_card's contract is fire-and-forget, so a
       // callback button would have nowhere to land. URL actions render as link buttons.
-      if (content.type === 'card' && content.card && typeof content.card === 'object') {
-        const cardSpec = content.card as Record<string, unknown>;
-        const title = (cardSpec.title as string) || '';
-        const fallbackText = (content.fallbackText as string) || (cardSpec.description as string) || title || '';
-
-        const cardChildren: CardChild[] = [];
-        if (typeof cardSpec.description === 'string' && cardSpec.description) {
-          cardChildren.push(CardText(cardSpec.description));
-        }
-        if (Array.isArray(cardSpec.children)) {
-          for (const child of cardSpec.children) {
-            if (typeof child === 'string' && child) {
-              cardChildren.push(CardText(child));
-            } else if (
-              child &&
-              typeof child === 'object' &&
-              typeof (child as Record<string, unknown>).text === 'string'
-            ) {
-              cardChildren.push(CardText((child as Record<string, string>).text));
-            }
+      const displayCard = normalizeDisplayCardPayload(content);
+      if (displayCard) {
+        if (!displayCard.card) {
+          if (!displayCard.fallbackText) {
+            log.warn('send_card payload empty, skipping delivery');
+            return;
           }
+          const result = await adapter.postMessage(tid, { markdown: displayCard.fallbackText });
+          return result?.id;
         }
-        if (Array.isArray(cardSpec.actions)) {
-          const linkButtons = (cardSpec.actions as Array<Record<string, unknown>>)
-            .filter((a) => typeof a.url === 'string' && a.url && typeof a.label === 'string' && a.label)
-            .map((a) => {
-              const style = a.style;
-              const safeStyle: 'primary' | 'danger' | 'default' | undefined =
-                style === 'primary' || style === 'danger' || style === 'default' ? style : undefined;
-              return LinkButton({
-                label: a.label as string,
-                url: a.url as string,
-                style: safeStyle,
-              });
-            });
+
+        const cardChildren: CardChild[] = [
+          ...(displayCard.card.description ? [CardText(displayCard.card.description)] : []),
+          ...displayCard.card.children.map((child) => CardText(child)),
+        ];
+        if (displayCard.card.actions.length > 0) {
+          const linkButtons = displayCard.card.actions.map((action) =>
+            LinkButton({
+              label: action.label,
+              url: action.url,
+              style: action.style,
+            }),
+          );
           if (linkButtons.length > 0) {
             cardChildren.push(Actions(linkButtons));
           }
         }
 
-        if (cardChildren.length === 0 && !title) {
-          log.warn('send_card payload empty, skipping delivery');
-          return;
-        }
-
-        const card = Card({ title, children: cardChildren });
-        const result = await adapter.postMessage(tid, { card, fallbackText });
+        const card = Card({ title: displayCard.card.title, children: cardChildren });
+        const result = await adapter.postMessage(tid, { card, fallbackText: displayCard.fallbackText });
         return result?.id;
       }
 

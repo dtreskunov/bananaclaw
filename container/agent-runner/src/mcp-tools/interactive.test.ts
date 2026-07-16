@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { closeSessionDb, getInboundDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
-import { askUserQuestion } from './interactive.js';
+import { askUserQuestion, sendCard } from './interactive.js';
 
 describe('ask_user_question', () => {
   beforeEach(() => {
@@ -62,5 +62,18 @@ describe('ask_user_question', () => {
       responseMode: 'choice_or_text',
       options: [{ label: 'Production', selectedLabel: 'Production', value: 'prod' }],
     });
+  });
+
+  it('declares the constrained display-card schema', () => {
+    const properties = sendCard.tool.inputSchema.properties as Record<string, unknown>;
+    const card = properties.card as {
+      properties: Record<string, { items?: { properties?: Record<string, unknown> } }>;
+    };
+    expect(Object.keys(card.properties)).toEqual(['title', 'description', 'children', 'actions']);
+    expect(card.properties.actions.items?.properties).toEqual(expect.objectContaining({
+      label: expect.any(Object),
+      url: expect.any(Object),
+      style: expect.objectContaining({ enum: ['primary', 'danger', 'default'] }),
+    }));
   });
 });

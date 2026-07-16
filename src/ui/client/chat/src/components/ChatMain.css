@@ -474,6 +474,18 @@
 .chat-main .question-card-btn:hover:not(:disabled) { background: var(--accent, #6366f1); color: #fff; }
 .chat-main .question-card-btn:disabled { opacity: 0.5; cursor: default; }
 
+/* Fire-and-forget display cards use a constrained, channel-parity schema. */
+.chat-main .display-card { border: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; min-width: min(260px, 78%); white-space: normal; }
+.chat-main .display-card-title { font-size: var(--font-base); font-weight: 700; color: var(--fg); }
+.chat-main .display-card-description { color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-main .display-card-blocks { display: flex; flex-direction: column; gap: 5px; border-top: 1px solid var(--border); padding-top: 8px; }
+.chat-main .display-card-block { color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-main .display-card-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 2px; }
+.chat-main .display-card-action { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 4px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); color: var(--fg); background: var(--bg); font-size: var(--font-sm); font-weight: 600; text-decoration: none; }
+.chat-main .display-card-action:hover { background: var(--wash-strong); }
+.chat-main .display-card-action-primary { border-color: var(--accent-strong, var(--accent)); background: var(--accent); }
+.chat-main .display-card-action-danger { border-color: var(--reject); color: var(--reject); }
+
 /* Quick Capture — in-page camera modal */
 .qcap-backdrop {
   position: fixed; inset: 0; z-index: 1000;

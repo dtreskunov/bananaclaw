@@ -168,7 +168,38 @@ export const sendCard: McpToolDefinition = {
       properties: {
         card: {
           type: 'object',
-          description: 'Card structure with title, description, and optional children/actions',
+          description: 'Display card with text content and optional URL actions',
+          properties: {
+            title: { type: 'string', description: 'Compact card heading' },
+            description: { type: 'string', description: 'Primary card body text' },
+            children: {
+              type: 'array',
+              description: 'Additional text blocks',
+              items: {
+                oneOf: [
+                  { type: 'string' },
+                  {
+                    type: 'object',
+                    properties: { text: { type: 'string' } },
+                    required: ['text'],
+                  },
+                ],
+              },
+            },
+            actions: {
+              type: 'array',
+              description: 'Links displayed as buttons; callback actions are not supported',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  url: { type: 'string', description: 'Absolute http, https, or mailto URL' },
+                  style: { type: 'string', enum: ['primary', 'danger', 'default'] },
+                },
+                required: ['label', 'url'],
+              },
+            },
+          },
         },
         fallbackText: { type: 'string', description: 'Text fallback for platforms without card support' },
       },

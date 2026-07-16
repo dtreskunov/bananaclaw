@@ -50,6 +50,7 @@ import type {
   Direction,
   ChatMessage,
   ChatMessageFile,
+  DisplayCard,
   TreeEntry,
   PreviewBlock,
   PendingFile,
@@ -63,6 +64,7 @@ interface ServerMessage {
   id?: string;
   direction: string;
   text: string;
+  card?: DisplayCard;
   files?: ChatMessageFile[] | null;
   timestamp: string;
   usage?: import('./types').TurnUsage;
@@ -325,6 +327,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       id: m.id,
       direction,
       text: m.text,
+      ...(m.card ? { card: m.card } : {}),
       files: m.files || null,
       ts,
       ...(m.usage ? { usage: m.usage } : {}),
@@ -391,6 +394,7 @@ function appendMsg(
   ts: string,
   id?: string,
   activity?: import('./types').ActivityLine[] | null,
+  card?: DisplayCard,
 ): void {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
@@ -399,6 +403,7 @@ function appendMsg(
     id,
     direction,
     text,
+    ...(card ? { card } : {}),
     files: files || null,
     ts,
     ...(activity && activity.length ? { activity } : {}),
@@ -441,6 +446,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       id: m.id,
       direction: normDirection(m.direction),
       text: m.text,
+      ...(m.card ? { card: m.card } : {}),
       files: m.files || null,
       ts: m.timestamp,
       ...(m.usage ? { usage: m.usage } : {}),
@@ -462,6 +468,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       id: m.id,
       direction,
       text: m.text,
+      ...(m.card ? { card: m.card } : {}),
       files: m.files || null,
       ts,
       ...(m.usage ? { usage: m.usage } : {}),
@@ -546,6 +553,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
             id: m.id,
             direction: normDirection(m.direction),
             text: m.text,
+            ...(m.card ? { card: m.card } : {}),
             files: m.files || null,
             ts: m.timestamp,
             ...(m.usage ? { usage: m.usage } : {}),
@@ -754,11 +762,21 @@ function connectChatWs(): void {
           typingHint.value = '';
           activityLog.value = [];
         } else {
-          // send_card or unknown chat-sdk — render fallbackText as bubble.
+          // Display cards keep fallbackText for notifications/degradation while
+          // rendering their normalized structure when the server supplied it.
           const c = payload.content || {};
           const text = typeof c === 'string' ? c : (c as { fallbackText?: string }).fallbackText || '';
-          if (text) {
-            appendMsg('out', text, payload.files || [], payload.timestamp || '', payload.id);
+          if (payload.card || text) {
+            const cardActivity = activityLog.value.length ? activityLog.value.slice() : null;
+            appendMsg(
+              'out',
+              text,
+              payload.files || [],
+              payload.timestamp || '',
+              payload.id,
+              cardActivity,
+              payload.card,
+            );
             bumpActiveThread();
           }
         }
