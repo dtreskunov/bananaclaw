@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
+// node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
+  "node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
+// node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
+  "node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
+// node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
+// node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
+// node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
+// node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
+// node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
+// node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
+// node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
+// node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
+// node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
+// node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
+// node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
+// node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
+// node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
+// node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
+// node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
+// node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
+// node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
+// node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
+// node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
+// node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
+// node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
+// node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
+// node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
+// node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
+// node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
+// node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
+// node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
+// node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
+// node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
+// node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
+// node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
+// node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
+// node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
+// node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
+// node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
+// node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
+// node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
+  "node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
+// node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
+// node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14878,7 +14878,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
+// node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15269,7 +15269,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
+// node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -15624,7 +15624,7 @@ var BRAND = {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
+// node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -17143,7 +17143,7 @@ async function applyHash(router2) {
   }
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -18028,7 +18028,15 @@ function connectChatWs() {
           const text2 = typeof c5 === "string" ? c5 : c5.fallbackText || "";
           if (payload.card || text2) {
             const cardActivity = activityLog.value.length ? activityLog.value.slice() : null;
-            appendMsg("out", text2, payload.files || [], payload.timestamp || "", payload.id, cardActivity, payload.card);
+            appendMsg(
+              "out",
+              text2,
+              payload.files || [],
+              payload.timestamp || "",
+              payload.id,
+              cardActivity,
+              payload.card
+            );
             bumpActiveThread();
           }
         }
@@ -18214,6 +18222,11 @@ async function navFile(entry) {
   await selectFile(entry);
   writeHash();
 }
+var filePreviewRevision = 0;
+function refreshableFileUrl(url) {
+  filePreviewRevision += 1;
+  return `${url}${url.includes("?") ? "&" : "?"}preview=${filePreviewRevision}`;
+}
 async function selectFile(entry) {
   filePath.value = entry.path;
   if (!groupId.value) return;
@@ -18222,7 +18235,7 @@ async function selectFile(entry) {
   let size = entry.size;
   let mtime = entry.mtime;
   try {
-    const h5 = await fetch(url, { method: "HEAD", credentials: "same-origin" });
+    const h5 = await fetch(url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
     if (h5.status >= 400) {
       const msg = h5.status === 404 ? "File not found. It may have been renamed or deleted." : `HTTP ${h5.status}`;
       previewBlock.value = { kind: "error", text: msg, name: entry.name, url };
@@ -18243,14 +18256,16 @@ async function selectFile(entry) {
   }
   const ext = entry.name.toLowerCase().split(".").pop() || "";
   const meta = { name: entry.name, size: size ?? null, mtime: mtime ?? null, url, path: entry.path };
-  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) previewBlock.value = { kind: "image", ...meta };
+  const refreshableMeta = () => ({ ...meta, url: refreshableFileUrl(url) });
+  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) previewBlock.value = { kind: "image", ...refreshableMeta() };
   else if (["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"].includes(ext))
-    previewBlock.value = { kind: "audio", ...meta };
-  else if (["mp4", "m4v", "mov", "webm", "ogv"].includes(ext)) previewBlock.value = { kind: "video", ...meta };
-  else if (ext === "pdf") previewBlock.value = { kind: "pdf", ...meta };
+    previewBlock.value = { kind: "audio", ...refreshableMeta() };
+  else if (["mp4", "m4v", "mov", "webm", "ogv"].includes(ext))
+    previewBlock.value = { kind: "video", ...refreshableMeta() };
+  else if (ext === "pdf") previewBlock.value = { kind: "pdf", ...refreshableMeta() };
   else {
     try {
-      const r4 = await fetch(url, { credentials: "same-origin" });
+      const r4 = await fetch(url, { credentials: "same-origin", cache: "no-store" });
       if (!r4.ok) {
         previewBlock.value = { kind: "error", text: `HTTP ${r4.status}`, ...meta };
         return;
@@ -21640,7 +21655,7 @@ function formatTime(s5) {
   return `${m6}:${String(sec).padStart(2, "0")}`;
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
+// node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 
@@ -23196,7 +23211,7 @@ function TaskPanel() {
   ] }) });
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
+// node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;

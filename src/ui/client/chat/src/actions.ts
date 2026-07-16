@@ -1013,6 +1013,13 @@ export async function navFile(entry: Pick<TreeEntry, 'path' | 'name'> & Partial<
   writeHash();
 }
 
+let filePreviewRevision = 0;
+
+function refreshableFileUrl(url: string): string {
+  filePreviewRevision += 1;
+  return `${url}${url.includes('?') ? '&' : '?'}preview=${filePreviewRevision}`;
+}
+
 export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Partial<TreeEntry>): Promise<void> {
   filePath.value = entry.path;
   if (!groupId.value) return;
@@ -1024,7 +1031,7 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
   let size = entry.size;
   let mtime = entry.mtime;
   try {
-    const h = await fetch(url, { method: 'HEAD', credentials: 'same-origin' });
+    const h = await fetch(url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' });
     if (h.status >= 400) {
       const msg = h.status === 404 ? 'File not found. It may have been renamed or deleted.' : `HTTP ${h.status}`;
       previewBlock.value = { kind: 'error', text: msg, name: entry.name, url };
@@ -1046,14 +1053,16 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
   }
   const ext = entry.name.toLowerCase().split('.').pop() || '';
   const meta = { name: entry.name, size: size ?? null, mtime: mtime ?? null, url, path: entry.path };
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) previewBlock.value = { kind: 'image', ...meta };
+  const refreshableMeta = (): typeof meta => ({ ...meta, url: refreshableFileUrl(url) });
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) previewBlock.value = { kind: 'image', ...refreshableMeta() };
   else if (['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'weba'].includes(ext))
-    previewBlock.value = { kind: 'audio', ...meta };
-  else if (['mp4', 'm4v', 'mov', 'webm', 'ogv'].includes(ext)) previewBlock.value = { kind: 'video', ...meta };
-  else if (ext === 'pdf') previewBlock.value = { kind: 'pdf', ...meta };
+    previewBlock.value = { kind: 'audio', ...refreshableMeta() };
+  else if (['mp4', 'm4v', 'mov', 'webm', 'ogv'].includes(ext))
+    previewBlock.value = { kind: 'video', ...refreshableMeta() };
+  else if (ext === 'pdf') previewBlock.value = { kind: 'pdf', ...refreshableMeta() };
   else {
     try {
-      const r = await fetch(url, { credentials: 'same-origin' });
+      const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
       if (!r.ok) {
         previewBlock.value = { kind: 'error', text: `HTTP ${r.status}`, ...meta };
         return;
