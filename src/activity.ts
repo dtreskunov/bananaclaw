@@ -88,39 +88,35 @@ const FILE_OP_VERBS: Record<string, { present: string; past: string }> = {
   edit: { present: 'Editing', past: 'Edited' },
 };
 
+const COMMAND_TOOLS = new Set(['bash', 'shell', 'run', 'run_in_terminal']);
+
 /** Canonical plain-text primary label used by typing hints. */
 export function activityLabel(step: ActivityStep): string {
   switch (step.kind) {
       case 'tool': {
-        // File-operation tools (read/write/edit) carry the path but no verb;
-        // make the operation explicit so a read is distinguishable from a write.
-        const fileOp = FILE_OP_VERBS[(step.tool || '').toLowerCase()];
+        const toolName = (step.tool || '').toLowerCase();
+        const finished = step.status === 'completed' || step.status === 'error';
+        const fileOp = FILE_OP_VERBS[toolName];
         if (fileOp) {
-          const target = step.title || step.detail || '';
+          const target = step.detail || step.title || '';
           const suffix = target ? ` ${target}` : '';
-          if (step.status === 'error') return `${fileOp.past}${suffix} ✕`;
-          if (step.status === 'completed') return `${fileOp.past}${suffix} ✓`;
-          return `${fileOp.present}${suffix}…`;
+          return `${finished ? fileOp.past : fileOp.present}${suffix}`;
         }
-        // A provider-supplied title (e.g. "Loaded skill: agent-browser") is
-        // far more descriptive than the bare tool name ("skill"), so prefer it
-        // for the label; fall back to the verb + tool-name form otherwise.
+        if (COMMAND_TOOLS.has(toolName) && step.detail) {
+          return `${finished ? 'Ran' : 'Running'} ${step.detail.replace(/\s+/g, ' ').trim()}`;
+        }
         if (step.title) {
-          if (step.status === 'error') return `${step.title} ✕`;
-          if (step.status === 'completed') return `${step.title} ✓`;
-          return `${step.title}…`;
+          return step.title;
         }
         const tool = cleanToolName(step.tool);
-        if (step.status === 'error') return `Used ${tool} ✕`;
-        if (step.status === 'completed') return `Used ${tool} ✓`;
-        return `Using ${tool}…`;
+        return `${finished ? 'Used' : 'Using'} ${tool}`;
       }
-      case 'internal': return 'Internal…';
-      case 'file': return `Opened ${step.name || step.path || 'a file'}`;
+      case 'internal': return 'Internal activity';
+      case 'file': return `Opened ${step.name || step.path || 'file'}`;
       case 'patch': return `Updated ${step.files.length === 1 ? step.files[0] : `${step.files.length} files`}`;
-      case 'retry': return `Retrying (attempt ${step.attempt})…`;
-      case 'compaction': return 'Compacting context…';
-      case 'subtask': return step.description || (step.agent ? `Running ${step.agent} subtask…` : 'Running subtask…');
+      case 'retry': return `Retrying attempt ${step.attempt}`;
+      case 'compaction': return step.auto ? 'Compacted context automatically' : 'Compacted context';
+      case 'subtask': return step.agent ? `Started subtask with ${step.agent}` : step.description || 'Started subtask';
       case 'notification': return step.text;
   }
 }

@@ -114,7 +114,7 @@ export async function startRecording(transcribe: boolean): Promise<boolean> {
   recordingDuration.value = 0;
   durationTimer = setInterval(() => {
     recordingDuration.value = Date.now() - startTime;
-  }, 200);
+  }, 1000);
 
   // Optional speech recognition
   if (transcribe && hasSpeechRecognition()) {

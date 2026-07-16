@@ -50,24 +50,24 @@ describe('activityHint', () => {
     expect(activityHint([
       line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running' }),
       line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
-    ])).toBe('Used bash ✓');
+    ])).toBe('Used bash');
     expect(activityHint([
       line('1', { kind: 'internal', id: 'i1', text: 'Checking constraints' }),
-    ])).toBe('Internal…');
+    ])).toBe('Internal activity');
   });
 
   it('uses the same success and error labels shown in trace rows', () => {
     expect(activityHint([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'running' })]))
-      .toBe('Using bash…');
+      .toBe('Using bash');
     expect(activityHint([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'error' })]))
-      .toBe('Used bash ✕');
+      .toBe('Used bash');
   });
 
   it('prefers a provider tool title over the bare tool name', () => {
     expect(activityHint([
       line('1', { kind: 'tool', id: 'a', tool: 'skill', status: 'running' }),
       line('2', { kind: 'tool', id: 'a', tool: 'skill', status: 'completed', title: 'Loaded skill: agent-browser' }),
-    ])).toBe('Loaded skill: agent-browser ✓');
+    ])).toBe('Loaded skill: agent-browser');
   });
 
   it('shows the operation verb for file tools (read/write/edit)', () => {
@@ -75,11 +75,18 @@ describe('activityHint', () => {
     expect(activityHint([
       line('1', { kind: 'tool', id: 'a', tool: 'write', status: 'running', detail: '/workspace/agent/notes.md' }),
       line('2', { kind: 'tool', id: 'a', tool: 'write', status: 'completed', detail: '/workspace/agent/notes.md', title: 'workspace/agent/notes.md' }),
-    ])).toBe('Wrote workspace/agent/notes.md ✓');
+    ])).toBe('Wrote /workspace/agent/notes.md');
     // Claude-style: no title, path comes from detail.
     expect(activityHint([line('1', { kind: 'tool', id: 'b', tool: 'Read', status: 'running', detail: '/workspace/agent/notes.md' })]))
-      .toBe('Reading /workspace/agent/notes.md…');
+      .toBe('Reading /workspace/agent/notes.md');
     expect(activityHint([line('1', { kind: 'tool', id: 'c', tool: 'Edit', status: 'error', detail: '/workspace/agent/notes.md' })]))
-      .toBe('Edited /workspace/agent/notes.md ✕');
+      .toBe('Edited /workspace/agent/notes.md');
+  });
+
+  it('uses status-aware command labels and collapses command whitespace', () => {
+    expect(activityHint([line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running', detail: 'pnpm test\n--runInBand' })]))
+      .toBe('Running pnpm test --runInBand');
+    expect(activityHint([line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed', detail: 'pnpm test' })]))
+      .toBe('Ran pnpm test');
   });
 });

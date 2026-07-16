@@ -1729,6 +1729,13 @@ nav.tab-bar-strip.group-strip {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.chat-main .trace-subject {
+  padding: 0 4px;
+  background: rgba(127, 127, 127, 0.15);
+  border-radius: var(--radius-sm, 4px);
+  font-family: var(--font-mono, monospace);
+  font-size: inherit;
+}
 .chat-main .activity-trace .trace-meta {
   margin: 0 0 0 17px;
   color: var(--muted);

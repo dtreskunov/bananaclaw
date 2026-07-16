@@ -89,46 +89,77 @@ const FILE_OP_VERBS: Record<string, { present: string; past: string }> = {
   edit: { present: 'Editing', past: 'Edited' },
 };
 
-function stepPhrase(s: TraceStep): string {
+const COMMAND_TOOLS = new Set(['bash', 'shell', 'run', 'run_in_terminal']);
+
+interface StepHeadline {
+  action: string;
+  subject?: string;
+  codeSubject?: boolean;
+}
+
+function singleLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function stepHeadline(s: TraceStep): StepHeadline {
   switch (s.kind) {
     case 'tool': {
-      // File-operation tools (read/write/edit) carry the path but no verb;
-      // make the operation explicit so a read is distinguishable from a write.
-      const fileOp = FILE_OP_VERBS[(s.tool || '').toLowerCase()];
+      const tool = (s.tool || '').toLowerCase();
+      const finished = s.status === 'completed' || s.status === 'error';
+      const fileOp = FILE_OP_VERBS[tool];
       if (fileOp) {
-        const target = s.title || s.detail || '';
-        const suffix = target ? ` ${target}` : '';
-        if (s.status === 'error') return `${fileOp.past}${suffix} ✕`;
-        if (s.status === 'completed') return `${fileOp.past}${suffix} ✓`;
-        return `${fileOp.present}${suffix}…`;
+        const target = s.detail || s.title || '';
+        return {
+          action: finished ? fileOp.past : fileOp.present,
+          ...(target ? { subject: singleLine(target), codeSubject: true } : {}),
+        };
       }
-      // Prefer a provider-supplied title (e.g. "Loaded skill: agent-browser")
-      // over the bare tool name ("skill"), which is often uninformative.
+      if (COMMAND_TOOLS.has(tool) && s.detail) {
+        return { action: finished ? 'Ran' : 'Running', subject: singleLine(s.detail), codeSubject: true };
+      }
       if (s.title) {
-        if (s.status === 'error') return `${s.title} ✕`;
-        if (s.status === 'completed') return `${s.title} ✓`;
-        return `${s.title}…`;
+        return { action: s.title };
       }
-      const label = cleanToolName(s.tool || 'tool');
-      if (s.status === 'error') return `Used ${label} ✕`;
-      if (s.status === 'completed') return `Used ${label} ✓`;
-      return `Using ${label}…`;
+      return {
+        action: finished ? 'Used' : 'Using',
+        subject: cleanToolName(s.tool || 'tool'),
+        codeSubject: true,
+      };
     }
-    case 'internal': return 'Internal…';
-    case 'file': return `Opened ${s.name || s.path || 'file'}`;
-    case 'patch': return `Updated ${(s.files || []).length === 1 ? s.files![0] : `${(s.files || []).length} files`}`;
-    case 'retry': return `Retry attempt ${s.attempt ?? 0}`;
-    case 'compaction': return s.auto ? 'Compacted context automatically' : 'Compacted context';
-    case 'subtask': return s.description || (s.agent ? `${s.agent} subtask` : 'Subtask');
-    case 'notification': return s.text || 'Notification';
-    default: return '';
+    case 'internal': return { action: 'Internal activity' };
+    case 'file': return { action: 'Opened', subject: s.name || s.path || 'file', codeSubject: true };
+    case 'patch': {
+      const files = s.files || [];
+      return files.length === 1
+        ? { action: 'Updated', subject: files[0], codeSubject: true }
+        : { action: 'Updated', subject: `${files.length} files` };
+    }
+    case 'retry': return { action: 'Retrying', subject: `attempt ${s.attempt ?? 0}` };
+    case 'compaction': return { action: s.auto ? 'Compacted context automatically' : 'Compacted context' };
+    case 'subtask': return s.agent
+      ? { action: 'Started subtask with', subject: s.agent, codeSubject: true }
+      : { action: s.description || 'Started subtask' };
+    case 'notification': return { action: s.text || 'Notification' };
+    default: return { action: '' };
   }
 }
 
 /** One-line collapsed summary for a step (whitespace-collapsed so a
  *  multi-line command still fits one truncated row). */
 function stepSummary(s: TraceStep): string {
-  return stepPhrase(s);
+  const headline = stepHeadline(s);
+  return [headline.action, headline.subject].filter(Boolean).join(' ');
+}
+
+function StepHeadlineContent({ headline }: { headline: StepHeadline }) {
+  return (
+    <>
+      {headline.action}
+      {headline.subject
+        ? <>{' '}{headline.codeSubject ? <code class="trace-subject">{headline.subject}</code> : headline.subject}</>
+        : null}
+    </>
+  );
 }
 
 function stepBody(s: TraceStep): string | null {
@@ -140,7 +171,7 @@ function stepBody(s: TraceStep): string | null {
   return null;
 }
 
-function toolMeta(s: TraceStep): string | null {
+function stepMeta(s: TraceStep, elapsedMs: number | null): string | null {
   if (s.kind !== 'tool') return null;
   const status = s.status === 'error'
     ? 'Failed'
@@ -149,7 +180,13 @@ function toolMeta(s: TraceStep): string | null {
       : s.status === 'running'
         ? 'Running'
         : 'Pending';
-  return `${status}${typeof s.durationMs === 'number' ? ` · ${formatDuration(s.durationMs)}` : ''}`;
+  const duration = s.status === 'running' ? elapsedMs : s.durationMs;
+  const formattedDuration = typeof duration !== 'number'
+    ? ''
+    : s.status === 'running'
+      ? `${Math.floor(duration / 1000)}s`
+      : formatDuration(duration);
+  return `${status}${formattedDuration ? ` · ${formattedDuration}` : ''}`;
 }
 
 function formatDuration(ms: number): string {
@@ -168,10 +205,25 @@ function formatRecordingDuration(ms: number): string {
  *  truncated summary line (timestamp + summary). Expanded shows a rich
  *  prefix inline next to the timestamp; a tool step additionally renders its
  *  raw primary argument as a multi-line code block below, newlines intact. */
-function ActivityTraceRow({ line, open, onToggle }: { line: ActivityLine; open: boolean; onToggle: () => void }) {
-  const step = parseStep(line.text);
+function ActivityTraceRow({ line, open, live, onToggle }: { line: ActivityLine; open: boolean; live: boolean; onToggle: () => void }) {
+  const parsedStep = parseStep(line.text);
+  const step = !live && parsedStep.kind === 'tool' && (parsedStep.status === 'pending' || parsedStep.status === 'running')
+    ? { ...parsedStep, status: 'completed' as const }
+    : parsedStep;
+  const headline = stepHeadline(step);
+  const running = live && step.kind === 'tool' && step.status === 'running';
+  const startedAt = Number(line.ts);
+  const hasStartedAt = Number.isFinite(startedAt);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!open || !running || !hasStartedAt) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [open, running, hasStartedAt, line.ts]);
   const code = open ? stepBody(step) : null;
-  const meta = open ? toolMeta(step) : null;
+  const elapsedMs = running && hasStartedAt ? Math.max(0, now - startedAt) : null;
+  const meta = open ? stepMeta(step, elapsedMs) : null;
   return (
     <li class={`trace-row${open ? ' open' : ''}`}>
       <button
@@ -183,7 +235,7 @@ function ActivityTraceRow({ line, open, onToggle }: { line: ActivityLine; open: 
       >
         <span class={`chevron${open ? ' open' : ''}`}>{'\u203A'}</span>
         {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
-        <span class="trace-text">{stepSummary(step)}</span>
+        <span class="trace-text"><StepHeadlineContent headline={headline} /></span>
       </button>
       {meta ? <div class="trace-meta">{meta}</div> : null}
       {open && code != null
@@ -198,22 +250,22 @@ function ActivityTraceRow({ line, open, onToggle }: { line: ActivityLine; open: 
  *  timestamp and, for a command step, the code body as a multi-line block.
  *  Single-open accordion. Shared by the persisted trace and the live typing
  *  bubble. */
-function ActivityTraceList({ lines }: { lines: ActivityLine[] }) {
-  // null → nothing expanded; >= 0 → that row is open (single-open accordion).
-  const [sel, setSel] = useState<number | null>(null);
-  const toggle = (i: number) => setSel((cur) => (cur === i ? null : i));
+function ActivityTraceList({ lines, live = false }: { lines: ActivityLine[]; live?: boolean }) {
+  const [sel, setSel] = useState<string | null>(null);
+  const toggle = (id: string) => setSel((cur) => (cur === id ? null : id));
   return (
     <ul class="activity-trace">
-      {lines.map((line, i) => (
-        <ActivityTraceRow key={i} line={line} open={i === sel} onToggle={() => toggle(i)} />
-      ))}
+      {lines.map((line, i) => {
+        const id = parseStep(line.text).id || `activity-${i}`;
+        return <ActivityTraceRow key={id} line={line} open={id === sel} live={live} onToggle={() => toggle(id)} />;
+      })}
     </ul>
   );
 }
 
-function latestActivityPhrase(lines: ActivityLine[]): string {
-  if (!lines.length) return '';
-  return stepPhrase(parseStep(lines[lines.length - 1].text));
+function latestActivityHeadline(lines: ActivityLine[]): StepHeadline | null {
+  if (!lines.length) return null;
+  return stepHeadline(parseStep(lines[lines.length - 1].text));
 }
 
 /** A collapsible activity trace (chevron + timestamped step list). Used for
@@ -605,6 +657,7 @@ function MessageLog() {
   const scrollTick = scrollToBottomTick.value;
   // Subscribe to trace growth so the effect re-runs as steps stream in.
   const traceLen = activityLog.value.length;
+  const liveHeadline = latestActivityHeadline(activityLog.value);
 
   const scrollToBottom = () => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -689,8 +742,8 @@ function MessageLog() {
           <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
             <div class="typing-dots">
               <span></span><span></span><span></span>
-              {!traceExpanded && (latestActivityPhrase(activityLog.value) || typingHint.value)
-                ? <span class="hint">{latestActivityPhrase(activityLog.value) || typingHint.value}</span>
+              {!traceExpanded && (liveHeadline || typingHint.value)
+                ? <span class="hint">{liveHeadline ? <StepHeadlineContent headline={liveHeadline} /> : typingHint.value}</span>
                 : null}
               {activityLog.value.length
                 ? (
@@ -708,7 +761,7 @@ function MessageLog() {
                 : null}
             </div>
             {traceExpanded && activityLog.value.length
-              ? <ActivityTraceList lines={activityLog.value} />
+              ? <ActivityTraceList lines={activityLog.value} live />
               : null}
           </div>
         )
