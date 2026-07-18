@@ -635,6 +635,12 @@ async function processQuery(
   // if the retry still delivers nothing we surface a generic error rather
   // than nudging again. Reset at every turn boundary (warm-query safety).
   let nudgedForDelivery = false;
+  // OpenCode reasoning models occasionally stop after placing a future-work
+  // announcement inside an unclosed <think>, without invoking any tools. Keep
+  // the original batch claimed while one corrective continuation runs.
+  let nudgedForPrematureCompletion = false;
+  let prematureCompletionBatchIds: string[] = [];
+  let toolActivityThisTurn = false;
   // Set when the post-nudge retry comes back as an `<internal>` note (the
   // model confirming, via the escape hatch in the nudge text, that it meant
   // to stay silent). Suppresses BOTH terminal notices — a deliberate no-op
@@ -842,6 +848,9 @@ async function processQuery(
         // the user with total silence. Reset all three so the notices key off
         // THIS turn's delivery, not the whole warm query's history.
         nudgedForDelivery = false;
+        nudgedForPrematureCompletion = false;
+        prematureCompletionBatchIds = [];
+        toolActivityThisTurn = false;
         sentAny = false;
         emptyResultSeen = false;
         silenceConfirmed = false;
@@ -966,6 +975,24 @@ async function processQuery(
         `<internal>…</internal> note explaining why (it will not be delivered).</system>`,
     );
   };
+  const pushPrematureCompletionNudge = (): void => {
+    nudgedForPrematureCompletion = true;
+    log('Recovery nudge: agent announced future work but ended the turn before using tools');
+    try {
+      appendActivity({
+        kind: 'notification',
+        id: `nudge:${generateId()}`,
+        text: 'The agent stopped after announcing work - asked it to continue the original request.',
+      });
+    } catch { /* best-effort */ }
+    turnActive = true;
+    try { clearTurnEnded(); } catch { /* best-effort */ }
+    query.push(
+      `<system>You ended the turn after announcing work that you had not performed. ` +
+        `Continue the original request now. Invoke the required tools before returning a final ` +
+        `<message>. Do not send another acknowledgment.</system>`,
+    );
+  };
   const liveHandle = setInterval(() => {
     if (!turnActive) return;
     try { touchHeartbeat(); } catch { /* best-effort */ }
@@ -976,6 +1003,10 @@ async function processQuery(
     for await (const event of query.events) {
       handleEvent(event, routing);
       touchHeartbeat();
+
+      if (event.type === 'progress' && event.step.kind === 'tool') {
+        toolActivityThisTurn = true;
+      }
 
       if (event.type === 'init') {
         queryContinuation = event.continuation;
@@ -1039,7 +1070,6 @@ async function processQuery(
           drainedIds.push(...head.ids);
           resultRouting = head.routing;
         }
-        if (drainedIds.length > 0) markCompleted(drainedIds);
         // Only end the turn (stop warming the heartbeat, mark
         // turn_ended_at so the host clears the typing indicator) when
         // no more queued batches remain. If there's still pending
@@ -1055,28 +1085,79 @@ async function processQuery(
         setCurrentInReplyTo(resultRouting.inReplyTo);
         if (event.text) {
           const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
-          const { sent, hasUnwrapped, internalCount } = dispatchResultText(event.text, resultRouting);
-          if (sent > 0) sentAny = true;
-          // A post-nudge retry that delivers nothing but writes an <internal>
-          // note is the model taking the escape hatch — confirming it meant to
-          // stay silent. Treat as intentional silence, not a delivery failure.
-          if (nudgedForDelivery && sent === 0 && internalCount > 0) silenceConfirmed = true;
-          const willRetryWrapping = !mcpWroteReply && hasUnwrapped && !nudgedForDelivery;
-          notifyExchangeComplete(onExchangeComplete, {
-            prompt: archivePrompts[0] ?? initialPrompt,
-            result: event.text,
-            continuation: queryContinuation ?? priorContinuation,
-            status: (!mcpWroteReply && hasUnwrapped) ? 'undelivered' : 'completed',
-          });
-          if (mcpWroteReply) {
+          const wasRecoveringPrematureCompletion = prematureCompletionBatchIds.length > 0;
+          const prematureCompletion =
+            !mcpWroteReply && !toolActivityThisTurn &&
+            event.finishReason === 'stop' && event.recoveredFromUnclosedThink === true &&
+            isFutureWorkAnnouncement(event.text);
+          if (prematureCompletion && nudgedForPrematureCompletion) {
+            if (prematureCompletionBatchIds.length > 0 || drainedIds.length > 0) {
+              markCompleted([...prematureCompletionBatchIds, ...drainedIds]);
+              prematureCompletionBatchIds = [];
+            }
+            writeMessageOut({
+              id: generateId(),
+              kind: 'chat',
+              platform_id: resultRouting.platformId,
+              channel_type: resultRouting.channelType,
+              thread_id: resultRouting.threadId,
+              content: JSON.stringify({
+                text: 'The agent stopped after announcing work twice without performing it. Please retry or use another model.',
+              }),
+            });
             sentAny = true;
-          } else if (willRetryWrapping) {
-            log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
-            pushDeliveryNudge();
+            notifyExchangeComplete(onExchangeComplete, {
+              prompt: archivePrompts[0] ?? initialPrompt,
+              result: event.text,
+              continuation: queryContinuation ?? priorContinuation,
+              status: 'error',
+            });
+            archivePrompts.shift();
+            if (!endedForCommand) {
+              endedForCommand = true;
+              query.end();
+            }
+          } else {
+            if (prematureCompletion) {
+              prematureCompletionBatchIds.push(...drainedIds);
+            } else if (prematureCompletionBatchIds.length > 0 || drainedIds.length > 0) {
+              markCompleted([...prematureCompletionBatchIds, ...drainedIds]);
+              prematureCompletionBatchIds = [];
+            }
+            const { sent, hasUnwrapped, internalCount } = dispatchResultText(event.text, resultRouting);
+            // The first premature announcement is deliberately delivered as a
+            // progress update, but it does not satisfy the original request.
+            if (sent > 0 && !prematureCompletion) sentAny = true;
+            // A post-nudge retry that delivers nothing but writes an <internal>
+            // note is the model taking the escape hatch — confirming it meant to
+            // stay silent. Treat as intentional silence, not a delivery failure.
+            if (nudgedForDelivery && sent === 0 && internalCount > 0) silenceConfirmed = true;
+            const willRetryWrapping =
+              !mcpWroteReply && hasUnwrapped &&
+              !nudgedForDelivery && !nudgedForPrematureCompletion;
+            notifyExchangeComplete(onExchangeComplete, {
+              prompt: archivePrompts[0] ?? initialPrompt,
+              result: event.text,
+              continuation: queryContinuation ?? priorContinuation,
+              status: (prematureCompletion || (!mcpWroteReply && hasUnwrapped)) ? 'undelivered' : 'completed',
+            });
+            if (mcpWroteReply) {
+              sentAny = true;
+            } else if (prematureCompletion) {
+              pushPrematureCompletionNudge();
+            } else if (willRetryWrapping) {
+              log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
+              pushDeliveryNudge();
+            }
+            // Recovery retries answer the SAME user prompt — keep it queued so
+            // the retry archives against it, not the nudge text.
+            if (!willRetryWrapping && !prematureCompletion) archivePrompts.shift();
+            if (wasRecoveringPrematureCompletion && !mcpWroteReply && sent === 0 && !endedForCommand) {
+              emptyResultSeen = true;
+              endedForCommand = true;
+              query.end();
+            }
           }
-          // The wrapping-retry result answers the SAME user prompt — keep it
-          // queued so the retry archives against it, not the nudge text.
-          if (!willRetryWrapping) archivePrompts.shift();
         } else {
           // A result event with no final text. Two sub-cases:
           //  (a) `strippedToEmpty` — the model produced raw text that
@@ -1088,9 +1169,14 @@ async function processQuery(
           //      autonomous/task turn, so it is NOT nudged; it falls through
           //      to the terminal empty-result notice.
           const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
+          const wasRecoveringPrematureCompletion = prematureCompletionBatchIds.length > 0;
+          if (prematureCompletionBatchIds.length > 0 || drainedIds.length > 0) {
+            markCompleted([...prematureCompletionBatchIds, ...drainedIds]);
+            prematureCompletionBatchIds = [];
+          }
           const willNudge =
             !mcpWroteReply && event.strippedToEmpty === true &&
-            !nudgedForDelivery && !lastProviderError;
+            !nudgedForDelivery && !nudgedForPrematureCompletion && !lastProviderError;
           if (mcpWroteReply) sentAny = true;
           if (willNudge) {
             log('Result stripped to empty (reply swallowed by reasoning) — nudging');
@@ -1107,7 +1193,7 @@ async function processQuery(
             // follow-up batches are queued, end the stream now so the turn
             // completes and the notice fires. The continuation was persisted at
             // `init`, so the next message resumes the same session normally.
-            if (!sentAny && turnBatchQueue.length === 0 && !endedForCommand) {
+            if ((!sentAny || wasRecoveringPrematureCompletion) && turnBatchQueue.length === 0 && !endedForCommand) {
               endedForCommand = true;
               query.end();
             }
@@ -1166,6 +1252,7 @@ async function processQuery(
         // Reset the per-turn baseline so a follow-up push within the same
         // query starts a fresh "did MCP write anything?" window.
         outboundMaxAtTurnStart = currentOutboundMax();
+        toolActivityThisTurn = false;
         turnStartTime = Date.now();
       }
     }
@@ -1227,12 +1314,16 @@ async function processQuery(
   //     took the escape hatch and confirmed it meant to stay quiet. A
   //     deliberate no-op must not surface as an error.
   //
-  //  2. nudgedForDelivery (and not silence-confirmed) → generic error. The
+  //  2. nudgedForPrematureCompletion → explicit incomplete-work error. A
+  //     progress update was delivered, but the corrective turn still failed
+  //     to answer the original request.
+  //
+  //  3. nudgedForDelivery (and not silence-confirmed) → generic error. The
   //     model left evidence it was trying to reply — bare unwrapped text, or a
   //     reply swallowed by reasoning — we asked it to re-send wrapped, and it
   //     STILL delivered nothing. That's a genuine malfunction.
   //
-  //  3. emptyResultSeen (never nudged) → "finished without producing a
+  //  4. emptyResultSeen (never nudged) → "finished without producing a
   //     response". The turn produced genuinely nothing recoverable: no bare
   //     reply and no reasoning that stripped away. We deliberately did NOT
   //     nudge this (see the result handler) because it is indistinguishable
@@ -1240,6 +1331,22 @@ async function processQuery(
   //     such turn would tax that hot path and fight the one-shot task query.
   if (!sentAny && silenceConfirmed && !lastProviderError) {
     log('Turn confirmed intentional silence after nudge — delivering nothing');
+  } else if (!sentAny && nudgedForPrematureCompletion && !lastProviderError) {
+    log('Premature-completion recovery produced no answer — surfacing explicit error');
+    try {
+      writeMessageOut({
+        id: generateId(),
+        kind: 'chat',
+        platform_id: routing.platformId,
+        channel_type: routing.channelType,
+        thread_id: routing.threadId,
+        content: JSON.stringify({
+          text: 'The agent stopped after announcing work without completing it. Please retry or use another model.',
+        }),
+      });
+    } catch (e) {
+      log(`Failed to write premature-completion error: ${e instanceof Error ? e.message : String(e)}`);
+    }
   } else if (!sentAny && nudgedForDelivery && !lastProviderError) {
     log('Turn produced no deliverable output after recovery nudge — surfacing generic error');
     try {
@@ -1394,6 +1501,21 @@ function dispatchResultText(
 
   const hasUnwrapped = sent === 0 && !!scratchpad;
   return { sent, hasUnwrapped, internalCount: parsed.internal.length };
+}
+
+/**
+ * Identify a short delivery whose only purpose is to announce tool work that
+ * has not happened yet. Callers also require OpenCode's malformed-output and
+ * no-tool signals; this text check is intentionally only one part of the guard.
+ */
+export function isFutureWorkAnnouncement(text: string): boolean {
+  const parsed = parseAssistantOutput(text);
+  if (parsed.deliveries.length !== 1 || parsed.internal.length > 0 || parsed.unwrapped) return false;
+  const body = parsed.deliveries[0].body;
+  if (!body || body.length > 240) return false;
+  const planningLead = /\b(?:on it|let me|i(?:'ll| will| need to| am going to| am about to))\b/i;
+  const toolWork = /\b(?:search(?:ing)?|research(?:ing)?|look(?:ing)?\s+(?:into|up)|investigat(?:e|ing)|check(?:ing)?|dig(?:ging)?|review(?:ing)?|inspect(?:ing)?|test(?:ing)?|work(?:ing)?\s+on|start(?:ing)?)\b/i;
+  return planningLead.test(body) && toolWork.test(body);
 }
 
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {

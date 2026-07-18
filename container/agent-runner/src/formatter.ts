@@ -371,6 +371,7 @@ function escapeXml(str: string): string {
 
 export type OutputDiagnostic =
   | 'missing-leading-angle'
+  | 'missing-message-space'
   | 'orphan-think-close'
   | 'unclosed-think'
   | 'unclosed-internal'
@@ -398,7 +399,7 @@ type OpenSegment =
   | { kind: 'think'; text: string };
 
 const OUTPUT_TAG_RE =
-  /<message\s+to="([^"]+)"\s*>|<\/message\s*>|<internal\s*>|<\/internal\s*>|<think(?:ing)?\b[^>]*>|<\/think(?:ing)?\s*>/gi;
+  /<message\s*to="([^"]+)"\s*>|<\/message\s*>|<internal\s*>|<\/internal\s*>|<think(?:ing)?\b[^>]*>|<\/think(?:ing)?\s*>/gi;
 
 function appendOutputSegment(segments: AssistantOutputSegment[], segment: AssistantOutputSegment): void {
   if (!segment.text) return;
@@ -450,7 +451,7 @@ function isDeliveryOnlySuffix(text: string, from: number): boolean {
   let seen = false;
   while (rest.trimStart()) {
     rest = rest.trimStart();
-    const messageOpen = /^<message\s+to="[^"]+"\s*>/i.exec(rest);
+    const messageOpen = /^<message\s*to="[^"]+"\s*>/i.exec(rest);
     if (messageOpen) {
       const close = /<\/message\s*>/i.exec(rest.slice(messageOpen[0].length));
       if (!close) return false;
@@ -483,7 +484,7 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
   let body = raw.slice(leadingWhitespace.length);
   if (
     body && body[0] !== '<' &&
-    /^(?:message(?:\s+[\w-]+=|>)|internal\s*>|think(?:ing)?(?:\s[^>]*)?>)/i.test(body)
+    /^(?:message(?:\s*to=|\s+[\w-]+=|>)|internal\s*>|think(?:ing)?(?:\s[^>]*)?>)/i.test(body)
   ) {
     body = '<' + body;
     diagnostics.push('missing-leading-angle');
@@ -518,6 +519,9 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
     if (!isThinkClose && isInsideMarkdownCode(text, match.index)) {
       appendText(token);
       continue;
+    }
+    if (/^<messageto=/i.test(token)) {
+      diagnostics.push('missing-message-space');
     }
 
     if (open?.kind === 'message') {

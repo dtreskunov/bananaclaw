@@ -852,7 +852,9 @@ export class OpenCodeProvider implements AgentProvider {
         // unclosed `<think>` with no `<message>`), not genuinely absent. The
         // poll-loop keys its recovery nudge off this distinction.
         const rawResultNonEmpty = resultText.trim().length > 0;
-        resultText = normalizeAssistantText(resultText);
+        const parsedResult = parseAssistantOutput(resultText);
+        const recoveredFromUnclosedThink = parsedResult.diagnostics.includes('unclosed-think');
+        resultText = parsedResult.normalizedText;
         // Some providers (e.g. gemini-via-openrouter) finalize cost/tokens in a
         // `message.updated` that arrives *after* `session.idle` ends our loop,
         // so the values we captured from streaming events are still zero. Do a
@@ -908,7 +910,13 @@ export class OpenCodeProvider implements AgentProvider {
           yield { type: 'error', message: reasonMsg, retryable: false, classification: `opencode:finish:${lastFinish}` };
         }
         const strippedToEmpty = rawResultNonEmpty && resultText.trim().length === 0;
-        yield { type: 'result', text: resultText || null, strippedToEmpty };
+        yield {
+          type: 'result',
+          text: resultText || null,
+          strippedToEmpty,
+          finishReason: lastFinish,
+          recoveredFromUnclosedThink,
+        };
       }
     }
 

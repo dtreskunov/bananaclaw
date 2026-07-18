@@ -282,6 +282,18 @@ describe('parseAssistantOutput', () => {
     expect(parsed.diagnostics).toEqual(['missing-leading-angle']);
   });
 
+  it('repairs a missing space in a routed message tag', () => {
+    const parsed = parseAssistantOutput(
+      '<think>Re-send it wrapped.<messageto="web-mg-web-0">Recovered answer.</message>',
+    );
+    expect(parsed.deliveries).toEqual([{ to: 'web-mg-web-0', body: 'Recovered answer.' }]);
+    expect(parsed.normalizedText).toBe(
+      '<message to="web-mg-web-0">Recovered answer.</message>',
+    );
+    expect(parsed.diagnostics).toContain('missing-message-space');
+    expect(parsed.diagnostics).toContain('unclosed-think');
+  });
+
   it('recovers delivery and internal blocks inside an unclosed think', () => {
     const message = parseAssistantOutput(
       '<think>private preamble<message to="web">answer</message>',

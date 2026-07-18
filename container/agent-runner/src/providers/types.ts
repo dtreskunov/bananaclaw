@@ -238,7 +238,13 @@ export type ProviderEvent =
    * reply (nudge-worthy) from a genuinely silent turn (nothing to recover).
    * Only OpenCode sets it; Claude strips in-loop, so it stays undefined there.
    */
-  | { type: 'result'; text: string | null; strippedToEmpty?: boolean }
+  | {
+      type: 'result';
+      text: string | null;
+      strippedToEmpty?: boolean;
+      finishReason?: string;
+      recoveredFromUnclosedThink?: boolean;
+    }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
   | { type: 'progress'; step: ActivityStep }
   /**

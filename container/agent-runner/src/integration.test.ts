@@ -854,7 +854,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
 
     const provider = new ScriptedProvider([
       { text: '', strippedToEmpty: true },
-      { text: '<message to="discord-test">recovered reply</message>' },
+      { text: '<messageto="discord-test">recovered reply</message>' },
     ]);
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
@@ -935,6 +935,110 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
   });
 });
 
+describe('poll loop - premature completion recovery', () => {
+  it('keeps the inbound claim processing until the corrective turn finishes', async () => {
+    insertMessage('m-premature', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ControlledPrematureProvider();
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(() => provider.pushes.length === 1, 3000);
+    const interimAck = getOutboundDb()
+      .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
+      .get('m-premature') as { status: string };
+    expect(interimAck.status).toBe('processing');
+    expect(provider.pushes[0]).toContain('Continue the original request now');
+
+    provider.releaseRecovery();
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Here are the researched results.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const finalAck = getOutboundDb()
+      .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
+      .get('m-premature') as { status: string };
+    expect(finalAck.status).toBe('completed');
+    expect(getUndeliveredMessages().map((m) => JSON.parse(m.content).text)).toEqual([
+      'On it. Searching now for the requested details.',
+      'Here are the researched results.',
+    ]);
+  });
+
+  it('stops after one retry and replaces a repeated announcement with an error', async () => {
+    insertMessage('m-repeat', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const announcement = '<message to="discord-test">On it. Searching now for the requested details.</message>';
+    const provider = new ScriptedProvider([
+      { text: announcement, finishReason: 'stop', recoveredFromUnclosedThink: true },
+      { text: announcement, finishReason: 'stop', recoveredFromUnclosedThink: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('announcing work twice')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
+    expect(texts.filter((text) => text === 'On it. Searching now for the requested details.')).toHaveLength(1);
+    expect(texts.some((text) => text.includes('announcing work twice'))).toBe(true);
+    expect(provider.pushes).toHaveLength(1);
+  });
+
+  it('surfaces an explicit error when the corrective turn is empty', async () => {
+    insertMessage('m-empty-recovery', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      {
+        text: '<message to="discord-test">On it. Searching now for the requested details.</message>',
+        finishReason: 'stop',
+        recoveredFromUnclosedThink: true,
+      },
+      { text: '' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('without completing it')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(1);
+  });
+
+  it('does not recover an announcement-shaped final response after real tool activity', async () => {
+    insertMessage('m-tool-work', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([{
+      text: '<message to="discord-test">On it. Searching now for the requested details.</message>',
+      finishReason: 'stop',
+      recoveredFromUnclosedThink: true,
+      toolActivity: true,
+    }]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(() => getUndeliveredMessages().length === 1, 3000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(0);
+    expect(JSON.parse(getUndeliveredMessages()[0].content).text).toBe(
+      'On it. Searching now for the requested details.',
+    );
+  });
+});
+
 /**
  * Scripted provider for the recovery-nudge tests. Emits a pre-set sequence of
  * result turns (each with optional `strippedToEmpty`); the initial turn plays
@@ -948,7 +1052,13 @@ class ScriptedProvider {
   ended = false;
   readonly pushes: string[] = [];
 
-  constructor(private readonly turns: Array<{ text: string; strippedToEmpty?: boolean }>) {}
+  constructor(private readonly turns: Array<{
+    text: string;
+    strippedToEmpty?: boolean;
+    finishReason?: string;
+    recoveredFromUnclosedThink?: boolean;
+    toolActivity?: boolean;
+  }>) {}
 
   isSessionInvalid(): boolean {
     return false;
@@ -978,18 +1088,106 @@ class ScriptedProvider {
       events: (async function* () {
         yield { type: 'init' as const, continuation: 'scripted-session' };
         const first = nextTurn();
-        yield { type: 'result' as const, text: first.text || null, strippedToEmpty: first.strippedToEmpty };
+        if (first.toolActivity) {
+          yield {
+            type: 'progress' as const,
+            step: { kind: 'tool' as const, id: 'tool-1', tool: 'web_search', status: 'completed' as const },
+          };
+        }
+        yield {
+          type: 'result' as const,
+          text: first.text || null,
+          strippedToEmpty: first.strippedToEmpty,
+          finishReason: first.finishReason,
+          recoveredFromUnclosedThink: first.recoveredFromUnclosedThink,
+        };
         while (!owner.ended && !aborted) {
           if (pending.length > 0) {
             pending.shift();
             const t = nextTurn();
-            yield { type: 'result' as const, text: t.text || null, strippedToEmpty: t.strippedToEmpty };
+            if (t.toolActivity) {
+              yield {
+                type: 'progress' as const,
+                step: { kind: 'tool' as const, id: `tool-${idx}`, tool: 'web_search', status: 'completed' as const },
+              };
+            }
+            yield {
+              type: 'result' as const,
+              text: t.text || null,
+              strippedToEmpty: t.strippedToEmpty,
+              finishReason: t.finishReason,
+              recoveredFromUnclosedThink: t.recoveredFromUnclosedThink,
+            };
             continue;
           }
           await new Promise<void>((resolve) => {
             wake = resolve;
           });
           wake = null;
+        }
+      })(),
+    };
+  }
+}
+
+class ControlledPrematureProvider {
+  readonly supportsNativeSlashCommands = false;
+  readonly pushes: string[] = [];
+  private release: (() => void) | undefined;
+
+  isSessionInvalid(): boolean {
+    return false;
+  }
+
+  releaseRecovery(): void {
+    this.release?.();
+  }
+
+  query() {
+    const owner = this;
+    let ended = false;
+    let aborted = false;
+    let pushed: (() => void) | undefined;
+    return {
+      push(message: string) {
+        owner.pushes.push(message);
+        pushed?.();
+      },
+      end() {
+        ended = true;
+        pushed?.();
+        owner.release?.();
+      },
+      abort() {
+        aborted = true;
+        pushed?.();
+        owner.release?.();
+      },
+      events: (async function* () {
+        yield { type: 'init' as const, continuation: 'controlled-premature-session' };
+        yield {
+          type: 'result' as const,
+          text: '<message to="discord-test">On it. Searching now for the requested details.</message>',
+          finishReason: 'stop',
+          recoveredFromUnclosedThink: true,
+        };
+        if (owner.pushes.length === 0 && !ended && !aborted) {
+          await new Promise<void>((resolve) => { pushed = resolve; });
+          pushed = undefined;
+        }
+        if (ended || aborted) return;
+        await new Promise<void>((resolve) => { owner.release = resolve; });
+        owner.release = undefined;
+        if (ended || aborted) return;
+        yield {
+          type: 'result' as const,
+          text: '<message to="discord-test">Here are the researched results.</message>',
+          finishReason: 'stop',
+          recoveredFromUnclosedThink: false,
+        };
+        while (!ended && !aborted) {
+          await new Promise<void>((resolve) => { pushed = resolve; });
+          pushed = undefined;
         }
       })(),
     };

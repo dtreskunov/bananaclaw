@@ -6,6 +6,8 @@
 
 Use the `mcp__nanoclaw__send_message` tool to send a message while you're still working (before your final output). If you have one destination, `to` is optional; with multiple, specify it. Pace your updates to the length of the work:
 
+A final `<message>` block ends the turn. Never use final output to announce tool work you have not performed; use `send_message` for that update, then continue working in the same turn.
+
 - **Short turn (≤2 quick tool calls):** Don't narrate. Output any response.
 - **Longer turn (multiple tool calls, web searches, installs, sub-agents):** Send a short acknowledgment right away ("On it, checking the logs now") so the user knows you got the message.
 - **Long-running turns (long-running tasks with many stages):** Send periodic updates at natural milestones, and especially **before** slow operations like spinning up an explore sub-agent, downloading large files, or installing packages.
