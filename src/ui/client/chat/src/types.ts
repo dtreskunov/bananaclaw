@@ -128,6 +128,8 @@ export interface ChatMessage {
   text: string;
   files: ChatMessageFile[] | null;
   ts: string;
+  /** How the agent emitted this row. Absent for legacy/unclassified messages. */
+  deliveryOrigin?: 'send_message' | 'response';
   usage?: TurnUsage;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
@@ -296,7 +298,14 @@ export interface WsPayload {
   /** Complete host-reduced activity snapshot for the current turn. */
   items?: ActivityLine[] | null;
   text?: string;
-  content?: string | { text?: string; markdown?: string; fallbackText?: string };
+  content?:
+    | string
+    | {
+        text?: string;
+        markdown?: string;
+        fallbackText?: string;
+        delivery_origin?: 'send_message' | 'response';
+      };
   card?: DisplayCard;
   files?: ChatMessageFile[] | null;
   timestamp?: string;

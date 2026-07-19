@@ -17683,6 +17683,7 @@ function mergeIncomingMessages(messages) {
       ...m6.card ? { card: m6.card } : {},
       files: m6.files || null,
       ts,
+      ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.activity ? { activity: m6.activity } : {},
       ...m6.event ? { event: m6.event } : {},
@@ -17720,7 +17721,7 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-function appendMsg(direction, text, files, ts, id, activity, card) {
+function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin) {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
   if (key) refs.seenIds.add(key);
@@ -17731,6 +17732,7 @@ function appendMsg(direction, text, files, ts, id, activity, card) {
     ...card ? { card } : {},
     files: files || null,
     ts,
+    ...deliveryOrigin ? { deliveryOrigin } : {},
     ...activity && activity.length ? { activity } : {}
   });
 }
@@ -17764,6 +17766,7 @@ async function refetchThreadHistory(appendNewOnly) {
       ...m6.card ? { card: m6.card } : {},
       files: m6.files || null,
       ts: m6.timestamp,
+      ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.activity ? { activity: m6.activity } : {},
       ...m6.event ? { event: m6.event } : {},
@@ -17786,6 +17789,7 @@ async function refetchThreadHistory(appendNewOnly) {
       ...m6.card ? { card: m6.card } : {},
       files: m6.files || null,
       ts,
+      ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.activity ? { activity: m6.activity } : {},
       ...m6.event ? { event: m6.event } : {},
@@ -17861,6 +17865,7 @@ async function openChat(gid, resumeTid, opts) {
             ...m6.card ? { card: m6.card } : {},
             files: m6.files || null,
             ts: m6.timestamp,
+            ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
             ...m6.usage ? { usage: m6.usage } : {},
             ...m6.activity ? { activity: m6.activity } : {},
             ...m6.event ? { event: m6.event } : {},
@@ -18082,8 +18087,18 @@ function connectChatWs() {
       }
       const text = typeof c4 === "string" ? c4 : c4.text || c4.markdown || "";
       const dir = payload.messageKind === "internal" ? "internal" : "out";
+      const deliveryOrigin = typeof c4 === "object" && (c4.delivery_origin === "send_message" || c4.delivery_origin === "response") ? c4.delivery_origin : void 0;
       const carriedActivity = dir === "out" ? activityLog.value.length ? activityLog.value.slice() : refs.carryActivity : null;
-      appendMsg(dir, text, payload.files || [], payload.timestamp || "", payload.id, carriedActivity);
+      appendMsg(
+        dir,
+        text,
+        payload.files || [],
+        payload.timestamp || "",
+        payload.id,
+        carriedActivity,
+        void 0,
+        deliveryOrigin
+      );
       bumpActiveThread();
       if (dir === "out") {
         activityLog.value = [];
@@ -20190,7 +20205,7 @@ function Message({ m: m6 }) {
     }
     if (q5 && ref.current) highlightTextNodes(ref.current, q5);
   }, [m6.text, md != null, q5]);
-  const cls = "msg " + m6.direction + (md != null ? " markdown" : "");
+  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (m6.deliveryOrigin === "send_message" ? " delivery-update" : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   return /* @__PURE__ */ u4("div", { class: cls, "data-msg-id": m6.id, ref, children: [
@@ -20221,6 +20236,7 @@ function Message({ m: m6 }) {
     m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
     m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+      m6.deliveryOrigin === "send_message" ? /* @__PURE__ */ u4("span", { class: "delivery-origin", title: "Sent during the turn with send_message", children: "mid-turn update" }) : null,
       m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null
     ] }) : null
   ] });

@@ -1544,7 +1544,7 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
     platform_id: platformId,
     channel_type: channelType,
     thread_id: threadId,
-    content: JSON.stringify({ text: body }),
+    content: JSON.stringify({ text: body, delivery_origin: 'response' }),
   });
 }
 

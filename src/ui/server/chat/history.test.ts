@@ -1,6 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
-import { chatSdkHistoryContent } from './chat.js';
+import { chatSdkHistoryContent, parseOutboundContent } from './chat.js';
+
+describe('parseOutboundContent', () => {
+  it('preserves recognized delivery provenance', () => {
+    expect(parseOutboundContent(JSON.stringify({ text: 'Working on it', delivery_origin: 'send_message' }))).toEqual({
+      text: 'Working on it',
+      files: undefined,
+      deliveryOrigin: 'send_message',
+    });
+    expect(parseOutboundContent(JSON.stringify({ text: 'Done', delivery_origin: 'response' }))).toEqual({
+      text: 'Done',
+      files: undefined,
+      deliveryOrigin: 'response',
+    });
+  });
+
+  it('drops unknown delivery provenance', () => {
+    expect(parseOutboundContent(JSON.stringify({ text: 'Legacy', delivery_origin: 'other' }))).toEqual({
+      text: 'Legacy',
+      files: undefined,
+    });
+  });
+});
 
 describe('chatSdkHistoryContent', () => {
   it('omits durable questions because /sync renders their lifecycle card', () => {

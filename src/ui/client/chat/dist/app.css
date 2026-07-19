@@ -1286,6 +1286,9 @@ nav.tab-bar-strip.group-strip {
   align-self: flex-start;
   background: var(--wash);
 }
+.chat-main .msg.out.delivery-update {
+  box-shadow: inset 2px 0 var(--accent-strong);
+}
 .chat-main .msg.internal {
   align-self: flex-start;
   background: transparent !important;
@@ -1482,6 +1485,9 @@ nav.tab-bar-strip.group-strip {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+.chat-main .msg .delivery-origin {
+  font-style: italic;
 }
 .chat-main .msg .reactions {
   display: flex;

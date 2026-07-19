@@ -54,6 +54,7 @@ describe('send_message MCP tool — in_reply_to plumbing', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(out[0].in_reply_to).toBe('inbound-msg-1');
+    expect(JSON.parse(out[0].content).delivery_origin).toBe('send_message');
   });
 
   it('writes null when no batch is active', async () => {

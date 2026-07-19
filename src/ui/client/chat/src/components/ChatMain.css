@@ -33,6 +33,7 @@
 .chat-main .msg { padding: 6px 10px; border-radius: var(--radius-lg); max-width: 78%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
 .chat-main .msg.in { align-self: flex-end; background: var(--accent); }
 .chat-main .msg.out { align-self: flex-start; background: var(--wash); }
+.chat-main .msg.out.delivery-update { box-shadow: inset 2px 0 var(--accent-strong); }
 .chat-main .msg.internal { align-self: flex-start; background: transparent !important; border: 1px dashed var(--muted); color: var(--muted); opacity: 0.85; max-width: 92%; }
 .chat-main .msg.internal, .chat-main .msg.internal * { font-style: italic; }
 .chat-main .msg.internal .internal-label { font-size: var(--font-2xs); font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; opacity: 0.7; }
@@ -125,6 +126,7 @@
 .chat-main .msg .inline-media video { max-height: 320px; background: #000; }
 .chat-main .msg .inline-media-name { font-size: var(--font-2xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-main .msg .meta { font-size: var(--font-2xs); color: var(--muted); margin-top: 4px; opacity: 0.7; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.chat-main .msg .delivery-origin { font-style: italic; }
 .chat-main .msg .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .chat-main .msg.in .reactions { justify-content: flex-end; }
 .chat-main .msg .reaction-chip { font-size: var(--font-sm); line-height: 1; background: var(--wash-strong); border: 1px solid var(--border, transparent); border-radius: 999px; padding: 2px 6px; }

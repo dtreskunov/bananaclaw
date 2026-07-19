@@ -70,6 +70,7 @@ interface ServerMessage {
   card?: DisplayCard;
   files?: ChatMessageFile[] | null;
   timestamp: string;
+  deliveryOrigin?: 'send_message' | 'response';
   usage?: import('./types').TurnUsage;
   activity?: import('./types').ActivityLine[];
   event?: import('./types').TimelineEvent;
@@ -338,6 +339,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ...(m.card ? { card: m.card } : {}),
       files: m.files || null,
       ts,
+      ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
@@ -395,6 +397,7 @@ function appendMsg(
   id?: string,
   activity?: import('./types').ActivityLine[] | null,
   card?: DisplayCard,
+  deliveryOrigin?: 'send_message' | 'response',
 ): void {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
@@ -406,6 +409,7 @@ function appendMsg(
     ...(card ? { card } : {}),
     files: files || null,
     ts,
+    ...(deliveryOrigin ? { deliveryOrigin } : {}),
     ...(activity && activity.length ? { activity } : {}),
   });
 }
@@ -449,6 +453,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       ...(m.card ? { card: m.card } : {}),
       files: m.files || null,
       ts: m.timestamp,
+      ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
@@ -471,6 +476,7 @@ async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
       ...(m.card ? { card: m.card } : {}),
       files: m.files || null,
       ts,
+      ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
@@ -558,6 +564,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
             ...(m.card ? { card: m.card } : {}),
             files: m.files || null,
             ts: m.timestamp,
+            ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
             ...(m.usage ? { usage: m.usage } : {}),
             ...(m.activity ? { activity: m.activity } : {}),
             ...(m.event ? { event: m.event } : {}),
@@ -809,6 +816,10 @@ function connectChatWs(): void {
       }
       const text = typeof c === 'string' ? c : c.text || c.markdown || '';
       const dir: Direction = payload.messageKind === 'internal' ? 'internal' : 'out';
+      const deliveryOrigin =
+        typeof c === 'object' && (c.delivery_origin === 'send_message' || c.delivery_origin === 'response')
+          ? c.delivery_origin
+          : undefined;
       // For the final response, carry the live-accumulated trace onto the
       // message bubble so it stays visible immediately — the live outbound
       // frame has no activity of its own, and otherwise the trace would only
@@ -818,7 +829,16 @@ function connectChatWs(): void {
       // the outbound raced ahead of the typing-off frame.
       const carriedActivity =
         dir === 'out' ? (activityLog.value.length ? activityLog.value.slice() : refs.carryActivity) : null;
-      appendMsg(dir, text, payload.files || [], payload.timestamp || '', payload.id, carriedActivity);
+      appendMsg(
+        dir,
+        text,
+        payload.files || [],
+        payload.timestamp || '',
+        payload.id,
+        carriedActivity,
+        undefined,
+        deliveryOrigin,
+      );
       bumpActiveThread();
       if (dir === 'out') {
         // Final response arrived — the live activity trace has been carried

@@ -131,7 +131,7 @@ export const sendMessage: McpToolDefinition = {
       platform_id: routing.platform_id,
       channel_type: routing.channel_type,
       thread_id: routing.thread_id,
-      content: JSON.stringify({ text }),
+      content: JSON.stringify({ text, delivery_origin: 'send_message' }),
     });
 
     log(`send_message: #${seq} → ${routing.resolvedName}`);

@@ -410,7 +410,8 @@ function Message({ m }: { m: ChatMessage }) {
     // Highlight search query terms in the rendered message.
     if (q && ref.current) highlightTextNodes(ref.current, q);
   }, [m.text, md != null, q]);
-  const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '');
+  const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') +
+    (m.deliveryOrigin === 'send_message' ? ' delivery-update' : '');
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   return (
@@ -460,6 +461,9 @@ function Message({ m }: { m: ChatMessage }) {
         : null}
       {m.ts ? <div class="meta">
         <RelativeTime ts={m.ts} />
+        {m.deliveryOrigin === 'send_message'
+          ? <span class="delivery-origin" title="Sent during the turn with send_message">mid-turn update</span>
+          : null}
         {m.usage && m.direction === 'out' ? <UsageMeta u={m.usage} /> : null}
       </div> : null}
     </div>

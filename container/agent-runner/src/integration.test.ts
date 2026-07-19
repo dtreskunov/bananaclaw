@@ -53,6 +53,7 @@ describe('poll loop integration', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toBe('42');
+    expect(JSON.parse(out[0].content).delivery_origin).toBe('response');
     expect(out[0].platform_id).toBe('chan-1');
     expect(out[0].channel_type).toBe('discord');
     expect(out[0].in_reply_to).toBe('m1');
