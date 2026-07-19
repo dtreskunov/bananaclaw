@@ -77,6 +77,7 @@ interface TypingTarget {
   interval: NodeJS.Timeout;
   startedAt: number;
   model?: string;
+  paused: boolean;
 }
 
 let adapter: TypingAdapter | null = null;
@@ -170,6 +171,7 @@ export function startTypingRefresh(
     const model = configuredModel(agentGroupId);
     existing.startedAt = startedAt;
     existing.model = model;
+    existing.paused = false;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
     // a different chat address (agent-shared sessions span messaging
     // groups, possibly on different platforms/instances), so the address
@@ -204,6 +206,7 @@ export function startTypingRefresh(
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
     if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
+      entry.paused = false;
       triggerTyping(
         sessionId,
         entry.agentGroupId,
@@ -217,10 +220,13 @@ export function startTypingRefresh(
       return;
     }
 
-    // Out of grace AND heartbeat stale — agent is idle, stop refreshing.
-    clearInterval(entry.interval);
-    typingRefreshers.delete(sessionId);
-    triggerClearTyping(entry.channelType, entry.platformId, entry.threadId).catch(() => {});
+    // Out of grace AND heartbeat stale — hide typing, but keep the refresher
+    // paused so a transient provider/event-loop stall can recover without a
+    // new inbound message. Container exit and turn-end paths still remove it.
+    if (!entry.paused) {
+      entry.paused = true;
+      triggerClearTyping(entry.channelType, entry.platformId, entry.threadId).catch(() => {});
+    }
   }, TYPING_REFRESH_MS);
   // unref so a stale refresher can't hold the event loop alive.
   interval.unref();
@@ -233,6 +239,7 @@ export function startTypingRefresh(
     interval,
     startedAt,
     model,
+    paused: false,
   });
 }
 

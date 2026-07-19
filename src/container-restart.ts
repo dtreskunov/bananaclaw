@@ -5,9 +5,11 @@
  * wakes a fresh container via the onExit callback — race-free.
  */
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
+import { getMessagingGroup } from './db/messaging-groups.js';
 import { countDueMessages } from './db/session-db.js';
 import { getSession, getSessionsByAgentGroup } from './db/sessions.js';
 import { log } from './log.js';
+import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
 import { openInboundDb, writeSessionMessage } from './session-manager.js';
 
 /**
@@ -52,7 +54,21 @@ export function restartAgentGroupContainers(agentGroupId: string, reason: string
       wakeMessage || hasPending
         ? () => {
             const s = getSession(session.id);
-            if (s) wakeContainer(s);
+            if (!s) return;
+            const messagingGroup = s.messaging_group_id ? getMessagingGroup(s.messaging_group_id) : undefined;
+            if (messagingGroup) {
+              startTypingRefresh(
+                s.id,
+                s.agent_group_id,
+                messagingGroup.channel_type,
+                messagingGroup.platform_id,
+                s.thread_id,
+                messagingGroup.instance,
+              );
+            }
+            void wakeContainer(s).then((woke) => {
+              if (!woke && messagingGroup) stopTypingRefresh(s.id);
+            });
           }
         : undefined,
     );

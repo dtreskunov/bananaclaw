@@ -8,12 +8,29 @@ vi.mock('./log.js', () => ({
 
 const mockIsContainerRunning = vi.fn<(id: string) => boolean>();
 const mockKillContainer = vi.fn<(id: string, reason: string, onExit?: () => void) => void>();
-const mockWakeContainer = vi.fn();
+const mockWakeContainer = vi.fn<(...args: unknown[]) => Promise<boolean>>(() => Promise.resolve(true));
 vi.mock('./container-runner.js', () => ({
   isContainerRunning: (...args: unknown[]) => mockIsContainerRunning(args[0] as string),
   killContainer: (...args: unknown[]) =>
     mockKillContainer(args[0] as string, args[1] as string, args[2] as (() => void) | undefined),
   wakeContainer: (...args: unknown[]) => mockWakeContainer(...args),
+}));
+
+const mockStartTypingRefresh = vi.fn();
+const mockStopTypingRefresh = vi.fn();
+vi.mock('./modules/typing/index.js', () => ({
+  startTypingRefresh: (...args: unknown[]) => mockStartTypingRefresh(...args),
+  stopTypingRefresh: (...args: unknown[]) => mockStopTypingRefresh(...args),
+}));
+
+const mockGetMessagingGroup = vi.fn((_id: string) => ({
+  id: 'mg1',
+  channel_type: 'web',
+  platform_id: 'web-1',
+  instance: 'web',
+}));
+vi.mock('./db/messaging-groups.js', () => ({
+  getMessagingGroup: (id: string) => mockGetMessagingGroup(id),
 }));
 
 const mockGetSessionsByAgentGroup = vi.fn();
@@ -38,12 +55,19 @@ import { restartAgentGroupContainers } from './container-restart.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockWakeContainer.mockResolvedValue(true);
 });
 
 // --- Helpers ---
 
 function makeSession(id: string, agentGroupId: string, status = 'active') {
-  return { id, agent_group_id: agentGroupId, status };
+  return {
+    id,
+    agent_group_id: agentGroupId,
+    messaging_group_id: 'mg1',
+    thread_id: 'thread-1',
+    status,
+  };
 }
 
 // --- Tests ---
@@ -170,5 +194,20 @@ describe('restartAgentGroupContainers', () => {
     mockGetSession.mockReturnValue(makeSession('s1', 'ag1'));
     onExit();
     expect(mockWakeContainer).toHaveBeenCalled();
+  });
+
+  it('re-arms typing before waking a restarted session with pending work', () => {
+    mockGetSessionsByAgentGroup.mockReturnValue([makeSession('s1', 'ag1')]);
+    mockIsContainerRunning.mockReturnValue(true);
+    mockCountDueMessages.mockReturnValue(2);
+    const freshSession = makeSession('s1', 'ag1');
+    mockGetSession.mockReturnValue(freshSession);
+
+    restartAgentGroupContainers('ag1', 'provider switch');
+    const onExit = mockKillContainer.mock.calls[0][2] as () => void;
+    onExit();
+
+    expect(mockStartTypingRefresh).toHaveBeenCalledWith('s1', 'ag1', 'web', 'web-1', 'thread-1', 'web');
+    expect(mockStartTypingRefresh.mock.invocationCallOrder[0]).toBeLessThan(mockWakeContainer.mock.invocationCallOrder[0]);
   });
 });

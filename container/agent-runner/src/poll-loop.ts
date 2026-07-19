@@ -1001,8 +1001,8 @@ async function processQuery(
 
   try {
     for await (const event of query.events) {
-      handleEvent(event, routing);
       touchHeartbeat();
+      handleEvent(event, routing);
 
       if (event.type === 'progress' && event.step.kind === 'tool') {
         toolActivityThisTurn = true;

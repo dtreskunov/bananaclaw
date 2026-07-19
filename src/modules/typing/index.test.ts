@@ -7,6 +7,8 @@
  * must forward the adapter instance, or a named instance's typing indicator
  * fires through the wrong bot.
  */
+import fs from 'fs';
+
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 
 vi.mock('../../config.js', async () => {
@@ -44,6 +46,7 @@ beforeEach(() => {
 
 afterEach(() => {
   stopTypingRefresh('sess-1');
+  fs.rmSync('/tmp/nanoclaw-test-typing', { recursive: true, force: true });
   vi.useRealTimers();
 });
 
@@ -137,5 +140,27 @@ describe('startTypingRefresh — instance forwarding', () => {
         metadata: { startedAt: expect.any(Number), model: 'openrouter/minimax/minimax-m3' },
       });
     }
+  });
+});
+
+describe('startTypingRefresh — transient heartbeat stalls', () => {
+  it('re-arms typing when a stale heartbeat becomes fresh again', async () => {
+    const setTyping = vi.fn(async () => {});
+    const clearTyping = vi.fn(async () => {});
+    setTypingAdapter({ setTyping, clearTyping });
+    startTypingRefresh('sess-1', 'ag-1', 'web', 'web-1', 'thread-1', 'web');
+    await vi.advanceTimersByTimeAsync(16_000);
+
+    expect(clearTyping).toHaveBeenCalledTimes(1);
+    const callsBeforeRecovery = setTyping.mock.calls.length;
+
+    const heartbeat = '/tmp/nanoclaw-test-typing/v2-sessions/ag-1/sess-1/.heartbeat';
+    fs.mkdirSync('/tmp/nanoclaw-test-typing/v2-sessions/ag-1/sess-1', { recursive: true });
+    fs.writeFileSync(heartbeat, '');
+    const now = new Date(Date.now());
+    fs.utimesSync(heartbeat, now, now);
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    expect(setTyping.mock.calls.length).toBeGreaterThan(callsBeforeRecovery);
   });
 });
