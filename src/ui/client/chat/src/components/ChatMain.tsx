@@ -281,11 +281,20 @@ function latestActivityHeadline(lines: ActivityLine[]): StepHeadline | null {
   return stepHeadline(parseStep(lines[lines.length - 1].text));
 }
 
-/** A collapsible activity trace (chevron + timestamped step list). Used for
- *  the persisted trace on historical outbound messages; the live typing
- *  bubble renders its own copy coupled to autoscroll. */
-function ActivityTrace({ lines }: { lines: ActivityLine[] }) {
-  const [expanded, setExpanded] = useState(false);
+/** Shared header and row list for live and completed activity traces. */
+function ActivityTracePanel({
+  lines,
+  expanded,
+  onToggle,
+  live = false,
+  now = null,
+}: {
+  lines: ActivityLine[];
+  expanded: boolean;
+  onToggle: () => void;
+  live?: boolean;
+  now?: number | null;
+}) {
   if (!lines.length) return null;
   return (
     <div class={`msg-activity${expanded ? ' expanded' : ''}`}>
@@ -295,13 +304,25 @@ function ActivityTrace({ lines }: { lines: ActivityLine[] }) {
         aria-expanded={expanded}
         aria-label={expanded ? 'Hide activity' : 'Show activity'}
         title={expanded ? 'Hide activity' : 'Show activity'}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={onToggle}
       >
         <span class={`chevron${expanded ? ' open' : ''}`}>{'\u203A'}</span>
         <span class="trace-count">{lines.length} step{lines.length === 1 ? '' : 's'}</span>
       </button>
-      {expanded ? <ActivityTraceList lines={lines} /> : null}
+      {expanded ? <ActivityTraceList lines={lines} live={live} now={now} /> : null}
     </div>
+  );
+}
+
+/** A collapsible activity trace on a completed outbound message. */
+function ActivityTrace({ lines }: { lines: ActivityLine[] }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ActivityTracePanel
+      lines={lines}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    />
   );
 }
 
@@ -710,45 +731,21 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
       <div class="typing-summary">
         <div class="typing-dots">
           <span></span><span></span><span></span>
-          {!traceExpanded && liveHeadline
-            ? (
-              <button
-                type="button"
-                class="hint trace-summary-toggle"
-                aria-expanded="false"
-                aria-label="Show activity"
-                title="Show activity"
-                onClick={onToggleTrace}
-              >
-                <StepHeadlineContent headline={liveHeadline} />
-              </button>
-            )
+          {liveHeadline
+            ? <span class="hint trace-preview"><StepHeadlineContent headline={liveHeadline} /></span>
             : !traceExpanded && typingHint.value
               ? <span class="hint">{typingHint.value}</span>
               : null}
-          {activityLog.value.length
-            ? (
-              <button
-                type="button"
-                class="trace-toggle"
-                aria-expanded={traceExpanded}
-                aria-label={traceExpanded ? 'Hide activity' : 'Show activity'}
-                title={traceExpanded ? 'Hide activity' : 'Show activity'}
-                onClick={onToggleTrace}
-              >
-                {traceExpanded
-                  ? <span class="trace-count">{activityLog.value.length} step{activityLog.value.length === 1 ? '' : 's'}</span>
-                  : null}
-                <span class={`chevron${traceExpanded ? ' open' : ''}`}>{'\u203A'}</span>
-              </button>
-            )
-            : null}
         </div>
-        <div class="typing-meta">{metadata}</div>
       </div>
-      {traceExpanded && activityLog.value.length
-        ? <ActivityTraceList lines={activityLog.value} live now={now} />
-        : null}
+      <ActivityTracePanel
+        lines={activityLog.value}
+        expanded={traceExpanded}
+        onToggle={onToggleTrace}
+        live
+        now={now}
+      />
+      <div class="typing-meta">{metadata}</div>
     </div>
   );
 }

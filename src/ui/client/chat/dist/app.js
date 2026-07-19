@@ -20074,8 +20074,13 @@ function latestActivityHeadline(lines) {
   if (!lines.length) return null;
   return stepHeadline(parseStep(lines[lines.length - 1].text));
 }
-function ActivityTrace({ lines }) {
-  const [expanded, setExpanded] = h2(false);
+function ActivityTracePanel({
+  lines,
+  expanded,
+  onToggle,
+  live = false,
+  now = null
+}) {
   if (!lines.length) return null;
   return /* @__PURE__ */ u4("div", { class: `msg-activity${expanded ? " expanded" : ""}`, children: [
     /* @__PURE__ */ u4(
@@ -20086,7 +20091,7 @@ function ActivityTrace({ lines }) {
         "aria-expanded": expanded,
         "aria-label": expanded ? "Hide activity" : "Show activity",
         title: expanded ? "Hide activity" : "Show activity",
-        onClick: () => setExpanded((v5) => !v5),
+        onClick: onToggle,
         children: [
           /* @__PURE__ */ u4("span", { class: `chevron${expanded ? " open" : ""}`, children: "\u203A" }),
           /* @__PURE__ */ u4("span", { class: "trace-count", children: [
@@ -20097,8 +20102,19 @@ function ActivityTrace({ lines }) {
         ]
       }
     ),
-    expanded ? /* @__PURE__ */ u4(ActivityTraceList, { lines }) : null
+    expanded ? /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now }) : null
   ] });
+}
+function ActivityTrace({ lines }) {
+  const [expanded, setExpanded] = h2(false);
+  return /* @__PURE__ */ u4(
+    ActivityTracePanel,
+    {
+      lines,
+      expanded,
+      onToggle: () => setExpanded((v5) => !v5)
+    }
+  );
 }
 function fmtCost(usd) {
   if (usd >= 1) return "$" + usd.toFixed(2);
@@ -20440,46 +20456,23 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
   const metadata = [fmtDur(Math.max(0, now - startedAt)), model].filter(Boolean).join(" \xB7 ");
   const liveHeadline = latestActivityHeadline(activityLog.value);
   return /* @__PURE__ */ u4("div", { class: `typing${traceExpanded ? " expanded" : ""}`, "aria-live": "polite", children: [
-    /* @__PURE__ */ u4("div", { class: "typing-summary", children: [
-      /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
-        /* @__PURE__ */ u4("span", {}),
-        /* @__PURE__ */ u4("span", {}),
-        /* @__PURE__ */ u4("span", {}),
-        !traceExpanded && liveHeadline ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "hint trace-summary-toggle",
-            "aria-expanded": "false",
-            "aria-label": "Show activity",
-            title: "Show activity",
-            onClick: onToggleTrace,
-            children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
-          }
-        ) : !traceExpanded && typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null,
-        activityLog.value.length ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "trace-toggle",
-            "aria-expanded": traceExpanded,
-            "aria-label": traceExpanded ? "Hide activity" : "Show activity",
-            title: traceExpanded ? "Hide activity" : "Show activity",
-            onClick: onToggleTrace,
-            children: [
-              traceExpanded ? /* @__PURE__ */ u4("span", { class: "trace-count", children: [
-                activityLog.value.length,
-                " step",
-                activityLog.value.length === 1 ? "" : "s"
-              ] }) : null,
-              /* @__PURE__ */ u4("span", { class: `chevron${traceExpanded ? " open" : ""}`, children: "\u203A" })
-            ]
-          }
-        ) : null
-      ] }),
-      /* @__PURE__ */ u4("div", { class: "typing-meta", children: metadata })
-    ] }),
-    traceExpanded && activityLog.value.length ? /* @__PURE__ */ u4(ActivityTraceList, { lines: activityLog.value, live: true, now }) : null
+    /* @__PURE__ */ u4("div", { class: "typing-summary", children: /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
+      /* @__PURE__ */ u4("span", {}),
+      /* @__PURE__ */ u4("span", {}),
+      /* @__PURE__ */ u4("span", {}),
+      liveHeadline ? /* @__PURE__ */ u4("span", { class: "hint trace-preview", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline }) }) : !traceExpanded && typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null
+    ] }) }),
+    /* @__PURE__ */ u4(
+      ActivityTracePanel,
+      {
+        lines: activityLog.value,
+        expanded: traceExpanded,
+        onToggle: onToggleTrace,
+        live: true,
+        now
+      }
+    ),
+    /* @__PURE__ */ u4("div", { class: "typing-meta", children: metadata })
   ] });
 }
 function MessageLog() {
