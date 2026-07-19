@@ -732,6 +732,9 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
                 title={traceExpanded ? 'Hide activity' : 'Show activity'}
                 onClick={onToggleTrace}
               >
+                {traceExpanded
+                  ? <span class="trace-count">{activityLog.value.length} step{activityLog.value.length === 1 ? '' : 's'}</span>
+                  : null}
                 <span class={`chevron${traceExpanded ? ' open' : ''}`}>{'\u203A'}</span>
               </button>
             )

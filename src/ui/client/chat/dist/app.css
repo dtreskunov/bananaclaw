@@ -1623,14 +1623,20 @@ nav.tab-bar-strip.group-strip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  gap: 3px;
+  min-width: 18px;
   height: 18px;
-  padding: 0;
+  padding: 0 2px;
   border: none;
   background: none;
   color: var(--muted);
   cursor: pointer;
   border-radius: 4px;
+  font-size: var(--font-xs);
+}
+.chat-main .typing .trace-toggle .trace-count {
+  font-style: italic;
+  white-space: nowrap;
 }
 .chat-main .typing .trace-toggle:hover {
   background: rgba(127, 127, 127, 0.15);

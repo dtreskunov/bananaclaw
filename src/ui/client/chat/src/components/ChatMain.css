@@ -150,7 +150,8 @@
 .chat-main .typing .trace-summary-toggle:hover,
 .chat-main .typing .trace-summary-toggle:focus-visible { opacity: 1; color: var(--fg); outline: none; }
 .chat-main .typing .typing-meta { font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
-.chat-main .typing .trace-toggle { flex: none; margin-left: 2px; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; background: none; color: var(--muted); cursor: pointer; border-radius: 4px; }
+.chat-main .typing .trace-toggle { flex: none; margin-left: 2px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-width: 18px; height: 18px; padding: 0 2px; border: none; background: none; color: var(--muted); cursor: pointer; border-radius: 4px; font-size: var(--font-xs); }
+.chat-main .typing .trace-toggle .trace-count { font-style: italic; white-space: nowrap; }
 .chat-main .typing .trace-toggle:hover { background: rgba(127, 127, 127, 0.15); color: var(--fg); }
 .chat-main .typing .trace-toggle .chevron { display: inline-block; font-size: 14px; line-height: 1; transition: transform 0.15s ease; }
 .chat-main .typing .trace-toggle .chevron.open { transform: rotate(90deg); }

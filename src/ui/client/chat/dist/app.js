@@ -20450,7 +20450,14 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
             "aria-label": traceExpanded ? "Hide activity" : "Show activity",
             title: traceExpanded ? "Hide activity" : "Show activity",
             onClick: onToggleTrace,
-            children: /* @__PURE__ */ u4("span", { class: `chevron${traceExpanded ? " open" : ""}`, children: "\u203A" })
+            children: [
+              traceExpanded ? /* @__PURE__ */ u4("span", { class: "trace-count", children: [
+                activityLog.value.length,
+                " step",
+                activityLog.value.length === 1 ? "" : "s"
+              ] }) : null,
+              /* @__PURE__ */ u4("span", { class: `chevron${traceExpanded ? " open" : ""}`, children: "\u203A" })
+            ]
           }
         ) : null
       ] }),
