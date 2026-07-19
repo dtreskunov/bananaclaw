@@ -1597,6 +1597,20 @@ nav.tab-bar-strip.group-strip {
   white-space: nowrap;
   min-width: 0;
 }
+.chat-main .typing .trace-summary-toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.chat-main .typing .trace-summary-toggle:hover,
+.chat-main .typing .trace-summary-toggle:focus-visible {
+  opacity: 1;
+  color: var(--fg);
+  outline: none;
+}
 .chat-main .typing .typing-meta {
   font-size: var(--font-2xs);
   color: var(--muted);

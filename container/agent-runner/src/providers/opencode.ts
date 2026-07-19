@@ -211,6 +211,18 @@ export function finalTextFromParts(parts: OpenCodePart[]): string {
     .join('');
 }
 
+export function hasNonEmptyReasoning(parts: Array<{ type?: string; text?: string }>): boolean {
+  return parts.some((part) => part.type === 'reasoning' && typeof part.text === 'string' && part.text.trim().length > 0);
+}
+
+export function isRecoverableReasoningOnlyCompletion(
+  rawText: string,
+  reasoningOutputNonEmpty: boolean,
+  finish: string | undefined,
+): boolean {
+  return rawText.trim().length === 0 && reasoningOutputNonEmpty && finish === 'unknown';
+}
+
 function killProcessTree(proc: ChildProcess): void {
   if (!proc.pid) return;
   try {
@@ -821,6 +833,7 @@ export class OpenCodeProvider implements AgentProvider {
         }
 
         let resultText = '';
+        let reasoningOutputNonEmpty = false;
         let lastAssistantId: string | undefined;
         const assistantMessageIds: string[] = [];
         for (const [msgId, role] of roleByMessageId) {
@@ -845,6 +858,7 @@ export class OpenCodeProvider implements AgentProvider {
           }
           const parts = finalizedParts ?? [...(textPartsByMessageId.get(messageID)?.values() ?? [])];
           resultText += finalTextFromParts(parts);
+          reasoningOutputNonEmpty ||= hasNonEmptyReasoning(parts);
         }
         // Repair known malformed wrappers and drop inline chain-of-thought.
         // Capture whether the model produced ANY raw text first: if it did but
@@ -855,6 +869,16 @@ export class OpenCodeProvider implements AgentProvider {
         const parsedResult = parseAssistantOutput(resultText);
         const recoveredFromUnclosedThink = parsedResult.diagnostics.includes('unclosed-think');
         resultText = parsedResult.normalizedText;
+        const lastFinish = lastAssistantId ? finishByMessageId.get(lastAssistantId) : undefined;
+        // MiniMax/OpenRouter can terminate mid-reasoning with finish="unknown"
+        // and no text/tool part. The reasoning proves this was an interrupted
+        // reply rather than intentional silence, so reuse the one-shot delivery
+        // nudge instead of surfacing an immediate terminal provider error.
+        const recoverableReasoningOnly = isRecoverableReasoningOnlyCompletion(
+          resultText,
+          reasoningOutputNonEmpty,
+          lastFinish,
+        );
         // Some providers (e.g. gemini-via-openrouter) finalize cost/tokens in a
         // `message.updated` that arrives *after* `session.idle` ends our loop,
         // so the values we captured from streaming events are still zero. Do a
@@ -904,12 +928,12 @@ export class OpenCodeProvider implements AgentProvider {
         // (e.g. "length" = model hit max_output_tokens before producing any
         // user-visible text — common with heavy-reasoning models like
         // minimax-m3 capped low on OpenRouter).
-        const lastFinish = lastAssistantId ? finishByMessageId.get(lastAssistantId) : undefined;
-        if (!resultText && lastFinish && lastFinish !== 'stop') {
+        if (!resultText && lastFinish && lastFinish !== 'stop' && !recoverableReasoningOnly) {
           const reasonMsg = describeFinishReason(lastFinish);
           yield { type: 'error', message: reasonMsg, retryable: false, classification: `opencode:finish:${lastFinish}` };
         }
-        const strippedToEmpty = rawResultNonEmpty && resultText.trim().length === 0;
+        const strippedToEmpty =
+          (rawResultNonEmpty || recoverableReasoningOnly) && resultText.trim().length === 0;
         yield {
           type: 'result',
           text: resultText || null,

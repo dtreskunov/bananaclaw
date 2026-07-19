@@ -90,6 +90,8 @@ const FILE_OP_VERBS: Record<string, { present: string; past: string }> = {
 };
 
 const COMMAND_TOOLS = new Set(['bash', 'shell', 'run', 'run_in_terminal']);
+const SEARCH_TOOLS = new Set(['grep', 'glob', 'search', 'websearch', 'web_search']);
+const TODO_TOOLS = new Set(['todowrite', 'todo_write']);
 
 interface StepHeadline {
   action: string;
@@ -116,6 +118,24 @@ function stepHeadline(s: TraceStep): StepHeadline {
       }
       if (COMMAND_TOOLS.has(tool) && s.detail) {
         return { action: finished ? 'Ran' : 'Running', subject: singleLine(s.detail), codeSubject: true };
+      }
+      if (SEARCH_TOOLS.has(tool) && (s.detail || s.title)) {
+        return {
+          action: finished ? 'Searched for' : 'Searching for',
+          subject: singleLine(s.detail || s.title || ''),
+          codeSubject: true,
+        };
+      }
+      if (TODO_TOOLS.has(tool)) {
+        const titleCount = s.title?.match(/^(\d+)\s+todos?$/i)?.[1];
+        const detailCount = s.detail?.split('\n').filter(Boolean).length;
+        const count = titleCount ? Number(titleCount) : detailCount;
+        return {
+          action: finished ? 'Updated task list' : 'Updating task list',
+          ...(typeof count === 'number'
+            ? { subject: `${count} ${count === 1 ? 'task' : 'tasks'}` }
+            : {}),
+        };
       }
       if (s.title) {
         return { action: s.title };
@@ -686,9 +706,22 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
       <div class="typing-summary">
         <div class="typing-dots">
           <span></span><span></span><span></span>
-          {!traceExpanded && (liveHeadline || typingHint.value)
-            ? <span class="hint">{liveHeadline ? <StepHeadlineContent headline={liveHeadline} /> : typingHint.value}</span>
-            : null}
+          {!traceExpanded && liveHeadline
+            ? (
+              <button
+                type="button"
+                class="hint trace-summary-toggle"
+                aria-expanded="false"
+                aria-label="Show activity"
+                title="Show activity"
+                onClick={onToggleTrace}
+              >
+                <StepHeadlineContent headline={liveHeadline} />
+              </button>
+            )
+            : !traceExpanded && typingHint.value
+              ? <span class="hint">{typingHint.value}</span>
+              : null}
           {activityLog.value.length
             ? (
               <button

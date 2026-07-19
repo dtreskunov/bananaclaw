@@ -146,6 +146,9 @@
 .chat-main .typing .typing-dots > span:nth-child(2) { animation-delay: 0.15s; }
 .chat-main .typing .typing-dots > span:nth-child(3) { animation-delay: 0.3s; }
 .chat-main .typing .hint { flex: 1; font-size: var(--font-xs); color: var(--muted); font-style: italic; margin-left: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chat-main .typing .trace-summary-toggle { padding: 0; border: none; background: none; text-align: left; cursor: pointer; opacity: 0.85; }
+.chat-main .typing .trace-summary-toggle:hover,
+.chat-main .typing .trace-summary-toggle:focus-visible { opacity: 1; color: var(--fg); outline: none; }
 .chat-main .typing .typing-meta { font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
 .chat-main .typing .trace-toggle { flex: none; margin-left: 2px; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; background: none; color: var(--muted); cursor: pointer; border-radius: 4px; }
 .chat-main .typing .trace-toggle:hover { background: rgba(127, 127, 127, 0.15); color: var(--fg); }

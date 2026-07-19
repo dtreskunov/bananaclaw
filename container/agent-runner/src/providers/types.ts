@@ -210,6 +210,36 @@ const ACTIVITY_DETAIL_KEYS = [
   'notebook_path', 'url', 'description', 'prompt', 'path',
 ];
 
+const TODO_STATUS_LABELS: Record<string, string> = {
+  completed: 'Completed',
+  in_progress: 'In progress',
+  pending: 'Pending',
+  cancelled: 'Cancelled',
+};
+
+/** Render structured todo-tool input as a compact, safe activity checklist. */
+export function formatTodoActivityDetail(input: Record<string, unknown> | undefined): string | undefined {
+  if (!Array.isArray(input?.todos)) return undefined;
+  const lines = input.todos.flatMap((value) => {
+    if (!value || typeof value !== 'object') return [];
+    const todo = value as Record<string, unknown>;
+    if (typeof todo.content !== 'string' || !todo.content.trim()) return [];
+    const status = typeof todo.status === 'string'
+      ? TODO_STATUS_LABELS[todo.status] ?? singleWordLabel(todo.status)
+      : 'Task';
+    const priority = typeof todo.priority === 'string' && todo.priority.trim()
+      ? ` (${singleWordLabel(todo.priority)} priority)`
+      : '';
+    return [`${status}: ${todo.content.trim()}${priority}`];
+  });
+  return lines.length > 0 ? lines.join('\n') : undefined;
+}
+
+function singleWordLabel(value: string): string {
+  const label = value.replace(/[_-]+/g, ' ').trim();
+  return label ? label[0].toUpperCase() + label.slice(1) : value;
+}
+
 /**
  * Provider-agnostic: pick the first string-valued "primary argument" from a
  * tool input, preserving internal newlines (only leading blank lines and
@@ -224,18 +254,18 @@ export function pickActivityDetail(input: Record<string, unknown> | undefined): 
       return v.replace(/^\n+/, '').replace(/\s+$/, '');
     }
   }
-  return undefined;
+  return formatTodoActivityDetail(input);
 }
 
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   /**
    * Final turn output. `strippedToEmpty` marks the case where the model's
-   * RAW assistant text was non-empty but provider normalization reduced it
-   * to nothing (e.g. a reasoning model that buried its whole reply inside an
-   * unclosed `<think>` with no `<message>` wrapper — the answer exists but is
-   * unrecoverable as-is). The poll-loop uses this to distinguish a swallowed
-   * reply (nudge-worthy) from a genuinely silent turn (nothing to recover).
+  * assistant produced recoverable output but no deliverable text (e.g. a
+  * reply buried inside an unclosed `<think>`, or an OpenCode completion that
+  * stopped mid-reasoning with finish="unknown"). The poll-loop uses this to
+  * distinguish an interrupted/swallowed reply (nudge-worthy) from a genuinely
+  * silent turn (nothing to recover).
    * Only OpenCode sets it; Claude strips in-loop, so it stays undefined there.
    */
   | {

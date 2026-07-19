@@ -19913,6 +19913,8 @@ var FILE_OP_VERBS = {
   edit: { present: "Editing", past: "Edited" }
 };
 var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
+var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
+var TODO_TOOLS = /* @__PURE__ */ new Set(["todowrite", "todo_write"]);
 function singleLine(value) {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -19931,6 +19933,22 @@ function stepHeadline(s5) {
       }
       if (COMMAND_TOOLS.has(tool) && s5.detail) {
         return { action: finished ? "Ran" : "Running", subject: singleLine(s5.detail), codeSubject: true };
+      }
+      if (SEARCH_TOOLS.has(tool) && (s5.detail || s5.title)) {
+        return {
+          action: finished ? "Searched for" : "Searching for",
+          subject: singleLine(s5.detail || s5.title || ""),
+          codeSubject: true
+        };
+      }
+      if (TODO_TOOLS.has(tool)) {
+        const titleCount = s5.title?.match(/^(\d+)\s+todos?$/i)?.[1];
+        const detailCount = s5.detail?.split("\n").filter(Boolean).length;
+        const count = titleCount ? Number(titleCount) : detailCount;
+        return {
+          action: finished ? "Updated task list" : "Updating task list",
+          ...typeof count === "number" ? { subject: `${count} ${count === 1 ? "task" : "tasks"}` } : {}
+        };
       }
       if (s5.title) {
         return { action: s5.title };
@@ -20411,7 +20429,18 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
         /* @__PURE__ */ u4("span", {}),
         /* @__PURE__ */ u4("span", {}),
         /* @__PURE__ */ u4("span", {}),
-        !traceExpanded && (liveHeadline || typingHint.value) ? /* @__PURE__ */ u4("span", { class: "hint", children: liveHeadline ? /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline }) : typingHint.value }) : null,
+        !traceExpanded && liveHeadline ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "hint trace-summary-toggle",
+            "aria-expanded": "false",
+            "aria-label": "Show activity",
+            title: "Show activity",
+            onClick: onToggleTrace,
+            children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
+          }
+        ) : !traceExpanded && typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null,
         activityLog.value.length ? /* @__PURE__ */ u4(
           "button",
           {

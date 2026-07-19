@@ -3,7 +3,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   finalTextFromParts,
   formatProgressFromPart,
+  hasNonEmptyReasoning,
   isEventForSession,
+  isRecoverableReasoningOnlyCompletion,
 } from './opencode.js';
 
 describe('formatProgressFromPart', () => {
@@ -33,6 +35,23 @@ describe('formatProgressFromPart', () => {
       state: { status: 'error', input: { filePath: '/tmp/a' }, error: 'not found' },
     })).toEqual({
       kind: 'tool', id: 'tool-2', tool: 'read', status: 'error', detail: '/tmp/a', error: 'not found',
+    });
+  });
+
+  it('preserves todo descriptions, statuses, and priorities as expandable detail', () => {
+    expect(formatProgressFromPart({
+      id: 'todo-1', type: 'tool', tool: 'todowrite',
+      state: {
+        status: 'completed',
+        title: '2 todos',
+        input: { todos: [
+          { content: 'Create the sign structure', status: 'in_progress', priority: 'high' },
+          { content: 'Render the PDFs', status: 'pending', priority: 'medium' },
+        ] },
+      },
+    })).toEqual({
+      kind: 'tool', id: 'todo-1', tool: 'todowrite', status: 'completed', title: '2 todos',
+      detail: 'In progress: Create the sign structure (High priority)\nPending: Render the PDFs (Medium priority)',
     });
   });
 
@@ -80,5 +99,34 @@ describe('finalTextFromParts', () => {
       { id: 'r1', type: 'reasoning', text: 'private' },
       { id: 't1', type: 'text', text: '<message to="web">public</message>' },
     ])).toBe('<message to="web">public</message>');
+  });
+});
+
+describe('hasNonEmptyReasoning', () => {
+  it('detects an interrupted reasoning-only completion without exposing it as reply text', () => {
+    const parts = [
+      { type: 'step-start' },
+      { type: 'reasoning', text: 'I understand the answer. Next I will update the files.' },
+      { type: 'step-finish' },
+    ];
+
+    expect(hasNonEmptyReasoning(parts)).toBe(true);
+    expect(finalTextFromParts(parts)).toBe('');
+  });
+
+  it('ignores empty reasoning and normal text parts', () => {
+    expect(hasNonEmptyReasoning([
+      { type: 'reasoning', text: '   ' },
+      { type: 'text', text: '<message>done</message>' },
+    ])).toBe(false);
+  });
+});
+
+describe('isRecoverableReasoningOnlyCompletion', () => {
+  it('recovers only an unknown finish with reasoning but no reply text', () => {
+    expect(isRecoverableReasoningOnlyCompletion('', true, 'unknown')).toBe(true);
+    expect(isRecoverableReasoningOnlyCompletion('<message>done</message>', true, 'unknown')).toBe(false);
+    expect(isRecoverableReasoningOnlyCompletion('', false, 'unknown')).toBe(false);
+    expect(isRecoverableReasoningOnlyCompletion('', true, 'length')).toBe(false);
   });
 });
