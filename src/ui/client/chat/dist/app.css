@@ -1286,7 +1286,7 @@ nav.tab-bar-strip.group-strip {
   align-self: flex-start;
   background: var(--wash);
 }
-.chat-main .msg.out.delivery-update {
+.chat-main .msg.agent-action {
   box-shadow: inset 2px 0 var(--accent-strong);
 }
 .chat-main .msg.internal {
@@ -2301,7 +2301,7 @@ nav.tab-bar-strip.group-strip {
   }
 }
 .chat-main .question-card {
-  border: 1px solid var(--accent, #6366f1);
+  border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 8px;

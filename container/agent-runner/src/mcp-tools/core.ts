@@ -210,7 +210,12 @@ export const sendFile: McpToolDefinition = {
       platform_id: routing.platform_id,
       channel_type: routing.channel_type,
       thread_id: routing.thread_id,
-      content: JSON.stringify({ text: (args.text as string) || '', files: filenames, file_paths: filePaths }),
+      content: JSON.stringify({
+        text: (args.text as string) || '',
+        files: filenames,
+        file_paths: filePaths,
+        delivery_origin: 'send_file',
+      }),
     });
 
     log(`send_file: ${id} → ${routing.resolvedName} (${filenames.join(', ')})`);

@@ -82,6 +82,7 @@ describe('send_file MCP tool — multi-file batching', () => {
     const content = JSON.parse(out[0].content);
     expect(content.text).toBe('two files');
     expect(content.files).toEqual(['a.txt', 'b.txt']);
+    expect(content.delivery_origin).toBe('send_file');
 
     // Files are staged side-by-side in the outbox dir for the host to read.
     const outboxDir = path.join(outboxRoot, out[0].id);

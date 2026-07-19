@@ -14,6 +14,11 @@ describe('parseOutboundContent', () => {
       files: undefined,
       deliveryOrigin: 'response',
     });
+    expect(parseOutboundContent(JSON.stringify({ text: 'Attached', delivery_origin: 'send_file' }))).toEqual({
+      text: 'Attached',
+      files: undefined,
+      deliveryOrigin: 'send_file',
+    });
   });
 
   it('drops unknown delivery provenance', () => {

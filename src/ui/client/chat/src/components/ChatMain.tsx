@@ -372,6 +372,10 @@ function UsageMeta({ u }: { u: TurnUsage }) {
   );
 }
 
+function AgentActionLabel({ label, title }: { label: string; title: string }) {
+  return <span class="delivery-origin" title={title}>{label}</span>;
+}
+
 function Message({ m }: { m: ChatMessage }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
@@ -431,8 +435,8 @@ function Message({ m }: { m: ChatMessage }) {
     // Highlight search query terms in the rendered message.
     if (q && ref.current) highlightTextNodes(ref.current, q);
   }, [m.text, md != null, q]);
-  const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') +
-    (m.deliveryOrigin === 'send_message' ? ' delivery-update' : '');
+  const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
+  const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '');
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   return (
@@ -483,8 +487,10 @@ function Message({ m }: { m: ChatMessage }) {
       {m.ts ? <div class="meta">
         <RelativeTime ts={m.ts} />
         {m.deliveryOrigin === 'send_message'
-          ? <span class="delivery-origin" title="Sent during the turn with send_message">mid-turn update</span>
-          : null}
+          ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
+          : m.deliveryOrigin === 'send_file'
+            ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
+            : null}
         {m.usage && m.direction === 'out' ? <UsageMeta u={m.usage} /> : null}
       </div> : null}
     </div>
@@ -493,7 +499,7 @@ function Message({ m }: { m: ChatMessage }) {
 
 function DisplayCardMessage({ message, card }: { message: ChatMessage; card: DisplayCard }) {
   return (
-    <div class="msg out display-card" data-msg-id={message.id}>
+    <div class="msg out display-card agent-action" data-msg-id={message.id}>
       {card.title ? <div class="display-card-title">{card.title}</div> : null}
       {card.description ? <div class="display-card-description">{card.description}</div> : null}
       {card.children.length > 0 ? (
@@ -522,7 +528,10 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      {message.ts ? <div class="meta"><RelativeTime ts={message.ts} /></div> : null}
+      {message.ts ? <div class="meta">
+        <RelativeTime ts={message.ts} />
+        <AgentActionLabel label="card" title="Sent with send_card" />
+      </div> : null}
     </div>
   );
 }
@@ -1025,7 +1034,7 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
   }, [q.status, target]);
 
   return (
-    <div class={`msg ${answered ? 'in question-card-answered' : 'out'} question-card`} data-msg-id={q.questionId}>
+    <div class={`msg ${answered ? 'in question-card-answered' : 'out agent-action'} question-card`} data-msg-id={q.questionId}>
       <div class="question-card-heading">{q.title}</div>
       <div class="question-card-title">{q.question}</div>
       {answered ? (
@@ -1113,6 +1122,7 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
       {q.activity?.length ? <ActivityTrace lines={q.activity} /> : null}
       <div class="meta question-card-meta">
         <RelativeTime ts={answered && q.answeredAt ? q.answeredAt : q.createdAt} />
+        {!answered ? <AgentActionLabel label="question" title="Sent with ask_user_question" /> : null}
       </div>
     </div>
   );

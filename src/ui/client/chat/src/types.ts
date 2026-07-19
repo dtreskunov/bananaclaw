@@ -129,7 +129,7 @@ export interface ChatMessage {
   files: ChatMessageFile[] | null;
   ts: string;
   /** How the agent emitted this row. Absent for legacy/unclassified messages. */
-  deliveryOrigin?: 'send_message' | 'response';
+  deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   usage?: TurnUsage;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
@@ -304,7 +304,7 @@ export interface WsPayload {
         text?: string;
         markdown?: string;
         fallbackText?: string;
-        delivery_origin?: 'send_message' | 'response';
+        delivery_origin?: 'send_message' | 'send_file' | 'response';
       };
   card?: DisplayCard;
   files?: ChatMessageFile[] | null;

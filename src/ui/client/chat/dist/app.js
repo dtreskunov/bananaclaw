@@ -18087,7 +18087,7 @@ function connectChatWs() {
       }
       const text = typeof c4 === "string" ? c4 : c4.text || c4.markdown || "";
       const dir = payload.messageKind === "internal" ? "internal" : "out";
-      const deliveryOrigin = typeof c4 === "object" && (c4.delivery_origin === "send_message" || c4.delivery_origin === "response") ? c4.delivery_origin : void 0;
+      const deliveryOrigin = typeof c4 === "object" && (c4.delivery_origin === "send_message" || c4.delivery_origin === "send_file" || c4.delivery_origin === "response") ? c4.delivery_origin : void 0;
       const carriedActivity = dir === "out" ? activityLog.value.length ? activityLog.value.slice() : refs.carryActivity : null;
       appendMsg(
         dir,
@@ -20157,6 +20157,9 @@ function UsageMeta({ u: u5 }) {
     expanded && detail ? ` \xB7 ${detail}` : ""
   ] });
 }
+function AgentActionLabel({ label, title }) {
+  return /* @__PURE__ */ u4("span", { class: "delivery-origin", title, children: label });
+}
 function Message({ m: m6 }) {
   const ref = A2(null);
   const mdRef = A2(null);
@@ -20221,7 +20224,8 @@ function Message({ m: m6 }) {
     }
     if (q5 && ref.current) highlightTextNodes(ref.current, q5);
   }, [m6.text, md != null, q5]);
-  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (m6.deliveryOrigin === "send_message" ? " delivery-update" : "");
+  const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
+  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   return /* @__PURE__ */ u4("div", { class: cls, "data-msg-id": m6.id, ref, children: [
@@ -20252,13 +20256,13 @@ function Message({ m: m6 }) {
     m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
     m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-      m6.deliveryOrigin === "send_message" ? /* @__PURE__ */ u4("span", { class: "delivery-origin", title: "Sent during the turn with send_message", children: "mid-turn update" }) : null,
+      m6.deliveryOrigin === "send_message" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
       m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null
     ] }) : null
   ] });
 }
 function DisplayCardMessage({ message, card }) {
-  return /* @__PURE__ */ u4("div", { class: "msg out display-card", "data-msg-id": message.id, children: [
+  return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message.id, children: [
     card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
     card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
     card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
@@ -20281,7 +20285,10 @@ function DisplayCardMessage({ message, card }) {
     )) }) : null,
     message.activity?.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: message.activity }) : null,
     message.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
-    message.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: message.ts }) }) : null
+    message.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+      /* @__PURE__ */ u4(RelativeTime, { ts: message.ts }),
+      /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" })
+    ] }) : null
   ] });
 }
 function groupMessages(list) {
@@ -20703,7 +20710,7 @@ function QuestionCardItem({ question: q5, busy }) {
       }
     };
   }, [q5.status, target]);
-  return /* @__PURE__ */ u4("div", { class: `msg ${answered ? "in question-card-answered" : "out"} question-card`, "data-msg-id": q5.questionId, children: [
+  return /* @__PURE__ */ u4("div", { class: `msg ${answered ? "in question-card-answered" : "out agent-action"} question-card`, "data-msg-id": q5.questionId, children: [
     /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
     /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.question }),
     answered ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: q5.options.find((option) => option.value === q5.answerValue)?.selectedLabel ?? q5.answerValue }) : q5.status === "cancelled" ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: "Cancelled" }) : /* @__PURE__ */ u4(k, { children: [
@@ -20782,7 +20789,10 @@ function QuestionCardItem({ question: q5, busy }) {
       )
     ] }),
     q5.activity?.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: q5.activity }) : null,
-    /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }) })
+    /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
+      /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }),
+      !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null
+    ] })
   ] });
 }
 var REFUSAL_PATTERNS = [

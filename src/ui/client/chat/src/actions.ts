@@ -70,7 +70,7 @@ interface ServerMessage {
   card?: DisplayCard;
   files?: ChatMessageFile[] | null;
   timestamp: string;
-  deliveryOrigin?: 'send_message' | 'response';
+  deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   usage?: import('./types').TurnUsage;
   activity?: import('./types').ActivityLine[];
   event?: import('./types').TimelineEvent;
@@ -397,7 +397,7 @@ function appendMsg(
   id?: string,
   activity?: import('./types').ActivityLine[] | null,
   card?: DisplayCard,
-  deliveryOrigin?: 'send_message' | 'response',
+  deliveryOrigin?: 'send_message' | 'send_file' | 'response',
 ): void {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
@@ -817,7 +817,8 @@ function connectChatWs(): void {
       const text = typeof c === 'string' ? c : c.text || c.markdown || '';
       const dir: Direction = payload.messageKind === 'internal' ? 'internal' : 'out';
       const deliveryOrigin =
-        typeof c === 'object' && (c.delivery_origin === 'send_message' || c.delivery_origin === 'response')
+        typeof c === 'object' &&
+        (c.delivery_origin === 'send_message' || c.delivery_origin === 'send_file' || c.delivery_origin === 'response')
           ? c.delivery_origin
           : undefined;
       // For the final response, carry the live-accumulated trace onto the

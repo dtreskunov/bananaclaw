@@ -769,7 +769,7 @@ export interface HistoryMessage {
   timestamp: string;
   text: string;
   /** How an agent chat row was emitted. Absent for legacy/unclassified rows. */
-  deliveryOrigin?: 'send_message' | 'response';
+  deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
   files?: { filename: string; size: number; path?: string; url?: string; contentType?: string }[];
@@ -1648,14 +1648,16 @@ function serveInboundAttachment(
 export function parseOutboundContent(content: string): {
   text: string;
   files?: { filename: string; size: number; path?: string }[];
-  deliveryOrigin?: 'send_message' | 'response';
+  deliveryOrigin?: 'send_message' | 'send_file' | 'response';
 } {
   try {
     const o = JSON.parse(content);
     if (typeof o === 'string') return { text: o };
     const text = typeof o?.text === 'string' ? o.text : typeof o?.markdown === 'string' ? o.markdown : '';
     const deliveryOrigin =
-      o?.delivery_origin === 'send_message' || o?.delivery_origin === 'response' ? o.delivery_origin : undefined;
+      o?.delivery_origin === 'send_message' || o?.delivery_origin === 'send_file' || o?.delivery_origin === 'response'
+        ? o.delivery_origin
+        : undefined;
     // file_paths is a parallel array to files written by send_file with
     // workspace-relative source paths (or null when the source isn't in
     // /workspace/agent). Lets the chat UI link the chip to the FILES
