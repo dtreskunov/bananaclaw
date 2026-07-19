@@ -211,6 +211,13 @@ export function finalTextFromParts(parts: OpenCodePart[]): string {
     .join('');
 }
 
+/** OpenCode creates a new assistant message around each tool call. Only the
+ * last one is the completed reply; earlier text is intermediate narration. */
+export function finalTextFromAssistantMessages(messages: OpenCodePart[][]): string {
+  const finalMessage = messages.at(-1);
+  return finalMessage ? finalTextFromParts(finalMessage) : '';
+}
+
 export function hasNonEmptyReasoning(parts: Array<{ type?: string; text?: string }>): boolean {
   return parts.some((part) => part.type === 'reasoning' && typeof part.text === 'string' && part.text.trim().length > 0);
 }
@@ -846,6 +853,7 @@ export class OpenCodeProvider implements AgentProvider {
         // If a final fetch fails, fall back to the per-part SSE snapshots for
         // that message rather than dropping an otherwise deliverable reply.
         let lastAssistantMessageData: { info?: unknown; parts?: OpenCodePart[] } | undefined;
+        const assistantMessageParts: OpenCodePart[][] = [];
         for (const messageID of assistantMessageIds) {
           let finalizedParts: OpenCodePart[] | undefined;
           try {
@@ -857,9 +865,10 @@ export class OpenCodeProvider implements AgentProvider {
             log(`Failed to refresh final assistant message: ${err instanceof Error ? err.message : String(err)}`);
           }
           const parts = finalizedParts ?? [...(textPartsByMessageId.get(messageID)?.values() ?? [])];
-          resultText += finalTextFromParts(parts);
+          assistantMessageParts.push(parts);
           reasoningOutputNonEmpty ||= hasNonEmptyReasoning(parts);
         }
+        resultText = finalTextFromAssistantMessages(assistantMessageParts);
         // Repair known malformed wrappers and drop inline chain-of-thought.
         // Capture whether the model produced ANY raw text first: if it did but
         // normalization strips it to nothing, the reply was swallowed (e.g. an

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  finalTextFromAssistantMessages,
   finalTextFromParts,
   formatProgressFromPart,
   hasNonEmptyReasoning,
@@ -99,6 +100,20 @@ describe('finalTextFromParts', () => {
       { id: 'r1', type: 'reasoning', text: 'private' },
       { id: 't1', type: 'text', text: '<message to="web">public</message>' },
     ])).toBe('<message to="web">public</message>');
+  });
+});
+
+describe('finalTextFromAssistantMessages', () => {
+  it('delivers only the final assistant message after tool-call narration', () => {
+    expect(finalTextFromAssistantMessages([
+      [{ id: 'progress-1', type: 'text', text: '<message to="web">Looking up the RSVP link.</message>' }],
+      [{ id: 'progress-2', type: 'text', text: '<message to="web">Checking the guest list.</message>' }],
+      [{ id: 'final', type: 'text', text: 'The RSVP link is https://example.com/rsvp' }],
+    ])).toBe('The RSVP link is https://example.com/rsvp');
+  });
+
+  it('returns no reply when OpenCode produced no assistant message', () => {
+    expect(finalTextFromAssistantMessages([])).toBe('');
   });
 });
 
