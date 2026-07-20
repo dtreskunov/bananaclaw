@@ -709,7 +709,7 @@ async function processQuery(
     for (const r of rows) {
       // kind='internal' is the web thought-bubble surfaced by dispatchResultText
       // from <internal>...</internal> blocks — not a reply.
-      if (r.kind === 'internal') continue;
+      if (r.kind === 'internal' || r.kind === 'system') continue;
       // chat-kind rows can carry either content (text/markdown/files) or a
       // bare operation (reaction/edit). Only the former counts as a reply.
       if (r.kind === 'chat') {

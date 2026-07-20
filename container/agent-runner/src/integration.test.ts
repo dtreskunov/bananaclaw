@@ -403,6 +403,42 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
+  it('system action does NOT suppress the unwrapped-text nudge', async () => {
+    insertMessage('m1', { sender: 'Alice', text: 'publish this' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    let turn = 0;
+    const provider = new MockProvider({}, (prompt) => {
+      turn++;
+      if (turn === 1) {
+        writeMessageOut({
+          id: `cli-${Date.now()}`,
+          kind: 'system',
+          content: JSON.stringify({ action: 'cli_request', requestId: 'cli-1', command: 'help', args: {} }),
+        });
+        return 'Published successfully';
+      }
+      expect(prompt).toContain('was not delivered');
+      return '<message to="discord-test">Published successfully</message>';
+    });
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 3000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((message) => {
+        try { return (JSON.parse(message.content) as { text?: string }).text === 'Published successfully'; }
+        catch { return false; }
+      }),
+      3000,
+    );
+    controller.abort();
+
+    const chatRows = getUndeliveredMessages().filter((message) => message.kind === 'chat');
+    expect(chatRows).toHaveLength(1);
+    expect(JSON.parse(chatRows[0].content).text).toBe('Published successfully');
+
+    await loopPromise.catch(() => {});
+  });
+
   it('handles mixed task + chat batch with correct origin metadata', async () => {
     // Seed destination for routing lookup
     insertMessage('m-chat', { sender: 'Alice', text: 'check this' }, { platformId: 'chan-1', channelType: 'discord' });
