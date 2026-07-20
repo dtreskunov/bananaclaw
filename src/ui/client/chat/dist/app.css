@@ -1603,6 +1603,22 @@ nav.tab-bar-strip.group-strip {
   white-space: nowrap;
   min-width: 0;
 }
+.chat-main .typing .trace-preview {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-main .typing .trace-preview:hover {
+  color: var(--fg);
+}
+.chat-main .typing .trace-preview:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .chat-main .typing .typing-meta {
   font-size: var(--font-2xs);
   color: var(--muted);

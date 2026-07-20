@@ -263,13 +263,19 @@ function ActivityTraceRow({ line, open, live, now, onToggle }: { line: ActivityL
  *  timestamp and, for a command step, the code body as a multi-line block.
  *  Single-open accordion. Shared by the persisted trace and the live typing
  *  bubble. */
-function ActivityTraceList({ lines, live = false, now = null }: { lines: ActivityLine[]; live?: boolean; now?: number | null }) {
-  const [sel, setSel] = useState<string | null>(null);
+function activityLineId(line: ActivityLine, index: number): string {
+  return parseStep(line.text).id || `activity-${index}`;
+}
+
+function ActivityTraceList({ lines, live = false, now = null, openLatest = false }: { lines: ActivityLine[]; live?: boolean; now?: number | null; openLatest?: boolean }) {
+  const [sel, setSel] = useState<string | null>(() => openLatest && lines.length
+    ? activityLineId(lines[lines.length - 1], lines.length - 1)
+    : null);
   const toggle = (id: string) => setSel((cur) => (cur === id ? null : id));
   return (
     <ul class="activity-trace">
       {lines.map((line, i) => {
-        const id = parseStep(line.text).id || `activity-${i}`;
+        const id = activityLineId(line, i);
         return <ActivityTraceRow key={id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(id)} />;
       })}
     </ul>
@@ -288,12 +294,14 @@ function ActivityTracePanel({
   onToggle,
   live = false,
   now = null,
+  openLatest = false,
 }: {
   lines: ActivityLine[];
   expanded: boolean;
   onToggle: () => void;
   live?: boolean;
   now?: number | null;
+  openLatest?: boolean;
 }) {
   if (!lines.length) return null;
   return (
@@ -309,7 +317,7 @@ function ActivityTracePanel({
         <span class={`chevron${expanded ? ' open' : ''}`}>{'\u203A'}</span>
         <span class="trace-count">{lines.length} step{lines.length === 1 ? '' : 's'}</span>
       </button>
-      {expanded ? <ActivityTraceList lines={lines} live={live} now={now} /> : null}
+      {expanded ? <ActivityTraceList lines={lines} live={live} now={now} openLatest={openLatest} /> : null}
     </div>
   );
 }
@@ -735,13 +743,29 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
   const model = typingModel.value ? shortModel(typingModel.value) : '';
   const metadata = [fmtDur(Math.max(0, now - startedAt)), model].filter(Boolean).join(' \u00b7 ');
   const liveHeadline = latestActivityHeadline(activityLog.value);
+  const [openLatestOnExpand, setOpenLatestOnExpand] = useState(false);
+  const toggleFromPreview = () => {
+    setOpenLatestOnExpand(!traceExpanded);
+    onToggleTrace();
+  };
+  const toggleFromCount = () => {
+    setOpenLatestOnExpand(false);
+    onToggleTrace();
+  };
   return (
     <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
       <div class="typing-summary">
         <div class="typing-dots">
           <span></span><span></span><span></span>
           {liveHeadline
-            ? <span class="hint trace-preview"><StepHeadlineContent headline={liveHeadline} /></span>
+            ? <button
+                type="button"
+                class="hint trace-preview"
+                aria-expanded={traceExpanded}
+                aria-label={traceExpanded ? 'Hide activity' : 'Show latest activity'}
+                title={traceExpanded ? 'Hide activity' : 'Show latest activity'}
+                onClick={toggleFromPreview}
+              ><StepHeadlineContent headline={liveHeadline} /></button>
             : !traceExpanded && typingHint.value
               ? <span class="hint">{typingHint.value}</span>
               : null}
@@ -750,9 +774,10 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
       <ActivityTracePanel
         lines={activityLog.value}
         expanded={traceExpanded}
-        onToggle={onToggleTrace}
+        onToggle={toggleFromCount}
         live
         now={now}
+        openLatest={openLatestOnExpand}
       />
       <div class="typing-meta">{metadata}</div>
     </div>
