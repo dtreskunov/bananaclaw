@@ -21272,7 +21272,7 @@ function ChatMain() {
   return /* @__PURE__ */ u4("section", { class: "chat-main", id: "chat-main", ref, children: [
     /* @__PURE__ */ u4(ApprovalsBanner, {}),
     /* @__PURE__ */ u4(MessageLog, {}),
-    /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", children: chatStatus.value }),
+    /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatStatus.value === "connected", children: chatStatus.value }),
     /* @__PURE__ */ u4(ContextChip, {}),
     /* @__PURE__ */ u4(PendingTray, {}),
     /* @__PURE__ */ u4(ReadonlyBanner, {}),

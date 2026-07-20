@@ -1656,7 +1656,7 @@ export function ChatMain() {
     <section class="chat-main" id="chat-main" ref={ref}>
       <ApprovalsBanner />
       <MessageLog />
-      <div class="status" id="chat-status">{chatStatus.value}</div>
+      <div class="status" id="chat-status" hidden={chatStatus.value === 'connected'}>{chatStatus.value}</div>
       <ContextChip />
       <PendingTray />
       <ReadonlyBanner />

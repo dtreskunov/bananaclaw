@@ -1853,6 +1853,11 @@ nav.tab-bar-strip.group-strip {
   font-size: var(--font-xs);
   color: var(--muted);
 }
+.chat-main .status[hidden],
+.chat-main .context[hidden],
+.chat-main .pending[hidden] {
+  display: none;
+}
 .chat-main .context .chip {
   display: inline-flex;
   align-items: center;
