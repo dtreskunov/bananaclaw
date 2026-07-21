@@ -284,7 +284,23 @@ export interface RouterApi {
 
 // Value sent by the chat WS.
 export interface WsPayload {
-  kind: 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'activity' | 'task-run' | 'reaction';
+  kind: 'history' | 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'activity' | 'task-run' | 'reaction';
+  threadId?: string;
+  messages?: Array<{
+    id?: string;
+    direction: string;
+    text: string;
+    card?: DisplayCard;
+    files?: ChatMessageFile[] | null;
+    timestamp: string;
+    deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+    usage?: TurnUsage;
+    activity?: ActivityLine[];
+    event?: TimelineEvent;
+    reactions?: MessageReaction[];
+  }>;
+  voiceMode?: 'off' | 'transcribe' | 'audio';
+  canSend?: boolean;
   on?: boolean;
   /** reaction frame: target message id the emoji attaches to. */
   targetId?: string;

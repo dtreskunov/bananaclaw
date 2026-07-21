@@ -518,7 +518,7 @@ interface QuestionDto {
   createdAt: string;
 }
 
-function listQuestionsForUser(userId: string, filterGroupId?: string, filterThreadId?: string): QuestionDto[] {
+function listQuestionsForUser(userId: string, filterGroupId?: string, filterThreadId?: string | null): QuestionDto[] {
   const rows = getDb()
     .prepare(
       'SELECT q.*, s.agent_group_id FROM questions q JOIN sessions s ON q.session_id = s.id ORDER BY q.created_at ASC',
@@ -545,7 +545,7 @@ function listQuestionsForUser(userId: string, filterGroupId?: string, filterThre
   for (const r of rows) {
     if (!canAccessAgentGroup(userId, r.agent_group_id).allowed) continue;
     if (filterGroupId && r.agent_group_id !== filterGroupId) continue;
-    if (filterThreadId && r.thread_id !== filterThreadId) continue;
+    if (filterThreadId !== undefined && r.thread_id !== filterThreadId) continue;
     let options: { label: string; selectedLabel: string; value: string }[] = [];
     try {
       const parsed = JSON.parse(r.options_json) as { label?: string; selectedLabel?: string; value?: string }[];
@@ -611,7 +611,8 @@ function handleSync(ctx: Ctx, userId: string): void {
       }
     }
     // Include the durable question history for the active thread.
-    out.questions = listQuestionsForUser(userId, gid, tid || undefined);
+    const questionThreadId = tid.startsWith('__dm:') ? null : tid || undefined;
+    out.questions = listQuestionsForUser(userId, gid, questionThreadId);
   }
   json(ctx, 200, out);
 }

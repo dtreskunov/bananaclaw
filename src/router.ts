@@ -480,6 +480,7 @@ async function deliverToAgent(
     content: event.message.content,
     trigger: wake ? 1 : 0,
     senderUserId: userId,
+    idempotent: event.message.idempotent,
   });
 
   log.info('Message routed', {

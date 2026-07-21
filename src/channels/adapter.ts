@@ -70,6 +70,8 @@ export interface InboundEvent {
     kind: 'chat' | 'chat-sdk';
     content: string; // JSON blob
     timestamp: string;
+    /** Replays with the same message id should reuse the existing inbound row. */
+    idempotent?: boolean;
     /**
      * Platform-confirmed bot-mention signal forwarded from the adapter.
      * See InboundMessage.isMention for the full explanation.

@@ -5,7 +5,7 @@ import { signal } from '@preact/signals';
 import type { JSX } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
-  chatMessages, chatStatus, chatLoading, isTyping, typingHint, typingStartedAt, typingModel, activityLog, threadId, channelType, canSend, pending,
+  chatMessages, chatStatus, chatLoading, chatReady, isTyping, typingHint, typingStartedAt, typingModel, activityLog, threadId, channelType, canSend, pending,
   threads, groupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions, respondingQuestionIds,
   highlightMessageId, searchQuery, voiceMode, isMobile, scrollToBottomTick,
@@ -1173,11 +1173,11 @@ function Composer() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [quickCapture, setQuickCapture] = useState(false);
   const isWeb = !channelType.value || channelType.value === 'web';
-  const showComposer = isWeb || canSend.value;
-  // Web threads send over the WebSocket; if it isn't connected, block input
-  // rather than silently dropping the message. Non-web channels post via
-  // HTTP and don't care about chatStatus.
-  const wsDown = isWeb && chatStatus.value !== 'connected';
+  const showComposer = canSend.value;
+  // Web threads receive over the socket but send over HTTP. Wait for the
+  // synchronized socket handshake so the accepted inbound echo cannot race
+  // ahead of the active subscription. Non-web sends do not require a socket.
+  const wsDown = isWeb && !chatReady.value;
   // Disable composer while a question card is awaiting user response.
   const hasQuestion = pendingQuestions.value.some(
     (q) => q.status === 'pending' && (!q.threadId || q.threadId === threadId.value),
@@ -1606,8 +1606,7 @@ function Composer() {
 }
 
 function ReadonlyBanner() {
-  const isWeb = !channelType.value || channelType.value === 'web';
-  const showComposer = isWeb || canSend.value;
+  const showComposer = canSend.value;
   if (showComposer) return <div class="readonly-banner" hidden></div>;
   const meta = channelMeta(channelType.value);
   return <div class="readonly-banner">Read-only view — reply on {meta.label} to continue this thread.</div>;
@@ -1615,7 +1614,7 @@ function ReadonlyBanner() {
 
 function Subnotice() {
   const isWeb = !channelType.value || channelType.value === 'web';
-  const showComposer = isWeb || canSend.value;
+  const showComposer = canSend.value;
   if (!(showComposer && !isWeb)) return <div class="chat-subnotice" hidden></div>;
   const meta = channelMeta(channelType.value);
   const t = threads.value.find((x) => x.threadId === threadId.value);

@@ -157,9 +157,11 @@ function SearchResultRow({ r }: { r: SearchResult }) {
     const tid = r.threadId || (r.messagingGroupId ? `__dm:${r.messagingGroupId}` : null);
     if (!tid) return;
     drawerOpen.threads.value = false;
-    const opts = r.channelType && r.channelType !== 'web'
-      ? { channelType: r.channelType, messagingGroupId: r.messagingGroupId, canSend: false }
-      : null;
+    const opts = {
+      channelType: r.channelType || 'web',
+      messagingGroupId: r.messagingGroupId,
+      canSend: false,
+    };
     if (threadId.value === tid) {
       // Thread already open — scroll directly to the matched message.
       setTimeout(() => {

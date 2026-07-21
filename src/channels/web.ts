@@ -139,10 +139,13 @@ export async function submitWebInbound(args: {
   platformId: string;
   threadId: string;
   text: string;
+  clientMessageId?: string;
   attachments?: { filename: string; contentType?: string; data: string /* base64 */; size: number }[];
 }): Promise<string> {
   if (!setupCallbacks) throw new Error('web channel not initialized');
-  const id = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const id = args.clientMessageId
+    ? `web-${args.clientMessageId}`
+    : `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const contentPayload: Record<string, unknown> = {
     text: args.text,
     sender: args.userId,
@@ -168,6 +171,7 @@ export async function submitWebInbound(args: {
       isMention: true,
       isGroup: false,
       content: JSON.stringify(contentPayload),
+      idempotent: !!args.clientMessageId,
     },
   };
   // Echo to local subscribers immediately so the sending tab sees its own

@@ -253,6 +253,40 @@ describe('session manager', () => {
     expect(fs.readFileSync(expected, 'utf-8')).toBe('PNGBYTES');
   });
 
+  it('should ignore idempotent attachment replays before touching inbox files', () => {
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    const message = {
+      id: 'msg-replay',
+      kind: 'chat',
+      timestamp: now(),
+      idempotent: true,
+    };
+
+    writeSessionMessage('ag-1', session.id, {
+      ...message,
+      content: JSON.stringify({
+        text: 'first',
+        attachments: [{ name: 'photo.png', data: Buffer.from('FIRST').toString('base64') }],
+      }),
+    });
+    writeSessionMessage('ag-1', session.id, {
+      ...message,
+      content: JSON.stringify({
+        text: 'replay',
+        attachments: [{ name: 'photo.png', data: Buffer.from('SECOND').toString('base64') }],
+      }),
+    });
+
+    const db = new Database(inboundDbPath('ag-1', session.id));
+    const rows = db.prepare('SELECT content FROM messages_in WHERE id = ?').all(message.id) as Array<{ content: string }>;
+    db.close();
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].content).text).toBe('first');
+
+    const attachment = path.join(sessionDir('ag-1', session.id), 'inbox', message.id, 'photo.png');
+    expect(fs.readFileSync(attachment, 'utf-8')).toBe('FIRST');
+  });
+
   it('should resolve to existing session (shared mode)', () => {
     const { session: s1, created: c1 } = resolveSession('ag-1', 'mg-1', null, 'shared');
     expect(c1).toBe(true);

@@ -143,7 +143,30 @@ interface ChatContext {
   userId: string;
   groupId: string;
   platformId: string;
+  messagingGroupId: string;
   threadId: string;
+  canSend: boolean;
+}
+
+export function createBufferedFrameSender(sendEncoded: (frame: string) => void): {
+  send: (frame: unknown) => void;
+  finish: (historyFrame: unknown, readyFrame: unknown) => void;
+} {
+  let initializing = true;
+  const bufferedFrames: string[] = [];
+  return {
+    send(frame) {
+      const encoded = JSON.stringify(frame);
+      if (initializing) bufferedFrames.push(encoded);
+      else sendEncoded(encoded);
+    },
+    finish(historyFrame, readyFrame) {
+      sendEncoded(JSON.stringify(historyFrame));
+      for (const frame of bufferedFrames) sendEncoded(frame);
+      sendEncoded(JSON.stringify(readyFrame));
+      initializing = false;
+    },
+  };
 }
 
 /**
@@ -155,7 +178,6 @@ export function matchChatPath(
 ):
   | { kind: 'start'; groupId: string }
   | { kind: 'send'; groupId: string; threadId: string }
-  | { kind: 'history'; groupId: string; threadId: string }
   | { kind: 'threads'; groupId: string }
   | { kind: 'search'; groupId: string }
   | { kind: 'tasks'; groupId: string; threadId: string }
@@ -188,8 +210,6 @@ export function matchChatPath(
     };
   const send = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/send$/);
   if (send) return { kind: 'send', groupId: decodeURIComponent(send[1]), threadId: decodeURIComponent(send[2]) };
-  const hist = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/history$/);
-  if (hist) return { kind: 'history', groupId: decodeURIComponent(hist[1]), threadId: decodeURIComponent(hist[2]) };
   const tasksList = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks$/);
   if (tasksList)
     return { kind: 'tasks', groupId: decodeURIComponent(tasksList[1]), threadId: decodeURIComponent(tasksList[2]) };
@@ -218,11 +238,7 @@ export function matchChatPath(
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     'Content-Type': 'application/json',
-    // All chat-api responses are dynamic per-user state; the browser
-    // (especially on mobile after backgrounding) was serving stale
-    // /history responses from cache on visibility-resume catchup,
-    // so the just-arrived agent reply wasn't visible until a hard
-    // reload. no-store is the right tier for this content.
+    // All chat-api responses are dynamic per-user state.
     'Cache-Control': 'no-store',
   });
   res.end(JSON.stringify(body));
@@ -250,6 +266,7 @@ const UPLOAD_MAX_FILENAME = 255;
 
 interface ParsedUpload {
   text: string;
+  clientMessageId?: string;
   files: { filename: string; contentType: string; buffer: Buffer }[];
 }
 
@@ -289,6 +306,7 @@ function readMultipartBody(req: http.IncomingMessage): Promise<ParsedUpload> {
 
     bb.on('field', (name, value) => {
       if (name === 'text' && typeof value === 'string') out.text = value;
+      if (name === 'clientMessageId' && typeof value === 'string') out.clientMessageId = value;
     });
     bb.on('file', (_name, stream, info) => {
       const rawName = info.filename || 'upload';
@@ -346,9 +364,9 @@ export async function handleChatRequest(
       writeJson(res, 405, { error: 'method_not_allowed' });
       return true;
     }
-    ensureWebMessagingGroup(userId, m.groupId);
+    const messagingGroupId = ensureWebMessagingGroup(userId, m.groupId);
     const threadId = crypto.randomUUID();
-    writeJson(res, 200, { threadId, platformId: platformIdFor(userId, m.groupId) });
+    writeJson(res, 200, { threadId, messagingGroupId, platformId: platformIdFor(userId, m.groupId) });
     return true;
   }
 
@@ -359,11 +377,13 @@ export async function handleChatRequest(
     }
     const ctype = (req.headers['content-type'] || '').toLowerCase();
     let text = '';
+    let clientMessageId: unknown;
     let attachments: { filename: string; contentType: string; data: string; size: number }[] = [];
     if (ctype.startsWith('multipart/form-data')) {
       try {
         const parsed = await readMultipartBody(req);
         text = parsed.text;
+        clientMessageId = parsed.clientMessageId;
         attachments = parsed.files.map((f) => ({
           filename: f.filename,
           contentType: f.contentType,
@@ -387,6 +407,14 @@ export async function handleChatRequest(
       }
       const t = (body as { text?: unknown })?.text;
       if (typeof t === 'string') text = t;
+      clientMessageId = (body as { clientMessageId?: unknown })?.clientMessageId;
+    }
+    if (
+      clientMessageId !== undefined &&
+      (typeof clientMessageId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientMessageId))
+    ) {
+      writeJson(res, 400, { error: 'invalid_client_message_id' });
+      return true;
     }
     if (!text && attachments.length === 0) {
       writeJson(res, 400, { error: 'empty_message' });
@@ -443,6 +471,7 @@ export async function handleChatRequest(
         platformId,
         threadId: m.threadId,
         text,
+        clientMessageId: clientMessageId as string | undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
       });
       writeJson(res, 200, { id });
@@ -519,27 +548,6 @@ export async function handleChatRequest(
       return true;
     }
     serveInboundAttachment(req, res, userId, m.groupId, m.threadId, m.attachmentPath);
-    return true;
-  }
-
-  if (m.kind === 'history') {
-    if (req.method !== 'GET') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
-    const q = new URLSearchParams((req.url || '').split('?')[1] || '');
-    const qChannel = q.get('channel') || undefined;
-    const qMg = q.get('mg') || undefined;
-    const override = qChannel && qMg ? { channelType: qChannel, messagingGroupId: qMg } : undefined;
-    try {
-      const cfg = getContainerConfig(m.groupId);
-      const voiceMode = await reconcileVoiceMode(m.groupId, cfg);
-      const messages = readChatHistory(userId, m.groupId, m.threadId, override);
-      writeJson(res, 200, { messages, voiceMode });
-    } catch (err) {
-      log.warn('web chat history read failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
-      writeJson(res, 200, { messages: [], voiceMode: 'off' });
-    }
     return true;
   }
 
@@ -789,8 +797,7 @@ export interface HistoryMessage {
 /**
  * Look up `turn_usage` for a single outbound message id. Used by the live
  * WS subscriber to push usage to the client as soon as it's written —
- * without this, usage only appears after the next REST `/history` fetch
- * (i.e. on page reload).
+ * without this, usage only appears after the next socket snapshot.
  */
 export function readTurnUsageForOutbound(
   agentGroupId: string,
@@ -1285,7 +1292,14 @@ function resolveSessionForMode(
   return (
     findSessionForAgent(agentGroupId, messagingGroupId, threadId) ||
     findSessionForAgent(agentGroupId, messagingGroupId, null) ||
-    findSessionByAgentGroup(agentGroupId)
+    (getDb()
+      .prepare(
+        `SELECT * FROM sessions
+          WHERE agent_group_id = ? AND messaging_group_id IS NULL
+            AND thread_id IS NULL AND status = 'active'
+          ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(agentGroupId) as { id: string } | undefined)
   );
 }
 
@@ -2690,21 +2704,47 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
     return;
   }
 
+  const query = new URLSearchParams(url.split('?')[1] || '');
+  const requestedMg = query.get('mg');
+  let target: ReturnType<typeof resolveTargetMessagingGroup>;
+  if (requestedMg) {
+    target = resolveTargetMessagingGroup(
+      session.userId,
+      match.groupId,
+      { channelType: WEB_CHANNEL_TYPE, messagingGroupId: requestedMg },
+      isElevated(session.userId),
+    );
+  } else {
+    ensureWebMessagingGroup(session.userId, match.groupId);
+    target = resolveTargetMessagingGroup(session.userId, match.groupId, undefined, isElevated(session.userId));
+  }
+  if (!target || target.channelType !== WEB_CHANNEL_TYPE) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  const targetMg = getMessagingGroup(target.messagingGroupId);
+  if (!targetMg || targetMg.channel_type !== WEB_CHANNEL_TYPE) {
+    socket.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
   wss.handleUpgrade(req, socket, head, (ws) => {
-    attachChatSocket(ws, {
+    void attachChatSocket(ws, {
       userId: session.userId,
       groupId: match.groupId,
-      platformId: platformIdFor(session.userId, match.groupId),
+      platformId: targetMg.platform_id,
+      messagingGroupId: target.messagingGroupId,
       threadId: match.threadId,
+      canSend: userOwnsMessagingGroup(session.userId, match.groupId, WEB_CHANNEL_TYPE, target.messagingGroupId),
     });
   });
 }
 
-function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
-  // Auto-provision on connect so the messaging group exists before any
-  // inbound. (POST /start already does this, but a client could open the
-  // WS before calling /start — be defensive.)
-  ensureWebMessagingGroup(ctx.userId, ctx.groupId);
+async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> {
+  const frameSender = createBufferedFrameSender((frame) => ws.send(frame));
+  const sendFrame = frameSender.send;
 
   // Lazy-resolved session id for this (user, agentGroup, thread). Cached
   // once found — used to look up `turn_usage` on each outbound message.
@@ -2714,10 +2754,8 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
   function resolveSessionIdForUsage(): string | undefined {
     if (cachedSessionId) return cachedSessionId;
     try {
-      const mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, ctx.platformId);
-      if (!mg) return undefined;
       const isDm = ctx.threadId.startsWith('__dm:');
-      const session = resolveSessionForMode(ctx.groupId, mg.id, 'per-thread', isDm ? '' : ctx.threadId);
+      const session = resolveSessionForMode(ctx.groupId, ctx.messagingGroupId, 'per-thread', isDm ? '' : ctx.threadId);
       cachedSessionId = session?.id;
       return cachedSessionId;
     } catch {
@@ -2731,13 +2769,13 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
       if (sid) {
         const usage = readTurnUsageForOutbound(ctx.groupId, sid, messageId);
         if (usage) {
-          ws.send(JSON.stringify({ kind: 'usage', id: messageId, usage }));
+          sendFrame({ kind: 'usage', id: messageId, usage });
           return;
         }
       }
       // Race: the host may deliver the outbound row before the container
       // has flushed the matching `turn_usage` row. One short retry covers
-      // this; on miss the user still sees usage on next reload via /history.
+      // this; on miss the next socket snapshot still includes usage.
       if (attempt < 1) setTimeout(() => pushUsageFrame(messageId, attempt + 1), 500);
     } catch (err) {
       log.warn('web chat ws usage send failed', { err });
@@ -2750,7 +2788,7 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
       if (sid) {
         const activity = readTurnActivityForOutbound(ctx.groupId, sid, messageId);
         if (activity) {
-          ws.send(JSON.stringify({ kind: 'activity', id: messageId, items: activity }));
+          sendFrame({ kind: 'activity', id: messageId, items: activity });
           return;
         }
       }
@@ -2773,17 +2811,15 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
           const op = message.content as { operation?: string; messageId?: string; emoji?: string };
           if (op.operation === 'reaction' && op.messageId && op.emoji) {
             // De-namespace the target id to match the client's bubble id
-            // (inbound echoes/history strip the `:<groupId>` suffix).
+            // (inbound echoes and socket snapshots strip the `:<groupId>` suffix).
             const suffix = `:${ctx.groupId}`;
             const targetId = op.messageId.endsWith(suffix) ? op.messageId.slice(0, -suffix.length) : op.messageId;
-            ws.send(
-              JSON.stringify({
-                kind: 'reaction',
-                targetId,
-                emoji: shortcodeToEmoji(op.emoji),
-                timestamp: new Date().toISOString(),
-              }),
-            );
+            sendFrame({
+              kind: 'reaction',
+              targetId,
+              emoji: shortcodeToEmoji(op.emoji),
+              timestamp: new Date().toISOString(),
+            });
             return;
           }
         }
@@ -2836,23 +2872,21 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
           }
         }
 
-        ws.send(
-          JSON.stringify({
-            kind: 'outbound',
-            id: message.id,
-            messageKind: message.kind,
-            content: message.content,
-            card,
-            files:
-              message.files?.map((f, i) => ({
-                filename: f.filename,
-                size: f.data.length,
-                path: typeof filePaths[i] === 'string' ? (filePaths[i] as string) : undefined,
-              })) ?? [],
-            timestamp: new Date().toISOString(),
-            ...(question ? { question } : {}),
-          }),
-        );
+        sendFrame({
+          kind: 'outbound',
+          id: message.id,
+          messageKind: message.kind,
+          content: message.content,
+          card,
+          files:
+            message.files?.map((f, i) => ({
+              filename: f.filename,
+              size: f.data.length,
+              path: typeof filePaths[i] === 'string' ? (filePaths[i] as string) : undefined,
+            })) ?? [],
+          timestamp: new Date().toISOString(),
+          ...(question ? { question } : {}),
+        });
       } catch (err) {
         log.warn('web chat ws send failed', { err });
       }
@@ -2864,9 +2898,9 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
     onInboundEcho(id, text, files) {
       try {
         // Live echo files arrive with just {filename, size}. Enrich them
-        // with the same attachment `url` + `contentType` that /history
-        // supplies so inline audio/video players render immediately on send
-        // instead of only after a page reload. The host namespaces the
+        // with the same attachment `url` + `contentType` that socket snapshots
+        // supply so inline audio/video players render immediately on send.
+        // The host namespaces the
         // stored message id as `<id>:<agentGroupId>` and writes attachments
         // to inbox/<namespaced-id>/<filename>; reconstruct that localPath to
         // build the matching url.
@@ -2875,22 +2909,20 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
           url: encodedAttachmentUrl(ctx.groupId, ctx.threadId, `inbox/${id}:${ctx.groupId}/${f.filename}`),
           contentType: mimeFromFilename(f.filename),
         }));
-        ws.send(JSON.stringify({ kind: 'inbound', id, text, files: enriched, timestamp: new Date().toISOString() }));
+        sendFrame({ kind: 'inbound', id, text, files: enriched, timestamp: new Date().toISOString() });
       } catch (err) {
         log.warn('web chat ws echo failed', { err });
       }
     },
     onTyping(on, hint, items, metadata) {
       try {
-        ws.send(
-          JSON.stringify({
-            kind: 'typing',
-            on,
-            hint: hint ?? null,
-            items: items ?? null,
-            ...(metadata ?? {}),
-          }),
-        );
+        sendFrame({
+          kind: 'typing',
+          on,
+          hint: hint ?? null,
+          items: items ?? null,
+          ...(metadata ?? {}),
+        });
       } catch (err) {
         log.warn('web chat ws typing send failed', { err });
       }
@@ -2898,16 +2930,14 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
     onTaskRun(event) {
       try {
         const summary = summarizeTaskPrompt(event.content);
-        ws.send(
-          JSON.stringify({
-            kind: 'task-run',
-            id: event.id,
-            timestamp: event.timestamp,
-            summary,
-            ...(event.seriesId ? { taskId: event.seriesId } : {}),
-            ...(event.recurrence ? { recurrence: event.recurrence } : {}),
-          }),
-        );
+        sendFrame({
+          kind: 'task-run',
+          id: event.id,
+          timestamp: event.timestamp,
+          summary,
+          ...(event.seriesId ? { taskId: event.seriesId } : {}),
+          ...(event.recurrence ? { recurrence: event.recurrence } : {}),
+        });
       } catch (err) {
         log.warn('web chat ws task-run send failed', { err });
       }
@@ -2929,10 +2959,25 @@ function attachChatSocket(ws: WebSocket, ctx: ChatContext): void {
   ws.on('close', () => unsubscribe());
   ws.on('error', (err) => log.warn('web chat ws error', { err }));
 
-  // Send a ready frame so the client can mark the connection open.
   try {
-    ws.send(JSON.stringify({ kind: 'ready', threadId: ctx.threadId }));
-  } catch {
-    // swallow
+    const messages = readChatHistory(ctx.userId, ctx.groupId, ctx.threadId, {
+      channelType: WEB_CHANNEL_TYPE,
+      messagingGroupId: ctx.messagingGroupId,
+    });
+    const voiceMode = await reconcileVoiceMode(ctx.groupId, getContainerConfig(ctx.groupId));
+    frameSender.finish(
+      {
+        kind: 'history',
+        threadId: ctx.threadId,
+        messages,
+        voiceMode,
+        canSend: ctx.canSend,
+      },
+      { kind: 'ready', threadId: ctx.threadId },
+    );
+  } catch (err) {
+    unsubscribe();
+    log.warn('web chat ws initialization failed', { err });
+    ws.close(1011, 'initialization failed');
   }
 }

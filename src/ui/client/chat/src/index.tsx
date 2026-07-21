@@ -108,9 +108,9 @@ async function init(): Promise<void> {
   }
   const parsed = parseHash();
   if (parsed && parsed.groupId) chatLoading.value = true;
-  applyHash(router).catch((err) => console.error('initial route failed', err));
   const app = document.getElementById('app');
   if (app) render(<App />, app);
+  await applyHash(router).catch((err) => console.error('initial route failed', err));
   startSyncPoll();
   try {
     const sp = new URLSearchParams(window.location.search);

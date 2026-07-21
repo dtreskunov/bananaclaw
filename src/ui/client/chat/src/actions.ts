@@ -11,6 +11,7 @@ import {
   chatMessages,
   chatStatus,
   chatLoading,
+  chatReady,
   isTyping,
   typingHint,
   typingStartedAt,
@@ -43,7 +44,7 @@ import {
 } from './state';
 import { api, postJson } from './api';
 import { writeHash } from './hash';
-import { buildHistoryUrl } from './history-url';
+import { isFinalResponse } from './chat-protocol';
 import { maybeNotify } from './notify';
 import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
@@ -212,10 +213,12 @@ export function clearSearch(): void {
 
 // ── chat ────────────────────────────────────────────────────────────
 export function clearChat(): void {
+  refs.chatGeneration++;
   batch(() => {
     chatMessages.value = [];
     chatStatus.value = '';
     chatLoading.value = false;
+    chatReady.value = false;
     threadId.value = null;
     channelType.value = 'web';
     messagingGroupId.value = null;
@@ -238,6 +241,10 @@ export function clearChat(): void {
   if (refs.reconnectTimer) {
     clearTimeout(refs.reconnectTimer);
     refs.reconnectTimer = null;
+  }
+  if (refs.wsPingTimer) {
+    clearInterval(refs.wsPingTimer);
+    refs.wsPingTimer = null;
   }
   refs.seenIds.clear();
 }
@@ -272,7 +279,8 @@ interface SyncResponse {
   threadMessages?: ServerMessage[];
 }
 
-export async function runSync(): Promise<void> {
+export async function runSync(options: { replaceThreadMessages?: boolean } = {}): Promise<void> {
+  const requestId = ++refs.syncRequestId;
   const gid = groupId.value;
   const tid = threadId.value;
   const ct = channelType.value;
@@ -280,8 +288,8 @@ export async function runSync(): Promise<void> {
   const params = new URLSearchParams();
   if (gid) {
     params.set('gid', gid);
+    if (tid) params.set('tid', tid);
     if (tid && ct && ct !== 'web' && mg) {
-      params.set('tid', tid);
       params.set('channel', ct);
       params.set('mg', mg);
     }
@@ -292,8 +300,17 @@ export async function runSync(): Promise<void> {
   } catch {
     return;
   }
+  if (requestId !== refs.syncRequestId) return;
   if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
-  if (Array.isArray(res.questions)) pendingQuestions.value = res.questions;
+  if (gid && groupId.value === gid && tid === threadId.value && Array.isArray(res.questions)) {
+    const serverIds = new Set(res.questions.map((question) => question.questionId));
+    const liveQuestions = pendingQuestions.value.filter((question) => {
+      if (serverIds.has(question.questionId) || question.agentGroupId !== gid) return false;
+      if (tid?.startsWith('__dm:')) return question.threadId === null;
+      return question.threadId === tid;
+    });
+    pendingQuestions.value = liveQuestions.length > 0 ? [...res.questions, ...liveQuestions] : res.questions;
+  }
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
     // Preserve any client-only "(new thread)" entries — they have no
     // server session yet (no inbound message has been sent), so they
@@ -320,8 +337,30 @@ export async function runSync(): Promise<void> {
     ct !== 'web' &&
     Array.isArray(res.threadMessages)
   ) {
-    mergeIncomingMessages(res.threadMessages);
+    if (options.replaceThreadMessages) replaceIncomingMessages(res.threadMessages);
+    else mergeIncomingMessages(res.threadMessages);
   }
+}
+
+function toChatMessage(m: ServerMessage): ChatMessage {
+  return {
+    id: m.id,
+    direction: normDirection(m.direction),
+    text: m.text,
+    ...(m.card ? { card: m.card } : {}),
+    files: m.files || null,
+    ts: m.timestamp,
+    ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
+    ...(m.usage ? { usage: m.usage } : {}),
+    ...(m.activity ? { activity: m.activity } : {}),
+    ...(m.event ? { event: m.event } : {}),
+    ...(m.reactions ? { reactions: m.reactions } : {}),
+  };
+}
+
+function replaceIncomingMessages(messages: ServerMessage[]): void {
+  chatMessages.value = messages.map(toChatMessage);
+  refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
 }
 
 function mergeIncomingMessages(messages: ServerMessage[]): void {
@@ -355,18 +394,9 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
   }
 }
 
-function historyUrl(gid: string, tid: string): string {
-  // Look up the thread's owning mg/channel so the server can resolve the
-  // correct session DB, including web threads visible to elevated users.
-  const t = threads.value.find((x) => x.threadId === tid);
-  const ct = t?.channelType || channelType.value;
-  const mg = t?.messagingGroupId || messagingGroupId.value;
-  return buildHistoryUrl(gid, tid, ct, mg);
-}
-
 /**
  * Build a task-endpoint URL for a thread, appending the `channel`/`mg`
- * override for non-web threads (same resolution as `historyUrl`). `suffix`
+ * override for non-web threads. `suffix`
  * is an extra path segment such as `/${seriesId}/pause`.
  */
 export function taskUrl(gid: string, tid: string, suffix = ''): string {
@@ -421,8 +451,8 @@ function normDirection(d: string): Direction {
 /**
  * Attach an emoji reaction to the message with `targetId`, matched against
  * either an inbound or outbound bubble id. Dedupes identical emoji so a
- * live frame that races the /history backfill doesn't double up. No-op when
- * the target isn't loaded (history will surface it on the next fetch).
+ * live frame that races the socket snapshot doesn't double up. No-op when
+ * the target isn't loaded (the next socket snapshot will surface it).
  */
 function applyReaction(targetId: string, emoji: string, ts: string): void {
   let changed = false;
@@ -436,62 +466,6 @@ function applyReaction(targetId: string, emoji: string, ts: string): void {
   if (changed) chatMessages.value = next;
 }
 
-async function refetchThreadHistory(appendNewOnly: boolean): Promise<void> {
-  const gid = groupId.value,
-    tid = threadId.value;
-  if (!gid || !tid) return;
-  const r = await fetch(historyUrl(gid, tid), { credentials: 'same-origin', cache: 'no-store' });
-  if (!r.ok) return;
-  const { messages, voiceMode: nextVoiceMode } = (await r.json()) as { messages: ServerMessage[]; voiceMode?: string };
-  if (!Array.isArray(messages)) return;
-  if (nextVoiceMode) voiceMode.value = nextVoiceMode as typeof voiceMode.value;
-  if (!appendNewOnly) {
-    chatMessages.value = messages.map((m) => ({
-      id: m.id,
-      direction: normDirection(m.direction),
-      text: m.text,
-      ...(m.card ? { card: m.card } : {}),
-      files: m.files || null,
-      ts: m.timestamp,
-      ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
-      ...(m.usage ? { usage: m.usage } : {}),
-      ...(m.activity ? { activity: m.activity } : {}),
-      ...(m.event ? { event: m.event } : {}),
-      ...(m.reactions ? { reactions: m.reactions } : {}),
-    }));
-    refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
-    return;
-  }
-  let maxTs = '';
-  const additions: ChatMessage[] = [];
-  for (const m of messages) {
-    const direction = normDirection(m.direction);
-    const key = m.id ? `${direction}:${m.id}` : null;
-    if (key && refs.seenIds.has(key)) continue;
-    const ts = m.timestamp || '';
-    additions.push({
-      id: m.id,
-      direction,
-      text: m.text,
-      ...(m.card ? { card: m.card } : {}),
-      files: m.files || null,
-      ts,
-      ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
-      ...(m.usage ? { usage: m.usage } : {}),
-      ...(m.activity ? { activity: m.activity } : {}),
-      ...(m.event ? { event: m.event } : {}),
-      ...(m.reactions ? { reactions: m.reactions } : {}),
-    });
-    if (key) refs.seenIds.add(key);
-    if (ts > maxTs) maxTs = ts;
-    if (direction === 'out') maybeNotify(m.text, m.files || []);
-  }
-  if (additions.length) {
-    chatMessages.value = chatMessages.value.concat(additions);
-    bumpActiveThread(maxTs);
-  }
-}
-
 interface ChatStartResponse {
   threadId: string;
   sessionId?: string | null;
@@ -501,6 +475,8 @@ interface ChatStartResponse {
 
 export async function openChat(gid: string, resumeTid: string | null, opts: ThreadCtx | null): Promise<void> {
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
+  if (!resumeTid && refs.newChatInFlight) return;
+  const generation = ++refs.chatGeneration;
   if (refs.ws) {
     try {
       refs.ws.close();
@@ -513,6 +489,10 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     clearTimeout(refs.reconnectTimer);
     refs.reconnectTimer = null;
   }
+  if (refs.wsPingTimer) {
+    clearInterval(refs.wsPingTimer);
+    refs.wsPingTimer = null;
+  }
   refs.reconnectAttempt = 0;
 
   let ct: string = 'web';
@@ -524,7 +504,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     cs = !!opts.canSend;
   } else if (resumeTid) {
     const t = threads.value.find((x) => x.threadId === resumeTid);
-    if (t && t.channelType && t.channelType !== 'web') {
+    if (t && t.channelType) {
       ct = t.channelType;
       mg = t.messagingGroupId || null;
       cs = !!t.canSend;
@@ -534,9 +514,11 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
   batch(() => {
     groupId.value = gid;
     chatMessages.value = [];
+    chatReady.value = false;
     channelType.value = ct;
     messagingGroupId.value = mg;
-    canSend.value = ct === 'web' ? true : cs;
+    canSend.value = ct === 'web' ? false : cs;
+    pendingQuestions.value = [];
     isTyping.value = false;
     typingHint.value = '';
     typingStartedAt.value = null;
@@ -545,50 +527,21 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     if (resumeTid) {
       threadId.value = resumeTid;
       chatLoading.value = true;
-      chatStatus.value = 'loading history\u2026';
+      chatStatus.value = ct === 'web' ? 'connecting\u2026' : 'loading history\u2026';
     }
   });
+  refs.seenIds.clear();
 
   if (resumeTid) {
     writeHash();
-    try {
-      const r = await fetch(historyUrl(gid, resumeTid), { credentials: 'same-origin', cache: 'no-store' });
-      if (r.ok) {
-        const data = (await r.json()) as { messages: ServerMessage[]; voiceMode?: string };
-        const messages = data.messages;
-        batch(() => {
-          chatMessages.value = (messages || []).map((m) => ({
-            id: m.id,
-            direction: normDirection(m.direction),
-            text: m.text,
-            ...(m.card ? { card: m.card } : {}),
-            files: m.files || null,
-            ts: m.timestamp,
-            ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
-            ...(m.usage ? { usage: m.usage } : {}),
-            ...(m.activity ? { activity: m.activity } : {}),
-            ...(m.event ? { event: m.event } : {}),
-            ...(m.reactions ? { reactions: m.reactions } : {}),
-          }));
-          chatLoading.value = false;
-          voiceMode.value = (data.voiceMode as typeof voiceMode.value) || 'off';
-        });
-        if (Array.isArray(messages)) {
-          refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
-        }
-      } else {
-        chatLoading.value = false;
-      }
-    } catch (err) {
-      console.error('history load failed', err);
+    if (ct === 'web') {
+      connectChatWs({ gid, tid: resumeTid, mg, generation });
+      void runSync();
+    } else {
+      await runSync({ replaceThreadMessages: true });
+      if (generation !== refs.chatGeneration) return;
       chatLoading.value = false;
-    }
-    if (ct === 'web') connectChatWs();
-    else {
       chatStatus.value = '';
-      // Non-web threads catch up via runSync() on the next tick (or sooner
-      // via the visibilitychange handler). The unified ticker is owned at
-      // the app level by startSyncPoll().
     }
     // Don't steal focus from the search view when navigating via search result.
     if (!highlightMessageId.value) focusComposerSoon();
@@ -604,20 +557,24 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
   );
   if (empty) {
     threadId.value = empty.threadId;
+    messagingGroupId.value = empty.messagingGroupId || null;
+    chatLoading.value = true;
+    chatStatus.value = 'syncing\u2026';
     writeHash();
-    connectChatWs();
+    connectChatWs({ gid, tid: empty.threadId, mg: empty.messagingGroupId || null, generation });
+    void runSync();
     focusComposerSoon();
     return;
   }
   // Guard against rapid double-clicks while POST /chat/start is in
   // flight (the empty-thread check above can't catch this race since
   // the new thread isn't in `threads.value` yet).
-  if (refs.newChatInFlight) return;
   refs.newChatInFlight = true;
   batch(() => {
     channelType.value = 'web';
     messagingGroupId.value = null;
-    canSend.value = true;
+    canSend.value = false;
+    chatLoading.value = true;
   });
   chatStatus.value = 'starting\u2026';
   let started: ChatStartResponse;
@@ -630,11 +587,16 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     started = (await r.json()) as ChatStartResponse;
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
-    chatStatus.value = 'failed to start chat: ' + m;
+    if (generation === refs.chatGeneration) chatStatus.value = 'failed to start chat: ' + m;
+    refs.newChatInFlight = false;
+    return;
+  }
+  if (generation !== refs.chatGeneration) {
     refs.newChatInFlight = false;
     return;
   }
   threadId.value = started.threadId;
+  messagingGroupId.value = started.messagingGroupId || null;
   threads.value = [
     {
       threadId: started.threadId,
@@ -649,23 +611,35 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     ...threads.value,
   ];
   writeHash();
-  connectChatWs();
+  connectChatWs({
+    gid,
+    tid: started.threadId,
+    mg: started.messagingGroupId || null,
+    generation,
+  });
+  void runSync();
   focusComposerSoon();
   refs.newChatInFlight = false;
 }
 
-function connectChatWs(): void {
-  if (!groupId.value || !threadId.value) return;
-  const gid = groupId.value,
-    tid = threadId.value;
+interface ChatSocketContext {
+  gid: string;
+  tid: string;
+  mg: string | null;
+  generation: number;
+}
+
+function connectChatWs(ctx: ChatSocketContext): void {
+  const { gid, tid, mg, generation } = ctx;
+  if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}/ui/chat/api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/ws`;
+  let wsUrl = `${proto}//${location.host}/ui/chat/api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/ws`;
+  if (mg) wsUrl += `?mg=${encodeURIComponent(mg)}`;
   const ws = new WebSocket(wsUrl);
   refs.ws = ws;
   ws.onopen = () => {
-    const wasReconnect = refs.reconnectAttempt > 0;
-    refs.reconnectAttempt = 0;
-    chatStatus.value = 'connected';
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    chatStatus.value = 'syncing\u2026';
     // App-level keepalive: any frame keeps an intermediary's idle timer
     // from closing the socket. Server also sends ws pings, but the
     // browser doesn't expose ws.ping(), so push a tiny JSON frame.
@@ -679,13 +653,11 @@ function connectChatWs(): void {
         // socket closing — onclose will clear the timer
       }
     }, 25000);
-    if (wasReconnect) {
-      refetchThreadHistory(true).catch((err) => console.error('reconnect catchup failed', err));
-    }
   };
   ws.onclose = () => {
-    if (refs.ws !== ws) return;
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
     refs.ws = null;
+    chatReady.value = false;
     if (refs.wsPingTimer) {
       clearInterval(refs.wsPingTimer);
       refs.wsPingTimer = null;
@@ -701,20 +673,37 @@ function connectChatWs(): void {
     chatStatus.value = `disconnected \u00b7 reconnecting in ${Math.round(delay / 1000)}s\u2026`;
     refs.reconnectTimer = setTimeout(() => {
       refs.reconnectTimer = null;
-      if (groupId.value === gid && threadId.value === tid) connectChatWs();
+      if (generation === refs.chatGeneration && groupId.value === gid && threadId.value === tid) connectChatWs(ctx);
     }, delay);
   };
   ws.onerror = () => {
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    chatReady.value = false;
     chatStatus.value = 'connection error';
   };
   ws.onmessage = (ev: MessageEvent) => {
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
     let payload: WsPayload;
     try {
       payload = JSON.parse(ev.data) as WsPayload;
     } catch {
       return;
     }
-    if (payload.kind === 'ready') return;
+    if (payload.kind === 'history') {
+      if (payload.threadId !== tid || !Array.isArray(payload.messages)) return;
+      replaceIncomingMessages(payload.messages);
+      voiceMode.value = payload.voiceMode || 'off';
+      canSend.value = payload.canSend === true;
+      return;
+    }
+    if (payload.kind === 'ready') {
+      if (payload.threadId !== tid) return;
+      refs.reconnectAttempt = 0;
+      chatLoading.value = false;
+      chatReady.value = true;
+      chatStatus.value = 'connected';
+      return;
+    }
     if (payload.kind === 'typing') {
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || '';
@@ -821,15 +810,19 @@ function connectChatWs(): void {
         (c.delivery_origin === 'send_message' || c.delivery_origin === 'send_file' || c.delivery_origin === 'response')
           ? c.delivery_origin
           : undefined;
+      const finalResponse = isFinalResponse(dir, deliveryOrigin);
       // For the final response, carry the live-accumulated trace onto the
       // message bubble so it stays visible immediately — the live outbound
       // frame has no activity of its own, and otherwise the trace would only
-      // reappear after a reload (via /history's persisted turn_activity).
+      // reappear in the next socket snapshot's persisted turn_activity.
       // The typing:{on:false} frame usually arrives first and moves the trace
       // into refs.carryActivity, so prefer that; fall back to the live log if
       // the outbound raced ahead of the typing-off frame.
-      const carriedActivity =
-        dir === 'out' ? (activityLog.value.length ? activityLog.value.slice() : refs.carryActivity) : null;
+      const carriedActivity = finalResponse
+        ? activityLog.value.length
+          ? activityLog.value.slice()
+          : refs.carryActivity
+        : null;
       appendMsg(
         dir,
         text,
@@ -841,7 +834,7 @@ function connectChatWs(): void {
         deliveryOrigin,
       );
       bumpActiveThread();
-      if (dir === 'out') {
+      if (finalResponse) {
         // Final response arrived — the live activity trace has been carried
         // onto the message bubble above; clear the live log and carry buffer
         // so it doesn't linger under the new bubble or leak into next turn.
@@ -886,7 +879,7 @@ function connectChatWs(): void {
     }
     if (payload.kind === 'task-run') {
       // A scheduled task just fired. Drop a timeline event bubble (mirrors the
-      // /history event row) and refresh the thread list so the live-task pill's
+      // socket snapshot event row) and refresh the thread list so the live-task pill's
       // next-run label reflects the newly-cloned recurrence.
       const id = payload.id;
       if (id) {
@@ -917,11 +910,16 @@ function connectChatWs(): void {
 
 export async function sendChat(text: string, files: PendingFile[] | null | undefined): Promise<void> {
   if (!groupId.value || !threadId.value) return;
+  const generation = refs.chatGeneration;
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const clientMessageId = crypto.randomUUID();
   // New turn boundary — drop any trace stashed from the previous turn.
   refs.carryActivity = [];
   // Scroll to bottom immediately so user sees their message area
   requestScrollToBottom();
   const isWeb = !channelType.value || channelType.value === 'web';
+  if (isWeb && !chatReady.value) return;
   const hasFiles = Array.isArray(files) && files.length > 0;
   if (!isWeb) {
     const now = new Date().toISOString();
@@ -930,7 +928,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
       : null;
     appendMsg('in', text || '', fileMetas, now);
   }
-  let url = `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(threadId.value)}/send`;
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/send`;
   if (!isWeb && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
   }
@@ -939,6 +937,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
     if (hasFiles) {
       const fd = new FormData();
       fd.append('text', text || '');
+      fd.append('clientMessageId', clientMessageId);
       for (const f of files!) {
         if (f.file) fd.append('file', f.file, f.name);
       }
@@ -948,9 +947,10 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, clientMessageId }),
       });
     }
+    if (generation !== refs.chatGeneration) return;
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
@@ -962,13 +962,14 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
       chatStatus.value = `send failed: ${detail}`;
     } else if (!isWeb) {
       try {
-        await refetchThreadHistory(false);
+        await runSync({ replaceThreadMessages: true });
       } catch {
         /* ignore */
       }
     }
   } catch (err) {
     console.error('send failed', err);
+    if (generation !== refs.chatGeneration) return;
     const m = err instanceof Error ? err.message : 'network error';
     chatStatus.value = `send failed: ${m}`;
   }
@@ -1234,7 +1235,6 @@ export function installLivenessHandlers(): void {
       /* ignore */
     });
     if (!threadId.value) return;
-    refetchThreadHistory(true).catch((err) => console.error('resume catchup failed', err));
     const ws = refs.ws;
     const open = !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
     if (channelType.value === 'web' && !open) {
@@ -1242,7 +1242,14 @@ export function installLivenessHandlers(): void {
         clearTimeout(refs.reconnectTimer);
         refs.reconnectTimer = null;
       }
-      connectChatWs();
+      if (groupId.value) {
+        connectChatWs({
+          gid: groupId.value,
+          tid: threadId.value,
+          mg: messagingGroupId.value,
+          generation: refs.chatGeneration,
+        });
+      }
     }
   });
 }

@@ -190,7 +190,7 @@ function emitTaskRuns(inDb: Database.Database, completedIds: string[]): void {
         threadId: r.thread_id,
         id: r.id,
         // Place the firing at the time it was due to run (process_after),
-        // matching the /history event bubble; fall back to the row creation
+        // matching the socket-snapshot event bubble; fall back to the row creation
         // timestamp for legacy rows that predate process_after.
         timestamp: r.process_after ?? r.timestamp,
         content: r.content,

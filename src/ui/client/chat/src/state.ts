@@ -60,6 +60,7 @@ export const voiceMode: Signal<'off' | 'transcribe' | 'audio'> = signal<'off' | 
 export const chatMessages: Signal<ChatMessage[]> = signal<ChatMessage[]>([]);
 export const chatStatus: Signal<string> = signal('');
 export const chatLoading: Signal<boolean> = signal(false);
+export const chatReady: Signal<boolean> = signal(false);
 export const isTyping: Signal<boolean> = signal(false);
 export const typingHint: Signal<string> = signal('');
 export const typingStartedAt: Signal<number | null> = signal<number | null>(null);
@@ -119,6 +120,8 @@ export const respondingQuestionIds: Signal<Set<string>> = signal<Set<string>>(ne
 // ── non-reactive refs (mutated outside render) ──────────────────────
 export interface Refs {
   ws: WebSocket | null;
+  chatGeneration: number;
+  syncRequestId: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   reconnectAttempt: number;
   syncTimer: ReturnType<typeof setInterval> | null;
@@ -139,6 +142,8 @@ export interface Refs {
 
 export const refs: Refs = {
   ws: null,
+  chatGeneration: 0,
+  syncRequestId: 0,
   reconnectTimer: null,
   reconnectAttempt: 0,
   syncTimer: null,

@@ -15537,6 +15537,7 @@ var voiceMode = y3("off");
 var chatMessages = y3([]);
 var chatStatus = y3("");
 var chatLoading = y3(false);
+var chatReady = y3(false);
 var isTyping = y3(false);
 var typingHint = y3("");
 var typingStartedAt = y3(null);
@@ -15579,6 +15580,8 @@ var pendingQuestions = y3([]);
 var respondingQuestionIds = y3(/* @__PURE__ */ new Set());
 var refs = {
   ws: null,
+  chatGeneration: 0,
+  syncRequestId: 0,
   reconnectTimer: null,
   reconnectAttempt: 0,
   syncTimer: null,
@@ -17145,13 +17148,9 @@ async function applyHash(router2) {
   }
 }
 
-// src/history-url.ts
-function buildHistoryUrl(groupId2, threadId2, channelType2, messagingGroupId2) {
-  let url = `api/groups/${encodeURIComponent(groupId2)}/chat/${encodeURIComponent(threadId2)}/history`;
-  if (!messagingGroupId2) return url;
-  const params = new URLSearchParams({ channel: channelType2, mg: messagingGroupId2 });
-  url += "?" + params.toString();
-  return url;
+// src/chat-protocol.ts
+function isFinalResponse(direction, deliveryOrigin) {
+  return direction === "out" && deliveryOrigin !== "send_message" && deliveryOrigin !== "send_file";
 }
 
 // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
@@ -17598,10 +17597,12 @@ function clearSearch() {
   });
 }
 function clearChat() {
+  refs.chatGeneration++;
   n2(() => {
     chatMessages.value = [];
     chatStatus.value = "";
     chatLoading.value = false;
+    chatReady.value = false;
     threadId.value = null;
     channelType.value = "web";
     messagingGroupId.value = null;
@@ -17624,6 +17625,10 @@ function clearChat() {
     clearTimeout(refs.reconnectTimer);
     refs.reconnectTimer = null;
   }
+  if (refs.wsPingTimer) {
+    clearInterval(refs.wsPingTimer);
+    refs.wsPingTimer = null;
+  }
   refs.seenIds.clear();
 }
 function startSyncPoll() {
@@ -17635,7 +17640,8 @@ function startSyncPoll() {
     runSync().catch((err) => console.error("sync failed", err));
   }, SYNC_INTERVAL_MS);
 }
-async function runSync() {
+async function runSync(options = {}) {
+  const requestId = ++refs.syncRequestId;
   const gid = groupId.value;
   const tid = threadId.value;
   const ct = channelType.value;
@@ -17643,8 +17649,8 @@ async function runSync() {
   const params = new URLSearchParams();
   if (gid) {
     params.set("gid", gid);
+    if (tid) params.set("tid", tid);
     if (tid && ct && ct !== "web" && mg) {
-      params.set("tid", tid);
       params.set("channel", ct);
       params.set("mg", mg);
     }
@@ -17655,8 +17661,17 @@ async function runSync() {
   } catch {
     return;
   }
+  if (requestId !== refs.syncRequestId) return;
   if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
-  if (Array.isArray(res.questions)) pendingQuestions.value = res.questions;
+  if (gid && groupId.value === gid && tid === threadId.value && Array.isArray(res.questions)) {
+    const serverIds = new Set(res.questions.map((question) => question.questionId));
+    const liveQuestions = pendingQuestions.value.filter((question) => {
+      if (serverIds.has(question.questionId) || question.agentGroupId !== gid) return false;
+      if (tid?.startsWith("__dm:")) return question.threadId === null;
+      return question.threadId === tid;
+    });
+    pendingQuestions.value = liveQuestions.length > 0 ? [...res.questions, ...liveQuestions] : res.questions;
+  }
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
     const serverIds = new Set(res.threads.map((t4) => t4.threadId));
     const ephemeral = threads.value.filter(
@@ -17665,8 +17680,28 @@ async function runSync() {
     threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
   }
   if (gid && groupId.value === gid && tid && threadId.value === tid && ct === channelType.value && ct !== "web" && Array.isArray(res.threadMessages)) {
-    mergeIncomingMessages(res.threadMessages);
+    if (options.replaceThreadMessages) replaceIncomingMessages(res.threadMessages);
+    else mergeIncomingMessages(res.threadMessages);
   }
+}
+function toChatMessage(m6) {
+  return {
+    id: m6.id,
+    direction: normDirection(m6.direction),
+    text: m6.text,
+    ...m6.card ? { card: m6.card } : {},
+    files: m6.files || null,
+    ts: m6.timestamp,
+    ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
+    ...m6.usage ? { usage: m6.usage } : {},
+    ...m6.activity ? { activity: m6.activity } : {},
+    ...m6.event ? { event: m6.event } : {},
+    ...m6.reactions ? { reactions: m6.reactions } : {}
+  };
+}
+function replaceIncomingMessages(messages) {
+  chatMessages.value = messages.map(toChatMessage);
+  refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
 }
 function mergeIncomingMessages(messages) {
   let maxTs = "";
@@ -17697,12 +17732,6 @@ function mergeIncomingMessages(messages) {
     chatMessages.value = chatMessages.value.concat(additions);
     bumpActiveThread(maxTs);
   }
-}
-function historyUrl(gid, tid) {
-  const t4 = threads.value.find((x6) => x6.threadId === tid);
-  const ct = t4?.channelType || channelType.value;
-  const mg = t4?.messagingGroupId || messagingGroupId.value;
-  return buildHistoryUrl(gid, tid, ct, mg);
 }
 function taskUrl(gid, tid, suffix = "") {
   let u5 = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/tasks${suffix}`;
@@ -17750,62 +17779,10 @@ function applyReaction(targetId, emoji, ts) {
   });
   if (changed) chatMessages.value = next;
 }
-async function refetchThreadHistory(appendNewOnly) {
-  const gid = groupId.value, tid = threadId.value;
-  if (!gid || !tid) return;
-  const r4 = await fetch(historyUrl(gid, tid), { credentials: "same-origin", cache: "no-store" });
-  if (!r4.ok) return;
-  const { messages, voiceMode: nextVoiceMode } = await r4.json();
-  if (!Array.isArray(messages)) return;
-  if (nextVoiceMode) voiceMode.value = nextVoiceMode;
-  if (!appendNewOnly) {
-    chatMessages.value = messages.map((m6) => ({
-      id: m6.id,
-      direction: normDirection(m6.direction),
-      text: m6.text,
-      ...m6.card ? { card: m6.card } : {},
-      files: m6.files || null,
-      ts: m6.timestamp,
-      ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
-      ...m6.usage ? { usage: m6.usage } : {},
-      ...m6.activity ? { activity: m6.activity } : {},
-      ...m6.event ? { event: m6.event } : {},
-      ...m6.reactions ? { reactions: m6.reactions } : {}
-    }));
-    refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
-    return;
-  }
-  let maxTs = "";
-  const additions = [];
-  for (const m6 of messages) {
-    const direction = normDirection(m6.direction);
-    const key = m6.id ? `${direction}:${m6.id}` : null;
-    if (key && refs.seenIds.has(key)) continue;
-    const ts = m6.timestamp || "";
-    additions.push({
-      id: m6.id,
-      direction,
-      text: m6.text,
-      ...m6.card ? { card: m6.card } : {},
-      files: m6.files || null,
-      ts,
-      ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
-      ...m6.usage ? { usage: m6.usage } : {},
-      ...m6.activity ? { activity: m6.activity } : {},
-      ...m6.event ? { event: m6.event } : {},
-      ...m6.reactions ? { reactions: m6.reactions } : {}
-    });
-    if (key) refs.seenIds.add(key);
-    if (ts > maxTs) maxTs = ts;
-    if (direction === "out") maybeNotify(m6.text, m6.files || []);
-  }
-  if (additions.length) {
-    chatMessages.value = chatMessages.value.concat(additions);
-    bumpActiveThread(maxTs);
-  }
-}
 async function openChat(gid, resumeTid, opts) {
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
+  if (!resumeTid && refs.newChatInFlight) return;
+  const generation = ++refs.chatGeneration;
   if (refs.ws) {
     try {
       refs.ws.close();
@@ -17817,6 +17794,10 @@ async function openChat(gid, resumeTid, opts) {
     clearTimeout(refs.reconnectTimer);
     refs.reconnectTimer = null;
   }
+  if (refs.wsPingTimer) {
+    clearInterval(refs.wsPingTimer);
+    refs.wsPingTimer = null;
+  }
   refs.reconnectAttempt = 0;
   let ct = "web";
   let mg = null;
@@ -17827,7 +17808,7 @@ async function openChat(gid, resumeTid, opts) {
     cs = !!opts.canSend;
   } else if (resumeTid) {
     const t4 = threads.value.find((x6) => x6.threadId === resumeTid);
-    if (t4 && t4.channelType && t4.channelType !== "web") {
+    if (t4 && t4.channelType) {
       ct = t4.channelType;
       mg = t4.messagingGroupId || null;
       cs = !!t4.canSend;
@@ -17836,9 +17817,11 @@ async function openChat(gid, resumeTid, opts) {
   n2(() => {
     groupId.value = gid;
     chatMessages.value = [];
+    chatReady.value = false;
     channelType.value = ct;
     messagingGroupId.value = mg;
-    canSend.value = ct === "web" ? true : cs;
+    canSend.value = ct === "web" ? false : cs;
+    pendingQuestions.value = [];
     isTyping.value = false;
     typingHint.value = "";
     typingStartedAt.value = null;
@@ -17847,45 +17830,19 @@ async function openChat(gid, resumeTid, opts) {
     if (resumeTid) {
       threadId.value = resumeTid;
       chatLoading.value = true;
-      chatStatus.value = "loading history\u2026";
+      chatStatus.value = ct === "web" ? "connecting\u2026" : "loading history\u2026";
     }
   });
+  refs.seenIds.clear();
   if (resumeTid) {
     writeHash();
-    try {
-      const r4 = await fetch(historyUrl(gid, resumeTid), { credentials: "same-origin", cache: "no-store" });
-      if (r4.ok) {
-        const data = await r4.json();
-        const messages = data.messages;
-        n2(() => {
-          chatMessages.value = (messages || []).map((m6) => ({
-            id: m6.id,
-            direction: normDirection(m6.direction),
-            text: m6.text,
-            ...m6.card ? { card: m6.card } : {},
-            files: m6.files || null,
-            ts: m6.timestamp,
-            ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
-            ...m6.usage ? { usage: m6.usage } : {},
-            ...m6.activity ? { activity: m6.activity } : {},
-            ...m6.event ? { event: m6.event } : {},
-            ...m6.reactions ? { reactions: m6.reactions } : {}
-          }));
-          chatLoading.value = false;
-          voiceMode.value = data.voiceMode || "off";
-        });
-        if (Array.isArray(messages)) {
-          refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
-        }
-      } else {
-        chatLoading.value = false;
-      }
-    } catch (err) {
-      console.error("history load failed", err);
+    if (ct === "web") {
+      connectChatWs({ gid, tid: resumeTid, mg, generation });
+      void runSync();
+    } else {
+      await runSync({ replaceThreadMessages: true });
+      if (generation !== refs.chatGeneration) return;
       chatLoading.value = false;
-    }
-    if (ct === "web") connectChatWs();
-    else {
       chatStatus.value = "";
     }
     if (!highlightMessageId.value) focusComposerSoon();
@@ -17896,17 +17853,21 @@ async function openChat(gid, resumeTid, opts) {
   );
   if (empty) {
     threadId.value = empty.threadId;
+    messagingGroupId.value = empty.messagingGroupId || null;
+    chatLoading.value = true;
+    chatStatus.value = "syncing\u2026";
     writeHash();
-    connectChatWs();
+    connectChatWs({ gid, tid: empty.threadId, mg: empty.messagingGroupId || null, generation });
+    void runSync();
     focusComposerSoon();
     return;
   }
-  if (refs.newChatInFlight) return;
   refs.newChatInFlight = true;
   n2(() => {
     channelType.value = "web";
     messagingGroupId.value = null;
-    canSend.value = true;
+    canSend.value = false;
+    chatLoading.value = true;
   });
   chatStatus.value = "starting\u2026";
   let started;
@@ -17919,11 +17880,16 @@ async function openChat(gid, resumeTid, opts) {
     started = await r4.json();
   } catch (err) {
     const m6 = err instanceof Error ? err.message : String(err);
-    chatStatus.value = "failed to start chat: " + m6;
+    if (generation === refs.chatGeneration) chatStatus.value = "failed to start chat: " + m6;
+    refs.newChatInFlight = false;
+    return;
+  }
+  if (generation !== refs.chatGeneration) {
     refs.newChatInFlight = false;
     return;
   }
   threadId.value = started.threadId;
+  messagingGroupId.value = started.messagingGroupId || null;
   threads.value = [
     {
       threadId: started.threadId,
@@ -17938,21 +17904,27 @@ async function openChat(gid, resumeTid, opts) {
     ...threads.value
   ];
   writeHash();
-  connectChatWs();
+  connectChatWs({
+    gid,
+    tid: started.threadId,
+    mg: started.messagingGroupId || null,
+    generation
+  });
+  void runSync();
   focusComposerSoon();
   refs.newChatInFlight = false;
 }
-function connectChatWs() {
-  if (!groupId.value || !threadId.value) return;
-  const gid = groupId.value, tid = threadId.value;
+function connectChatWs(ctx2) {
+  const { gid, tid, mg, generation } = ctx2;
+  if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${proto}//${location.host}/ui/chat/api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/ws`;
+  let wsUrl = `${proto}//${location.host}/ui/chat/api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/ws`;
+  if (mg) wsUrl += `?mg=${encodeURIComponent(mg)}`;
   const ws = new WebSocket(wsUrl);
   refs.ws = ws;
   ws.onopen = () => {
-    const wasReconnect = refs.reconnectAttempt > 0;
-    refs.reconnectAttempt = 0;
-    chatStatus.value = "connected";
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    chatStatus.value = "syncing\u2026";
     if (refs.wsPingTimer) clearInterval(refs.wsPingTimer);
     refs.wsPingTimer = setInterval(() => {
       if (refs.ws !== ws) return;
@@ -17962,13 +17934,11 @@ function connectChatWs() {
       } catch {
       }
     }, 25e3);
-    if (wasReconnect) {
-      refetchThreadHistory(true).catch((err) => console.error("reconnect catchup failed", err));
-    }
   };
   ws.onclose = () => {
-    if (refs.ws !== ws) return;
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
     refs.ws = null;
+    chatReady.value = false;
     if (refs.wsPingTimer) {
       clearInterval(refs.wsPingTimer);
       refs.wsPingTimer = null;
@@ -17984,20 +17954,37 @@ function connectChatWs() {
     chatStatus.value = `disconnected \xB7 reconnecting in ${Math.round(delay / 1e3)}s\u2026`;
     refs.reconnectTimer = setTimeout(() => {
       refs.reconnectTimer = null;
-      if (groupId.value === gid && threadId.value === tid) connectChatWs();
+      if (generation === refs.chatGeneration && groupId.value === gid && threadId.value === tid) connectChatWs(ctx2);
     }, delay);
   };
   ws.onerror = () => {
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    chatReady.value = false;
     chatStatus.value = "connection error";
   };
   ws.onmessage = (ev) => {
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
     let payload;
     try {
       payload = JSON.parse(ev.data);
     } catch {
       return;
     }
-    if (payload.kind === "ready") return;
+    if (payload.kind === "history") {
+      if (payload.threadId !== tid || !Array.isArray(payload.messages)) return;
+      replaceIncomingMessages(payload.messages);
+      voiceMode.value = payload.voiceMode || "off";
+      canSend.value = payload.canSend === true;
+      return;
+    }
+    if (payload.kind === "ready") {
+      if (payload.threadId !== tid) return;
+      refs.reconnectAttempt = 0;
+      chatLoading.value = false;
+      chatReady.value = true;
+      chatStatus.value = "connected";
+      return;
+    }
     if (payload.kind === "typing") {
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || "";
@@ -18088,7 +18075,8 @@ function connectChatWs() {
       const text = typeof c4 === "string" ? c4 : c4.text || c4.markdown || "";
       const dir = payload.messageKind === "internal" ? "internal" : "out";
       const deliveryOrigin = typeof c4 === "object" && (c4.delivery_origin === "send_message" || c4.delivery_origin === "send_file" || c4.delivery_origin === "response") ? c4.delivery_origin : void 0;
-      const carriedActivity = dir === "out" ? activityLog.value.length ? activityLog.value.slice() : refs.carryActivity : null;
+      const finalResponse = isFinalResponse(dir, deliveryOrigin);
+      const carriedActivity = finalResponse ? activityLog.value.length ? activityLog.value.slice() : refs.carryActivity : null;
       appendMsg(
         dir,
         text,
@@ -18100,7 +18088,7 @@ function connectChatWs() {
         deliveryOrigin
       );
       bumpActiveThread();
-      if (dir === "out") {
+      if (finalResponse) {
         activityLog.value = [];
         refs.carryActivity = [];
         playCompletionChime();
@@ -18169,16 +18157,21 @@ function connectChatWs() {
 }
 async function sendChat(text, files) {
   if (!groupId.value || !threadId.value) return;
+  const generation = refs.chatGeneration;
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const clientMessageId = crypto.randomUUID();
   refs.carryActivity = [];
   requestScrollToBottom();
   const isWeb = !channelType.value || channelType.value === "web";
+  if (isWeb && !chatReady.value) return;
   const hasFiles = Array.isArray(files) && files.length > 0;
   if (!isWeb) {
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const fileMetas = hasFiles ? files.map((f5) => ({ filename: f5.name, size: f5.size })) : null;
     appendMsg("in", text || "", fileMetas, now);
   }
-  let url = `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(threadId.value)}/send`;
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/send`;
   if (!isWeb && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
   }
@@ -18187,6 +18180,7 @@ async function sendChat(text, files) {
     if (hasFiles) {
       const fd = new FormData();
       fd.append("text", text || "");
+      fd.append("clientMessageId", clientMessageId);
       for (const f5 of files) {
         if (f5.file) fd.append("file", f5.file, f5.name);
       }
@@ -18196,9 +18190,10 @@ async function sendChat(text, files) {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ text, clientMessageId })
       });
     }
+    if (generation !== refs.chatGeneration) return;
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
@@ -18209,12 +18204,13 @@ async function sendChat(text, files) {
       chatStatus.value = `send failed: ${detail}`;
     } else if (!isWeb) {
       try {
-        await refetchThreadHistory(false);
+        await runSync({ replaceThreadMessages: true });
       } catch {
       }
     }
   } catch (err) {
     console.error("send failed", err);
+    if (generation !== refs.chatGeneration) return;
     const m6 = err instanceof Error ? err.message : "network error";
     chatStatus.value = `send failed: ${m6}`;
   }
@@ -18411,7 +18407,6 @@ function installLivenessHandlers() {
     runSync().catch(() => {
     });
     if (!threadId.value) return;
-    refetchThreadHistory(true).catch((err) => console.error("resume catchup failed", err));
     const ws = refs.ws;
     const open = !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
     if (channelType.value === "web" && !open) {
@@ -18419,7 +18414,14 @@ function installLivenessHandlers() {
         clearTimeout(refs.reconnectTimer);
         refs.reconnectTimer = null;
       }
-      connectChatWs();
+      if (groupId.value) {
+        connectChatWs({
+          gid: groupId.value,
+          tid: threadId.value,
+          mg: messagingGroupId.value,
+          generation: refs.chatGeneration
+        });
+      }
     }
   });
 }
@@ -19316,7 +19318,11 @@ function SearchResultRow({ r: r4 }) {
     const tid = r4.threadId || (r4.messagingGroupId ? `__dm:${r4.messagingGroupId}` : null);
     if (!tid) return;
     drawerOpen.threads.value = false;
-    const opts = r4.channelType && r4.channelType !== "web" ? { channelType: r4.channelType, messagingGroupId: r4.messagingGroupId, canSend: false } : null;
+    const opts = {
+      channelType: r4.channelType || "web",
+      messagingGroupId: r4.messagingGroupId,
+      canSend: false
+    };
     if (threadId.value === tid) {
       setTimeout(() => {
         const el = document.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
@@ -20836,8 +20842,8 @@ function Composer() {
   const fileRef = A2(null);
   const [quickCapture, setQuickCapture] = h2(false);
   const isWeb = !channelType.value || channelType.value === "web";
-  const showComposer = isWeb || canSend.value;
-  const wsDown = isWeb && chatStatus.value !== "connected";
+  const showComposer = canSend.value;
+  const wsDown = isWeb && !chatReady.value;
   const hasQuestion = pendingQuestions.value.some(
     (q5) => q5.status === "pending" && (!q5.threadId || q5.threadId === threadId.value)
   );
@@ -21204,8 +21210,7 @@ function Composer() {
   ] });
 }
 function ReadonlyBanner() {
-  const isWeb = !channelType.value || channelType.value === "web";
-  const showComposer = isWeb || canSend.value;
+  const showComposer = canSend.value;
   if (showComposer) return /* @__PURE__ */ u4("div", { class: "readonly-banner", hidden: true });
   const meta = channelMeta(channelType.value);
   return /* @__PURE__ */ u4("div", { class: "readonly-banner", children: [
@@ -21216,7 +21221,7 @@ function ReadonlyBanner() {
 }
 function Subnotice() {
   const isWeb = !channelType.value || channelType.value === "web";
-  const showComposer = isWeb || canSend.value;
+  const showComposer = canSend.value;
   if (!(showComposer && !isWeb)) return /* @__PURE__ */ u4("div", { class: "chat-subnotice", hidden: true });
   const meta = channelMeta(channelType.value);
   const t4 = threads.value.find((x6) => x6.threadId === threadId.value);
@@ -26305,9 +26310,9 @@ async function init() {
   }
   const parsed = parseHash();
   if (parsed && parsed.groupId) chatLoading.value = true;
-  applyHash(router).catch((err) => console.error("initial route failed", err));
   const app = document.getElementById("app");
   if (app) D(/* @__PURE__ */ u4(App, {}), app);
+  await applyHash(router).catch((err) => console.error("initial route failed", err));
   startSyncPoll();
   try {
     const sp = new URLSearchParams(window.location.search);

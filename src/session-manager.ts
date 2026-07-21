@@ -244,11 +244,17 @@ export function writeSessionMessage(
     idempotent?: boolean;
   },
 ): void {
-  // Extract base64 attachment data, save to inbox, replace with file paths
-  const content = extractAttachmentFiles(agentGroupId, sessionId, message.id, message.content);
-
   const db = openInboundDb(agentGroupId, sessionId);
+  let content: string;
   try {
+    if (message.idempotent) {
+      const exists = db.prepare('SELECT 1 FROM messages_in WHERE id = ?').get(message.id);
+      if (exists) return;
+    }
+
+    // Extract base64 attachment data, save to inbox, replace with file paths
+    content = extractAttachmentFiles(agentGroupId, sessionId, message.id, message.content);
+
     insertMessage(db, {
       id: message.id,
       kind: message.kind,
