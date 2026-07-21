@@ -1419,7 +1419,11 @@ function AddDestinationForm({ gid, onCancel, onDone }: { gid: string; onCancel: 
           placeholder="Search by name or id…"
           disabled={busy}
           freeform={false}
-          onChange={(v) => setTargetId(v ?? '')}
+          onChange={(v) => {
+            const nextTargetId = v ?? '';
+            setTargetId(nextTargetId);
+            setLocalName(candidates.find((candidate) => candidate.id === nextTargetId)?.folder ?? '');
+          }}
         />
       </Field>
       <Field label="Local name">

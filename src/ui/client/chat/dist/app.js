@@ -25309,7 +25309,11 @@ function AddDestinationForm({ gid, onCancel, onDone }) {
         placeholder: "Search by name or id\u2026",
         disabled: busy,
         freeform: false,
-        onChange: (v5) => setTargetId(v5 ?? "")
+        onChange: (v5) => {
+          const nextTargetId = v5 ?? "";
+          setTargetId(nextTargetId);
+          setLocalName(candidates.find((candidate) => candidate.id === nextTargetId)?.folder ?? "");
+        }
       }
     ) }),
     /* @__PURE__ */ u4(Field, { label: "Local name", children: /* @__PURE__ */ u4(
