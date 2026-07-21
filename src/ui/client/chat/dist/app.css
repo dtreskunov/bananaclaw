@@ -1607,12 +1607,17 @@ nav.tab-bar-strip.group-strip {
   padding: 0;
   border: none;
   background: none;
-  font: inherit;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-xs);
+  font-style: normal;
   text-align: left;
   cursor: pointer;
+  opacity: 0.85;
 }
 .chat-main .typing .trace-preview:hover {
   color: var(--fg);
+  opacity: 1;
 }
 .chat-main .typing .trace-preview:focus-visible {
   outline: 1px solid currentColor;
