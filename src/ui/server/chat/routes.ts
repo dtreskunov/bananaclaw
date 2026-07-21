@@ -592,8 +592,8 @@ function handleSync(ctx: Ctx, userId: string): void {
   const out: SyncResponse = { approvals: listApprovalsForUser(userId) };
   const gid = ctx.url.searchParams.get('gid') || '';
   if (gid && canAccessAgentGroup(userId, gid).allowed && getAgentGroup(gid)) {
-    // Elevated users (owner/global admin) see every thread; others see
-    // only their own. No query-param gate — derived from user role.
+    // Elevated users also see every non-web thread. Shared web threads are
+    // already visible to every member through listAllThreadsForUser.
     const elevated = isOwner(userId) || isGlobalAdmin(userId);
     try {
       out.threads = elevated ? listAllThreadsForAgentGroup(gid) : listAllThreadsForUser(userId, gid);

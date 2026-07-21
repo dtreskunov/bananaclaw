@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 import {
   threads, threadId, groupId, drawerOpen, channelMeta,
   searchQuery, searchResults, searchLoading, searchOpen, highlightMessageId,
+  isAdmin,
 } from '../state';
 import { openChat, deleteThread, searchThreads, clearSearch, openTaskPanel } from '../actions';
 import { requestConfirm } from './PromptModal';
@@ -72,7 +73,7 @@ function ThreadRow({ t }: { t: Thread }) {
         ) : null}
       </div>
       <div class="meta"><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</div>
-      {ct === 'web'
+      {ct === 'web' && isAdmin.value
         ? <button type="button" class="del" title="Delete thread" aria-label="Delete thread" onClick={onDel}>{'\u00d7'}</button>
         : null}
     </div>

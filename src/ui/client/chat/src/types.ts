@@ -128,6 +128,7 @@ export interface ChatMessage {
   text: string;
   files: ChatMessageFile[] | null;
   ts: string;
+  author?: { userId: string; displayName: string };
   /** How the agent emitted this row. Absent for legacy/unclassified messages. */
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   usage?: TurnUsage;
@@ -298,7 +299,9 @@ export interface WsPayload {
     activity?: ActivityLine[];
     event?: TimelineEvent;
     reactions?: MessageReaction[];
+    author?: { userId: string; displayName: string };
   }>;
+  author?: { userId: string; displayName: string };
   voiceMode?: 'off' | 'transcribe' | 'audio';
   canSend?: boolean;
   on?: boolean;

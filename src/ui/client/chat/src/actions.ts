@@ -76,6 +76,7 @@ interface ServerMessage {
   activity?: import('./types').ActivityLine[];
   event?: import('./types').TimelineEvent;
   reactions?: import('./types').MessageReaction[];
+  author?: { userId: string; displayName: string };
 }
 
 /**
@@ -350,6 +351,7 @@ function toChatMessage(m: ServerMessage): ChatMessage {
     ...(m.card ? { card: m.card } : {}),
     files: m.files || null,
     ts: m.timestamp,
+    ...(m.author ? { author: m.author } : {}),
     ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
     ...(m.usage ? { usage: m.usage } : {}),
     ...(m.activity ? { activity: m.activity } : {}),
@@ -378,6 +380,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ...(m.card ? { card: m.card } : {}),
       files: m.files || null,
       ts,
+      ...(m.author ? { author: m.author } : {}),
       ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
@@ -428,6 +431,7 @@ function appendMsg(
   activity?: import('./types').ActivityLine[] | null,
   card?: DisplayCard,
   deliveryOrigin?: 'send_message' | 'send_file' | 'response',
+  author?: { userId: string; displayName: string },
 ): void {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
@@ -439,6 +443,7 @@ function appendMsg(
     ...(card ? { card } : {}),
     files: files || null,
     ts,
+    ...(author ? { author } : {}),
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
     ...(activity && activity.length ? { activity } : {}),
   });
@@ -730,7 +735,17 @@ function connectChatWs(ctx: ChatSocketContext): void {
     }
     if (payload.kind === 'inbound') {
       refs.carryActivity = [];
-      appendMsg('in', payload.text || '', payload.files || null, payload.timestamp || '', payload.id);
+      appendMsg(
+        'in',
+        payload.text || '',
+        payload.files || null,
+        payload.timestamp || '',
+        payload.id,
+        null,
+        undefined,
+        undefined,
+        payload.author,
+      );
       updateActiveThreadTitleFromFirstMessage(payload.text || '');
       bumpActiveThread();
       return;

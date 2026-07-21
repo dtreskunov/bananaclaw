@@ -450,6 +450,7 @@ function Message({ m }: { m: ChatMessage }) {
   return (
     <div class={cls} data-msg-id={m.id} ref={ref}>
       {m.direction === 'internal' ? <div class="internal-label">internal</div> : null}
+      {m.direction === 'in' && m.author ? <div class="message-author">{m.author.displayName}</div> : null}
       {md != null
         ? <div ref={mdRef} dangerouslySetInnerHTML={{ __html: md }} />
         : (m.text || '')}

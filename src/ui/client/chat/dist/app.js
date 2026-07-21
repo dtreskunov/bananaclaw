@@ -17692,6 +17692,7 @@ function toChatMessage(m6) {
     ...m6.card ? { card: m6.card } : {},
     files: m6.files || null,
     ts: m6.timestamp,
+    ...m6.author ? { author: m6.author } : {},
     ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
     ...m6.usage ? { usage: m6.usage } : {},
     ...m6.activity ? { activity: m6.activity } : {},
@@ -17718,6 +17719,7 @@ function mergeIncomingMessages(messages) {
       ...m6.card ? { card: m6.card } : {},
       files: m6.files || null,
       ts,
+      ...m6.author ? { author: m6.author } : {},
       ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.activity ? { activity: m6.activity } : {},
@@ -17750,7 +17752,7 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin) {
+function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author) {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
   if (key) refs.seenIds.add(key);
@@ -17761,6 +17763,7 @@ function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigi
     ...card ? { card } : {},
     files: files || null,
     ts,
+    ...author ? { author } : {},
     ...deliveryOrigin ? { deliveryOrigin } : {},
     ...activity && activity.length ? { activity } : {}
   });
@@ -18008,7 +18011,7 @@ function connectChatWs(ctx2) {
     }
     if (payload.kind === "inbound") {
       refs.carryActivity = [];
-      appendMsg("in", payload.text || "", payload.files || null, payload.timestamp || "", payload.id);
+      appendMsg("in", payload.text || "", payload.files || null, payload.timestamp || "", payload.id, null, void 0, void 0, payload.author);
       updateActiveThreadTitleFromFirstMessage(payload.text || "");
       bumpActiveThread();
       return;
@@ -19241,7 +19244,7 @@ function ThreadRow({ t: t4 }) {
       subTrailer,
       costStr
     ] }),
-    ct === "web" ? /* @__PURE__ */ u4("button", { type: "button", class: "del", title: "Delete thread", "aria-label": "Delete thread", onClick: onDel, children: "\xD7" }) : null
+    ct === "web" && isAdmin.value ? /* @__PURE__ */ u4("button", { type: "button", class: "del", title: "Delete thread", "aria-label": "Delete thread", onClick: onDel, children: "\xD7" }) : null
   ] });
 }
 function DmRow({ t: t4 }) {
@@ -20240,6 +20243,7 @@ function Message({ m: m6 }) {
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   return /* @__PURE__ */ u4("div", { class: cls, "data-msg-id": m6.id, ref, children: [
     m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
+    m6.direction === "in" && m6.author ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
     md != null ? /* @__PURE__ */ u4("div", { ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : m6.text || "",
     singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
       singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),

@@ -38,13 +38,7 @@ import { getUser } from '../../../modules/permissions/db/users.js';
 import { getIdentitiesForUser } from '../../../modules/permissions/db/identities.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
 
-/**
- * Elevated access (cross-user thread listing + history) is reserved
- * for global owners/admins. Group-level admins still have full admin
- * rights on their own group (file write, approvals, etc.) but cannot
- * peek into other users' DM threads — that would leak content across
- * the per-user boundary inside a group.
- */
+/** Elevated access to non-web messaging contexts. Web chats are group-wide. */
 function isElevated(userId: string): boolean {
   return isOwner(userId) || isGlobalAdmin(userId);
 }
@@ -76,27 +70,27 @@ function appendTranscriptDelta(text: string, delta: string): string {
   return text + delta;
 }
 
-/** Map (userId, agentGroupId) → deterministic web platform_id. */
-function platformIdFor(userId: string, agentGroupId: string): string {
-  return `${userId}#${agentGroupId}`;
+/** Map an agent group to its shared web platform_id. */
+function platformIdFor(agentGroupId: string): string {
+  return `group:${agentGroupId}`;
 }
 
 /**
- * Idempotently ensure a `web` messaging group exists for this (user, agent
- * group) and is wired to that agent group. Returns the messaging_group id.
+ * Idempotently ensure the shared `web` messaging group exists for this agent
+ * group and is wired to it. Returns the messaging_group id.
  */
-function ensureWebMessagingGroup(userId: string, agentGroupId: string): string {
-  const platformId = platformIdFor(userId, agentGroupId);
+function ensureWebMessagingGroup(agentGroupId: string): string {
+  const platformId = platformIdFor(agentGroupId);
   let mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformId);
   if (!mg) {
-    const id = `mg-web-${crypto.randomBytes(6).toString('hex')}`;
+    const id = `mg-web-shared-${agentGroupId}`;
     createMessagingGroup({
       id,
       channel_type: WEB_CHANNEL_TYPE,
       platform_id: platformId,
       name: null,
-      is_group: 0,
-      unknown_sender_policy: 'request_approval',
+      is_group: 1,
+      unknown_sender_policy: 'strict',
       denied_at: null,
       created_at: new Date().toISOString(),
     });
@@ -118,25 +112,6 @@ function ensureWebMessagingGroup(userId: string, agentGroupId: string): string {
     });
   }
   return mg.id;
-}
-
-function userOwnsWebThread(userId: string, agentGroupId: string, threadId: string): boolean {
-  const platformId = platformIdFor(userId, agentGroupId);
-  const senderMg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformId);
-  const existingCount = (
-    getDb()
-      .prepare('SELECT count(*) AS n FROM sessions WHERE agent_group_id = ? AND thread_id = ?')
-      .get(agentGroupId, threadId) as { n: number }
-  ).n;
-  if (existingCount === 0) return true;
-  const senderOwns = senderMg
-    ? (getDb()
-        .prepare(
-          'SELECT 1 AS x FROM sessions WHERE agent_group_id = ? AND thread_id = ? AND messaging_group_id = ? LIMIT 1',
-        )
-        .get(agentGroupId, threadId, senderMg.id) as { x: number } | undefined)
-    : undefined;
-  return !!senderOwns;
 }
 
 interface ChatContext {
@@ -364,9 +339,9 @@ export async function handleChatRequest(
       writeJson(res, 405, { error: 'method_not_allowed' });
       return true;
     }
-    const messagingGroupId = ensureWebMessagingGroup(userId, m.groupId);
+    const messagingGroupId = ensureWebMessagingGroup(m.groupId);
     const threadId = crypto.randomUUID();
-    writeJson(res, 200, { threadId, messagingGroupId, platformId: platformIdFor(userId, m.groupId) });
+    writeJson(res, 200, { threadId, messagingGroupId, platformId: platformIdFor(m.groupId) });
     return true;
   }
 
@@ -453,21 +428,12 @@ export async function handleChatRequest(
       return true;
     }
 
-    ensureWebMessagingGroup(userId, m.groupId);
-    const platformId = platformIdFor(userId, m.groupId);
-    // Spectator guard: if a session already exists for this (agentGroup,
-    // threadId) but none of them belong to the sender's mg, the sender
-    // is trying to write into someone else's thread. Refuse rather than
-    // minting a polluting session in the sender's mg with a borrowed
-    // thread UUID. (Cross-channel sends are already guarded by
-    // userOwnsMessagingGroup inside sendViaChannelAdapter.)
-    if (!userOwnsWebThread(userId, m.groupId, m.threadId)) {
-      writeJson(res, 403, { error: 'not_owner_of_thread' });
-      return true;
-    }
+    ensureWebMessagingGroup(m.groupId);
+    const platformId = platformIdFor(m.groupId);
     try {
       const id = await submitWebInbound({
         userId,
+        senderDisplayName: getUser(userId)?.display_name?.trim() || userId,
         platformId,
         threadId: m.threadId,
         text,
@@ -490,10 +456,6 @@ export async function handleChatRequest(
     const cfg = getContainerConfig(m.groupId);
     if (!cfg || cfg.voice_mode !== 'transcribe') {
       writeJson(res, 400, { error: 'voice_disabled' });
-      return true;
-    }
-    if (!userOwnsWebThread(userId, m.groupId, m.threadId)) {
-      writeJson(res, 403, { error: 'not_owner_of_thread' });
       return true;
     }
     try {
@@ -543,11 +505,7 @@ export async function handleChatRequest(
       writeJson(res, 405, { error: 'method_not_allowed' });
       return true;
     }
-    if (!userOwnsWebThread(userId, m.groupId, m.threadId)) {
-      writeJson(res, 403, { error: 'not_owner_of_thread' });
-      return true;
-    }
-    serveInboundAttachment(req, res, userId, m.groupId, m.threadId, m.attachmentPath);
+    serveInboundAttachment(req, res, m.groupId, m.threadId, m.attachmentPath);
     return true;
   }
 
@@ -608,8 +566,12 @@ export async function handleChatRequest(
       writeJson(res, 405, { error: 'method_not_allowed' });
       return true;
     }
+    if (!hasAdminPrivilege(userId, m.groupId)) {
+      writeJson(res, 403, { error: 'forbidden' });
+      return true;
+    }
     try {
-      const removed = deleteChatThread(userId, m.groupId, m.threadId);
+      const removed = deleteChatThread(m.groupId, m.threadId);
       writeJson(res, removed ? 200 : 404, { ok: removed });
     } catch (err) {
       log.warn('web chat thread delete failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
@@ -770,6 +732,8 @@ export interface TurnUsageDto {
 }
 
 export interface HistoryMessage {
+  /** Human sender attribution for inbound messages. */
+  author?: { userId: string; displayName: string };
   direction: 'in' | 'out' | 'internal' | 'event';
   // messages_in.id / messages_out.id — stable per-row id the client uses
   // as the dedup key against live WS pushes.
@@ -913,28 +877,28 @@ export function readChatHistory(
   try {
     const inDb = openInboundDb(groupId, session.id);
     try {
-      let rows: { id: string; timestamp: string; content: string }[];
+      let rows: { id: string; timestamp: string; content: string; sender_user_id: string | null }[];
       if (isDm && elevated) {
         rows = inDb
           .prepare(
-            'SELECT id, timestamp, content FROM messages_in WHERE channel_type = ? AND thread_id IS NULL ORDER BY seq',
+            'SELECT id, timestamp, content, sender_user_id FROM messages_in WHERE channel_type = ? AND thread_id IS NULL ORDER BY seq',
           )
-          .all(target.channelType) as { id: string; timestamp: string; content: string }[];
+          .all(target.channelType) as typeof rows;
       } else if (isDm) {
         rows = inDb
           .prepare(
-            `SELECT id, timestamp, content FROM messages_in
+            `SELECT id, timestamp, content, sender_user_id FROM messages_in
               WHERE channel_type = ? AND thread_id IS NULL
                 AND platform_id IN (${viewerHandles.map(() => '?').join(',')})
               ORDER BY seq`,
           )
-          .all(target.channelType, ...viewerHandles) as { id: string; timestamp: string; content: string }[];
+          .all(target.channelType, ...viewerHandles) as typeof rows;
       } else {
         rows = inDb
           .prepare(
-            'SELECT id, timestamp, content FROM messages_in WHERE channel_type = ? AND thread_id = ? ORDER BY seq',
+            'SELECT id, timestamp, content, sender_user_id FROM messages_in WHERE channel_type = ? AND thread_id = ? ORDER BY seq',
           )
-          .all(target.channelType, threadId) as { id: string; timestamp: string; content: string }[];
+          .all(target.channelType, threadId) as typeof rows;
       }
       // Router namespaces ids as `<rawId>:<agentGroupId>` when writing
       // into per-agent session DBs (router.ts messageIdForAgent), but the
@@ -950,7 +914,11 @@ export function readChatHistory(
           // HA replays the full transcript on every turn (see buildTurn);
           // show only the user's actual query in the UI.
           const text = target.channelType === HA_CHANNEL_TYPE ? extractDisplayQuery(parsed.text) : parsed.text;
-          messages.push({ direction: 'in', id, timestamp: r.timestamp, text, files: parsed.files });
+          const sender = r.sender_user_id ? getUser(r.sender_user_id) : undefined;
+          const author = r.sender_user_id
+            ? { userId: r.sender_user_id, displayName: sender?.display_name?.trim() || r.sender_user_id }
+            : undefined;
+          messages.push({ direction: 'in', id, timestamp: r.timestamp, text, files: parsed.files, author });
         }
       }
     } finally {
@@ -1220,10 +1188,9 @@ export function chatSdkHistoryContent(content: string): { text: string; card?: D
 
 /**
  * Resolve the (channelType, messagingGroupId, sessionMode) the user is
- * targeting. If `override` is provided, authorize that user is the
- * counterparty of that messaging group (web ownership or `user_dms`
- * entry). Elevated users skip the ownership check. Returns null on
- * auth failure or unknown mg.
+ * targeting. Shared web rooms are authorized by the route-level agent-group
+ * access check. Non-web overrides still require counterparty ownership;
+ * elevated users may inspect them without that ownership check.
  */
 function resolveTargetMessagingGroup(
   userId: string,
@@ -1232,15 +1199,12 @@ function resolveTargetMessagingGroup(
   elevated: boolean,
 ): { channelType: string; messagingGroupId: string; sessionMode: 'per-thread' | 'shared' | 'agent-shared' } | null {
   if (!override) {
-    // Without an explicit mg, default to the viewer's own web mg (if any)
-    // — elevated users can specify a different mg via override to peek at
-    // someone else's thread.
-    const platformId = platformIdFor(userId, agentGroupId);
+    const platformId = platformIdFor(agentGroupId);
     const mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformId);
     if (!mg) return null;
     return { channelType: WEB_CHANNEL_TYPE, messagingGroupId: mg.id, sessionMode: 'per-thread' };
   }
-  // Override path: require ownership unless the caller is elevated.
+  // Override path: shared web is group-authorized; non-web requires ownership.
   if (!elevated && !userOwnsMessagingGroup(userId, agentGroupId, override.channelType, override.messagingGroupId)) {
     return null;
   }
@@ -1253,7 +1217,7 @@ function resolveTargetMessagingGroup(
 /** Authorize: viewer is the counterparty of this messaging group. */
 function userOwnsMessagingGroup(userId: string, agentGroupId: string, channelType: string, mgId: string): boolean {
   if (channelType === WEB_CHANNEL_TYPE) {
-    const platformId = platformIdFor(userId, agentGroupId);
+    const platformId = platformIdFor(agentGroupId);
     const mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformId);
     return mg?.id === mgId;
   }
@@ -1551,7 +1515,6 @@ function mimeFromFilename(filename: string): string {
 function serveInboundAttachment(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  userId: string,
   groupId: string,
   threadId: string,
   requestedPath: string,
@@ -1561,7 +1524,7 @@ function serveInboundAttachment(
     writeJson(res, 400, { error: 'bad_attachment_path' });
     return;
   }
-  const mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformIdFor(userId, groupId));
+  const mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformIdFor(groupId));
   if (!mg) {
     writeJson(res, 404, { error: 'not_found' });
     return;
@@ -1971,8 +1934,8 @@ function listUserMessagingContexts(userId: string, agentGroupId: string): UserMe
   const out: UserMessagingContext[] = [];
   const seen = new Set<string>();
 
-  // Web: implicit per-(user, agentGroup) mg.
-  const webPlatformId = platformIdFor(userId, agentGroupId);
+  // Web: one shared messaging group for every member of the agent group.
+  const webPlatformId = platformIdFor(agentGroupId);
   const webMg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, webPlatformId);
   if (webMg) {
     const mga = getMessagingGroupAgentByPair(webMg.id, agentGroupId);
@@ -2604,8 +2567,8 @@ function readThreadStats(
  * file` until the host sweeper noticed — and even then the sweeper only
  * acts on heartbeat staleness, not on missing files).
  */
-function deleteChatThread(userId: string, groupId: string, threadId: string): boolean {
-  const platformId = platformIdFor(userId, groupId);
+function deleteChatThread(groupId: string, threadId: string): boolean {
+  const platformId = platformIdFor(groupId);
   const mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformId);
   if (!mg) return false;
   const session = findSessionForAgent(groupId, mg.id, threadId);
@@ -2715,7 +2678,7 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
       isElevated(session.userId),
     );
   } else {
-    ensureWebMessagingGroup(session.userId, match.groupId);
+    ensureWebMessagingGroup(match.groupId);
     target = resolveTargetMessagingGroup(session.userId, match.groupId, undefined, isElevated(session.userId));
   }
   if (!target || target.channelType !== WEB_CHANNEL_TYPE) {
@@ -2895,7 +2858,7 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
         pushActivityFrame(message.id, 0);
       }
     },
-    onInboundEcho(id, text, files) {
+    onInboundEcho(id, text, author, files) {
       try {
         // Live echo files arrive with just {filename, size}. Enrich them
         // with the same attachment `url` + `contentType` that socket snapshots
@@ -2909,7 +2872,7 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
           url: encodedAttachmentUrl(ctx.groupId, ctx.threadId, `inbox/${id}:${ctx.groupId}/${f.filename}`),
           contentType: mimeFromFilename(f.filename),
         }));
-        sendFrame({ kind: 'inbound', id, text, files: enriched, timestamp: new Date().toISOString() });
+        sendFrame({ kind: 'inbound', id, text, author, files: enriched, timestamp: new Date().toISOString() });
       } catch (err) {
         log.warn('web chat ws echo failed', { err });
       }

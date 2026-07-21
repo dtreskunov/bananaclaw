@@ -9,8 +9,9 @@
  * it and writes to `outbound.db`; the host delivery loop calls back into
  * this adapter's `deliver`, which republishes to live WS subscribers.
  *
- * Pub/sub key: `${platformId}::${threadId}`. The platformId carries the
- * userId so two users on the same agent group don't cross-publish.
+ * Pub/sub key: `${platformId}::${threadId}`. Shared web rooms use one
+ * `group:<agentGroupId>` platform id, so every member subscribed to the same
+ * thread receives the same live events.
  *
  * No platform identity, no credentials — this adapter is always-on and
  * only enabled when the UI is mounted. Messaging-group rows are
@@ -27,6 +28,8 @@ import type {
 import { registerChannelAdapter } from './channel-registry.js';
 import { log } from '../log.js';
 import { sendToUser as sendPushToUser } from '../modules/push/sender.js';
+import { getMembers } from '../modules/permissions/db/agent-group-members.js';
+import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners } from '../modules/permissions/db/user-roles.js';
 import { onTaskRun as onTaskRunNotice, type TaskRunNotice } from '../task-events.js';
 
 export const WEB_CHANNEL_TYPE = 'web';
@@ -52,7 +55,12 @@ export interface WebSubscriber {
   onOutbound(message: OutboundMessage): void;
   /** Called with the user's own inbound right after it's accepted. `id` is the
    *  messages_in.id we just wrote — clients use it as the dedup key. */
-  onInboundEcho(id: string, text: string, files?: { filename: string; size: number }[]): void;
+  onInboundEcho(
+    id: string,
+    text: string,
+    author: { userId: string; displayName: string },
+    files?: { filename: string; size: number }[],
+  ): void;
   /** Called when the typing indicator should turn on or off. The web channel
    *  uses explicit start/stop signals (no client-side timeout). `hint` is
    *  an optional one-line progress string from the container. When present,
@@ -136,6 +144,7 @@ export function subscribeWeb(platformId: string, threadId: string | null, sub: W
  */
 export async function submitWebInbound(args: {
   userId: string;
+  senderDisplayName: string;
   platformId: string;
   threadId: string;
   text: string;
@@ -148,7 +157,7 @@ export async function submitWebInbound(args: {
     : `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const contentPayload: Record<string, unknown> = {
     text: args.text,
-    sender: args.userId,
+    sender: args.senderDisplayName,
     senderId: args.userId,
   };
   if (args.attachments && args.attachments.length > 0) {
@@ -181,7 +190,7 @@ export async function submitWebInbound(args: {
     const echoFiles = args.attachments?.map((a) => ({ filename: a.filename, size: a.size }));
     for (const sub of echoSet) {
       try {
-        sub.onInboundEcho(id, args.text, echoFiles);
+        sub.onInboundEcho(id, args.text, { userId: args.userId, displayName: args.senderDisplayName }, echoFiles);
       } catch (err) {
         log.warn('web subscriber onInboundEcho threw', { err });
       }
@@ -191,7 +200,7 @@ export async function submitWebInbound(args: {
   return id;
 }
 
-function createAdapter(): ChannelAdapter {
+export function createWebAdapter(): ChannelAdapter {
   const adapter: ChannelAdapter = {
     name: 'web',
     channelType: WEB_CHANNEL_TYPE,
@@ -217,22 +226,30 @@ function createAdapter(): ChannelAdapter {
     },
 
     async deliver(platformId, threadId, message: OutboundMessage): Promise<string | undefined> {
-      // Fire a push to the owning user regardless of whether a live tab is
-      // attached — service worker dedupes against focused windows. Thin
-      // payload only; the SW fetches text via an authenticated request.
-      // platformId format: `${userId}#${agentGroupId}` (chat.ts platformIdFor).
-      const hashIdx = platformId.indexOf('#');
-      if (hashIdx > 0 && threadId && message.id && (message.kind === 'chat' || message.kind === 'text')) {
-        const userId = platformId.slice(0, hashIdx);
-        const groupId = platformId.slice(hashIdx + 1);
-        void sendPushToUser(userId, {
-          v: 1,
-          kind: 'message',
-          groupId,
-          threadId,
-          msgId: message.id,
-          ts: new Date().toISOString(),
-        }).catch((err) => log.warn('web push send failed', { err }));
+      // Shared web rooms notify every current member and administrator.
+      // The service worker suppresses notifications in focused windows.
+      if (
+        platformId.startsWith('group:') &&
+        threadId &&
+        message.id &&
+        (message.kind === 'chat' || message.kind === 'text')
+      ) {
+        const groupId = platformId.slice('group:'.length);
+        const recipients = new Set<string>();
+        for (const member of getMembers(groupId)) recipients.add(member.user_id);
+        for (const admin of getAdminsOfAgentGroup(groupId)) recipients.add(admin.user_id);
+        for (const admin of getGlobalAdmins()) recipients.add(admin.user_id);
+        for (const owner of getOwners()) recipients.add(owner.user_id);
+        for (const userId of recipients) {
+          void sendPushToUser(userId, {
+            v: 1,
+            kind: 'message',
+            groupId,
+            threadId,
+            msgId: message.id,
+            ts: new Date().toISOString(),
+          }).catch((err) => log.warn('web push send failed', { userId, err }));
+        }
       }
       const set = subscribers.get(subKey(platformId, threadId));
       if (!set || set.size === 0) {
@@ -277,4 +294,4 @@ function createAdapter(): ChannelAdapter {
   return adapter;
 }
 
-registerChannelAdapter('web', { factory: createAdapter });
+registerChannelAdapter('web', { factory: createWebAdapter });

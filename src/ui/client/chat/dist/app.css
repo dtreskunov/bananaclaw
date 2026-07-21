@@ -1282,6 +1282,12 @@ nav.tab-bar-strip.group-strip {
   align-self: flex-end;
   background: var(--accent);
 }
+.chat-main .msg .message-author {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: var(--font-2xs);
+  font-weight: 700;
+}
 .chat-main .msg.out {
   align-self: flex-start;
   background: var(--wash);

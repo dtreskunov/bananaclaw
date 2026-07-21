@@ -55,6 +55,11 @@ In-browser chat + read-only browser for the per-agent-group filesystem at `group
 - the user has an `owner` or `admin` role for the group (or globally), or
 - the user is listed in `agent_group_members` for the group.
 
+Web chat threads are shared by every user who can access the agent group. All
+members can list, read, and send messages in every web thread; only owners and
+admins (global or scoped to the group) can delete a thread. Human messages keep
+their sender attribution in both history and live updates.
+
 Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visible only to admins. `.git`, `node_modules`, `.claude-fragments`, dotfiles, and the composed `CLAUDE.md` are always hidden. `CLAUDE.local.md` is visible read-only.
 
 **Inline preview** in-browser:
