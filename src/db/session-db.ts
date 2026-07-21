@@ -413,6 +413,20 @@ export function migrateMessagesInTable(db: Database.Database): void {
     // ${channel_type}:${raw} synthesis for those.
     db.prepare('ALTER TABLE messages_in ADD COLUMN sender_user_id TEXT').run();
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS thread_titles (
+      channel_type       TEXT NOT NULL,
+      platform_id        TEXT NOT NULL DEFAULT '',
+      thread_id          TEXT NOT NULL DEFAULT '',
+      title              TEXT NOT NULL,
+      source             TEXT NOT NULL DEFAULT 'model',
+      request_message_id TEXT NOT NULL,
+      published          INTEGER NOT NULL DEFAULT 0,
+      updated_at         TEXT NOT NULL,
+      PRIMARY KEY (channel_type, platform_id, thread_id)
+    )
+  `);
 }
 
 /**

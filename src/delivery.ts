@@ -25,6 +25,7 @@ import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
 import { extractOutboundText, indexMessage } from './search-index.js';
 import { checkTurnEndedAndStop, flushActivity, setTypingAdapter } from './modules/typing/index.js';
+import { publishTitlesForDeliveredReplies } from './modules/thread-titles/db.js';
 import type { ActivityLine, OutboundFile, TypingMetadata } from './channels/adapter.js';
 import type { Session } from './types.js';
 
@@ -216,6 +217,7 @@ async function drainSession(session: Session): Promise<void> {
       try {
         const platformMsgId = await deliverMessage(msg, session, inDb);
         markDelivered(inDb, msg.id, platformMsgId ?? null);
+        publishTitlesForDeliveredReplies(inDb, outDb);
         deliveryAttempts.delete(msg.id);
 
         // Fire-and-forget: index outbound chat messages for search.

@@ -246,6 +246,20 @@ CREATE TABLE IF NOT EXISTS session_routing (
   platform_id  TEXT,
   thread_id    TEXT
 );
+
+-- Host-owned metadata for logical threads. Shared sessions may contain many
+-- routing tuples, while per-thread sessions normally contain exactly one.
+CREATE TABLE IF NOT EXISTS thread_titles (
+  channel_type       TEXT NOT NULL,
+  platform_id        TEXT NOT NULL DEFAULT '',
+  thread_id          TEXT NOT NULL DEFAULT '',
+  title              TEXT NOT NULL,
+  source             TEXT NOT NULL DEFAULT 'model',
+  request_message_id TEXT NOT NULL,
+  published          INTEGER NOT NULL DEFAULT 0,
+  updated_at         TEXT NOT NULL,
+  PRIMARY KEY (channel_type, platform_id, thread_id)
+);
 `;
 
 /** Container-owned: outbound messages + processing acknowledgments. */

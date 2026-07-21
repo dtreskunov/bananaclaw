@@ -7,6 +7,7 @@
  */
 import './core.js';
 import './scheduling.js';
+import './thread-titles.js';
 import './interactive.js';
 import './agents.js';
 import './agent-link.js';

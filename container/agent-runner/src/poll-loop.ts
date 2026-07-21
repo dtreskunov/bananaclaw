@@ -18,6 +18,7 @@ import {
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import { isAudioMime, transcribeAudio } from './transcribe.js';
+import { appendThreadTitleRequest } from './thread-title-request.js';
 import { getConfig } from './config.js';
 import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderExchange } from './providers/types.js';
 
@@ -285,6 +286,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
     let prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
+    prompt = appendThreadTitleRequest(prompt, keep);
 
     // Replay any prior failed turn. The continuation rollback in
     // processQuery restores the agent to a session that completed before
@@ -851,7 +853,7 @@ async function processQuery(
         if (done) return;
 
         const keptIds = keep.map((m) => m.id);
-        let prompt = formatMessages(keep);
+        let prompt = appendThreadTitleRequest(formatMessages(keep), keep);
         const rawFollowUpFiles = extractFileAttachments(keep);
         const { prompt: resolvedFollowUp, files: followUpFiles } = await transcribeAudioFiles(rawFollowUpFiles, prompt);
         prompt = resolvedFollowUp;

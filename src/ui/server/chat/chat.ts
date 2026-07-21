@@ -31,6 +31,7 @@ import { deleteSession, findSessionByAgentGroup, findSessionForAgent } from '../
 import { openInboundDb, openOutboundDb, sessionDir, writeSessionMessage } from '../../../session-manager.js';
 import { killContainer } from '../../../container-runner.js';
 import { cancelTask, pauseTask, resumeTask, updateTask, type TaskUpdate } from '../../../modules/scheduling/db.js';
+import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
 import { TIMEZONE } from '../../../config.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import { searchMessages, type SearchResultRow } from '../../../search-index.js';
@@ -2160,7 +2161,7 @@ function enumeratePerThread(
     ) {
       continue;
     }
-    const stats = readThreadStats(agentGroupId, r.id, ctx.channelType, r.thread_id);
+    const stats = readThreadStats(agentGroupId, r.id, ctx.channelType, ctx.platformId, r.thread_id);
     out.push({
       threadId: r.thread_id,
       sessionId: r.id,
@@ -2413,7 +2414,12 @@ function collectThreadsFromSharedSession(
         const scope = scopes.find((s) => s.ctx.channelType === g.channel_type && s.ctx.platformId === g.platform_id);
         if (!scope) continue;
         const first = titleStmt.get(g.channel_type, g.platform_id, g.thread_id) as { content: string } | undefined;
-        const title = first ? extractTitle(g.channel_type, first.content) : '';
+        const title =
+          readPublishedThreadTitle(inDb, {
+            channelType: g.channel_type,
+            platformId: g.platform_id,
+            threadId: g.thread_id,
+          }) ?? (first ? extractTitle(g.channel_type, first.content) : '');
         let count = g.n;
         let maxTs = g.max_ts ?? '';
         if (outStmt) {
@@ -2455,6 +2461,7 @@ function readThreadStats(
   agentGroupId: string,
   sessionId: string,
   channelType: string,
+  platformId: string,
   threadId: string,
 ): {
   title: string;
@@ -2475,10 +2482,13 @@ function readThreadStats(
   try {
     const inDb = openInboundDb(agentGroupId, sessionId);
     try {
-      const first = inDb
-        .prepare('SELECT content FROM messages_in WHERE channel_type = ? AND thread_id = ? ORDER BY seq LIMIT 1')
-        .get(channelType, threadId) as { content: string } | undefined;
-      if (first) title = extractTitle(channelType, first.content);
+      title = readPublishedThreadTitle(inDb, { channelType, platformId, threadId }) ?? '';
+      if (!title) {
+        const first = inDb
+          .prepare('SELECT content FROM messages_in WHERE channel_type = ? AND thread_id = ? ORDER BY seq LIMIT 1')
+          .get(channelType, threadId) as { content: string } | undefined;
+        if (first) title = extractTitle(channelType, first.content);
+      }
       const c = inDb
         .prepare('SELECT COUNT(*) AS n, MAX(timestamp) AS t FROM messages_in WHERE channel_type = ? AND thread_id = ?')
         .get(channelType, threadId) as { n: number; t: string | null };

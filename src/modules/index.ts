@@ -19,6 +19,7 @@
 import './approvals/index.js';
 import './interactive/index.js';
 import './scheduling/index.js';
+import './thread-titles/index.js';
 import './permissions/index.js';
 import './agent-to-agent/index.js';
 import './self-mod/index.js';
