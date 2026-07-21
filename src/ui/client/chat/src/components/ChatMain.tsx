@@ -655,32 +655,34 @@ function ApprovalsBanner() {
       <div class="approvals-header">
         Pending approvals <span class="approvals-count">({list.length})</span>
       </div>
-      {list.map((a) => (
-        <div class="approval-row" key={a.approvalId}>
-          <div class="approval-text">
-            <div class="approval-title">{a.title || a.action}</div>
-            {a.details ? <div class="approval-details">{a.details}</div> : null}
-            <div class="approval-meta">
-              <span class="approval-group">{a.agentGroupName || 'Global'}</span>
-              <span class="dot">{'\u00b7'}</span>
-              <RelativeTime ts={a.createdAt} />
+      <div class="approvals-list">
+        {list.map((a) => (
+          <div class="approval-row" key={a.approvalId}>
+            <div class="approval-text">
+              <div class="approval-title">{a.title || a.action}</div>
+              {a.details ? <div class="approval-details">{a.details}</div> : null}
+              <div class="approval-meta">
+                <span class="approval-group">{a.agentGroupName || 'Global'}</span>
+                <span class="dot">{'\u00b7'}</span>
+                <RelativeTime ts={a.createdAt} />
+              </div>
+            </div>
+            <div class="approval-actions">
+              {a.options.length === 0
+                ? <span class="approval-disabled">no options</span>
+                : a.options.map((o) => (
+                  <button
+                    type="button"
+                    class={'approval-btn approval-' + (o.value === 'approve' ? 'approve' : o.value === 'reject' ? 'reject' : 'neutral')}
+                    disabled={busy.has(a.approvalId)}
+                    onClick={() => respondApproval(a.approvalId, o.value).catch(console.error)}
+                    key={o.value}
+                  >{o.label}</button>
+                ))}
             </div>
           </div>
-          <div class="approval-actions">
-            {a.options.length === 0
-              ? <span class="approval-disabled">no options</span>
-              : a.options.map((o) => (
-                <button
-                  type="button"
-                  class={'approval-btn approval-' + (o.value === 'approve' ? 'approve' : o.value === 'reject' ? 'reject' : 'neutral')}
-                  disabled={busy.has(a.approvalId)}
-                  onClick={() => respondApproval(a.approvalId, o.value).catch(console.error)}
-                  key={o.value}
-                >{o.label}</button>
-              ))}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

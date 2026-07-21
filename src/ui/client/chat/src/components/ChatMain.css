@@ -438,9 +438,10 @@
   .chat-main #chat-mic.recording { min-width: 56px; font-size: 14px; }
 }
 
-.chat-main .approvals-banner { border-bottom: 1px solid var(--border); background: var(--wash); padding-block: 8px; display: flex; flex-direction: column; gap: 6px; }
+.chat-main .approvals-banner { --approvals-max-height: min(40vh, 360px); --approvals-max-height: min(40dvh, 360px); border-bottom: 1px solid var(--border); background: var(--wash); padding-block: 8px; display: flex; flex-direction: column; gap: 6px; }
 .chat-main .approvals-header { font-size: var(--font-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .chat-main .approvals-header .approvals-count { font-weight: 600; color: var(--fg); }
+.chat-main .approvals-list { display: flex; flex-direction: column; gap: 6px; max-height: calc(var(--approvals-max-height) - 40px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .chat-main .approval-row { display: flex; align-items: flex-start; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 10px; }
 .chat-main .approval-text { flex: 1; min-width: 0; }
 .chat-main .approval-title { font-size: var(--font-base); font-weight: 600; }
@@ -457,6 +458,7 @@
 .chat-main .approval-btn.approval-reject:hover:not(:disabled) { background: var(--reject); color: #fff; }
 .chat-main .approval-disabled { font-size: var(--font-xs); color: var(--muted); font-style: italic; }
 @media (max-width: 720px) {
+  .chat-main .approvals-list { padding-inline-end: 10px; }
   .chat-main .approval-row { flex-wrap: wrap; }
   .chat-main .approval-actions { width: 100%; justify-content: flex-end; }
 }

@@ -2223,6 +2223,8 @@ nav.tab-bar-strip.group-strip {
   }
 }
 .chat-main .approvals-banner {
+  --approvals-max-height: min(40vh, 360px);
+  --approvals-max-height: min(40dvh, 360px);
   border-bottom: 1px solid var(--border);
   background: var(--wash);
   padding-block: 8px;
@@ -2239,6 +2241,15 @@ nav.tab-bar-strip.group-strip {
 .chat-main .approvals-header .approvals-count {
   font-weight: 600;
   color: var(--fg);
+}
+.chat-main .approvals-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: calc(var(--approvals-max-height) - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .chat-main .approval-row {
   display: flex;
@@ -2324,6 +2335,9 @@ nav.tab-bar-strip.group-strip {
   font-style: italic;
 }
 @media (max-width: 720px) {
+  .chat-main .approvals-list {
+    padding-inline-end: 10px;
+  }
   .chat-main .approval-row {
     flex-wrap: wrap;
   }

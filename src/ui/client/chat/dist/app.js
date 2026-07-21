@@ -20430,7 +20430,7 @@ function ApprovalsBanner() {
         ")"
       ] })
     ] }),
-    list.map((a4) => /* @__PURE__ */ u4("div", { class: "approval-row", children: [
+    /* @__PURE__ */ u4("div", { class: "approvals-list", children: list.map((a4) => /* @__PURE__ */ u4("div", { class: "approval-row", children: [
       /* @__PURE__ */ u4("div", { class: "approval-text", children: [
         /* @__PURE__ */ u4("div", { class: "approval-title", children: a4.title || a4.action }),
         a4.details ? /* @__PURE__ */ u4("div", { class: "approval-details", children: a4.details }) : null,
@@ -20451,7 +20451,7 @@ function ApprovalsBanner() {
         },
         o4.value
       )) })
-    ] }, a4.approvalId))
+    ] }, a4.approvalId)) })
   ] });
 }
 function fmtNextShort(iso) {
