@@ -641,6 +641,7 @@ async function processQuery(
   let nudgedForPrematureCompletion = false;
   let prematureCompletionBatchIds: string[] = [];
   let toolActivityThisTurn = false;
+  let substantiveToolActivityThisTurn = false;
   // Set when the post-nudge retry comes back as an `<internal>` note (the
   // model confirming, via the escape hatch in the nudge text, that it meant
   // to stay silent). Suppresses BOTH terminal notices — a deliberate no-op
@@ -725,6 +726,24 @@ async function processQuery(
       n++;
     }
     return n;
+  };
+
+  const turnOnlySentFutureWorkAnnouncements = (since: number): boolean => {
+    const rows = getOutboundDb()
+      .prepare("SELECT kind, content FROM messages_out WHERE seq > ? AND kind NOT IN ('internal', 'system')")
+      .all(since) as { kind: string; content: string }[];
+    if (rows.length === 0) return false;
+    return rows.every((row) => {
+      if (row.kind !== 'chat') return false;
+      try {
+        const content = JSON.parse(row.content) as { text?: unknown; delivery_origin?: unknown };
+        return content.delivery_origin === 'send_message' &&
+          typeof content.text === 'string' &&
+          isFutureWorkMessage(content.text);
+      } catch {
+        return false;
+      }
+    });
   };
 
   // Prompt queue for the exchange hook — each result event consumes the
@@ -851,6 +870,7 @@ async function processQuery(
         nudgedForPrematureCompletion = false;
         prematureCompletionBatchIds = [];
         toolActivityThisTurn = false;
+        substantiveToolActivityThisTurn = false;
         sentAny = false;
         emptyResultSeen = false;
         silenceConfirmed = false;
@@ -1006,6 +1026,9 @@ async function processQuery(
 
       if (event.type === 'progress' && event.step.kind === 'tool') {
         toolActivityThisTurn = true;
+        if (event.step.tool !== 'nanoclaw_send_message' && !event.step.tool.endsWith('__send_message')) {
+          substantiveToolActivityThisTurn = true;
+        }
       }
 
       if (event.type === 'init') {
@@ -1170,32 +1193,60 @@ async function processQuery(
           //      to the terminal empty-result notice.
           const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
           const wasRecoveringPrematureCompletion = prematureCompletionBatchIds.length > 0;
-          if (prematureCompletionBatchIds.length > 0 || drainedIds.length > 0) {
-            markCompleted([...prematureCompletionBatchIds, ...drainedIds]);
-            prematureCompletionBatchIds = [];
-          }
-          const willNudge =
-            !mcpWroteReply && event.strippedToEmpty === true &&
-            !nudgedForDelivery && !nudgedForPrematureCompletion && !lastProviderError;
-          if (mcpWroteReply) sentAny = true;
-          if (willNudge) {
-            log('Result stripped to empty (reply swallowed by reasoning) — nudging');
-            pushDeliveryNudge();
-            // Keep the prompt queued: the retry answers the same user prompt.
-          } else {
-            emptyResultSeen = true;
-            archivePrompts.shift();
-            // Long-lived providers (OpenCode) keep the query open after a turn
-            // so rapid follow-ups reuse the warm session. That's fine when a
-            // reply was sent, but an empty turn sends nothing, so the query
-            // would sit open and the post-stream empty-result notice (below the
-            // events loop) would never run. When nothing was sent and no
-            // follow-up batches are queued, end the stream now so the turn
-            // completes and the notice fires. The continuation was persisted at
-            // `init`, so the next message resumes the same session normally.
-            if ((!sentAny || wasRecoveringPrematureCompletion) && turnBatchQueue.length === 0 && !endedForCommand) {
+          const progressOnlyCompletion =
+            mcpWroteReply && !substantiveToolActivityThisTurn &&
+            turnOnlySentFutureWorkAnnouncements(outboundMaxAtTurnStart);
+          if (progressOnlyCompletion && !nudgedForPrematureCompletion) {
+            prematureCompletionBatchIds.push(...drainedIds);
+            pushPrematureCompletionNudge();
+          } else if (progressOnlyCompletion) {
+            if (prematureCompletionBatchIds.length > 0 || drainedIds.length > 0) {
+              markCompleted([...prematureCompletionBatchIds, ...drainedIds]);
+              prematureCompletionBatchIds = [];
+            }
+            writeMessageOut({
+              id: generateId(),
+              kind: 'chat',
+              platform_id: resultRouting.platformId,
+              channel_type: resultRouting.channelType,
+              thread_id: resultRouting.threadId,
+              content: JSON.stringify({
+                text: 'The agent stopped after announcing work twice without performing it. Please retry or use another model.',
+              }),
+            });
+            sentAny = true;
+            if (!endedForCommand) {
               endedForCommand = true;
               query.end();
+            }
+          } else {
+            if (prematureCompletionBatchIds.length > 0 || drainedIds.length > 0) {
+              markCompleted([...prematureCompletionBatchIds, ...drainedIds]);
+              prematureCompletionBatchIds = [];
+            }
+            const willNudge =
+              !mcpWroteReply && event.strippedToEmpty === true &&
+              !nudgedForDelivery && !nudgedForPrematureCompletion && !lastProviderError;
+            if (mcpWroteReply) sentAny = true;
+            if (willNudge) {
+              log('Result stripped to empty (reply swallowed by reasoning) — nudging');
+              pushDeliveryNudge();
+              // Keep the prompt queued: the retry answers the same user prompt.
+            } else {
+              emptyResultSeen = true;
+              archivePrompts.shift();
+              // Long-lived providers (OpenCode) keep the query open after a turn
+              // so rapid follow-ups reuse the warm session. That's fine when a
+              // reply was sent, but an empty turn sends nothing, so the query
+              // would sit open and the post-stream empty-result notice (below the
+              // events loop) would never run. When nothing was sent and no
+              // follow-up batches are queued, end the stream now so the turn
+              // completes and the notice fires. The continuation was persisted at
+              // `init`, so the next message resumes the same session normally.
+              if ((!sentAny || wasRecoveringPrematureCompletion) && turnBatchQueue.length === 0 && !endedForCommand) {
+                endedForCommand = true;
+                query.end();
+              }
             }
           }
         }
@@ -1253,6 +1304,7 @@ async function processQuery(
         // query starts a fresh "did MCP write anything?" window.
         outboundMaxAtTurnStart = currentOutboundMax();
         toolActivityThisTurn = false;
+        substantiveToolActivityThisTurn = false;
         turnStartTime = Date.now();
       }
     }
@@ -1511,9 +1563,12 @@ function dispatchResultText(
 export function isFutureWorkAnnouncement(text: string): boolean {
   const parsed = parseAssistantOutput(text);
   if (parsed.deliveries.length !== 1 || parsed.internal.length > 0 || parsed.unwrapped) return false;
-  const body = parsed.deliveries[0].body;
+  return isFutureWorkMessage(parsed.deliveries[0].body);
+}
+
+function isFutureWorkMessage(body: string): boolean {
   if (!body || body.length > 240) return false;
-  const planningLead = /\b(?:on it|let me|i(?:'ll| will| need to| am going to| am about to))\b/i;
+  const planningLead = /\b(?:understood|on it|let me|i(?:'ll| will| need to| am going to| am about to))\b/i;
   const toolWork = /\b(?:search(?:ing)?|research(?:ing)?|look(?:ing)?\s+(?:into|up)|investigat(?:e|ing)|check(?:ing)?|dig(?:ging)?|review(?:ing)?|inspect(?:ing)?|test(?:ing)?|work(?:ing)?\s+on|start(?:ing)?)\b/i;
   return planningLead.test(body) && toolWork.test(body);
 }

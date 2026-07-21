@@ -973,6 +973,34 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
 });
 
 describe('poll loop - premature completion recovery', () => {
+  it('continues when send_message only announces future work before an empty result', async () => {
+    insertMessage('m-progress-only', { sender: 'Alice', text: 'update all issues' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      {
+        text: '',
+        mcpMessage: 'Understood - working through all 8 issues. Starting with TRE-51 now.',
+      },
+      { text: '<message to="discord-test">All issues are updated.</message>', toolActivity: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'All issues are updated.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(1);
+    expect(provider.pushes[0]).toContain('Continue the original request now');
+    expect(getUndeliveredMessages().map((m) => JSON.parse(m.content).text)).toEqual([
+      'Understood - working through all 8 issues. Starting with TRE-51 now.',
+      'All issues are updated.',
+    ]);
+  });
+
   it('keeps the inbound claim processing until the corrective turn finishes', async () => {
     insertMessage('m-premature', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
 
@@ -1091,6 +1119,7 @@ class ScriptedProvider {
 
   constructor(private readonly turns: Array<{
     text: string;
+    mcpMessage?: string;
     strippedToEmpty?: boolean;
     finishReason?: string;
     recoveredFromUnclosedThink?: boolean;
@@ -1125,6 +1154,20 @@ class ScriptedProvider {
       events: (async function* () {
         yield { type: 'init' as const, continuation: 'scripted-session' };
         const first = nextTurn();
+        if (first.mcpMessage) {
+          writeMessageOut({
+            id: `mcp-${idx}`,
+            kind: 'chat',
+            platform_id: 'chan-1',
+            channel_type: 'discord',
+            thread_id: null,
+            content: JSON.stringify({ text: first.mcpMessage, delivery_origin: 'send_message' }),
+          });
+          yield {
+            type: 'progress' as const,
+            step: { kind: 'tool' as const, id: `send-${idx}`, tool: 'nanoclaw_send_message', status: 'completed' as const },
+          };
+        }
         if (first.toolActivity) {
           yield {
             type: 'progress' as const,
@@ -1142,6 +1185,20 @@ class ScriptedProvider {
           if (pending.length > 0) {
             pending.shift();
             const t = nextTurn();
+            if (t.mcpMessage) {
+              writeMessageOut({
+                id: `mcp-${idx}`,
+                kind: 'chat',
+                platform_id: 'chan-1',
+                channel_type: 'discord',
+                thread_id: null,
+                content: JSON.stringify({ text: t.mcpMessage, delivery_origin: 'send_message' }),
+              });
+              yield {
+                type: 'progress' as const,
+                step: { kind: 'tool' as const, id: `send-${idx}`, tool: 'nanoclaw_send_message', status: 'completed' as const },
+              };
+            }
             if (t.toolActivity) {
               yield {
                 type: 'progress' as const,
