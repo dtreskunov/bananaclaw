@@ -417,7 +417,7 @@ function Message({ m }: { m: ChatMessage }) {
     );
   }
   if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
-  const md = renderMarkdown(m.text);
+  const md = renderMarkdown(m.text, groupId.value);
   const q = searchQuery.value;
   useEffect(() => {
     // Reset markdown DOM before re-processing (handles search query changes).

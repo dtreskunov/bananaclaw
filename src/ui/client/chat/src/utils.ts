@@ -112,9 +112,43 @@ function normalizeFileLinks(text: string): string {
   });
 }
 
-export function renderMarkdown(text: string | null | undefined): string | null {
+const isExternalFileRef = (ref: string): boolean =>
+  /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith('#') || ref.startsWith('//') || ref.startsWith('mailto:');
+const isGroupFileRef = (ref: string): boolean => /^\/?(?:ui\/chat\/)?api\/groups\//.test(ref);
+
+function decodeFileRef(ref: string): string {
   try {
-    return marked.parse(normalizeFileLinks(text || ''), { breaks: true, gfm: true }) as string;
+    return decodeURIComponent(ref);
+  } catch {
+    return ref;
+  }
+}
+
+function normalizeFileRef(ref: string): string {
+  return String(ref || '')
+    .replace(/^\.?\/+/, '')
+    .replace(/^workspace\/+/, '');
+}
+
+function toGroupFileUrl(groupId: string, rel: string): string {
+  const gid = encodeURIComponent(groupId);
+  const segs = rel.split('/').filter(Boolean).map(encodeURIComponent);
+  return `api/groups/${gid}/files/${segs.join('/')}`;
+}
+
+export function renderMarkdown(text: string | null | undefined, groupId?: string | null): string | null {
+  try {
+    const html = marked.parse(normalizeFileLinks(text || ''), { breaks: true, gfm: true }) as string;
+    if (!groupId || typeof document === 'undefined') return html;
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    template.content.querySelectorAll<HTMLImageElement>('img[src]').forEach((img) => {
+      const src = img.getAttribute('src') || '';
+      if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
+      const rel = normalizeFileRef(decodeFileRef(src));
+      if (rel) img.setAttribute('src', toGroupFileUrl(groupId, rel));
+    });
+    return template.innerHTML;
   } catch {
     return null;
   }
@@ -169,24 +203,6 @@ export function rewriteFileLinks(
   onNavFile: (entry: { path: string; name: string }) => void,
 ): void {
   if (!groupId || !root) return;
-  const gid = encodeURIComponent(groupId);
-  const isExternal = (h: string): boolean =>
-    /^[a-z][a-z0-9+.-]*:/i.test(h) || h.startsWith('#') || h.startsWith('//') || h.startsWith('mailto:');
-  const decodeHref = (h: string): string => {
-    try {
-      return decodeURIComponent(h);
-    } catch {
-      return h;
-    }
-  };
-  const normalizeRel = (p: string): string =>
-    String(p || '')
-      .replace(/^\.?\/+/, '')
-      .replace(/^workspace\/+/, '');
-  const toFileUrl = (rel: string): string => {
-    const segs = rel.split('/').filter(Boolean).map(encodeURIComponent);
-    return `api/groups/${gid}/files/${segs.join('/')}`;
-  };
   const attachPreviewClick = (a: HTMLAnchorElement, rel: string): void => {
     a.addEventListener('click', (ev: MouseEvent) => {
       if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
@@ -196,13 +212,20 @@ export function rewriteFileLinks(
   };
   root.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
     const href = a.getAttribute('href') || '';
-    if (!href || isExternal(href)) return;
-    const rel = normalizeRel(decodeHref(href));
+    if (!href || isExternalFileRef(href) || isGroupFileRef(href)) return;
+    const rel = normalizeFileRef(decodeFileRef(href));
     if (!rel) return;
-    a.setAttribute('href', toFileUrl(rel));
+    a.setAttribute('href', toGroupFileUrl(groupId, rel));
     a.setAttribute('target', '_blank');
     a.setAttribute('rel', 'noopener');
     attachPreviewClick(a, rel);
+  });
+  root.querySelectorAll<HTMLImageElement>('img[src]').forEach((img) => {
+    const src = img.getAttribute('src') || '';
+    if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
+    const rel = normalizeFileRef(decodeFileRef(src));
+    if (!rel) return;
+    img.setAttribute('src', toGroupFileUrl(groupId, rel));
   });
   const fileLikeRe = /^[\w.\-/ ]+\.[A-Za-z0-9]{1,8}$/;
   root.querySelectorAll<HTMLElement>('code').forEach((c) => {
@@ -210,10 +233,10 @@ export function rewriteFileLinks(
     const txt = c.textContent || '';
     if (!fileLikeRe.test(txt)) return;
     if (txt.length > 200) return;
-    const rel = normalizeRel(txt);
+    const rel = normalizeFileRef(txt);
     if (!rel) return;
     const a = document.createElement('a');
-    a.href = toFileUrl(rel);
+    a.href = toGroupFileUrl(groupId, rel);
     a.target = '_blank';
     a.rel = 'noopener';
     a.textContent = txt;

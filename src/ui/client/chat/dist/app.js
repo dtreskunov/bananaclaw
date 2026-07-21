@@ -16961,9 +16961,36 @@ function normalizeFileLinks(text) {
     return `[${label}](<${d5}>)`;
   });
 }
-function renderMarkdown(text) {
+var isExternalFileRef = (ref) => /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("#") || ref.startsWith("//") || ref.startsWith("mailto:");
+var isGroupFileRef = (ref) => /^\/?(?:ui\/chat\/)?api\/groups\//.test(ref);
+function decodeFileRef(ref) {
   try {
-    return g5.parse(normalizeFileLinks(text || ""), { breaks: true, gfm: true });
+    return decodeURIComponent(ref);
+  } catch {
+    return ref;
+  }
+}
+function normalizeFileRef(ref) {
+  return String(ref || "").replace(/^\.?\/+/, "").replace(/^workspace\/+/, "");
+}
+function toGroupFileUrl(groupId2, rel) {
+  const gid = encodeURIComponent(groupId2);
+  const segs = rel.split("/").filter(Boolean).map(encodeURIComponent);
+  return `api/groups/${gid}/files/${segs.join("/")}`;
+}
+function renderMarkdown(text, groupId2) {
+  try {
+    const html = g5.parse(normalizeFileLinks(text || ""), { breaks: true, gfm: true });
+    if (!groupId2 || typeof document === "undefined") return html;
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    template.content.querySelectorAll("img[src]").forEach((img) => {
+      const src = img.getAttribute("src") || "";
+      if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
+      const rel = normalizeFileRef(decodeFileRef(src));
+      if (rel) img.setAttribute("src", toGroupFileUrl(groupId2, rel));
+    });
+    return template.innerHTML;
   } catch {
     return null;
   }
@@ -17004,20 +17031,6 @@ function highlightTextNodes(root, query) {
 }
 function rewriteFileLinks(root, groupId2, onNavFile) {
   if (!groupId2 || !root) return;
-  const gid = encodeURIComponent(groupId2);
-  const isExternal = (h5) => /^[a-z][a-z0-9+.-]*:/i.test(h5) || h5.startsWith("#") || h5.startsWith("//") || h5.startsWith("mailto:");
-  const decodeHref = (h5) => {
-    try {
-      return decodeURIComponent(h5);
-    } catch {
-      return h5;
-    }
-  };
-  const normalizeRel = (p5) => String(p5 || "").replace(/^\.?\/+/, "").replace(/^workspace\/+/, "");
-  const toFileUrl = (rel) => {
-    const segs = rel.split("/").filter(Boolean).map(encodeURIComponent);
-    return `api/groups/${gid}/files/${segs.join("/")}`;
-  };
   const attachPreviewClick = (a4, rel) => {
     a4.addEventListener("click", (ev) => {
       if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
@@ -17027,13 +17040,20 @@ function rewriteFileLinks(root, groupId2, onNavFile) {
   };
   root.querySelectorAll("a[href]").forEach((a4) => {
     const href = a4.getAttribute("href") || "";
-    if (!href || isExternal(href)) return;
-    const rel = normalizeRel(decodeHref(href));
+    if (!href || isExternalFileRef(href) || isGroupFileRef(href)) return;
+    const rel = normalizeFileRef(decodeFileRef(href));
     if (!rel) return;
-    a4.setAttribute("href", toFileUrl(rel));
+    a4.setAttribute("href", toGroupFileUrl(groupId2, rel));
     a4.setAttribute("target", "_blank");
     a4.setAttribute("rel", "noopener");
     attachPreviewClick(a4, rel);
+  });
+  root.querySelectorAll("img[src]").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
+    const rel = normalizeFileRef(decodeFileRef(src));
+    if (!rel) return;
+    img.setAttribute("src", toGroupFileUrl(groupId2, rel));
   });
   const fileLikeRe = /^[\w.\-/ ]+\.[A-Za-z0-9]{1,8}$/;
   root.querySelectorAll("code").forEach((c4) => {
@@ -17041,10 +17061,10 @@ function rewriteFileLinks(root, groupId2, onNavFile) {
     const txt = c4.textContent || "";
     if (!fileLikeRe.test(txt)) return;
     if (txt.length > 200) return;
-    const rel = normalizeRel(txt);
+    const rel = normalizeFileRef(txt);
     if (!rel) return;
     const a4 = document.createElement("a");
-    a4.href = toFileUrl(rel);
+    a4.href = toGroupFileUrl(groupId2, rel);
     a4.target = "_blank";
     a4.rel = "noopener";
     a4.textContent = txt;
@@ -20222,7 +20242,7 @@ function Message({ m: m6 }) {
     );
   }
   if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card });
-  const md = renderMarkdown(m6.text);
+  const md = renderMarkdown(m6.text, groupId.value);
   const q5 = searchQuery.value;
   y2(() => {
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
