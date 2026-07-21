@@ -15561,6 +15561,7 @@ var drawerOpen = {
 var isMobile = y3(false);
 var uploadItems = y3([]);
 var me = y3("");
+var currentUserId = y3("");
 var notifMutedSig = y3(false);
 var progressSoundMutedSig = y3(false);
 var completionSoundMutedSig = y3(false);
@@ -18011,7 +18012,17 @@ function connectChatWs(ctx2) {
     }
     if (payload.kind === "inbound") {
       refs.carryActivity = [];
-      appendMsg("in", payload.text || "", payload.files || null, payload.timestamp || "", payload.id, null, void 0, void 0, payload.author);
+      appendMsg(
+        "in",
+        payload.text || "",
+        payload.files || null,
+        payload.timestamp || "",
+        payload.id,
+        null,
+        void 0,
+        void 0,
+        payload.author
+      );
       updateActiveThreadTitleFromFirstMessage(payload.text || "");
       bumpActiveThread();
       return;
@@ -20243,7 +20254,7 @@ function Message({ m: m6 }) {
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   return /* @__PURE__ */ u4("div", { class: cls, "data-msg-id": m6.id, ref, children: [
     m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
-    m6.direction === "in" && m6.author ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
+    m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
     md != null ? /* @__PURE__ */ u4("div", { ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : m6.text || "",
     singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
       singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
@@ -26301,6 +26312,7 @@ async function init() {
     ]);
     n2(() => {
       me.value = meRes.displayName || meRes.userId;
+      currentUserId.value = meRes.userId;
       isElevatedUser.value = meRes.isElevated === true;
       groups.value = sortGroups(groupsRes.groups);
     });

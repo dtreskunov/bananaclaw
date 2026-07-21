@@ -99,6 +99,7 @@ export const uploadItems: Signal<UploadItem[]> = signal<UploadItem[]>([]);
 
 // Misc
 export const me: Signal<string> = signal('');
+export const currentUserId: Signal<string> = signal('');
 export const notifMutedSig: Signal<boolean> = signal(false);
 export const progressSoundMutedSig: Signal<boolean> = signal(false);
 export const completionSoundMutedSig: Signal<boolean> = signal(false);

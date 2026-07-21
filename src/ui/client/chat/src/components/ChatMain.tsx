@@ -9,6 +9,7 @@ import {
   threads, groupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions, respondingQuestionIds,
   highlightMessageId, searchQuery, voiceMode, isMobile, scrollToBottomTick,
+  currentUserId,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
 } from '../state';
 import { renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
@@ -450,7 +451,9 @@ function Message({ m }: { m: ChatMessage }) {
   return (
     <div class={cls} data-msg-id={m.id} ref={ref}>
       {m.direction === 'internal' ? <div class="internal-label">internal</div> : null}
-      {m.direction === 'in' && m.author ? <div class="message-author">{m.author.displayName}</div> : null}
+      {m.direction === 'in' && m.author && m.author.userId !== currentUserId.value
+        ? <div class="message-author">{m.author.displayName}</div>
+        : null}
       {md != null
         ? <div ref={mdRef} dangerouslySetInnerHTML={{ __html: md }} />
         : (m.text || '')}

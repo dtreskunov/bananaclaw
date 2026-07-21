@@ -3,7 +3,7 @@ import './styles/global.css';
 import { render } from 'preact';
 import { batch } from '@preact/signals';
 import { api } from './api';
-import { me, groups, settingsOpen, chatLoading, isElevatedUser } from './state';
+import { me, currentUserId, groups, settingsOpen, chatLoading, isElevatedUser } from './state';
 import { App } from './components/App';
 import { initNotif, shouldShowIosInstallHint } from './notify';
 import { initSound } from './sound';
@@ -95,6 +95,7 @@ async function init(): Promise<void> {
     ]);
     batch(() => {
       me.value = meRes.displayName || meRes.userId;
+      currentUserId.value = meRes.userId;
       isElevatedUser.value = meRes.isElevated === true;
       groups.value = sortGroups(groupsRes.groups);
     });
