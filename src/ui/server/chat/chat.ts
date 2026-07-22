@@ -34,7 +34,7 @@ import { cancelTask, pauseTask, resumeTask, updateTask, type TaskUpdate } from '
 import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
 import { TIMEZONE } from '../../../config.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
-import { searchMessages, type SearchResultRow } from '../../../search-index.js';
+import { searchMessages, type SearchConversationScope, type SearchResultRow } from '../../../search-index.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { getIdentitiesForUser } from '../../../modules/permissions/db/identities.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
@@ -541,18 +541,10 @@ export async function handleChatRequest(
       return true;
     }
     try {
-      // Elevated users search all messaging groups; everyone else is
-      // scoped to their own contexts.
       const elevated = isElevated(userId);
-      let mgIds: string[] | undefined;
-      if (!elevated) {
-        const contexts = listUserMessagingContexts(userId, m.groupId);
-        const ids = contexts.map((c) => c.messagingGroupId).filter(Boolean) as string[];
-        mgIds = ids.length > 0 ? ids : ['__none__'];
-      }
       const results = searchMessages(query, {
         agentGroupId: m.groupId,
-        messagingGroupIds: mgIds,
+        conversations: elevated ? undefined : buildViewerSearchConversations(listAllThreadsForUser(userId, m.groupId)),
       });
       writeJson(res, 200, { results });
     } catch (err) {
@@ -1695,6 +1687,25 @@ export interface ThreadSummary {
    * auto-active thread reads differently from a conversational one.
    */
   liveTasks?: LiveTaskDto[];
+}
+
+export function buildViewerSearchConversations(threads: ThreadSummary[]): SearchConversationScope[] {
+  const seen = new Set<string>();
+  const scopes: SearchConversationScope[] = [];
+  for (const thread of threads) {
+    // Threadless DMs share one session across multiple viewers and outbound
+    // rows have no durable audience key in the index, so fail closed.
+    if (thread.kind === 'dm' || thread.threadId.startsWith('__dm:')) continue;
+    const key = `${thread.sessionId}\0${thread.threadId}\0${thread.channelType}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    scopes.push({
+      sessionId: thread.sessionId,
+      threadId: thread.threadId,
+      channelType: thread.channelType,
+    });
+  }
+  return scopes;
 }
 
 /** One live (pending/paused) scheduled task in a thread. */

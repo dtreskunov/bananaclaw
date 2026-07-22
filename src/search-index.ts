@@ -86,10 +86,18 @@ export interface SearchResultRow {
   rank: number;
 }
 
+export interface SearchConversationScope {
+  sessionId: string;
+  threadId: string;
+  channelType: string;
+}
+
 export interface SearchOptions {
   agentGroupId: string;
   /** Restrict to these messaging groups. If omitted, all MGs in the agent group. */
   messagingGroupIds?: string[];
+  /** Restrict to exact visible conversations. An empty array denies all results. */
+  conversations?: SearchConversationScope[];
   limit?: number;
 }
 
@@ -197,6 +205,7 @@ export function searchMessages(query: string, opts: SearchOptions): SearchResult
 
   const q = query.trim();
   if (!q) return [];
+  if (opts.conversations && opts.conversations.length === 0) return [];
 
   const limit = opts.limit ?? 50;
 
@@ -215,6 +224,16 @@ export function searchMessages(query: string, opts: SearchOptions): SearchResult
     for (let i = 0; i < opts.messagingGroupIds.length; i++) {
       params[`mg${i}`] = opts.messagingGroupIds[i];
     }
+  }
+
+  if (opts.conversations) {
+    const scopes = opts.conversations.map((scope, i) => {
+      params[`session${i}`] = scope.sessionId;
+      params[`thread${i}`] = scope.threadId;
+      params[`channel${i}`] = scope.channelType;
+      return `(mi.session_id = @session${i} AND mi.thread_id = @thread${i} AND mi.channel_type = @channel${i})`;
+    });
+    conditions.push(`(${scopes.join(' OR ')})`);
   }
 
   const where = conditions.join(' AND ');
@@ -265,6 +284,16 @@ function likeFallback(query: string, opts: SearchOptions, limit: number): Search
     for (let i = 0; i < opts.messagingGroupIds.length; i++) {
       params[`mg${i}`] = opts.messagingGroupIds[i];
     }
+  }
+
+  if (opts.conversations) {
+    const scopes = opts.conversations.map((scope, i) => {
+      params[`session${i}`] = scope.sessionId;
+      params[`thread${i}`] = scope.threadId;
+      params[`channel${i}`] = scope.channelType;
+      return `(session_id = @session${i} AND thread_id = @thread${i} AND channel_type = @channel${i})`;
+    });
+    conditions.push(`(${scopes.join(' OR ')})`);
   }
 
   const where = conditions.join(' AND ');
