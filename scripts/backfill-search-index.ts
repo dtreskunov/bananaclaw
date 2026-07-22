@@ -4,9 +4,8 @@
  * Usage:
  *   pnpm exec tsx scripts/backfill-search-index.ts
  *
- * Iterates all session directories under data/v2-sessions/, opens each
- * session's inbound.db + outbound.db, and indexes every chat message
- * into data/search.db. Idempotent (INSERT OR IGNORE on message ID).
+ * Rebuilds data/search.db from the authoritative central and per-session DBs.
+ * Existing rows are cleared first so migrated session metadata is refreshed.
  */
 import Database from 'better-sqlite3';
 import fs from 'fs';
@@ -16,6 +15,7 @@ import { DATA_DIR } from '../src/config.js';
 import {
   initSearchDb,
   closeSearchDb,
+  clearSearchIndex,
   indexMessage,
   extractInboundText,
   extractOutboundText,
@@ -35,9 +35,11 @@ if (!fs.existsSync(centralDbPath)) {
 const centralDb = new Database(centralDbPath, { readonly: true });
 
 initSearchDb();
+clearSearchIndex();
 
 let totalMessages = 0;
 let totalSessions = 0;
+let skippedSessions = 0;
 
 for (const agentGroupId of fs.readdirSync(sessionsDir)) {
   const groupDir = path.join(sessionsDir, agentGroupId);
@@ -48,9 +50,15 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
     if (!fs.statSync(sessionDir).isDirectory()) continue;
 
     const session = centralDb
-      .prepare('SELECT messaging_group_id, thread_id FROM sessions WHERE id = ?')
-      .get(sessionId) as { messaging_group_id: string | null; thread_id: string | null } | undefined;
-    const messagingGroupId = session?.messaging_group_id ?? null;
+      .prepare('SELECT agent_group_id, messaging_group_id, thread_id FROM sessions WHERE id = ?')
+      .get(sessionId) as
+      | { agent_group_id: string; messaging_group_id: string | null; thread_id: string | null }
+      | undefined;
+    if (!session || session.agent_group_id !== agentGroupId) {
+      skippedSessions++;
+      continue;
+    }
+    const messagingGroupId = session.messaging_group_id;
 
     let sessionMsgCount = 0;
 
@@ -151,3 +159,4 @@ closeSearchDb();
 centralDb.close();
 
 console.log(`Backfill complete: indexed ${totalMessages} messages from ${totalSessions} sessions.`);
+if (skippedSessions > 0) console.log(`Skipped ${skippedSessions} session directories absent from the central DB.`);

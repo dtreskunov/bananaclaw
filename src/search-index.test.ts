@@ -10,7 +10,7 @@ vi.mock('./config.js', async () => {
   return { ...actual, DATA_DIR: TEST_DATA_DIR };
 });
 
-import { closeSearchDb, indexMessage, initSearchDb, searchMessages } from './search-index.js';
+import { clearSearchIndex, closeSearchDb, indexMessage, initSearchDb, searchMessages } from './search-index.js';
 
 function addMessage(
   id: string,
@@ -18,12 +18,13 @@ function addMessage(
   threadId: string | null,
   channelType = 'resend',
   text = `shared needle ${id}`,
+  messagingGroupId = 'shared-inbox',
 ): void {
   indexMessage({
     id,
     sessionId,
     agentGroupId: 'agent',
-    messagingGroupId: 'shared-inbox',
+    messagingGroupId,
     channelType,
     threadId,
     direction: 'in',
@@ -75,5 +76,24 @@ describe('search conversation authorization', () => {
     });
 
     expect(results.map((row) => row.messageId)).toEqual(['allowed']);
+  });
+});
+
+describe('search index rebuild', () => {
+  it('refreshes migrated metadata for an existing message ID', () => {
+    addMessage('migrated', 'session-a', 'thread-a', 'web', 'shared needle', 'legacy-web-group');
+
+    clearSearchIndex();
+    addMessage('migrated', 'session-a', 'thread-a', 'web', 'shared needle', 'current-shared-web-group');
+
+    const results = searchMessages('needle', {
+      agentGroupId: 'agent',
+      messagingGroupIds: ['current-shared-web-group'],
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.messagingGroupId).toBe('current-shared-web-group');
+    expect(
+      searchMessages('needle', { agentGroupId: 'agent', messagingGroupIds: ['legacy-web-group'] }),
+    ).toEqual([]);
   });
 });

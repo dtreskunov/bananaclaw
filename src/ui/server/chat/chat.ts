@@ -542,9 +542,12 @@ export async function handleChatRequest(
     }
     try {
       const elevated = isElevated(userId);
+      const visibleThreads = elevated
+        ? listAllThreadsForAgentGroup(m.groupId)
+        : listAllThreadsForUser(userId, m.groupId);
       const results = searchMessages(query, {
         agentGroupId: m.groupId,
-        conversations: elevated ? undefined : buildViewerSearchConversations(listAllThreadsForUser(userId, m.groupId)),
+        conversations: buildViewerSearchConversations(visibleThreads),
       });
       writeJson(res, 200, { results });
     } catch (err) {

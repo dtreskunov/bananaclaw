@@ -139,6 +139,11 @@ export function closeSearchDb(): void {
   }
 }
 
+/** Remove all indexed messages before rebuilding from the session DBs. */
+export function clearSearchIndex(): void {
+  getSearchDb().exec('DELETE FROM message_index');
+}
+
 // ---------------------------------------------------------------------------
 // Indexing
 // ---------------------------------------------------------------------------
