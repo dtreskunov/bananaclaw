@@ -143,9 +143,19 @@
   top: calc(var(--handle-h) + 49px);
   overflow-y: auto;
 }
+.threads-rail .search-result {
+  display: block; width: 100%;
+  border: 0; border-bottom: 1px solid var(--border);
+  background: transparent; color: inherit; font: inherit; text-align: left;
+}
+.threads-rail .search-result:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .threads-rail .search-result .title { display: flex; align-items: baseline; gap: 4px; }
 .threads-rail .search-result .dir-pill {
   font-size: var(--font-2xs); opacity: 0.5; flex: 0 0 auto;
+}
+.threads-rail .search-result-direction {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 .threads-rail .search-result .snippet {
   font-size: var(--font-sm);
@@ -185,9 +195,18 @@
     border-bottom: 1px solid var(--border);
   }
   .nc-pane.threads-rail > .head .title { writing-mode: horizontal-tb; transform: none; }
-  .threads-rail .threads-actions { position: static !important; }
+  .threads-rail .threads-actions {
+    position: relative !important;
+    top: auto; left: auto; right: auto;
+  }
   .threads-rail .list { position: static !important; flex: 1; }
   .threads-rail .search-results { position: static !important; flex: 1; overflow-y: auto; }
+  .threads-rail .search-toggle-btn { min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+  .threads-rail .threads-actions .search-input { height: 48px; padding-right: 48px; }
+  .threads-rail .threads-actions .search-clear {
+    right: 8px; min-width: 40px; min-height: 40px;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+  }
   .threads-rail .threads-actions #btn-new-chat { min-height: 48px; font-size: var(--font-xl); font-weight: 600; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
   .threads-rail .threads-actions #btn-new-chat .plus { font-size: 26px; font-weight: 400; line-height: 1; position: relative; top: -1px; }
   .threads-rail .thread { padding: 12px 14px; }

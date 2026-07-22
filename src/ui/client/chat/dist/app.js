@@ -19363,7 +19363,7 @@ function SearchResultRow({ r: r4 }) {
     const tid = r4.threadId || (r4.messagingGroupId ? `__dm:${r4.messagingGroupId}` : null);
     if (!tid) return;
     drawerOpen.threads.value = false;
-    const opts = {
+    const opts = threadCtxOf2(threads.value.find((t4) => t4.threadId === tid)) ?? {
       channelType: r4.channelType || "web",
       messagingGroupId: r4.messagingGroupId,
       canSend: false
@@ -19393,10 +19393,13 @@ function SearchResultRow({ r: r4 }) {
     cropped = cropped.slice(0, MAX_CHARS + 20) + "\u2026";
   }
   const snippetHtml = cropped.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/&gt;&gt;&gt;/g, "<mark>").replace(/&lt;&lt;&lt;/g, "</mark>");
-  return /* @__PURE__ */ u4("div", { class: "thread search-result", onClick: onOpen, children: [
+  return /* @__PURE__ */ u4("button", { type: "button", class: "thread search-result", onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
       r4.channelType && r4.channelType !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: meta.label, children: meta.icon }) : null,
-      /* @__PURE__ */ u4("span", { class: "dir-pill " + r4.direction, children: r4.direction === "in" ? "\u2190" : "\u2192" }),
+      /* @__PURE__ */ u4("span", { class: "dir-pill " + r4.direction, children: [
+        /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: r4.direction === "in" ? "\u2190" : "\u2192" }),
+        /* @__PURE__ */ u4("span", { class: "search-result-direction", children: r4.direction === "in" ? "Incoming" : "Outgoing" })
+      ] }),
       /* @__PURE__ */ u4("span", { class: "snippet", dangerouslySetInnerHTML: { __html: snippetHtml } })
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: r4.timestamp }) })

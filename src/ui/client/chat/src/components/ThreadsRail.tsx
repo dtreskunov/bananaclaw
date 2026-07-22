@@ -158,7 +158,7 @@ function SearchResultRow({ r }: { r: SearchResult }) {
     const tid = r.threadId || (r.messagingGroupId ? `__dm:${r.messagingGroupId}` : null);
     if (!tid) return;
     drawerOpen.threads.value = false;
-    const opts = {
+    const opts = threadCtxOf(threads.value.find((t) => t.threadId === tid)) ?? {
       channelType: r.channelType || 'web',
       messagingGroupId: r.messagingGroupId,
       canSend: false,
@@ -195,16 +195,19 @@ function SearchResultRow({ r }: { r: SearchResult }) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/&gt;&gt;&gt;/g, '<mark>').replace(/&lt;&lt;&lt;/g, '</mark>');
   return (
-    <div class="thread search-result" onClick={onOpen}>
+    <button type="button" class="thread search-result" onClick={onOpen}>
       <div class="title">
         {r.channelType && r.channelType !== 'web'
           ? <span class="ch-pill" title={meta.label}>{meta.icon}</span>
           : null}
-        <span class={'dir-pill ' + r.direction}>{r.direction === 'in' ? '\u2190' : '\u2192'}</span>
+        <span class={'dir-pill ' + r.direction}>
+          <span aria-hidden="true">{r.direction === 'in' ? '\u2190' : '\u2192'}</span>
+          <span class="search-result-direction">{r.direction === 'in' ? 'Incoming' : 'Outgoing'}</span>
+        </span>
         <span class="snippet" dangerouslySetInnerHTML={{ __html: snippetHtml }} />
       </div>
       <div class="meta"><RelativeTime ts={r.timestamp} /></div>
-    </div>
+    </button>
   );
 }
 
