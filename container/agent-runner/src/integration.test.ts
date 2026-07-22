@@ -121,7 +121,7 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
-  it('bare text produces no outbound messages (scratchpad only)', async () => {
+  it('bare text remains scratchpad and surfaces an error after the recovery retry fails', async () => {
     insertMessage('m1', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
 
     // Agent responds with bare text — no <message to="..."> wrapping
@@ -129,12 +129,12 @@ describe('poll loop integration', () => {
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
 
-    // Wait long enough for the poll loop to process
-    await sleep(1000);
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
     controller.abort();
 
     const out = getUndeliveredMessages();
-    expect(out).toHaveLength(0);
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toContain('Something went wrong producing a reply');
 
     await loopPromise.catch(() => {});
   });
@@ -968,6 +968,32 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     expect(texts.some((t: string) => t?.includes('Something went wrong producing a reply'))).toBe(true);
     // Not the truly-empty notice — this turn HAD recoverable content.
     expect(texts.some((t: string) => t?.includes('without producing a response'))).toBe(false);
+    expect(provider.pushes).toHaveLength(1);
+  });
+
+  it('surfaces a generic error when the nudge retry targets another unknown destination', async () => {
+    insertMessage('m-unknown-destination', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '<message to="unknown:first">original answer</message>' },
+      { text: '<message to="unknown:second">retried answer</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => {
+        try { return JSON.parse(m.content).text?.includes('Something went wrong producing a reply'); } catch { return false; }
+      }),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
+    expect(texts.some((t: string) => t?.includes('Something went wrong producing a reply'))).toBe(true);
+    expect(texts).not.toContain('original answer');
+    expect(texts).not.toContain('retried answer');
     expect(provider.pushes).toHaveLength(1);
   });
 });

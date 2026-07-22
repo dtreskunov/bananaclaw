@@ -1149,6 +1149,7 @@ async function processQuery(
               markCompleted([...prematureCompletionBatchIds, ...drainedIds]);
               prematureCompletionBatchIds = [];
             }
+            const wasRecoveringDelivery = nudgedForDelivery;
             const { sent, hasUnwrapped, internalCount } = dispatchResultText(event.text, resultRouting);
             // The first premature announcement is deliberately delivered as a
             // progress update, but it does not satisfy the original request.
@@ -1177,6 +1178,13 @@ async function processQuery(
             // Recovery retries answer the SAME user prompt — keep it queued so
             // the retry archives against it, not the nudge text.
             if (!willRetryWrapping && !prematureCompletion) archivePrompts.shift();
+            if (
+              wasRecoveringDelivery && !mcpWroteReply && sent === 0 && internalCount === 0 &&
+              turnBatchQueue.length === 0 && !endedForCommand
+            ) {
+              endedForCommand = true;
+              query.end();
+            }
             if (wasRecoveringPrematureCompletion && !mcpWroteReply && sent === 0 && !endedForCommand) {
               emptyResultSeen = true;
               endedForCommand = true;

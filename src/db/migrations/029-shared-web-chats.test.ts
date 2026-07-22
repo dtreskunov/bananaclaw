@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { closeDb, initTestDb } from '../connection.js';
 import { migrations, runMigrations } from './index.js';
 import { migration029 } from './029-shared-web-chats.js';
+import { migration030 } from './030-shared-web-destinations.js';
 
 const NOW = '2026-07-21T00:00:00.000Z';
 
@@ -13,7 +14,7 @@ describe('shared web chats migration', () => {
     const db = initTestDb();
     runMigrations(
       db,
-      migrations.filter((migration) => migration.name !== migration029.name),
+      migrations.filter((migration) => migration.name !== migration029.name && migration.name !== migration030.name),
     );
 
     db.prepare(
@@ -41,8 +42,13 @@ describe('shared web chats migration', () => {
        VALUES ('session-priya', 'ag-team', 'mg-private', 'thread-priya', NULL,
                'active', 'stopped', ?, ?)`,
     ).run(NOW, NOW);
+    db.prepare(
+      `INSERT INTO agent_destinations
+         (agent_group_id, local_name, target_type, target_id, created_at)
+       VALUES ('ag-team', 'web-mg-priva', 'channel', 'mg-private', ?)`,
+    ).run(NOW);
 
-    runMigrations(db, [migration029]);
+    runMigrations(db, [migration029, migration030]);
 
     expect(
       db
@@ -67,5 +73,21 @@ describe('shared web chats migration', () => {
         )
         .all(),
     ).toEqual([{ platform_id: 'group:ag-team', is_group: 1, session_mode: 'per-thread' }]);
+    expect(
+      db
+        .prepare(
+          `SELECT d.local_name, d.target_id, mg.platform_id
+             FROM agent_destinations d
+             JOIN messaging_groups mg ON mg.id = d.target_id
+            WHERE d.agent_group_id = 'ag-team' AND mg.channel_type = 'web'`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        local_name: 'web-mg-web-s',
+        target_id: 'mg-web-shared-ag-team',
+        platform_id: 'group:ag-team',
+      },
+    ]);
   });
 });
