@@ -142,6 +142,7 @@
 .chat-main .msg.markdown code { background: var(--wash-strong); padding: 1px 4px; border-radius: var(--radius-sm); font-size: var(--font-sm); }
 .chat-main .msg.markdown pre code { background: transparent; padding: 0; }
 .chat-main .msg.markdown ul, .chat-main .msg.markdown ol { margin: 4px 0; padding-left: 20px; }
+.chat-main .msg.markdown img { display: block; width: auto; height: auto; max-width: 100%; max-height: min(420px, 50vh); border-radius: var(--radius-md); }
 .chat-main .typing { align-self: flex-start; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px; background: var(--wash); border-radius: var(--radius-lg); max-width: 78%; }
 .chat-main .typing .typing-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; min-width: 0; }
 .chat-main .typing .typing-dots { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
