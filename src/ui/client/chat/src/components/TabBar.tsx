@@ -14,6 +14,8 @@ export interface TabItem {
   label: string;
   /** Optional second line under the label (e.g. relative activity time). */
   sublabel?: string;
+  /** Keep an empty second row when sibling tabs display sublabels. */
+  reserveSublabel?: boolean;
   /** Tooltip / aria title. */
   title?: string;
   /** Extra className for per-item styling (e.g. dimmed / accent). */
@@ -23,9 +25,10 @@ export interface TabItem {
 export interface TabExtra {
   key: string;
   label: string;
-  /** Optional second line — pass '\u00A0' to reserve the line for vertical
-   *  alignment with sibling tabs that have a sublabel. */
+  /** Optional second line under the label. */
   sublabel?: string;
+  /** Keep an empty second row when sibling tabs display sublabels. */
+  reserveSublabel?: boolean;
   onClick: () => void;
   title?: string;
   className?: string;
@@ -95,7 +98,11 @@ export function TabBar(props: TabBarProps): JSX.Element {
               onClick={() => onSelect(it.id)}
             >
               <span class="tab-item-label">{it.label}</span>
-              {it.sublabel ? <span class="tab-item-sublabel">{it.sublabel}</span> : null}
+              {it.sublabel || it.reserveSublabel ? (
+                <span class="tab-item-sublabel" aria-hidden={it.sublabel ? undefined : 'true'}>
+                  {it.sublabel}
+                </span>
+              ) : null}
             </button>
           );
         })}
@@ -109,7 +116,11 @@ export function TabBar(props: TabBarProps): JSX.Element {
             onClick={ex.onClick}
           >
             <span class="tab-item-label">{ex.label}</span>
-            {ex.sublabel ? <span class="tab-item-sublabel">{ex.sublabel}</span> : null}
+            {ex.sublabel || ex.reserveSublabel ? (
+              <span class="tab-item-sublabel" aria-hidden={ex.sublabel ? undefined : 'true'}>
+                {ex.sublabel}
+              </span>
+            ) : null}
           </button>
         ))}
       </nav>

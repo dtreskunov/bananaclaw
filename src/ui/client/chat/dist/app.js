@@ -18703,7 +18703,7 @@ function TabBar(props) {
                 onClick: () => onSelect(it.id),
                 children: [
                   /* @__PURE__ */ u4("span", { class: "tab-item-label", children: it.label }),
-                  it.sublabel ? /* @__PURE__ */ u4("span", { class: "tab-item-sublabel", children: it.sublabel }) : null
+                  it.sublabel || it.reserveSublabel ? /* @__PURE__ */ u4("span", { class: "tab-item-sublabel", "aria-hidden": it.sublabel ? void 0 : "true", children: it.sublabel }) : null
                 ]
               },
               it.id
@@ -18719,7 +18719,7 @@ function TabBar(props) {
               onClick: ex.onClick,
               children: [
                 /* @__PURE__ */ u4("span", { class: "tab-item-label", children: ex.label }),
-                ex.sublabel ? /* @__PURE__ */ u4("span", { class: "tab-item-sublabel", children: ex.sublabel }) : null
+                ex.sublabel || ex.reserveSublabel ? /* @__PURE__ */ u4("span", { class: "tab-item-sublabel", "aria-hidden": ex.sublabel ? void 0 : "true", children: ex.sublabel }) : null
               ]
             },
             ex.key
@@ -18855,6 +18855,7 @@ function GroupStrip() {
       id: g8.id,
       label: g8.name,
       sublabel: sublabel || void 0,
+      reserveSublabel: true,
       title: tipFor(g8, isAdminOnly),
       className: isAdminOnly ? "is-admin-visible" : void 0
     };
@@ -18864,7 +18865,7 @@ function GroupStrip() {
     extras.push({
       key: "new",
       label: "New Agent\u2026",
-      sublabel: "\xA0",
+      reserveSublabel: true,
       title: "Create a new agent group",
       ariaHaspopup: "dialog",
       onClick: () => {

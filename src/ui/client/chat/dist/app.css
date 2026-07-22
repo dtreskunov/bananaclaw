@@ -204,6 +204,9 @@ nav.tab-bar-strip.group-strip {
   margin-bottom: -9px;
   border-bottom: 0;
 }
+nav.tab-bar-strip.group-strip .tab-item {
+  gap: 2px;
+}
 @media (max-width: 720px) {
   header .more-agents-btn {
     display: none;
@@ -636,6 +639,7 @@ nav.tab-bar-strip.group-strip {
 .tab-item-sublabel {
   font-size: var(--font-2xs);
   line-height: 1.2;
+  min-height: 1.2em;
   color: var(--muted);
   letter-spacing: 0.01em;
   max-width: 100%;

@@ -70,6 +70,7 @@ export function GroupStrip(): JSX.Element | null {
       id: g.id,
       label: g.name,
       sublabel: sublabel || undefined,
+      reserveSublabel: true,
       title: tipFor(g, isAdminOnly),
       className: isAdminOnly ? 'is-admin-visible' : undefined,
     };
@@ -80,7 +81,7 @@ export function GroupStrip(): JSX.Element | null {
     extras.push({
       key: 'new',
       label: 'New Agent\u2026',
-      sublabel: '\u00A0',
+      reserveSublabel: true,
       title: 'Create a new agent group',
       ariaHaspopup: 'dialog',
       onClick: () => { createGroupOpen.value = true; },

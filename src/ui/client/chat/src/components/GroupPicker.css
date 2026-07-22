@@ -21,6 +21,10 @@ nav.tab-bar-strip.group-strip {
   border-bottom: 0;
 }
 
+nav.tab-bar-strip.group-strip .tab-item {
+   gap: 2px;
+}
+
 /* Trailing extras (e.g. "+ Agent group") inherit the default `.tab-item`
    chrome so they read as another tab in the strip. The leading "+"
    distinguishes them as an action; no extra styling needed here. */
