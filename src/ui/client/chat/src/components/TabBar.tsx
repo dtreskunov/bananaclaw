@@ -46,10 +46,12 @@ interface TabBarProps {
   className?: string;
   /** Header text for the mobile sheet. Defaults to `ariaLabel`. */
   mobileSheetTitle?: string;
+  /** Label when the active item is intentionally absent from `items`. */
+  mobileFallbackLabel?: string;
 }
 
 export function TabBar(props: TabBarProps): JSX.Element {
-  const { ariaLabel, activeId, items, onSelect, extras, className, mobileSheetTitle } = props;
+  const { ariaLabel, activeId, items, onSelect, extras, className, mobileSheetTitle, mobileFallbackLabel } = props;
   const navRef = useRef<HTMLElement | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -72,8 +74,8 @@ export function TabBar(props: TabBarProps): JSX.Element {
   }, [sheetOpen]);
 
   const activeItem = items.find((it) => it.id === activeId) ?? null;
-  const dropdownLabel = activeItem?.label ?? '';
   const sheetTitle = mobileSheetTitle ?? ariaLabel;
+  const dropdownLabel = activeItem?.label ?? mobileFallbackLabel ?? sheetTitle;
 
   const cls = (base: string): string => (className ? `${base} ${className}` : base);
 

@@ -46,6 +46,7 @@ vi.mock('../auth.js', () => ({
 }));
 
 import { initTestDb, closeDb, runMigrations, getDb } from '../../../db/index.js';
+import { addMember } from '../../../modules/permissions/db/agent-group-members.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { handle } from './routes.js';
 
@@ -149,6 +150,52 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
+});
+
+describe('GET /api/groups', () => {
+  it('marks only groups requiring system-wide access as elevated-only', async () => {
+    seedUser('web:admin');
+    for (const [id, name] of [
+      ['ag-member', 'Member'],
+      ['ag-scoped', 'Scoped'],
+      ['ag-elevated', 'Elevated'],
+    ]) {
+      getDb()
+        .prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`)
+        .run(id, name, id, now());
+    }
+    grantRole({
+      user_id: 'web:admin',
+      role: 'admin',
+      agent_group_id: null,
+      granted_by: 'web:admin',
+      granted_at: now(),
+    });
+    addMember({
+      user_id: 'web:admin',
+      agent_group_id: 'ag-member',
+      added_by: 'web:admin',
+      added_at: now(),
+    });
+    grantRole({
+      user_id: 'web:admin',
+      role: 'admin',
+      agent_group_id: 'ag-scoped',
+      granted_by: 'web:admin',
+      granted_at: now(),
+    });
+
+    mockUserId = 'web:admin';
+    const res = await call('GET', '/ui/chat/api/groups');
+    expect(res.status()).toBe(200);
+    const body = res.body() as { groups: Array<{ id: string; elevatedOnly: boolean }> };
+    const elevatedById = Object.fromEntries(body.groups.map((group) => [group.id, group.elevatedOnly]));
+    expect(elevatedById).toEqual({
+      'ag-member': false,
+      'ag-scoped': false,
+      'ag-elevated': true,
+    });
+  });
 });
 
 describe('POST /api/groups', () => {

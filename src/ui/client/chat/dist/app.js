@@ -18660,7 +18660,7 @@ function CreateGroupModal() {
 
 // src/components/TabBar.tsx
 function TabBar(props) {
-  const { ariaLabel, activeId, items, onSelect, extras, className, mobileSheetTitle } = props;
+  const { ariaLabel, activeId, items, onSelect, extras, className, mobileSheetTitle, mobileFallbackLabel } = props;
   const navRef = A2(null);
   const [sheetOpen, setSheetOpen] = h2(false);
   y2(() => {
@@ -18678,8 +18678,8 @@ function TabBar(props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [sheetOpen]);
   const activeItem = items.find((it) => it.id === activeId) ?? null;
-  const dropdownLabel = activeItem?.label ?? "";
   const sheetTitle = mobileSheetTitle ?? ariaLabel;
+  const dropdownLabel = activeItem?.label ?? mobileFallbackLabel ?? sheetTitle;
   const cls = (base) => className ? `${base} ${className}` : base;
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(
@@ -18819,11 +18819,11 @@ function TabBarSheet(props) {
 }
 
 // src/components/GroupPicker.tsx
-function isNonMember(g8) {
-  return g8.hasContent === false;
+function isElevatedOnly(g8) {
+  return g8.elevatedOnly === true;
 }
 function chipParts(g8, elevated) {
-  const isAdminOnly = elevated && isNonMember(g8);
+  const isAdminOnly = elevated && isElevatedOnly(g8);
   const parts = [];
   if (!g8.isAdmin) parts.push("\u{1F512}");
   if (isAdminOnly) parts.push("\u{1F441}");
@@ -18844,11 +18844,9 @@ function GroupStrip() {
   const elevated = isElevatedUser.value;
   nowTick.value;
   const all = groups.value;
-  const memberGroups = all.filter((g8) => !isNonMember(g8));
+  const memberGroups = all.filter((g8) => !isElevatedOnly(g8));
   const active = all.find((g8) => g8.id === groupId.value);
-  const hasActiveNonMember = active && isNonMember(active);
-  const stripGroups = hasActiveNonMember ? [...memberGroups, active] : memberGroups;
-  const items = stripGroups.map((g8) => {
+  const items = memberGroups.map((g8) => {
     const { parts, isAdminOnly } = chipParts(g8, elevated);
     const sublabel = parts.join(" \xB7 ");
     return {
@@ -18862,6 +18860,17 @@ function GroupStrip() {
   });
   const extras = [];
   if (elevated) {
+    const elevatedOnlyCount = all.filter(isElevatedOnly).length;
+    if (elevatedOnlyCount > 0) {
+      extras.push({
+        key: "more",
+        label: `More agents (${elevatedOnlyCount})`,
+        title: `Groups available through system admin access (${elevatedOnlyCount})`,
+        ariaHaspopup: "dialog",
+        onClick: () => openModal("non-members"),
+        className: "group-extra-more"
+      });
+    }
     extras.push({
       key: "new",
       label: "New Agent\u2026",
@@ -18882,6 +18891,7 @@ function GroupStrip() {
     {
       ariaLabel: "Agent groups",
       mobileSheetTitle: "Agent groups",
+      mobileFallbackLabel: active?.name,
       activeId: active?.id ?? null,
       items,
       onSelect: pick,
@@ -18894,9 +18904,9 @@ function MoreAgentsButton() {
   const elevated = isElevatedUser.value;
   const all = groups.value;
   if (!elevated) return null;
-  const nonMemberCount = all.filter(isNonMember).length;
-  if (nonMemberCount === 0) return null;
-  const tip = `Groups belonging to other users (${nonMemberCount})`;
+  const elevatedOnlyCount = all.filter(isElevatedOnly).length;
+  if (elevatedOnlyCount === 0) return null;
+  const tip = `Groups available through system admin access (${elevatedOnlyCount})`;
   return /* @__PURE__ */ u4(
     "button",
     {
@@ -18926,8 +18936,8 @@ function GroupPickerModal() {
   const elevated = isElevatedUser.value;
   const all = groups.value;
   const visible = (() => {
-    if (mode === "non-members") return all.filter(isNonMember);
-    return elevated ? all : all.filter((g8) => !isNonMember(g8));
+    if (mode === "non-members") return all.filter(isElevatedOnly);
+    return elevated ? all : all.filter((g8) => !isElevatedOnly(g8));
   })();
   const title = mode === "non-members" ? "More agents" : "Agent groups";
   const close = () => {

@@ -23,11 +23,11 @@ export interface Group {
   id: string;
   name: string;
   isAdmin?: boolean;
+  /** True when access depends solely on owner/global-admin privileges. */
+  elevatedOnly?: boolean;
   /**
    * Whether the viewer has any messaging-group context (web mg, or a
-   * non-web mg matching one of their identities) in this group. The
-   * dropdown hides groups with `hasContent=false` by default — toggle
-   * "Show all" to override.
+   * non-web mg matching one of their identities) in this group.
    */
   hasContent?: boolean;
   lastActivityAt?: string;

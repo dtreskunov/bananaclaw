@@ -9,7 +9,7 @@
  * Approver-picking (`pickApprover`, `pickApprovalDelivery`) lives in the
  * approvals module — see `src/modules/approvals/primitive.ts`.
  */
-import { getMembershipsForUser, isMember } from './db/agent-group-members.js';
+import { getMembershipsForUser, hasMembershipRow, isMember } from './db/agent-group-members.js';
 import { getUserRoles, isAdminOfAgentGroup, isGlobalAdmin, isOwner } from './db/user-roles.js';
 import { getUser } from './db/users.js';
 import { getAllAgentGroups } from '../../db/agent-groups.js';
@@ -27,6 +27,12 @@ export function canAccessAgentGroup(userId: string, agentGroupId: string): Acces
   if (isAdminOfAgentGroup(userId, agentGroupId)) return { allowed: true, reason: 'admin_of_group' };
   if (isMember(userId, agentGroupId)) return { allowed: true, reason: 'member' };
   return { allowed: false, reason: 'not_member' };
+}
+
+/** Access granted directly by group membership or a group-scoped admin role. */
+export function hasDirectAgentGroupAccess(userId: string, agentGroupId: string): boolean {
+  if (!getUser(userId)) return false;
+  return isAdminOfAgentGroup(userId, agentGroupId) || hasMembershipRow(userId, agentGroupId);
 }
 
 /**

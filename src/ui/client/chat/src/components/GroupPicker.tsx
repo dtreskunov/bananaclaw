@@ -18,8 +18,8 @@ import type { Group } from '../types';
 import { createGroupOpen } from './CreateGroupModal';
 import { TabBar, type TabItem, type TabExtra } from './TabBar';
 
-function isNonMember(g: Group): boolean {
-  return g.hasContent === false;
+function isElevatedOnly(g: Group): boolean {
+  return g.elevatedOnly === true;
 }
 
 interface ChipParts {
@@ -28,7 +28,7 @@ interface ChipParts {
 }
 
 function chipParts(g: Group, elevated: boolean): ChipParts {
-  const isAdminOnly = elevated && isNonMember(g);
+  const isAdminOnly = elevated && isElevatedOnly(g);
   const parts: string[] = [];
   if (!g.isAdmin) parts.push('\uD83D\uDD12');
   if (isAdminOnly) parts.push('\uD83D\uDC41');
@@ -54,16 +54,11 @@ export function GroupStrip(): JSX.Element | null {
   // eslint-disable-next-line @typescript-eslint/no-unused-expressions
   nowTick.value;
   const all = groups.value;
-  // Strip = member groups, plus the active group if it happens to be
-  // non-member (so it's clear what's currently selected).
-  const memberGroups = all.filter((g) => !isNonMember(g));
+  // Groups requiring system-wide privileges belong exclusively in the eye browser.
+  const memberGroups = all.filter((g) => !isElevatedOnly(g));
   const active = all.find((g) => g.id === groupId.value);
-  const hasActiveNonMember = active && isNonMember(active);
-  const stripGroups: Group[] = hasActiveNonMember
-    ? [...memberGroups, active]
-    : memberGroups;
 
-  const items: TabItem[] = stripGroups.map((g) => {
+  const items: TabItem[] = memberGroups.map((g) => {
     const { parts, isAdminOnly } = chipParts(g, elevated);
     const sublabel = parts.join(' \u00B7 ');
     return {
@@ -78,6 +73,17 @@ export function GroupStrip(): JSX.Element | null {
 
   const extras: TabExtra[] = [];
   if (elevated) {
+    const elevatedOnlyCount = all.filter(isElevatedOnly).length;
+    if (elevatedOnlyCount > 0) {
+      extras.push({
+        key: 'more',
+        label: `More agents (${elevatedOnlyCount})`,
+        title: `Groups available through system admin access (${elevatedOnlyCount})`,
+        ariaHaspopup: 'dialog',
+        onClick: () => openModal('non-members'),
+        className: 'group-extra-more',
+      });
+    }
     extras.push({
       key: 'new',
       label: 'New Agent\u2026',
@@ -97,6 +103,7 @@ export function GroupStrip(): JSX.Element | null {
     <TabBar
       ariaLabel="Agent groups"
       mobileSheetTitle="Agent groups"
+      mobileFallbackLabel={active?.name}
       activeId={active?.id ?? null}
       items={items}
       onSelect={pick}
@@ -106,17 +113,14 @@ export function GroupStrip(): JSX.Element | null {
   );
 }
 
-// Header icon button for elevated users that opens the GroupPickerModal
-// in `non-members` mode (groups they administer but aren't a member of
-// — hence "belong to other users"). Hidden when there are no such
-// groups, so the header stays clean for regular users.
+// Compact desktop entry point for groups available through system-wide access.
 export function MoreAgentsButton(): JSX.Element | null {
   const elevated = isElevatedUser.value;
   const all = groups.value;
   if (!elevated) return null;
-  const nonMemberCount = all.filter(isNonMember).length;
-  if (nonMemberCount === 0) return null;
-  const tip = `Groups belonging to other users (${nonMemberCount})`;
+  const elevatedOnlyCount = all.filter(isElevatedOnly).length;
+  if (elevatedOnlyCount === 0) return null;
+  const tip = `Groups available through system admin access (${elevatedOnlyCount})`;
   return (
     <button
       type="button"
@@ -149,8 +153,8 @@ export function GroupPickerModal() {
   const elevated = isElevatedUser.value;
   const all = groups.value;
   const visible = (() => {
-    if (mode === 'non-members') return all.filter(isNonMember);
-    return elevated ? all : all.filter((g) => !isNonMember(g));
+    if (mode === 'non-members') return all.filter(isElevatedOnly);
+    return elevated ? all : all.filter((g) => !isElevatedOnly(g));
   })();
   const title = mode === 'non-members' ? 'More agents' : 'Agent groups';
 

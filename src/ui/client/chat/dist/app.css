@@ -207,6 +207,9 @@ nav.tab-bar-strip.group-strip {
 nav.tab-bar-strip.group-strip .tab-item {
   gap: 2px;
 }
+nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
+  display: none;
+}
 @media (max-width: 720px) {
   header .more-agents-btn {
     display: none;

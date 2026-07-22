@@ -12,7 +12,7 @@ import {
   teardownChannelAdapters,
 } from '../../channels/channel-registry.js';
 import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrations } from '../../db/index.js';
-import { canAccessAgentGroup } from './access.js';
+import { canAccessAgentGroup, hasDirectAgentGroupAccess } from './access.js';
 import { addMember, isMember } from './db/agent-group-members.js';
 import { createUser } from './db/users.js';
 import { grantRole, hasAnyOwner, isOwner } from './db/user-roles.js';
@@ -110,12 +110,14 @@ describe('canAccessAgentGroup', () => {
     grantRole({ user_id: 'u-ga', role: 'admin', agent_group_id: null, granted_by: null, granted_at: now() });
     expect(canAccessAgentGroup('u-ga', 'ag-1').allowed).toBe(true);
     expect(canAccessAgentGroup('u-ga', 'ag-2').allowed).toBe(true);
+    expect(hasDirectAgentGroupAccess('u-ga', 'ag-1')).toBe(false);
   });
 
   it('scopes admins to their agent group', () => {
     seedUser('u-sa', 'telegram');
     grantRole({ user_id: 'u-sa', role: 'admin', agent_group_id: 'ag-1', granted_by: null, granted_at: now() });
     expect(canAccessAgentGroup('u-sa', 'ag-1').allowed).toBe(true);
+    expect(hasDirectAgentGroupAccess('u-sa', 'ag-1')).toBe(true);
     const denied = canAccessAgentGroup('u-sa', 'ag-2');
     expect(denied.allowed).toBe(false);
     expect(denied.allowed === false && denied.reason).toBe('not_member');
@@ -131,6 +133,7 @@ describe('canAccessAgentGroup', () => {
     seedUser('u-m', 'telegram');
     addMember({ user_id: 'u-m', agent_group_id: 'ag-1', added_by: null, added_at: now() });
     expect(canAccessAgentGroup('u-m', 'ag-1').allowed).toBe(true);
+    expect(hasDirectAgentGroupAccess('u-m', 'ag-1')).toBe(true);
     expect(canAccessAgentGroup('u-m', 'ag-2').allowed).toBe(false);
   });
 

@@ -15,7 +15,11 @@ import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
 import { getSession } from '../../../db/sessions.js';
 import { log } from '../../../log.js';
-import { listAccessibleAgentGroups, canAccessAgentGroup } from '../../../modules/permissions/access.js';
+import {
+  listAccessibleAgentGroups,
+  canAccessAgentGroup,
+  hasDirectAgentGroupAccess,
+} from '../../../modules/permissions/access.js';
 import { grantRole, hasAdminPrivilege, isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
 import { isUserOnboarded } from '../../../modules/permissions/db/users.js';
 import { createGroup, GroupCreateError } from '../../../modules/groups/create.js';
@@ -310,9 +314,9 @@ function handleGroups(ctx: Ctx, userId: string): void {
     name: g.name,
     folder: g.folder,
     isAdmin: hasAdminPrivilege(userId, g.id),
+    elevatedOnly: !hasDirectAgentGroupAccess(userId, g.id),
     // Whether this viewer has any messaging context (web mg, or a non-web
-    // mg matching one of their identities) in the group. Drives the
-    // default dropdown filter; admins can override with "Show all".
+    // mg matching one of their identities) in the group.
     hasContent: viewerHasContent(userId, g.id),
     lastActivityAt: lastByGroup.get(g.id) ?? null,
   }));
