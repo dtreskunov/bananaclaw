@@ -18,7 +18,7 @@ const DEFAULT_MODEL = 'google/gemini-2.0-flash-lite-001';
 const TIMEOUT_MS = 30_000;
 
 const MIME_TO_FORMAT: Record<string, string> = {
-  'audio/mp4': 'mp4',
+  'audio/mp4': 'm4a',
   'audio/mpeg': 'mp3',
   'audio/ogg': 'ogg',
   'audio/wav': 'wav',
@@ -26,6 +26,10 @@ const MIME_TO_FORMAT: Record<string, string> = {
   'audio/aac': 'aac',
   'audio/webm': 'webm',
 };
+
+export function openRouterAudioFormat(mime: string): string | undefined {
+  return MIME_TO_FORMAT[mime];
+}
 
 function getApiKey(): string | undefined {
   if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
@@ -48,7 +52,7 @@ export async function* streamTranscribe(
   model?: string | null,
   agentIdentifier?: string,
 ): AsyncGenerator<string> {
-  const format = MIME_TO_FORMAT[mime];
+  const format = openRouterAudioFormat(mime);
   if (!format) throw new Error(`unsupported_mime: ${mime}`);
   if (audioBuffer.length === 0) throw new Error('empty_audio');
 

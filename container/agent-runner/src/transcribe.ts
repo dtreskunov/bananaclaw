@@ -16,7 +16,7 @@ const TIMEOUT_MS = 15_000;
 
 /** MIME-to-format mapping for the input_audio API */
 const MIME_TO_FORMAT: Record<string, string> = {
-  'audio/mp4': 'mp4',
+  'audio/mp4': 'm4a',
   'audio/mpeg': 'mp3',
   'audio/ogg': 'ogg',
   'audio/wav': 'wav',
@@ -24,6 +24,10 @@ const MIME_TO_FORMAT: Record<string, string> = {
   'audio/aac': 'aac',
   'audio/webm': 'webm',
 };
+
+export function openRouterAudioFormat(mime: string): string | undefined {
+  return MIME_TO_FORMAT[mime];
+}
 
 export function isAudioMime(mime: string): boolean {
   return mime.startsWith('audio/');
@@ -34,7 +38,7 @@ export function isAudioMime(mime: string): boolean {
  * Returns the transcript text, or null on failure.
  */
 export async function transcribeAudio(filePath: string, mime: string, model?: string): Promise<string | null> {
-  const format = MIME_TO_FORMAT[mime];
+  const format = openRouterAudioFormat(mime);
   if (!format) return null;
 
   let data: Buffer;
