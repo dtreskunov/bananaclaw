@@ -9,10 +9,11 @@ interface Props {
   label: string;
   extraClass?: string;
   headActions?: ComponentChildren;
+  collapsedActions?: ComponentChildren;
   children?: ComponentChildren;
 }
 
-export function Pane({ paneKey, name, label, extraClass, headActions, children }: Props) {
+export function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions, children }: Props) {
   const mobile = isMobile.value;
   const collapsed = !mobile && !paneOpen[paneKey].value;
   const drawer = drawerOpen[paneKey].value;
@@ -47,6 +48,7 @@ export function Pane({ paneKey, name, label, extraClass, headActions, children }
           onClick={(e: JSX.TargetedMouseEvent<HTMLButtonElement>) => { e.stopPropagation(); toggle(); }}
         ></button>
         <span class="title">{label}</span>
+        {collapsedActions ? <div class="collapsed-actions">{collapsedActions}</div> : null}
       </div>
       {headActions || null}
       {children}

@@ -53,3 +53,7 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   color: var(--muted); text-transform: uppercase; letter-spacing: 1px;
 }
+.nc-pane:not(.collapsed) > .head .collapsed-actions { display: none; }
+.nc-pane.collapsed > .head .collapsed-actions {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}

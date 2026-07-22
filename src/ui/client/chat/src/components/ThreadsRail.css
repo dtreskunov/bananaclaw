@@ -3,7 +3,7 @@
 
 .threads-rail { border-right: 1px solid var(--border); }
 
-/* ── Head actions (search toggle button) ───────────────────────── */
+/* ── Head actions ──────────────────────────────────────────────── */
 .threads-rail .head-actions {
   position: absolute; top: 0; right: 0;
   height: var(--handle-h);
@@ -11,14 +11,21 @@
   padding: 0 10px;
   z-index: 3;
 }
-.threads-rail.collapsed .head-actions { display: none; }
-.threads-rail .search-toggle-btn {
+.threads-rail.collapsed > .head-actions { display: none; }
+.threads-rail .search-toggle-btn,
+.threads-rail .new-thread-btn {
   background: transparent; border: 1px solid transparent;
   color: var(--muted); cursor: pointer;
   font-size: var(--font-base); line-height: 1;
   padding: 2px 6px; border-radius: var(--radius-sm);
 }
-.threads-rail .search-toggle-btn:hover { color: inherit; background: var(--wash); border-color: var(--border); }
+.threads-rail .new-thread-btn { font-size: var(--font-xl); }
+.threads-rail .search-toggle-btn:hover,
+.threads-rail .new-thread-btn:hover { color: inherit; background: var(--wash); border-color: var(--border); }
+.threads-rail .collapsed-actions .icon-btn {
+  width: 28px; height: 28px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
 
 .threads-rail .threads-actions {
   position: absolute; top: var(--handle-h); left: 0; right: 0;
@@ -26,7 +33,6 @@
   border-bottom: 1px solid var(--border);
   /* position context for search icon + clear button */
 }
-.threads-rail .threads-actions #btn-new-chat { width: 100%; font-size: var(--font-base); font-weight: 600; height: 32px; }
 
 .threads-rail .list {
   position: absolute; left: 0; right: 0; bottom: 0;
@@ -203,15 +209,16 @@
   }
   .threads-rail .list { position: static !important; flex: 1; }
   .threads-rail .search-results { position: static !important; flex: 1; overflow-y: auto; }
-  .threads-rail .search-toggle-btn { min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+  .threads-rail > .head-actions .new-thread-btn {
+    min-width: 40px; min-height: 40px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
   .threads-rail .threads-actions .search-input { height: 48px; padding-right: 48px; }
   .threads-rail .threads-actions .search-clear {
     right: 8px; min-width: 40px; min-height: 40px;
     display: flex; align-items: center; justify-content: center; padding: 0;
   }
   .threads-rail .search-error button { min-height: 40px; }
-  .threads-rail .threads-actions #btn-new-chat { min-height: 48px; font-size: var(--font-xl); font-weight: 600; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
-  .threads-rail .threads-actions #btn-new-chat .plus { font-size: 26px; font-weight: 400; line-height: 1; position: relative; top: -1px; }
   .threads-rail .thread { padding: 12px 14px; }
   .threads-rail .thread .title { font-size: var(--font-lg); }
   .threads-rail .thread .meta { font-size: var(--font-sm); }

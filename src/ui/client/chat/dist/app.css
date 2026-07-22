@@ -761,10 +761,11 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
   padding: 0 10px;
   z-index: 3;
 }
-.threads-rail.collapsed .head-actions {
+.threads-rail.collapsed > .head-actions {
   display: none;
 }
-.threads-rail .search-toggle-btn {
+.threads-rail .search-toggle-btn,
+.threads-rail .new-thread-btn {
   background: transparent;
   border: 1px solid transparent;
   color: var(--muted);
@@ -774,10 +775,22 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
   padding: 2px 6px;
   border-radius: var(--radius-sm);
 }
-.threads-rail .search-toggle-btn:hover {
+.threads-rail .new-thread-btn {
+  font-size: var(--font-xl);
+}
+.threads-rail .search-toggle-btn:hover,
+.threads-rail .new-thread-btn:hover {
   color: inherit;
   background: var(--wash);
   border-color: var(--border);
+}
+.threads-rail .collapsed-actions .icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .threads-rail .threads-actions {
   position: absolute;
@@ -786,12 +799,6 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
   right: 0;
   padding: 8px;
   border-bottom: 1px solid var(--border);
-}
-.threads-rail .threads-actions #btn-new-chat {
-  width: 100%;
-  font-size: var(--font-base);
-  font-weight: 600;
-  height: 32px;
 }
 .threads-rail .list {
   position: absolute;
@@ -1168,7 +1175,7 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
     flex: 1;
     overflow-y: auto;
   }
-  .threads-rail .search-toggle-btn {
+  .threads-rail > .head-actions .new-thread-btn {
     min-width: 40px;
     min-height: 40px;
     display: inline-flex;
@@ -1190,23 +1197,6 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
   }
   .threads-rail .search-error button {
     min-height: 40px;
-  }
-  .threads-rail .threads-actions #btn-new-chat {
-    min-height: 48px;
-    font-size: var(--font-xl);
-    font-weight: 600;
-    width: 100%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-  }
-  .threads-rail .threads-actions #btn-new-chat .plus {
-    font-size: 26px;
-    font-weight: 400;
-    line-height: 1;
-    position: relative;
-    top: -1px;
   }
   .threads-rail .thread {
     padding: 12px 14px;
@@ -1304,6 +1294,15 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+.nc-pane:not(.collapsed) > .head .collapsed-actions {
+  display: none;
+}
+.nc-pane.collapsed > .head .collapsed-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 
 /* src/components/ChatMain.css */

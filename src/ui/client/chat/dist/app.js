@@ -19198,7 +19198,7 @@ function ConfirmModal() {
 }
 
 // src/components/Pane.tsx
-function Pane({ paneKey, name, label, extraClass, headActions, children }) {
+function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions, children }) {
   const mobile = isMobile.value;
   const collapsed = !mobile && !paneOpen[paneKey].value;
   const drawer = drawerOpen[paneKey].value;
@@ -19232,7 +19232,8 @@ function Pane({ paneKey, name, label, extraClass, headActions, children }) {
           }
         }
       ),
-      /* @__PURE__ */ u4("span", { class: "title", children: label })
+      /* @__PURE__ */ u4("span", { class: "title", children: label }),
+      collapsedActions ? /* @__PURE__ */ u4("div", { class: "collapsed-actions", children: collapsedActions }) : null
     ] }),
     headActions || null,
     children
@@ -19455,12 +19456,6 @@ function ThreadsRail() {
   const list = threads.value;
   const searchInputRef = A2(null);
   const isSearching = searchResults.value !== null || searchLoading.value;
-  const searchVisible = searchOpen.value || isSearching;
-  y2(() => {
-    if (searchVisible && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [searchVisible]);
   const onNewChat = () => {
     if (!groupId.value) return;
     openChat(groupId.value, null, null).then(() => {
@@ -19496,47 +19491,54 @@ function ThreadsRail() {
     clearSearch();
     if (searchInputRef.current) searchInputRef.current.value = "";
   };
-  const onSearchToggle = (ev) => {
+  const onOpenSearch = (ev) => {
     ev.stopPropagation();
-    if (searchVisible) {
-      onSearchClear();
-    } else {
-      searchOpen.value = true;
-    }
+    paneOpen.threads.value = true;
+    requestAnimationFrame(() => searchInputRef.current?.focus());
   };
   const headActions = /* @__PURE__ */ u4("div", { class: "head-actions", children: /* @__PURE__ */ u4(
     "button",
     {
       type: "button",
-      class: "icon-btn search-toggle-btn",
-      title: "Search threads",
-      "aria-label": "Search threads",
-      onClick: onSearchToggle,
-      children: "\u{1F50D}"
+      class: "icon-btn new-thread-btn",
+      title: "New thread",
+      "aria-label": "New thread",
+      onClick: onNewChat,
+      children: "+"
     }
   ) });
-  return /* @__PURE__ */ u4(Pane, { paneKey: "threads", name: "threads-rail", label: "Threads", headActions, children: [
-    /* @__PURE__ */ u4("div", { class: "threads-actions", children: searchVisible ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { class: "search-icon", "aria-hidden": "true", children: "\u{1F50D}" }),
-      /* @__PURE__ */ u4(
-        "input",
-        {
-          ref: searchInputRef,
-          type: "text",
-          class: "search-input",
-          placeholder: "Search threads\u2026",
-          onKeyDown: onSearchKeyDown,
-          "aria-label": "Search threads"
-        }
-      ),
-      isSearching ? /* @__PURE__ */ u4("button", { type: "button", class: "search-clear", onClick: onSearchClear, title: "Clear search", children: "\xD7" }) : null
-    ] }) : /* @__PURE__ */ u4("button", { type: "button", id: "btn-new-chat", onClick: onNewChat, children: [
-      /* @__PURE__ */ u4("span", { class: "plus", children: "+" }),
-      " ",
-      /* @__PURE__ */ u4("span", { class: "label", children: "New thread" })
-    ] }) }),
-    isSearching ? /* @__PURE__ */ u4(SearchResults, {}) : /* @__PURE__ */ u4("div", { class: "list", id: "threads-list", children: list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No threads yet" }) : sections.map((s5) => /* @__PURE__ */ u4(ChannelSection, { ct: s5.ct, items: s5.items, defaultOpen: s5.ct === "web" }, s5.ct)) })
+  const collapsedActions = /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn new-thread-btn", title: "New thread", "aria-label": "New thread", onClick: onNewChat, children: "+" }),
+    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn search-toggle-btn", title: "Search threads", "aria-label": "Search threads", onClick: onOpenSearch, children: "\u{1F50D}" })
   ] });
+  return /* @__PURE__ */ u4(
+    Pane,
+    {
+      paneKey: "threads",
+      name: "threads-rail",
+      label: "Threads",
+      headActions,
+      collapsedActions,
+      children: [
+        /* @__PURE__ */ u4("div", { class: "threads-actions", children: [
+          /* @__PURE__ */ u4("span", { class: "search-icon", "aria-hidden": "true", children: "\u{1F50D}" }),
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              ref: searchInputRef,
+              type: "text",
+              class: "search-input",
+              placeholder: "Search threads\u2026",
+              onKeyDown: onSearchKeyDown,
+              "aria-label": "Search threads"
+            }
+          ),
+          isSearching ? /* @__PURE__ */ u4("button", { type: "button", class: "search-clear", onClick: onSearchClear, title: "Clear search", children: "\xD7" }) : null
+        ] }),
+        isSearching ? /* @__PURE__ */ u4(SearchResults, {}) : /* @__PURE__ */ u4("div", { class: "list", id: "threads-list", children: list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No threads yet" }) : sections.map((s5) => /* @__PURE__ */ u4(ChannelSection, { ct: s5.ct, items: s5.items, defaultOpen: s5.ct === "web" }, s5.ct)) })
+      ]
+    }
+  );
 }
 
 // src/recorder.ts

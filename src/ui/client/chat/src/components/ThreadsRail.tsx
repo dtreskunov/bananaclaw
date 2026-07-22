@@ -1,13 +1,19 @@
 // Threads rail.
 import './ThreadsRail.css';
 import type { JSX } from 'preact';
-import { useState, useRef, useEffect } from 'preact/hooks';
+import { useState, useRef } from 'preact/hooks';
 import {
-  threads, threadId, groupId, drawerOpen, channelMeta,
-  searchQuery, searchResults, searchLoading, searchError, searchOpen, highlightMessageId,
+  threads, threadId, groupId, paneOpen, drawerOpen, channelMeta,
+  searchQuery, searchResults, searchLoading, searchError, highlightMessageId,
   isAdmin,
 } from '../state';
-import { openChat, deleteThread, searchThreads, clearSearch, openTaskPanel } from '../actions';
+import {
+  openChat,
+  deleteThread,
+  searchThreads,
+  clearSearch,
+  openTaskPanel,
+} from '../actions';
 import { requestConfirm } from './PromptModal';
 import { tsKey } from '../utils';
 import { Pane } from './Pane';
@@ -248,14 +254,6 @@ export function ThreadsRail() {
   const list = threads.value;
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const isSearching = searchResults.value !== null || searchLoading.value;
-  const searchVisible = searchOpen.value || isSearching;
-
-  // Auto-focus when search bar opens.
-  useEffect(() => {
-    if (searchVisible && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [searchVisible]);
 
   const onNewChat = (): void => {
     if (!groupId.value) return;
@@ -299,52 +297,52 @@ export function ThreadsRail() {
     if (searchInputRef.current) searchInputRef.current.value = '';
   };
 
-  const onSearchToggle = (ev: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
+  const onOpenSearch = (ev: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
     ev.stopPropagation();
-    if (searchVisible) {
-      onSearchClear();
-    } else {
-      searchOpen.value = true;
-    }
+    paneOpen.threads.value = true;
+    requestAnimationFrame(() => searchInputRef.current?.focus());
   };
 
   const headActions = (
     <div class="head-actions">
       <button
         type="button"
-        class="icon-btn search-toggle-btn"
-        title="Search threads"
-        aria-label="Search threads"
-        onClick={onSearchToggle}
-      >{'\uD83D\uDD0D'}</button>
+        class="icon-btn new-thread-btn"
+        title="New thread"
+        aria-label="New thread"
+        onClick={onNewChat}
+      >+</button>
     </div>
   );
 
+  const collapsedActions = (
+    <>
+      <button type="button" class="icon-btn new-thread-btn" title="New thread" aria-label="New thread" onClick={onNewChat}>+</button>
+      <button type="button" class="icon-btn search-toggle-btn" title="Search threads" aria-label="Search threads" onClick={onOpenSearch}>{'\uD83D\uDD0D'}</button>
+    </>
+  );
+
   return (
-    <Pane paneKey="threads" name="threads-rail" label="Threads" headActions={headActions}>
+    <Pane
+      paneKey="threads"
+      name="threads-rail"
+      label="Threads"
+      headActions={headActions}
+      collapsedActions={collapsedActions}
+    >
       <div class="threads-actions">
-        {searchVisible
-          ? (
-            <>
-              <span class="search-icon" aria-hidden="true">{'\uD83D\uDD0D'}</span>
-              <input
-                ref={searchInputRef}
-                type="text"
-                class="search-input"
-                placeholder="Search threads…"
-                onKeyDown={onSearchKeyDown}
-                aria-label="Search threads"
-              />
-              {isSearching
-                ? <button type="button" class="search-clear" onClick={onSearchClear} title="Clear search">{'\u00d7'}</button>
-                : null}
-            </>
-          )
-          : (
-            <button type="button" id="btn-new-chat" onClick={onNewChat}>
-              <span class="plus">+</span> <span class="label">New thread</span>
-            </button>
-          )}
+        <span class="search-icon" aria-hidden="true">{'\uD83D\uDD0D'}</span>
+        <input
+          ref={searchInputRef}
+          type="text"
+          class="search-input"
+          placeholder="Search threads…"
+          onKeyDown={onSearchKeyDown}
+          aria-label="Search threads"
+        />
+        {isSearching
+          ? <button type="button" class="search-clear" onClick={onSearchClear} title="Clear search">{'\u00d7'}</button>
+          : null}
       </div>
       {isSearching
         ? <SearchResults />
