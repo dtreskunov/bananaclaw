@@ -4,7 +4,7 @@ import type { JSX } from 'preact';
 import { useState, useRef, useEffect } from 'preact/hooks';
 import {
   threads, threadId, groupId, drawerOpen, channelMeta,
-  searchQuery, searchResults, searchLoading, searchOpen, highlightMessageId,
+  searchQuery, searchResults, searchLoading, searchError, searchOpen, highlightMessageId,
   isAdmin,
 } from '../state';
 import { openChat, deleteThread, searchThreads, clearSearch, openTaskPanel } from '../actions';
@@ -214,11 +214,31 @@ function SearchResultRow({ r }: { r: SearchResult }) {
 function SearchResults() {
   const results = searchResults.value;
   const loading = searchLoading.value;
-  if (loading) return <div class="search-results"><div class="empty">Searching…</div></div>;
+  const error = searchError.value;
+  if (loading) {
+    return <div class="search-results"><div class="empty" role="status" aria-live="polite">Searching…</div></div>;
+  }
+  if (error) {
+    const onRetry = (): void => {
+      if (groupId.value && searchQuery.value) {
+        searchThreads(groupId.value, searchQuery.value).catch(console.error);
+      }
+    };
+    return (
+      <div class="search-results">
+        <div class="empty search-error" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={onRetry}>Retry</button>
+        </div>
+      </div>
+    );
+  }
   if (!results) return null;
-  if (results.length === 0) return <div class="search-results"><div class="empty">No results</div></div>;
+  if (results.length === 0) {
+    return <div class="search-results"><div class="empty" role="status" aria-live="polite">No results</div></div>;
+  }
   return (
-    <div class="search-results">
+    <div class="search-results" aria-label={`${results.length} search results`}>
       {results.map((r) => <SearchResultRow key={r.messageId} r={r} />)}
     </div>
   );

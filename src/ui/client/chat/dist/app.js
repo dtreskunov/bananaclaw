@@ -15547,6 +15547,7 @@ var pending = y3([]);
 var searchQuery = y3("");
 var searchResults = y3(null);
 var searchLoading = y3(false);
+var searchError = y3("");
 var searchOpen = y3(false);
 var highlightMessageId = y3(null);
 var scrollToBottomTick = y3(0);
@@ -17591,29 +17592,50 @@ function updateActiveThreadTitleFromFirstMessage(text) {
   list[idx] = { ...t4, title: clean.slice(0, 60) };
   threads.value = list;
 }
+var searchGeneration = 0;
+var searchController = null;
 async function searchThreads(gid, query) {
   if (!query.trim()) {
     clearSearch();
     return;
   }
-  searchLoading.value = true;
-  searchQuery.value = query;
+  const generation = ++searchGeneration;
+  searchController?.abort();
+  const controller = new AbortController();
+  searchController = controller;
+  n2(() => {
+    searchLoading.value = true;
+    searchError.value = "";
+    searchQuery.value = query;
+  });
   try {
-    let url = `api/groups/${encodeURIComponent(gid)}/chat/search?q=${encodeURIComponent(query)}`;
-    const { results } = await api(url);
+    const url = `api/groups/${encodeURIComponent(gid)}/chat/search?q=${encodeURIComponent(query)}`;
+    const { results } = await api(url, { signal: controller.signal });
+    if (generation !== searchGeneration || controller.signal.aborted) return;
     searchResults.value = results ?? [];
   } catch (err) {
+    if (generation !== searchGeneration || controller.signal.aborted) return;
     console.error("search failed", err);
-    searchResults.value = [];
+    n2(() => {
+      searchError.value = "Search failed. Check your connection and try again.";
+      searchResults.value = [];
+    });
   } finally {
-    searchLoading.value = false;
+    if (generation === searchGeneration) {
+      searchLoading.value = false;
+      searchController = null;
+    }
   }
 }
 function clearSearch() {
+  searchGeneration++;
+  searchController?.abort();
+  searchController = null;
   n2(() => {
     searchQuery.value = "";
     searchResults.value = null;
     searchLoading.value = false;
+    searchError.value = "";
     searchOpen.value = false;
   });
 }
@@ -19408,10 +19430,26 @@ function SearchResultRow({ r: r4 }) {
 function SearchResults() {
   const results = searchResults.value;
   const loading = searchLoading.value;
-  if (loading) return /* @__PURE__ */ u4("div", { class: "search-results", children: /* @__PURE__ */ u4("div", { class: "empty", children: "Searching\u2026" }) });
+  const error = searchError.value;
+  if (loading) {
+    return /* @__PURE__ */ u4("div", { class: "search-results", children: /* @__PURE__ */ u4("div", { class: "empty", role: "status", "aria-live": "polite", children: "Searching\u2026" }) });
+  }
+  if (error) {
+    const onRetry = () => {
+      if (groupId.value && searchQuery.value) {
+        searchThreads(groupId.value, searchQuery.value).catch(console.error);
+      }
+    };
+    return /* @__PURE__ */ u4("div", { class: "search-results", children: /* @__PURE__ */ u4("div", { class: "empty search-error", role: "alert", children: [
+      /* @__PURE__ */ u4("span", { children: error }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: onRetry, children: "Retry" })
+    ] }) });
+  }
   if (!results) return null;
-  if (results.length === 0) return /* @__PURE__ */ u4("div", { class: "search-results", children: /* @__PURE__ */ u4("div", { class: "empty", children: "No results" }) });
-  return /* @__PURE__ */ u4("div", { class: "search-results", children: results.map((r4) => /* @__PURE__ */ u4(SearchResultRow, { r: r4 }, r4.messageId)) });
+  if (results.length === 0) {
+    return /* @__PURE__ */ u4("div", { class: "search-results", children: /* @__PURE__ */ u4("div", { class: "empty", role: "status", "aria-live": "polite", children: "No results" }) });
+  }
+  return /* @__PURE__ */ u4("div", { class: "search-results", "aria-label": `${results.length} search results`, children: results.map((r4) => /* @__PURE__ */ u4(SearchResultRow, { r: r4 }, r4.messageId)) });
 }
 function ThreadsRail() {
   const list = threads.value;

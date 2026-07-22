@@ -36,6 +36,7 @@ import {
   searchQuery,
   searchResults,
   searchLoading,
+  searchError,
   searchOpen,
   highlightMessageId,
   scrollToBottomTick,
@@ -184,30 +185,52 @@ function updateActiveThreadTitleFromFirstMessage(text: string): void {
 }
 
 // ── search ──────────────────────────────────────────────────────────
+let searchGeneration = 0;
+let searchController: AbortController | null = null;
+
 export async function searchThreads(gid: string, query: string): Promise<void> {
   if (!query.trim()) {
     clearSearch();
     return;
   }
-  searchLoading.value = true;
-  searchQuery.value = query;
+  const generation = ++searchGeneration;
+  searchController?.abort();
+  const controller = new AbortController();
+  searchController = controller;
+  batch(() => {
+    searchLoading.value = true;
+    searchError.value = '';
+    searchQuery.value = query;
+  });
   try {
-    let url = `api/groups/${encodeURIComponent(gid)}/chat/search?q=${encodeURIComponent(query)}`;
-    const { results } = await api<{ results: SearchResult[] }>(url);
+    const url = `api/groups/${encodeURIComponent(gid)}/chat/search?q=${encodeURIComponent(query)}`;
+    const { results } = await api<{ results: SearchResult[] }>(url, { signal: controller.signal });
+    if (generation !== searchGeneration || controller.signal.aborted) return;
     searchResults.value = results ?? [];
   } catch (err) {
+    if (generation !== searchGeneration || controller.signal.aborted) return;
     console.error('search failed', err);
-    searchResults.value = [];
+    batch(() => {
+      searchError.value = 'Search failed. Check your connection and try again.';
+      searchResults.value = [];
+    });
   } finally {
-    searchLoading.value = false;
+    if (generation === searchGeneration) {
+      searchLoading.value = false;
+      searchController = null;
+    }
   }
 }
 
 export function clearSearch(): void {
+  searchGeneration++;
+  searchController?.abort();
+  searchController = null;
   batch(() => {
     searchQuery.value = '';
     searchResults.value = null;
     searchLoading.value = false;
+    searchError.value = '';
     searchOpen.value = false;
   });
 }

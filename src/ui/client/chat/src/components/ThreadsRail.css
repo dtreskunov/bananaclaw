@@ -167,6 +167,8 @@
   background: var(--highlight);
   color: inherit; border-radius: 2px; padding: 0 1px;
 }
+.threads-rail .search-error { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.threads-rail .search-error button { font: inherit; padding: 5px 12px; cursor: pointer; }
 
 @media (max-width: 720px) {
   .nc-pane.threads-rail {
@@ -207,6 +209,7 @@
     right: 8px; min-width: 40px; min-height: 40px;
     display: flex; align-items: center; justify-content: center; padding: 0;
   }
+  .threads-rail .search-error button { min-height: 40px; }
   .threads-rail .threads-actions #btn-new-chat { min-height: 48px; font-size: var(--font-xl); font-weight: 600; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
   .threads-rail .threads-actions #btn-new-chat .plus { font-size: 26px; font-weight: 400; line-height: 1; position: relative; top: -1px; }
   .threads-rail .thread { padding: 12px 14px; }

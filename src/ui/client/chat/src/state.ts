@@ -75,6 +75,7 @@ export const pending: Signal<PendingFile[]> = signal<PendingFile[]>([]);
 export const searchQuery: Signal<string> = signal('');
 export const searchResults: Signal<SearchResult[] | null> = signal<SearchResult[] | null>(null);
 export const searchLoading: Signal<boolean> = signal(false);
+export const searchError: Signal<string> = signal('');
 export const searchOpen: Signal<boolean> = signal(false);
 export const highlightMessageId: Signal<string | null> = signal<string | null>(null);
 // Scroll trigger — incremented to force scroll-to-bottom (e.g. after send)
