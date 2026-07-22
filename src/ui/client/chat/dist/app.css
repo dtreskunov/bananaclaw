@@ -1572,6 +1572,52 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
   max-width: 100%;
   max-height: min(420px, 50vh);
   border-radius: var(--radius-md);
+  cursor: zoom-in;
+}
+.chat-main .msg.markdown img:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+.image-viewer-backdrop {
+  z-index: 30;
+}
+.image-viewer-dialog {
+  max-width: calc(100vw - 32px);
+  height: calc(100vh - 80px);
+}
+.image-viewer-dialog .settings-head .title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-viewer-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  cursor: zoom-in;
+}
+.image-viewer-stage.zoomed {
+  cursor: grab;
+}
+.image-viewer-stage.zoomed:active {
+  cursor: grabbing;
+}
+.image-viewer-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  transform-origin: center;
+  user-select: none;
+  will-change: transform;
 }
 .chat-main .typing {
   align-self: flex-start;
@@ -2189,6 +2235,9 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
   padding: 0 8px;
 }
 @media (max-width: 720px) {
+  .image-viewer-dialog {
+    height: 100%;
+  }
   .chat-main .msg {
     max-width: 90%;
     font-size: var(--font-lg);

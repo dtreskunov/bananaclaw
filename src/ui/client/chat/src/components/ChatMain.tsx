@@ -26,6 +26,150 @@ import { RelativeTime } from './RelativeTime';
 import type { ActivityLine, ChatMessage, DisplayCard, PendingQuestionDto, TurnUsage } from '../types';
 
 const activeRecordingTarget = signal<string | null>(null);
+const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
+
+const MIN_IMAGE_SCALE = 1;
+const MAX_IMAGE_SCALE = 5;
+
+function imageFileName(src: string): string {
+  try {
+    const name = new URL(src, window.location.href).pathname.split('/').filter(Boolean).pop();
+    return name ? decodeURIComponent(name) : 'Image preview';
+  } catch {
+    return 'Image preview';
+  }
+}
+
+function ImageViewer() {
+  const image = imageViewer.value;
+  const [scale, setScale] = useState(MIN_IMAGE_SCALE);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const scaleRef = useRef(scale);
+  const offsetRef = useRef(offset);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const gestureRef = useRef<{ distance: number; scale: number; midpoint: { x: number; y: number }; offset: { x: number; y: number } } | null>(null);
+  const dragRef = useRef<{ pointer: { x: number; y: number }; offset: { x: number; y: number } } | null>(null);
+
+  const updateTransform = (nextScale: number, nextOffset = offsetRef.current): void => {
+    const clampedScale = Math.min(MAX_IMAGE_SCALE, Math.max(MIN_IMAGE_SCALE, nextScale));
+    const clampedOffset = clampedScale === MIN_IMAGE_SCALE ? { x: 0, y: 0 } : nextOffset;
+    scaleRef.current = clampedScale;
+    offsetRef.current = clampedOffset;
+    setScale(clampedScale);
+    setOffset(clampedOffset);
+  };
+
+  useEffect(() => {
+    if (!image) return undefined;
+    updateTransform(MIN_IMAGE_SCALE, { x: 0, y: 0 });
+    pointersRef.current.clear();
+    requestAnimationFrame(() => stageRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') imageViewer.value = null;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [image?.src]);
+
+  if (!image) return null;
+
+  const midpoint = (points: { x: number; y: number }[]): { x: number; y: number } => ({
+    x: (points[0]!.x + points[1]!.x) / 2,
+    y: (points[0]!.y + points[1]!.y) / 2,
+  });
+  const distance = (points: { x: number; y: number }[]): number => Math.hypot(
+    points[0]!.x - points[1]!.x,
+    points[0]!.y - points[1]!.y,
+  );
+  const beginPinch = (): void => {
+    const points = Array.from(pointersRef.current.values());
+    if (points.length < 2) return;
+    gestureRef.current = {
+      distance: distance(points),
+      scale: scaleRef.current,
+      midpoint: midpoint(points),
+      offset: offsetRef.current,
+    };
+    dragRef.current = null;
+  };
+  const onPointerDown = (event: JSX.TargetedPointerEvent<HTMLDivElement>): void => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointersRef.current.size === 2) beginPinch();
+    else if (pointersRef.current.size === 1) {
+      dragRef.current = { pointer: { x: event.clientX, y: event.clientY }, offset: offsetRef.current };
+    }
+  };
+  const onPointerMove = (event: JSX.TargetedPointerEvent<HTMLDivElement>): void => {
+    if (!pointersRef.current.has(event.pointerId)) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2 && gestureRef.current) {
+      const gesture = gestureRef.current;
+      const currentMidpoint = midpoint(points);
+      updateTransform(gesture.scale * (distance(points) / gesture.distance), {
+        x: gesture.offset.x + currentMidpoint.x - gesture.midpoint.x,
+        y: gesture.offset.y + currentMidpoint.y - gesture.midpoint.y,
+      });
+    } else if (points.length === 1 && dragRef.current && scaleRef.current > MIN_IMAGE_SCALE) {
+      updateTransform(scaleRef.current, {
+        x: dragRef.current.offset.x + event.clientX - dragRef.current.pointer.x,
+        y: dragRef.current.offset.y + event.clientY - dragRef.current.pointer.y,
+      });
+    }
+  };
+  const onPointerEnd = (event: JSX.TargetedPointerEvent<HTMLDivElement>): void => {
+    pointersRef.current.delete(event.pointerId);
+    gestureRef.current = null;
+    const remaining = Array.from(pointersRef.current.values());
+    dragRef.current = remaining.length === 1
+      ? { pointer: remaining[0]!, offset: offsetRef.current }
+      : null;
+  };
+  const onWheel = (event: JSX.TargetedWheelEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    updateTransform(scaleRef.current * Math.exp(-event.deltaY * 0.002));
+  };
+
+  return (
+    <div
+      class="settings-backdrop image-viewer-backdrop"
+      onClick={(event) => {
+        if ((event.target as HTMLElement).classList.contains('image-viewer-backdrop')) imageViewer.value = null;
+      }}
+    >
+      <div
+        class="settings-modal image-viewer-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={image.name}
+      >
+        <header class="settings-head">
+          <span class="title" title={image.name}>{image.name}</span>
+          <button type="button" class="icon-btn" aria-label="Close" onClick={() => { imageViewer.value = null; }}>{'\u2715'}</button>
+        </header>
+        <div
+          ref={stageRef}
+          class={'image-viewer-stage' + (scale > MIN_IMAGE_SCALE ? ' zoomed' : '')}
+          tabIndex={-1}
+          onWheel={onWheel}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+        >
+          <img
+            src={image.src}
+            alt={image.alt}
+            draggable={false}
+            style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function fmtTok(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
@@ -424,6 +568,22 @@ function Message({ m }: { m: ChatMessage }) {
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
     if (md != null && mdRef.current && groupId.value) {
       rewriteFileLinks(mdRef.current, groupId.value, (entry) => navFile(entry).catch(console.error));
+      for (const img of mdRef.current.querySelectorAll<HTMLImageElement>('img[src]')) {
+        img.tabIndex = 0;
+        img.setAttribute('role', 'button');
+        img.setAttribute('aria-label', img.alt ? `View ${img.alt}` : 'View image');
+        const openImage = (): void => {
+          const src = img.currentSrc || img.src;
+          imageViewer.value = { src, alt: img.alt || '', name: imageFileName(src) };
+        };
+        img.addEventListener('click', openImage);
+        img.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openImage();
+          }
+        });
+      }
       // Handle [[msg:id|threadId]] reference link clicks.
       for (const a of mdRef.current.querySelectorAll<HTMLAnchorElement>('a.msg-ref')) {
         a.addEventListener('click', (ev) => {
@@ -1661,6 +1821,7 @@ export function ChatMain() {
     <section class="chat-main" id="chat-main" ref={ref}>
       <ApprovalsBanner />
       <MessageLog />
+      <ImageViewer />
       <div class="status" id="chat-status" hidden={chatStatus.value === 'connected'}>{chatStatus.value}</div>
       <ContextChip />
       <PendingTray />

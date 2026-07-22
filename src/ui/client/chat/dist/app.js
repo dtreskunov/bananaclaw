@@ -19946,6 +19946,151 @@ function QuickCapture({ onCapture, onClose }) {
 
 // src/components/ChatMain.tsx
 var activeRecordingTarget = y3(null);
+var imageViewer = y3(null);
+var MIN_IMAGE_SCALE = 1;
+var MAX_IMAGE_SCALE = 5;
+function imageFileName(src) {
+  try {
+    const name = new URL(src, window.location.href).pathname.split("/").filter(Boolean).pop();
+    return name ? decodeURIComponent(name) : "Image preview";
+  } catch {
+    return "Image preview";
+  }
+}
+function ImageViewer() {
+  const image = imageViewer.value;
+  const [scale, setScale] = h2(MIN_IMAGE_SCALE);
+  const [offset, setOffset] = h2({ x: 0, y: 0 });
+  const stageRef = A2(null);
+  const scaleRef = A2(scale);
+  const offsetRef = A2(offset);
+  const pointersRef = A2(/* @__PURE__ */ new Map());
+  const gestureRef = A2(null);
+  const dragRef = A2(null);
+  const updateTransform = (nextScale, nextOffset = offsetRef.current) => {
+    const clampedScale = Math.min(MAX_IMAGE_SCALE, Math.max(MIN_IMAGE_SCALE, nextScale));
+    const clampedOffset = clampedScale === MIN_IMAGE_SCALE ? { x: 0, y: 0 } : nextOffset;
+    scaleRef.current = clampedScale;
+    offsetRef.current = clampedOffset;
+    setScale(clampedScale);
+    setOffset(clampedOffset);
+  };
+  y2(() => {
+    if (!image) return void 0;
+    updateTransform(MIN_IMAGE_SCALE, { x: 0, y: 0 });
+    pointersRef.current.clear();
+    requestAnimationFrame(() => stageRef.current?.focus());
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") imageViewer.value = null;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [image?.src]);
+  if (!image) return null;
+  const midpoint = (points) => ({
+    x: (points[0].x + points[1].x) / 2,
+    y: (points[0].y + points[1].y) / 2
+  });
+  const distance = (points) => Math.hypot(
+    points[0].x - points[1].x,
+    points[0].y - points[1].y
+  );
+  const beginPinch = () => {
+    const points = Array.from(pointersRef.current.values());
+    if (points.length < 2) return;
+    gestureRef.current = {
+      distance: distance(points),
+      scale: scaleRef.current,
+      midpoint: midpoint(points),
+      offset: offsetRef.current
+    };
+    dragRef.current = null;
+  };
+  const onPointerDown = (event) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointersRef.current.size === 2) beginPinch();
+    else if (pointersRef.current.size === 1) {
+      dragRef.current = { pointer: { x: event.clientX, y: event.clientY }, offset: offsetRef.current };
+    }
+  };
+  const onPointerMove = (event) => {
+    if (!pointersRef.current.has(event.pointerId)) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const points = Array.from(pointersRef.current.values());
+    if (points.length >= 2 && gestureRef.current) {
+      const gesture = gestureRef.current;
+      const currentMidpoint = midpoint(points);
+      updateTransform(gesture.scale * (distance(points) / gesture.distance), {
+        x: gesture.offset.x + currentMidpoint.x - gesture.midpoint.x,
+        y: gesture.offset.y + currentMidpoint.y - gesture.midpoint.y
+      });
+    } else if (points.length === 1 && dragRef.current && scaleRef.current > MIN_IMAGE_SCALE) {
+      updateTransform(scaleRef.current, {
+        x: dragRef.current.offset.x + event.clientX - dragRef.current.pointer.x,
+        y: dragRef.current.offset.y + event.clientY - dragRef.current.pointer.y
+      });
+    }
+  };
+  const onPointerEnd = (event) => {
+    pointersRef.current.delete(event.pointerId);
+    gestureRef.current = null;
+    const remaining = Array.from(pointersRef.current.values());
+    dragRef.current = remaining.length === 1 ? { pointer: remaining[0], offset: offsetRef.current } : null;
+  };
+  const onWheel = (event) => {
+    event.preventDefault();
+    updateTransform(scaleRef.current * Math.exp(-event.deltaY * 2e-3));
+  };
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: "settings-backdrop image-viewer-backdrop",
+      onClick: (event) => {
+        if (event.target.classList.contains("image-viewer-backdrop")) imageViewer.value = null;
+      },
+      children: /* @__PURE__ */ u4(
+        "div",
+        {
+          class: "settings-modal image-viewer-dialog",
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": image.name,
+          children: [
+            /* @__PURE__ */ u4("header", { class: "settings-head", children: [
+              /* @__PURE__ */ u4("span", { class: "title", title: image.name, children: image.name }),
+              /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: () => {
+                imageViewer.value = null;
+              }, children: "\u2715" })
+            ] }),
+            /* @__PURE__ */ u4(
+              "div",
+              {
+                ref: stageRef,
+                class: "image-viewer-stage" + (scale > MIN_IMAGE_SCALE ? " zoomed" : ""),
+                tabIndex: -1,
+                onWheel,
+                onPointerDown,
+                onPointerMove,
+                onPointerUp: onPointerEnd,
+                onPointerCancel: onPointerEnd,
+                children: /* @__PURE__ */ u4(
+                  "img",
+                  {
+                    src: image.src,
+                    alt: image.alt,
+                    draggable: false,
+                    style: { transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }
+                  }
+                )
+              }
+            )
+          ]
+        }
+      )
+    }
+  );
+}
 function fmtTok(n3) {
   if (n3 >= 1e6) return (n3 / 1e6).toFixed(1) + "M";
   if (n3 >= 1e3) return (n3 / 1e3).toFixed(1) + "k";
@@ -20259,6 +20404,22 @@ function Message({ m: m6 }) {
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
     if (md != null && mdRef.current && groupId.value) {
       rewriteFileLinks(mdRef.current, groupId.value, (entry) => navFile(entry).catch(console.error));
+      for (const img of mdRef.current.querySelectorAll("img[src]")) {
+        img.tabIndex = 0;
+        img.setAttribute("role", "button");
+        img.setAttribute("aria-label", img.alt ? `View ${img.alt}` : "View image");
+        const openImage = () => {
+          const src = img.currentSrc || img.src;
+          imageViewer.value = { src, alt: img.alt || "", name: imageFileName(src) };
+        };
+        img.addEventListener("click", openImage);
+        img.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openImage();
+          }
+        });
+      }
       for (const a4 of mdRef.current.querySelectorAll("a.msg-ref")) {
         a4.addEventListener("click", (ev) => {
           ev.preventDefault();
@@ -21323,6 +21484,7 @@ function ChatMain() {
   return /* @__PURE__ */ u4("section", { class: "chat-main", id: "chat-main", ref, children: [
     /* @__PURE__ */ u4(ApprovalsBanner, {}),
     /* @__PURE__ */ u4(MessageLog, {}),
+    /* @__PURE__ */ u4(ImageViewer, {}),
     /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatStatus.value === "connected", children: chatStatus.value }),
     /* @__PURE__ */ u4(ContextChip, {}),
     /* @__PURE__ */ u4(PendingTray, {}),
