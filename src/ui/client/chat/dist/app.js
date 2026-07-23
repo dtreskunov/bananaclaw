@@ -24455,7 +24455,7 @@ function GroupAdmin() {
       onClose: () => attemptClose(),
       onBack: mobile ? tab !== null ? () => setTab(null) : () => attemptClose(true) : void 0,
       backLabel: tab !== null ? "Back to all sections" : "Back to account menu",
-      actions: tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? /* @__PURE__ */ u4(Tooltip, { text: ha.canSave ? "Save changes" : "Nothing to save", children: /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Save", onClick: ha.apply, disabled: ha.busy || !ha.canSave, children: "\u2713" }) }) : null,
+      actions: tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? /* @__PURE__ */ u4(Tooltip, { text: ha.canSave ? "Save changes" : "Nothing to save", children: /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Save", onClick: ha.apply, disabled: ha.busy || !ha.canSave, children: "\u2713" }) }) : null,
       children: [
         !mobile ? /* @__PURE__ */ u4(
           TabBar,

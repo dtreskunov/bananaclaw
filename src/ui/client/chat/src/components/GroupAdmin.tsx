@@ -267,7 +267,7 @@ export function GroupAdmin(): JSX.Element | null {
       backLabel={tab !== null ? 'Back to all sections' : 'Back to account menu'}
       actions={tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? (
         <Tooltip text={ha.canSave ? 'Save changes' : 'Nothing to save'}>
-          <button type="button" class="icon-btn" aria-label="Save" onClick={ha.apply} disabled={ha.busy || !ha.canSave}>&#x2713;</button>
+          <button type="button" class="mobile-dialog-icon" aria-label="Save" onClick={ha.apply} disabled={ha.busy || !ha.canSave}>&#x2713;</button>
         </Tooltip>
       ) : null}
     >
