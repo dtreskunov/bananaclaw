@@ -15,7 +15,7 @@ import { URL } from 'url';
 
 import { CONTAINER_IMAGE } from '../../../config.js';
 import { readEnvFile } from '../../../env.js';
-import { buildAgentGroupImage, isContainerRunning } from '../../../container-runner.js';
+import { buildAgentGroupImage, isContainerRunning, runMcpProbeContainer } from '../../../container-runner.js';
 import { restartAgentGroupContainers } from '../../../container-restart.js';
 import { getDb } from '../../../db/connection.js';
 import { getAgentGroup, getAgentGroupBySiteSlug, updateAgentGroup } from '../../../db/agent-groups.js';
@@ -166,6 +166,7 @@ async function dispatch(
   if (rest === '/model-params' && method === 'PATCH') return handlePatchModelParams(req, res, actorUserId, gid);
   if (rest === '/packages' && method === 'PATCH') return handlePatchPackages(req, res, actorUserId, gid);
   if (rest === '/mcp-servers' && method === 'PATCH') return handlePatchMcpServers(req, res, actorUserId, gid);
+  if (rest === '/mcp-servers/test' && method === 'POST') return handleTestMcpServer(req, res, actorUserId, gid);
   if (rest === '/skills' && method === 'PATCH') return handlePatchSkills(req, res, actorUserId, gid);
   if (rest === '/restart' && method === 'POST') return handleRestart(req, res, actorUserId, gid);
   if (rest === '/archive' && method === 'POST') return handleArchive(req, res, actorUserId, gid);
@@ -886,6 +887,39 @@ async function handlePatchMcpServers(
     payload: { servers: cleaned } as Record<string, unknown>,
   });
   writeJson(res, 200, { mcpServers: cleaned });
+}
+
+/** POST /mcp-servers/test — validate one draft server in a disposable container. */
+async function handleTestMcpServer(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  actorUserId: string,
+  gid: string,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as { name?: unknown; server?: unknown };
+  if (typeof body.name !== 'string' || !MCP_NAME_RE.test(body.name) || body.name.length > MAX_MCP_NAME_LEN) {
+    throw new BadRequest('valid server name is required');
+  }
+  if (!body.server || typeof body.server !== 'object' || Array.isArray(body.server)) {
+    throw new BadRequest('server must be an object');
+  }
+
+  const cleaned = cleanOneMcpServer(body.name, body.server as Record<string, unknown>);
+  const result = await runMcpProbeContainer(gid, cleaned);
+  recordAdminAction({
+    actorUserId,
+    action: 'group_mcp_server_test',
+    targetKind: 'agent_group',
+    targetId: gid,
+    payload: {
+      name: body.name,
+      ok: result.ok,
+      phase: result.phase,
+      latencyMs: result.latencyMs,
+      toolCount: result.tools?.length ?? 0,
+    },
+  });
+  writeJson(res, 200, result);
 }
 
 /**

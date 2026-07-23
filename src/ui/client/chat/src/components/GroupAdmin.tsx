@@ -23,7 +23,7 @@ import { MembersTab, RolesTab } from './GroupAdminAccess';
 import { apiPath, call, errMsg } from './GroupAdminApi';
 import { DestinationsTab } from './GroupAdminDestinations';
 import { GroupAdminField as Field } from './GroupAdminField';
-import { McpServersSection, type McpServerConfigDto } from './GroupAdminMcp';
+import { McpServersSection, type McpProbeResultDto, type McpServerConfigDto } from './GroupAdminMcp';
 import { ModelParamsEditor } from './GroupAdminModelParams';
 import { PackagesSection } from './GroupAdminPackages';
 import { SkillsSection } from './GroupAdminSkills';
@@ -300,6 +300,14 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
     const r = await call<{ restarted: number; rebuilt: boolean }>(apiPath(gid, '/restart'), 'POST', { rebuild });
     if (!r.ok) { showToast(errMsg(r.data, `HTTP ${r.status}`), 'err'); return { ok: false }; }
     return { ok: true, restarted: r.data.restarted };
+  }
+
+  async function testMcpServer(name: string, server: McpServerConfigDto): Promise<McpProbeResultDto> {
+    const r = await call<McpProbeResultDto>(apiPath(gid, '/mcp-servers/test'), 'POST', { name, server });
+    if (!r.ok) {
+      return { ok: false, latencyMs: 0, phase: 'container', error: errMsg(r.data, `HTTP ${r.status}`) };
+    }
+    return r.data;
   }
 
   const RESTART_REQUIRING_FIELDS = new Set([
@@ -696,6 +704,7 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
           value={draftMcpServers}
           busy={busy}
           onChange={setDraftMcpServers}
+          onTest={testMcpServer}
         />
       ) : null}
 

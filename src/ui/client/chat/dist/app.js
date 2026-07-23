@@ -24815,7 +24815,8 @@ var MCP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 function McpServersSection({
   value,
   busy,
-  onChange
+  onChange,
+  onTest
 }) {
   const mobile = isMobile.value;
   const names = Object.keys(value);
@@ -24888,7 +24889,8 @@ function McpServersSection({
       value: selectedValue,
       disabled: busy,
       onChange: (next) => updateServer(selectedName, next),
-      onRemove: () => removeServer(selectedName)
+      onRemove: () => removeServer(selectedName),
+      onTest: () => onTest(selectedName, selectedValue)
     },
     selectedName
   ) : null;
@@ -25039,10 +25041,30 @@ function McpServerEditor({
   value,
   disabled,
   onChange,
-  onRemove
+  onRemove,
+  onTest
 }) {
   const type = mcpServerType(value);
   const [removeOpen, setRemoveOpen] = h2(false);
+  const [testing, setTesting] = h2(false);
+  const [testResult, setTestResult] = h2(null);
+  y2(() => setTestResult(null), [JSON.stringify(value)]);
+  async function testConnection() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await onTest());
+    } catch (error) {
+      setTestResult({
+        ok: false,
+        latencyMs: 0,
+        phase: "container",
+        error: error instanceof Error ? error.message : "Unable to start MCP test"
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
   function setType(next) {
     if (next === "stdio") {
       const stdio = value;
@@ -25164,6 +25186,34 @@ function McpServerEditor({
           )
         ] })
       ] })
+    ] }),
+    /* @__PURE__ */ u4("div", { class: "ga-mcp-test", children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          disabled: disabled || testing || mcpServerIssue(value) !== null,
+          onClick: testConnection,
+          children: testing ? "Testing\u2026" : "Test connection"
+        }
+      ),
+      /* @__PURE__ */ u4("div", { class: `ga-mcp-test-result${testResult?.ok ? " success" : testResult ? " error" : ""}`, role: "status", "aria-live": "polite", children: testing ? "Starting a disposable probe container\u2026" : testResult?.ok ? /* @__PURE__ */ u4(k, { children: [
+        "Connected \xB7 ",
+        testResult.tools?.length ?? 0,
+        " tool",
+        testResult.tools?.length === 1 ? "" : "s",
+        " \xB7 ",
+        testResult.latencyMs,
+        " ms",
+        testResult.serverInfo ? /* @__PURE__ */ u4("span", { children: [
+          testResult.serverInfo.name,
+          " ",
+          testResult.serverInfo.version
+        ] }) : null
+      ] }) : testResult ? /* @__PURE__ */ u4(k, { children: [
+        testResult.phase ? `${testResult.phase}: ` : "",
+        testResult.error ?? "Connection failed"
+      ] }) : null })
     ] }),
     /* @__PURE__ */ u4("div", { class: "ga-mcp-editor-danger", children: /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled, onClick: () => setRemoveOpen(true), children: "Remove server\u2026" }) }),
     removeOpen ? /* @__PURE__ */ u4(
@@ -26000,6 +26050,13 @@ function SettingsTab({ gid, section, onClose, onActions }) {
     }
     return { ok: true, restarted: r4.data.restarted };
   }
+  async function testMcpServer(name, server) {
+    const r4 = await call(apiPath(gid, "/mcp-servers/test"), "POST", { name, server });
+    if (!r4.ok) {
+      return { ok: false, latencyMs: 0, phase: "container", error: errMsg2(r4.data, `HTTP ${r4.status}`) };
+    }
+    return r4.data;
+  }
   const RESTART_REQUIRING_FIELDS = /* @__PURE__ */ new Set([
     "provider",
     "model",
@@ -26412,7 +26469,8 @@ function SettingsTab({ gid, section, onClose, onActions }) {
       {
         value: draftMcpServers,
         busy,
-        onChange: setDraftMcpServers
+        onChange: setDraftMcpServers,
+        onTest: testMcpServer
       }
     ) : null,
     section === "skills" ? /* @__PURE__ */ u4(

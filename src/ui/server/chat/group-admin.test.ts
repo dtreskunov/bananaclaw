@@ -35,6 +35,7 @@ vi.mock('../../../container-runner.js', () => ({
   getActiveContainerCount: vi.fn().mockReturnValue(0),
   killContainer: vi.fn(),
   buildAgentGroupImage: vi.fn().mockResolvedValue(undefined),
+  runMcpProbeContainer: vi.fn(),
 }));
 
 let mockUserId: string | null = null;
@@ -46,7 +47,7 @@ vi.mock('../auth.js', () => ({
 import { initTestDb, closeDb, runMigrations, getDb, getAgentGroup } from '../../../db/index.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { addMember } from '../../../modules/permissions/db/agent-group-members.js';
-import { isContainerRunning } from '../../../container-runner.js';
+import { isContainerRunning, runMcpProbeContainer } from '../../../container-runner.js';
 import {
   registerProviderContainerConfig,
   listProviderContainerConfigNames,
@@ -151,6 +152,7 @@ beforeEach(() => {
   runMigrations(db);
   mockUserId = null;
   vi.mocked(isContainerRunning).mockReset().mockReturnValue(false);
+  vi.mocked(runMcpProbeContainer).mockReset();
 });
 
 afterEach(() => {
@@ -395,6 +397,42 @@ describe('PATCH /api/groups/:gid/admin/mcp-servers', () => {
     const res = await call('PATCH', '/ui/chat/api/groups/ag-mcp4/admin/mcp-servers', { servers: {} });
     expect(res.status()).toBe(200);
     expect(getJsonCol('ag-mcp4', 'mcp_servers')).toEqual({});
+  });
+});
+
+describe('POST /api/groups/:gid/admin/mcp-servers/test', () => {
+  it('sanitizes a draft server and delegates to the disposable probe runner', async () => {
+    seedOwnedGroup('ag-mcp-test', 'mcp-test-grp');
+    vi.mocked(runMcpProbeContainer).mockResolvedValue({
+      ok: true,
+      latencyMs: 42,
+      serverInfo: { name: 'example', version: '1.0.0' },
+      tools: ['search', 'fetch'],
+    });
+
+    const res = await call('POST', '/ui/chat/api/groups/ag-mcp-test/admin/mcp-servers/test', {
+      name: 'example',
+      server: { command: '  npx  ', args: ['-y', 'example-mcp'], env: { TOKEN: 'secret' } },
+    });
+
+    expect(res.status()).toBe(200);
+    expect(res.body()).toMatchObject({ ok: true, latencyMs: 42, tools: ['search', 'fetch'] });
+    expect(runMcpProbeContainer).toHaveBeenCalledWith('ag-mcp-test', {
+      command: 'npx',
+      args: ['-y', 'example-mcp'],
+      env: { TOKEN: 'secret' },
+    });
+  });
+
+  it('rejects an invalid draft before starting a probe container', async () => {
+    seedOwnedGroup('ag-mcp-test-bad', 'mcp-test-bad-grp');
+    const res = await call('POST', '/ui/chat/api/groups/ag-mcp-test-bad/admin/mcp-servers/test', {
+      name: 'example',
+      server: { type: 'http', url: 'ftp://example.com/mcp' },
+    });
+
+    expect(res.status()).toBe(400);
+    expect(runMcpProbeContainer).not.toHaveBeenCalled();
   });
 });
 

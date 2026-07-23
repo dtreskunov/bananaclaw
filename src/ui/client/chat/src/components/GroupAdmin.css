@@ -612,6 +612,27 @@
 }
 .ga-mcp-timeout { max-width: 180px; }
 
+.ga-mcp-test {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ga-mcp-test > button { flex: 0 0 auto; }
+.ga-mcp-test-result {
+  min-height: 32px;
+  padding-top: 7px;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  overflow-wrap: anywhere;
+}
+.ga-mcp-test-result.success { color: var(--success, #16835b); }
+.ga-mcp-test-result.error { color: var(--danger); }
+.ga-mcp-test-result span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
 .ga-mcp-collection {
   display: flex;
   flex-direction: column;

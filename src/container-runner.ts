@@ -20,6 +20,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { materializeContainerJson } from './container-config.js';
+import type { McpServerConfig } from './container-config.js';
 import {
   decideAdmission,
   maxConcurrentContainers,
@@ -66,6 +67,15 @@ const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string; adopted?: boolean }>();
+
+export interface McpProbeResult {
+  ok: boolean;
+  latencyMs: number;
+  phase?: 'input' | 'container' | 'connect' | 'tools/list';
+  error?: string;
+  serverInfo?: { name: string; version: string };
+  tools?: string[];
+}
 
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
@@ -283,6 +293,142 @@ async function spawnContainer(session: Session): Promise<void> {
   // Now the container is running detached. Attach the lifecycle watcher;
   // the close handler registered here is the single source of cleanup.
   attachContainerWatcher(session.id, containerName);
+}
+
+const MCP_PROBE_OUTPUT_LIMIT = 64 * 1024;
+const MCP_PROBE_HOST_TIMEOUT_MS = 45_000;
+const MAX_CONCURRENT_MCP_PROBES = 2;
+const activeMcpProbeGroups = new Set<string>();
+
+/** Run an MCP initialize + tools/list check in a disposable group container. */
+export async function runMcpProbeContainer(
+  agentGroupId: string,
+  serverConfig: McpServerConfig,
+): Promise<McpProbeResult> {
+  const agentGroup = getAgentGroup(agentGroupId);
+  if (!agentGroup) throw new Error('Agent group not found');
+  if (activeMcpProbeGroups.has(agentGroupId)) {
+    return { ok: false, latencyMs: 0, phase: 'container', error: 'An MCP probe is already running for this group' };
+  }
+  if (activeMcpProbeGroups.size >= MAX_CONCURRENT_MCP_PROBES) {
+    return { ok: false, latencyMs: 0, phase: 'container', error: 'Too many MCP probes are already running' };
+  }
+  activeMcpProbeGroups.add(agentGroupId);
+
+  const probeId = `mcp-probe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const probeSession: Session = {
+    id: probeId,
+    agent_group_id: agentGroup.id,
+    messaging_group_id: null,
+    thread_id: null,
+    agent_provider: null,
+    status: 'active',
+    container_status: 'stopped',
+    last_active: null,
+    created_at: new Date().toISOString(),
+  };
+  const probeDir = sessionDir(agentGroup.id, probeId);
+  fs.mkdirSync(probeDir, { recursive: true });
+
+  let containerName: string | undefined;
+  try {
+    const containerConfig = materializeContainerJson(agentGroup.id);
+    const providerName = resolveProviderName(null, containerConfig.provider, resolveEnv('DEFAULT_PROVIDER'));
+    initGroupFilesystem(agentGroup, { provider: providerName });
+    const { provider, contribution } = resolveProviderContribution(probeSession, agentGroup, containerConfig);
+    const mounts = buildMounts(agentGroup, probeSession, containerConfig, provider, contribution);
+    const folderSlug = agentGroup.folder.replace(/@/g, '_at_').replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 48);
+    containerName = `nanoclaw-mcp-probe-${folderSlug}-${Date.now()}`;
+    const args = await buildContainerArgs(
+      mounts,
+      containerName,
+      agentGroup,
+      containerConfig,
+      provider,
+      contribution,
+      agentGroup.id,
+      probeId,
+      'mcp-probe',
+    );
+    return await executeMcpProbe(containerName, args, serverConfig);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn('MCP probe container failed', { agentGroupId, err: message });
+    return {
+      ok: false,
+      latencyMs: 0,
+      phase: 'container',
+      error: message.replace(/[\r\n]+/g, ' ').slice(0, 1_000) || 'Failed to start probe container',
+    };
+  } finally {
+    activeMcpProbeGroups.delete(agentGroupId);
+    if (containerName) {
+      try {
+        stopContainer(containerName);
+      } catch {
+        /* the --rm probe normally removed itself */
+      }
+    }
+    fs.rmSync(probeDir, { recursive: true, force: true });
+  }
+}
+
+async function executeMcpProbe(
+  containerName: string,
+  args: string[],
+  serverConfig: McpServerConfig,
+): Promise<McpProbeResult> {
+  const proc = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  let stdout = '';
+  let outputExceeded = false;
+  let timedOut = false;
+
+  proc.stdout?.on('data', (chunk) => {
+    if (stdout.length < MCP_PROBE_OUTPUT_LIMIT) stdout += chunk.toString();
+    else outputExceeded = true;
+  });
+  proc.stderr?.on('data', () => {});
+  proc.stdin?.end(JSON.stringify(serverConfig));
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      stopContainer(containerName);
+    } catch {
+      /* process close below reports the timeout */
+    }
+  }, MCP_PROBE_HOST_TIMEOUT_MS);
+
+  const spawnError = await new Promise<Error | null>((resolve) => {
+    proc.once('close', () => resolve(null));
+    proc.once('error', (error) => resolve(error));
+  });
+  clearTimeout(timer);
+
+  if (timedOut) {
+    return { ok: false, latencyMs: MCP_PROBE_HOST_TIMEOUT_MS, phase: 'container', error: 'Probe container timed out' };
+  }
+  if (spawnError) {
+    return { ok: false, latencyMs: 0, phase: 'container', error: spawnError.message };
+  }
+  if (outputExceeded) {
+    return { ok: false, latencyMs: 0, phase: 'container', error: 'Probe output exceeded its limit' };
+  }
+
+  const line = stdout.trim().split('\n').filter(Boolean).at(-1);
+  if (line) {
+    try {
+      return JSON.parse(line) as McpProbeResult;
+    } catch {
+      /* report the bounded runtime diagnostics below */
+    }
+  }
+  return {
+    ok: false,
+    latencyMs: 0,
+    phase: 'container',
+    error: 'Probe container did not return a valid result',
+  };
 }
 
 /**
@@ -644,12 +790,11 @@ async function buildContainerArgs(
   providerContribution: ProviderContainerContribution,
   agentIdentifier: string | undefined,
   sessionId: string,
+  launchMode: 'agent' | 'mcp-probe' = 'agent',
 ): Promise<string[]> {
-  // -d (detached): the container has no foreground console attached to the
-  // host process. Critical for surviving host restarts — a foreground attach
-  // dies when the host process dies, conmon's broken-console writes then
-  // kill the container ~10s later, defeating adoption. Lifecycle is tracked
-  // by a separate `docker wait` watcher (see attachContainerWatcher).
+  // Agent containers use -d: no foreground console is attached to the host,
+  // so they survive host restarts and can be adopted. MCP probes use -i so
+  // one config arrives on stdin and one result returns before --rm cleanup.
   //
   // Session/agent-group labels let `adoptRunningContainers` (called at host
   // startup) match each running container back to its session in the DB.
@@ -658,14 +803,14 @@ async function buildContainerArgs(
   // (losing in-flight turn state) or risk spawning duplicates.
   const args: string[] = [
     'run',
-    '-d',
+    launchMode === 'agent' ? '-d' : '-i',
     '--rm',
     '--name',
     containerName,
     '--label',
     CONTAINER_INSTALL_LABEL,
     '--label',
-    `nanoclaw-session=${sessionId}`,
+    launchMode === 'agent' ? `nanoclaw-session=${sessionId}` : 'nanoclaw-mcp-probe=true',
     '--label',
     `nanoclaw-agent-group=${agentGroup.id}`,
   ];
@@ -766,7 +911,9 @@ async function buildContainerArgs(
   const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
   args.push(imageTag);
 
-  args.push('-c', 'exec bun run /app/src/index.ts');
+  args.push('-c', launchMode === 'agent'
+    ? 'exec bun run /app/src/index.ts'
+    : 'exec bun run /app/src/mcp-probe.ts');
 
   return args;
 }

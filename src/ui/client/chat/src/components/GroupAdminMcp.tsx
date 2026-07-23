@@ -23,16 +23,27 @@ interface McpHttpServerDto {
 
 export type McpServerConfigDto = McpStdioServerDto | McpHttpServerDto;
 
+export interface McpProbeResultDto {
+  ok: boolean;
+  latencyMs: number;
+  phase?: 'input' | 'container' | 'connect' | 'tools/list';
+  error?: string;
+  serverInfo?: { name: string; version: string };
+  tools?: string[];
+}
+
 const MCP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 
 export function McpServersSection({
   value,
   busy,
   onChange,
+  onTest,
 }: {
   value: Record<string, McpServerConfigDto>;
   busy: boolean;
   onChange: (next: Record<string, McpServerConfigDto>) => void;
+  onTest: (name: string, server: McpServerConfigDto) => Promise<McpProbeResultDto>;
 }): JSX.Element {
   const mobile = isMobile.value;
   const names = Object.keys(value);
@@ -116,6 +127,7 @@ export function McpServersSection({
       disabled={busy}
       onChange={(next) => updateServer(selectedName, next)}
       onRemove={() => removeServer(selectedName)}
+      onTest={() => onTest(selectedName, selectedValue)}
     />
   ) : null;
 
@@ -299,15 +311,38 @@ function McpServerEditor({
   disabled,
   onChange,
   onRemove,
+  onTest,
 }: {
   name: string;
   value: McpServerConfigDto;
   disabled: boolean;
   onChange: (next: McpServerConfigDto) => void;
   onRemove: () => void;
+  onTest: () => Promise<McpProbeResultDto>;
 }): JSX.Element {
   const type = mcpServerType(value);
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<McpProbeResultDto | null>(null);
+
+  useEffect(() => setTestResult(null), [JSON.stringify(value)]);
+
+  async function testConnection(): Promise<void> {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await onTest());
+    } catch (error) {
+      setTestResult({
+        ok: false,
+        latencyMs: 0,
+        phase: 'container',
+        error: error instanceof Error ? error.message : 'Unable to start MCP test',
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   function setType(next: 'stdio' | 'http' | 'sse'): void {
     if (next === 'stdio') {
@@ -425,6 +460,26 @@ function McpServerEditor({
           </label>
         </div>
       </details>
+
+      <div class="ga-mcp-test">
+        <button
+          type="button"
+          disabled={disabled || testing || mcpServerIssue(value) !== null}
+          onClick={testConnection}
+        >
+          {testing ? 'Testing…' : 'Test connection'}
+        </button>
+        <div class={`ga-mcp-test-result${testResult?.ok ? ' success' : testResult ? ' error' : ''}`} role="status" aria-live="polite">
+          {testing ? 'Starting a disposable probe container…' : testResult?.ok ? (
+            <>
+              Connected · {testResult.tools?.length ?? 0} tool{testResult.tools?.length === 1 ? '' : 's'} · {testResult.latencyMs} ms
+              {testResult.serverInfo ? <span>{testResult.serverInfo.name} {testResult.serverInfo.version}</span> : null}
+            </>
+          ) : testResult ? (
+            <>{testResult.phase ? `${testResult.phase}: ` : ''}{testResult.error ?? 'Connection failed'}</>
+          ) : null}
+        </div>
+      </div>
 
       <div class="ga-mcp-editor-danger">
         <button type="button" class="danger" disabled={disabled} onClick={() => setRemoveOpen(true)}>Remove server…</button>
