@@ -468,6 +468,47 @@ describe('PATCH /api/groups/:gid/admin/skills', () => {
     });
     expect(res.status()).toBe(400);
   });
+
+  it('rejects newly selected unavailable skills', async () => {
+    seedOwnedGroup('ag-sk5', 'sk5-grp');
+    const previousUiEnabled = process.env.UI_ENABLED;
+    process.env.UI_ENABLED = '';
+    try {
+      const res = await call('PATCH', '/ui/chat/api/groups/ag-sk5/admin/skills', {
+        skills: ['web-ui'],
+      });
+      expect(res.status()).toBe(400);
+      expect(res.body()).toEqual({ error: 'skill "web-ui" is unavailable: Requires UI_ENABLED' });
+    } finally {
+      if (previousUiEnabled === undefined) delete process.env.UI_ENABLED;
+      else process.env.UI_ENABLED = previousUiEnabled;
+    }
+  });
+
+  it('allows an existing unavailable skill to be preserved or removed', async () => {
+    seedOwnedGroup('ag-sk6', 'sk6-grp');
+    getDb()
+      .prepare(`UPDATE container_configs SET skills = ? WHERE agent_group_id = ?`)
+      .run(JSON.stringify(['web-ui']), 'ag-sk6');
+    const previousUiEnabled = process.env.UI_ENABLED;
+    process.env.UI_ENABLED = '';
+    try {
+      const preserve = await call('PATCH', '/ui/chat/api/groups/ag-sk6/admin/skills', {
+        skills: ['web-ui', 'welcome'],
+      });
+      expect(preserve.status()).toBe(200);
+      expect(getJsonCol('ag-sk6', 'skills')).toEqual(['web-ui', 'welcome']);
+
+      const remove = await call('PATCH', '/ui/chat/api/groups/ag-sk6/admin/skills', {
+        skills: ['welcome'],
+      });
+      expect(remove.status()).toBe(200);
+      expect(getJsonCol('ag-sk6', 'skills')).toEqual(['welcome']);
+    } finally {
+      if (previousUiEnabled === undefined) delete process.env.UI_ENABLED;
+      else process.env.UI_ENABLED = previousUiEnabled;
+    }
+  });
 });
 
 describe('GET /api/groups/:gid/admin/settings (extended fields)', () => {
@@ -485,10 +526,21 @@ describe('GET /api/groups/:gid/admin/settings (extended fields)', () => {
       packages: { apt: string[]; npm: string[]; pip: string[] };
       mcpServers: Record<string, unknown>;
       skills: string[] | 'all';
+      availableSkills: Array<{ slug: string; name: string; description: string }>;
     };
     expect(body.packages.apt).toEqual(['jq']);
     expect(Object.keys(body.mcpServers)).toEqual(['fetch']);
     expect(body.skills).toEqual(['welcome']);
+    expect(body.availableSkills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          slug: 'agent-browser',
+          name: 'agent-browser',
+          description: expect.stringContaining('Browse the web'),
+        }),
+        expect.objectContaining({ slug: 'welcome', name: 'welcome' }),
+      ]),
+    );
   });
 
   it('counts only sessions with a live container as running', async () => {

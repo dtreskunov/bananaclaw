@@ -26,7 +26,7 @@ import { GroupAdminField as Field } from './GroupAdminField';
 import { McpServersSection, type McpProbeResultDto, type McpServerConfigDto } from './GroupAdminMcp';
 import { ModelParamsEditor } from './GroupAdminModelParams';
 import { PackagesSection } from './GroupAdminPackages';
-import { SkillsSection } from './GroupAdminSkills';
+import { SkillsSection, type AvailableSkillDto } from './GroupAdminSkills';
 
 type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'members' | 'roles' | 'destinations';
 
@@ -72,6 +72,7 @@ interface SettingsResponse {
   packages: { apt: string[]; npm: string[]; pip: string[] };
   mcpServers: Record<string, McpServerConfigDto>;
   skills: string[] | 'all';
+  availableSkills: AvailableSkillDto[];
   defaults: {
     provider: string | null;
     model: string | null;
@@ -255,6 +256,7 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
   const [draftPackages, setDraftPackages] = useState<{ apt: string[]; npm: string[]; pip: string[] }>({ apt: [], npm: [], pip: [] });
   const [draftMcpServers, setDraftMcpServers] = useState<Record<string, McpServerConfigDto>>({});
   const [draftSkills, setDraftSkills] = useState<string[] | 'all'>([]);
+  const [selectedSkills, setSelectedSkills] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [images, setImages] = useState<ImagesResponse | null>(null);
 
@@ -275,7 +277,9 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
         pip: [...(r.data.packages?.pip ?? [])],
       });
       setDraftMcpServers({ ...(r.data.mcpServers ?? {}) });
-      setDraftSkills(r.data.skills === 'all' ? 'all' : [...(r.data.skills ?? [])]);
+      const skills = r.data.skills === 'all' ? 'all' : [...(r.data.skills ?? [])];
+      setDraftSkills(skills);
+      setSelectedSkills(skills === 'all' ? null : skills);
     } finally { setBusy(false); }
   }
 
@@ -294,6 +298,11 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
 
   function update<K extends keyof SettingsResponse['config']>(k: K, v: SettingsResponse['config'][K]): void {
     setDraft((d) => (d ? { ...d, [k]: v } : d));
+  }
+
+  function updateSkills(skills: string[] | 'all'): void {
+    setDraftSkills(skills);
+    if (skills !== 'all') setSelectedSkills(skills);
   }
 
   async function runRestart(rebuild: boolean): Promise<{ ok: boolean; restarted?: number }> {
@@ -419,7 +428,9 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
           pip: [...(fresh.data.packages?.pip ?? [])],
         });
         setDraftMcpServers({ ...(fresh.data.mcpServers ?? {}) });
-        setDraftSkills(fresh.data.skills === 'all' ? 'all' : [...(fresh.data.skills ?? [])]);
+        const skills = fresh.data.skills === 'all' ? 'all' : [...(fresh.data.skills ?? [])];
+        setDraftSkills(skills);
+        setSelectedSkills(skills === 'all' ? null : skills);
         groups.value = groups.value.map((g) => g.id === gid ? { ...g, name: fresh.data.name } : g);
       }
       if (effectiveRebuild || effectiveRestart) {
@@ -711,8 +722,10 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
       {section === 'skills' ? (
         <SkillsSection
           value={draftSkills}
+          selectedSkills={selectedSkills}
+          availableSkills={data.availableSkills ?? []}
           busy={busy}
-          onChange={setDraftSkills}
+          onChange={updateSkills}
         />
       ) : null}
 

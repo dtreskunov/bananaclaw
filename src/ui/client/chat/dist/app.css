@@ -5132,8 +5132,50 @@ body.is-admin .files-pane.collapsed .admin-only {
 }
 
 /* src/components/GroupAdminSkills.css */
-.ga-skills-list {
-  gap: 8px;
+.ga-skills-catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+.ga-skills-catalog-item {
+  border-bottom: 1px solid var(--border);
+}
+.ga-skills-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  cursor: pointer;
+}
+.ga-skills-option:has(input:disabled) {
+  cursor: default;
+}
+.ga-skills-option input {
+  margin-top: 2px;
+}
+.ga-skills-details {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.ga-skills-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.ga-skills-title code,
+.ga-skills-description,
+.ga-skills-unavailable {
+  font-size: 12px;
+}
+.ga-skills-description {
+  color: var(--muted);
+  line-height: 1.4;
+}
+.ga-skills-unavailable {
+  color: var(--warning, #d99835);
 }
 .ga-skills-chips {
   list-style: none;
@@ -5172,17 +5214,5 @@ body.is-admin .files-pane.collapsed .admin-only {
 .ga-skills-chip-remove:disabled {
   opacity: 0.3;
   cursor: default;
-}
-.ga-skills-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.ga-skills-input {
-  flex: 1 1 200px;
-  min-width: 0;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 13px;
 }
 /*# sourceMappingURL=app.css.map */

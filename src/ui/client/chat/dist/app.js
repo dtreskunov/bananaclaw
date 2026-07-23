@@ -25806,106 +25806,77 @@ function PackageListField({
 }
 
 // src/components/GroupAdminSkills.tsx
-var SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 function SkillsSection({
   value,
+  selectedSkills,
+  availableSkills,
   busy,
   onChange
 }) {
   const isAll = value === "all";
   const list = isAll ? [] : value;
-  const [draft, setDraft] = h2("");
-  const trimmed = draft.trim();
-  const isInvalid = trimmed !== "" && !SKILL_SLUG_RE.test(trimmed);
-  const isDup = trimmed !== "" && list.includes(trimmed);
-  const canAdd = !isAll && trimmed !== "" && !isInvalid && !isDup;
-  function add() {
-    if (!canAdd) return;
-    onChange([...list, trimmed]);
-    setDraft("");
-  }
-  function remove(index) {
-    onChange(list.filter((_6, itemIndex) => itemIndex !== index));
+  const installedSlugs = new Set(availableSkills.map((skill) => skill.slug));
+  const missingSkills = list.filter((slug) => !installedSlugs.has(slug));
+  function setSkill(slug, enabled) {
+    if (isAll) return;
+    onChange(enabled ? [...list, slug] : list.filter((item) => item !== slug));
   }
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      'Container skills mounted into every session in this group. Restart required to take effect \u2014 skill mounts are computed at container spawn. Use "all" to mount every available container skill, or pick specific slugs from ',
+      "Installed skills are read from ",
       /* @__PURE__ */ u4("code", { children: "container/skills/" }),
-      "."
+      ". Restart required to take effect \u2014 skill mounts are computed at container spawn."
     ] }) }),
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Selection", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
-      /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-        /* @__PURE__ */ u4(
-          "input",
-          {
-            type: "radio",
-            name: "skills-mode",
-            checked: isAll,
-            disabled: busy,
-            onChange: () => onChange("all")
-          }
-        ),
-        /* @__PURE__ */ u4("span", { children: "All available skills" })
-      ] }),
-      /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-        /* @__PURE__ */ u4(
-          "input",
-          {
-            type: "radio",
-            name: "skills-mode",
-            checked: !isAll,
-            disabled: busy,
-            onChange: () => onChange([])
-          }
-        ),
-        /* @__PURE__ */ u4("span", { children: "Specific skills only" })
-      ] })
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Selection", children: /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "checkbox",
+          checked: isAll,
+          disabled: busy,
+          onChange: (event) => onChange(
+            event.currentTarget.checked ? "all" : selectedSkills ?? availableSkills.filter((skill) => skill.available).map((skill) => skill.slug)
+          )
+        }
+      ),
+      /* @__PURE__ */ u4("span", { children: "Enable all available skills" })
     ] }) }),
-    !isAll ? /* @__PURE__ */ u4(GroupAdminField, { label: "Skills", info: "Slug per skill (lowercase a\u2013z, 0\u20139, hyphen). Must match a folder under container/skills/ or a group-local skill.", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-skills-list", children: [
-      list.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No skills selected." }) : /* @__PURE__ */ u4("ul", { class: "ga-skills-chips", children: list.map((skill, index) => /* @__PURE__ */ u4("li", { class: "ga-skills-chip", children: [
-        /* @__PURE__ */ u4("span", { class: "ga-skills-chip-label", children: skill }),
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "ga-skills-chip-remove",
-            "aria-label": `Remove ${skill}`,
-            disabled: busy,
-            onClick: () => remove(index),
-            children: "\u2715"
-          }
-        )
-      ] }, `${skill}-${index}`)) }),
-      /* @__PURE__ */ u4("div", { class: "ga-skills-actions", children: [
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Installed skills", children: availableSkills.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No installed skills found." }) : /* @__PURE__ */ u4("ul", { class: "ga-skills-catalog", children: availableSkills.map((skill) => {
+      const checked = isAll ? skill.available : list.includes(skill.slug);
+      return /* @__PURE__ */ u4("li", { class: "ga-skills-catalog-item", children: /* @__PURE__ */ u4("label", { class: "ga-skills-option", children: [
         /* @__PURE__ */ u4(
           "input",
           {
-            type: "text",
-            class: "ga-skills-input",
-            placeholder: "skill slug (e.g. welcome, agent-browser)",
-            value: draft,
-            disabled: busy,
-            onInput: (event) => setDraft(event.currentTarget.value),
-            onKeyDown: (event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                add();
-              }
-            }
+            type: "checkbox",
+            checked,
+            disabled: busy || isAll || !skill.available && !checked,
+            onChange: (event) => setSkill(skill.slug, event.currentTarget.checked)
           }
         ),
-        /* @__PURE__ */ u4("button", { type: "button", disabled: busy || !canAdd, onClick: add, children: "+ Add" })
-      ] }),
-      isInvalid ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
-        '"',
-        trimmed,
-        '" must be lowercase a\u2013z, 0\u20139, hyphen.'
-      ] }) : isDup ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
-        '"',
-        trimmed,
-        '" is already in the list.'
-      ] }) : null
-    ] }) }) : null
+        /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-skills-title", children: [
+            /* @__PURE__ */ u4("strong", { children: skill.name }),
+            skill.name !== skill.slug ? /* @__PURE__ */ u4("code", { children: skill.slug }) : null
+          ] }),
+          skill.description ? /* @__PURE__ */ u4("span", { class: "ga-skills-description", children: skill.description }) : null,
+          skill.unavailableReason ? /* @__PURE__ */ u4("span", { class: "ga-skills-unavailable", children: skill.unavailableReason }) : null
+        ] })
+      ] }) }, skill.slug);
+    }) }) }),
+    !isAll && missingSkills.length > 0 ? /* @__PURE__ */ u4(GroupAdminField, { label: "Missing skills", info: "These skills are configured for the group but are not installed on this host.", children: /* @__PURE__ */ u4("ul", { class: "ga-skills-chips", children: missingSkills.map((slug) => /* @__PURE__ */ u4("li", { class: "ga-skills-chip", children: [
+      /* @__PURE__ */ u4("span", { class: "ga-skills-chip-label", children: slug }),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "ga-skills-chip-remove",
+          "aria-label": `Remove ${slug}`,
+          disabled: busy,
+          onClick: () => setSkill(slug, false),
+          children: "\u2715"
+        }
+      )
+    ] }, slug)) }) }) : null
   ] });
 }
 
@@ -26061,6 +26032,7 @@ function SettingsTab({ gid, section, onClose, onActions }) {
   const [draftPackages, setDraftPackages] = h2({ apt: [], npm: [], pip: [] });
   const [draftMcpServers, setDraftMcpServers] = h2({});
   const [draftSkills, setDraftSkills] = h2([]);
+  const [selectedSkills, setSelectedSkills] = h2(null);
   const [busy, setBusy] = h2(false);
   const [images, setImages] = h2(null);
   async function refresh() {
@@ -26083,7 +26055,9 @@ function SettingsTab({ gid, section, onClose, onActions }) {
         pip: [...r4.data.packages?.pip ?? []]
       });
       setDraftMcpServers({ ...r4.data.mcpServers ?? {} });
-      setDraftSkills(r4.data.skills === "all" ? "all" : [...r4.data.skills ?? []]);
+      const skills = r4.data.skills === "all" ? "all" : [...r4.data.skills ?? []];
+      setDraftSkills(skills);
+      setSelectedSkills(skills === "all" ? null : skills);
     } finally {
       setBusy(false);
     }
@@ -26105,6 +26079,10 @@ function SettingsTab({ gid, section, onClose, onActions }) {
   if (!data || !draft) return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
   function update(k4, v5) {
     setDraft((d5) => d5 ? { ...d5, [k4]: v5 } : d5);
+  }
+  function updateSkills(skills) {
+    setDraftSkills(skills);
+    if (skills !== "all") setSelectedSkills(skills);
   }
   async function runRestart(rebuild) {
     const r4 = await call(apiPath(gid, "/restart"), "POST", { rebuild });
@@ -26251,7 +26229,9 @@ function SettingsTab({ gid, section, onClose, onActions }) {
           pip: [...fresh.data.packages?.pip ?? []]
         });
         setDraftMcpServers({ ...fresh.data.mcpServers ?? {} });
-        setDraftSkills(fresh.data.skills === "all" ? "all" : [...fresh.data.skills ?? []]);
+        const skills = fresh.data.skills === "all" ? "all" : [...fresh.data.skills ?? []];
+        setDraftSkills(skills);
+        setSelectedSkills(skills === "all" ? null : skills);
         groups.value = groups.value.map((g8) => g8.id === gid ? { ...g8, name: fresh.data.name } : g8);
       }
       if (effectiveRebuild || effectiveRestart) {
@@ -26541,8 +26521,10 @@ function SettingsTab({ gid, section, onClose, onActions }) {
       SkillsSection,
       {
         value: draftSkills,
+        selectedSkills,
+        availableSkills: data.availableSkills ?? [],
         busy,
-        onChange: setDraftSkills
+        onChange: updateSkills
       }
     ) : null,
     /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending2.size} unsaved change${pending2.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),

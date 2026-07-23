@@ -63,6 +63,7 @@ import { SELECTABLE_AGENT_PROVIDERS, VALID_AGENT_PROVIDERS } from './agent-provi
 import { recordAdminAction } from './audit.js';
 import { listImages } from './image-catalog.js';
 import { bareIdForResponse, dbValueFromBareId, getModelDetails, listModelsForProvider } from './models-catalog.js';
+import { listAvailableSkills, type AvailableSkill } from './skill-catalog.js';
 import { deriveVoiceMode } from './voice-mode.js';
 import { allocateSiteSlug, isValidSlug, pagesBaseDomain, pagesEnabled, siteFqdn, siteUrl } from '../pages/site.js';
 
@@ -236,6 +237,8 @@ interface SettingsResponse {
   mcpServers: Record<string, McpServerConfig>;
   /** Container skill selection. `'all'` mounts every available container skill. */
   skills: string[] | 'all';
+  /** Skills currently installed under container/skills/. */
+  availableSkills: AvailableSkill[];
   /** Resolved defaults for nullable config fields (shown as placeholders). */
   defaults: {
     provider: string | null;
@@ -334,6 +337,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     },
     mcpServers: parseMcpServers(cfg.mcp_servers),
     skills: parseSkills(cfg.skills),
+    availableSkills: listAvailableSkills(),
     defaults: {
       provider: defaultProvider,
       model: defaultModel ? bareIdForResponse(defaultProvider, defaultModel) : null,
@@ -966,6 +970,19 @@ async function handlePatchSkills(
   if (!cfg) {
     writeJson(res, 500, { error: 'container_config_missing' });
     return;
+  }
+  if (cleaned !== 'all') {
+    const current = parseSkills(cfg.skills);
+    const currentSlugs = new Set(current === 'all' ? [] : current);
+    const availableSkills = new Map(listAvailableSkills().map((skill) => [skill.slug, skill]));
+    for (const slug of cleaned) {
+      if (currentSlugs.has(slug)) continue;
+      const skill = availableSkills.get(slug);
+      if (!skill) throw new BadRequest(`skill "${slug}" is not installed`);
+      if (!skill.available) {
+        throw new BadRequest(`skill "${slug}" is unavailable: ${skill.unavailableReason}`);
+      }
+    }
   }
   updateContainerConfigJson(gid, 'skills', cleaned);
   recordAdminAction({
