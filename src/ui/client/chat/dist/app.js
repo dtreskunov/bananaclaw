@@ -24344,44 +24344,7 @@ function ModelPickerDialog({
   ] });
 }
 
-// src/components/GroupAdmin.tsx
-var SETTINGS_SECTIONS = /* @__PURE__ */ new Set(["models", "settings", "packages", "mcp", "skills"]);
-var TAB_ITEMS = [
-  { id: "settings", label: "Settings", sublabel: "Image, scope, public site" },
-  { id: "models", label: "Models", sublabel: "Provider, model, voice" },
-  { id: "packages", label: "Packages", sublabel: "apt / npm / pip in the image" },
-  { id: "mcp", label: "MCP servers", sublabel: "External tools wired to the agent" },
-  { id: "skills", label: "Skills", sublabel: "Container skills mounted at runtime" },
-  { id: "members", label: "Members", sublabel: "Who can use this group" },
-  { id: "roles", label: "Admins", sublabel: "Admins for this group" },
-  { id: "destinations", label: "Destinations", sublabel: "Where this group can send messages" }
-];
-var PROVIDER_INFO = {
-  claude: "Claude \u2014 Anthropic models via the official SDK. Uses your OneCLI-injected Anthropic API key.",
-  opencode: "OpenCode \u2014 multi-provider gateway (OpenRouter, DeepSeek, OpenCode Zen, Anthropic, etc.) selected by host OPENCODE_PROVIDER. Wire prefix is handled automatically."
-};
-function formatAge(iso) {
-  if (!iso) return null;
-  const t4 = Date.parse(iso);
-  if (Number.isNaN(t4)) return null;
-  const diffMs = Date.now() - t4;
-  const day = 24 * 3600 * 1e3;
-  const hour = 3600 * 1e3;
-  if (diffMs < hour) return "just now";
-  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
-  const days = Math.floor(diffMs / day);
-  if (days < 7) return `${days}d ago`;
-  if (days < 60) return `${Math.floor(days / 7)}w ago`;
-  if (days < 730) return `${Math.floor(days / 30)}mo ago`;
-  return `${Math.floor(days / 365)}y ago`;
-}
-function formatSize(bytes) {
-  if (bytes == null) return null;
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+// src/components/GroupAdminApi.ts
 function apiPath(gid, sub) {
   return `/ui/chat/api/groups/${encodeURIComponent(gid)}/admin${sub}`;
 }
@@ -24403,795 +24366,8 @@ function errMsg2(d5, fallback) {
   const e4 = d5?.error;
   return typeof e4 === "string" && e4 ? e4 : fallback;
 }
-function GroupAdmin() {
-  const open = groupAdminOpen.value;
-  const gid = groupId.value;
-  const mobile = isMobile.value;
-  const [tab, setTab] = h2(() => isMobile.value ? null : "settings");
-  const actionsRef = A2(null);
-  const [, forceRender] = h2(0);
-  const [closeConfirmOpen, setCloseConfirmOpen] = h2(false);
-  const [returnToMenuAfterDiscard, setReturnToMenuAfterDiscard] = h2(false);
-  y2(() => {
-    setTab(isMobile.value ? null : "settings");
-    setCloseConfirmOpen(false);
-    setReturnToMenuAfterDiscard(false);
-  }, [open, gid]);
-  useBackButtonCloses(open, () => {
-    groupAdminOpen.value = false;
-  });
-  if (!open || !gid) return null;
-  const group = groups.value.find((g8) => g8.id === gid);
-  const title = group ? `Agent Settings \xB7 ${group.name}` : "Agent Settings";
-  function hardClose(returnToMenu = false) {
-    if (returnToMenu) returnToUserMenu(groupAdminOpen);
-    else groupAdminOpen.value = false;
-  }
-  function attemptClose(returnToMenu = false) {
-    if (actionsRef.current?.canSave) {
-      setReturnToMenuAfterDiscard(returnToMenu);
-      setCloseConfirmOpen(true);
-    } else {
-      hardClose(returnToMenu);
-    }
-  }
-  function onKey(e4) {
-    if (e4.key === "Escape") attemptClose();
-  }
-  y2(() => {
-    if (!open) return void 0;
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
-  const ha = actionsRef.current;
-  const setActions = (a4) => {
-    actionsRef.current = a4;
-    forceRender((n3) => n3 + 1);
-  };
-  const activeTab = tab ?? (mobile ? null : "settings");
-  return /* @__PURE__ */ u4(
-    MobileDialog,
-    {
-      title,
-      onClose: () => attemptClose(),
-      onBack: mobile ? activeTab !== null ? () => setTab(null) : () => attemptClose(true) : void 0,
-      backLabel: activeTab !== null ? "Back to all sections" : "Back to account menu",
-      actions: activeTab !== null && SETTINGS_SECTIONS.has(activeTab) && ha ? /* @__PURE__ */ u4(Tooltip, { text: ha.canSave ? "Save changes" : "Nothing to save", children: /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Save", onClick: ha.apply, disabled: ha.busy || !ha.canSave, children: "\u2713" }) }) : null,
-      children: [
-        !mobile ? /* @__PURE__ */ u4(
-          TabBar,
-          {
-            ariaLabel: "Group settings sections",
-            mobileSheetTitle: "Settings sections",
-            activeId: activeTab,
-            items: TAB_ITEMS,
-            onSelect: (id) => setTab(id),
-            className: "group-admin-tab-bar tab-bar-header"
-          }
-        ) : null,
-        mobile && activeTab === null ? /* @__PURE__ */ u4(MobileSectionList, { items: TAB_ITEMS, onSelect: (id) => setTab(id) }) : /* @__PURE__ */ u4("div", { class: `settings-body${activeTab === "mcp" ? " ga-mcp-settings-body" : ""}`, children: /* @__PURE__ */ u4(k, { children: [
-          activeTab !== null && SETTINGS_SECTIONS.has(activeTab) ? /* @__PURE__ */ u4(SettingsTab, { gid, section: activeTab, onClose: hardClose, onActions: setActions }) : null,
-          activeTab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
-          activeTab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
-          activeTab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
-        ] }) }),
-        closeConfirmOpen ? /* @__PURE__ */ u4(
-          MobileDialog,
-          {
-            title: "Discard unsaved changes?",
-            onClose: () => {
-              setCloseConfirmOpen(false);
-              setReturnToMenuAfterDiscard(false);
-            },
-            maxWidth: "420px",
-            className: "ga-confirm-modal",
-            children: [
-              /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "You have unsaved changes. Closing now discards them." }) }),
-              /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
-                /* @__PURE__ */ u4("button", { type: "button", onClick: () => {
-                  setCloseConfirmOpen(false);
-                  setReturnToMenuAfterDiscard(false);
-                }, children: "Keep editing" }),
-                /* @__PURE__ */ u4(
-                  "button",
-                  {
-                    type: "button",
-                    class: "danger",
-                    "data-testid": "discard-and-close-btn",
-                    onClick: () => {
-                      setCloseConfirmOpen(false);
-                      hardClose(returnToMenuAfterDiscard);
-                    },
-                    children: "Discard & close"
-                  }
-                )
-              ] })
-            ]
-          }
-        ) : null
-      ]
-    }
-  );
-}
-function MobileSectionList({ items, onSelect }) {
-  return /* @__PURE__ */ u4(MobileDialogList, { children: items.map((it) => /* @__PURE__ */ u4(
-    MobileDialogItem,
-    {
-      label: it.label,
-      sublabel: it.sublabel,
-      chevron: true,
-      onClick: () => onSelect(it.id)
-    },
-    it.id
-  )) });
-}
-function SettingsTab({ gid, section, onClose, onActions }) {
-  const [data, setData] = h2(null);
-  const [draft, setDraft] = h2(null);
-  const [draftName, setDraftName] = h2("");
-  const [siteEnabled, setSiteEnabled] = h2(false);
-  const [siteSlug, setSiteSlug] = h2("");
-  const [draftModelParams, setDraftModelParams] = h2({});
-  const [draftPackages, setDraftPackages] = h2({ apt: [], npm: [], pip: [] });
-  const [draftMcpServers, setDraftMcpServers] = h2({});
-  const [draftSkills, setDraftSkills] = h2([]);
-  const [busy, setBusy] = h2(false);
-  const [images, setImages] = h2(null);
-  async function refresh() {
-    setBusy(true);
-    try {
-      const r4 = await call(apiPath(gid, "/settings"));
-      if (!r4.ok) {
-        showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-        return;
-      }
-      setData(r4.data);
-      setDraft({ ...r4.data.config });
-      setDraftName(r4.data.name);
-      setSiteEnabled(r4.data.site.enabled);
-      setSiteSlug(r4.data.site.slug ?? "");
-      setDraftModelParams(r4.data.modelParams);
-      setDraftPackages({
-        apt: [...r4.data.packages?.apt ?? []],
-        npm: [...r4.data.packages?.npm ?? []],
-        pip: [...r4.data.packages?.pip ?? []]
-      });
-      setDraftMcpServers({ ...r4.data.mcpServers ?? {} });
-      setDraftSkills(r4.data.skills === "all" ? "all" : [...r4.data.skills ?? []]);
-    } finally {
-      setBusy(false);
-    }
-  }
-  y2(() => {
-    refresh();
-  }, [gid]);
-  y2(() => {
-    let cancelled = false;
-    (async () => {
-      const r4 = await call(apiPath(gid, "/images"));
-      if (!cancelled) setImages(r4.ok ? r4.data : { images: [] });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [gid]);
-  const provider = draft?.provider ?? null;
-  if (!data || !draft) return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
-  function update(k4, v5) {
-    setDraft((d5) => d5 ? { ...d5, [k4]: v5 } : d5);
-  }
-  async function runRestart(rebuild) {
-    const r4 = await call(apiPath(gid, "/restart"), "POST", { rebuild });
-    if (!r4.ok) {
-      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-      return { ok: false };
-    }
-    return { ok: true, restarted: r4.data.restarted };
-  }
-  const RESTART_REQUIRING_FIELDS = /* @__PURE__ */ new Set([
-    "provider",
-    "model",
-    "small_model",
-    "effort",
-    "image_tag",
-    "assistant_name",
-    "max_messages_per_prompt",
-    "model_params",
-    "mcp_servers",
-    "skills",
-    "packages_apt",
-    "packages_npm",
-    "packages_pip"
-  ]);
-  function changedFields() {
-    const out = /* @__PURE__ */ new Set();
-    if (!data || !draft) return out;
-    if (draftName.trim() !== data.name) out.add("name");
-    for (const k4 of Object.keys(draft)) {
-      if (draft[k4] !== data.config[k4]) out.add(k4);
-    }
-    if (data.site.available) {
-      if (siteEnabled !== data.site.enabled) out.add("site_enabled");
-      if (data.actorIsElevated && siteSlug.trim() !== (data.site.slug ?? "")) out.add("site_slug");
-    }
-    if (JSON.stringify(draftModelParams) !== JSON.stringify(data.modelParams ?? {})) out.add("model_params");
-    const dataPkg = data.packages ?? { apt: [], npm: [], pip: [] };
-    if (JSON.stringify(draftPackages.apt) !== JSON.stringify(dataPkg.apt)) out.add("packages_apt");
-    if (JSON.stringify(draftPackages.npm) !== JSON.stringify(dataPkg.npm)) out.add("packages_npm");
-    if (JSON.stringify(draftPackages.pip) !== JSON.stringify(dataPkg.pip)) out.add("packages_pip");
-    if (JSON.stringify(draftMcpServers) !== JSON.stringify(data.mcpServers ?? {})) out.add("mcp_servers");
-    if (JSON.stringify(draftSkills) !== JSON.stringify(data.skills ?? [])) out.add("skills");
-    return out;
-  }
-  const pending2 = changedFields();
-  const changed = pending2.size > 0;
-  const needsRestart = [...pending2].some((f5) => RESTART_REQUIRING_FIELDS.has(f5));
-  const imageRebuildNeeded = pending2.has("image_tag") && draft.image_tag != null && !!images && !images.images.some((i5) => i5.value === draft.image_tag);
-  const packagesChanged = pending2.has("packages_apt") || pending2.has("packages_npm") || pending2.has("packages_pip");
-  const needsRebuild = imageRebuildNeeded || packagesChanged;
-  const [confirmOpen, setConfirmOpen] = h2(false);
-  const [restartChecked, setRestartChecked] = h2(false);
-  const [rebuildChecked, setRebuildChecked] = h2(false);
-  const [archiveOpen, setArchiveOpen] = h2(false);
-  const [archiveConfirm, setArchiveConfirm] = h2("");
-  const [archiveBusy, setArchiveBusy] = h2(false);
-  const effectiveRestart = restartChecked || rebuildChecked;
-  const effectiveRebuild = rebuildChecked;
-  const canSave = changed;
-  y2(() => {
-    onActions({ refresh, apply: apply2, busy, canSave });
-    return () => onActions(null);
-  }, [busy, canSave, needsRestart, needsRebuild]);
-  function apply2() {
-    if (!changed) return;
-    setRestartChecked(needsRestart || needsRebuild);
-    setRebuildChecked(needsRebuild);
-    setConfirmOpen(true);
-  }
-  async function doApply() {
-    if (!draft) return;
-    setBusy(true);
-    try {
-      const JSON_FIELDS = /* @__PURE__ */ new Set([
-        "model_params",
-        "mcp_servers",
-        "skills",
-        "packages_apt",
-        "packages_npm",
-        "packages_pip"
-      ]);
-      const settingsChanged = [...pending2].some((f5) => !JSON_FIELDS.has(f5));
-      if (settingsChanged) {
-        const body = { ...draft };
-        if (data && draftName.trim() !== data.name) body.name = draftName.trim();
-        if (pending2.has("site_enabled")) body.site_enabled = siteEnabled;
-        if (pending2.has("site_slug")) body.site_slug = siteSlug.trim() || null;
-        const r4 = await call(apiPath(gid, "/settings"), "PATCH", body);
-        if (!r4.ok) {
-          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-          return;
-        }
-      }
-      if (pending2.has("model_params")) {
-        const r4 = await call(
-          apiPath(gid, "/model-params"),
-          "PATCH",
-          { params: draftModelParams }
-        );
-        if (!r4.ok) {
-          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-          return;
-        }
-      }
-      if (pending2.has("packages_apt") || pending2.has("packages_npm") || pending2.has("packages_pip")) {
-        const body = {};
-        if (pending2.has("packages_apt")) body.apt = draftPackages.apt;
-        if (pending2.has("packages_npm")) body.npm = draftPackages.npm;
-        if (pending2.has("packages_pip")) body.pip = draftPackages.pip;
-        const r4 = await call(apiPath(gid, "/packages"), "PATCH", body);
-        if (!r4.ok) {
-          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-          return;
-        }
-      }
-      if (pending2.has("mcp_servers")) {
-        const r4 = await call(apiPath(gid, "/mcp-servers"), "PATCH", { servers: draftMcpServers });
-        if (!r4.ok) {
-          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-          return;
-        }
-      }
-      if (pending2.has("skills")) {
-        const r4 = await call(apiPath(gid, "/skills"), "PATCH", { skills: draftSkills });
-        if (!r4.ok) {
-          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-          return;
-        }
-      }
-      const fresh = await call(apiPath(gid, "/settings"));
-      if (fresh.ok) {
-        setData(fresh.data);
-        setDraft({ ...fresh.data.config });
-        setDraftName(fresh.data.name);
-        setSiteEnabled(fresh.data.site.enabled);
-        setSiteSlug(fresh.data.site.slug ?? "");
-        setDraftModelParams(fresh.data.modelParams);
-        setDraftPackages({
-          apt: [...fresh.data.packages?.apt ?? []],
-          npm: [...fresh.data.packages?.npm ?? []],
-          pip: [...fresh.data.packages?.pip ?? []]
-        });
-        setDraftMcpServers({ ...fresh.data.mcpServers ?? {} });
-        setDraftSkills(fresh.data.skills === "all" ? "all" : [...fresh.data.skills ?? []]);
-        groups.value = groups.value.map((g8) => g8.id === gid ? { ...g8, name: fresh.data.name } : g8);
-      }
-      if (effectiveRebuild || effectiveRestart) {
-        const r4 = await runRestart(effectiveRebuild);
-        if (!r4.ok) return;
-        const msg = effectiveRebuild ? `Rebuilt image and restarted ${r4.restarted} session${r4.restarted === 1 ? "" : "s"}.` : `Restarted ${r4.restarted} session${r4.restarted === 1 ? "" : "s"}.`;
-        showToast(msg);
-      } else {
-        showToast("Saved.");
-      }
-      setConfirmOpen(false);
-      onClose();
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function doArchive() {
-    if (!data || archiveBusy) return;
-    setArchiveBusy(true);
-    try {
-      const r4 = await call(
-        apiPath(gid, "/archive"),
-        "POST",
-        { confirm_folder: archiveConfirm.trim() }
-      );
-      if (!r4.ok) {
-        showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-        return;
-      }
-      const archivedId = gid;
-      const remaining = groups.value.filter((g8) => g8.id !== archivedId);
-      groups.value = remaining;
-      setArchiveOpen(false);
-      onClose();
-      showToast(`Archived. Restore on the host with: ncl groups restore --folder ${r4.data.folder}`);
-      if (groupId.value === archivedId && remaining[0]) {
-        void selectGroup(remaining[0].id);
-      }
-    } finally {
-      setArchiveBusy(false);
-    }
-  }
-  const imageOptions = (images?.images ?? []).map((i5) => {
-    const age = formatAge(i5.createdAt);
-    const size = formatSize(i5.size);
-    const detailParts = [age, size, i5.isDefault ? "default" : null].filter(Boolean);
-    return {
-      value: i5.value,
-      label: i5.label,
-      detail: detailParts.length ? detailParts.join(" \xB7 ") : void 0,
-      tooltip: [
-        i5.value,
-        i5.createdAt ? `Created: ${new Date(i5.createdAt).toLocaleString()}` : null,
-        size ? `Size: ${size}` : null,
-        i5.isDefault ? "Install default image (used when image_tag is unset)." : null
-      ].filter(Boolean).join("\n")
-    };
-  });
-  const selectedImg = images?.images.find((i5) => i5.value === draft.image_tag) ?? null;
-  const selectedImgAge = formatAge(selectedImg?.createdAt ?? null);
-  const selectedImgSize = formatSize(selectedImg?.size ?? null);
-  return /* @__PURE__ */ u4("section", { class: section === "mcp" ? "ga-mcp-tab" : void 0, children: [
-    section === "settings" ? /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "muted ga-folder-line", children: [
-      "Folder ",
-      /* @__PURE__ */ u4("code", { children: data.folder }),
-      " ",
-      /* @__PURE__ */ u4("code", { class: "ga-folder-id", children: data.id }),
-      data.updatedAt ? ` \xB7 last updated ${new Date(data.updatedAt).toLocaleString()}` : "",
-      data.runningSessionCount > 0 ? ` \xB7 ${data.runningSessionCount} running session${data.runningSessionCount === 1 ? "" : "s"}` : " \xB7 no running sessions"
-    ] }) }) : null,
-    section === "models" ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4(
-        Field,
-        {
-          label: "Provider",
-          info: draft.provider ? PROVIDER_INFO[draft.provider] ?? `Provider "${draft.provider}".` : void 0,
-          children: [
-            /* @__PURE__ */ u4(
-              Combobox,
-              {
-                value: draft.provider,
-                options: (() => {
-                  const selectable = data.validProviders.slice();
-                  if (draft.provider && !selectable.includes(draft.provider)) {
-                    selectable.push(draft.provider);
-                  }
-                  return selectable.map((p5) => ({
-                    value: p5,
-                    label: p5,
-                    tooltip: PROVIDER_INFO[p5]
-                  }));
-                })(),
-                placeholder: data.defaults.provider ? `default: ${data.defaults.provider}` : "pick a provider",
-                disabled: busy,
-                freeform: false,
-                onChange: (v5) => update("provider", v5)
-              }
-            ),
-            data.providesAgentSurfaces ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "This provider composes its own instructions and discovers skills its own way, so the Skills selection and Assistant name don't apply while it's active." }) : null
-          ]
-        }
-      ),
-      /* @__PURE__ */ u4(Field, { label: "Model", children: /* @__PURE__ */ u4(
-        ModelPickerDialog,
-        {
-          value: draft.model,
-          provider: provider ?? data.defaults.provider,
-          placeholder: data.defaults.model ? `default: ${data.defaults.model}` : "pick or type a model id",
-          disabled: busy,
-          apiBasePath: apiPath(gid, ""),
-          outputModality: "text",
-          onChange: (v5) => update("model", v5)
-        }
-      ) }),
-      /* @__PURE__ */ u4(
-        Field,
-        {
-          label: "Small model",
-          info: "Lighter model for background tasks like compaction and summaries (cost optimization). Used by OpenCode; other providers may use in future.",
-          children: /* @__PURE__ */ u4(
-            ModelPickerDialog,
-            {
-              value: draft.small_model,
-              provider: provider ?? data.defaults.provider,
-              placeholder: "same as main model",
-              disabled: busy,
-              apiBasePath: apiPath(gid, ""),
-              outputModality: "text",
-              onChange: (v5) => update("small_model", v5)
-            }
-          )
-        }
-      ),
-      /* @__PURE__ */ u4(
-        Field,
-        {
-          label: "Transcription model",
-          info: "OpenRouter model used when the main model cannot accept audio directly. When set, a mic button appears in the chat composer.\nLeave blank to disable voice input.",
-          children: /* @__PURE__ */ u4(
-            ModelPickerDialog,
-            {
-              value: draft.transcription_model,
-              provider: "openrouter",
-              placeholder: data.defaults.transcription_model || "google/gemini-2.0-flash-lite-001",
-              disabled: busy,
-              apiBasePath: apiPath(gid, ""),
-              inputModality: "audio",
-              onChange: (v5) => update("transcription_model", v5)
-            }
-          )
-        }
-      ),
-      /* @__PURE__ */ u4(
-        ModelParamsEditor,
-        {
-          gid,
-          provider: draft.provider,
-          value: draftModelParams,
-          busy,
-          onChange: setDraftModelParams
-        }
-      )
-    ] }) : null,
-    section === "settings" ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4(Field, { label: "Name", children: /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "text",
-          value: draftName,
-          disabled: busy,
-          maxLength: 100,
-          onInput: (e4) => setDraftName(e4.target.value)
-        }
-      ) }),
-      /* @__PURE__ */ u4(Field, { label: "Effort", children: /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "text",
-          value: draft.effort ?? "",
-          disabled: busy,
-          onInput: (e4) => update("effort", e4.currentTarget.value || null),
-          placeholder: "provider-specific (e.g. high)"
-        }
-      ) }),
-      /* @__PURE__ */ u4(Field, { label: "Image tag", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
-        /* @__PURE__ */ u4(
-          Combobox,
-          {
-            value: draft.image_tag,
-            options: imageOptions,
-            placeholder: data.defaults.image_tag ? `default: ${data.defaults.image_tag}` : "pick an image",
-            disabled: busy,
-            onChange: (v5) => update("image_tag", v5)
-          }
-        ),
-        selectedImg ? /* @__PURE__ */ u4("div", { class: "group-admin-selected-info", children: [
-          /* @__PURE__ */ u4("div", { class: "selected-title", children: [
-            selectedImg.label,
-            selectedImgAge || selectedImgSize ? /* @__PURE__ */ u4("span", { class: "selected-detail", children: [
-              " \xB7 ",
-              [selectedImgAge, selectedImgSize].filter(Boolean).join(" \xB7 ")
-            ] }) : null,
-            selectedImg.isDefault ? /* @__PURE__ */ u4("span", { class: "selected-detail", children: " \xB7 default" }) : null
-          ] }),
-          selectedImg.createdAt ? /* @__PURE__ */ u4("pre", { class: "selected-tooltip", children: [
-            "Created: ",
-            new Date(selectedImg.createdAt).toLocaleString()
-          ] }) : null
-        ] }) : draft.image_tag && images ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Tag not in local image list \u2014 will fail at container start if not pulled." }) : null
-      ] }) }),
-      /* @__PURE__ */ u4(Field, { label: "Assistant name", children: /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "text",
-          value: draft.assistant_name ?? "",
-          disabled: busy,
-          onInput: (e4) => update("assistant_name", e4.currentTarget.value || null)
-        }
-      ) }),
-      /* @__PURE__ */ u4(
-        Field,
-        {
-          label: "Max messages / prompt",
-          info: "Hard cap on how many history messages get included in each model call. Higher = more context but more cost; lower = faster + cheaper but the agent forgets sooner. Leave blank for the provider default.",
-          children: /* @__PURE__ */ u4(
-            "input",
-            {
-              type: "number",
-              min: 1,
-              max: 1e3,
-              value: draft.max_messages_per_prompt ?? "",
-              disabled: busy,
-              onInput: (e4) => {
-                const v5 = e4.currentTarget.value;
-                update("max_messages_per_prompt", v5 ? Number(v5) : null);
-              }
-            }
-          )
-        }
-      ),
-      /* @__PURE__ */ u4(
-        Field,
-        {
-          label: "CLI scope",
-          info: "Controls which `ncl` commands an agent in this group can run.\ndisabled = no CLI access.\ngroup = limited to the group's own resources.\nglobal = unrestricted (owner / global admin only \u2014 use sparingly).",
-          children: /* @__PURE__ */ u4(
-            Combobox,
-            {
-              value: draft.cli_scope,
-              options: data.validCliScopes.filter((s5) => s5 !== "global" || data.actorIsElevated || draft.cli_scope === "global").map((s5) => ({
-                value: s5,
-                label: s5,
-                tooltip: s5 === "global" && !data.actorIsElevated ? "Owner / global admin only." : void 0
-              })),
-              placeholder: "pick a scope",
-              disabled: busy,
-              freeform: false,
-              onChange: (v5) => update("cli_scope", v5)
-            }
-          )
-        }
-      ),
-      data.site.available ? /* @__PURE__ */ u4(
-        Field,
-        {
-          label: "Website",
-          info: "Serve a public static website for this group from a folder in its workspace. Files in the FQDN-named folder become readable by anyone with the link \u2014 no login required. Separate from private file-share links.",
-          children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
-            /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-              /* @__PURE__ */ u4(
-                "input",
-                {
-                  type: "checkbox",
-                  checked: siteEnabled,
-                  disabled: busy,
-                  onChange: (e4) => setSiteEnabled(e4.target.checked)
-                }
-              ),
-              /* @__PURE__ */ u4("span", { children: "Enable website" })
-            ] }),
-            data.actorIsElevated ? /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "text",
-                value: siteSlug,
-                disabled: busy,
-                maxLength: 63,
-                placeholder: data.site.baseDomain ? `subdomain (.${data.site.baseDomain})` : "subdomain",
-                onInput: (e4) => setSiteSlug(e4.currentTarget.value)
-              }
-            ) : null,
-            siteEnabled && data.site.url ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-              "Live at ",
-              /* @__PURE__ */ u4("a", { href: data.site.url, target: "_blank", rel: "noopener noreferrer", children: data.site.url }),
-              " ",
-              "\u2014 publish by writing files into the ",
-              /* @__PURE__ */ u4("code", { children: data.site.fqdn }),
-              " folder in the workspace."
-            ] }) : siteEnabled ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Save to allocate a subdomain and go live." }) : /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Disabled \u2014 enable to publish a public static site on its own subdomain." })
-          ] })
-        }
-      ) : null,
-      /* @__PURE__ */ u4("div", { class: "group-admin-danger-zone", "data-testid": "danger-zone", children: /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "danger",
-          "data-testid": "archive-btn",
-          disabled: busy || archiveBusy,
-          onClick: () => {
-            setArchiveConfirm("");
-            setArchiveOpen(true);
-          },
-          children: "Archive group\u2026"
-        }
-      ) })
-    ] }) : null,
-    section === "packages" ? /* @__PURE__ */ u4(
-      PackagesSection,
-      {
-        value: draftPackages,
-        busy,
-        onChange: setDraftPackages
-      }
-    ) : null,
-    section === "mcp" ? /* @__PURE__ */ u4(
-      McpServersSection,
-      {
-        value: draftMcpServers,
-        busy,
-        onChange: setDraftMcpServers
-      }
-    ) : null,
-    section === "skills" ? /* @__PURE__ */ u4(
-      SkillsSection,
-      {
-        value: draftSkills,
-        busy,
-        onChange: setDraftSkills
-      }
-    ) : null,
-    /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending2.size} unsaved change${pending2.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),
-    confirmOpen ? /* @__PURE__ */ u4(
-      MobileDialog,
-      {
-        title: "Apply changes",
-        onClose: () => setConfirmOpen(false),
-        closeDisabled: busy,
-        maxWidth: "440px",
-        className: "ga-confirm-modal",
-        children: [
-          /* @__PURE__ */ u4("div", { class: "settings-body", children: [
-            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
-              pending2.size,
-              " setting",
-              pending2.size === 1 ? "" : "s",
-              " will be saved:",
-              " ",
-              /* @__PURE__ */ u4("code", { children: [...pending2].join(", ") })
-            ] }),
-            /* @__PURE__ */ u4("div", { class: "ga-confirm-options", children: [
-              /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-                /* @__PURE__ */ u4(
-                  "input",
-                  {
-                    type: "checkbox",
-                    checked: effectiveRestart,
-                    disabled: busy || rebuildChecked,
-                    onChange: (e4) => setRestartChecked(e4.target.checked)
-                  }
-                ),
-                /* @__PURE__ */ u4("span", { children: "Restart sessions" }),
-                /* @__PURE__ */ u4(Tooltip, { text: "Stop and respawn all running container sessions for this group so they pick up the saved config.\nDefaults on when you change provider, model, effort, image tag, assistant name, or max messages per prompt. CLI scope alone does not need a restart \u2014 it is re-read on every CLI call.\nActive conversations resume on the next user message.", children: /* @__PURE__ */ u4("span", { class: "info-icon", "aria-label": "More info", children: "i" }) })
-              ] }),
-              /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-                /* @__PURE__ */ u4(
-                  "input",
-                  {
-                    type: "checkbox",
-                    checked: rebuildChecked,
-                    disabled: busy,
-                    onChange: (e4) => setRebuildChecked(e4.target.checked)
-                  }
-                ),
-                /* @__PURE__ */ u4("span", { children: "Rebuild image" }),
-                /* @__PURE__ */ u4(Tooltip, { text: "Rebuild the container image before restarting.\nDefaults on when the chosen image tag does not exist locally. Otherwise normally only needed after `ncl groups config add-package` / `add-mcp-server` or a base-image change \u2014 that workflow lives in the CLI today, not this UI.\nA rebuild always implies a restart and takes minutes, not seconds.", children: /* @__PURE__ */ u4("span", { class: "info-icon", "aria-label": "More info", children: "i" }) })
-              ] })
-            ] }),
-            needsRestart && !effectiveRestart ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: "These changes won\u2019t take effect until the sessions restart." }) : null
-          ] }),
-          /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
-            /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => setConfirmOpen(false), children: "Cancel" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy, onClick: doApply, children: busy ? "Applying\u2026" : effectiveRebuild ? "Save & rebuild" : effectiveRestart ? "Save & restart" : "Save" })
-          ] })
-        ]
-      }
-    ) : null,
-    archiveOpen ? /* @__PURE__ */ u4(
-      MobileDialog,
-      {
-        title: "Archive group",
-        onClose: () => setArchiveOpen(false),
-        closeDisabled: archiveBusy,
-        maxWidth: "440px",
-        className: "ga-confirm-modal",
-        children: [
-          /* @__PURE__ */ u4("div", { class: "settings-body", children: [
-            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
-              "Running container sessions will stop and the group will be removed from this UI. Its folder is renamed with a ",
-              /* @__PURE__ */ u4("code", { children: "~" }),
-              " suffix \u2014 nothing is deleted."
-            ] }),
-            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
-              "Restore is host-only: ",
-              /* @__PURE__ */ u4("code", { children: [
-                "ncl groups restore --folder ",
-                data.folder
-              ] }),
-              "."
-            ] }),
-            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:8px", children: [
-              "Type ",
-              /* @__PURE__ */ u4("code", { children: data.folder }),
-              " to confirm:"
-            ] }),
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "text",
-                "data-testid": "archive-confirm-input",
-                value: archiveConfirm,
-                disabled: archiveBusy,
-                placeholder: data.folder,
-                onInput: (e4) => setArchiveConfirm(e4.currentTarget.value)
-              }
-            )
-          ] }),
-          /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
-            /* @__PURE__ */ u4("button", { type: "button", disabled: archiveBusy, onClick: () => setArchiveOpen(false), children: "Cancel" }),
-            /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: "danger",
-                "data-testid": "archive-confirm-btn",
-                disabled: archiveBusy || archiveConfirm.trim() !== data.folder,
-                onClick: doArchive,
-                children: archiveBusy ? "Archiving\u2026" : "Archive group"
-              }
-            )
-          ] })
-        ]
-      }
-    ) : null
-  ] });
-}
-function Field({
-  label,
-  info,
-  children
-}) {
-  return /* @__PURE__ */ u4("div", { class: "settings-row group-admin-field", children: [
-    /* @__PURE__ */ u4("label", { class: "group-admin-label", children: [
-      label,
-      info ? /* @__PURE__ */ u4(InfoIcon, { text: info }) : null
-    ] }),
-    /* @__PURE__ */ u4("div", { class: "group-admin-control", children })
-  ] });
-}
+
+// src/components/GroupAdminAccess.tsx
 function MembersTab({ gid }) {
   const [members, setMembers] = h2(null);
   const [busy, setBusy] = h2(false);
@@ -25345,6 +24521,79 @@ function RolesTab({ gid }) {
     )
   ] });
 }
+function UserPicker({
+  gid,
+  excludeUserIds,
+  disabled,
+  onPick
+}) {
+  const [q5, setQ] = h2("");
+  const [results, setResults] = h2([]);
+  const [searching, setSearching] = h2(false);
+  y2(() => {
+    let cancelled = false;
+    const t4 = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const r4 = await call(
+          apiPath(gid, `/users-search?q=${encodeURIComponent(q5)}`)
+        );
+        if (!cancelled && r4.ok) setResults(r4.data.users);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t4);
+    };
+  }, [q5, gid]);
+  const visible = results.filter((u5) => !excludeUserIds.has(u5.userId)).slice(0, 20);
+  return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("div", { class: "settings-row", children: /* @__PURE__ */ u4(
+      "input",
+      {
+        type: "text",
+        placeholder: "Search name, handle, or user id",
+        value: q5,
+        onInput: (e4) => setQ(e4.currentTarget.value),
+        disabled
+      }
+    ) }),
+    searching && visible.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "Searching\u2026" }) : null,
+    visible.length > 0 ? /* @__PURE__ */ u4("ul", { class: "group-admin-search-results", children: visible.map((u5) => /* @__PURE__ */ u4("li", { children: /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "group-admin-search-row",
+        disabled,
+        onClick: () => onPick(u5.userId),
+        children: [
+          /* @__PURE__ */ u4("span", { class: "group-admin-search-name", children: u5.displayName || u5.userId }),
+          /* @__PURE__ */ u4("span", { class: "group-admin-search-handle", children: u5.primaryHandle ? `${u5.primaryChannel}:${u5.primaryHandle}` : u5.kind })
+        ]
+      }
+    ) }, u5.userId)) }) : null,
+    !searching && q5 && visible.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "No matches." }) : null
+  ] });
+}
+
+// src/components/GroupAdminField.tsx
+function GroupAdminField({
+  label,
+  info,
+  children
+}) {
+  return /* @__PURE__ */ u4("div", { class: "settings-row group-admin-field", children: [
+    /* @__PURE__ */ u4("label", { class: "group-admin-label", children: [
+      label,
+      info ? /* @__PURE__ */ u4(InfoIcon, { text: info }) : null
+    ] }),
+    /* @__PURE__ */ u4("div", { class: "group-admin-control", children })
+  ] });
+}
+
+// src/components/GroupAdminDestinations.tsx
 function formatChannelHandle(channelType2, platformId, targetId) {
   if (!channelType2 && !platformId) return targetId;
   if (!channelType2) return platformId ?? targetId;
@@ -25512,7 +24761,7 @@ function AddDestinationForm({ gid, onCancel, onDone }) {
     tooltip: c4.adminOnTarget ? `You are an admin of "${c4.name}". Linking will apply immediately.` : `You are not an admin of "${c4.name}". An admin of that group will be asked to approve the link.`
   }));
   return /* @__PURE__ */ u4("form", { onSubmit: submit, class: "ga-add-link-form", children: [
-    /* @__PURE__ */ u4(Field, { label: "Target agent group", children: /* @__PURE__ */ u4(
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Target agent group", children: /* @__PURE__ */ u4(
       Combobox,
       {
         value: targetId || null,
@@ -25527,7 +24776,7 @@ function AddDestinationForm({ gid, onCancel, onDone }) {
         }
       }
     ) }),
-    /* @__PURE__ */ u4(Field, { label: "Local name", children: /* @__PURE__ */ u4(
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Local name", children: /* @__PURE__ */ u4(
       "input",
       {
         type: "text",
@@ -25537,7 +24786,7 @@ function AddDestinationForm({ gid, onCancel, onDone }) {
         disabled: busy
       }
     ) }),
-    /* @__PURE__ */ u4(Field, { label: "Reverse link", children: /* @__PURE__ */ u4("label", { class: "ga-checkbox", children: [
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Reverse link", children: /* @__PURE__ */ u4("label", { class: "ga-checkbox", children: [
       /* @__PURE__ */ u4(
         "input",
         {
@@ -25560,357 +24809,9 @@ function AddDestinationForm({ gid, onCancel, onDone }) {
     ] })
   ] });
 }
-function UserPicker({
-  gid,
-  excludeUserIds,
-  disabled,
-  onPick
-}) {
-  const [q5, setQ] = h2("");
-  const [results, setResults] = h2([]);
-  const [searching, setSearching] = h2(false);
-  y2(() => {
-    let cancelled = false;
-    const t4 = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const r4 = await call(
-          apiPath(gid, `/users-search?q=${encodeURIComponent(q5)}`)
-        );
-        if (!cancelled && r4.ok) setResults(r4.data.users);
-      } finally {
-        if (!cancelled) setSearching(false);
-      }
-    }, 200);
-    return () => {
-      cancelled = true;
-      clearTimeout(t4);
-    };
-  }, [q5, gid]);
-  const visible = results.filter((u5) => !excludeUserIds.has(u5.userId)).slice(0, 20);
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("div", { class: "settings-row", children: /* @__PURE__ */ u4(
-      "input",
-      {
-        type: "text",
-        placeholder: "Search name, handle, or user id",
-        value: q5,
-        onInput: (e4) => setQ(e4.currentTarget.value),
-        disabled
-      }
-    ) }),
-    searching && visible.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "Searching\u2026" }) : null,
-    visible.length > 0 ? /* @__PURE__ */ u4("ul", { class: "group-admin-search-results", children: visible.map((u5) => /* @__PURE__ */ u4("li", { children: /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "group-admin-search-row",
-        disabled,
-        onClick: () => onPick(u5.userId),
-        children: [
-          /* @__PURE__ */ u4("span", { class: "group-admin-search-name", children: u5.displayName || u5.userId }),
-          /* @__PURE__ */ u4("span", { class: "group-admin-search-handle", children: u5.primaryHandle ? `${u5.primaryChannel}:${u5.primaryHandle}` : u5.kind })
-        ]
-      }
-    ) }, u5.userId)) }) : null,
-    !searching && q5 && visible.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "No matches." }) : null
-  ] });
-}
-var MODEL_PARAM_RECOGNIZED = {
-  opencode: ["max_tokens", "temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty", "seed", "stop"],
-  claude: ["max_tokens", "thinking_budget_tokens"]
-};
-var MODEL_PARAM_KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_.]*$/;
-var _rowUid = 0;
-function nextRowUid() {
-  _rowUid += 1;
-  return _rowUid;
-}
-function paramsToRows(params) {
-  return Object.entries(params).map(([k4, v5]) => ({
-    uid: nextRowUid(),
-    key: k4,
-    // Stringify in a JSON-roundtrippable form so the user can edit & resave.
-    valueText: typeof v5 === "string" ? v5 : JSON.stringify(v5)
-  }));
-}
-function parseRowValue(raw) {
-  const trimmed = raw.trim();
-  if (trimmed === "") return "";
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return raw;
-  }
-}
-function rowsToParams(rows) {
-  const out = {};
-  const seen = /* @__PURE__ */ new Set();
-  for (const r4 of rows) {
-    const k4 = r4.key.trim();
-    if (k4 === "" && r4.valueText.trim() === "") continue;
-    if (!k4 || !MODEL_PARAM_KEY_RE.test(k4) || seen.has(k4)) continue;
-    seen.add(k4);
-    out[k4] = parseRowValue(r4.valueText);
-  }
-  return out;
-}
-function ModelParamsEditor({
-  gid,
-  provider,
-  value,
-  busy,
-  onChange
-}) {
-  const [rows, setRows] = h2(() => paramsToRows(value));
-  const lastEmittedRef = A2(JSON.stringify(value));
-  y2(() => {
-    const incoming = JSON.stringify(value);
-    if (incoming === lastEmittedRef.current) return;
-    setRows(paramsToRows(value));
-    lastEmittedRef.current = incoming;
-  }, [value]);
-  const recognized = provider ? MODEL_PARAM_RECOGNIZED[provider] ?? [] : [];
-  function emit(next) {
-    const params = rowsToParams(next);
-    lastEmittedRef.current = JSON.stringify(params);
-    onChange(params);
-  }
-  function update(uid, patch) {
-    setRows((rs) => {
-      const next = rs.map((r4) => r4.uid === uid ? { ...r4, ...patch } : r4);
-      emit(next);
-      return next;
-    });
-  }
-  function remove(uid) {
-    setRows((rs) => {
-      const next = rs.filter((r4) => r4.uid !== uid);
-      emit(next);
-      return next;
-    });
-  }
-  function addBlank(presetKey = "") {
-    setRows((rs) => {
-      const next = [...rs, { uid: nextRowUid(), key: presetKey, valueText: "" }];
-      emit(next);
-      return next;
-    });
-  }
-  const issues = [];
-  const seenKeys = /* @__PURE__ */ new Set();
-  for (const r4 of rows) {
-    const k4 = r4.key.trim();
-    if (k4 === "" && r4.valueText.trim() === "") continue;
-    if (k4 === "") {
-      issues.push("A row is missing a key.");
-      continue;
-    }
-    if (!MODEL_PARAM_KEY_RE.test(k4)) {
-      issues.push(`Invalid key "${k4}".`);
-      continue;
-    }
-    if (seenKeys.has(k4)) {
-      issues.push(`Duplicate key "${k4}".`);
-      continue;
-    }
-    seenKeys.add(k4);
-  }
-  const suggestions = recognized.filter((k4) => !rows.some((r4) => r4.key.trim() === k4));
-  return /* @__PURE__ */ u4(
-    Field,
-    {
-      label: "Model parameters",
-      info: 'Per-group knobs passed to the provider when it builds requests (max_tokens, temperature, \u2026).\nValues are parsed as JSON first (so 8192 is a number, "high" is a string, true is a boolean), then fall back to a plain string if JSON parsing fails.\nChanges take effect on next container restart. Providers warn once per startup about keys they do not recognize.',
-      children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-model-params", children: [
-        rows.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No parameters set \u2014 using provider defaults." }) : /* @__PURE__ */ u4("ul", { class: "ga-mp-list", children: rows.map((r4) => {
-          const trimmedKey = r4.key.trim();
-          const isRecognized = trimmedKey !== "" && recognized.includes(trimmedKey);
-          return /* @__PURE__ */ u4("li", { class: "ga-mp-row", children: [
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "text",
-                class: `ga-mp-key${trimmedKey !== "" && !isRecognized && recognized.length > 0 ? " ga-mp-key-unknown" : ""}`,
-                placeholder: "key (e.g. max_tokens)",
-                value: r4.key,
-                disabled: busy,
-                list: `ga-mp-keys-${gid}`,
-                onInput: (e4) => update(r4.uid, { key: e4.currentTarget.value })
-              }
-            ),
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "text",
-                class: "ga-mp-value",
-                placeholder: "value (JSON or string)",
-                value: r4.valueText,
-                disabled: busy,
-                onInput: (e4) => update(r4.uid, { valueText: e4.currentTarget.value })
-              }
-            ),
-            /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: "icon-btn",
-                "aria-label": "Remove",
-                disabled: busy,
-                onClick: () => remove(r4.uid),
-                children: "\u2715"
-              }
-            )
-          ] }, r4.uid);
-        }) }),
-        /* @__PURE__ */ u4("datalist", { id: `ga-mp-keys-${gid}`, children: recognized.map((k4) => /* @__PURE__ */ u4("option", { value: k4 }, k4)) }),
-        /* @__PURE__ */ u4("div", { class: "ga-mp-actions", children: [
-          /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => addBlank(), children: "+ Add parameter" }),
-          suggestions.length > 0 ? /* @__PURE__ */ u4("span", { class: "ga-mp-suggest", children: [
-            /* @__PURE__ */ u4("span", { class: "group-admin-help", children: [
-              "Common for ",
-              provider,
-              ":"
-            ] }),
-            suggestions.map((k4) => /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: "ga-mp-suggest-chip",
-                disabled: busy,
-                onClick: () => addBlank(k4),
-                title: `Add ${k4}`,
-                children: [
-                  "+ ",
-                  k4
-                ]
-              },
-              k4
-            ))
-          ] }) : null
-        ] }),
-        issues.length > 0 ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: issues[0] }) : null
-      ] })
-    }
-  );
-}
-var PACKAGE_TOKEN_RE = /^[A-Za-z0-9@._/+=<>~^!*-]+$/;
+
+// src/components/GroupAdminMcp.tsx
 var MCP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
-var SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
-function PackagesSection({
-  value,
-  busy,
-  onChange
-}) {
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      "Packages baked into the container image. Changes require an image rebuild \u2014 the Apply dialog suggests rebuild when any list here changes. Mirrors",
-      " ",
-      /* @__PURE__ */ u4("code", { children: "ncl groups config add-package / remove-package" }),
-      "."
-    ] }) }),
-    /* @__PURE__ */ u4(
-      PackageListField,
-      {
-        label: "apt packages",
-        info: "Debian packages installed via apt-get in the agent image. Example: ripgrep, jq, postgresql-client.",
-        placeholder: "apt package (e.g. ripgrep, jq, postgresql-client)",
-        items: value.apt,
-        disabled: busy,
-        onChange: (apt) => onChange({ ...value, apt })
-      }
-    ),
-    /* @__PURE__ */ u4(
-      PackageListField,
-      {
-        label: "npm packages",
-        info: "Node packages installed globally via pnpm/npm in the agent image. Example: typescript@5, prettier.",
-        placeholder: "npm package (e.g. typescript@5, prettier)",
-        items: value.npm,
-        disabled: busy,
-        onChange: (npm) => onChange({ ...value, npm })
-      }
-    ),
-    /* @__PURE__ */ u4(
-      PackageListField,
-      {
-        label: "pip packages",
-        info: "Python packages installed via pip in the agent image. Example: requests, pandas==2.0.0.",
-        placeholder: "pip package (e.g. requests, pandas==2.0.0)",
-        items: value.pip,
-        disabled: busy,
-        onChange: (pip) => onChange({ ...value, pip })
-      }
-    )
-  ] });
-}
-function PackageListField({
-  label,
-  info,
-  placeholder,
-  items,
-  disabled,
-  onChange
-}) {
-  const [draft, setDraft] = h2("");
-  const trimmed = draft.trim();
-  const isDup = trimmed !== "" && items.includes(trimmed);
-  const isInvalid = trimmed !== "" && !PACKAGE_TOKEN_RE.test(trimmed);
-  const canAdd = trimmed !== "" && !isDup && !isInvalid;
-  function add() {
-    if (!canAdd) return;
-    onChange([...items, trimmed]);
-    setDraft("");
-  }
-  function remove(idx) {
-    onChange(items.filter((_6, i5) => i5 !== idx));
-  }
-  return /* @__PURE__ */ u4(Field, { label, info, children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-model-params", children: [
-    items.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No packages." }) : /* @__PURE__ */ u4("ul", { class: "ga-chip-list", children: items.map((p5, i5) => /* @__PURE__ */ u4("li", { class: "ga-chip", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-chip-label", children: p5 }),
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "ga-chip-remove",
-          "aria-label": `Remove ${p5}`,
-          disabled,
-          onClick: () => remove(i5),
-          children: "\u2715"
-        }
-      )
-    ] }, `${p5}-${i5}`)) }),
-    /* @__PURE__ */ u4("div", { class: "ga-mp-actions", children: [
-      /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "text",
-          class: "ga-chip-input",
-          placeholder,
-          value: draft,
-          disabled,
-          onInput: (e4) => setDraft(e4.currentTarget.value),
-          onKeyDown: (e4) => {
-            if (e4.key === "Enter") {
-              e4.preventDefault();
-              add();
-            }
-          }
-        }
-      ),
-      /* @__PURE__ */ u4("button", { type: "button", disabled: disabled || !canAdd, onClick: add, children: "+ Add" })
-    ] }),
-    isInvalid ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
-      '"',
-      trimmed,
-      '" has invalid characters.'
-    ] }) : isDup ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
-      '"',
-      trimmed,
-      '" is already in the list.'
-    ] }) : null
-  ] }) });
-}
 function McpServersSection({
   value,
   busy,
@@ -26492,6 +25393,306 @@ function McpKeyValueEditor({
     duplicate ? /* @__PURE__ */ u4("span", { class: "ga-mcp-field-error", children: "That key already exists." }) : null
   ] });
 }
+
+// src/components/GroupAdminModelParams.tsx
+var MODEL_PARAM_RECOGNIZED = {
+  opencode: ["max_tokens", "temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty", "seed", "stop"],
+  claude: ["max_tokens", "thinking_budget_tokens"]
+};
+var MODEL_PARAM_KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_.]*$/;
+var _rowUid = 0;
+function nextRowUid() {
+  _rowUid += 1;
+  return _rowUid;
+}
+function paramsToRows(params) {
+  return Object.entries(params).map(([k4, v5]) => ({
+    uid: nextRowUid(),
+    key: k4,
+    // Stringify in a JSON-roundtrippable form so the user can edit & resave.
+    valueText: typeof v5 === "string" ? v5 : JSON.stringify(v5)
+  }));
+}
+function parseRowValue(raw) {
+  const trimmed = raw.trim();
+  if (trimmed === "") return "";
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return raw;
+  }
+}
+function rowsToParams(rows) {
+  const out = {};
+  const seen = /* @__PURE__ */ new Set();
+  for (const r4 of rows) {
+    const k4 = r4.key.trim();
+    if (k4 === "" && r4.valueText.trim() === "") continue;
+    if (!k4 || !MODEL_PARAM_KEY_RE.test(k4) || seen.has(k4)) continue;
+    seen.add(k4);
+    out[k4] = parseRowValue(r4.valueText);
+  }
+  return out;
+}
+function ModelParamsEditor({
+  gid,
+  provider,
+  value,
+  busy,
+  onChange
+}) {
+  const [rows, setRows] = h2(() => paramsToRows(value));
+  const lastEmittedRef = A2(JSON.stringify(value));
+  y2(() => {
+    const incoming = JSON.stringify(value);
+    if (incoming === lastEmittedRef.current) return;
+    setRows(paramsToRows(value));
+    lastEmittedRef.current = incoming;
+  }, [value]);
+  const recognized = provider ? MODEL_PARAM_RECOGNIZED[provider] ?? [] : [];
+  function emit(next) {
+    const params = rowsToParams(next);
+    lastEmittedRef.current = JSON.stringify(params);
+    onChange(params);
+  }
+  function update(uid, patch) {
+    setRows((rs) => {
+      const next = rs.map((r4) => r4.uid === uid ? { ...r4, ...patch } : r4);
+      emit(next);
+      return next;
+    });
+  }
+  function remove(uid) {
+    setRows((rs) => {
+      const next = rs.filter((r4) => r4.uid !== uid);
+      emit(next);
+      return next;
+    });
+  }
+  function addBlank(presetKey = "") {
+    setRows((rs) => {
+      const next = [...rs, { uid: nextRowUid(), key: presetKey, valueText: "" }];
+      emit(next);
+      return next;
+    });
+  }
+  const issues = [];
+  const seenKeys = /* @__PURE__ */ new Set();
+  for (const r4 of rows) {
+    const k4 = r4.key.trim();
+    if (k4 === "" && r4.valueText.trim() === "") continue;
+    if (k4 === "") {
+      issues.push("A row is missing a key.");
+      continue;
+    }
+    if (!MODEL_PARAM_KEY_RE.test(k4)) {
+      issues.push(`Invalid key "${k4}".`);
+      continue;
+    }
+    if (seenKeys.has(k4)) {
+      issues.push(`Duplicate key "${k4}".`);
+      continue;
+    }
+    seenKeys.add(k4);
+  }
+  const suggestions = recognized.filter((k4) => !rows.some((r4) => r4.key.trim() === k4));
+  return /* @__PURE__ */ u4(
+    GroupAdminField,
+    {
+      label: "Model parameters",
+      info: 'Per-group knobs passed to the provider when it builds requests (max_tokens, temperature, \u2026).\nValues are parsed as JSON first (so 8192 is a number, "high" is a string, true is a boolean), then fall back to a plain string if JSON parsing fails.\nChanges take effect on next container restart. Providers warn once per startup about keys they do not recognize.',
+      children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-model-params", children: [
+        rows.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No parameters set \u2014 using provider defaults." }) : /* @__PURE__ */ u4("ul", { class: "ga-mp-list", children: rows.map((r4) => {
+          const trimmedKey = r4.key.trim();
+          const isRecognized = trimmedKey !== "" && recognized.includes(trimmedKey);
+          return /* @__PURE__ */ u4("li", { class: "ga-mp-row", children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "text",
+                class: `ga-mp-key${trimmedKey !== "" && !isRecognized && recognized.length > 0 ? " ga-mp-key-unknown" : ""}`,
+                placeholder: "key (e.g. max_tokens)",
+                value: r4.key,
+                disabled: busy,
+                list: `ga-mp-keys-${gid}`,
+                onInput: (e4) => update(r4.uid, { key: e4.currentTarget.value })
+              }
+            ),
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "text",
+                class: "ga-mp-value",
+                placeholder: "value (JSON or string)",
+                value: r4.valueText,
+                disabled: busy,
+                onInput: (e4) => update(r4.uid, { valueText: e4.currentTarget.value })
+              }
+            ),
+            /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "button",
+                class: "icon-btn",
+                "aria-label": "Remove",
+                disabled: busy,
+                onClick: () => remove(r4.uid),
+                children: "\u2715"
+              }
+            )
+          ] }, r4.uid);
+        }) }),
+        /* @__PURE__ */ u4("datalist", { id: `ga-mp-keys-${gid}`, children: recognized.map((k4) => /* @__PURE__ */ u4("option", { value: k4 }, k4)) }),
+        /* @__PURE__ */ u4("div", { class: "ga-mp-actions", children: [
+          /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => addBlank(), children: "+ Add parameter" }),
+          suggestions.length > 0 ? /* @__PURE__ */ u4("span", { class: "ga-mp-suggest", children: [
+            /* @__PURE__ */ u4("span", { class: "group-admin-help", children: [
+              "Common for ",
+              provider,
+              ":"
+            ] }),
+            suggestions.map((k4) => /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "button",
+                class: "ga-mp-suggest-chip",
+                disabled: busy,
+                onClick: () => addBlank(k4),
+                title: `Add ${k4}`,
+                children: [
+                  "+ ",
+                  k4
+                ]
+              },
+              k4
+            ))
+          ] }) : null
+        ] }),
+        issues.length > 0 ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: issues[0] }) : null
+      ] })
+    }
+  );
+}
+
+// src/components/GroupAdminPackages.tsx
+var PACKAGE_TOKEN_RE = /^[A-Za-z0-9@._/+=<>~^!*-]+$/;
+function PackagesSection({
+  value,
+  busy,
+  onChange
+}) {
+  return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+      "Packages baked into the container image. Changes require an image rebuild \u2014 the Apply dialog suggests rebuild when any list here changes. Mirrors",
+      " ",
+      /* @__PURE__ */ u4("code", { children: "ncl groups config add-package / remove-package" }),
+      "."
+    ] }) }),
+    /* @__PURE__ */ u4(
+      PackageListField,
+      {
+        label: "apt packages",
+        info: "Debian packages installed via apt-get in the agent image. Example: ripgrep, jq, postgresql-client.",
+        placeholder: "apt package (e.g. ripgrep, jq, postgresql-client)",
+        items: value.apt,
+        disabled: busy,
+        onChange: (apt) => onChange({ ...value, apt })
+      }
+    ),
+    /* @__PURE__ */ u4(
+      PackageListField,
+      {
+        label: "npm packages",
+        info: "Node packages installed globally via pnpm/npm in the agent image. Example: typescript@5, prettier.",
+        placeholder: "npm package (e.g. typescript@5, prettier)",
+        items: value.npm,
+        disabled: busy,
+        onChange: (npm) => onChange({ ...value, npm })
+      }
+    ),
+    /* @__PURE__ */ u4(
+      PackageListField,
+      {
+        label: "pip packages",
+        info: "Python packages installed via pip in the agent image. Example: requests, pandas==2.0.0.",
+        placeholder: "pip package (e.g. requests, pandas==2.0.0)",
+        items: value.pip,
+        disabled: busy,
+        onChange: (pip) => onChange({ ...value, pip })
+      }
+    )
+  ] });
+}
+function PackageListField({
+  label,
+  info,
+  placeholder,
+  items,
+  disabled,
+  onChange
+}) {
+  const [draft, setDraft] = h2("");
+  const trimmed = draft.trim();
+  const isDup = trimmed !== "" && items.includes(trimmed);
+  const isInvalid = trimmed !== "" && !PACKAGE_TOKEN_RE.test(trimmed);
+  const canAdd = trimmed !== "" && !isDup && !isInvalid;
+  function add() {
+    if (!canAdd) return;
+    onChange([...items, trimmed]);
+    setDraft("");
+  }
+  function remove(idx) {
+    onChange(items.filter((_6, i5) => i5 !== idx));
+  }
+  return /* @__PURE__ */ u4(GroupAdminField, { label, info, children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-model-params", children: [
+    items.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No packages." }) : /* @__PURE__ */ u4("ul", { class: "ga-chip-list", children: items.map((packageName, index) => /* @__PURE__ */ u4("li", { class: "ga-chip", children: [
+      /* @__PURE__ */ u4("span", { class: "ga-chip-label", children: packageName }),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "ga-chip-remove",
+          "aria-label": `Remove ${packageName}`,
+          disabled,
+          onClick: () => remove(index),
+          children: "\u2715"
+        }
+      )
+    ] }, `${packageName}-${index}`)) }),
+    /* @__PURE__ */ u4("div", { class: "ga-mp-actions", children: [
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "text",
+          class: "ga-chip-input",
+          placeholder,
+          value: draft,
+          disabled,
+          onInput: (event) => setDraft(event.currentTarget.value),
+          onKeyDown: (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              add();
+            }
+          }
+        }
+      ),
+      /* @__PURE__ */ u4("button", { type: "button", disabled: disabled || !canAdd, onClick: add, children: "+ Add" })
+    ] }),
+    isInvalid ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
+      '"',
+      trimmed,
+      '" has invalid characters.'
+    ] }) : isDup ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
+      '"',
+      trimmed,
+      '" is already in the list.'
+    ] }) : null
+  ] }) });
+}
+
+// src/components/GroupAdminSkills.tsx
+var SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 function SkillsSection({
   value,
   busy,
@@ -26509,8 +25710,8 @@ function SkillsSection({
     onChange([...list, trimmed]);
     setDraft("");
   }
-  function remove(idx) {
-    onChange(list.filter((_6, i5) => i5 !== idx));
+  function remove(index) {
+    onChange(list.filter((_6, itemIndex) => itemIndex !== index));
   }
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
@@ -26518,7 +25719,7 @@ function SkillsSection({
       /* @__PURE__ */ u4("code", { children: "container/skills/" }),
       "."
     ] }) }),
-    /* @__PURE__ */ u4(Field, { label: "Selection", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Selection", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
       /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
         /* @__PURE__ */ u4(
           "input",
@@ -26546,21 +25747,21 @@ function SkillsSection({
         /* @__PURE__ */ u4("span", { children: "Specific skills only" })
       ] })
     ] }) }),
-    !isAll ? /* @__PURE__ */ u4(Field, { label: "Skills", info: "Slug per skill (lowercase a\u2013z, 0\u20139, hyphen). Must match a folder under container/skills/ or a group-local skill.", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-model-params", children: [
-      list.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No skills selected." }) : /* @__PURE__ */ u4("ul", { class: "ga-chip-list", children: list.map((s5, i5) => /* @__PURE__ */ u4("li", { class: "ga-chip", children: [
-        /* @__PURE__ */ u4("span", { class: "ga-chip-label", children: s5 }),
+    !isAll ? /* @__PURE__ */ u4(GroupAdminField, { label: "Skills", info: "Slug per skill (lowercase a\u2013z, 0\u20139, hyphen). Must match a folder under container/skills/ or a group-local skill.", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-model-params", children: [
+      list.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No skills selected." }) : /* @__PURE__ */ u4("ul", { class: "ga-chip-list", children: list.map((skill, index) => /* @__PURE__ */ u4("li", { class: "ga-chip", children: [
+        /* @__PURE__ */ u4("span", { class: "ga-chip-label", children: skill }),
         /* @__PURE__ */ u4(
           "button",
           {
             type: "button",
             class: "ga-chip-remove",
-            "aria-label": `Remove ${s5}`,
+            "aria-label": `Remove ${skill}`,
             disabled: busy,
-            onClick: () => remove(i5),
+            onClick: () => remove(index),
             children: "\u2715"
           }
         )
-      ] }, `${s5}-${i5}`)) }),
+      ] }, `${skill}-${index}`)) }),
       /* @__PURE__ */ u4("div", { class: "ga-mp-actions", children: [
         /* @__PURE__ */ u4(
           "input",
@@ -26570,10 +25771,10 @@ function SkillsSection({
             placeholder: "skill slug (e.g. welcome, agent-browser)",
             value: draft,
             disabled: busy,
-            onInput: (e4) => setDraft(e4.currentTarget.value),
-            onKeyDown: (e4) => {
-              if (e4.key === "Enter") {
-                e4.preventDefault();
+            onInput: (event) => setDraft(event.currentTarget.value),
+            onKeyDown: (event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
                 add();
               }
             }
@@ -26591,6 +25792,750 @@ function SkillsSection({
         '" is already in the list.'
       ] }) : null
     ] }) }) : null
+  ] });
+}
+
+// src/components/GroupAdmin.tsx
+var SETTINGS_SECTIONS = /* @__PURE__ */ new Set(["models", "settings", "packages", "mcp", "skills"]);
+var TAB_ITEMS = [
+  { id: "settings", label: "Settings", sublabel: "Image, scope, public site" },
+  { id: "models", label: "Models", sublabel: "Provider, model, voice" },
+  { id: "packages", label: "Packages", sublabel: "apt / npm / pip in the image" },
+  { id: "mcp", label: "MCP servers", sublabel: "External tools wired to the agent" },
+  { id: "skills", label: "Skills", sublabel: "Container skills mounted at runtime" },
+  { id: "members", label: "Members", sublabel: "Who can use this group" },
+  { id: "roles", label: "Admins", sublabel: "Admins for this group" },
+  { id: "destinations", label: "Destinations", sublabel: "Where this group can send messages" }
+];
+var PROVIDER_INFO = {
+  claude: "Claude \u2014 Anthropic models via the official SDK. Uses your OneCLI-injected Anthropic API key.",
+  opencode: "OpenCode \u2014 multi-provider gateway (OpenRouter, DeepSeek, OpenCode Zen, Anthropic, etc.) selected by host OPENCODE_PROVIDER. Wire prefix is handled automatically."
+};
+function formatAge(iso) {
+  if (!iso) return null;
+  const t4 = Date.parse(iso);
+  if (Number.isNaN(t4)) return null;
+  const diffMs = Date.now() - t4;
+  const day = 24 * 3600 * 1e3;
+  const hour = 3600 * 1e3;
+  if (diffMs < hour) return "just now";
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
+  const days = Math.floor(diffMs / day);
+  if (days < 7) return `${days}d ago`;
+  if (days < 60) return `${Math.floor(days / 7)}w ago`;
+  if (days < 730) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+function formatSize(bytes) {
+  if (bytes == null) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+function GroupAdmin() {
+  const open = groupAdminOpen.value;
+  const gid = groupId.value;
+  const mobile = isMobile.value;
+  const [tab, setTab] = h2(() => isMobile.value ? null : "settings");
+  const actionsRef = A2(null);
+  const [, forceRender] = h2(0);
+  const [closeConfirmOpen, setCloseConfirmOpen] = h2(false);
+  const [returnToMenuAfterDiscard, setReturnToMenuAfterDiscard] = h2(false);
+  y2(() => {
+    setTab(isMobile.value ? null : "settings");
+    setCloseConfirmOpen(false);
+    setReturnToMenuAfterDiscard(false);
+  }, [open, gid]);
+  useBackButtonCloses(open, () => {
+    groupAdminOpen.value = false;
+  });
+  if (!open || !gid) return null;
+  const group = groups.value.find((g8) => g8.id === gid);
+  const title = group ? `Agent Settings \xB7 ${group.name}` : "Agent Settings";
+  function hardClose(returnToMenu = false) {
+    if (returnToMenu) returnToUserMenu(groupAdminOpen);
+    else groupAdminOpen.value = false;
+  }
+  function attemptClose(returnToMenu = false) {
+    if (actionsRef.current?.canSave) {
+      setReturnToMenuAfterDiscard(returnToMenu);
+      setCloseConfirmOpen(true);
+    } else {
+      hardClose(returnToMenu);
+    }
+  }
+  function onKey(e4) {
+    if (e4.key === "Escape") attemptClose();
+  }
+  y2(() => {
+    if (!open) return void 0;
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  const ha = actionsRef.current;
+  const setActions = (a4) => {
+    actionsRef.current = a4;
+    forceRender((n3) => n3 + 1);
+  };
+  const activeTab = tab ?? (mobile ? null : "settings");
+  return /* @__PURE__ */ u4(
+    MobileDialog,
+    {
+      title,
+      onClose: () => attemptClose(),
+      onBack: mobile ? activeTab !== null ? () => setTab(null) : () => attemptClose(true) : void 0,
+      backLabel: activeTab !== null ? "Back to all sections" : "Back to account menu",
+      actions: activeTab !== null && SETTINGS_SECTIONS.has(activeTab) && ha ? /* @__PURE__ */ u4(Tooltip, { text: ha.canSave ? "Save changes" : "Nothing to save", children: /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Save", onClick: ha.apply, disabled: ha.busy || !ha.canSave, children: "\u2713" }) }) : null,
+      children: [
+        !mobile ? /* @__PURE__ */ u4(
+          TabBar,
+          {
+            ariaLabel: "Group settings sections",
+            mobileSheetTitle: "Settings sections",
+            activeId: activeTab,
+            items: TAB_ITEMS,
+            onSelect: (id) => setTab(id),
+            className: "group-admin-tab-bar tab-bar-header"
+          }
+        ) : null,
+        mobile && activeTab === null ? /* @__PURE__ */ u4(MobileSectionList, { items: TAB_ITEMS, onSelect: (id) => setTab(id) }) : /* @__PURE__ */ u4("div", { class: `settings-body${activeTab === "mcp" ? " ga-mcp-settings-body" : ""}`, children: [
+          activeTab !== null && SETTINGS_SECTIONS.has(activeTab) ? /* @__PURE__ */ u4(SettingsTab, { gid, section: activeTab, onClose: hardClose, onActions: setActions }) : null,
+          activeTab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
+          activeTab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
+          activeTab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
+        ] }),
+        closeConfirmOpen ? /* @__PURE__ */ u4(
+          MobileDialog,
+          {
+            title: "Discard unsaved changes?",
+            onClose: () => {
+              setCloseConfirmOpen(false);
+              setReturnToMenuAfterDiscard(false);
+            },
+            maxWidth: "420px",
+            className: "ga-confirm-modal",
+            children: [
+              /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "You have unsaved changes. Closing now discards them." }) }),
+              /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
+                /* @__PURE__ */ u4("button", { type: "button", onClick: () => {
+                  setCloseConfirmOpen(false);
+                  setReturnToMenuAfterDiscard(false);
+                }, children: "Keep editing" }),
+                /* @__PURE__ */ u4("button", { type: "button", class: "danger", "data-testid": "discard-and-close-btn", onClick: () => {
+                  setCloseConfirmOpen(false);
+                  hardClose(returnToMenuAfterDiscard);
+                }, children: "Discard & close" })
+              ] })
+            ]
+          }
+        ) : null
+      ]
+    }
+  );
+}
+function MobileSectionList({ items, onSelect }) {
+  return /* @__PURE__ */ u4(MobileDialogList, { children: items.map((it) => /* @__PURE__ */ u4(MobileDialogItem, { label: it.label, sublabel: it.sublabel, chevron: true, onClick: () => onSelect(it.id) }, it.id)) });
+}
+function SettingsTab({ gid, section, onClose, onActions }) {
+  const [data, setData] = h2(null);
+  const [draft, setDraft] = h2(null);
+  const [draftName, setDraftName] = h2("");
+  const [siteEnabled, setSiteEnabled] = h2(false);
+  const [siteSlug, setSiteSlug] = h2("");
+  const [draftModelParams, setDraftModelParams] = h2({});
+  const [draftPackages, setDraftPackages] = h2({ apt: [], npm: [], pip: [] });
+  const [draftMcpServers, setDraftMcpServers] = h2({});
+  const [draftSkills, setDraftSkills] = h2([]);
+  const [busy, setBusy] = h2(false);
+  const [images, setImages] = h2(null);
+  async function refresh() {
+    setBusy(true);
+    try {
+      const r4 = await call(apiPath(gid, "/settings"));
+      if (!r4.ok) {
+        showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+        return;
+      }
+      setData(r4.data);
+      setDraft({ ...r4.data.config });
+      setDraftName(r4.data.name);
+      setSiteEnabled(r4.data.site.enabled);
+      setSiteSlug(r4.data.site.slug ?? "");
+      setDraftModelParams(r4.data.modelParams);
+      setDraftPackages({
+        apt: [...r4.data.packages?.apt ?? []],
+        npm: [...r4.data.packages?.npm ?? []],
+        pip: [...r4.data.packages?.pip ?? []]
+      });
+      setDraftMcpServers({ ...r4.data.mcpServers ?? {} });
+      setDraftSkills(r4.data.skills === "all" ? "all" : [...r4.data.skills ?? []]);
+    } finally {
+      setBusy(false);
+    }
+  }
+  y2(() => {
+    refresh();
+  }, [gid]);
+  y2(() => {
+    let cancelled = false;
+    (async () => {
+      const r4 = await call(apiPath(gid, "/images"));
+      if (!cancelled) setImages(r4.ok ? r4.data : { images: [] });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gid]);
+  const provider = draft?.provider ?? null;
+  if (!data || !draft) return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
+  function update(k4, v5) {
+    setDraft((d5) => d5 ? { ...d5, [k4]: v5 } : d5);
+  }
+  async function runRestart(rebuild) {
+    const r4 = await call(apiPath(gid, "/restart"), "POST", { rebuild });
+    if (!r4.ok) {
+      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+      return { ok: false };
+    }
+    return { ok: true, restarted: r4.data.restarted };
+  }
+  const RESTART_REQUIRING_FIELDS = /* @__PURE__ */ new Set([
+    "provider",
+    "model",
+    "small_model",
+    "effort",
+    "image_tag",
+    "assistant_name",
+    "max_messages_per_prompt",
+    "model_params",
+    "mcp_servers",
+    "skills",
+    "packages_apt",
+    "packages_npm",
+    "packages_pip"
+  ]);
+  function changedFields() {
+    const out = /* @__PURE__ */ new Set();
+    if (!data || !draft) return out;
+    if (draftName.trim() !== data.name) out.add("name");
+    for (const k4 of Object.keys(draft)) {
+      if (draft[k4] !== data.config[k4]) out.add(k4);
+    }
+    if (data.site.available) {
+      if (siteEnabled !== data.site.enabled) out.add("site_enabled");
+      if (data.actorIsElevated && siteSlug.trim() !== (data.site.slug ?? "")) out.add("site_slug");
+    }
+    if (JSON.stringify(draftModelParams) !== JSON.stringify(data.modelParams ?? {})) out.add("model_params");
+    const dataPkg = data.packages ?? { apt: [], npm: [], pip: [] };
+    if (JSON.stringify(draftPackages.apt) !== JSON.stringify(dataPkg.apt)) out.add("packages_apt");
+    if (JSON.stringify(draftPackages.npm) !== JSON.stringify(dataPkg.npm)) out.add("packages_npm");
+    if (JSON.stringify(draftPackages.pip) !== JSON.stringify(dataPkg.pip)) out.add("packages_pip");
+    if (JSON.stringify(draftMcpServers) !== JSON.stringify(data.mcpServers ?? {})) out.add("mcp_servers");
+    if (JSON.stringify(draftSkills) !== JSON.stringify(data.skills ?? [])) out.add("skills");
+    return out;
+  }
+  const pending2 = changedFields();
+  const changed = pending2.size > 0;
+  const needsRestart = [...pending2].some((f5) => RESTART_REQUIRING_FIELDS.has(f5));
+  const imageRebuildNeeded = pending2.has("image_tag") && draft.image_tag != null && !!images && !images.images.some((i5) => i5.value === draft.image_tag);
+  const packagesChanged = pending2.has("packages_apt") || pending2.has("packages_npm") || pending2.has("packages_pip");
+  const needsRebuild = imageRebuildNeeded || packagesChanged;
+  const [confirmOpen, setConfirmOpen] = h2(false);
+  const [restartChecked, setRestartChecked] = h2(false);
+  const [rebuildChecked, setRebuildChecked] = h2(false);
+  const [archiveOpen, setArchiveOpen] = h2(false);
+  const [archiveConfirm, setArchiveConfirm] = h2("");
+  const [archiveBusy, setArchiveBusy] = h2(false);
+  const effectiveRestart = restartChecked || rebuildChecked;
+  const effectiveRebuild = rebuildChecked;
+  const canSave = changed;
+  y2(() => {
+    onActions({ refresh, apply: apply2, busy, canSave });
+    return () => onActions(null);
+  }, [busy, canSave, needsRestart, needsRebuild]);
+  function apply2() {
+    if (!changed) return;
+    setRestartChecked(needsRestart || needsRebuild);
+    setRebuildChecked(needsRebuild);
+    setConfirmOpen(true);
+  }
+  async function doApply() {
+    if (!draft) return;
+    setBusy(true);
+    try {
+      const JSON_FIELDS = /* @__PURE__ */ new Set([
+        "model_params",
+        "mcp_servers",
+        "skills",
+        "packages_apt",
+        "packages_npm",
+        "packages_pip"
+      ]);
+      const settingsChanged = [...pending2].some((f5) => !JSON_FIELDS.has(f5));
+      if (settingsChanged) {
+        const body = { ...draft };
+        if (data && draftName.trim() !== data.name) body.name = draftName.trim();
+        if (pending2.has("site_enabled")) body.site_enabled = siteEnabled;
+        if (pending2.has("site_slug")) body.site_slug = siteSlug.trim() || null;
+        const r4 = await call(apiPath(gid, "/settings"), "PATCH", body);
+        if (!r4.ok) {
+          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+          return;
+        }
+      }
+      if (pending2.has("model_params")) {
+        const r4 = await call(apiPath(gid, "/model-params"), "PATCH", { params: draftModelParams });
+        if (!r4.ok) {
+          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+          return;
+        }
+      }
+      if (pending2.has("packages_apt") || pending2.has("packages_npm") || pending2.has("packages_pip")) {
+        const body = {};
+        if (pending2.has("packages_apt")) body.apt = draftPackages.apt;
+        if (pending2.has("packages_npm")) body.npm = draftPackages.npm;
+        if (pending2.has("packages_pip")) body.pip = draftPackages.pip;
+        const r4 = await call(apiPath(gid, "/packages"), "PATCH", body);
+        if (!r4.ok) {
+          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+          return;
+        }
+      }
+      if (pending2.has("mcp_servers")) {
+        const r4 = await call(apiPath(gid, "/mcp-servers"), "PATCH", { servers: draftMcpServers });
+        if (!r4.ok) {
+          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+          return;
+        }
+      }
+      if (pending2.has("skills")) {
+        const r4 = await call(apiPath(gid, "/skills"), "PATCH", { skills: draftSkills });
+        if (!r4.ok) {
+          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+          return;
+        }
+      }
+      const fresh = await call(apiPath(gid, "/settings"));
+      if (fresh.ok) {
+        setData(fresh.data);
+        setDraft({ ...fresh.data.config });
+        setDraftName(fresh.data.name);
+        setSiteEnabled(fresh.data.site.enabled);
+        setSiteSlug(fresh.data.site.slug ?? "");
+        setDraftModelParams(fresh.data.modelParams);
+        setDraftPackages({
+          apt: [...fresh.data.packages?.apt ?? []],
+          npm: [...fresh.data.packages?.npm ?? []],
+          pip: [...fresh.data.packages?.pip ?? []]
+        });
+        setDraftMcpServers({ ...fresh.data.mcpServers ?? {} });
+        setDraftSkills(fresh.data.skills === "all" ? "all" : [...fresh.data.skills ?? []]);
+        groups.value = groups.value.map((g8) => g8.id === gid ? { ...g8, name: fresh.data.name } : g8);
+      }
+      if (effectiveRebuild || effectiveRestart) {
+        const r4 = await runRestart(effectiveRebuild);
+        if (!r4.ok) return;
+        showToast(effectiveRebuild ? `Rebuilt image and restarted ${r4.restarted} session${r4.restarted === 1 ? "" : "s"}.` : `Restarted ${r4.restarted} session${r4.restarted === 1 ? "" : "s"}.`);
+      } else {
+        showToast("Saved.");
+      }
+      setConfirmOpen(false);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function doArchive() {
+    if (archiveBusy) return;
+    setArchiveBusy(true);
+    try {
+      const r4 = await call(
+        apiPath(gid, "/archive"),
+        "POST",
+        { confirm_folder: archiveConfirm.trim() }
+      );
+      if (!r4.ok) {
+        showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+        return;
+      }
+      const remaining = groups.value.filter((g8) => g8.id !== gid);
+      groups.value = remaining;
+      setArchiveOpen(false);
+      onClose();
+      showToast(`Archived. Restore on the host with: ncl groups restore --folder ${r4.data.folder}`);
+      if (groupId.value === gid && remaining[0]) void selectGroup(remaining[0].id);
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+  const imageOptions = (images?.images ?? []).map((i5) => {
+    const age = formatAge(i5.createdAt);
+    const size = formatSize(i5.size);
+    const detailParts = [age, size, i5.isDefault ? "default" : null].filter(Boolean);
+    return {
+      value: i5.value,
+      label: i5.label,
+      detail: detailParts.length ? detailParts.join(" \xB7 ") : void 0,
+      tooltip: [
+        i5.value,
+        i5.createdAt ? `Created: ${new Date(i5.createdAt).toLocaleString()}` : null,
+        size ? `Size: ${size}` : null,
+        i5.isDefault ? "Install default image (used when image_tag is unset)." : null
+      ].filter(Boolean).join("\n")
+    };
+  });
+  const selectedImg = images?.images.find((i5) => i5.value === draft.image_tag) ?? null;
+  const selectedImgAge = formatAge(selectedImg?.createdAt ?? null);
+  const selectedImgSize = formatSize(selectedImg?.size ?? null);
+  return /* @__PURE__ */ u4("section", { class: section === "mcp" ? "ga-mcp-tab" : void 0, children: [
+    section === "settings" ? /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "muted ga-folder-line", children: [
+      "Folder ",
+      /* @__PURE__ */ u4("code", { children: data.folder }),
+      " ",
+      /* @__PURE__ */ u4("code", { class: "ga-folder-id", children: data.id }),
+      data.updatedAt ? ` \xB7 last updated ${new Date(data.updatedAt).toLocaleString()}` : "",
+      data.runningSessionCount > 0 ? ` \xB7 ${data.runningSessionCount} running session${data.runningSessionCount === 1 ? "" : "s"}` : " \xB7 no running sessions"
+    ] }) }) : null,
+    section === "models" ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Provider", info: draft.provider ? PROVIDER_INFO[draft.provider] ?? `Provider "${draft.provider}".` : void 0, children: [
+        /* @__PURE__ */ u4(
+          Combobox,
+          {
+            value: draft.provider,
+            options: (() => {
+              const selectable = data.validProviders.slice();
+              if (draft.provider && !selectable.includes(draft.provider)) selectable.push(draft.provider);
+              return selectable.map((p5) => ({ value: p5, label: p5, tooltip: PROVIDER_INFO[p5] }));
+            })(),
+            placeholder: data.defaults.provider ? `default: ${data.defaults.provider}` : "pick a provider",
+            disabled: busy,
+            freeform: false,
+            onChange: (v5) => update("provider", v5)
+          }
+        ),
+        data.providesAgentSurfaces ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "This provider composes its own instructions and discovers skills its own way, so the Skills selection and Assistant name don't apply while it's active." }) : null
+      ] }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Model", children: /* @__PURE__ */ u4(
+        ModelPickerDialog,
+        {
+          value: draft.model,
+          provider: provider ?? data.defaults.provider,
+          placeholder: data.defaults.model ? `default: ${data.defaults.model}` : "pick or type a model id",
+          disabled: busy,
+          apiBasePath: apiPath(gid, ""),
+          outputModality: "text",
+          onChange: (v5) => update("model", v5)
+        }
+      ) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Small model", info: "Lighter model for background tasks like compaction and summaries (cost optimization). Used by OpenCode; other providers may use in future.", children: /* @__PURE__ */ u4(
+        ModelPickerDialog,
+        {
+          value: draft.small_model,
+          provider: provider ?? data.defaults.provider,
+          placeholder: "same as main model",
+          disabled: busy,
+          apiBasePath: apiPath(gid, ""),
+          outputModality: "text",
+          onChange: (v5) => update("small_model", v5)
+        }
+      ) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Transcription model", info: "OpenRouter model used when the main model cannot accept audio directly. When set, a mic button appears in the chat composer.\nLeave blank to disable voice input.", children: /* @__PURE__ */ u4(
+        ModelPickerDialog,
+        {
+          value: draft.transcription_model,
+          provider: "openrouter",
+          placeholder: data.defaults.transcription_model || "google/gemini-2.0-flash-lite-001",
+          disabled: busy,
+          apiBasePath: apiPath(gid, ""),
+          inputModality: "audio",
+          onChange: (v5) => update("transcription_model", v5)
+        }
+      ) }),
+      /* @__PURE__ */ u4(ModelParamsEditor, { gid, provider: draft.provider, value: draftModelParams, busy, onChange: setDraftModelParams })
+    ] }) : null,
+    section === "settings" ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Name", children: /* @__PURE__ */ u4("input", { type: "text", value: draftName, disabled: busy, maxLength: 100, onInput: (e4) => setDraftName(e4.target.value) }) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Effort", children: /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "text",
+          value: draft.effort ?? "",
+          disabled: busy,
+          onInput: (e4) => update("effort", e4.currentTarget.value || null),
+          placeholder: "provider-specific (e.g. high)"
+        }
+      ) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Image tag", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
+        /* @__PURE__ */ u4(
+          Combobox,
+          {
+            value: draft.image_tag,
+            options: imageOptions,
+            placeholder: data.defaults.image_tag ? `default: ${data.defaults.image_tag}` : "pick an image",
+            disabled: busy,
+            onChange: (v5) => update("image_tag", v5)
+          }
+        ),
+        selectedImg ? /* @__PURE__ */ u4("div", { class: "group-admin-selected-info", children: [
+          /* @__PURE__ */ u4("div", { class: "selected-title", children: [
+            selectedImg.label,
+            selectedImgAge || selectedImgSize ? /* @__PURE__ */ u4("span", { class: "selected-detail", children: [
+              " \xB7 ",
+              [selectedImgAge, selectedImgSize].filter(Boolean).join(" \xB7 ")
+            ] }) : null,
+            selectedImg.isDefault ? /* @__PURE__ */ u4("span", { class: "selected-detail", children: " \xB7 default" }) : null
+          ] }),
+          selectedImg.createdAt ? /* @__PURE__ */ u4("pre", { class: "selected-tooltip", children: [
+            "Created: ",
+            new Date(selectedImg.createdAt).toLocaleString()
+          ] }) : null
+        ] }) : draft.image_tag && images ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Tag not in local image list \u2014 will fail at container start if not pulled." }) : null
+      ] }) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Assistant name", children: /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "text",
+          value: draft.assistant_name ?? "",
+          disabled: busy,
+          onInput: (e4) => update("assistant_name", e4.currentTarget.value || null)
+        }
+      ) }),
+      /* @__PURE__ */ u4(
+        GroupAdminField,
+        {
+          label: "Max messages / prompt",
+          info: "Hard cap on how many history messages get included in each model call. Higher = more context but more cost; lower = faster + cheaper but the agent forgets sooner. Leave blank for the provider default.",
+          children: /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "number",
+              min: 1,
+              max: 1e3,
+              value: draft.max_messages_per_prompt ?? "",
+              disabled: busy,
+              onInput: (e4) => {
+                const v5 = e4.currentTarget.value;
+                update("max_messages_per_prompt", v5 ? Number(v5) : null);
+              }
+            }
+          )
+        }
+      ),
+      /* @__PURE__ */ u4(
+        GroupAdminField,
+        {
+          label: "CLI scope",
+          info: "Controls which `ncl` commands an agent in this group can run.\ndisabled = no CLI access.\ngroup = limited to the group's own resources.\nglobal = unrestricted (owner / global admin only \u2014 use sparingly).",
+          children: /* @__PURE__ */ u4(
+            Combobox,
+            {
+              value: draft.cli_scope,
+              options: data.validCliScopes.filter((s5) => s5 !== "global" || data.actorIsElevated || draft.cli_scope === "global").map((s5) => ({
+                value: s5,
+                label: s5,
+                tooltip: s5 === "global" && !data.actorIsElevated ? "Owner / global admin only." : void 0
+              })),
+              placeholder: "pick a scope",
+              disabled: busy,
+              freeform: false,
+              onChange: (v5) => update("cli_scope", v5)
+            }
+          )
+        }
+      ),
+      data.site.available ? /* @__PURE__ */ u4(
+        GroupAdminField,
+        {
+          label: "Website",
+          info: "Serve a public static website for this group from a folder in its workspace. Files in the FQDN-named folder become readable by anyone with the link \u2014 no login required. Separate from private file-share links.",
+          children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
+            /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+              /* @__PURE__ */ u4(
+                "input",
+                {
+                  type: "checkbox",
+                  checked: siteEnabled,
+                  disabled: busy,
+                  onChange: (e4) => setSiteEnabled(e4.target.checked)
+                }
+              ),
+              /* @__PURE__ */ u4("span", { children: "Enable website" })
+            ] }),
+            data.actorIsElevated ? /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "text",
+                value: siteSlug,
+                disabled: busy,
+                maxLength: 63,
+                placeholder: data.site.baseDomain ? `subdomain (.${data.site.baseDomain})` : "subdomain",
+                onInput: (e4) => setSiteSlug(e4.currentTarget.value)
+              }
+            ) : null,
+            siteEnabled && data.site.url ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+              "Live at ",
+              /* @__PURE__ */ u4("a", { href: data.site.url, target: "_blank", rel: "noopener noreferrer", children: data.site.url }),
+              " ",
+              "\u2014 publish by writing files into the ",
+              /* @__PURE__ */ u4("code", { children: data.site.fqdn }),
+              " folder in the workspace."
+            ] }) : siteEnabled ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Save to allocate a subdomain and go live." }) : /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Disabled \u2014 enable to publish a public static site on its own subdomain." })
+          ] })
+        }
+      ) : null,
+      /* @__PURE__ */ u4("div", { class: "group-admin-danger-zone", "data-testid": "danger-zone", children: /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "danger",
+          "data-testid": "archive-btn",
+          disabled: busy || archiveBusy,
+          onClick: () => {
+            setArchiveConfirm("");
+            setArchiveOpen(true);
+          },
+          children: "Archive group\u2026"
+        }
+      ) })
+    ] }) : null,
+    section === "packages" ? /* @__PURE__ */ u4(
+      PackagesSection,
+      {
+        value: draftPackages,
+        busy,
+        onChange: setDraftPackages
+      }
+    ) : null,
+    section === "mcp" ? /* @__PURE__ */ u4(
+      McpServersSection,
+      {
+        value: draftMcpServers,
+        busy,
+        onChange: setDraftMcpServers
+      }
+    ) : null,
+    section === "skills" ? /* @__PURE__ */ u4(
+      SkillsSection,
+      {
+        value: draftSkills,
+        busy,
+        onChange: setDraftSkills
+      }
+    ) : null,
+    /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending2.size} unsaved change${pending2.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),
+    confirmOpen ? /* @__PURE__ */ u4(
+      MobileDialog,
+      {
+        title: "Apply changes",
+        onClose: () => setConfirmOpen(false),
+        closeDisabled: busy,
+        maxWidth: "440px",
+        className: "ga-confirm-modal",
+        children: [
+          /* @__PURE__ */ u4("div", { class: "settings-body", children: [
+            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
+              pending2.size,
+              " setting",
+              pending2.size === 1 ? "" : "s",
+              " will be saved:",
+              " ",
+              /* @__PURE__ */ u4("code", { children: [...pending2].join(", ") })
+            ] }),
+            /* @__PURE__ */ u4("div", { class: "ga-confirm-options", children: [
+              /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+                /* @__PURE__ */ u4(
+                  "input",
+                  {
+                    type: "checkbox",
+                    checked: effectiveRestart,
+                    disabled: busy || rebuildChecked,
+                    onChange: (e4) => setRestartChecked(e4.target.checked)
+                  }
+                ),
+                /* @__PURE__ */ u4("span", { children: "Restart sessions" }),
+                /* @__PURE__ */ u4(Tooltip, { text: "Stop and respawn all running container sessions for this group so they pick up the saved config.\nDefaults on when you change provider, model, effort, image tag, assistant name, or max messages per prompt. CLI scope alone does not need a restart \u2014 it is re-read on every CLI call.\nActive conversations resume on the next user message.", children: /* @__PURE__ */ u4("span", { class: "info-icon", "aria-label": "More info", children: "i" }) })
+              ] }),
+              /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+                /* @__PURE__ */ u4(
+                  "input",
+                  {
+                    type: "checkbox",
+                    checked: rebuildChecked,
+                    disabled: busy,
+                    onChange: (e4) => setRebuildChecked(e4.target.checked)
+                  }
+                ),
+                /* @__PURE__ */ u4("span", { children: "Rebuild image" }),
+                /* @__PURE__ */ u4(Tooltip, { text: "Rebuild the container image before restarting.\nDefaults on when the chosen image tag does not exist locally. Otherwise normally only needed after `ncl groups config add-package` / `add-mcp-server` or a base-image change \u2014 that workflow lives in the CLI today, not this UI.\nA rebuild always implies a restart and takes minutes, not seconds.", children: /* @__PURE__ */ u4("span", { class: "info-icon", "aria-label": "More info", children: "i" }) })
+              ] })
+            ] }),
+            needsRestart && !effectiveRestart ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: "These changes won\u2019t take effect until the sessions restart." }) : null
+          ] }),
+          /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
+            /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => setConfirmOpen(false), children: "Cancel" }),
+            /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy, onClick: doApply, children: busy ? "Applying\u2026" : effectiveRebuild ? "Save & rebuild" : effectiveRestart ? "Save & restart" : "Save" })
+          ] })
+        ]
+      }
+    ) : null,
+    archiveOpen ? /* @__PURE__ */ u4(
+      MobileDialog,
+      {
+        title: "Archive group",
+        onClose: () => setArchiveOpen(false),
+        closeDisabled: archiveBusy,
+        maxWidth: "440px",
+        className: "ga-confirm-modal",
+        children: [
+          /* @__PURE__ */ u4("div", { class: "settings-body", children: [
+            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
+              "Running container sessions will stop and the group will be removed from this UI. Its folder is renamed with a ",
+              /* @__PURE__ */ u4("code", { children: "~" }),
+              " suffix \u2014 nothing is deleted."
+            ] }),
+            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
+              "Restore is host-only: ",
+              /* @__PURE__ */ u4("code", { children: [
+                "ncl groups restore --folder ",
+                data.folder
+              ] }),
+              "."
+            ] }),
+            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:8px", children: [
+              "Type ",
+              /* @__PURE__ */ u4("code", { children: data.folder }),
+              " to confirm:"
+            ] }),
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "text",
+                "data-testid": "archive-confirm-input",
+                value: archiveConfirm,
+                disabled: archiveBusy,
+                placeholder: data.folder,
+                onInput: (e4) => setArchiveConfirm(e4.currentTarget.value)
+              }
+            )
+          ] }),
+          /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
+            /* @__PURE__ */ u4("button", { type: "button", disabled: archiveBusy, onClick: () => setArchiveOpen(false), children: "Cancel" }),
+            /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "button",
+                class: "danger",
+                "data-testid": "archive-confirm-btn",
+                disabled: archiveBusy || archiveConfirm.trim() !== data.folder,
+                onClick: doArchive,
+                children: archiveBusy ? "Archiving\u2026" : "Archive group"
+              }
+            )
+          ] })
+        ]
+      }
+    ) : null
   ] });
 }
 
