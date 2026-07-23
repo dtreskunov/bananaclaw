@@ -1,5 +1,5 @@
 import './GroupAdminMcp.css';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
 import { isMobile } from '../state';
@@ -53,10 +53,20 @@ export function McpServersSection({
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'stdio' | 'http' | 'sse'>('stdio');
+  const [newConnection, setNewConnection] = useState('');
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
   const trimmedNew = newName.trim();
+  const trimmedConnection = newConnection.trim();
   const newNameInvalid = trimmedNew !== '' && !MCP_NAME_RE.test(trimmedNew);
   const newNameDup = trimmedNew !== '' && trimmedNew in value;
-  const canAdd = trimmedNew !== '' && !newNameInvalid && !newNameDup;
+  const newConnectionInvalid = newType !== 'stdio'
+    && trimmedConnection !== ''
+    && !/^https?:\/\//.test(trimmedConnection);
+  const canAdd = trimmedNew !== ''
+    && !newNameInvalid
+    && !newNameDup
+    && trimmedConnection !== ''
+    && !newConnectionInvalid;
   const selectedValue = selectedName ? value[selectedName] : undefined;
 
   useEffect(() => {
@@ -71,11 +81,12 @@ export function McpServersSection({
   function addServer(): void {
     if (!canAdd) return;
     const config: McpServerConfigDto = newType === 'stdio'
-      ? { type: 'stdio', command: '' }
-      : { type: newType, url: '' };
+      ? { type: 'stdio', command: trimmedConnection }
+      : { type: newType, url: trimmedConnection };
     onChange({ ...value, [trimmedNew]: config });
     setSelectedName(trimmedNew);
     setNewName('');
+    setNewConnection('');
     setAddOpen(false);
     if (mobile) setEditorOpen(true);
   }
@@ -102,21 +113,34 @@ export function McpServersSection({
   function beginAdd(): void {
     setNewName('');
     setNewType('stdio');
+    setNewConnection('');
     setAddOpen(true);
+  }
+
+  function cancelAdd(): void {
+    setAddOpen(false);
+    requestAnimationFrame(() => addButtonRef.current?.focus());
   }
 
   const addForm = (
     <McpAddServerForm
       name={newName}
       type={newType}
+      connection={newConnection}
+      mobile={mobile}
       disabled={busy}
       invalid={newNameInvalid}
       duplicate={newNameDup}
+      connectionInvalid={newConnectionInvalid}
       canAdd={canAdd}
       onNameChange={setNewName}
-      onTypeChange={setNewType}
+      onTypeChange={(type) => {
+        setNewType(type);
+        setNewConnection('');
+      }}
+      onConnectionChange={setNewConnection}
       onAdd={addServer}
-      onCancel={() => setAddOpen(false)}
+      onCancel={cancelAdd}
     />
   );
 
@@ -140,7 +164,7 @@ export function McpServersSection({
           take effect — the SDK builds the MCP map at session start. Mirrors{' '}
           <code>ncl groups config add-mcp-server / remove-mcp-server</code>.
         </p>
-        <button type="button" class="ga-mcp-add" disabled={busy} onClick={beginAdd}>
+        <button ref={addButtonRef} type="button" class="ga-mcp-add" disabled={busy} onClick={beginAdd}>
           + Add server
         </button>
       </div>
@@ -165,11 +189,17 @@ export function McpServersSection({
       {mobile && addOpen ? (
         <MobileDialog
           title="Add MCP server"
-          onBack={() => setAddOpen(false)}
+          onBack={cancelAdd}
           backLabel="Back to MCP servers"
-          onClose={() => setAddOpen(false)}
+          onClose={cancelAdd}
         >
           <div class="settings-body ga-mcp-mobile-editor">{addForm}</div>
+          <MobileDialogFooter>
+            <button type="button" onClick={cancelAdd}>Cancel</button>
+            <button type="submit" form="ga-mcp-add-server-form" class="primary" disabled={busy || !canAdd}>
+              Add server
+            </button>
+          </MobileDialogFooter>
         </MobileDialog>
       ) : null}
 
@@ -255,55 +285,109 @@ function McpServerList({
 function McpAddServerForm({
   name,
   type,
+  connection,
+  mobile,
   disabled,
   invalid,
   duplicate,
+  connectionInvalid,
   canAdd,
   onNameChange,
   onTypeChange,
+  onConnectionChange,
   onAdd,
   onCancel,
 }: {
   name: string;
   type: 'stdio' | 'http' | 'sse';
+  connection: string;
+  mobile: boolean;
   disabled: boolean;
   invalid: boolean;
   duplicate: boolean;
+  connectionInvalid: boolean;
   canAdd: boolean;
   onNameChange: (name: string) => void;
   onTypeChange: (type: 'stdio' | 'http' | 'sse') => void;
+  onConnectionChange: (connection: string) => void;
   onAdd: () => void;
   onCancel: () => void;
 }): JSX.Element {
+  const nameError = invalid
+    ? 'Start with a letter or _, then use letters, digits, _, ., or -.'
+    : duplicate
+      ? `A server named "${name.trim()}" already exists.`
+      : null;
+  const connectionLabel = type === 'stdio' ? 'Command' : 'URL';
+  const connectionPlaceholder = type === 'stdio'
+    ? 'e.g. npx @modelcontextprotocol/server-filesystem'
+    : 'https://example.com/mcp';
+  const transportHelp = type === 'stdio'
+    ? 'Runs a local process inside the agent container.'
+    : type === 'http'
+      ? 'Connects to a Streamable HTTP endpoint.'
+      : 'Connects using the legacy SSE transport.';
+
   return (
-    <div class="ga-mcp-add-form">
-      <div>
+    <form
+      id="ga-mcp-add-server-form"
+      class="ga-mcp-add-form"
+      onSubmit={(event) => { event.preventDefault(); onAdd(); }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          onCancel();
+        }
+      }}
+    >
+      {!mobile ? <div>
         <h3>Add MCP server</h3>
-        <p class="group-admin-help">The name is how the agent identifies this server's tools.</p>
-      </div>
+        <p class="group-admin-help">Configure the connection now; advanced settings remain available after adding.</p>
+      </div> : null}
       <label class="ga-mcp-row">
         <span class="ga-mcp-row-label">Server name</span>
         <input
           type="text"
-          class="ga-mcp-input"
+          class={`ga-mcp-input${nameError ? ' ga-mcp-input-invalid' : ''}`}
           placeholder="e.g. context7 or home_assistant"
           value={name}
           disabled={disabled}
           autoFocus
+          aria-invalid={nameError ? 'true' : undefined}
+          aria-describedby={nameError ? 'ga-mcp-add-name-error' : undefined}
           onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => onNameChange(e.currentTarget.value)}
-          onKeyDown={(e: JSX.TargetedKeyboardEvent<HTMLInputElement>) => {
-            if (e.key === 'Enter') { e.preventDefault(); onAdd(); }
-          }}
         />
+        {nameError ? <span id="ga-mcp-add-name-error" class="ga-mcp-field-error">{nameError}</span> : null}
       </label>
-      {invalid ? <p class="ga-confirm-warn">Start with a letter or _, then use letters, digits, _, ., or -.</p> : null}
-      {duplicate ? <p class="ga-confirm-warn">A server named "{name.trim()}" already exists.</p> : null}
-      <McpTransportControl value={type} disabled={disabled} onChange={onTypeChange} />
-      <div class="ga-mcp-form-actions">
-        <button type="button" onClick={onCancel}>Cancel</button>
-        <button type="button" class="primary" disabled={disabled || !canAdd} onClick={onAdd}>Add server</button>
+      <div class="ga-mcp-add-transport">
+        <span class="ga-mcp-row-label">Transport</span>
+        <McpTransportControl value={type} disabled={disabled} onChange={onTypeChange} />
+        <span class="group-admin-help">{transportHelp}</span>
       </div>
-    </div>
+      <label class="ga-mcp-row">
+        <span class="ga-mcp-row-label">{connectionLabel}</span>
+        <input
+          type={type === 'stdio' ? 'text' : 'url'}
+          class={`ga-mcp-input${connectionInvalid ? ' ga-mcp-input-invalid' : ''}`}
+          placeholder={connectionPlaceholder}
+          value={connection}
+          disabled={disabled}
+          aria-invalid={connectionInvalid ? 'true' : undefined}
+          aria-describedby={connectionInvalid ? 'ga-mcp-add-connection-error' : undefined}
+          onInput={(event: JSX.TargetedEvent<HTMLInputElement>) => onConnectionChange(event.currentTarget.value)}
+        />
+        {connectionInvalid ? (
+          <span id="ga-mcp-add-connection-error" class="ga-mcp-field-error">URL must start with http:// or https://.</span>
+        ) : null}
+      </label>
+      {!mobile ? (
+        <div class="ga-mcp-form-actions">
+          <button type="button" onClick={onCancel}>Cancel</button>
+          <button type="submit" class="primary" disabled={disabled || !canAdd}>Add server</button>
+        </div>
+      ) : null}
+    </form>
   );
 }
 

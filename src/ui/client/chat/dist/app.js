@@ -24825,10 +24825,14 @@ function McpServersSection({
   const [addOpen, setAddOpen] = h2(false);
   const [newName, setNewName] = h2("");
   const [newType, setNewType] = h2("stdio");
+  const [newConnection, setNewConnection] = h2("");
+  const addButtonRef = A2(null);
   const trimmedNew = newName.trim();
+  const trimmedConnection = newConnection.trim();
   const newNameInvalid = trimmedNew !== "" && !MCP_NAME_RE.test(trimmedNew);
   const newNameDup = trimmedNew !== "" && trimmedNew in value;
-  const canAdd = trimmedNew !== "" && !newNameInvalid && !newNameDup;
+  const newConnectionInvalid = newType !== "stdio" && trimmedConnection !== "" && !/^https?:\/\//.test(trimmedConnection);
+  const canAdd = trimmedNew !== "" && !newNameInvalid && !newNameDup && trimmedConnection !== "" && !newConnectionInvalid;
   const selectedValue = selectedName ? value[selectedName] : void 0;
   y2(() => {
     if (selectedName && selectedName in value) return;
@@ -24839,10 +24843,11 @@ function McpServersSection({
   }, [mobile]);
   function addServer() {
     if (!canAdd) return;
-    const config = newType === "stdio" ? { type: "stdio", command: "" } : { type: newType, url: "" };
+    const config = newType === "stdio" ? { type: "stdio", command: trimmedConnection } : { type: newType, url: trimmedConnection };
     onChange({ ...value, [trimmedNew]: config });
     setSelectedName(trimmedNew);
     setNewName("");
+    setNewConnection("");
     setAddOpen(false);
     if (mobile) setEditorOpen(true);
   }
@@ -24865,21 +24870,33 @@ function McpServersSection({
   function beginAdd() {
     setNewName("");
     setNewType("stdio");
+    setNewConnection("");
     setAddOpen(true);
+  }
+  function cancelAdd() {
+    setAddOpen(false);
+    requestAnimationFrame(() => addButtonRef.current?.focus());
   }
   const addForm = /* @__PURE__ */ u4(
     McpAddServerForm,
     {
       name: newName,
       type: newType,
+      connection: newConnection,
+      mobile,
       disabled: busy,
       invalid: newNameInvalid,
       duplicate: newNameDup,
+      connectionInvalid: newConnectionInvalid,
       canAdd,
       onNameChange: setNewName,
-      onTypeChange: setNewType,
+      onTypeChange: (type) => {
+        setNewType(type);
+        setNewConnection("");
+      },
+      onConnectionChange: setNewConnection,
       onAdd: addServer,
-      onCancel: () => setAddOpen(false)
+      onCancel: cancelAdd
     }
   );
   const editor = selectedName && selectedValue ? /* @__PURE__ */ u4(
@@ -24902,7 +24919,7 @@ function McpServersSection({
         /* @__PURE__ */ u4("code", { children: "ncl groups config add-mcp-server / remove-mcp-server" }),
         "."
       ] }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "ga-mcp-add", disabled: busy, onClick: beginAdd, children: "+ Add server" })
+      /* @__PURE__ */ u4("button", { ref: addButtonRef, type: "button", class: "ga-mcp-add", disabled: busy, onClick: beginAdd, children: "+ Add server" })
     ] }),
     mobile ? /* @__PURE__ */ u4(McpServerList, { names, value, selectedName, onSelect: selectServer }) : /* @__PURE__ */ u4("div", { class: "ga-mcp-workspace", children: [
       /* @__PURE__ */ u4(McpServerList, { names, value, selectedName, onSelect: selectServer }),
@@ -24916,10 +24933,16 @@ function McpServersSection({
       MobileDialog,
       {
         title: "Add MCP server",
-        onBack: () => setAddOpen(false),
+        onBack: cancelAdd,
         backLabel: "Back to MCP servers",
-        onClose: () => setAddOpen(false),
-        children: /* @__PURE__ */ u4("div", { class: "settings-body ga-mcp-mobile-editor", children: addForm })
+        onClose: cancelAdd,
+        children: [
+          /* @__PURE__ */ u4("div", { class: "settings-body ga-mcp-mobile-editor", children: addForm }),
+          /* @__PURE__ */ u4(MobileDialogFooter, { children: [
+            /* @__PURE__ */ u4("button", { type: "button", onClick: cancelAdd, children: "Cancel" }),
+            /* @__PURE__ */ u4("button", { type: "submit", form: "ga-mcp-add-server-form", class: "primary", disabled: busy || !canAdd, children: "Add server" })
+          ] })
+        ]
       }
     ) : null,
     mobile && editorOpen && editor ? /* @__PURE__ */ u4(
@@ -24991,53 +25014,91 @@ function McpServerList({
 function McpAddServerForm({
   name,
   type,
+  connection,
+  mobile,
   disabled,
   invalid,
   duplicate,
+  connectionInvalid,
   canAdd,
   onNameChange,
   onTypeChange,
+  onConnectionChange,
   onAdd,
   onCancel
 }) {
-  return /* @__PURE__ */ u4("div", { class: "ga-mcp-add-form", children: [
-    /* @__PURE__ */ u4("div", { children: [
-      /* @__PURE__ */ u4("h3", { children: "Add MCP server" }),
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "The name is how the agent identifies this server's tools." })
-    ] }),
-    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Server name" }),
-      /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "text",
-          class: "ga-mcp-input",
-          placeholder: "e.g. context7 or home_assistant",
-          value: name,
-          disabled,
-          autoFocus: true,
-          onInput: (e4) => onNameChange(e4.currentTarget.value),
-          onKeyDown: (e4) => {
-            if (e4.key === "Enter") {
-              e4.preventDefault();
-              onAdd();
-            }
-          }
+  const nameError = invalid ? "Start with a letter or _, then use letters, digits, _, ., or -." : duplicate ? `A server named "${name.trim()}" already exists.` : null;
+  const connectionLabel = type === "stdio" ? "Command" : "URL";
+  const connectionPlaceholder = type === "stdio" ? "e.g. npx @modelcontextprotocol/server-filesystem" : "https://example.com/mcp";
+  const transportHelp = type === "stdio" ? "Runs a local process inside the agent container." : type === "http" ? "Connects to a Streamable HTTP endpoint." : "Connects using the legacy SSE transport.";
+  return /* @__PURE__ */ u4(
+    "form",
+    {
+      id: "ga-mcp-add-server-form",
+      class: "ga-mcp-add-form",
+      onSubmit: (event) => {
+        event.preventDefault();
+        onAdd();
+      },
+      onKeyDown: (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onCancel();
         }
-      )
-    ] }),
-    invalid ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: "Start with a letter or _, then use letters, digits, _, ., or -." }) : null,
-    duplicate ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
-      'A server named "',
-      name.trim(),
-      '" already exists.'
-    ] }) : null,
-    /* @__PURE__ */ u4(McpTransportControl, { value: type, disabled, onChange: onTypeChange }),
-    /* @__PURE__ */ u4("div", { class: "ga-mcp-form-actions", children: [
-      /* @__PURE__ */ u4("button", { type: "button", onClick: onCancel, children: "Cancel" }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: disabled || !canAdd, onClick: onAdd, children: "Add server" })
-    ] })
-  ] });
+      },
+      children: [
+        !mobile ? /* @__PURE__ */ u4("div", { children: [
+          /* @__PURE__ */ u4("h3", { children: "Add MCP server" }),
+          /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Configure the connection now; advanced settings remain available after adding." })
+        ] }) : null,
+        /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Server name" }),
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "text",
+              class: `ga-mcp-input${nameError ? " ga-mcp-input-invalid" : ""}`,
+              placeholder: "e.g. context7 or home_assistant",
+              value: name,
+              disabled,
+              autoFocus: true,
+              "aria-invalid": nameError ? "true" : void 0,
+              "aria-describedby": nameError ? "ga-mcp-add-name-error" : void 0,
+              onInput: (e4) => onNameChange(e4.currentTarget.value)
+            }
+          ),
+          nameError ? /* @__PURE__ */ u4("span", { id: "ga-mcp-add-name-error", class: "ga-mcp-field-error", children: nameError }) : null
+        ] }),
+        /* @__PURE__ */ u4("div", { class: "ga-mcp-add-transport", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Transport" }),
+          /* @__PURE__ */ u4(McpTransportControl, { value: type, disabled, onChange: onTypeChange }),
+          /* @__PURE__ */ u4("span", { class: "group-admin-help", children: transportHelp })
+        ] }),
+        /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: connectionLabel }),
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: type === "stdio" ? "text" : "url",
+              class: `ga-mcp-input${connectionInvalid ? " ga-mcp-input-invalid" : ""}`,
+              placeholder: connectionPlaceholder,
+              value: connection,
+              disabled,
+              "aria-invalid": connectionInvalid ? "true" : void 0,
+              "aria-describedby": connectionInvalid ? "ga-mcp-add-connection-error" : void 0,
+              onInput: (event) => onConnectionChange(event.currentTarget.value)
+            }
+          ),
+          connectionInvalid ? /* @__PURE__ */ u4("span", { id: "ga-mcp-add-connection-error", class: "ga-mcp-field-error", children: "URL must start with http:// or https://." }) : null
+        ] }),
+        !mobile ? /* @__PURE__ */ u4("div", { class: "ga-mcp-form-actions", children: [
+          /* @__PURE__ */ u4("button", { type: "button", onClick: onCancel, children: "Cancel" }),
+          /* @__PURE__ */ u4("button", { type: "submit", class: "primary", disabled: disabled || !canAdd, children: "Add server" })
+        ] }) : null
+      ]
+    }
+  );
 }
 function McpServerEditor({
   name,
