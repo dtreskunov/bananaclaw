@@ -207,14 +207,6 @@ nav.tab-bar-strip.group-strip {
 nav.tab-bar-strip.group-strip .tab-item {
   gap: 2px;
 }
-nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
-  display: none;
-}
-@media (max-width: 720px) {
-  header .more-agents-btn {
-    display: none;
-  }
-}
 .group-picker-modal .group-picker-list {
   padding: 8px;
   display: flex;
@@ -519,23 +511,6 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
   background: rgba(228, 68, 68, 0.15);
   color: var(--error);
 }
-.settings-account {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.settings-account-name {
-  font-size: var(--font-base);
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
 @media (max-width: 720px) {
   .settings-backdrop {
     padding: 0;
@@ -744,6 +719,97 @@ nav.tab-bar-strip.group-strip .tab-item.group-extra-more {
 .tab-bar-dropdown.is-admin-visible,
 .tab-bar-sheet-row.is-admin-visible {
   opacity: 0.7;
+}
+
+/* src/components/UserMenu.css */
+.user-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+.avatar-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--surface-fg);
+  font-family: inherit;
+  font-size: var(--font-sm);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.avatar-btn:hover,
+.user-menu.open .avatar-btn {
+  background: var(--wash);
+  border-color: var(--muted);
+}
+.avatar-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: max-content;
+  min-width: 190px;
+  max-width: min(280px, calc(100vw - 20px));
+  padding: 4px 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--surface-fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 24px var(--shadow-color);
+}
+.user-menu-identity {
+  padding: 7px 12px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  border-bottom: 1px solid var(--border);
+}
+.user-menu-panel button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.user-menu-panel button:hover,
+.user-menu-panel button:focus-visible {
+  background: var(--wash);
+  outline: none;
+}
+.user-menu-logout-form {
+  margin: 0;
+}
+.user-menu-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+@media (max-width: 720px) {
+  .avatar-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .user-menu-logout-form {
+    width: 100%;
+  }
 }
 
 /* src/components/ThreadsRail.css */

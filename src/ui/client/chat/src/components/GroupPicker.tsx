@@ -43,11 +43,6 @@ function tipFor(g: Group, isAdminOnly: boolean): string {
   return parts.join(' \u00B7 ');
 }
 
-function openModal(mode: 'all' | 'non-members'): void {
-  groupPickerMode.value = mode;
-  groupPickerOpen.value = true;
-}
-
 export function GroupStrip(): JSX.Element | null {
   const elevated = isElevatedUser.value;
   // Subscribe so relative times refresh.
@@ -73,17 +68,6 @@ export function GroupStrip(): JSX.Element | null {
 
   const extras: TabExtra[] = [];
   if (elevated) {
-    const elevatedOnlyCount = all.filter(isElevatedOnly).length;
-    if (elevatedOnlyCount > 0) {
-      extras.push({
-        key: 'more',
-        label: `More agents (${elevatedOnlyCount})`,
-        title: `Groups available through system admin access (${elevatedOnlyCount})`,
-        ariaHaspopup: 'dialog',
-        onClick: () => openModal('non-members'),
-        className: 'group-extra-more',
-      });
-    }
     extras.push({
       key: 'new',
       label: 'New Agent\u2026',
@@ -110,26 +94,6 @@ export function GroupStrip(): JSX.Element | null {
       extras={extras.length ? extras : undefined}
       className="group-strip"
     />
-  );
-}
-
-// Compact desktop entry point for groups available through system-wide access.
-export function MoreAgentsButton(): JSX.Element | null {
-  const elevated = isElevatedUser.value;
-  const all = groups.value;
-  if (!elevated) return null;
-  const elevatedOnlyCount = all.filter(isElevatedOnly).length;
-  if (elevatedOnlyCount === 0) return null;
-  const tip = `Groups available through system admin access (${elevatedOnlyCount})`;
-  return (
-    <button
-      type="button"
-      class="icon-btn more-agents-btn"
-      aria-label={tip}
-      title={tip}
-      aria-haspopup="dialog"
-      onClick={() => openModal('non-members')}
-    >{'\uD83D\uDC41\uFE0F'}</button>
   );
 }
 

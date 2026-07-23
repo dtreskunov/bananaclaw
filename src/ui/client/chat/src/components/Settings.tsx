@@ -214,11 +214,12 @@ export function Settings() {
 
   if (!open) return null;
   const muted = notifMutedSig.value;
+  const title = me.value ? `My Profile · ${me.value}` : 'My Profile';
   return (
     <div class="settings-backdrop" onClick={onBackdrop}>
-      <div class="settings-modal" role="dialog" aria-label="Settings">
+      <div class="settings-modal" role="dialog" aria-label={title}>
         <header class="settings-head">
-          <span class="title">Settings</span>
+          <span class="title">{title}</span>
           <button type="button" class="icon-btn" aria-label="Close" onClick={close}>{'\u2715'}</button>
         </header>
         <div class="settings-body">
@@ -345,13 +346,6 @@ export function Settings() {
           </section>
 
           {status ? <div class={'settings-status ' + (status.err ? 'err' : 'ok')}>{status.err || status.ok}</div> : null}
-
-          <section class="settings-account">
-            {me.value ? <span class="settings-account-name">{me.value}</span> : null}
-            <form method="POST" action="/ui/auth/logout" style="margin:0">
-              <button type="submit">Log out</button>
-            </form>
-          </section>
         </div>
       </div>
     </div>

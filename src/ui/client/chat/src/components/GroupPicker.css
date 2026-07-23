@@ -29,15 +29,6 @@ nav.tab-bar-strip.group-strip .tab-item {
    chrome so they read as another tab in the strip. The leading "+"
    distinguishes them as an action; no extra styling needed here. */
 
-/* The text action belongs only in the mobile sheet. Desktop uses the compact
-    eye button instead. Match the strip selector so TabBar's `.tab-item`
-    display rule cannot override this. */
-nav.tab-bar-strip.group-strip .tab-item.group-extra-more { display: none; }
-
-@media (max-width: 720px) {
-   header .more-agents-btn { display: none; }
-}
-
 /* The "More agents" modal — opened from the extras button to browse
    non-member admin groups. Still uses the legacy DOM (intentionally not
    a TabBar, because it's a full searchable list of groups + a

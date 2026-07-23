@@ -83,13 +83,6 @@
 .settings-status.ok { background: rgba(108, 198, 108, 0.15); color: var(--success); }
 .settings-status.err { background: rgba(228, 68, 68, 0.15); color: var(--error); }
 
-.settings-account {
-  margin-top: 16px; padding-top: 12px;
-  border-top: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-}
-.settings-account-name { font-size: var(--font-base); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-
 @media (max-width: 720px) {
   /* Fullscreen modal on mobile: zero padding around the backdrop, modal
      fills the viewport, no rounded corners or visible border. The header

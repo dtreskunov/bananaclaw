@@ -1,16 +1,11 @@
-// Header: brand, group strip, settings button, mobile drawer buttons.
+// Header: brand, group strip, account menu, mobile drawer buttons.
 import './Header.css';
-import {
-  drawerOpen,
-  groupAdminOpen,
-  isAdmin,
-  settingsOpen,
-} from '../state';
+import { drawerOpen } from '../state';
 import { BRAND } from '../brand';
-import { GroupStrip, MoreAgentsButton } from './GroupPicker';
+import { GroupStrip } from './GroupPicker';
+import { UserMenu } from './UserMenu';
 
 export function Header() {
-  const admin = isAdmin.value;
   return (
     <header>
       <button
@@ -21,23 +16,7 @@ export function Header() {
       >{'\u2630'}</button>
       <span class="brand">{BRAND.name}</span>
       <GroupStrip />
-      <MoreAgentsButton />
-      {admin ? (
-        <button
-          type="button"
-          class="icon-btn"
-          aria-label="Group admin"
-          title="Group admin"
-          onClick={() => { groupAdminOpen.value = !groupAdminOpen.value; }}
-        >{'\u2699\uFE0F'}</button>
-      ) : null}
-      <button
-        type="button"
-        class="icon-btn"
-        aria-label="Settings"
-        title="Settings"
-        onClick={() => { settingsOpen.value = !settingsOpen.value; }}
-      >{'\uD83D\uDC64'}</button>
+      <UserMenu />
       <button
         type="button"
         class="icon-btn mobile-only"

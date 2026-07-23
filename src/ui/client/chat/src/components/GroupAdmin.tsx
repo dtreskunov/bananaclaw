@@ -231,7 +231,7 @@ export function GroupAdmin(): JSX.Element | null {
 
   if (!open || !gid) return null;
   const group = groups.value.find((g) => g.id === gid);
-  const title = group ? `Admin · ${group.name}` : 'Admin';
+  const title = group ? `Agent Settings · ${group.name}` : 'Agent Settings';
 
   function hardClose(): void { groupAdminOpen.value = false; }
   function attemptClose(): void {

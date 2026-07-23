@@ -18858,10 +18858,6 @@ function tipFor(g8, isAdminOnly) {
   if (g8.lastActivityAt) parts.push(fmtAbsolute(g8.lastActivityAt));
   return parts.join(" \xB7 ");
 }
-function openModal(mode) {
-  groupPickerMode.value = mode;
-  groupPickerOpen.value = true;
-}
 function GroupStrip() {
   const elevated = isElevatedUser.value;
   nowTick.value;
@@ -18882,17 +18878,6 @@ function GroupStrip() {
   });
   const extras = [];
   if (elevated) {
-    const elevatedOnlyCount = all.filter(isElevatedOnly).length;
-    if (elevatedOnlyCount > 0) {
-      extras.push({
-        key: "more",
-        label: `More agents (${elevatedOnlyCount})`,
-        title: `Groups available through system admin access (${elevatedOnlyCount})`,
-        ariaHaspopup: "dialog",
-        onClick: () => openModal("non-members"),
-        className: "group-extra-more"
-      });
-    }
     extras.push({
       key: "new",
       label: "New Agent\u2026",
@@ -18919,26 +18904,6 @@ function GroupStrip() {
       onSelect: pick,
       extras: extras.length ? extras : void 0,
       className: "group-strip"
-    }
-  );
-}
-function MoreAgentsButton() {
-  const elevated = isElevatedUser.value;
-  const all = groups.value;
-  if (!elevated) return null;
-  const elevatedOnlyCount = all.filter(isElevatedOnly).length;
-  if (elevatedOnlyCount === 0) return null;
-  const tip = `Groups available through system admin access (${elevatedOnlyCount})`;
-  return /* @__PURE__ */ u4(
-    "button",
-    {
-      type: "button",
-      class: "icon-btn more-agents-btn",
-      "aria-label": tip,
-      title: tip,
-      "aria-haspopup": "dialog",
-      onClick: () => openModal("non-members"),
-      children: "\u{1F441}\uFE0F"
     }
   );
 }
@@ -19009,9 +18974,118 @@ function GroupPickerModal() {
   ) });
 }
 
+// src/components/UserMenu.tsx
+function initialsFor(displayName) {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = Array.from(parts[0])[0] || "?";
+  if (parts.length === 1) return first.toUpperCase();
+  const last = Array.from(parts[parts.length - 1])[0] || "";
+  return (first + last).toUpperCase();
+}
+function UserMenu() {
+  const [open, setOpen] = h2(false);
+  const wrapRef = A2(null);
+  const admin = isAdmin.value;
+  const showAllAgents = isElevatedUser.value;
+  const mobile = isMobile.value;
+  const displayName = me.value || "User";
+  y2(() => {
+    if (!open) return void 0;
+    const onDocumentMouseDown = (event) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target)) setOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocumentMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocumentMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+  const choose = (action) => {
+    setOpen(false);
+    action();
+  };
+  const items = [
+    { label: "My Profile", action: () => {
+      settingsOpen.value = true;
+    } }
+  ];
+  if (admin) items.push({ label: "Agent Settings", action: () => {
+    groupAdminOpen.value = true;
+  } });
+  if (showAllAgents) {
+    items.push({
+      label: "Show All Agents",
+      action: () => {
+        groupPickerMode.value = "all";
+        groupPickerOpen.value = true;
+      }
+    });
+  }
+  const onBackdrop = (event) => {
+    if (event.target.classList.contains("settings-backdrop")) setOpen(false);
+  };
+  return /* @__PURE__ */ u4("div", { class: "user-menu" + (open ? " open" : ""), ref: wrapRef, children: [
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "avatar-btn",
+        "aria-label": `${displayName} menu`,
+        "aria-haspopup": mobile ? "dialog" : "menu",
+        "aria-expanded": open,
+        title: displayName,
+        onClick: (event) => {
+          event.stopPropagation();
+          setOpen((value) => !value);
+        },
+        children: initialsFor(displayName)
+      }
+    ),
+    open && !mobile ? /* @__PURE__ */ u4("div", { class: "user-menu-panel", role: "menu", "aria-label": "Account and agent actions", children: [
+      /* @__PURE__ */ u4("div", { class: "user-menu-identity", "aria-hidden": "true", children: displayName }),
+      /* @__PURE__ */ u4("form", { method: "POST", action: "/ui/auth/logout", class: "user-menu-logout-form", children: /* @__PURE__ */ u4("button", { type: "submit", role: "menuitem", children: "Log out" }) }),
+      /* @__PURE__ */ u4("div", { class: "user-menu-divider", "aria-hidden": "true" }),
+      items.map((item) => /* @__PURE__ */ u4("button", { type: "button", role: "menuitem", onClick: () => choose(item.action), children: item.label }, item.label))
+    ] }) : null,
+    open && mobile ? /* @__PURE__ */ u4("div", { class: "settings-backdrop tab-bar-sheet-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4(
+      "div",
+      {
+        class: "settings-modal tab-bar-sheet",
+        role: "dialog",
+        "aria-label": "Account and agent actions",
+        style: "max-width:480px",
+        children: [
+          /* @__PURE__ */ u4("header", { class: "settings-head", children: [
+            /* @__PURE__ */ u4("span", { class: "title", children: displayName }),
+            /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: () => setOpen(false), children: "\u2715" })
+          ] }),
+          /* @__PURE__ */ u4("div", { class: "settings-body tab-bar-sheet-list", children: [
+            /* @__PURE__ */ u4("form", { method: "POST", action: "/ui/auth/logout", class: "user-menu-logout-form", children: /* @__PURE__ */ u4("button", { type: "submit", class: "tab-bar-sheet-row", children: /* @__PURE__ */ u4("span", { class: "tab-bar-sheet-row-name", children: "Log out" }) }) }),
+            /* @__PURE__ */ u4("div", { class: "tab-bar-sheet-divider", "aria-hidden": "true" }),
+            items.map((item) => /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "button",
+                class: "tab-bar-sheet-row",
+                onClick: () => choose(item.action),
+                children: /* @__PURE__ */ u4("span", { class: "tab-bar-sheet-row-name", children: item.label })
+              },
+              item.label
+            ))
+          ] })
+        ]
+      }
+    ) }) : null
+  ] });
+}
+
 // src/components/Header.tsx
 function Header() {
-  const admin = isAdmin.value;
   return /* @__PURE__ */ u4("header", { children: [
     /* @__PURE__ */ u4(
       "button",
@@ -19028,33 +19102,7 @@ function Header() {
     ),
     /* @__PURE__ */ u4("span", { class: "brand", children: BRAND.name }),
     /* @__PURE__ */ u4(GroupStrip, {}),
-    /* @__PURE__ */ u4(MoreAgentsButton, {}),
-    admin ? /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "icon-btn",
-        "aria-label": "Group admin",
-        title: "Group admin",
-        onClick: () => {
-          groupAdminOpen.value = !groupAdminOpen.value;
-        },
-        children: "\u2699\uFE0F"
-      }
-    ) : null,
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "icon-btn",
-        "aria-label": "Settings",
-        title: "Settings",
-        onClick: () => {
-          settingsOpen.value = !settingsOpen.value;
-        },
-        children: "\u{1F464}"
-      }
-    ),
+    /* @__PURE__ */ u4(UserMenu, {}),
     /* @__PURE__ */ u4(
       "button",
       {
@@ -22808,9 +22856,10 @@ function Settings() {
   }, [open]);
   if (!open) return null;
   const muted = notifMutedSig.value;
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "settings-modal", role: "dialog", "aria-label": "Settings", children: [
+  const title = me.value ? `My Profile \xB7 ${me.value}` : "My Profile";
+  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "settings-modal", role: "dialog", "aria-label": title, children: [
     /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-      /* @__PURE__ */ u4("span", { class: "title", children: "Settings" }),
+      /* @__PURE__ */ u4("span", { class: "title", children: title }),
       /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: close, children: "\u2715" })
     ] }),
     /* @__PURE__ */ u4("div", { class: "settings-body", children: [
@@ -22962,11 +23011,7 @@ function Settings() {
           ] }) : null
         ] })
       ] }),
-      status ? /* @__PURE__ */ u4("div", { class: "settings-status " + (status.err ? "err" : "ok"), children: status.err || status.ok }) : null,
-      /* @__PURE__ */ u4("section", { class: "settings-account", children: [
-        me.value ? /* @__PURE__ */ u4("span", { class: "settings-account-name", children: me.value }) : null,
-        /* @__PURE__ */ u4("form", { method: "POST", action: "/ui/auth/logout", style: "margin:0", children: /* @__PURE__ */ u4("button", { type: "submit", children: "Log out" }) })
-      ] })
+      status ? /* @__PURE__ */ u4("div", { class: "settings-status " + (status.err ? "err" : "ok"), children: status.err || status.ok }) : null
     ] })
   ] }) });
 }
@@ -24428,7 +24473,7 @@ function GroupAdmin() {
   });
   if (!open || !gid) return null;
   const group = groups.value.find((g8) => g8.id === gid);
-  const title = group ? `Admin \xB7 ${group.name}` : "Admin";
+  const title = group ? `Agent Settings \xB7 ${group.name}` : "Agent Settings";
   function hardClose() {
     groupAdminOpen.value = false;
   }
