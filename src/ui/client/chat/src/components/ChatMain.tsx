@@ -23,6 +23,7 @@ import { mergeQuestionTimeline } from '../question-timeline';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
+import { MobileDialog } from './MobileDialog';
 import type { ActivityLine, ChatMessage, DisplayCard, PendingQuestionDto, TurnUsage } from '../types';
 
 const activeRecordingTarget = signal<string | null>(null);
@@ -133,22 +134,13 @@ function ImageViewer() {
   };
 
   return (
-    <div
-      class="settings-backdrop image-viewer-backdrop"
-      onClick={(event) => {
-        if ((event.target as HTMLElement).classList.contains('image-viewer-backdrop')) imageViewer.value = null;
-      }}
+    <MobileDialog
+      title={image.name}
+      onClose={() => { imageViewer.value = null; }}
+      className="image-viewer-dialog"
+      backdropClassName="image-viewer-backdrop"
+      maxWidth="calc(100vw - 32px)"
     >
-      <div
-        class="settings-modal image-viewer-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={image.name}
-      >
-        <header class="settings-head">
-          <span class="title" title={image.name}>{image.name}</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={() => { imageViewer.value = null; }}>{'\u2715'}</button>
-        </header>
         <div
           ref={stageRef}
           class={'image-viewer-stage' + (scale > MIN_IMAGE_SCALE ? ' zoomed' : '')}
@@ -166,8 +158,7 @@ function ImageViewer() {
             style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
           />
         </div>
-      </div>
-    </div>
+    </MobileDialog>
   );
 }
 

@@ -1,5 +1,5 @@
 // Action orchestrators. Mutate signals + perform IO.
-import { batch } from '@preact/signals';
+import { batch, type Signal } from '@preact/signals';
 import {
   groupId,
   threads,
@@ -41,6 +41,7 @@ import {
   highlightMessageId,
   scrollToBottomTick,
   taskPanelRequest,
+  userMenuOpen,
   SYNC_INTERVAL_MS,
 } from './state';
 import { api, postJson } from './api';
@@ -78,6 +79,13 @@ interface ServerMessage {
   event?: import('./types').TimelineEvent;
   reactions?: import('./types').MessageReaction[];
   author?: { userId: string; displayName: string };
+}
+
+export function returnToUserMenu(source: Signal<boolean>): void {
+  batch(() => {
+    source.value = false;
+    userMenuOpen.value = true;
+  });
 }
 
 /**

@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import './TabBar.css';
+import { MobileDialog, MobileDialogDivider, MobileDialogItem, MobileDialogList } from './MobileDialog';
 
 export interface TabItem {
   id: string;
@@ -166,56 +167,32 @@ interface TabBarSheetProps {
 
 function TabBarSheet(props: TabBarSheetProps): JSX.Element {
   const { title, items, extras, activeId, onSelect, onExtra, onClose } = props;
-  const onBackdrop = (e: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) onClose();
-  };
   return (
-    <div class="settings-backdrop tab-bar-sheet-backdrop" onClick={onBackdrop}>
-      <div
-        class="settings-modal tab-bar-sheet"
-        role="dialog"
-        aria-label={title}
-        style="max-width:480px"
-      >
-        <header class="settings-head">
-          <span class="title">{title}</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={onClose}>{'\u2715'}</button>
-        </header>
-        <div class="settings-body tab-bar-sheet-list">
-          {items.map((it) => {
-            const isActive = it.id === activeId;
-            return (
-              <button
-                type="button"
-                key={it.id}
-                class={`tab-bar-sheet-row${isActive ? ' active' : ''}${it.className ? ` ${it.className}` : ''}`}
-                aria-current={isActive ? 'true' : undefined}
-                title={it.title}
-                onClick={() => onSelect(it.id)}
-              >
-                <span class="tab-bar-sheet-row-name">{it.label}</span>
-                {it.sublabel ? <span class="tab-bar-sheet-row-sub">{it.sublabel}</span> : null}
-              </button>
-            );
-          })}
-          {extras?.length ? (
-            <>
-              <div class="tab-bar-sheet-divider" aria-hidden="true" />
-              {extras.map((ex) => (
-                <button
-                  type="button"
-                  key={ex.key}
-                  class={`tab-bar-sheet-row tab-bar-sheet-extra${ex.className ? ` ${ex.className}` : ''}`}
-                  title={ex.title}
-                  onClick={() => onExtra(ex)}
-                >
-                  <span class="tab-bar-sheet-row-name">{ex.label}</span>
-                </button>
-              ))}
-            </>
-          ) : null}
-        </div>
-      </div>
-    </div>
+    <MobileDialog title={title} onClose={onClose} maxWidth="480px">
+      <MobileDialogList>
+        {items.map((it) => (
+          <MobileDialogItem
+            key={it.id}
+            label={it.label}
+            sublabel={it.sublabel}
+            active={it.id === activeId}
+            title={it.title}
+            className={it.className}
+            onClick={() => onSelect(it.id)}
+          />
+        ))}
+        {extras?.length ? <MobileDialogDivider /> : null}
+        {extras?.map((ex) => (
+          <MobileDialogItem
+            key={ex.key}
+            label={ex.label}
+            sublabel={ex.sublabel}
+            title={ex.title}
+            className={ex.className}
+            onClick={() => onExtra(ex)}
+          />
+        ))}
+      </MobileDialogList>
+    </MobileDialog>
   );
 }

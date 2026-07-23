@@ -21,6 +21,15 @@
 }
 .tab-bar-strip::-webkit-scrollbar { display: none; }
 
+/* GroupPicker header placement and active-tab overlap. */
+.group-strip { flex: 1; min-width: 0; }
+nav.tab-bar-strip.group-strip {
+  align-self: stretch;
+  margin-bottom: -9px;
+  border-bottom: 0;
+}
+nav.tab-bar-strip.group-strip .tab-item { gap: 2px; }
+
 .tab-item {
   display: flex;
   flex-direction: column;
@@ -118,52 +127,8 @@
   }
 }
 
-/* ---- Mobile sheet (always rendered by JSX but only triggered on
-   mobile via the dropdown button). Reuses the .settings-backdrop /
-   .settings-modal chrome for visual parity with the rest of the app. */
-.tab-bar-sheet-list {
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.tab-bar-sheet-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: var(--radius-lg);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-  width: 100%;
-  min-height: 48px;
-}
-.tab-bar-sheet-row:hover { background: var(--wash); }
-.tab-bar-sheet-row.active { background: var(--wash-subtle); }
-.tab-bar-sheet-row.active .tab-bar-sheet-row-name { font-weight: 700; }
-.tab-bar-sheet-row-name {
-  font-size: var(--font-lg);
-  font-weight: 500;
-  line-height: 1.3;
-}
-.tab-bar-sheet-row-sub {
-  font-size: var(--font-xs);
-  line-height: 1.2;
-  color: var(--muted);
-  margin-top: 2px;
-}
-.tab-bar-sheet-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 6px 4px;
-}
-
 /* Dim items the caller flags as admin-only (i.e. visible to elevated
    users but not actually a member). Works on both the strip and sheet. */
 .tab-item.is-admin-visible,
 .tab-bar-dropdown.is-admin-visible,
-.tab-bar-sheet-row.is-admin-visible { opacity: 0.7; }
+.mobile-dialog-item.is-admin-visible { opacity: 0.7; }

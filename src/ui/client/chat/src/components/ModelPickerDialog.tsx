@@ -12,6 +12,8 @@
 import './ModelPickerDialog.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
+import { isMobile } from '../state';
+import { MobileDialog } from './MobileDialog';
 
 // ── types ─────────────────────────────────────────────────────────────────
 
@@ -315,24 +317,20 @@ export function ModelPickerDialog({
 
       {/* Dialog */}
       {open && (
-        <div
-          class="mpd-backdrop"
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
-          onKeyDown={handleKeyDown}
+        <MobileDialog
+          title="Pick a model"
+          onClose={() => setOpen(false)}
+          onBack={isMobile.value ? () => setOpen(false) : undefined}
+          backLabel="Back to agent settings"
+          onKeyDown={(e) => handleKeyDown(e)}
+          maxWidth="720px"
+          className="mpd-dialog"
+          actions={value ? (
+            <button type="button" class="mpd-clear" title="Clear selection" onClick={handleClear}>
+              {'\u2715'} Clear
+            </button>
+          ) : null}
         >
-          <div class="mpd-dialog" role="dialog" aria-label="Pick a model">
-            <div class="mpd-head">
-              <span class="mpd-title">Pick a model</span>
-              {value && (
-                <button type="button" class="mpd-close" title="Clear selection" onClick={handleClear}>
-                  ✕ Clear
-                </button>
-              )}
-              <button type="button" class="mpd-close" title="Close" onClick={() => setOpen(false)}>
-                ✕
-              </button>
-            </div>
-
             <div class="mpd-content">
               {/* Sidebar filters */}
               <div class="mpd-sidebar">
@@ -445,8 +443,7 @@ export function ModelPickerDialog({
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+        </MobileDialog>
       )}
     </>
   );

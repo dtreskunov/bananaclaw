@@ -15566,6 +15566,7 @@ var currentUserId = y3("");
 var notifMutedSig = y3(false);
 var progressSoundMutedSig = y3(false);
 var completionSoundMutedSig = y3(false);
+var userMenuOpen = y3(false);
 var settingsOpen = y3(false);
 var groupAdminOpen = y3(false);
 var groupPickerOpen = y3(false);
@@ -17518,6 +17519,12 @@ function playCompletionChime() {
 }
 
 // src/actions.ts
+function returnToUserMenu(source) {
+  n2(() => {
+    source.value = false;
+    userMenuOpen.value = true;
+  });
+}
 function focusComposerSoon() {
   if (isMobile.value) return;
   let tries = 0;
@@ -18542,6 +18549,83 @@ async function respondQuestion(questionId, value) {
   }
 }
 
+// src/components/MobileDialog.tsx
+function MobileDialog(props) {
+  const {
+    title,
+    ariaLabel,
+    onClose,
+    onBack,
+    backLabel = "Back",
+    actions,
+    children,
+    className,
+    backdropClassName,
+    maxWidth,
+    closeDisabled,
+    role = "dialog",
+    onKeyDown
+  } = props;
+  const onBackdrop = (event) => {
+    if (event.target === event.currentTarget && !closeDisabled) onClose();
+  };
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: `mobile-dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`,
+      onClick: onBackdrop,
+      onKeyDown,
+      tabIndex: onKeyDown ? -1 : void 0,
+      children: /* @__PURE__ */ u4(
+        "div",
+        {
+          class: `mobile-dialog${className ? ` ${className}` : ""}`,
+          role,
+          "aria-modal": "true",
+          "aria-label": ariaLabel ?? title,
+          style: maxWidth ? `max-width:${maxWidth}` : void 0,
+          children: [
+            /* @__PURE__ */ u4("header", { class: "mobile-dialog-head", children: [
+              onBack ? /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": backLabel, onClick: onBack, children: "\u2039" }) : null,
+              /* @__PURE__ */ u4("span", { class: "mobile-dialog-title", children: title }),
+              actions ? /* @__PURE__ */ u4("div", { class: "mobile-dialog-actions", children: actions }) : null,
+              /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Close", disabled: closeDisabled, onClick: onClose, children: "\u2715" })
+            ] }),
+            children
+          ]
+        }
+      )
+    }
+  );
+}
+function MobileDialogList({ children, className }) {
+  return /* @__PURE__ */ u4("div", { class: `mobile-dialog-list${className ? ` ${className}` : ""}`, children });
+}
+function MobileDialogItem(props) {
+  const { label, sublabel, onClick, type = "button", active, chevron, title, className } = props;
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type,
+      class: `mobile-dialog-item${active ? " active" : ""}${className ? ` ${className}` : ""}`,
+      "aria-current": active ? "true" : void 0,
+      title,
+      onClick,
+      children: [
+        /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-label", children: label }),
+        sublabel ? /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-sublabel", children: sublabel }) : null,
+        chevron ? /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-chevron", "aria-hidden": "true", children: "\u203A" }) : null
+      ]
+    }
+  );
+}
+function MobileDialogDivider() {
+  return /* @__PURE__ */ u4("div", { class: "mobile-dialog-divider", "aria-hidden": "true" });
+}
+function MobileDialogFooter({ children, className }) {
+  return /* @__PURE__ */ u4("footer", { class: `mobile-dialog-footer${className ? ` ${className}` : ""}`, children });
+}
+
 // src/components/CreateGroupModal.tsx
 var createGroupOpen = y3(false);
 function errMsg(data, fallback) {
@@ -18598,26 +18682,16 @@ function CreateGroupModal() {
     showToast(`Created "${created.name}"`);
     selectGroup(created.id).catch((err) => console.error("selectGroup after create", err));
   }
-  function onBackdrop(e4) {
-    if (e4.target.classList.contains("settings-backdrop")) close();
-  }
   function onKey(e4) {
     if (e4.key === "Escape") close();
   }
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4(
+  return /* @__PURE__ */ u4(MobileDialog, { title: "New agent group", ariaLabel: "Create agent group", onClose: close, maxWidth: "480px", children: /* @__PURE__ */ u4(
     "form",
     {
-      class: "settings-modal",
-      role: "dialog",
-      "aria-label": "Create agent group",
-      style: "max-width:480px",
+      class: "mobile-dialog-form",
       onSubmit,
       onKeyDown: onKey,
       children: [
-        /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-          /* @__PURE__ */ u4("span", { class: "title", children: "New agent group" }),
-          /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: close, children: "\u2715" })
-        ] }),
         /* @__PURE__ */ u4("div", { class: "settings-body create-group-body", children: [
           /* @__PURE__ */ u4("label", { class: "cg-field", children: [
             /* @__PURE__ */ u4("span", { class: "cg-label", children: "Name" }),
@@ -18664,17 +18738,10 @@ function CreateGroupModal() {
             )
           ] })
         ] }),
-        /* @__PURE__ */ u4(
-          "footer",
-          {
-            class: "settings-foot",
-            style: "display:flex;justify-content:flex-end;gap:8px;padding:8px 12px;border-top:1px solid var(--border)",
-            children: [
-              /* @__PURE__ */ u4("button", { type: "button", onClick: close, disabled: submitting, children: "Cancel" }),
-              /* @__PURE__ */ u4("button", { type: "submit", class: "primary", disabled: submitting || !name.trim(), children: submitting ? "Creating\u2026" : "Create" })
-            ]
-          }
-        )
+        /* @__PURE__ */ u4(MobileDialogFooter, { children: [
+          /* @__PURE__ */ u4("button", { type: "button", onClick: close, disabled: submitting, children: "Cancel" }),
+          /* @__PURE__ */ u4("button", { type: "submit", class: "primary", disabled: submitting || !name.trim(), children: submitting ? "Creating\u2026" : "Create" })
+        ] })
       ]
     }
   ) });
@@ -18786,58 +18853,32 @@ function TabBar(props) {
 }
 function TabBarSheet(props) {
   const { title, items, extras, activeId, onSelect, onExtra, onClose } = props;
-  const onBackdrop = (e4) => {
-    if (e4.target.classList.contains("settings-backdrop")) onClose();
-  };
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop tab-bar-sheet-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4(
-    "div",
-    {
-      class: "settings-modal tab-bar-sheet",
-      role: "dialog",
-      "aria-label": title,
-      style: "max-width:480px",
-      children: [
-        /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-          /* @__PURE__ */ u4("span", { class: "title", children: title }),
-          /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: onClose, children: "\u2715" })
-        ] }),
-        /* @__PURE__ */ u4("div", { class: "settings-body tab-bar-sheet-list", children: [
-          items.map((it) => {
-            const isActive = it.id === activeId;
-            return /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: `tab-bar-sheet-row${isActive ? " active" : ""}${it.className ? ` ${it.className}` : ""}`,
-                "aria-current": isActive ? "true" : void 0,
-                title: it.title,
-                onClick: () => onSelect(it.id),
-                children: [
-                  /* @__PURE__ */ u4("span", { class: "tab-bar-sheet-row-name", children: it.label }),
-                  it.sublabel ? /* @__PURE__ */ u4("span", { class: "tab-bar-sheet-row-sub", children: it.sublabel }) : null
-                ]
-              },
-              it.id
-            );
-          }),
-          extras?.length ? /* @__PURE__ */ u4(k, { children: [
-            /* @__PURE__ */ u4("div", { class: "tab-bar-sheet-divider", "aria-hidden": "true" }),
-            extras.map((ex) => /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: `tab-bar-sheet-row tab-bar-sheet-extra${ex.className ? ` ${ex.className}` : ""}`,
-                title: ex.title,
-                onClick: () => onExtra(ex),
-                children: /* @__PURE__ */ u4("span", { class: "tab-bar-sheet-row-name", children: ex.label })
-              },
-              ex.key
-            ))
-          ] }) : null
-        ] })
-      ]
-    }
-  ) });
+  return /* @__PURE__ */ u4(MobileDialog, { title, onClose, maxWidth: "480px", children: /* @__PURE__ */ u4(MobileDialogList, { children: [
+    items.map((it) => /* @__PURE__ */ u4(
+      MobileDialogItem,
+      {
+        label: it.label,
+        sublabel: it.sublabel,
+        active: it.id === activeId,
+        title: it.title,
+        className: it.className,
+        onClick: () => onSelect(it.id)
+      },
+      it.id
+    )),
+    extras?.length ? /* @__PURE__ */ u4(MobileDialogDivider, {}) : null,
+    extras?.map((ex) => /* @__PURE__ */ u4(
+      MobileDialogItem,
+      {
+        label: ex.label,
+        sublabel: ex.sublabel,
+        title: ex.title,
+        className: ex.className,
+        onClick: () => onExtra(ex)
+      },
+      ex.key
+    ))
+  ] }) });
 }
 
 // src/components/GroupPicker.tsx
@@ -18930,48 +18971,27 @@ function GroupPickerModal() {
   const close = () => {
     groupPickerOpen.value = false;
   };
-  const onBackdrop = (e4) => {
-    if (e4.target.classList.contains("settings-backdrop")) close();
-  };
   const pick = (gid) => {
     close();
     if (gid !== groupId.value) selectGroup(gid).catch(console.error);
   };
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4(
-    "div",
-    {
-      class: "settings-modal group-picker-modal",
-      role: "dialog",
-      "aria-label": title,
-      style: "max-width:480px",
-      children: [
-        /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-          /* @__PURE__ */ u4("span", { class: "title", children: title }),
-          /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: close, children: "\u2715" })
-        ] }),
-        /* @__PURE__ */ u4("div", { class: "settings-body group-picker-list", children: visible.map((g8) => {
-          const isActive = g8.id === groupId.value;
-          const { parts, isAdminOnly } = chipParts(g8, elevated);
-          const subtitle = parts.join(" \xB7 ");
-          return /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: `group-row${isActive ? " active" : ""}${isAdminOnly ? " is-admin-visible" : ""}`,
-              "aria-current": isActive ? "true" : void 0,
-              title: tipFor(g8, isAdminOnly),
-              onClick: () => pick(g8.id),
-              children: [
-                /* @__PURE__ */ u4("span", { class: "row-name", children: g8.name }),
-                subtitle ? /* @__PURE__ */ u4("span", { class: "row-sub", children: subtitle }) : null
-              ]
-            },
-            g8.id
-          );
-        }) })
-      ]
-    }
-  ) });
+  return /* @__PURE__ */ u4(MobileDialog, { title, onClose: close, maxWidth: "480px", children: /* @__PURE__ */ u4(MobileDialogList, { children: visible.map((g8) => {
+    const isActive = g8.id === groupId.value;
+    const { parts, isAdminOnly } = chipParts(g8, elevated);
+    const subtitle = parts.join(" \xB7 ");
+    return /* @__PURE__ */ u4(
+      MobileDialogItem,
+      {
+        label: g8.name,
+        sublabel: subtitle || void 0,
+        active: isActive,
+        className: isAdminOnly ? "is-admin-visible" : void 0,
+        title: tipFor(g8, isAdminOnly),
+        onClick: () => pick(g8.id)
+      },
+      g8.id
+    );
+  }) }) });
 }
 
 // src/components/UserMenu.tsx
@@ -18984,7 +19004,10 @@ function initialsFor(displayName) {
   return (first + last).toUpperCase();
 }
 function UserMenu() {
-  const [open, setOpen] = h2(false);
+  const open = userMenuOpen.value;
+  const setOpen = (value) => {
+    userMenuOpen.value = typeof value === "function" ? value(userMenuOpen.value) : value;
+  };
   const wrapRef = A2(null);
   const admin = isAdmin.value;
   const showAllAgents = isElevatedUser.value;
@@ -19026,9 +19049,6 @@ function UserMenu() {
       }
     });
   }
-  const onBackdrop = (event) => {
-    if (event.target.classList.contains("settings-backdrop")) setOpen(false);
-  };
   return /* @__PURE__ */ u4("div", { class: "user-menu" + (open ? " open" : ""), ref: wrapRef, children: [
     /* @__PURE__ */ u4(
       "button",
@@ -19052,35 +19072,11 @@ function UserMenu() {
       /* @__PURE__ */ u4("div", { class: "user-menu-divider", "aria-hidden": "true" }),
       items.map((item) => /* @__PURE__ */ u4("button", { type: "button", role: "menuitem", onClick: () => choose(item.action), children: item.label }, item.label))
     ] }) : null,
-    open && mobile ? /* @__PURE__ */ u4("div", { class: "settings-backdrop tab-bar-sheet-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4(
-      "div",
-      {
-        class: "settings-modal tab-bar-sheet",
-        role: "dialog",
-        "aria-label": "Account and agent actions",
-        style: "max-width:480px",
-        children: [
-          /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-            /* @__PURE__ */ u4("span", { class: "title", children: displayName }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: () => setOpen(false), children: "\u2715" })
-          ] }),
-          /* @__PURE__ */ u4("div", { class: "settings-body tab-bar-sheet-list", children: [
-            /* @__PURE__ */ u4("form", { method: "POST", action: "/ui/auth/logout", class: "user-menu-logout-form", children: /* @__PURE__ */ u4("button", { type: "submit", class: "tab-bar-sheet-row", children: /* @__PURE__ */ u4("span", { class: "tab-bar-sheet-row-name", children: "Log out" }) }) }),
-            /* @__PURE__ */ u4("div", { class: "tab-bar-sheet-divider", "aria-hidden": "true" }),
-            items.map((item) => /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: "tab-bar-sheet-row",
-                onClick: () => choose(item.action),
-                children: /* @__PURE__ */ u4("span", { class: "tab-bar-sheet-row-name", children: item.label })
-              },
-              item.label
-            ))
-          ] })
-        ]
-      }
-    ) }) : null
+    open && mobile ? /* @__PURE__ */ u4(MobileDialog, { title: displayName, ariaLabel: "Account and agent actions", onClose: () => setOpen(false), children: /* @__PURE__ */ u4(MobileDialogList, { children: [
+      items.map((item) => /* @__PURE__ */ u4(MobileDialogItem, { label: item.label, chevron: true, onClick: () => choose(item.action) }, item.label)),
+      /* @__PURE__ */ u4(MobileDialogDivider, {}),
+      /* @__PURE__ */ u4("form", { method: "POST", action: "/ui/auth/logout", class: "user-menu-logout-form", children: /* @__PURE__ */ u4(MobileDialogItem, { type: "submit", label: "Log out" }) })
+    ] }) }) : null
   ] });
 }
 
@@ -19146,47 +19142,30 @@ function PromptModal() {
     const trimmed = value.trim();
     close(trimmed ? trimmed : null);
   }
-  function onBackdrop(e4) {
-    if (e4.target.classList.contains("settings-backdrop")) close(null);
-  }
   function onKey(e4) {
     if (e4.key === "Escape") close(null);
   }
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4(
-    "form",
-    {
-      class: "settings-modal",
-      role: "dialog",
-      "aria-label": req.title,
-      style: "max-width:420px",
-      onSubmit,
-      children: [
-        /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-          /* @__PURE__ */ u4("span", { class: "title", children: req.title }),
-          /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: () => close(null), children: "\u2715" })
-        ] }),
-        /* @__PURE__ */ u4("div", { class: "settings-body", children: [
-          req.label ? /* @__PURE__ */ u4("label", { style: "display:block;margin-bottom:6px;font-size:12px;color:var(--muted)", children: req.label }) : null,
-          /* @__PURE__ */ u4(
-            "input",
-            {
-              ref: inputRef,
-              type: "text",
-              value,
-              placeholder: req.placeholder || "",
-              onInput: (e4) => setValue(e4.currentTarget.value),
-              onKeyDown: onKey,
-              style: "width:100%"
-            }
-          )
-        ] }),
-        /* @__PURE__ */ u4("footer", { class: "settings-foot", style: "display:flex;justify-content:flex-end;gap:8px;padding:8px 12px;border-top:1px solid var(--border)", children: [
-          /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(null), children: "Cancel" }),
-          /* @__PURE__ */ u4("button", { type: "submit", class: "primary", children: req.okLabel || "OK" })
-        ] })
-      ]
-    }
-  ) });
+  return /* @__PURE__ */ u4(MobileDialog, { title: req.title, onClose: () => close(null), maxWidth: "420px", children: /* @__PURE__ */ u4("form", { class: "mobile-dialog-form", onSubmit, children: [
+    /* @__PURE__ */ u4("div", { class: "settings-body", children: [
+      req.label ? /* @__PURE__ */ u4("label", { style: "display:block;margin-bottom:6px;font-size:12px;color:var(--muted)", children: req.label }) : null,
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          ref: inputRef,
+          type: "text",
+          value,
+          placeholder: req.placeholder || "",
+          onInput: (e4) => setValue(e4.currentTarget.value),
+          onKeyDown: onKey,
+          style: "width:100%"
+        }
+      )
+    ] }),
+    /* @__PURE__ */ u4(MobileDialogFooter, { children: [
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(null), children: "Cancel" }),
+      /* @__PURE__ */ u4("button", { type: "submit", class: "primary", children: req.okLabel || "OK" })
+    ] })
+  ] }) });
 }
 var confirmRequest = y3(null);
 function requestConfirm(opts) {
@@ -19207,27 +19186,21 @@ function ConfirmModal() {
     confirmRequest.value = null;
     r4?.resolve(result);
   }
-  function onBackdrop(e4) {
-    if (e4.target.classList.contains("settings-backdrop")) close(false);
-  }
   function onKey(e4) {
     if (e4.key === "Escape") close(false);
     else if (e4.key === "Enter") close(true);
   }
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, onKeyDown: onKey, tabIndex: -1, children: /* @__PURE__ */ u4(
-    "div",
+  return /* @__PURE__ */ u4(
+    MobileDialog,
     {
-      class: "settings-modal",
+      title: req.title,
+      onClose: () => close(false),
+      maxWidth: "420px",
       role: "alertdialog",
-      "aria-label": req.title,
-      style: "max-width:420px",
+      onKeyDown: onKey,
       children: [
-        /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-          /* @__PURE__ */ u4("span", { class: "title", children: req.title }),
-          /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: () => close(false), children: "\u2715" })
-        ] }),
         /* @__PURE__ */ u4("div", { class: "settings-body", style: "white-space:pre-wrap", children: req.message }),
-        /* @__PURE__ */ u4("footer", { class: "settings-foot", style: "display:flex;justify-content:flex-end;gap:8px;padding:8px 12px;border-top:1px solid var(--border)", children: [
+        /* @__PURE__ */ u4(MobileDialogFooter, { children: [
           /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(false), children: req.cancelLabel || "Cancel" }),
           /* @__PURE__ */ u4(
             "button",
@@ -19242,7 +19215,7 @@ function ConfirmModal() {
         ] })
       ]
     }
-  ) });
+  );
 }
 
 // src/components/Pane.tsx
@@ -19996,43 +19969,49 @@ function QuickCapture({ onCapture, onClose }) {
   };
   const flip = () => setFacing((f5) => f5 === "environment" ? "user" : "environment");
   const flipTarget = facing === "environment" ? "Front camera" : "Back camera";
-  const onBackdrop = (ev) => {
-    if (ev.target.classList.contains("qcap-backdrop")) onClose();
-  };
-  return /* @__PURE__ */ u4("div", { class: "qcap-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "qcap-modal", role: "dialog", "aria-label": "Quick capture", children: [
-    /* @__PURE__ */ u4("button", { type: "button", class: "qcap-close", onClick: onClose, "aria-label": "Close", children: "\xD7" }),
-    /* @__PURE__ */ u4("div", { class: "qcap-stage", children: error ? /* @__PURE__ */ u4("div", { class: "qcap-error", children: error }) : preview ? /* @__PURE__ */ u4("img", { class: "qcap-preview", src: preview.url, alt: "" }) : /* @__PURE__ */ u4(
-      "video",
-      {
-        class: "qcap-video" + (facing === "user" ? " mirror" : ""),
-        ref: videoRef,
-        playsInline: true,
-        muted: true,
-        autoplay: true
-      }
-    ) }),
-    /* @__PURE__ */ u4("div", { class: "qcap-controls", children: error ? /* @__PURE__ */ u4("button", { type: "button", class: "qcap-btn", onClick: onClose, children: "Close" }) : preview ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", class: "qcap-btn", onClick: retake, children: "Retake" }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "qcap-btn primary", onClick: use, children: "Use photo" })
-    ] }) : /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "qcap-flip",
-          onClick: flip,
-          "aria-label": `Switch to ${flipTarget.toLowerCase()}`,
-          title: `Switch to ${flipTarget.toLowerCase()}`,
-          children: [
-            /* @__PURE__ */ u4("span", { class: "qcap-flip-ico", "aria-hidden": "true", children: "\u21BB" }),
-            /* @__PURE__ */ u4("span", { class: "qcap-flip-lbl", children: flipTarget })
-          ]
-        }
-      ),
-      /* @__PURE__ */ u4("button", { type: "button", class: "qcap-shutter", onClick: shoot, disabled: busy, "aria-label": "Capture" }),
-      /* @__PURE__ */ u4("span", { class: "qcap-spacer" })
-    ] }) })
-  ] }) });
+  return /* @__PURE__ */ u4(
+    MobileDialog,
+    {
+      title: "Quick capture",
+      onClose,
+      maxWidth: "720px",
+      backdropClassName: "qcap-backdrop",
+      className: "qcap-modal",
+      children: [
+        /* @__PURE__ */ u4("div", { class: "qcap-stage", children: error ? /* @__PURE__ */ u4("div", { class: "qcap-error", children: error }) : preview ? /* @__PURE__ */ u4("img", { class: "qcap-preview", src: preview.url, alt: "" }) : /* @__PURE__ */ u4(
+          "video",
+          {
+            class: "qcap-video" + (facing === "user" ? " mirror" : ""),
+            ref: videoRef,
+            playsInline: true,
+            muted: true,
+            autoplay: true
+          }
+        ) }),
+        /* @__PURE__ */ u4("div", { class: "qcap-controls", children: error ? /* @__PURE__ */ u4("button", { type: "button", class: "qcap-btn", onClick: onClose, children: "Close" }) : preview ? /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("button", { type: "button", class: "qcap-btn", onClick: retake, children: "Retake" }),
+          /* @__PURE__ */ u4("button", { type: "button", class: "qcap-btn primary", onClick: use, children: "Use photo" })
+        ] }) : /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "qcap-flip",
+              onClick: flip,
+              "aria-label": `Switch to ${flipTarget.toLowerCase()}`,
+              title: `Switch to ${flipTarget.toLowerCase()}`,
+              children: [
+                /* @__PURE__ */ u4("span", { class: "qcap-flip-ico", "aria-hidden": "true", children: "\u21BB" }),
+                /* @__PURE__ */ u4("span", { class: "qcap-flip-lbl", children: flipTarget })
+              ]
+            }
+          ),
+          /* @__PURE__ */ u4("button", { type: "button", class: "qcap-shutter", onClick: shoot, disabled: busy, "aria-label": "Capture" }),
+          /* @__PURE__ */ u4("span", { class: "qcap-spacer" })
+        ] }) })
+      ]
+    }
+  );
 }
 
 // src/components/ChatMain.tsx
@@ -20134,49 +20113,35 @@ function ImageViewer() {
     updateTransform(scaleRef.current * Math.exp(-event.deltaY * 2e-3));
   };
   return /* @__PURE__ */ u4(
-    "div",
+    MobileDialog,
     {
-      class: "settings-backdrop image-viewer-backdrop",
-      onClick: (event) => {
-        if (event.target.classList.contains("image-viewer-backdrop")) imageViewer.value = null;
+      title: image.name,
+      onClose: () => {
+        imageViewer.value = null;
       },
+      className: "image-viewer-dialog",
+      backdropClassName: "image-viewer-backdrop",
+      maxWidth: "calc(100vw - 32px)",
       children: /* @__PURE__ */ u4(
         "div",
         {
-          class: "settings-modal image-viewer-dialog",
-          role: "dialog",
-          "aria-modal": "true",
-          "aria-label": image.name,
-          children: [
-            /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-              /* @__PURE__ */ u4("span", { class: "title", title: image.name, children: image.name }),
-              /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: () => {
-                imageViewer.value = null;
-              }, children: "\u2715" })
-            ] }),
-            /* @__PURE__ */ u4(
-              "div",
-              {
-                ref: stageRef,
-                class: "image-viewer-stage" + (scale > MIN_IMAGE_SCALE ? " zoomed" : ""),
-                tabIndex: -1,
-                onWheel,
-                onPointerDown,
-                onPointerMove,
-                onPointerUp: onPointerEnd,
-                onPointerCancel: onPointerEnd,
-                children: /* @__PURE__ */ u4(
-                  "img",
-                  {
-                    src: image.src,
-                    alt: image.alt,
-                    draggable: false,
-                    style: { transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }
-                  }
-                )
-              }
-            )
-          ]
+          ref: stageRef,
+          class: "image-viewer-stage" + (scale > MIN_IMAGE_SCALE ? " zoomed" : ""),
+          tabIndex: -1,
+          onWheel,
+          onPointerDown,
+          onPointerMove,
+          onPointerUp: onPointerEnd,
+          onPointerCancel: onPointerEnd,
+          children: /* @__PURE__ */ u4(
+            "img",
+            {
+              src: image.src,
+              alt: image.alt,
+              draggable: false,
+              style: { transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }
+            }
+          )
         }
       )
     }
@@ -22842,9 +22807,6 @@ function Settings() {
   function close() {
     settingsOpen.value = false;
   }
-  function onBackdrop(e4) {
-    if (e4.target.classList.contains("settings-backdrop")) close();
-  }
   function onKey(e4) {
     if (e4.key === "Escape") close();
   }
@@ -22857,163 +22819,166 @@ function Settings() {
   if (!open) return null;
   const muted = notifMutedSig.value;
   const title = me.value ? `My Profile \xB7 ${me.value}` : "My Profile";
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "settings-modal", role: "dialog", "aria-label": title, children: [
-    /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-      /* @__PURE__ */ u4("span", { class: "title", children: title }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: close, children: "\u2715" })
-    ] }),
-    /* @__PURE__ */ u4("div", { class: "settings-body", children: [
-      /* @__PURE__ */ u4("section", { children: [
-        /* @__PURE__ */ u4("h3", { children: "Profile" }),
-        /* @__PURE__ */ u4("div", { class: "settings-row", children: [
-          /* @__PURE__ */ u4(
-            "input",
-            {
-              type: "text",
-              placeholder: "Display name",
-              maxlength: 80,
-              value: displayName,
-              onInput: (e4) => setDisplayName(e4.currentTarget.value)
-            }
-          ),
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              onClick: saveProfile,
-              disabled: savingProfile || !displayName.trim() || displayName.trim() === savedDisplayName,
-              children: "Save"
-            }
-          )
-        ] }),
-        /* @__PURE__ */ u4("p", { class: "muted", children: [
-          "Shown in ",
-          BRAND.name,
-          " chat headers and approval messages. Does not change how channels address you."
-        ] })
-      ] }),
-      /* @__PURE__ */ u4("section", { children: [
-        /* @__PURE__ */ u4("h3", { children: "Notifications" }),
-        /* @__PURE__ */ u4("label", { class: "settings-row", children: [
-          /* @__PURE__ */ u4("input", { type: "checkbox", checked: !muted, onChange: toggleMute }),
-          /* @__PURE__ */ u4("span", { children: "Browser notifications for new messages" })
-        ] }),
-        /* @__PURE__ */ u4("p", { class: "muted", children: muted ? "Currently muted. New messages will not raise notifications." : "Enabled. Permission is requested on first toggle." })
-      ] }),
-      /* @__PURE__ */ u4("section", { children: [
-        /* @__PURE__ */ u4("h3", { children: "Sounds" }),
-        /* @__PURE__ */ u4("label", { class: "settings-row", children: [
-          /* @__PURE__ */ u4(
-            "input",
-            {
-              type: "checkbox",
-              checked: !progressSoundMutedSig.value,
-              onChange: () => {
-                progressSoundMutedSig.value = !progressSoundMutedSig.value;
-              }
-            }
-          ),
-          /* @__PURE__ */ u4("span", { children: "Play a sound as the agent makes progress" })
-        ] }),
-        /* @__PURE__ */ u4("p", { class: "muted", children: "A subtle tick when the agent runs a tool or moves to a new step." })
-      ] }),
-      /* @__PURE__ */ u4("section", { children: [
-        /* @__PURE__ */ u4("h3", { children: "Completion sound" }),
-        /* @__PURE__ */ u4("label", { class: "settings-row", children: [
-          /* @__PURE__ */ u4(
-            "input",
-            {
-              type: "checkbox",
-              checked: !completionSoundMutedSig.value,
-              onChange: () => {
-                completionSoundMutedSig.value = !completionSoundMutedSig.value;
-              }
-            }
-          ),
-          /* @__PURE__ */ u4("span", { children: "Play a chime when the agent's reply arrives" })
-        ] }),
-        /* @__PURE__ */ u4("p", { class: "muted", children: "A short chime each time the agent finishes and sends its response." })
-      ] }),
-      /* @__PURE__ */ u4(InstallSection, {}),
-      /* @__PURE__ */ u4("section", { children: [
-        /* @__PURE__ */ u4("h3", { children: "Linked identities" }),
-        /* @__PURE__ */ u4("p", { class: "muted", children: [
-          "Identities let ",
-          BRAND.name,
-          " recognize you across channels. Add more so any channel you DM the bot from is treated as the same user. The ",
-          /* @__PURE__ */ u4("em", { children: "primary" }),
-          " identity is where ",
-          BRAND.name,
-          " reaches out when it needs to message you first (approval prompts, pairing, host notifications); replies always go back through whichever channel you wrote from."
-        ] }),
-        identities.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "No identities yet." }) : /* @__PURE__ */ u4("table", { class: "settings-table", children: [
-          /* @__PURE__ */ u4("thead", { children: /* @__PURE__ */ u4("tr", { children: [
-            /* @__PURE__ */ u4("th", { children: "Channel" }),
-            /* @__PURE__ */ u4("th", { children: "Handle" }),
-            /* @__PURE__ */ u4("th", { title: "Where the bot reaches you when it initiates a DM (approvals, pairing, host notifications). Replies follow whichever channel you wrote from.", children: "Primary" }),
-            /* @__PURE__ */ u4("th", {})
-          ] }) }),
-          /* @__PURE__ */ u4("tbody", { children: identities.map((i5) => /* @__PURE__ */ u4("tr", { children: [
-            /* @__PURE__ */ u4("td", { children: chanLabel(i5.channel) }),
-            /* @__PURE__ */ u4("td", { children: /* @__PURE__ */ u4("code", { children: i5.handle }) }),
-            /* @__PURE__ */ u4("td", { children: i5.primary ? "yes" : "" }),
-            /* @__PURE__ */ u4("td", { children: identities.length > 1 ? /* @__PURE__ */ u4("button", { class: "danger", onClick: () => unlink(i5.channel, i5.handle), children: "Unlink" }) : /* @__PURE__ */ u4("span", { class: "muted", children: "last" }) })
-          ] }, i5.channel + ":" + i5.handle)) })
-        ] }),
-        /* @__PURE__ */ u4("h4", { children: "Link a new identity" }),
-        channels.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "No additional channels available." }) : deepLinkChannels.includes(chan) ? /* @__PURE__ */ u4(k, { children: [
+  return /* @__PURE__ */ u4(
+    MobileDialog,
+    {
+      title,
+      onClose: close,
+      onBack: isMobile.value ? () => returnToUserMenu(settingsOpen) : void 0,
+      backLabel: "Back to account menu",
+      children: /* @__PURE__ */ u4("div", { class: "settings-body", children: [
+        /* @__PURE__ */ u4("section", { children: [
+          /* @__PURE__ */ u4("h3", { children: "Profile" }),
           /* @__PURE__ */ u4("div", { class: "settings-row", children: [
-            /* @__PURE__ */ u4("select", { value: chan, onChange: (e4) => {
-              setChan(e4.currentTarget.value);
-              setDeepLink(null);
-              setChallenge(null);
-              setStatus(null);
-            }, children: channels.map((c4) => /* @__PURE__ */ u4("option", { value: c4, children: chanLabel(c4) }, c4)) }),
-            /* @__PURE__ */ u4("button", { onClick: startDeepLink, disabled: busy || !!deepLink, children: [
-              "Open ",
-              chanLabel(chan),
-              " to confirm"
-            ] })
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "text",
+                placeholder: "Display name",
+                maxlength: 80,
+                value: displayName,
+                onInput: (e4) => setDisplayName(e4.currentTarget.value)
+              }
+            ),
+            /* @__PURE__ */ u4(
+              "button",
+              {
+                onClick: saveProfile,
+                disabled: savingProfile || !displayName.trim() || displayName.trim() === savedDisplayName,
+                children: "Save"
+              }
+            )
           ] }),
-          deepLink ? /* @__PURE__ */ u4("div", { class: "settings-row", style: "margin-top:8px", children: [
-            /* @__PURE__ */ u4("a", { href: deepLink.url, target: "_blank", rel: "noopener", children: "Reopen link" }),
-            /* @__PURE__ */ u4("button", { class: "ghost", onClick: () => {
-              setDeepLink(null);
-              setStatus(null);
-            }, children: "Cancel" }),
-            /* @__PURE__ */ u4("span", { class: "muted", children: [
-              "expires ",
-              new Date(deepLink.expiresAt).toLocaleTimeString()
-            ] })
-          ] }) : null
-        ] }) : /* @__PURE__ */ u4(k, { children: [
-          /* @__PURE__ */ u4("div", { class: "settings-row", children: [
-            /* @__PURE__ */ u4("select", { value: chan, onChange: (e4) => {
-              setChan(e4.currentTarget.value);
-              setDeepLink(null);
-              setChallenge(null);
-              setStatus(null);
-            }, children: channels.map((c4) => /* @__PURE__ */ u4("option", { value: c4, children: chanLabel(c4) }, c4)) }),
-            /* @__PURE__ */ u4("input", { placeholder: "handle", value: handle, onInput: (e4) => setHandle(e4.currentTarget.value) }),
-            /* @__PURE__ */ u4("button", { onClick: startLink, disabled: busy || !!challenge, children: "Send code" })
+          /* @__PURE__ */ u4("p", { class: "muted", children: [
+            "Shown in ",
+            BRAND.name,
+            " chat headers and approval messages. Does not change how channels address you."
+          ] })
+        ] }),
+        /* @__PURE__ */ u4("section", { children: [
+          /* @__PURE__ */ u4("h3", { children: "Notifications" }),
+          /* @__PURE__ */ u4("label", { class: "settings-row", children: [
+            /* @__PURE__ */ u4("input", { type: "checkbox", checked: !muted, onChange: toggleMute }),
+            /* @__PURE__ */ u4("span", { children: "Browser notifications for new messages" })
           ] }),
-          challenge ? /* @__PURE__ */ u4("div", { class: "settings-row", style: "margin-top:8px", children: [
-            /* @__PURE__ */ u4("input", { placeholder: "6-digit code", maxlength: 6, value: code, onInput: (e4) => setCode(e4.currentTarget.value), style: "width:120px" }),
-            /* @__PURE__ */ u4("button", { onClick: verify, disabled: busy || !code.trim(), children: "Verify" }),
-            /* @__PURE__ */ u4("button", { class: "ghost", onClick: () => {
-              setChallenge(null);
-              setCode("");
-              setStatus(null);
-            }, children: "Cancel" }),
-            /* @__PURE__ */ u4("span", { class: "muted", children: [
-              "expires ",
-              new Date(challenge.expiresAt).toLocaleTimeString()
-            ] })
-          ] }) : null
-        ] })
-      ] }),
-      status ? /* @__PURE__ */ u4("div", { class: "settings-status " + (status.err ? "err" : "ok"), children: status.err || status.ok }) : null
-    ] })
-  ] }) });
+          /* @__PURE__ */ u4("p", { class: "muted", children: muted ? "Currently muted. New messages will not raise notifications." : "Enabled. Permission is requested on first toggle." })
+        ] }),
+        /* @__PURE__ */ u4("section", { children: [
+          /* @__PURE__ */ u4("h3", { children: "Sounds" }),
+          /* @__PURE__ */ u4("label", { class: "settings-row", children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "checkbox",
+                checked: !progressSoundMutedSig.value,
+                onChange: () => {
+                  progressSoundMutedSig.value = !progressSoundMutedSig.value;
+                }
+              }
+            ),
+            /* @__PURE__ */ u4("span", { children: "Play a sound as the agent makes progress" })
+          ] }),
+          /* @__PURE__ */ u4("p", { class: "muted", children: "A subtle tick when the agent runs a tool or moves to a new step." })
+        ] }),
+        /* @__PURE__ */ u4("section", { children: [
+          /* @__PURE__ */ u4("h3", { children: "Completion sound" }),
+          /* @__PURE__ */ u4("label", { class: "settings-row", children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "checkbox",
+                checked: !completionSoundMutedSig.value,
+                onChange: () => {
+                  completionSoundMutedSig.value = !completionSoundMutedSig.value;
+                }
+              }
+            ),
+            /* @__PURE__ */ u4("span", { children: "Play a chime when the agent's reply arrives" })
+          ] }),
+          /* @__PURE__ */ u4("p", { class: "muted", children: "A short chime each time the agent finishes and sends its response." })
+        ] }),
+        /* @__PURE__ */ u4(InstallSection, {}),
+        /* @__PURE__ */ u4("section", { children: [
+          /* @__PURE__ */ u4("h3", { children: "Linked identities" }),
+          /* @__PURE__ */ u4("p", { class: "muted", children: [
+            "Identities let ",
+            BRAND.name,
+            " recognize you across channels. Add more so any channel you DM the bot from is treated as the same user. The ",
+            /* @__PURE__ */ u4("em", { children: "primary" }),
+            " identity is where ",
+            BRAND.name,
+            " reaches out when it needs to message you first (approval prompts, pairing, host notifications); replies always go back through whichever channel you wrote from."
+          ] }),
+          identities.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "No identities yet." }) : /* @__PURE__ */ u4("table", { class: "settings-table", children: [
+            /* @__PURE__ */ u4("thead", { children: /* @__PURE__ */ u4("tr", { children: [
+              /* @__PURE__ */ u4("th", { children: "Channel" }),
+              /* @__PURE__ */ u4("th", { children: "Handle" }),
+              /* @__PURE__ */ u4("th", { title: "Where the bot reaches you when it initiates a DM (approvals, pairing, host notifications). Replies follow whichever channel you wrote from.", children: "Primary" }),
+              /* @__PURE__ */ u4("th", {})
+            ] }) }),
+            /* @__PURE__ */ u4("tbody", { children: identities.map((i5) => /* @__PURE__ */ u4("tr", { children: [
+              /* @__PURE__ */ u4("td", { children: chanLabel(i5.channel) }),
+              /* @__PURE__ */ u4("td", { children: /* @__PURE__ */ u4("code", { children: i5.handle }) }),
+              /* @__PURE__ */ u4("td", { children: i5.primary ? "yes" : "" }),
+              /* @__PURE__ */ u4("td", { children: identities.length > 1 ? /* @__PURE__ */ u4("button", { class: "danger", onClick: () => unlink(i5.channel, i5.handle), children: "Unlink" }) : /* @__PURE__ */ u4("span", { class: "muted", children: "last" }) })
+            ] }, i5.channel + ":" + i5.handle)) })
+          ] }),
+          /* @__PURE__ */ u4("h4", { children: "Link a new identity" }),
+          channels.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "No additional channels available." }) : deepLinkChannels.includes(chan) ? /* @__PURE__ */ u4(k, { children: [
+            /* @__PURE__ */ u4("div", { class: "settings-row", children: [
+              /* @__PURE__ */ u4("select", { value: chan, onChange: (e4) => {
+                setChan(e4.currentTarget.value);
+                setDeepLink(null);
+                setChallenge(null);
+                setStatus(null);
+              }, children: channels.map((c4) => /* @__PURE__ */ u4("option", { value: c4, children: chanLabel(c4) }, c4)) }),
+              /* @__PURE__ */ u4("button", { onClick: startDeepLink, disabled: busy || !!deepLink, children: [
+                "Open ",
+                chanLabel(chan),
+                " to confirm"
+              ] })
+            ] }),
+            deepLink ? /* @__PURE__ */ u4("div", { class: "settings-row", style: "margin-top:8px", children: [
+              /* @__PURE__ */ u4("a", { href: deepLink.url, target: "_blank", rel: "noopener", children: "Reopen link" }),
+              /* @__PURE__ */ u4("button", { class: "ghost", onClick: () => {
+                setDeepLink(null);
+                setStatus(null);
+              }, children: "Cancel" }),
+              /* @__PURE__ */ u4("span", { class: "muted", children: [
+                "expires ",
+                new Date(deepLink.expiresAt).toLocaleTimeString()
+              ] })
+            ] }) : null
+          ] }) : /* @__PURE__ */ u4(k, { children: [
+            /* @__PURE__ */ u4("div", { class: "settings-row", children: [
+              /* @__PURE__ */ u4("select", { value: chan, onChange: (e4) => {
+                setChan(e4.currentTarget.value);
+                setDeepLink(null);
+                setChallenge(null);
+                setStatus(null);
+              }, children: channels.map((c4) => /* @__PURE__ */ u4("option", { value: c4, children: chanLabel(c4) }, c4)) }),
+              /* @__PURE__ */ u4("input", { placeholder: "handle", value: handle, onInput: (e4) => setHandle(e4.currentTarget.value) }),
+              /* @__PURE__ */ u4("button", { onClick: startLink, disabled: busy || !!challenge, children: "Send code" })
+            ] }),
+            challenge ? /* @__PURE__ */ u4("div", { class: "settings-row", style: "margin-top:8px", children: [
+              /* @__PURE__ */ u4("input", { placeholder: "6-digit code", maxlength: 6, value: code, onInput: (e4) => setCode(e4.currentTarget.value), style: "width:120px" }),
+              /* @__PURE__ */ u4("button", { onClick: verify, disabled: busy || !code.trim(), children: "Verify" }),
+              /* @__PURE__ */ u4("button", { class: "ghost", onClick: () => {
+                setChallenge(null);
+                setCode("");
+                setStatus(null);
+              }, children: "Cancel" }),
+              /* @__PURE__ */ u4("span", { class: "muted", children: [
+                "expires ",
+                new Date(challenge.expiresAt).toLocaleTimeString()
+              ] })
+            ] }) : null
+          ] })
+        ] }),
+        status ? /* @__PURE__ */ u4("div", { class: "settings-status " + (status.err ? "err" : "ok"), children: status.err || status.ok }) : null
+      ] })
+    }
+  );
 }
 function InstallSection() {
   const canInstall = installAvailable.value;
@@ -23087,9 +23052,6 @@ function ShareLinkModal() {
   function close() {
     shareModalRequest.value = null;
   }
-  function onBackdrop(e4) {
-    if (e4.target.classList.contains("settings-backdrop")) close();
-  }
   async function mint() {
     setBusy(true);
     setError(null);
@@ -23136,11 +23098,7 @@ function ShareLinkModal() {
   }
   const expiresLabel = result?.expiresAt ? new Date(result.expiresAt).toLocaleString() : null;
   const navAny = navigator;
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "settings-modal", role: "dialog", "aria-label": "Share with link", style: "max-width:520px", children: [
-    /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-      /* @__PURE__ */ u4("span", { class: "title", children: "Share with link" }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: close, children: "\u2715" })
-    ] }),
+  return /* @__PURE__ */ u4(MobileDialog, { title: "Share with link", onClose: close, maxWidth: "520px", children: [
     /* @__PURE__ */ u4("div", { class: "settings-body", children: [
       /* @__PURE__ */ u4("p", { class: "muted", style: "margin-top:0", children: [
         "Anyone with this link can download ",
@@ -23218,7 +23176,7 @@ function ShareLinkModal() {
       /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: close, disabled: busy, children: "Cancel" }),
       /* @__PURE__ */ u4("button", { type: "button", onClick: mint, disabled: busy, children: busy ? "Creating\u2026" : "Create link" })
     ] }) })
-  ] }) });
+  ] });
 }
 
 // src/components/TaskPanel.tsx
@@ -23595,17 +23553,7 @@ function TaskPanel() {
   const { gid, tid } = req;
   const focusMissing = !!req.focusSeriesId && !!tasks && !tasks.some((t4) => t4.seriesId === req.focusSeriesId);
   const activeTask = mode === "single" && activeId ? tasks?.find((t4) => t4.seriesId === activeId) || null : null;
-  function onBackdrop(e4) {
-    if (e4.target.classList.contains("settings-backdrop")) close();
-  }
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "settings-modal task-panel", role: "dialog", "aria-label": "Scheduled tasks", style: "max-width:560px", children: [
-    /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-      /* @__PURE__ */ u4("span", { class: "title", children: [
-        "\u23F0",
-        " Scheduled tasks"
-      ] }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: close, children: "\u2715" })
-    ] }),
+  return /* @__PURE__ */ u4(MobileDialog, { title: `${"\u23F0"} Scheduled tasks`, onClose: close, maxWidth: "560px", className: "task-panel", children: [
     /* @__PURE__ */ u4("div", { class: "settings-body", children: [
       error ? /* @__PURE__ */ u4("div", { class: "settings-status err", children: error }) : null,
       tasks === null && !error ? /* @__PURE__ */ u4("p", { class: "muted", children: [
@@ -23629,7 +23577,7 @@ function TaskPanel() {
       ] })
     ] }),
     /* @__PURE__ */ u4("div", { class: "settings-row", style: "padding:10px 16px;border-top:1px solid var(--border);justify-content:flex-end", children: /* @__PURE__ */ u4("button", { type: "button", onClick: close, children: "Done" }) })
-  ] }) });
+  ] });
 }
 
 // node_modules/preact/compat/dist/compat.module.js
@@ -24269,126 +24217,125 @@ function ModelPickerDialog({
       }
     ),
     open && /* @__PURE__ */ u4(
-      "div",
+      MobileDialog,
       {
-        class: "mpd-backdrop",
-        onMouseDown: (e4) => {
-          if (e4.target === e4.currentTarget) setOpen(false);
-        },
-        onKeyDown: handleKeyDown,
-        children: /* @__PURE__ */ u4("div", { class: "mpd-dialog", role: "dialog", "aria-label": "Pick a model", children: [
-          /* @__PURE__ */ u4("div", { class: "mpd-head", children: [
-            /* @__PURE__ */ u4("span", { class: "mpd-title", children: "Pick a model" }),
-            value && /* @__PURE__ */ u4("button", { type: "button", class: "mpd-close", title: "Clear selection", onClick: handleClear, children: "\u2715 Clear" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "mpd-close", title: "Close", onClick: () => setOpen(false), children: "\u2715" })
-          ] }),
-          /* @__PURE__ */ u4("div", { class: "mpd-content", children: [
-            /* @__PURE__ */ u4("div", { class: "mpd-sidebar", children: [
-              /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
-                /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Input" }),
-                ALL_INPUT_MODALITIES.map((mod) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
-                  /* @__PURE__ */ u4(
-                    "input",
-                    {
-                      type: "checkbox",
-                      id: `mpd-in-${mod}`,
-                      checked: selectedInputMods.has(mod),
-                      onChange: () => setSelectedInputMods(toggleSet(selectedInputMods, mod))
-                    }
-                  ),
-                  /* @__PURE__ */ u4("label", { for: `mpd-in-${mod}`, children: mod })
-                ] }, mod))
-              ] }),
-              /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
-                /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Output" }),
-                ALL_OUTPUT_MODALITIES.map((mod) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
-                  /* @__PURE__ */ u4(
-                    "input",
-                    {
-                      type: "checkbox",
-                      id: `mpd-out-${mod}`,
-                      checked: selectedOutputMods.has(mod),
-                      onChange: () => setSelectedOutputMods(toggleSet(selectedOutputMods, mod))
-                    }
-                  ),
-                  /* @__PURE__ */ u4("label", { for: `mpd-out-${mod}`, children: mod })
-                ] }, mod))
-              ] }),
-              /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
-                /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Cost (output)" }),
-                COST_TIERS.map((tier) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
-                  /* @__PURE__ */ u4(
-                    "input",
-                    {
-                      type: "checkbox",
-                      id: `mpd-cost-${tier.id}`,
-                      checked: selectedCostTiers.has(tier.id),
-                      onChange: () => setSelectedCostTiers(toggleSet(selectedCostTiers, tier.id))
-                    }
-                  ),
-                  /* @__PURE__ */ u4("label", { for: `mpd-cost-${tier.id}`, children: tier.label })
-                ] }, tier.id))
-              ] }),
-              /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
-                /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Context window" }),
-                CTX_TIERS.map((tier) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
-                  /* @__PURE__ */ u4(
-                    "input",
-                    {
-                      type: "checkbox",
-                      id: `mpd-ctx-${tier.id}`,
-                      checked: selectedCtxTier === tier.id,
-                      onChange: () => setSelectedCtxTier(selectedCtxTier === tier.id ? null : tier.id)
-                    }
-                  ),
-                  /* @__PURE__ */ u4("label", { for: `mpd-ctx-${tier.id}`, children: tier.label })
-                ] }, tier.id))
-              ] })
-            ] }),
-            /* @__PURE__ */ u4("div", { class: "mpd-main", children: [
-              /* @__PURE__ */ u4("div", { class: "mpd-search", children: /* @__PURE__ */ u4(
-                "input",
-                {
-                  ref: searchRef,
-                  type: "text",
-                  placeholder: "Search models\u2026",
-                  value: search,
-                  onInput: (e4) => setSearch(e4.target.value)
-                }
-              ) }),
-              /* @__PURE__ */ u4("div", { class: "mpd-list", children: [
-                loading && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "Loading\u2026" }),
-                !loading && source === "unavailable" && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "Model catalog unavailable." }),
-                !loading && source !== "unavailable" && filtered.length === 0 && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "No models match filters." }),
-                !loading && filtered.map((m6) => /* @__PURE__ */ u4(
-                  "button",
-                  {
-                    type: "button",
-                    class: `mpd-item${m6.id === value ? " selected" : ""}`,
-                    onClick: () => handleSelect(m6.id),
-                    children: [
-                      /* @__PURE__ */ u4("div", { class: "mpd-item-name", children: m6.label }),
-                      /* @__PURE__ */ u4("div", { class: "mpd-item-detail", children: formatDetailLine(m6) })
-                    ]
-                  },
-                  m6.id
-                ))
-              ] }),
-              /* @__PURE__ */ u4("div", { class: "mpd-freeform", children: [
+        title: "Pick a model",
+        onClose: () => setOpen(false),
+        onBack: isMobile.value ? () => setOpen(false) : void 0,
+        backLabel: "Back to agent settings",
+        onKeyDown: (e4) => handleKeyDown(e4),
+        maxWidth: "720px",
+        className: "mpd-dialog",
+        actions: value ? /* @__PURE__ */ u4("button", { type: "button", class: "mpd-clear", title: "Clear selection", onClick: handleClear, children: [
+          "\u2715",
+          " Clear"
+        ] }) : null,
+        children: /* @__PURE__ */ u4("div", { class: "mpd-content", children: [
+          /* @__PURE__ */ u4("div", { class: "mpd-sidebar", children: [
+            /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
+              /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Input" }),
+              ALL_INPUT_MODALITIES.map((mod) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
                 /* @__PURE__ */ u4(
                   "input",
                   {
-                    type: "text",
-                    placeholder: "Or type a custom model ID\u2026",
-                    value: freeformValue,
-                    onInput: (e4) => setFreeformValue(e4.target.value),
-                    onKeyDown: (e4) => {
-                      if (e4.key === "Enter") handleFreeformSubmit();
-                    }
+                    type: "checkbox",
+                    id: `mpd-in-${mod}`,
+                    checked: selectedInputMods.has(mod),
+                    onChange: () => setSelectedInputMods(toggleSet(selectedInputMods, mod))
                   }
                 ),
-                /* @__PURE__ */ u4("button", { type: "button", disabled: !freeformValue.trim(), onClick: handleFreeformSubmit, children: "Use" })
-              ] })
+                /* @__PURE__ */ u4("label", { for: `mpd-in-${mod}`, children: mod })
+              ] }, mod))
+            ] }),
+            /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
+              /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Output" }),
+              ALL_OUTPUT_MODALITIES.map((mod) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
+                /* @__PURE__ */ u4(
+                  "input",
+                  {
+                    type: "checkbox",
+                    id: `mpd-out-${mod}`,
+                    checked: selectedOutputMods.has(mod),
+                    onChange: () => setSelectedOutputMods(toggleSet(selectedOutputMods, mod))
+                  }
+                ),
+                /* @__PURE__ */ u4("label", { for: `mpd-out-${mod}`, children: mod })
+              ] }, mod))
+            ] }),
+            /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
+              /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Cost (output)" }),
+              COST_TIERS.map((tier) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
+                /* @__PURE__ */ u4(
+                  "input",
+                  {
+                    type: "checkbox",
+                    id: `mpd-cost-${tier.id}`,
+                    checked: selectedCostTiers.has(tier.id),
+                    onChange: () => setSelectedCostTiers(toggleSet(selectedCostTiers, tier.id))
+                  }
+                ),
+                /* @__PURE__ */ u4("label", { for: `mpd-cost-${tier.id}`, children: tier.label })
+              ] }, tier.id))
+            ] }),
+            /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
+              /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Context window" }),
+              CTX_TIERS.map((tier) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
+                /* @__PURE__ */ u4(
+                  "input",
+                  {
+                    type: "checkbox",
+                    id: `mpd-ctx-${tier.id}`,
+                    checked: selectedCtxTier === tier.id,
+                    onChange: () => setSelectedCtxTier(selectedCtxTier === tier.id ? null : tier.id)
+                  }
+                ),
+                /* @__PURE__ */ u4("label", { for: `mpd-ctx-${tier.id}`, children: tier.label })
+              ] }, tier.id))
+            ] })
+          ] }),
+          /* @__PURE__ */ u4("div", { class: "mpd-main", children: [
+            /* @__PURE__ */ u4("div", { class: "mpd-search", children: /* @__PURE__ */ u4(
+              "input",
+              {
+                ref: searchRef,
+                type: "text",
+                placeholder: "Search models\u2026",
+                value: search,
+                onInput: (e4) => setSearch(e4.target.value)
+              }
+            ) }),
+            /* @__PURE__ */ u4("div", { class: "mpd-list", children: [
+              loading && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "Loading\u2026" }),
+              !loading && source === "unavailable" && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "Model catalog unavailable." }),
+              !loading && source !== "unavailable" && filtered.length === 0 && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "No models match filters." }),
+              !loading && filtered.map((m6) => /* @__PURE__ */ u4(
+                "button",
+                {
+                  type: "button",
+                  class: `mpd-item${m6.id === value ? " selected" : ""}`,
+                  onClick: () => handleSelect(m6.id),
+                  children: [
+                    /* @__PURE__ */ u4("div", { class: "mpd-item-name", children: m6.label }),
+                    /* @__PURE__ */ u4("div", { class: "mpd-item-detail", children: formatDetailLine(m6) })
+                  ]
+                },
+                m6.id
+              ))
+            ] }),
+            /* @__PURE__ */ u4("div", { class: "mpd-freeform", children: [
+              /* @__PURE__ */ u4(
+                "input",
+                {
+                  type: "text",
+                  placeholder: "Or type a custom model ID\u2026",
+                  value: freeformValue,
+                  onInput: (e4) => setFreeformValue(e4.target.value),
+                  onKeyDown: (e4) => {
+                    if (e4.key === "Enter") handleFreeformSubmit();
+                  }
+                }
+              ),
+              /* @__PURE__ */ u4("button", { type: "button", disabled: !freeformValue.trim(), onClick: handleFreeformSubmit, children: "Use" })
             ] })
           ] })
         ] })
@@ -24464,9 +24411,11 @@ function GroupAdmin() {
   const actionsRef = A2(null);
   const [, forceRender] = h2(0);
   const [closeConfirmOpen, setCloseConfirmOpen] = h2(false);
+  const [returnToMenuAfterDiscard, setReturnToMenuAfterDiscard] = h2(false);
   y2(() => {
     setTab(isMobile.value ? null : "settings");
     setCloseConfirmOpen(false);
+    setReturnToMenuAfterDiscard(false);
   }, [open, gid]);
   useBackButtonCloses(open, () => {
     groupAdminOpen.value = false;
@@ -24474,18 +24423,17 @@ function GroupAdmin() {
   if (!open || !gid) return null;
   const group = groups.value.find((g8) => g8.id === gid);
   const title = group ? `Agent Settings \xB7 ${group.name}` : "Agent Settings";
-  function hardClose() {
-    groupAdminOpen.value = false;
+  function hardClose(returnToMenu = false) {
+    if (returnToMenu) returnToUserMenu(groupAdminOpen);
+    else groupAdminOpen.value = false;
   }
-  function attemptClose() {
+  function attemptClose(returnToMenu = false) {
     if (actionsRef.current?.canSave) {
+      setReturnToMenuAfterDiscard(returnToMenu);
       setCloseConfirmOpen(true);
     } else {
-      hardClose();
+      hardClose(returnToMenu);
     }
-  }
-  function onBackdrop(e4) {
-    if (e4.target.classList.contains("settings-backdrop")) attemptClose();
   }
   function onKey(e4) {
     if (e4.key === "Escape") attemptClose();
@@ -24500,91 +24448,78 @@ function GroupAdmin() {
     actionsRef.current = a4;
     forceRender((n3) => n3 + 1);
   };
-  return /* @__PURE__ */ u4("div", { class: "settings-backdrop", onClick: onBackdrop, children: /* @__PURE__ */ u4("div", { class: "settings-modal", role: "dialog", "aria-label": title, children: [
-    /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-      /* @__PURE__ */ u4("span", { class: "title", children: title }),
-      /* @__PURE__ */ u4("div", { class: "settings-head-actions", children: [
-        tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? /* @__PURE__ */ u4(k, { children: /* @__PURE__ */ u4(Tooltip, { text: ha.canSave ? "Save changes" : "Nothing to save", children: /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Save", onClick: ha.apply, disabled: ha.busy || !ha.canSave, children: "\u2713" }) }) }) : null,
-        /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: attemptClose, children: "\u2715" })
-      ] })
-    ] }),
-    !mobile ? /* @__PURE__ */ u4(
-      TabBar,
-      {
-        ariaLabel: "Group settings sections",
-        mobileSheetTitle: "Settings sections",
-        activeId: tab,
-        items: TAB_ITEMS,
-        onSelect: (id) => setTab(id),
-        className: "group-admin-tab-bar"
-      }
-    ) : null,
-    /* @__PURE__ */ u4("div", { class: "settings-body", children: mobile && tab === null ? /* @__PURE__ */ u4(MobileSectionList, { items: TAB_ITEMS, onSelect: (id) => setTab(id) }) : /* @__PURE__ */ u4(k, { children: [
-      mobile && tab !== null ? /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "group-admin-back",
-          onClick: () => setTab(null),
-          "aria-label": "Back to sections",
-          children: [
-            /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: "\u2039" }),
-            " Sections"
-          ]
-        }
-      ) : null,
-      tab !== null && SETTINGS_SECTIONS.has(tab) ? /* @__PURE__ */ u4(SettingsTab, { gid, section: tab, onClose: hardClose, onActions: setActions }) : null,
-      tab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
-      tab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
-      tab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
-    ] }) }),
-    closeConfirmOpen ? /* @__PURE__ */ u4(
-      "div",
-      {
-        class: "settings-backdrop",
-        onClick: (e4) => {
-          if (e4.target.classList.contains("settings-backdrop")) setCloseConfirmOpen(false);
-        },
-        children: /* @__PURE__ */ u4("div", { class: "settings-modal ga-confirm-modal", role: "dialog", "aria-label": "Discard changes?", style: "max-width:420px", children: [
-          /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-            /* @__PURE__ */ u4("span", { class: "title", children: "Discard unsaved changes?" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", onClick: () => setCloseConfirmOpen(false), children: "\u2715" })
-          ] }),
-          /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "You have unsaved changes. Closing now discards them." }) }),
-          /* @__PURE__ */ u4("footer", { class: "settings-foot ga-confirm-foot", children: [
-            /* @__PURE__ */ u4("button", { type: "button", onClick: () => setCloseConfirmOpen(false), children: "Keep editing" }),
-            /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: "danger",
-                "data-testid": "discard-and-close-btn",
-                onClick: () => {
+  return /* @__PURE__ */ u4(
+    MobileDialog,
+    {
+      title,
+      onClose: () => attemptClose(),
+      onBack: mobile ? tab !== null ? () => setTab(null) : () => attemptClose(true) : void 0,
+      backLabel: tab !== null ? "Back to all sections" : "Back to account menu",
+      actions: tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? /* @__PURE__ */ u4(Tooltip, { text: ha.canSave ? "Save changes" : "Nothing to save", children: /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Save", onClick: ha.apply, disabled: ha.busy || !ha.canSave, children: "\u2713" }) }) : null,
+      children: [
+        !mobile ? /* @__PURE__ */ u4(
+          TabBar,
+          {
+            ariaLabel: "Group settings sections",
+            mobileSheetTitle: "Settings sections",
+            activeId: tab,
+            items: TAB_ITEMS,
+            onSelect: (id) => setTab(id),
+            className: "group-admin-tab-bar"
+          }
+        ) : null,
+        mobile && tab === null ? /* @__PURE__ */ u4(MobileSectionList, { items: TAB_ITEMS, onSelect: (id) => setTab(id) }) : /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4(k, { children: [
+          tab !== null && SETTINGS_SECTIONS.has(tab) ? /* @__PURE__ */ u4(SettingsTab, { gid, section: tab, onClose: hardClose, onActions: setActions }) : null,
+          tab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
+          tab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
+          tab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
+        ] }) }),
+        closeConfirmOpen ? /* @__PURE__ */ u4(
+          MobileDialog,
+          {
+            title: "Discard unsaved changes?",
+            onClose: () => {
+              setCloseConfirmOpen(false);
+              setReturnToMenuAfterDiscard(false);
+            },
+            maxWidth: "420px",
+            className: "ga-confirm-modal",
+            children: [
+              /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "You have unsaved changes. Closing now discards them." }) }),
+              /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
+                /* @__PURE__ */ u4("button", { type: "button", onClick: () => {
                   setCloseConfirmOpen(false);
-                  hardClose();
-                },
-                children: "Discard & close"
-              }
-            )
-          ] })
-        ] })
-      }
-    ) : null
-  ] }) });
+                  setReturnToMenuAfterDiscard(false);
+                }, children: "Keep editing" }),
+                /* @__PURE__ */ u4(
+                  "button",
+                  {
+                    type: "button",
+                    class: "danger",
+                    "data-testid": "discard-and-close-btn",
+                    onClick: () => {
+                      setCloseConfirmOpen(false);
+                      hardClose(returnToMenuAfterDiscard);
+                    },
+                    children: "Discard & close"
+                  }
+                )
+              ] })
+            ]
+          }
+        ) : null
+      ]
+    }
+  );
 }
 function MobileSectionList({ items, onSelect }) {
-  return /* @__PURE__ */ u4("div", { class: "group-admin-section-list", role: "list", children: items.map((it) => /* @__PURE__ */ u4(
-    "button",
+  return /* @__PURE__ */ u4(MobileDialogList, { children: items.map((it) => /* @__PURE__ */ u4(
+    MobileDialogItem,
     {
-      type: "button",
-      role: "listitem",
-      class: "group-admin-section-row",
-      onClick: () => onSelect(it.id),
-      children: [
-        /* @__PURE__ */ u4("span", { class: "group-admin-section-name", children: it.label }),
-        it.sublabel ? /* @__PURE__ */ u4("span", { class: "group-admin-section-sub", children: it.sublabel }) : null,
-        /* @__PURE__ */ u4("span", { class: "group-admin-section-caret", "aria-hidden": "true", children: "\u203A" })
-      ]
+      label: it.label,
+      sublabel: it.sublabel,
+      chevron: true,
+      onClick: () => onSelect(it.id)
     },
     it.id
   )) });
@@ -25130,17 +25065,14 @@ function SettingsTab({ gid, section, onClose, onActions }) {
     ) : null,
     /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending2.size} unsaved change${pending2.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),
     confirmOpen ? /* @__PURE__ */ u4(
-      "div",
+      MobileDialog,
       {
-        class: "settings-backdrop",
-        onClick: (e4) => {
-          if (e4.target.classList.contains("settings-backdrop") && !busy) setConfirmOpen(false);
-        },
-        children: /* @__PURE__ */ u4("div", { class: "settings-modal ga-confirm-modal", role: "dialog", "aria-label": "Apply changes", style: "max-width:440px", children: [
-          /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-            /* @__PURE__ */ u4("span", { class: "title", children: "Apply changes" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", disabled: busy, onClick: () => setConfirmOpen(false), children: "\u2715" })
-          ] }),
+        title: "Apply changes",
+        onClose: () => setConfirmOpen(false),
+        closeDisabled: busy,
+        maxWidth: "440px",
+        className: "ga-confirm-modal",
+        children: [
           /* @__PURE__ */ u4("div", { class: "settings-body", children: [
             /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
               pending2.size,
@@ -25180,25 +25112,22 @@ function SettingsTab({ gid, section, onClose, onActions }) {
             ] }),
             needsRestart && !effectiveRestart ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: "These changes won\u2019t take effect until the sessions restart." }) : null
           ] }),
-          /* @__PURE__ */ u4("footer", { class: "settings-foot ga-confirm-foot", children: [
+          /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
             /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => setConfirmOpen(false), children: "Cancel" }),
             /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy, onClick: doApply, children: busy ? "Applying\u2026" : effectiveRebuild ? "Save & rebuild" : effectiveRestart ? "Save & restart" : "Save" })
           ] })
-        ] })
+        ]
       }
     ) : null,
     archiveOpen ? /* @__PURE__ */ u4(
-      "div",
+      MobileDialog,
       {
-        class: "settings-backdrop",
-        onClick: (e4) => {
-          if (e4.target.classList.contains("settings-backdrop") && !archiveBusy) setArchiveOpen(false);
-        },
-        children: /* @__PURE__ */ u4("div", { class: "settings-modal ga-confirm-modal", role: "dialog", "aria-label": "Archive group", style: "max-width:440px", children: [
-          /* @__PURE__ */ u4("header", { class: "settings-head", children: [
-            /* @__PURE__ */ u4("span", { class: "title", children: "Archive group" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Close", disabled: archiveBusy, onClick: () => setArchiveOpen(false), children: "\u2715" })
-          ] }),
+        title: "Archive group",
+        onClose: () => setArchiveOpen(false),
+        closeDisabled: archiveBusy,
+        maxWidth: "440px",
+        className: "ga-confirm-modal",
+        children: [
           /* @__PURE__ */ u4("div", { class: "settings-body", children: [
             /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
               "Running container sessions will stop and the group will be removed from this UI. Its folder is renamed with a ",
@@ -25230,7 +25159,7 @@ function SettingsTab({ gid, section, onClose, onActions }) {
               }
             )
           ] }),
-          /* @__PURE__ */ u4("footer", { class: "settings-foot ga-confirm-foot", children: [
+          /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
             /* @__PURE__ */ u4("button", { type: "button", disabled: archiveBusy, onClick: () => setArchiveOpen(false), children: "Cancel" }),
             /* @__PURE__ */ u4(
               "button",
@@ -25244,7 +25173,7 @@ function SettingsTab({ gid, section, onClose, onActions }) {
               }
             )
           ] })
-        ] })
+        ]
       }
     ) : null
   ] });

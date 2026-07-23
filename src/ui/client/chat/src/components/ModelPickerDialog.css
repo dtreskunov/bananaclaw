@@ -17,28 +17,12 @@
 .mpd-trigger .mpd-trigger-placeholder { color: var(--muted); }
 .mpd-trigger .mpd-trigger-icon { flex: none; color: var(--muted); font-size: var(--font-lg); }
 
-/* Dialog chrome — reuses settings-backdrop for scrim + z-index */
-.mpd-backdrop {
-  position: fixed; inset: 0; background: var(--scrim);
-  z-index: 25; display: flex; align-items: flex-start; justify-content: center;
-  padding: 40px 16px; overflow-y: auto;
-}
 .mpd-dialog {
-  background: var(--surface); color: var(--surface-fg);
-  border: 1px solid var(--border); border-radius: var(--radius-xl);
-  box-shadow: 0 10px 32px var(--shadow-color-strong);
-  width: 100%; max-width: 720px; max-height: calc(100vh - 80px);
-  display: flex; flex-direction: column; overflow: hidden;
+  z-index: 25;
 }
-.mpd-head {
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 14px; border-bottom: 1px solid var(--border);
-  background: var(--head-tint);
-}
-.mpd-head .mpd-title { flex: 1; font-weight: 600; font-size: var(--font-xl); }
-.mpd-head .mpd-close {
+.mpd-clear {
   flex: none; background: transparent; border: none; color: inherit;
-  font-size: var(--font-xl); cursor: pointer; padding: 4px; line-height: 1;
+  font: inherit; cursor: pointer; padding: 4px; line-height: 1;
 }
 
 .mpd-content {
@@ -125,11 +109,6 @@
 
 /* Mobile: sidebar collapses to horizontal filter bar */
 @media (max-width: 720px) {
-  .mpd-backdrop { padding: 0; align-items: stretch; overflow: hidden; }
-  .mpd-dialog {
-    width: 100%; max-width: 100%; max-height: 100%; height: 100%;
-    border-radius: 0; border: 0; box-shadow: none;
-  }
   .mpd-content { flex-direction: column; }
   .mpd-sidebar {
     width: auto; border-right: none;

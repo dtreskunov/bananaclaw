@@ -104,6 +104,7 @@ export const currentUserId: Signal<string> = signal('');
 export const notifMutedSig: Signal<boolean> = signal(false);
 export const progressSoundMutedSig: Signal<boolean> = signal(false);
 export const completionSoundMutedSig: Signal<boolean> = signal(false);
+export const userMenuOpen: Signal<boolean> = signal(false);
 export const settingsOpen: Signal<boolean> = signal(false);
 export const groupAdminOpen: Signal<boolean> = signal(false);
 export const groupPickerOpen: Signal<boolean> = signal(false);

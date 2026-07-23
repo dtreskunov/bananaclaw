@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { shareModalRequest } from '../state';
 import { postJson } from '../api';
 import { showToast } from './Toast';
+import { MobileDialog } from './MobileDialog';
 
 const DURATIONS: { label: string; minutes: number }[] = [
   { label: '15 minutes', minutes: 15 },
@@ -51,9 +52,6 @@ export function ShareLinkModal() {
   const title = entry?.name || (entry?.path || '').slice((entry?.path || '').lastIndexOf('/') + 1);
 
   function close(): void { shareModalRequest.value = null; }
-  function onBackdrop(e: JSX.TargetedMouseEvent<HTMLDivElement>): void {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) close();
-  }
 
   async function mint(): Promise<void> {
     setBusy(true);
@@ -101,12 +99,7 @@ export function ShareLinkModal() {
   const navAny = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
 
   return (
-    <div class="settings-backdrop" onClick={onBackdrop}>
-      <div class="settings-modal" role="dialog" aria-label="Share with link" style="max-width:520px">
-        <header class="settings-head">
-          <span class="title">Share with link</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={close}>{'\u2715'}</button>
-        </header>
+    <MobileDialog title="Share with link" onClose={close} maxWidth="520px">
         <div class="settings-body">
           <p class="muted" style="margin-top:0">
             Anyone with this link can download <code>{title}</code> until it expires
@@ -180,7 +173,6 @@ export function ShareLinkModal() {
               </>
             )}
         </div>
-      </div>
-    </div>
+    </MobileDialog>
   );
 }

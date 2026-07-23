@@ -4,6 +4,7 @@ import './Settings.css';
 import type { JSX } from 'preact';
 import { signal, type Signal } from '@preact/signals';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { MobileDialog, MobileDialogFooter } from './MobileDialog';
 
 interface PromptRequest {
   title: string;
@@ -45,26 +46,13 @@ export function PromptModal() {
     const trimmed = value.trim();
     close(trimmed ? trimmed : null);
   }
-  function onBackdrop(e: JSX.TargetedMouseEvent<HTMLDivElement>): void {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) close(null);
-  }
   function onKey(e: JSX.TargetedKeyboardEvent<HTMLInputElement>): void {
     if (e.key === 'Escape') close(null);
   }
 
   return (
-    <div class="settings-backdrop" onClick={onBackdrop}>
-      <form
-        class="settings-modal"
-        role="dialog"
-        aria-label={req.title}
-        style="max-width:420px"
-        onSubmit={onSubmit}
-      >
-        <header class="settings-head">
-          <span class="title">{req.title}</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={() => close(null)}>{'\u2715'}</button>
-        </header>
+    <MobileDialog title={req.title} onClose={() => close(null)} maxWidth="420px">
+      <form class="mobile-dialog-form" onSubmit={onSubmit}>
         <div class="settings-body">
           {req.label ? <label style="display:block;margin-bottom:6px;font-size:12px;color:var(--muted)">{req.label}</label> : null}
           <input
@@ -77,12 +65,12 @@ export function PromptModal() {
             style="width:100%"
           />
         </div>
-        <footer class="settings-foot" style="display:flex;justify-content:flex-end;gap:8px;padding:8px 12px;border-top:1px solid var(--border)">
+        <MobileDialogFooter>
           <button type="button" onClick={() => close(null)}>Cancel</button>
           <button type="submit" class="primary">{req.okLabel || 'OK'}</button>
-        </footer>
+        </MobileDialogFooter>
       </form>
-    </div>
+    </MobileDialog>
   );
 }
 
@@ -119,28 +107,21 @@ export function ConfirmModal() {
     confirmRequest.value = null;
     r?.resolve(result);
   }
-  function onBackdrop(e: JSX.TargetedMouseEvent<HTMLDivElement>): void {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) close(false);
-  }
   function onKey(e: JSX.TargetedKeyboardEvent<HTMLDivElement>): void {
     if (e.key === 'Escape') close(false);
     else if (e.key === 'Enter') close(true);
   }
 
   return (
-    <div class="settings-backdrop" onClick={onBackdrop} onKeyDown={onKey} tabIndex={-1}>
-      <div
-        class="settings-modal"
-        role="alertdialog"
-        aria-label={req.title}
-        style="max-width:420px"
-      >
-        <header class="settings-head">
-          <span class="title">{req.title}</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={() => close(false)}>{'\u2715'}</button>
-        </header>
+    <MobileDialog
+      title={req.title}
+      onClose={() => close(false)}
+      maxWidth="420px"
+      role="alertdialog"
+      onKeyDown={onKey}
+    >
         <div class="settings-body" style="white-space:pre-wrap">{req.message}</div>
-        <footer class="settings-foot" style="display:flex;justify-content:flex-end;gap:8px;padding:8px 12px;border-top:1px solid var(--border)">
+        <MobileDialogFooter>
           <button type="button" onClick={() => close(false)}>{req.cancelLabel || 'Cancel'}</button>
           <button
             ref={okRef}
@@ -150,8 +131,7 @@ export function ConfirmModal() {
           >
             {req.okLabel || 'OK'}
           </button>
-        </footer>
-      </div>
-    </div>
+        </MobileDialogFooter>
+    </MobileDialog>
   );
 }

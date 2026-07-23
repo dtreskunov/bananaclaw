@@ -1,6 +1,6 @@
 // Per-group admin modal — config, members, scoped admin grants.
-// Visible only when the active group's `isAdmin` is true. Reuses the
-// existing .settings-backdrop / .settings-modal chrome for visual parity.
+// Visible only when the active group's `isAdmin` is true. Shared dialog
+// chrome keeps desktop and mobile presentation consistent.
 import './GroupAdmin.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
@@ -11,13 +11,14 @@ import {
   groups,
   isMobile,
 } from '../state';
-import { selectGroup } from '../actions';
+import { returnToUserMenu, selectGroup } from '../actions';
 import { Combobox, type ComboboxOption } from './Combobox';
 import { ModelPickerDialog } from './ModelPickerDialog';
 import { InfoIcon, Tooltip } from './Tooltip';
 import { showToast } from './Toast';
 import { useBackButtonCloses } from '../modalBackButton';
 import { TabBar, type TabItem } from './TabBar';
+import { MobileDialog, MobileDialogFooter, MobileDialogItem, MobileDialogList } from './MobileDialog';
 
 type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'members' | 'roles' | 'destinations';
 
@@ -223,9 +224,11 @@ export function GroupAdmin(): JSX.Element | null {
   const actionsRef = useRef<HeaderActions | null>(null);
   const [, forceRender] = useState(0);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [returnToMenuAfterDiscard, setReturnToMenuAfterDiscard] = useState(false);
   useEffect(() => {
     setTab(isMobile.value ? null : 'settings');
     setCloseConfirmOpen(false);
+    setReturnToMenuAfterDiscard(false);
   }, [open, gid]);
   useBackButtonCloses(open, () => { groupAdminOpen.value = false; });
 
@@ -233,16 +236,17 @@ export function GroupAdmin(): JSX.Element | null {
   const group = groups.value.find((g) => g.id === gid);
   const title = group ? `Agent Settings · ${group.name}` : 'Agent Settings';
 
-  function hardClose(): void { groupAdminOpen.value = false; }
-  function attemptClose(): void {
+  function hardClose(returnToMenu = false): void {
+    if (returnToMenu) returnToUserMenu(groupAdminOpen);
+    else groupAdminOpen.value = false;
+  }
+  function attemptClose(returnToMenu = false): void {
     if (actionsRef.current?.canSave) {
+      setReturnToMenuAfterDiscard(returnToMenu);
       setCloseConfirmOpen(true);
     } else {
-      hardClose();
+      hardClose(returnToMenu);
     }
-  }
-  function onBackdrop(e: JSX.TargetedMouseEvent<HTMLDivElement>): void {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) attemptClose();
   }
   function onKey(e: KeyboardEvent): void { if (e.key === 'Escape') attemptClose(); }
 
@@ -256,21 +260,17 @@ export function GroupAdmin(): JSX.Element | null {
   const setActions = (a: HeaderActions | null) => { actionsRef.current = a; forceRender((n) => n + 1); };
 
   return (
-    <div class="settings-backdrop" onClick={onBackdrop}>
-      <div class="settings-modal" role="dialog" aria-label={title}>
-        <header class="settings-head">
-          <span class="title">{title}</span>
-          <div class="settings-head-actions">
-            {tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? (
-              <>
-                <Tooltip text={ha.canSave ? 'Save changes' : 'Nothing to save'}>
-                  <button type="button" class="icon-btn" aria-label="Save" onClick={ha.apply} disabled={ha.busy || !ha.canSave}>&#x2713;</button>
-                </Tooltip>
-              </>
-            ) : null}
-            <button type="button" class="icon-btn" aria-label="Close" onClick={attemptClose}>{'\u2715'}</button>
-          </div>
-        </header>
+    <MobileDialog
+      title={title}
+      onClose={() => attemptClose()}
+      onBack={mobile ? (tab !== null ? () => setTab(null) : () => attemptClose(true)) : undefined}
+      backLabel={tab !== null ? 'Back to all sections' : 'Back to account menu'}
+      actions={tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? (
+        <Tooltip text={ha.canSave ? 'Save changes' : 'Nothing to save'}>
+          <button type="button" class="icon-btn" aria-label="Save" onClick={ha.apply} disabled={ha.busy || !ha.canSave}>&#x2713;</button>
+        </Tooltip>
+      ) : null}
+    >
         {!mobile ? (
           <TabBar
             ariaLabel="Group settings sections"
@@ -281,21 +281,11 @@ export function GroupAdmin(): JSX.Element | null {
             className="group-admin-tab-bar"
           />
         ) : null}
-        <div class="settings-body">
-          {mobile && tab === null ? (
-            <MobileSectionList items={TAB_ITEMS} onSelect={(id) => setTab(id as Tab)} />
-          ) : (
+        {mobile && tab === null ? (
+          <MobileSectionList items={TAB_ITEMS} onSelect={(id) => setTab(id as Tab)} />
+        ) : (
+          <div class="settings-body">
             <>
-              {mobile && tab !== null ? (
-                <button
-                  type="button"
-                  class="group-admin-back"
-                  onClick={() => setTab(null)}
-                  aria-label="Back to sections"
-                >
-                  <span aria-hidden="true">{'\u2039'}</span> Sections
-                </button>
-              ) : null}
               {tab !== null && SETTINGS_SECTIONS.has(tab)
                 ? <SettingsTab gid={gid} section={tab as 'models' | 'settings' | 'packages' | 'mcp' | 'skills'} onClose={hardClose} onActions={setActions} />
                 : null}
@@ -303,41 +293,34 @@ export function GroupAdmin(): JSX.Element | null {
               {tab === 'roles' ? <RolesTab gid={gid} /> : null}
               {tab === 'destinations' ? <DestinationsTab gid={gid} /> : null}
             </>
-          )}
-        </div>
+          </div>
+        )}
         {closeConfirmOpen ? (
-          <div
-            class="settings-backdrop"
-            onClick={(e) => {
-              if ((e.target as HTMLElement).classList.contains('settings-backdrop')) setCloseConfirmOpen(false);
-            }}
+          <MobileDialog
+            title="Discard unsaved changes?"
+            onClose={() => { setCloseConfirmOpen(false); setReturnToMenuAfterDiscard(false); }}
+            maxWidth="420px"
+            className="ga-confirm-modal"
           >
-            <div class="settings-modal ga-confirm-modal" role="dialog" aria-label="Discard changes?" style="max-width:420px">
-              <header class="settings-head">
-                <span class="title">Discard unsaved changes?</span>
-                <button type="button" class="icon-btn" aria-label="Close" onClick={() => setCloseConfirmOpen(false)}>{'\u2715'}</button>
-              </header>
               <div class="settings-body">
                 <p class="group-admin-help">
                   You have unsaved changes. Closing now discards them.
                 </p>
               </div>
-              <footer class="settings-foot ga-confirm-foot">
-                <button type="button" onClick={() => setCloseConfirmOpen(false)}>Keep editing</button>
+              <MobileDialogFooter className="ga-confirm-foot">
+                <button type="button" onClick={() => { setCloseConfirmOpen(false); setReturnToMenuAfterDiscard(false); }}>Keep editing</button>
                 <button
                   type="button"
                   class="danger"
                   data-testid="discard-and-close-btn"
-                  onClick={() => { setCloseConfirmOpen(false); hardClose(); }}
+                  onClick={() => { setCloseConfirmOpen(false); hardClose(returnToMenuAfterDiscard); }}
                 >
                   Discard &amp; close
                 </button>
-              </footer>
-            </div>
-          </div>
+              </MobileDialogFooter>
+          </MobileDialog>
         ) : null}
-      </div>
-    </div>
+    </MobileDialog>
   );
 }
 
@@ -345,21 +328,17 @@ export function GroupAdmin(): JSX.Element | null {
 // before the user has drilled into a section.
 function MobileSectionList({ items, onSelect }: { items: TabItem[]; onSelect: (id: string) => void }): JSX.Element {
   return (
-    <div class="group-admin-section-list" role="list">
+    <MobileDialogList>
       {items.map((it) => (
-        <button
-          type="button"
+        <MobileDialogItem
           key={it.id}
-          role="listitem"
-          class="group-admin-section-row"
+          label={it.label}
+          sublabel={it.sublabel}
+          chevron
           onClick={() => onSelect(it.id)}
-        >
-          <span class="group-admin-section-name">{it.label}</span>
-          {it.sublabel ? <span class="group-admin-section-sub">{it.sublabel}</span> : null}
-          <span class="group-admin-section-caret" aria-hidden="true">{'\u203A'}</span>
-        </button>
+        />
       ))}
-    </div>
+    </MobileDialogList>
   );
 }
 
@@ -912,17 +891,13 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
       </div>
 
       {confirmOpen ? (
-        <div
-          class="settings-backdrop"
-          onClick={(e) => {
-            if ((e.target as HTMLElement).classList.contains('settings-backdrop') && !busy) setConfirmOpen(false);
-          }}
+        <MobileDialog
+          title="Apply changes"
+          onClose={() => setConfirmOpen(false)}
+          closeDisabled={busy}
+          maxWidth="440px"
+          className="ga-confirm-modal"
         >
-          <div class="settings-modal ga-confirm-modal" role="dialog" aria-label="Apply changes" style="max-width:440px">
-            <header class="settings-head">
-              <span class="title">Apply changes</span>
-              <button type="button" class="icon-btn" aria-label="Close" disabled={busy} onClick={() => setConfirmOpen(false)}>{'\u2715'}</button>
-            </header>
             <div class="settings-body">
               <p class="group-admin-help" style="margin-bottom:12px">
                 {pending.size} setting{pending.size === 1 ? '' : 's'} will be saved:{' '}
@@ -960,7 +935,7 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
                 </p>
               ) : null}
             </div>
-            <footer class="settings-foot ga-confirm-foot">
+            <MobileDialogFooter className="ga-confirm-foot">
               <button type="button" disabled={busy} onClick={() => setConfirmOpen(false)}>Cancel</button>
               <button type="button" class="primary" disabled={busy} onClick={doApply}>
                 {busy
@@ -971,23 +946,18 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
                       ? 'Save & restart'
                       : 'Save'}
               </button>
-            </footer>
-          </div>
-        </div>
+            </MobileDialogFooter>
+        </MobileDialog>
       ) : null}
 
       {archiveOpen ? (
-        <div
-          class="settings-backdrop"
-          onClick={(e) => {
-            if ((e.target as HTMLElement).classList.contains('settings-backdrop') && !archiveBusy) setArchiveOpen(false);
-          }}
+        <MobileDialog
+          title="Archive group"
+          onClose={() => setArchiveOpen(false)}
+          closeDisabled={archiveBusy}
+          maxWidth="440px"
+          className="ga-confirm-modal"
         >
-          <div class="settings-modal ga-confirm-modal" role="dialog" aria-label="Archive group" style="max-width:440px">
-            <header class="settings-head">
-              <span class="title">Archive group</span>
-              <button type="button" class="icon-btn" aria-label="Close" disabled={archiveBusy} onClick={() => setArchiveOpen(false)}>{'\u2715'}</button>
-            </header>
             <div class="settings-body">
               <p class="group-admin-help" style="margin-bottom:12px">
                 Running container sessions will stop and the group will be removed from this UI.
@@ -1008,7 +978,7 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
                 onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setArchiveConfirm(e.currentTarget.value)}
               />
             </div>
-            <footer class="settings-foot ga-confirm-foot">
+            <MobileDialogFooter className="ga-confirm-foot">
               <button type="button" disabled={archiveBusy} onClick={() => setArchiveOpen(false)}>Cancel</button>
               <button
                 type="button"
@@ -1019,9 +989,8 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
               >
                 {archiveBusy ? 'Archiving…' : 'Archive group'}
               </button>
-            </footer>
-          </div>
-        </div>
+            </MobileDialogFooter>
+        </MobileDialog>
       ) : null}
     </section>
   );

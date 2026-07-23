@@ -146,7 +146,7 @@
 .chat-main .msg.markdown img:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 .image-viewer-backdrop { z-index: 30; }
 .image-viewer-dialog { max-width: calc(100vw - 32px); height: calc(100vh - 80px); }
-.image-viewer-dialog .settings-head .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-viewer-dialog .mobile-dialog-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-viewer-stage { flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: none; cursor: zoom-in; }
 .image-viewer-stage.zoomed { cursor: grab; }
 .image-viewer-stage.zoomed:active { cursor: grabbing; }
@@ -504,30 +504,11 @@
 
 /* Quick Capture — in-page camera modal */
 .qcap-backdrop {
-  position: fixed; inset: 0; z-index: 1000;
+  z-index: 1000;
   background: rgba(0, 0, 0, 0.92);
-  display: flex; align-items: center; justify-content: center;
-  padding: 16px;
-  /* Respect iOS safe areas (notch, home indicator) */
-  padding-top: max(16px, env(safe-area-inset-top));
-  padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
 .qcap-modal {
-  position: relative;
-  width: 100%; max-width: 720px;
-  height: 100%; max-height: 100%;
-  display: flex; flex-direction: column;
   background: #000; color: #fff;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-.qcap-close {
-  position: absolute; top: 8px; right: 8px; z-index: 2;
-  width: 40px; height: 40px;
-  background: rgba(0, 0, 0, 0.5); color: #fff;
-  border: none; border-radius: 50%;
-  font-size: 24px; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
 }
 .qcap-stage {
   flex: 1; min-height: 0;

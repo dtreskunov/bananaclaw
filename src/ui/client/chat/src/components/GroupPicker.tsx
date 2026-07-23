@@ -3,7 +3,6 @@
 import { useEffect } from 'preact/hooks';
 import type { JSX } from 'preact';
 
-import './GroupPicker.css';
 import {
   groups,
   groupId,
@@ -17,6 +16,7 @@ import { fmtRelative, fmtAbsolute } from '../utils';
 import type { Group } from '../types';
 import { createGroupOpen } from './CreateGroupModal';
 import { TabBar, type TabItem, type TabExtra } from './TabBar';
+import { MobileDialog, MobileDialogItem, MobileDialogList } from './MobileDialog';
 
 function isElevatedOnly(g: Group): boolean {
   return g.elevatedOnly === true;
@@ -123,47 +123,31 @@ export function GroupPickerModal() {
   const title = mode === 'non-members' ? 'More agents' : 'Agent groups';
 
   const close = (): void => { groupPickerOpen.value = false; };
-  const onBackdrop = (e: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) close();
-  };
   const pick = (gid: string): void => {
     close();
     if (gid !== groupId.value) selectGroup(gid).catch(console.error);
   };
 
   return (
-    <div class="settings-backdrop" onClick={onBackdrop}>
-      <div
-        class="settings-modal group-picker-modal"
-        role="dialog"
-        aria-label={title}
-        style="max-width:480px"
-      >
-        <header class="settings-head">
-          <span class="title">{title}</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={close}>{'\u2715'}</button>
-        </header>
-        <div class="settings-body group-picker-list">
-          {visible.map((g) => {
-            const isActive = g.id === groupId.value;
-            const { parts, isAdminOnly } = chipParts(g, elevated);
-            const subtitle = parts.join(' \u00B7 ');
-            return (
-              <button
-                type="button"
-                key={g.id}
-                class={`group-row${isActive ? ' active' : ''}${isAdminOnly ? ' is-admin-visible' : ''}`}
-                aria-current={isActive ? 'true' : undefined}
-                title={tipFor(g, isAdminOnly)}
-                onClick={() => pick(g.id)}
-              >
-                <span class="row-name">{g.name}</span>
-                {subtitle ? <span class="row-sub">{subtitle}</span> : null}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
+    <MobileDialog title={title} onClose={close} maxWidth="480px">
+      <MobileDialogList>
+        {visible.map((g) => {
+          const isActive = g.id === groupId.value;
+          const { parts, isAdminOnly } = chipParts(g, elevated);
+          const subtitle = parts.join(' \u00B7 ');
+          return (
+            <MobileDialogItem
+              key={g.id}
+              label={g.name}
+              sublabel={subtitle || undefined}
+              active={isActive}
+              className={isAdminOnly ? 'is-admin-visible' : undefined}
+              title={tipFor(g, isAdminOnly)}
+              onClick={() => pick(g.id)}
+            />
+          );
+        })}
+      </MobileDialogList>
+    </MobileDialog>
   );
 }

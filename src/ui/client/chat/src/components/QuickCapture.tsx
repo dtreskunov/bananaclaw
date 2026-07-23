@@ -5,6 +5,7 @@
 // to keep size small.
 import type { JSX } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { MobileDialog } from './MobileDialog';
 
 interface Props {
   onCapture: (file: File) => void;
@@ -133,14 +134,14 @@ export function QuickCapture({ onCapture, onClose }: Props): JSX.Element {
   const flip = (): void => setFacing((f) => (f === 'environment' ? 'user' : 'environment'));
   const flipTarget = facing === 'environment' ? 'Front camera' : 'Back camera';
 
-  const onBackdrop = (ev: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-    if ((ev.target as HTMLElement).classList.contains('qcap-backdrop')) onClose();
-  };
-
   return (
-    <div class="qcap-backdrop" onClick={onBackdrop}>
-      <div class="qcap-modal" role="dialog" aria-label="Quick capture">
-        <button type="button" class="qcap-close" onClick={onClose} aria-label="Close">{'\u00D7'}</button>
+    <MobileDialog
+      title="Quick capture"
+      onClose={onClose}
+      maxWidth="720px"
+      backdropClassName="qcap-backdrop"
+      className="qcap-modal"
+    >
         <div class="qcap-stage">
           {error ? (
             <div class="qcap-error">{error}</div>
@@ -181,7 +182,6 @@ export function QuickCapture({ onCapture, onClose }: Props): JSX.Element {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </MobileDialog>
   );
 }

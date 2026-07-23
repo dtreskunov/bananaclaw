@@ -11,6 +11,7 @@ import { selectGroup } from '../actions';
 import { groups } from '../state';
 import type { Group } from '../types';
 import { showToast } from './Toast';
+import { MobileDialog, MobileDialogFooter } from './MobileDialog';
 
 export const createGroupOpen: Signal<boolean> = signal(false);
 
@@ -82,27 +83,17 @@ export function CreateGroupModal() {
     selectGroup(created.id).catch((err) => console.error('selectGroup after create', err));
   }
 
-  function onBackdrop(e: JSX.TargetedMouseEvent<HTMLDivElement>): void {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) close();
-  }
   function onKey(e: JSX.TargetedKeyboardEvent<HTMLElement>): void {
     if (e.key === 'Escape') close();
   }
 
   return (
-    <div class="settings-backdrop" onClick={onBackdrop}>
+    <MobileDialog title="New agent group" ariaLabel="Create agent group" onClose={close} maxWidth="480px">
       <form
-        class="settings-modal"
-        role="dialog"
-        aria-label="Create agent group"
-        style="max-width:480px"
+        class="mobile-dialog-form"
         onSubmit={onSubmit}
         onKeyDown={onKey}
       >
-        <header class="settings-head">
-          <span class="title">New agent group</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={close}>{'\u2715'}</button>
-        </header>
         <div class="settings-body create-group-body">
           <label class="cg-field">
             <span class="cg-label">Name</span>
@@ -138,16 +129,13 @@ export function CreateGroupModal() {
             />
           </label>
         </div>
-        <footer
-          class="settings-foot"
-          style="display:flex;justify-content:flex-end;gap:8px;padding:8px 12px;border-top:1px solid var(--border)"
-        >
+        <MobileDialogFooter>
           <button type="button" onClick={close} disabled={submitting}>Cancel</button>
           <button type="submit" class="primary" disabled={submitting || !name.trim()}>
             {submitting ? 'Creating\u2026' : 'Create'}
           </button>
-        </footer>
+        </MobileDialogFooter>
       </form>
-    </div>
+    </MobileDialog>
   );
 }

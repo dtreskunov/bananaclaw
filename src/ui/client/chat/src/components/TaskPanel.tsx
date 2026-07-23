@@ -6,6 +6,7 @@
 import './Settings.css';
 import './TaskPanel.css';
 import type { JSX } from 'preact';
+import { MobileDialog } from './MobileDialog';
 import { useEffect, useState } from 'preact/hooks';
 import { taskPanelRequest } from '../state';
 import { taskUrl } from '../actions';
@@ -478,17 +479,8 @@ export function TaskPanel() {
   const focusMissing = !!req.focusSeriesId && !!tasks && !tasks.some((t) => t.seriesId === req.focusSeriesId);
   const activeTask = mode === 'single' && activeId ? tasks?.find((t) => t.seriesId === activeId) || null : null;
 
-  function onBackdrop(e: JSX.TargetedMouseEvent<HTMLDivElement>): void {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) close();
-  }
-
   return (
-    <div class="settings-backdrop" onClick={onBackdrop}>
-      <div class="settings-modal task-panel" role="dialog" aria-label="Scheduled tasks" style="max-width:560px">
-        <header class="settings-head">
-          <span class="title">{'\u23F0'} Scheduled tasks</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={close}>{'\u2715'}</button>
-        </header>
+    <MobileDialog title={`${'\u23F0'} Scheduled tasks`} onClose={close} maxWidth="560px" className="task-panel">
         <div class="settings-body">
           {error ? <div class="settings-status err">{error}</div> : null}
           {tasks === null && !error ? <p class="muted">Loading{'\u2026'}</p> : null}
@@ -521,7 +513,6 @@ export function TaskPanel() {
         <div class="settings-row" style="padding:10px 16px;border-top:1px solid var(--border);justify-content:flex-end">
           <button type="button" onClick={close}>Done</button>
         </div>
-      </div>
-    </div>
+    </MobileDialog>
   );
 }

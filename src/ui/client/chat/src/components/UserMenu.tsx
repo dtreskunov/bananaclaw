@@ -1,6 +1,6 @@
 import './UserMenu.css';
 import type { JSX } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import {
   groupAdminOpen,
   groupPickerMode,
@@ -10,7 +10,9 @@ import {
   isMobile,
   me,
   settingsOpen,
+  userMenuOpen,
 } from '../state';
+import { MobileDialog, MobileDialogDivider, MobileDialogItem, MobileDialogList } from './MobileDialog';
 
 interface MenuItem {
   label: string;
@@ -27,7 +29,10 @@ function initialsFor(displayName: string): string {
 }
 
 export function UserMenu(): JSX.Element {
-  const [open, setOpen] = useState(false);
+  const open = userMenuOpen.value;
+  const setOpen = (value: boolean | ((current: boolean) => boolean)): void => {
+    userMenuOpen.value = typeof value === 'function' ? value(userMenuOpen.value) : value;
+  };
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const admin = isAdmin.value;
   const showAllAgents = isElevatedUser.value;
@@ -68,10 +73,6 @@ export function UserMenu(): JSX.Element {
     });
   }
 
-  const onBackdrop = (event: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-    if ((event.target as HTMLElement).classList.contains('settings-backdrop')) setOpen(false);
-  };
-
   return (
     <div class={'user-menu' + (open ? ' open' : '')} ref={wrapRef}>
       <button
@@ -101,37 +102,17 @@ export function UserMenu(): JSX.Element {
         </div>
       ) : null}
       {open && mobile ? (
-        <div class="settings-backdrop tab-bar-sheet-backdrop" onClick={onBackdrop}>
-          <div
-            class="settings-modal tab-bar-sheet"
-            role="dialog"
-            aria-label="Account and agent actions"
-            style="max-width:480px"
-          >
-            <header class="settings-head">
-              <span class="title">{displayName}</span>
-              <button type="button" class="icon-btn" aria-label="Close" onClick={() => setOpen(false)}>{'\u2715'}</button>
-            </header>
-            <div class="settings-body tab-bar-sheet-list">
-              <form method="POST" action="/ui/auth/logout" class="user-menu-logout-form">
-                <button type="submit" class="tab-bar-sheet-row">
-                  <span class="tab-bar-sheet-row-name">Log out</span>
-                </button>
-              </form>
-              <div class="tab-bar-sheet-divider" aria-hidden="true" />
-              {items.map((item) => (
-                <button
-                  type="button"
-                  class="tab-bar-sheet-row"
-                  key={item.label}
-                  onClick={() => choose(item.action)}
-                >
-                  <span class="tab-bar-sheet-row-name">{item.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <MobileDialog title={displayName} ariaLabel="Account and agent actions" onClose={() => setOpen(false)}>
+          <MobileDialogList>
+            {items.map((item) => (
+              <MobileDialogItem label={item.label} chevron key={item.label} onClick={() => choose(item.action)} />
+            ))}
+            <MobileDialogDivider />
+            <form method="POST" action="/ui/auth/logout" class="user-menu-logout-form">
+              <MobileDialogItem type="submit" label="Log out" />
+            </form>
+          </MobileDialogList>
+        </MobileDialog>
       ) : null}
     </div>
   );

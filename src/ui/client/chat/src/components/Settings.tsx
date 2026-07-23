@@ -2,7 +2,8 @@
 import './Settings.css';
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { settingsOpen, notifMutedSig, progressSoundMutedSig, completionSoundMutedSig, CHANNEL_META, me } from '../state';
+import { settingsOpen, notifMutedSig, progressSoundMutedSig, completionSoundMutedSig, CHANNEL_META, isMobile, me } from '../state';
+import { returnToUserMenu } from '../actions';
 import { toggleMute, shouldShowIosInstallHint } from '../notify';
 import { installAvailable, installCompleted, triggerInstall } from '../install';
 import { useBackButtonCloses } from '../modalBackButton';
@@ -10,6 +11,7 @@ import { showToast } from './Toast';
 import { requestConfirm } from './PromptModal';
 import { BRAND } from '../brand';
 import type { Identity } from '../types';
+import { MobileDialog } from './MobileDialog';
 
 const API = '/ui/settings/api';
 
@@ -199,9 +201,6 @@ export function Settings() {
   }
 
   function close(): void { settingsOpen.value = false; }
-  function onBackdrop(e: JSX.TargetedMouseEvent<HTMLDivElement>): void {
-    if ((e.target as HTMLElement).classList.contains('settings-backdrop')) close();
-  }
   function onKey(e: KeyboardEvent): void { if (e.key === 'Escape') close(); }
 
   useBackButtonCloses(open, close);
@@ -216,12 +215,12 @@ export function Settings() {
   const muted = notifMutedSig.value;
   const title = me.value ? `My Profile · ${me.value}` : 'My Profile';
   return (
-    <div class="settings-backdrop" onClick={onBackdrop}>
-      <div class="settings-modal" role="dialog" aria-label={title}>
-        <header class="settings-head">
-          <span class="title">{title}</span>
-          <button type="button" class="icon-btn" aria-label="Close" onClick={close}>{'\u2715'}</button>
-        </header>
+    <MobileDialog
+      title={title}
+      onClose={close}
+      onBack={isMobile.value ? () => returnToUserMenu(settingsOpen) : undefined}
+      backLabel="Back to account menu"
+    >
         <div class="settings-body">
           <section>
             <h3>Profile</h3>
@@ -347,8 +346,7 @@ export function Settings() {
 
           {status ? <div class={'settings-status ' + (status.err ? 'err' : 'ok')}>{status.err || status.ok}</div> : null}
         </div>
-      </div>
-    </div>
+    </MobileDialog>
   );
 }
 
