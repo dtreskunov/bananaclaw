@@ -1,3 +1,4 @@
+import './GroupAdminMcp.css';
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
@@ -589,7 +590,7 @@ function McpHttpFields({
       <span class="ga-mcp-row-label">URL</span>
       <input
         type="url"
-        class={`ga-mcp-input${urlInvalid ? ' ga-mp-key-unknown' : ''}`}
+        class={`ga-mcp-input${urlInvalid ? ' ga-mcp-input-invalid' : ''}`}
         placeholder="https://example.com/mcp"
         value={value.url ?? ''}
         disabled={disabled}

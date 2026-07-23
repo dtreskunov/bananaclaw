@@ -1,0 +1,58 @@
+/* Destinations tab — two-line "name + id" cells, reverse-link chip, hints. */
+.ga-id-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--font-sm);
+  color: var(--muted);
+  word-break: break-all;
+  font-weight: 400;
+}
+.ga-reverse {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ga-reverse-x {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ga-reverse-x:hover:not(:disabled) {
+  background: var(--wash-soft);
+  color: var(--surface-fg);
+}
+.ga-reverse-x:disabled { opacity: 0.5; cursor: default; }
+.ga-hint {
+  margin-top: 4px;
+  font-size: var(--font-sm);
+}
+.ga-section-h4 {
+  margin-top: 24px;
+}
+.ga-add-link-form .ga-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+}
+
+@media (max-width: 720px) {
+  /*
+   * Override the global Settings.css rule that hides the 3rd column on
+   * narrow widths (intended for the Members/Admins identity column).
+   * On the Destinations tab the 3rd column is meaningful (Reverse link
+   * or Local name) and must stay visible.
+   */
+  .settings-table.ga-destinations-table th:nth-child(3),
+  .settings-table.ga-destinations-table td:nth-child(3) {
+    display: table-cell;
+  }
+}

@@ -1,0 +1,47 @@
+.group-admin-field {
+  align-items: baseline;
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.group-admin-label {
+  flex: none;
+  width: 180px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--font-base);
+}
+
+.group-admin-control {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.group-admin-control > input[type="text"],
+.group-admin-control > input[type="number"],
+.group-admin-control > select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+}
+
+@media (max-width: 720px) {
+  .group-admin-field {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .group-admin-label {
+    width: auto;
+  }
+}

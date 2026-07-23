@@ -1,3 +1,4 @@
+import './GroupAdminPackages.css';
 import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
@@ -90,17 +91,17 @@ function PackageListField({
 
   return (
     <Field label={label} info={info}>
-      <div class="group-admin-stack ga-model-params">
+      <div class="group-admin-stack ga-package-list">
         {items.length === 0 ? (
           <p class="group-admin-help">No packages.</p>
         ) : (
-          <ul class="ga-chip-list">
+          <ul class="ga-package-chips">
             {items.map((packageName, index) => (
-              <li key={`${packageName}-${index}`} class="ga-chip">
-                <span class="ga-chip-label">{packageName}</span>
+              <li key={`${packageName}-${index}`} class="ga-package-chip">
+                <span class="ga-package-chip-label">{packageName}</span>
                 <button
                   type="button"
-                  class="ga-chip-remove"
+                  class="ga-package-chip-remove"
                   aria-label={`Remove ${packageName}`}
                   disabled={disabled}
                   onClick={() => remove(index)}
@@ -111,10 +112,10 @@ function PackageListField({
             ))}
           </ul>
         )}
-        <div class="ga-mp-actions">
+        <div class="ga-package-actions">
           <input
             type="text"
-            class="ga-chip-input"
+            class="ga-package-input"
             placeholder={placeholder}
             value={draft}
             disabled={disabled}

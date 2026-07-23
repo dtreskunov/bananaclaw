@@ -1,3 +1,4 @@
+import './GroupAdminField.css';
 import type { ComponentChildren, JSX } from 'preact';
 
 import { InfoIcon } from './Tooltip';

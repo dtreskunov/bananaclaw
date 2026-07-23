@@ -1,0 +1,72 @@
+/* Model parameters editor (Models tab) */
+.ga-model-params { gap: 8px; }
+
+.ga-mp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ga-mp-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.ga-mp-key,
+.ga-mp-value {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+}
+
+.ga-mp-key-unknown {
+  border-color: var(--warn, #c98a00);
+}
+
+.ga-mp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ga-mp-suggest {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ga-mp-suggest-chip {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--chip-bg, rgba(127, 127, 127, 0.15));
+  cursor: pointer;
+}
+.ga-mp-suggest-chip:disabled { opacity: 0.5; cursor: default; }
+
+.ga-mp-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+@media (max-width: 720px) {
+  .ga-mp-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "key   remove"
+      "value remove";
+  }
+  .ga-mp-key   { grid-area: key; }
+  .ga-mp-value { grid-area: value; }
+  .ga-mp-row > .icon-btn { grid-area: remove; align-self: center; }
+}

@@ -1,3 +1,4 @@
+import './GroupAdminSkills.css';
 import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
@@ -69,17 +70,17 @@ export function SkillsSection({
 
       {!isAll ? (
         <Field label="Skills" info="Slug per skill (lowercase a–z, 0–9, hyphen). Must match a folder under container/skills/ or a group-local skill.">
-          <div class="group-admin-stack ga-model-params">
+          <div class="group-admin-stack ga-skills-list">
             {list.length === 0 ? (
               <p class="group-admin-help">No skills selected.</p>
             ) : (
-              <ul class="ga-chip-list">
+              <ul class="ga-skills-chips">
                 {list.map((skill, index) => (
-                  <li key={`${skill}-${index}`} class="ga-chip">
-                    <span class="ga-chip-label">{skill}</span>
+                  <li key={`${skill}-${index}`} class="ga-skills-chip">
+                    <span class="ga-skills-chip-label">{skill}</span>
                     <button
                       type="button"
-                      class="ga-chip-remove"
+                      class="ga-skills-chip-remove"
                       aria-label={`Remove ${skill}`}
                       disabled={busy}
                       onClick={() => remove(index)}
@@ -90,10 +91,10 @@ export function SkillsSection({
                 ))}
               </ul>
             )}
-            <div class="ga-mp-actions">
+            <div class="ga-skills-actions">
               <input
                 type="text"
-                class="ga-chip-input"
+                class="ga-skills-input"
                 placeholder="skill slug (e.g. welcome, agent-browser)"
                 value={draft}
                 disabled={busy}

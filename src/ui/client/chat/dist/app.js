@@ -25304,7 +25304,7 @@ function McpHttpFields({
       "input",
       {
         type: "url",
-        class: `ga-mcp-input${urlInvalid ? " ga-mp-key-unknown" : ""}`,
+        class: `ga-mcp-input${urlInvalid ? " ga-mcp-input-invalid" : ""}`,
         placeholder: "https://example.com/mcp",
         value: value.url ?? "",
         disabled,
@@ -25694,14 +25694,14 @@ function PackageListField({
   function remove(idx) {
     onChange(items.filter((_6, i5) => i5 !== idx));
   }
-  return /* @__PURE__ */ u4(GroupAdminField, { label, info, children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-model-params", children: [
-    items.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No packages." }) : /* @__PURE__ */ u4("ul", { class: "ga-chip-list", children: items.map((packageName, index) => /* @__PURE__ */ u4("li", { class: "ga-chip", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-chip-label", children: packageName }),
+  return /* @__PURE__ */ u4(GroupAdminField, { label, info, children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-package-list", children: [
+    items.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No packages." }) : /* @__PURE__ */ u4("ul", { class: "ga-package-chips", children: items.map((packageName, index) => /* @__PURE__ */ u4("li", { class: "ga-package-chip", children: [
+      /* @__PURE__ */ u4("span", { class: "ga-package-chip-label", children: packageName }),
       /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
-          class: "ga-chip-remove",
+          class: "ga-package-chip-remove",
           "aria-label": `Remove ${packageName}`,
           disabled,
           onClick: () => remove(index),
@@ -25709,12 +25709,12 @@ function PackageListField({
         }
       )
     ] }, `${packageName}-${index}`)) }),
-    /* @__PURE__ */ u4("div", { class: "ga-mp-actions", children: [
+    /* @__PURE__ */ u4("div", { class: "ga-package-actions", children: [
       /* @__PURE__ */ u4(
         "input",
         {
           type: "text",
-          class: "ga-chip-input",
+          class: "ga-package-input",
           placeholder,
           value: draft,
           disabled,
@@ -25797,14 +25797,14 @@ function SkillsSection({
         /* @__PURE__ */ u4("span", { children: "Specific skills only" })
       ] })
     ] }) }),
-    !isAll ? /* @__PURE__ */ u4(GroupAdminField, { label: "Skills", info: "Slug per skill (lowercase a\u2013z, 0\u20139, hyphen). Must match a folder under container/skills/ or a group-local skill.", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-model-params", children: [
-      list.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No skills selected." }) : /* @__PURE__ */ u4("ul", { class: "ga-chip-list", children: list.map((skill, index) => /* @__PURE__ */ u4("li", { class: "ga-chip", children: [
-        /* @__PURE__ */ u4("span", { class: "ga-chip-label", children: skill }),
+    !isAll ? /* @__PURE__ */ u4(GroupAdminField, { label: "Skills", info: "Slug per skill (lowercase a\u2013z, 0\u20139, hyphen). Must match a folder under container/skills/ or a group-local skill.", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-skills-list", children: [
+      list.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No skills selected." }) : /* @__PURE__ */ u4("ul", { class: "ga-skills-chips", children: list.map((skill, index) => /* @__PURE__ */ u4("li", { class: "ga-skills-chip", children: [
+        /* @__PURE__ */ u4("span", { class: "ga-skills-chip-label", children: skill }),
         /* @__PURE__ */ u4(
           "button",
           {
             type: "button",
-            class: "ga-chip-remove",
+            class: "ga-skills-chip-remove",
             "aria-label": `Remove ${skill}`,
             disabled: busy,
             onClick: () => remove(index),
@@ -25812,12 +25812,12 @@ function SkillsSection({
           }
         )
       ] }, `${skill}-${index}`)) }),
-      /* @__PURE__ */ u4("div", { class: "ga-mp-actions", children: [
+      /* @__PURE__ */ u4("div", { class: "ga-skills-actions", children: [
         /* @__PURE__ */ u4(
           "input",
           {
             type: "text",
-            class: "ga-chip-input",
+            class: "ga-skills-input",
             placeholder: "skill slug (e.g. welcome, agent-browser)",
             value: draft,
             disabled: busy,

@@ -1,0 +1,50 @@
+.ga-package-list { gap: 8px; }
+
+.ga-package-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ga-package-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 12px;
+  background: var(--chip-bg, rgba(127, 127, 127, 0.15));
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+}
+
+.ga-package-chip-label { line-height: 1.4; }
+
+.ga-package-chip-remove {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.7;
+}
+.ga-package-chip-remove:hover { opacity: 1; }
+.ga-package-chip-remove:disabled { opacity: 0.3; cursor: default; }
+
+.ga-package-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ga-package-input {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+}

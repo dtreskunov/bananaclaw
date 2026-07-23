@@ -1,0 +1,47 @@
+.group-admin-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--head-tint);
+  color: var(--muted);
+  font-size: var(--font-sm);
+  vertical-align: middle;
+}
+
+.group-admin-search-results {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.group-admin-search-results li {
+  border-bottom: 1px solid var(--border);
+}
+.group-admin-search-results li:last-child { border-bottom: 0; }
+.group-admin-search-row {
+  display: flex;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  align-items: baseline;
+  gap: 10px;
+}
+.group-admin-search-row:hover {
+  background: var(--wash);
+}
+.group-admin-search-row[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.group-admin-search-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-admin-search-handle { color: var(--muted); font-size: var(--font-sm); }
