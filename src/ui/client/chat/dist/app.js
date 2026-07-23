@@ -18944,7 +18944,7 @@ function GroupStrip() {
       items,
       onSelect: pick,
       extras: extras.length ? extras : void 0,
-      className: "group-strip"
+      className: "group-strip tab-bar-header"
     }
   );
 }
@@ -24448,31 +24448,32 @@ function GroupAdmin() {
     actionsRef.current = a4;
     forceRender((n3) => n3 + 1);
   };
+  const activeTab = tab ?? (mobile ? null : "settings");
   return /* @__PURE__ */ u4(
     MobileDialog,
     {
       title,
       onClose: () => attemptClose(),
-      onBack: mobile ? tab !== null ? () => setTab(null) : () => attemptClose(true) : void 0,
-      backLabel: tab !== null ? "Back to all sections" : "Back to account menu",
-      actions: tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? /* @__PURE__ */ u4(Tooltip, { text: ha.canSave ? "Save changes" : "Nothing to save", children: /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Save", onClick: ha.apply, disabled: ha.busy || !ha.canSave, children: "\u2713" }) }) : null,
+      onBack: mobile ? activeTab !== null ? () => setTab(null) : () => attemptClose(true) : void 0,
+      backLabel: activeTab !== null ? "Back to all sections" : "Back to account menu",
+      actions: activeTab !== null && SETTINGS_SECTIONS.has(activeTab) && ha ? /* @__PURE__ */ u4(Tooltip, { text: ha.canSave ? "Save changes" : "Nothing to save", children: /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Save", onClick: ha.apply, disabled: ha.busy || !ha.canSave, children: "\u2713" }) }) : null,
       children: [
         !mobile ? /* @__PURE__ */ u4(
           TabBar,
           {
             ariaLabel: "Group settings sections",
             mobileSheetTitle: "Settings sections",
-            activeId: tab,
+            activeId: activeTab,
             items: TAB_ITEMS,
             onSelect: (id) => setTab(id),
-            className: "group-admin-tab-bar"
+            className: "group-admin-tab-bar tab-bar-header"
           }
         ) : null,
-        mobile && tab === null ? /* @__PURE__ */ u4(MobileSectionList, { items: TAB_ITEMS, onSelect: (id) => setTab(id) }) : /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4(k, { children: [
-          tab !== null && SETTINGS_SECTIONS.has(tab) ? /* @__PURE__ */ u4(SettingsTab, { gid, section: tab, onClose: hardClose, onActions: setActions }) : null,
-          tab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
-          tab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
-          tab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
+        mobile && activeTab === null ? /* @__PURE__ */ u4(MobileSectionList, { items: TAB_ITEMS, onSelect: (id) => setTab(id) }) : /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4(k, { children: [
+          activeTab !== null && SETTINGS_SECTIONS.has(activeTab) ? /* @__PURE__ */ u4(SettingsTab, { gid, section: activeTab, onClose: hardClose, onActions: setActions }) : null,
+          activeTab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
+          activeTab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
+          activeTab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
         ] }) }),
         closeConfirmOpen ? /* @__PURE__ */ u4(
           MobileDialog,

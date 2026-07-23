@@ -258,14 +258,15 @@ export function GroupAdmin(): JSX.Element | null {
 
   const ha = actionsRef.current;
   const setActions = (a: HeaderActions | null) => { actionsRef.current = a; forceRender((n) => n + 1); };
+  const activeTab = tab ?? (mobile ? null : 'settings');
 
   return (
     <MobileDialog
       title={title}
       onClose={() => attemptClose()}
-      onBack={mobile ? (tab !== null ? () => setTab(null) : () => attemptClose(true)) : undefined}
-      backLabel={tab !== null ? 'Back to all sections' : 'Back to account menu'}
-      actions={tab !== null && SETTINGS_SECTIONS.has(tab) && ha ? (
+      onBack={mobile ? (activeTab !== null ? () => setTab(null) : () => attemptClose(true)) : undefined}
+      backLabel={activeTab !== null ? 'Back to all sections' : 'Back to account menu'}
+      actions={activeTab !== null && SETTINGS_SECTIONS.has(activeTab) && ha ? (
         <Tooltip text={ha.canSave ? 'Save changes' : 'Nothing to save'}>
           <button type="button" class="mobile-dialog-icon" aria-label="Save" onClick={ha.apply} disabled={ha.busy || !ha.canSave}>&#x2713;</button>
         </Tooltip>
@@ -275,23 +276,23 @@ export function GroupAdmin(): JSX.Element | null {
           <TabBar
             ariaLabel="Group settings sections"
             mobileSheetTitle="Settings sections"
-            activeId={tab}
+            activeId={activeTab}
             items={TAB_ITEMS}
             onSelect={(id) => setTab(id as Tab)}
-            className="group-admin-tab-bar"
+            className="group-admin-tab-bar tab-bar-header"
           />
         ) : null}
-        {mobile && tab === null ? (
+        {mobile && activeTab === null ? (
           <MobileSectionList items={TAB_ITEMS} onSelect={(id) => setTab(id as Tab)} />
         ) : (
           <div class="settings-body">
             <>
-              {tab !== null && SETTINGS_SECTIONS.has(tab)
-                ? <SettingsTab gid={gid} section={tab as 'models' | 'settings' | 'packages' | 'mcp' | 'skills'} onClose={hardClose} onActions={setActions} />
+              {activeTab !== null && SETTINGS_SECTIONS.has(activeTab)
+                ? <SettingsTab gid={gid} section={activeTab as 'models' | 'settings' | 'packages' | 'mcp' | 'skills'} onClose={hardClose} onActions={setActions} />
                 : null}
-              {tab === 'members' ? <MembersTab gid={gid} /> : null}
-              {tab === 'roles' ? <RolesTab gid={gid} /> : null}
-              {tab === 'destinations' ? <DestinationsTab gid={gid} /> : null}
+              {activeTab === 'members' ? <MembersTab gid={gid} /> : null}
+              {activeTab === 'roles' ? <RolesTab gid={gid} /> : null}
+              {activeTab === 'destinations' ? <DestinationsTab gid={gid} /> : null}
             </>
           </div>
         )}

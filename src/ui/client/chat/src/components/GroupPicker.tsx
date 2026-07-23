@@ -92,7 +92,7 @@ export function GroupStrip(): JSX.Element | null {
       items={items}
       onSelect={pick}
       extras={extras.length ? extras : undefined}
-      className="group-strip"
+      className="group-strip tab-bar-header"
     />
   );
 }

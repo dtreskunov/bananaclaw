@@ -14,8 +14,8 @@
    drill-in section list (see `.group-admin-section-list` below). The
    strip variant gets the modal-head tint to blend with the header. */
 .tab-bar-strip.group-admin-tab-bar {
+  flex-shrink: 0;
   background: var(--head-tint);
-  padding: 0 8px;
 }
 /* Sublabels on TAB_ITEMS are mobile-only hints for the section list;
    they'd be visual clutter in the desktop tab strip. */

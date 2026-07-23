@@ -641,13 +641,15 @@ header .mobile-only {
   flex: 1;
   min-width: 0;
 }
-nav.tab-bar-strip.group-strip {
+nav.tab-bar-strip.tab-bar-header {
   align-self: stretch;
-  margin-bottom: -9px;
   border-bottom: 0;
 }
-nav.tab-bar-strip.group-strip .tab-item {
+nav.tab-bar-strip.tab-bar-header .tab-item {
   gap: 2px;
+}
+nav.tab-bar-strip.group-strip {
+  margin-bottom: -9px;
 }
 .tab-item {
   display: flex;
@@ -3942,8 +3944,8 @@ body.is-admin .files-pane.collapsed .admin-only {
   color: var(--muted);
 }
 .tab-bar-strip.group-admin-tab-bar {
+  flex-shrink: 0;
   background: var(--head-tint);
-  padding: 0 8px;
 }
 .tab-bar-strip.group-admin-tab-bar .tab-item-sublabel {
   display: none;

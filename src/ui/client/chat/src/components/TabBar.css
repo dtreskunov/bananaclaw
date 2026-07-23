@@ -21,14 +21,15 @@
 }
 .tab-bar-strip::-webkit-scrollbar { display: none; }
 
-/* GroupPicker header placement and active-tab overlap. */
+/* Header-style tabs. The main group strip overlaps its app-header edge;
+   other callers can use the same treatment without shifting layout. */
 .group-strip { flex: 1; min-width: 0; }
-nav.tab-bar-strip.group-strip {
+nav.tab-bar-strip.tab-bar-header {
   align-self: stretch;
-  margin-bottom: -9px;
   border-bottom: 0;
 }
-nav.tab-bar-strip.group-strip .tab-item { gap: 2px; }
+nav.tab-bar-strip.tab-bar-header .tab-item { gap: 2px; }
+nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
 
 .tab-item {
   display: flex;
