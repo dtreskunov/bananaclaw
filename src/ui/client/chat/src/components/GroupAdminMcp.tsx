@@ -240,8 +240,9 @@ function McpServerList({
             onClick={() => onSelect(name)}
           >
             <span class="ga-mcp-list-name">{name}</span>
-            <span class="ga-mcp-transport-badge">{mcpServerType(config)}</span>
-            <span class="ga-mcp-list-summary">{mcpServerSummary(config)}</span>
+            <span class="ga-mcp-list-summary">
+              {mcpServerType(config).toUpperCase()} · {mcpServerSummary(config)}
+            </span>
             {issue ? <span class="ga-mcp-list-issue">{issue}</span> : null}
             <span class="ga-mcp-list-chevron" aria-hidden="true">{'\u203A'}</span>
           </button>

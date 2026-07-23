@@ -24975,8 +24975,11 @@ function McpServerList({
         onClick: () => onSelect(name),
         children: [
           /* @__PURE__ */ u4("span", { class: "ga-mcp-list-name", children: name }),
-          /* @__PURE__ */ u4("span", { class: "ga-mcp-transport-badge", children: mcpServerType(config) }),
-          /* @__PURE__ */ u4("span", { class: "ga-mcp-list-summary", children: mcpServerSummary(config) }),
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-list-summary", children: [
+            mcpServerType(config).toUpperCase(),
+            " \xB7 ",
+            mcpServerSummary(config)
+          ] }),
           issue ? /* @__PURE__ */ u4("span", { class: "ga-mcp-list-issue", children: issue }) : null,
           /* @__PURE__ */ u4("span", { class: "ga-mcp-list-chevron", "aria-hidden": "true", children: "\u203A" })
         ]

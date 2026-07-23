@@ -36,7 +36,7 @@
   min-height: 64px;
   padding: 10px 12px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto auto;
   column-gap: 8px;
   row-gap: 2px;
@@ -62,15 +62,6 @@
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: var(--font-base);
   font-weight: 600;
-}
-.ga-mcp-transport-badge {
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-size: var(--font-2xs);
-  line-height: 1.4;
-  text-transform: uppercase;
 }
 .ga-mcp-list-summary,
 .ga-mcp-list-issue {
@@ -296,16 +287,15 @@
   }
   .ga-mcp-list-item {
     min-height: 68px;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
   .ga-mcp-list-item.active { box-shadow: none; background: transparent; }
   .ga-mcp-list-name { grid-column: 1; }
-  .ga-mcp-transport-badge { grid-column: 2; }
   .ga-mcp-list-summary,
-  .ga-mcp-list-issue { grid-column: 1 / span 2; }
+  .ga-mcp-list-issue { grid-column: 1; }
   .ga-mcp-list-chevron {
     display: block;
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 1 / span 3;
     align-self: center;
     color: var(--muted);
