@@ -24469,7 +24469,7 @@ function GroupAdmin() {
             className: "group-admin-tab-bar tab-bar-header"
           }
         ) : null,
-        mobile && activeTab === null ? /* @__PURE__ */ u4(MobileSectionList, { items: TAB_ITEMS, onSelect: (id) => setTab(id) }) : /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4(k, { children: [
+        mobile && activeTab === null ? /* @__PURE__ */ u4(MobileSectionList, { items: TAB_ITEMS, onSelect: (id) => setTab(id) }) : /* @__PURE__ */ u4("div", { class: `settings-body${activeTab === "mcp" ? " ga-mcp-settings-body" : ""}`, children: /* @__PURE__ */ u4(k, { children: [
           activeTab !== null && SETTINGS_SECTIONS.has(activeTab) ? /* @__PURE__ */ u4(SettingsTab, { gid, section: activeTab, onClose: hardClose, onActions: setActions }) : null,
           activeTab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
           activeTab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
@@ -24784,7 +24784,7 @@ function SettingsTab({ gid, section, onClose, onActions }) {
   const selectedImg = images?.images.find((i5) => i5.value === draft.image_tag) ?? null;
   const selectedImgAge = formatAge(selectedImg?.createdAt ?? null);
   const selectedImgSize = formatSize(selectedImg?.size ?? null);
-  return /* @__PURE__ */ u4("section", { children: [
+  return /* @__PURE__ */ u4("section", { class: section === "mcp" ? "ga-mcp-tab" : void 0, children: [
     /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "muted ga-folder-line", children: [
       "Folder ",
       /* @__PURE__ */ u4("code", { children: data.folder }),
@@ -25916,81 +25916,232 @@ function McpServersSection({
   busy,
   onChange
 }) {
+  const mobile = isMobile.value;
   const names = Object.keys(value);
+  const [selectedName, setSelectedName] = h2(() => names[0] ?? null);
+  const [editorOpen, setEditorOpen] = h2(false);
+  const [addOpen, setAddOpen] = h2(false);
   const [newName, setNewName] = h2("");
+  const [newType, setNewType] = h2("stdio");
   const trimmedNew = newName.trim();
   const newNameInvalid = trimmedNew !== "" && !MCP_NAME_RE.test(trimmedNew);
   const newNameDup = trimmedNew !== "" && trimmedNew in value;
   const canAdd = trimmedNew !== "" && !newNameInvalid && !newNameDup;
+  const selectedValue = selectedName ? value[selectedName] : void 0;
+  y2(() => {
+    if (selectedName && selectedName in value) return;
+    setSelectedName(names[0] ?? null);
+  }, [JSON.stringify(names)]);
+  y2(() => {
+    if (!mobile) setEditorOpen(false);
+  }, [mobile]);
   function addServer() {
     if (!canAdd) return;
-    onChange({ ...value, [trimmedNew]: { command: "" } });
+    const config = newType === "stdio" ? { type: "stdio", command: "" } : { type: newType, url: "" };
+    onChange({ ...value, [trimmedNew]: config });
+    setSelectedName(trimmedNew);
     setNewName("");
+    setAddOpen(false);
+    if (mobile) setEditorOpen(true);
   }
   function removeServer(name) {
     const next = { ...value };
     delete next[name];
     onChange(next);
+    const nextName = Object.keys(next)[0] ?? null;
+    setSelectedName(nextName);
+    setEditorOpen(false);
   }
   function updateServer(name, patch) {
     onChange({ ...value, [name]: patch });
   }
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      "MCP (Model Context Protocol) servers wired into this group's agents. Restart required to take effect \u2014 the SDK builds the MCP map at session start. Mirrors",
-      " ",
-      /* @__PURE__ */ u4("code", { children: "ncl groups config add-mcp-server / remove-mcp-server" }),
-      "."
-    ] }) }),
-    names.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin:8px 0 16px", children: "No MCP servers configured." }) : names.map((name) => /* @__PURE__ */ u4(
-      McpServerCard,
+  function selectServer(name) {
+    setSelectedName(name);
+    setAddOpen(false);
+    if (mobile) setEditorOpen(true);
+  }
+  function beginAdd() {
+    setNewName("");
+    setNewType("stdio");
+    setAddOpen(true);
+  }
+  const addForm = /* @__PURE__ */ u4(
+    McpAddServerForm,
+    {
+      name: newName,
+      type: newType,
+      disabled: busy,
+      invalid: newNameInvalid,
+      duplicate: newNameDup,
+      canAdd,
+      onNameChange: setNewName,
+      onTypeChange: setNewType,
+      onAdd: addServer,
+      onCancel: () => setAddOpen(false)
+    }
+  );
+  const editor = selectedName && selectedValue ? /* @__PURE__ */ u4(
+    McpServerEditor,
+    {
+      name: selectedName,
+      value: selectedValue,
+      disabled: busy,
+      onChange: (next) => updateServer(selectedName, next),
+      onRemove: () => removeServer(selectedName)
+    },
+    selectedName
+  ) : null;
+  return /* @__PURE__ */ u4("div", { class: "ga-mcp-section", children: [
+    /* @__PURE__ */ u4("div", { class: "ga-mcp-section-head", children: [
+      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+        "MCP (Model Context Protocol) servers wired into this group's agents. Restart required to take effect \u2014 the SDK builds the MCP map at session start. Mirrors",
+        " ",
+        /* @__PURE__ */ u4("code", { children: "ncl groups config add-mcp-server / remove-mcp-server" }),
+        "."
+      ] }),
+      /* @__PURE__ */ u4("button", { type: "button", class: "ga-mcp-add", disabled: busy, onClick: beginAdd, children: "+ Add server" })
+    ] }),
+    mobile ? /* @__PURE__ */ u4(McpServerList, { names, value, selectedName, onSelect: selectServer }) : /* @__PURE__ */ u4("div", { class: "ga-mcp-workspace", children: [
+      /* @__PURE__ */ u4(McpServerList, { names, value, selectedName, onSelect: selectServer }),
+      /* @__PURE__ */ u4("div", { class: "ga-mcp-editor-pane", children: addOpen ? addForm : editor ?? /* @__PURE__ */ u4("div", { class: "ga-mcp-empty", children: [
+        /* @__PURE__ */ u4("strong", { children: "No MCP servers configured" }),
+        /* @__PURE__ */ u4("span", { children: "Add a server to expose external tools to this agent." }),
+        /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: beginAdd, children: "+ Add server" })
+      ] }) })
+    ] }),
+    mobile && addOpen ? /* @__PURE__ */ u4(
+      MobileDialog,
       {
-        name,
-        value: value[name],
-        disabled: busy,
-        onChange: (next) => updateServer(name, next),
-        onRemove: () => removeServer(name)
+        title: "Add MCP server",
+        onBack: () => setAddOpen(false),
+        backLabel: "Back to MCP servers",
+        onClose: () => setAddOpen(false),
+        children: /* @__PURE__ */ u4("div", { class: "settings-body ga-mcp-mobile-editor", children: addForm })
+      }
+    ) : null,
+    mobile && editorOpen && editor ? /* @__PURE__ */ u4(
+      MobileDialog,
+      {
+        title: selectedName ?? "MCP server",
+        onBack: () => setEditorOpen(false),
+        backLabel: "Back to MCP servers",
+        onClose: () => setEditorOpen(false),
+        children: /* @__PURE__ */ u4("div", { class: "settings-body ga-mcp-mobile-editor", children: editor })
+      }
+    ) : null
+  ] });
+}
+function mcpServerType(value) {
+  const rawType = value.type;
+  return rawType === "http" || rawType === "sse" ? rawType : "stdio";
+}
+function mcpServerSummary(value) {
+  const type = mcpServerType(value);
+  if (type === "stdio") {
+    const stdio = value;
+    return [stdio.command, ...stdio.args ?? []].filter(Boolean).join(" ") || "Command required";
+  }
+  return value.url || "URL required";
+}
+function mcpServerIssue(value) {
+  const type = mcpServerType(value);
+  if (type === "stdio" && !value.command.trim()) return "Command required";
+  if (type !== "stdio") {
+    const url = value.url.trim();
+    if (!url) return "URL required";
+    if (!/^https?:\/\//.test(url)) return "Invalid URL";
+  }
+  if (value.timeout != null && (value.timeout < 1e3 || value.timeout > 6e5)) return "Invalid timeout";
+  return null;
+}
+function McpServerList({
+  names,
+  value,
+  selectedName,
+  onSelect
+}) {
+  return /* @__PURE__ */ u4("nav", { class: "ga-mcp-list", "aria-label": "Configured MCP servers", children: names.length === 0 ? /* @__PURE__ */ u4("p", { class: "ga-mcp-list-empty", children: "No servers yet." }) : names.map((name) => {
+    const config = value[name];
+    const issue = mcpServerIssue(config);
+    return /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: `ga-mcp-list-item${selectedName === name ? " active" : ""}`,
+        "aria-current": selectedName === name ? "true" : void 0,
+        onClick: () => onSelect(name),
+        children: [
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-list-name", children: name }),
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-transport-badge", children: mcpServerType(config) }),
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-list-summary", children: mcpServerSummary(config) }),
+          issue ? /* @__PURE__ */ u4("span", { class: "ga-mcp-list-issue", children: issue }) : null,
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-list-chevron", "aria-hidden": "true", children: "\u203A" })
+        ]
       },
       name
-    )),
-    /* @__PURE__ */ u4(Field, { label: "Add server", info: "Name is the key the agent uses to reference this server's tools. Letters, digits, _, ., - only.", children: [
-      /* @__PURE__ */ u4("div", { class: "ga-mp-actions", children: [
-        /* @__PURE__ */ u4(
-          "input",
-          {
-            type: "text",
-            class: "ga-chip-input",
-            placeholder: "server name (e.g. context7, fetch)",
-            value: newName,
-            disabled: busy,
-            onInput: (e4) => setNewName(e4.currentTarget.value),
-            onKeyDown: (e4) => {
-              if (e4.key === "Enter") {
-                e4.preventDefault();
-                addServer();
-              }
+    );
+  }) });
+}
+function McpAddServerForm({
+  name,
+  type,
+  disabled,
+  invalid,
+  duplicate,
+  canAdd,
+  onNameChange,
+  onTypeChange,
+  onAdd,
+  onCancel
+}) {
+  return /* @__PURE__ */ u4("div", { class: "ga-mcp-add-form", children: [
+    /* @__PURE__ */ u4("div", { children: [
+      /* @__PURE__ */ u4("h3", { children: "Add MCP server" }),
+      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "The name is how the agent identifies this server's tools." })
+    ] }),
+    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
+      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Server name" }),
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "text",
+          class: "ga-mcp-input",
+          placeholder: "e.g. context7 or home_assistant",
+          value: name,
+          disabled,
+          autoFocus: true,
+          onInput: (e4) => onNameChange(e4.currentTarget.value),
+          onKeyDown: (e4) => {
+            if (e4.key === "Enter") {
+              e4.preventDefault();
+              onAdd();
             }
           }
-        ),
-        /* @__PURE__ */ u4("button", { type: "button", disabled: busy || !canAdd, onClick: addServer, children: "+ Add server" })
-      ] }),
-      newNameInvalid ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: "Name must start with a letter or _, then letters/digits/_/./-." }) : newNameDup ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
-        '"',
-        trimmedNew,
-        '" already exists.'
-      ] }) : null
+        }
+      )
+    ] }),
+    invalid ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: "Start with a letter or _, then use letters, digits, _, ., or -." }) : null,
+    duplicate ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: [
+      'A server named "',
+      name.trim(),
+      '" already exists.'
+    ] }) : null,
+    /* @__PURE__ */ u4(McpTransportControl, { value: type, disabled, onChange: onTypeChange }),
+    /* @__PURE__ */ u4("div", { class: "ga-mcp-form-actions", children: [
+      /* @__PURE__ */ u4("button", { type: "button", onClick: onCancel, children: "Cancel" }),
+      /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: disabled || !canAdd, onClick: onAdd, children: "Add server" })
     ] })
   ] });
 }
-function McpServerCard({
+function McpServerEditor({
   name,
   value,
   disabled,
   onChange,
   onRemove
 }) {
-  const rawType = value.type;
-  const type = rawType === "http" || rawType === "sse" ? rawType : "stdio";
+  const type = mcpServerType(value);
+  const [removeOpen, setRemoveOpen] = h2(false);
   function setType(next) {
     if (next === "stdio") {
       const stdio = value;
@@ -26013,34 +26164,13 @@ function McpServerCard({
       });
     }
   }
-  return /* @__PURE__ */ u4("div", { class: "ga-mcp-card", children: [
-    /* @__PURE__ */ u4("div", { class: "ga-mcp-card-head", children: [
-      /* @__PURE__ */ u4("strong", { class: "ga-mcp-card-name", children: name }),
-      /* @__PURE__ */ u4(
-        "select",
-        {
-          class: "ga-mcp-type",
-          value: type,
-          disabled,
-          onChange: (e4) => setType(e4.currentTarget.value),
-          children: [
-            /* @__PURE__ */ u4("option", { value: "stdio", children: "stdio" }),
-            /* @__PURE__ */ u4("option", { value: "http", children: "http" }),
-            /* @__PURE__ */ u4("option", { value: "sse", children: "sse" })
-          ]
-        }
-      ),
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "icon-btn",
-          "aria-label": `Remove ${name}`,
-          disabled,
-          onClick: onRemove,
-          children: "\u2715"
-        }
-      )
+  return /* @__PURE__ */ u4("div", { class: "ga-mcp-editor", children: [
+    /* @__PURE__ */ u4("div", { class: "ga-mcp-editor-head", children: [
+      /* @__PURE__ */ u4("div", { children: [
+        /* @__PURE__ */ u4("h3", { children: name }),
+        /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Configure how the agent connects to this server." })
+      ] }),
+      /* @__PURE__ */ u4(McpTransportControl, { value: type, disabled, onChange: setType })
     ] }),
     type === "stdio" ? /* @__PURE__ */ u4(
       McpStdioFields,
@@ -26057,86 +26187,129 @@ function McpServerCard({
         onChange
       }
     ),
-    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "instructions" }),
-      /* @__PURE__ */ u4(
-        "textarea",
-        {
-          class: "ga-mcp-textarea",
-          placeholder: "optional one-line description shown to the agent",
-          rows: 2,
-          value: value.instructions ?? "",
-          disabled,
-          onInput: (e4) => {
-            const v5 = e4.currentTarget.value;
-            onChange({ ...value, instructions: v5 || void 0 });
+    /* @__PURE__ */ u4("details", { class: "ga-mcp-advanced", children: [
+      /* @__PURE__ */ u4("summary", { children: "Advanced settings" }),
+      /* @__PURE__ */ u4("div", { class: "ga-mcp-advanced-body", children: [
+        type === "stdio" ? /* @__PURE__ */ u4(
+          McpKeyValueEditor,
+          {
+            label: "Environment variables",
+            value: value.env ?? {},
+            disabled,
+            keyPlaceholder: "VARIABLE_NAME",
+            valuePlaceholder: "value",
+            onChange: (env) => {
+              const next = { ...value };
+              if (Object.keys(env).length) next.env = env;
+              else delete next.env;
+              onChange(next);
+            }
           }
-        }
-      )
+        ) : /* @__PURE__ */ u4(
+          McpKeyValueEditor,
+          {
+            label: "Request headers",
+            value: value.headers ?? {},
+            disabled,
+            keyPlaceholder: "Authorization",
+            valuePlaceholder: "Bearer \u2026",
+            onChange: (headers) => {
+              const next = { ...value };
+              if (Object.keys(headers).length) next.headers = headers;
+              else delete next.headers;
+              onChange(next);
+            }
+          }
+        ),
+        /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Instructions" }),
+          /* @__PURE__ */ u4(
+            "textarea",
+            {
+              class: "ga-mcp-textarea",
+              placeholder: "When should the agent use these tools?",
+              rows: 3,
+              value: value.instructions ?? "",
+              disabled,
+              onInput: (e4) => {
+                const instructions = e4.currentTarget.value;
+                onChange({ ...value, instructions: instructions || void 0 });
+              }
+            }
+          )
+        ] }),
+        /* @__PURE__ */ u4("label", { class: "ga-mcp-row ga-mcp-timeout", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Timeout (ms)" }),
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "number",
+              class: "ga-mcp-input",
+              placeholder: "60000",
+              min: 1e3,
+              max: 6e5,
+              step: 1e3,
+              value: value.timeout ?? "",
+              disabled,
+              onInput: (e4) => {
+                const raw = e4.currentTarget.value.trim();
+                const timeout = raw === "" ? void 0 : Number(raw);
+                onChange({
+                  ...value,
+                  timeout: timeout != null && Number.isFinite(timeout) ? timeout : void 0
+                });
+              }
+            }
+          )
+        ] })
+      ] })
     ] }),
-    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "timeout (ms)" }),
-      /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "number",
-          class: "ga-mcp-input",
-          placeholder: "default 60000",
-          min: 1e3,
-          max: 6e5,
-          step: 1e3,
-          value: value.timeout ?? "",
-          disabled,
-          onInput: (e4) => {
-            const raw = e4.currentTarget.value.trim();
-            const n3 = raw === "" ? void 0 : Number(raw);
-            onChange({
-              ...value,
-              timeout: n3 != null && Number.isFinite(n3) ? n3 : void 0
-            });
-          }
-        }
-      )
-    ] })
+    /* @__PURE__ */ u4("div", { class: "ga-mcp-editor-danger", children: /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled, onClick: () => setRemoveOpen(true), children: "Remove server\u2026" }) }),
+    removeOpen ? /* @__PURE__ */ u4(
+      MobileDialog,
+      {
+        title: "Remove MCP server?",
+        role: "alertdialog",
+        maxWidth: "420px",
+        onClose: () => setRemoveOpen(false),
+        children: [
+          /* @__PURE__ */ u4("div", { class: "settings-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+            "Remove ",
+            /* @__PURE__ */ u4("code", { children: name }),
+            " from this agent's MCP configuration?"
+          ] }) }),
+          /* @__PURE__ */ u4(MobileDialogFooter, { children: [
+            /* @__PURE__ */ u4("button", { type: "button", onClick: () => setRemoveOpen(false), children: "Cancel" }),
+            /* @__PURE__ */ u4("button", { type: "button", class: "danger", onClick: onRemove, children: "Remove server" })
+          ] })
+        ]
+      }
+    ) : null
   ] });
+}
+function McpTransportControl({
+  value,
+  disabled,
+  onChange
+}) {
+  return /* @__PURE__ */ u4("div", { class: "ga-mcp-transport", role: "group", "aria-label": "Transport", children: ["stdio", "http", "sse"].map((type) => /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: value === type ? "active" : "",
+      "aria-pressed": value === type,
+      disabled,
+      onClick: () => onChange(type),
+      children: type.toUpperCase()
+    },
+    type
+  )) });
 }
 function McpStdioFields({
   value,
   disabled,
   onChange
 }) {
-  const argsText = value.args ? JSON.stringify(value.args) : "";
-  const envText = value.env ? JSON.stringify(value.env, null, 2) : "";
-  const [argsDraft, setArgsDraft] = h2(argsText);
-  const [envDraft, setEnvDraft] = h2(envText);
-  y2(() => {
-    setArgsDraft(value.args ? JSON.stringify(value.args) : "");
-  }, [JSON.stringify(value.args ?? [])]);
-  y2(() => {
-    setEnvDraft(value.env ? JSON.stringify(value.env, null, 2) : "");
-  }, [JSON.stringify(value.env ?? {})]);
-  const argsParsed = parseJsonStringArray(argsDraft);
-  const envParsed = parseJsonStringMap(envDraft);
-  function commitArgs(text) {
-    setArgsDraft(text);
-    const parsed = parseJsonStringArray(text);
-    if (parsed.ok) {
-      const next = { ...value };
-      if (parsed.value.length === 0) delete next.args;
-      else next.args = parsed.value;
-      onChange(next);
-    }
-  }
-  function commitEnv(text) {
-    setEnvDraft(text);
-    const parsed = parseJsonStringMap(text);
-    if (parsed.ok) {
-      const next = { ...value };
-      if (Object.keys(parsed.value).length === 0) delete next.env;
-      else next.env = parsed.value;
-      onChange(next);
-    }
-  }
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
       /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "command" }),
@@ -26150,38 +26323,22 @@ function McpStdioFields({
           disabled,
           onInput: (e4) => onChange({ ...value, command: e4.currentTarget.value })
         }
-      )
-    ] }),
-    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "args (JSON array)" }),
-      /* @__PURE__ */ u4(
-        "textarea",
-        {
-          class: `ga-mcp-textarea${argsParsed.ok ? "" : " ga-mp-key-unknown"}`,
-          placeholder: '["-y","@my/mcp-server"]',
-          rows: 2,
-          value: argsDraft,
-          disabled,
-          onInput: (e4) => commitArgs(e4.currentTarget.value)
-        }
       ),
-      !argsParsed.ok ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: argsParsed.error }) : null
+      !value.command.trim() ? /* @__PURE__ */ u4("span", { class: "ga-mcp-field-error", children: "Command is required." }) : null
     ] }),
-    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "env (JSON object)" }),
-      /* @__PURE__ */ u4(
-        "textarea",
-        {
-          class: `ga-mcp-textarea${envParsed.ok ? "" : " ga-mp-key-unknown"}`,
-          placeholder: '{"FOO":"bar"}',
-          rows: 3,
-          value: envDraft,
-          disabled,
-          onInput: (e4) => commitEnv(e4.currentTarget.value)
+    /* @__PURE__ */ u4(
+      McpArgumentsEditor,
+      {
+        value: value.args ?? [],
+        disabled,
+        onChange: (args) => {
+          const next = { ...value };
+          if (args.length) next.args = args;
+          else delete next.args;
+          onChange(next);
         }
-      ),
-      !envParsed.ok ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: envParsed.error }) : null
-    ] })
+      }
+    )
   ] });
 }
 function McpHttpFields({
@@ -26189,87 +26346,151 @@ function McpHttpFields({
   disabled,
   onChange
 }) {
-  const headersText = value.headers ? JSON.stringify(value.headers, null, 2) : "";
-  const [headersDraft, setHeadersDraft] = h2(headersText);
-  y2(() => {
-    setHeadersDraft(value.headers ? JSON.stringify(value.headers, null, 2) : "");
-  }, [JSON.stringify(value.headers ?? {})]);
-  const headersParsed = parseJsonStringMap(headersDraft);
   const urlInvalid = value.url && !/^https?:\/\//.test(value.url);
-  function commitHeaders(text) {
-    setHeadersDraft(text);
-    const parsed = parseJsonStringMap(text);
-    if (parsed.ok) {
-      const next = { ...value };
-      if (Object.keys(parsed.value).length === 0) delete next.headers;
-      else next.headers = parsed.value;
-      onChange(next);
-    }
+  return /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
+    /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "URL" }),
+    /* @__PURE__ */ u4(
+      "input",
+      {
+        type: "url",
+        class: `ga-mcp-input${urlInvalid ? " ga-mp-key-unknown" : ""}`,
+        placeholder: "https://example.com/mcp",
+        value: value.url ?? "",
+        disabled,
+        onInput: (e4) => onChange({ ...value, url: e4.currentTarget.value })
+      }
+    ),
+    !value.url.trim() ? /* @__PURE__ */ u4("span", { class: "ga-mcp-field-error", children: "URL is required." }) : null,
+    urlInvalid ? /* @__PURE__ */ u4("span", { class: "ga-mcp-field-error", children: "URL must start with http:// or https://." }) : null
+  ] });
+}
+function McpArgumentsEditor({
+  value,
+  disabled,
+  onChange
+}) {
+  const [draft, setDraft] = h2("");
+  function add() {
+    if (!draft) return;
+    onChange([...value, draft]);
+    setDraft("");
   }
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "url" }),
+  return /* @__PURE__ */ u4("div", { class: "ga-mcp-collection", children: [
+    /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Arguments" }),
+    value.map((argument, index) => /* @__PURE__ */ u4("div", { class: "ga-mcp-collection-row", children: [
       /* @__PURE__ */ u4(
         "input",
         {
           type: "text",
-          class: `ga-mcp-input${urlInvalid ? " ga-mp-key-unknown" : ""}`,
-          placeholder: "https://example.com/mcp",
-          value: value.url ?? "",
+          class: "ga-mcp-input",
+          "aria-label": `Argument ${index + 1}`,
+          value: argument,
           disabled,
-          onInput: (e4) => onChange({ ...value, url: e4.currentTarget.value })
+          onInput: (e4) => {
+            const next = [...value];
+            next[index] = e4.currentTarget.value;
+            onChange(next);
+          }
         }
       ),
-      urlInvalid ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: "URL must start with http:// or https://" }) : null
-    ] }),
-    /* @__PURE__ */ u4("label", { class: "ga-mcp-row", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "headers (JSON object)" }),
+      /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": `Remove argument ${index + 1}`, disabled, onClick: () => onChange(value.filter((_6, i5) => i5 !== index)), children: "\u2715" })
+    ] }, `${index}-${argument}`)),
+    /* @__PURE__ */ u4("div", { class: "ga-mcp-collection-row", children: [
       /* @__PURE__ */ u4(
-        "textarea",
+        "input",
         {
-          class: `ga-mcp-textarea${headersParsed.ok ? "" : " ga-mp-key-unknown"}`,
-          placeholder: '{"Authorization":"Bearer \u2026"}',
-          rows: 3,
-          value: headersDraft,
+          type: "text",
+          class: "ga-mcp-input",
+          "aria-label": "New argument",
+          placeholder: "Add an argument",
+          value: draft,
           disabled,
-          onInput: (e4) => commitHeaders(e4.currentTarget.value)
+          onInput: (e4) => setDraft(e4.currentTarget.value),
+          onKeyDown: (e4) => {
+            if (e4.key === "Enter") {
+              e4.preventDefault();
+              add();
+            }
+          }
         }
       ),
-      !headersParsed.ok ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: headersParsed.error }) : null
+      /* @__PURE__ */ u4("button", { type: "button", disabled: disabled || !draft, onClick: add, children: "Add" })
     ] })
   ] });
 }
-function parseJsonStringArray(text) {
-  const t4 = text.trim();
-  if (t4 === "") return { ok: true, value: [] };
-  let parsed;
-  try {
-    parsed = JSON.parse(t4);
-  } catch (e4) {
-    return { ok: false, error: `Not valid JSON: ${e4.message}` };
+function McpKeyValueEditor({
+  label,
+  value,
+  disabled,
+  keyPlaceholder,
+  valuePlaceholder,
+  onChange
+}) {
+  const [newKey, setNewKey] = h2("");
+  const [newValue, setNewValue] = h2("");
+  const trimmedKey = newKey.trim();
+  const duplicate = trimmedKey !== "" && trimmedKey in value;
+  function add() {
+    if (!trimmedKey || duplicate) return;
+    onChange({ ...value, [trimmedKey]: newValue });
+    setNewKey("");
+    setNewValue("");
   }
-  if (!Array.isArray(parsed)) return { ok: false, error: "Must be a JSON array" };
-  for (const v5 of parsed) {
-    if (typeof v5 !== "string") return { ok: false, error: "All array entries must be strings" };
-  }
-  return { ok: true, value: parsed };
-}
-function parseJsonStringMap(text) {
-  const t4 = text.trim();
-  if (t4 === "") return { ok: true, value: {} };
-  let parsed;
-  try {
-    parsed = JSON.parse(t4);
-  } catch (e4) {
-    return { ok: false, error: `Not valid JSON: ${e4.message}` };
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ok: false, error: "Must be a JSON object" };
-  }
-  for (const v5 of Object.values(parsed)) {
-    if (typeof v5 !== "string") return { ok: false, error: "All values must be strings" };
-  }
-  return { ok: true, value: parsed };
+  return /* @__PURE__ */ u4("div", { class: "ga-mcp-collection", children: [
+    /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: label }),
+    Object.entries(value).map(([key, entryValue]) => /* @__PURE__ */ u4("div", { class: "ga-mcp-kv-row", children: [
+      /* @__PURE__ */ u4("code", { title: key, children: key }),
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "text",
+          class: "ga-mcp-input",
+          "aria-label": `${key} value`,
+          value: entryValue,
+          disabled,
+          onInput: (e4) => onChange({ ...value, [key]: e4.currentTarget.value })
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "icon-btn",
+          "aria-label": `Remove ${key}`,
+          disabled,
+          onClick: () => {
+            const next = { ...value };
+            delete next[key];
+            onChange(next);
+          },
+          children: "\u2715"
+        }
+      )
+    ] }, key)),
+    /* @__PURE__ */ u4("div", { class: "ga-mcp-kv-row ga-mcp-kv-new", children: [
+      /* @__PURE__ */ u4("input", { type: "text", class: "ga-mcp-input", "aria-label": `New ${label} key`, placeholder: keyPlaceholder, value: newKey, disabled, onInput: (e4) => setNewKey(e4.currentTarget.value) }),
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "text",
+          class: "ga-mcp-input",
+          "aria-label": `New ${label} value`,
+          placeholder: valuePlaceholder,
+          value: newValue,
+          disabled,
+          onInput: (e4) => setNewValue(e4.currentTarget.value),
+          onKeyDown: (e4) => {
+            if (e4.key === "Enter") {
+              e4.preventDefault();
+              add();
+            }
+          }
+        }
+      ),
+      /* @__PURE__ */ u4("button", { type: "button", disabled: disabled || !trimmedKey || duplicate, onClick: add, children: "Add" })
+    ] }),
+    duplicate ? /* @__PURE__ */ u4("span", { class: "ga-mcp-field-error", children: "That key already exists." }) : null
+  ] });
 }
 function SkillsSection({
   value,
