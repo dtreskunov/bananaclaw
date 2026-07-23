@@ -24785,14 +24785,14 @@ function SettingsTab({ gid, section, onClose, onActions }) {
   const selectedImgAge = formatAge(selectedImg?.createdAt ?? null);
   const selectedImgSize = formatSize(selectedImg?.size ?? null);
   return /* @__PURE__ */ u4("section", { class: section === "mcp" ? "ga-mcp-tab" : void 0, children: [
-    /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "muted ga-folder-line", children: [
+    section === "settings" ? /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "muted ga-folder-line", children: [
       "Folder ",
       /* @__PURE__ */ u4("code", { children: data.folder }),
       " ",
       /* @__PURE__ */ u4("code", { class: "ga-folder-id", children: data.id }),
       data.updatedAt ? ` \xB7 last updated ${new Date(data.updatedAt).toLocaleString()}` : "",
       data.runningSessionCount > 0 ? ` \xB7 ${data.runningSessionCount} running session${data.runningSessionCount === 1 ? "" : "s"}` : " \xB7 no running sessions"
-    ] }) }),
+    ] }) }) : null,
     section === "models" ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4(
         Field,

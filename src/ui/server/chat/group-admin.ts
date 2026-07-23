@@ -15,7 +15,7 @@ import { URL } from 'url';
 
 import { CONTAINER_IMAGE } from '../../../config.js';
 import { readEnvFile } from '../../../env.js';
-import { buildAgentGroupImage } from '../../../container-runner.js';
+import { buildAgentGroupImage, isContainerRunning } from '../../../container-runner.js';
 import { restartAgentGroupContainers } from '../../../container-restart.js';
 import { getDb } from '../../../db/connection.js';
 import { getAgentGroup, getAgentGroupBySiteSlug, updateAgentGroup } from '../../../db/agent-groups.js';
@@ -278,9 +278,9 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     writeJson(res, 500, { error: 'container_config_missing' });
     return;
   }
-  const running = getDb()
-    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE agent_group_id = ? AND status = 'active'")
-    .get(gid) as { n: number };
+  const runningSessionCount = getSessionsByAgentGroup(gid).filter(
+    (session) => session.status === 'active' && isContainerRunning(session.id),
+  ).length;
 
   // Translate DB model value → bare id for the wire. Client never sees the
   // OPENCODE_PROVIDER prefix.
@@ -350,7 +350,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
       url: siteUrl(group),
       enabled: !!group.site_enabled,
     },
-    runningSessionCount: running.n,
+    runningSessionCount,
     selectedModelDetail,
     selectedImageDetail,
     actorIsElevated: isOwner(actorUserId) || isGlobalAdmin(actorUserId),

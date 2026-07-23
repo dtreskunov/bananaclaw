@@ -46,6 +46,7 @@ vi.mock('../auth.js', () => ({
 import { initTestDb, closeDb, runMigrations, getDb, getAgentGroup } from '../../../db/index.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { addMember } from '../../../modules/permissions/db/agent-group-members.js';
+import { isContainerRunning } from '../../../container-runner.js';
 import {
   registerProviderContainerConfig,
   listProviderContainerConfigNames,
@@ -149,6 +150,7 @@ beforeEach(() => {
   const db = initTestDb();
   runMigrations(db);
   mockUserId = null;
+  vi.mocked(isContainerRunning).mockReset().mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -449,6 +451,22 @@ describe('GET /api/groups/:gid/admin/settings (extended fields)', () => {
     expect(body.packages.apt).toEqual(['jq']);
     expect(Object.keys(body.mcpServers)).toEqual(['fetch']);
     expect(body.skills).toEqual(['welcome']);
+  });
+
+  it('counts only sessions with a live container as running', async () => {
+    seedOwnedGroup('ag-running', 'running-grp');
+    const insert = getDb().prepare(`
+      INSERT INTO sessions
+        (id, agent_group_id, messaging_group_id, thread_id, agent_provider, status, container_status, last_active, created_at)
+      VALUES (?, 'ag-running', NULL, NULL, NULL, 'active', ?, ?, ?)
+    `);
+    insert.run('sess-live', 'running', NOW(), NOW());
+    insert.run('sess-stopped', 'stopped', NOW(), NOW());
+    vi.mocked(isContainerRunning).mockImplementation((sessionId) => sessionId === 'sess-live');
+
+    const res = await call('GET', '/ui/chat/api/groups/ag-running/admin/settings');
+    expect(res.status()).toBe(200);
+    expect((res.body() as { runningSessionCount: number }).runningSessionCount).toBe(1);
   });
 
   it('reports providesAgentSurfaces=false for the default (claude) provider', async () => {

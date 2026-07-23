@@ -608,12 +608,14 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
 
   return (
     <section class={section === 'mcp' ? 'ga-mcp-tab' : undefined}>
-      <div class="group-admin-toolbar">
-        <p class="muted ga-folder-line">
-          Folder <code>{data.folder}</code> <code class="ga-folder-id">{data.id}</code>{data.updatedAt ? ` · last updated ${new Date(data.updatedAt).toLocaleString()}` : ''}
-          {data.runningSessionCount > 0 ? ` · ${data.runningSessionCount} running session${data.runningSessionCount === 1 ? '' : 's'}` : ' · no running sessions'}
-        </p>
-      </div>
+      {section === 'settings' ? (
+        <div class="group-admin-toolbar">
+          <p class="muted ga-folder-line">
+            Folder <code>{data.folder}</code> <code class="ga-folder-id">{data.id}</code>{data.updatedAt ? ` · last updated ${new Date(data.updatedAt).toLocaleString()}` : ''}
+            {data.runningSessionCount > 0 ? ` · ${data.runningSessionCount} running session${data.runningSessionCount === 1 ? '' : 's'}` : ' · no running sessions'}
+          </p>
+        </div>
+      ) : null}
 
       {section === 'models' ? (
         <>
