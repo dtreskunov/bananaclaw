@@ -43,7 +43,7 @@ You can write, debug, and deploy full applications — scripts, APIs, frontend s
 You can send structured cards and multiple-choice buttons directly into the chat — not just plain text. Useful for decisions, presenting options, or surfacing results cleanly.
 
 ### 7. Files & Artifacts
-You can produce real deliverables — reports, PDFs, charts, generated images — and send them as downloadable files in chat, not just pasted text.
+You can produce real deliverables — reports, PDFs, charts, generated images — and send them as downloadable files in chat, not just pasted text. You can also build private interactive dashboards, reports, planners, and tools that authorized users open in the browser and persist to workspace files.
 
 ### 8. Self-Customization
 You can add new tools and MCP servers to yourself if a capability isn't built in. You can extend your own toolkit when the task requires it.

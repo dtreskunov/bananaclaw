@@ -5,10 +5,10 @@ description: >-
   Web UI access: how the user opens a browser to see their files, and how
   to send them a single-file download link instead of attaching bytes
   inline. Use when the user asks to "show me my files", "browse my files",
-  "open the file browser", "see my files in a browser", "download a file",
-  "give me a link to my files", or when you want to send a specific file
-  but inline attachment isn't a good fit (large file, channel that handles
-  attachments poorly, sensitive/revocable, etc.).
+  "open the file browser", "see my files in a browser", "open this HTML",
+  "download a file", "give me a link to my files", or when you want to send
+  a specific file but inline attachment isn't a good fit (large file,
+  channel that handles attachments poorly, sensitive/revocable, etc.).
 ---
 
 # Web UI — File Browser + File Links
@@ -83,25 +83,29 @@ request_login_link(userId: "resend:user@example.com")
 
 Use when the user asks to browse or see "my files" generally. Same DM
 delivery, same group-safe behavior. The link mints a 30-day browser
-session for the read-only file browser.
+session for the private file browser.
 
 A reasonable reply (in a group or DM):
 
 > I've sent you a one-time login link in a direct message. It's valid for
-> 10 minutes and gives you a 30-day browser session to the read-only file
+> 10 minutes and gives you a 30-day browser session to the private file
 > browser for this agent group.
 
 ## What they can do once logged in (browser session)
 
-Read-only:
-
 - Browse the filesystem of every agent group they have access to
   (membership, admin role, or ownership)
-- Preview images, audio, video, PDFs, and text files inline in the browser
+- Preview images, audio, video, PDFs, text, and HTML files inline in the browser
 - Download anything else
+- Open member-visible HTML as an isolated private application. Run
+  `/private-web` when building one.
 
-They cannot upload, rename, delete, or edit anything from the web UI —
-only through chat with you.
+The trusted file browser and an HTML application's private origin are separate
+surfaces. Trusted browser controls are role-gated. A private HTML application
+can read member-visible workspace files and conditionally replace existing
+member-visible regular files with ETag-protected `PUT`; it cannot create,
+delete, rename, or access hidden/admin-tier files. Browser writes do not wake
+you or send a chat message.
 
 ## Visibility rules (so you can answer "why don't I see X?")
 

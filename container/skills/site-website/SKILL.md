@@ -11,6 +11,9 @@ HTTPS — anyone with the URL can read them.
 
 This is a **separate capability** from:
 
+- **`private-web`** (`/private-web`): build an authenticated interactive
+  application backed by member-visible workspace files. Use that for private
+  dashboards, reports, editors, or tools whose authorized users persist state.
 - **`vercel-cli`** (`/vercel-cli`): deploy to Vercel. Use that when the user
   wants Vercel specifically, or needs preview URLs / framework SSR / build
   steps. The current skill is for self-hosting on this group's own subdomain
@@ -103,8 +106,17 @@ rewriting from memory.
 Pages itself is static — the served folder is public **read-only**, there is
 no database, and anonymous visitors cannot write anything. If the site needs
 data that changes over time (a JSON feed, a small dataset a page renders, a
-counter, saved state), keep that data as **files in your group folder** and
-maintain them yourself. Two complementary access paths:
+counter, saved state), first decide who writes it:
+
+- For authenticated group members using an interactive browser app, prefer
+  `/private-web`. It provides same-origin reads and ETag-protected replacement
+  of existing member-visible files without making the app public.
+- For agent-maintained public data, keep the data as files in the public site
+  folder and update them from the workspace.
+- Use the authenticated admin file API below only when an existing Pages app
+  specifically needs its legacy cross-origin editing path.
+
+The available Pages data paths are:
 
 - **Publish for reading.** Write the data file into the publish directory
   (`/workspace/agent/<siteFqdn>/data.json`) and the page's client-side JS can
