@@ -33,9 +33,7 @@ import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js'
 import { createPrivateWebSession } from '../private-web-db.js';
 import { resolvePrivateWebEntry } from '../private-web-path.js';
 import { uiBaseUrl } from '../server.js';
-import { siteFqdn } from '../pages/site.js';
 import { classify, resolveSafe } from './classify.js';
-import { decideFileApiCors } from './cors.js';
 import { fileEtag } from './etag.js';
 import {
   handleChatRequest,
@@ -82,22 +80,6 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
   }
   if (pathname.startsWith(CHAT_MOUNT_PREFIX + '/')) {
     pathname = pathname.slice(CHAT_MOUNT_PREFIX.length) || '/';
-  }
-
-  // Cross-origin (same-site) access from a group's own Pages subdomain to its
-  // file API. A page served at https://<slug>.<pages-domain> may read/write
-  // the files of *its own* group only; the allowed origin is derived from the
-  // group id in the path. Preflight (OPTIONS) is answered here because it
-  // carries no cookie and would otherwise fall through to a 401. Same-origin
-  // UI requests carry a non-matching (or absent) Origin and are untouched.
-  const cors = decideFileApiCors(pathname, req.method || 'GET', req.headers.origin, allowedPagesOriginForGroup);
-  if (cors) {
-    for (const [k, v] of Object.entries(cors.headers)) res.setHeader(k, v);
-    if (cors.preflight) {
-      res.writeHead(cors.preflight.status);
-      res.end();
-      return;
-    }
   }
 
   try {
@@ -1425,19 +1407,6 @@ function mimeFor(ext: string): { type: string; inlineSafe: boolean } {
 function json(ctx: Ctx, status: number, body: unknown): void {
   ctx.res.writeHead(status, { 'Content-Type': 'application/json' });
   ctx.res.end(JSON.stringify(body));
-}
-
-/**
- * The single origin permitted to make cross-origin requests to a group's
- * file API: its own Pages site origin (`https://<slug>.<pages-domain>`).
- * Returns null when the group doesn't exist, has no enabled site, or the
- * Pages feature isn't configured — in which case no CORS header is emitted.
- */
-function allowedPagesOriginForGroup(groupId: string): string | null {
-  const group = getAgentGroup(groupId);
-  if (!group || !group.site_enabled) return null;
-  const fqdn = siteFqdn(group);
-  return fqdn ? `https://${fqdn}` : null;
 }
 
 function text(ctx: Ctx, status: number, body: string): void {

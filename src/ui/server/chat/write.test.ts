@@ -22,6 +22,7 @@ vi.mock('../../../config.js', async () => {
     ...actual,
     GROUPS_DIR: '/tmp/nanoclaw-test-ui-write-concurrency/groups',
     DATA_DIR: '/tmp/nanoclaw-test-ui-write-concurrency/data',
+    PAGES_BASE_DOMAIN: 'pages.test',
   };
 });
 
@@ -165,6 +166,33 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
+});
+
+describe('file API origin policy', () => {
+  it('does not grant an enabled Pages origin cross-origin access', async () => {
+    getDb().prepare(`UPDATE agent_groups SET site_enabled = 1, site_slug = 'write' WHERE id = ?`).run(GID);
+    writeFile('state.json', '{"n":1}');
+
+    const response = await call('GET', `/api/groups/${GID}/files/state.json`, {
+      headers: { origin: 'https://write.pages.test' },
+    });
+
+    expect(response.status()).toBe(200);
+    expect(response.header('access-control-allow-origin')).toBeUndefined();
+    expect(response.header('access-control-allow-credentials')).toBeUndefined();
+
+    const preflight = await call('OPTIONS', `/api/groups/${GID}/write`, {
+      headers: {
+        origin: 'https://write.pages.test',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type, if-match',
+      },
+    });
+
+    expect(preflight.status()).not.toBe(204);
+    expect(preflight.header('access-control-allow-origin')).toBeUndefined();
+    expect(preflight.header('access-control-allow-methods')).toBeUndefined();
+  });
 });
 
 describe('file write optimistic concurrency', () => {

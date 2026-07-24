@@ -198,9 +198,9 @@ Properties:
 - Public HTML may use normal browser features because it has no private read
   authority.
 
-The current Pages-to-apex credentialed CORS file API may remain temporarily for
-compatibility. New administrative applications should edit through a private
-web session. Once migrated, the Pages CORS exception can be removed.
+The authenticated chat file API does not grant CORS access to Pages origins.
+Administrative applications edit through a private web session, where the
+application and its file operations share a disposable authenticated origin.
 
 Anonymous visitor submissions are not generic filesystem writes. If needed,
 they should use a separate typed, validated, rate-limited submission API.

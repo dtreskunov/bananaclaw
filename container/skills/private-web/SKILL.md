@@ -31,19 +31,26 @@ interaction or persistence. It is not a server runtime.
 1. Create a dedicated directory under `/workspace/agent/` with an `.html` or
    `.htm` entry file. Root-level HTML also works, but a directory keeps the app
    and its state easy to identify.
-2. Keep scripts, styles, fonts, images, data, and browser dependencies in the
-   workspace. Use relative or root-relative URLs. External scripts, resources,
-  frames, workers, forms, and programmatic connections are blocked;
-  same-origin `fetch()` is allowed. Do not treat this CSP as hard network
-  isolation: the document can still navigate its own frame to another URL.
+2. **CDNs are not supported.** Download, vendor, or bundle every runtime
+  dependency and asset into the app directory before presenting it. This
+  includes scripts, ES modules, styles, fonts, images, audio, video, 3D models,
+  textures, WASM, workers, and data. Use local relative or root-relative URLs;
+  do not leave runtime references to jsDelivr, unpkg, cdnjs, Google Fonts, or
+  any other `http://` or `https://` origin in HTML, CSS, imports, workers, or
+  `fetch()` calls. External scripts, resources, frames, workers, forms, and
+  programmatic connections are blocked; same-origin `fetch()` is allowed. Do
+  not treat this CSP as hard network isolation: the document can still
+  navigate its own frame to another URL.
 3. Treat every member-visible workspace file as readable by the application.
    Never place secrets in member-visible files. Hidden and admin-tier files are
    unavailable from private web origins.
 4. Pre-create every file the browser must persist. A private app can replace an
    existing member-visible regular file, but cannot create, delete, rename, or
    make directories.
-5. Build responsive loading, empty, error, save, and conflict states. Verify the
-   app in a real browser at desktop and mobile sizes before presenting it.
+5. Scan the final HTML, CSS, and JavaScript for remote runtime URLs and replace
+  each one with a local asset. Build responsive loading, empty, error, save,
+  and conflict states. Verify the app in a real browser at desktop and mobile
+  sizes before presenting it.
 
 ## Read and persist workspace data
 

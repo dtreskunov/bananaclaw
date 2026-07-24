@@ -179,41 +179,22 @@ This is **separate** from the private file-sharing **link** feature (one-off
 expiring `/dl` links backed by `ui_download_tokens`). Use links for private,
 per-file shares; use Pages for a public site.
 
-## Data persistence (the file API)
+## Data persistence
 
 Pages is **static and public read-only** — no server-side runtime, no
-database, and anonymous visitors cannot write. When a site needs data that
-changes over time, keep it as files in the group folder and update them
-through the authenticated file API (part of the web UI under `/api/groups/…`,
-so it requires a logged-in **admin** UI session — never reachable by anonymous
-site visitors):
+database, and anonymous visitors cannot write. Pages origins are not allowed
+to call the authenticated chat file API cross-origin.
 
-| Method + path | Purpose |
-|---|---|
-| `GET /api/groups/<gid>/files/<rel>` | File bytes. Response includes an `ETag` (version token). |
-| `GET /api/groups/<gid>/files/<rel>?meta=1` | Metadata JSON: `size`, `mtime`, `etag`, … |
-| `POST /api/groups/<gid>/write` | Overwrite an existing file. Body `{ path, content }`. |
-| `POST /api/groups/<gid>/upload` | Multipart upload; `?mode=skip\|overwrite\|rename`. |
+Choose persistence based on who uses the application:
 
-A data file written into the FQDN publish folder is *also* served publicly as
-a static asset, so a page's client JS can `fetch()` it for reads while the
-agent/admin owns the writes.
+- For authenticated group members, run the application as a private web view.
+  It can read member-visible workspace files and replace existing files using
+  same-origin `PUT` requests with mandatory `If-Match` preconditions.
+- For agent-maintained public data, write files directly into the FQDN publish
+  folder. The site can read those files as ordinary public static assets.
+- For anonymous visitor submissions, build a separate typed, validated, and
+  rate-limited submission service. Do not expose generic workspace writes.
 
-### Optimistic concurrency (safe overwrites)
-
-Reads (`GET …/files/<rel>` and `?meta=1`) return a strong `ETag` derived from
-the file's size + mtime. Overwrites accept it as a precondition so a client
-can only replace the exact version it last read:
-
-- `POST …/write` — pass the token as an `If-Match` header or an `ifMatch`
-  field in the JSON body.
-- `POST …/upload` with `mode=overwrite` — pass the token as an `If-Match`
-  header (applied per matching target).
-
-If the on-disk version no longer matches, the write is rejected with **`412
-Precondition Failed`** (the `write` op; the `upload` op reports
-`precondition_failed` in that file's result entry) and the response carries
-the current `ETag`. The precondition is opt-in: omit it for first-writer-wins
-behavior (the prior default). Implementation:
-[src/ui/server/chat/etag.ts](../src/ui/server/chat/etag.ts),
-[src/ui/server/chat/write.ts](../src/ui/server/chat/write.ts).
+The authenticated file API remains available to the trusted chat UI for file
+management, but browser JavaScript running on a Pages origin cannot read its
+responses or invoke its mutations.
