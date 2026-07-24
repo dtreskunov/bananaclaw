@@ -43,7 +43,7 @@ async function resolveProxyConfig(agent?: string): Promise<ProxyConfig | null> {
     }
     try {
       const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
-      const config = await onecli.getContainerConfig(agent);
+      const config = await onecli.getContainerConfig({ agent });
       const rawProxy = config.env.HTTPS_PROXY || config.env.https_proxy;
       if (!rawProxy) {
         log.warn('OneCLI config has no HTTPS_PROXY', { agent: agent ?? null });
