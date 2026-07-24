@@ -187,7 +187,7 @@ export interface TreeEntry {
   tier?: number;
 }
 
-export type PreviewKind = 'image' | 'audio' | 'video' | 'pdf' | 'markdown' | 'text' | 'binary' | 'error';
+export type PreviewKind = 'image' | 'audio' | 'video' | 'pdf' | 'html' | 'markdown' | 'text' | 'binary' | 'error';
 
 export interface PreviewBlock {
   kind: PreviewKind;

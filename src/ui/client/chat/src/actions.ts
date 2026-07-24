@@ -1154,7 +1154,14 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
       if (ctType.startsWith('text/') || ctType.includes('json') || ctType.includes('xml')) {
         const txt = await r.text();
         const isMd = ext === 'md' || ext === 'markdown';
-        previewBlock.value = { kind: isMd ? 'markdown' : 'text', text: txt, etag, ...meta };
+        const isHtml = ext === 'html' || ext === 'htm';
+        previewBlock.value = {
+          kind: isHtml ? 'html' : isMd ? 'markdown' : 'text',
+          text: txt,
+          etag,
+          ...meta,
+          ...(isHtml ? { url: refreshableFileUrl(url) } : {}),
+        };
       } else {
         previewBlock.value = { kind: 'binary', mime: ctType, etag, ...meta };
       }

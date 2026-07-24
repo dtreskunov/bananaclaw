@@ -170,6 +170,14 @@ describe('handlePagesRequest', () => {
     expect(c.headers()['Allow']).toBe('GET, HEAD');
   });
 
+  it('keeps public Pages read-only', async () => {
+    const c = makeRes();
+    expect(serve.handlePagesRequest(makeReq('svsite.pages.test', '/style.css', 'PUT'), c.res)).toBe(true);
+    await c.done;
+    expect(c.status()).toBe(405);
+    expect(fs.readFileSync(path.join(siteRoot, 'style.css'), 'utf8')).toBe('body{color:red}');
+  });
+
   it('supports HEAD without a body', async () => {
     const c = makeRes();
     expect(serve.handlePagesRequest(makeReq('svsite.pages.test', '/', 'HEAD'), c.res)).toBe(true);

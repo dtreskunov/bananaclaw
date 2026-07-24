@@ -75,8 +75,14 @@ export function createSession(userId: string, ttlMs: number): { token: string; e
   return { token, expiresAt };
 }
 
-export function lookupSession(token: string): { userId: string; expiresAt: string } | null {
+export function lookupSession(token: string): { tokenHash: string; userId: string; expiresAt: string } | null {
   const hash = hashToken(token);
+  const session = lookupSessionByHash(hash);
+  if (!session) return null;
+  return { tokenHash: hash, ...session };
+}
+
+export function lookupSessionByHash(hash: string): { userId: string; expiresAt: string } | null {
   const row = getDb().prepare('SELECT * FROM ui_sessions WHERE token_hash = ?').get(hash) as UiSession | undefined;
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) return null;

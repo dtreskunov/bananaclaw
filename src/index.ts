@@ -55,6 +55,7 @@ import './cli/commands/index.js';
 import './cli/delivery-action.js';
 import { startCliServer, stopCliServer } from './cli/socket-server.js';
 import { startUi, stopUi } from './ui/server/server.js';
+import { registerPrivateWebHostHandler } from './ui/server/pages/private-web.js';
 import { registerPagesHostHandler } from './ui/server/pages/serve.js';
 import './ui/server/login-link-action.js';
 import './ui/server/file-link-action.js';
@@ -193,6 +194,7 @@ async function main(): Promise<void> {
 
   // 8a. Register the per-group static website host handler (no-op unless
   //     PAGES_BASE_DOMAIN is set).
+  registerPrivateWebHostHandler();
   registerPagesHostHandler();
 
   log.info('NanoClaw running');

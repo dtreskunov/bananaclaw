@@ -110,6 +110,7 @@ export function claimIdentity(args: { targetUserId: string; channel: string; han
 
     db.prepare('UPDATE ui_sessions SET user_id = ? WHERE user_id = ?').run(targetUserId, donorUserId);
     db.prepare('UPDATE ui_magic_links SET user_id = ? WHERE user_id = ?').run(targetUserId, donorUserId);
+    db.prepare('UPDATE ui_private_web_sessions SET user_id = ? WHERE user_id = ?').run(targetUserId, donorUserId);
     db.prepare('UPDATE ui_download_tokens SET issuer_user_id = ? WHERE issuer_user_id = ?').run(
       targetUserId,
       donorUserId,

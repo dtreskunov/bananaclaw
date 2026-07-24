@@ -5,7 +5,7 @@ import type { ComponentChildren, JSX, VNode } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
   treePath, treeEntries, treeError, filePath, isAdmin,
-  previewBlock, uploadItems, threadId, pinnedContext,
+  previewBlock, uploadItems, threadId, pinnedContext, groupId,
 } from '../state';
 import { navTree, navFile, closePreview, togglePinnedFile, loadTree, selectFile } from '../actions';
 import {
@@ -17,6 +17,7 @@ import { RelativeTime } from './RelativeTime';
 import { ActionsMenu } from './ActionsMenu';
 import { MediaPlayer } from './MediaPlayer';
 import { LyricsPanel } from './LyricsPanel';
+import { PrivateWebView } from './PrivateWebView';
 import { requestConfirm } from './PromptModal';
 import { highlightCode } from '../highlight';
 import type { TreeEntry, PreviewKind } from '../types';
@@ -152,6 +153,7 @@ function mimeFromKind(kind: PreviewKind): string | null {
     case 'audio': return 'audio';
     case 'video': return 'video';
     case 'pdf': return 'application/pdf';
+    case 'html': return 'text/html';
     case 'markdown': return 'text/markdown';
     case 'text': return 'text/plain';
     default: return null;
@@ -197,7 +199,7 @@ function Preview() {
   if (!p) return <div class="preview-body" id="preview" ref={ref}></div>;
   const pinned = !!fp && pinnedContext.value.includes(fp);
   const clippyTitle = pinned ? 'Detach from next message' : 'Attach to next message';
-  const editable = isAdmin.value && (p.kind === 'text' || p.kind === 'markdown');
+  const editable = isAdmin.value && (p.kind === 'text' || p.kind === 'markdown' || p.kind === 'html');
 
   const beginEdit = (): void => {
     setDraft(p.text || '');
@@ -343,6 +345,9 @@ function Preview() {
     );
   } else if (p.kind === 'image') body = <img alt={p.name} src={p.url} />;
   else if (p.kind === 'pdf') body = <iframe src={p.url} style="width:100%;height:90vh;border:0" />;
+  else if (p.kind === 'html' && fp && groupId.value) {
+    body = <PrivateWebView key={`${p.url || ''}:${p.etag || ''}`} groupId={groupId.value} path={fp} title={p.name} />;
+  }
   else if (p.kind === 'markdown') {
     const md = renderMarkdown(p.text);
     body = md != null

@@ -59,6 +59,7 @@ describe('isValidSlug', () => {
     expect(site.isValidSlug('UPPER')).toBe(false);
     expect(site.isValidSlug('has space')).toBe(false);
     expect(site.isValidSlug('a'.repeat(64))).toBe(false);
+    expect(site.isValidSlug('secure-report')).toBe(false);
   });
 });
 
@@ -106,6 +107,10 @@ describe('allocateSiteSlug', () => {
 
   it('returns null when the name yields no usable slug', () => {
     expect(site.allocateSiteSlug({ id: 'g3', name: '!!!' })).toBeNull();
+  });
+
+  it('keeps automatic allocations out of the secure namespace', () => {
+    expect(site.allocateSiteSlug({ id: 'g4', name: 'Secure Report' })).toBe('site-secure-report');
   });
 });
 

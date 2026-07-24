@@ -12,11 +12,15 @@
  *                  URLs. Defaults to http://localhost:${WEBHOOK_PORT}/ui.
  */
 import http from 'http';
+import path from 'path';
 
+import { getAgentGroup } from '../../db/agent-groups.js';
 import { readEnvFile } from '../../env.js';
 import { log } from '../../log.js';
+import { canAccessAgentGroup } from '../../modules/permissions/access.js';
 import { ensureSharedHttpServer, mountHandler, mountUpgradeHandler } from '../../webhook-server.js';
 import {
+  authenticate,
   buildClearCookie,
   buildSessionCookie,
   logout as authLogout,
@@ -24,6 +28,8 @@ import {
   redeemAndCreateSession,
 } from './auth.js';
 import { purgeExpired } from './db.js';
+import { purgeExpiredPrivateWebSessions } from './private-web-db.js';
+import { resolvePrivateWebEntry } from './private-web-path.js';
 import { handleLandingPage, ASSETS_MOUNT_PREFIX } from './landing-page.js';
 import { handleOidcRoute, renderLoginPage } from './oidc-routes.js';
 import { handleOnboarding } from './onboarding.js';
@@ -103,6 +109,7 @@ export function startUi(): void {
   );
 
   // Per-app mounts. Add more here as new UI apps are introduced.
+  mountHandler(`${UI_MOUNT_PREFIX}/view`, withAccessLog('private-web-view', handlePrivateWebView));
   mountHandler(CHAT_MOUNT_PREFIX, withAccessLog('chat', chatHandle));
   mountUpgradeHandler(CHAT_MOUNT_PREFIX, handleChatUpgrade);
 
@@ -129,11 +136,85 @@ export function startUi(): void {
   purgeTimer = setInterval(() => {
     try {
       purgeExpired();
+      purgeExpiredPrivateWebSessions();
     } catch (err) {
       log.warn('UI purge failed', { err });
     }
   }, PURGE_INTERVAL_MS);
   purgeTimer.unref?.();
+}
+
+function decodeViewPath(pathname: string): { groupId: string; relativePath: string } | null {
+  const prefix = `${UI_MOUNT_PREFIX}/view/`;
+  if (!pathname.startsWith(prefix)) return null;
+  const rawSegments = pathname.slice(prefix.length).split('/');
+  if (rawSegments.length < 2) return null;
+  try {
+    const segments = rawSegments.map((segment) => decodeURIComponent(segment));
+    if (
+      segments.some(
+        (segment) =>
+          !segment ||
+          segment === '.' ||
+          segment === '..' ||
+          segment.includes('\0') ||
+          segment.includes('/') ||
+          segment.includes('\\'),
+      )
+    ) {
+      return null;
+    }
+    return { groupId: segments[0]!, relativePath: segments.slice(1).join('/') };
+  } catch {
+    return null;
+  }
+}
+
+function htmlAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function handlePrivateWebView(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { Allow: 'GET, HEAD' });
+    res.end();
+    return;
+  }
+  const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  const target = decodeViewPath(parsedUrl.pathname);
+  if (!target) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not found');
+    return;
+  }
+  const session = authenticate(req);
+  if (!session) {
+    const next = req.url || parsedUrl.pathname;
+    res.writeHead(303, { Location: `/ui/login?next=${encodeURIComponent(next)}` });
+    res.end();
+    return;
+  }
+  if (!canAccessAgentGroup(session.userId, target.groupId).allowed) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not found');
+    return;
+  }
+  const group = getAgentGroup(target.groupId);
+  if (!group || !resolvePrivateWebEntry(group, target.relativePath)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not found');
+    return;
+  }
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${htmlAttribute(path.basename(target.relativePath))}</title><link rel="stylesheet" href="/ui/chat/dist/private-web.css"></head><body class="private-web-page"><div id="private-web-root" data-group-id="${htmlAttribute(target.groupId)}" data-path="${htmlAttribute(target.relativePath)}"></div><script type="module" src="/ui/chat/dist/private-web.js"></script></body></html>`;
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'private, no-store',
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  if (req.method === 'HEAD') res.end();
+  else res.end(body);
 }
 
 export async function stopUi(): Promise<void> {

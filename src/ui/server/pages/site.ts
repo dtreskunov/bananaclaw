@@ -39,7 +39,7 @@ export function sanitizeSlug(input: string): string {
 
 /** A valid DNS label is 1–63 chars, [a-z0-9-], no leading/trailing hyphen. */
 export function isValidSlug(slug: string): boolean {
-  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug);
+  return !slug.startsWith('secure-') && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug);
 }
 
 /**
@@ -48,7 +48,8 @@ export function isValidSlug(slug: string): boolean {
  * null if the name yields no usable slug (caller should surface an error).
  */
 export function allocateSiteSlug(group: Pick<AgentGroup, 'id' | 'name'>): string | null {
-  const base = sanitizeSlug(group.name);
+  const sanitized = sanitizeSlug(group.name);
+  const base = sanitized.startsWith('secure-') ? sanitizeSlug(`site-${sanitized}`) : sanitized;
   if (!base) return null;
   const taken = (slug: string): boolean => {
     const existing = getAgentGroupBySiteSlug(slug);

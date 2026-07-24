@@ -18379,7 +18379,14 @@ async function selectFile(entry) {
       if (ctType.startsWith("text/") || ctType.includes("json") || ctType.includes("xml")) {
         const txt = await r4.text();
         const isMd = ext === "md" || ext === "markdown";
-        previewBlock.value = { kind: isMd ? "markdown" : "text", text: txt, etag, ...meta };
+        const isHtml = ext === "html" || ext === "htm";
+        previewBlock.value = {
+          kind: isHtml ? "html" : isMd ? "markdown" : "text",
+          text: txt,
+          etag,
+          ...meta,
+          ...isHtml ? { url: refreshableFileUrl(url) } : {}
+        };
       } else {
         previewBlock.value = { kind: "binary", mime: ctType, etag, ...meta };
       }
@@ -21771,13 +21778,21 @@ function fileUrl(gid, relPath) {
   const segs = String(relPath || "").split("/").filter(Boolean).map(encodeURIComponent);
   return `api/groups/${encodeURIComponent(gid)}/files/${segs.join("/")}`;
 }
+function privateViewUrl(gid, relPath) {
+  const segs = String(relPath || "").split("/").filter(Boolean).map(encodeURIComponent);
+  return `/ui/view/${encodeURIComponent(gid)}/${segs.join("/")}`;
+}
+function isHtmlPath(relPath) {
+  return /\.html?$/i.test(relPath);
+}
 function openInNewTab(gid, relPath) {
   if (!gid || !relPath) return;
-  window.open(fileUrl(gid, relPath), "_blank", "noopener");
+  window.open(isHtmlPath(relPath) ? privateViewUrl(gid, relPath) : fileUrl(gid, relPath), "_blank", "noopener");
 }
 async function sharePrivate(gid, entry) {
   if (!gid || !entry?.path) return;
-  const url = new URL(fileUrl(gid, entry.path), window.location.href).toString();
+  const relativeUrl = isHtmlPath(entry.path) ? privateViewUrl(gid, entry.path) : fileUrl(gid, entry.path);
+  const url = new URL(relativeUrl, window.location.href).toString();
   const title = entry.name || entry.path.slice(entry.path.lastIndexOf("/") + 1);
   const navAny = navigator;
   if (navAny.share) {
@@ -22044,6 +22059,78 @@ function formatTime(s5) {
   return `${m6}:${String(sec).padStart(2, "0")}`;
 }
 
+// src/components/PrivateWebView.tsx
+function PrivateWebView({ groupId: groupId2, path, title }) {
+  const [url, setUrl] = h2(null);
+  const [error, setError] = h2(null);
+  const [revision, setRevision] = h2(0);
+  const frameRef = A2(null);
+  const refreshingRef = A2(false);
+  y2(() => {
+    const controller = new AbortController();
+    setUrl(null);
+    setError(null);
+    fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/private-web-session`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+      signal: controller.signal
+    }).then(async (response) => {
+      if (response.status === 401) {
+        const next = window.location.pathname + window.location.search + window.location.hash;
+        window.location.assign(`/ui/login?next=${encodeURIComponent(next)}`);
+        return null;
+      }
+      if (!response.ok) throw new Error(response.status === 404 ? "This page is no longer available." : `Unable to open page (HTTP ${response.status}).`);
+      return response.json();
+    }).then((issued) => {
+      if (issued && !controller.signal.aborted) {
+        refreshingRef.current = false;
+        setUrl(issued.url);
+      }
+    }).catch((reason) => {
+      if (controller.signal.aborted) return;
+      refreshingRef.current = false;
+      setError(reason instanceof Error ? reason.message : "Unable to open page.");
+    });
+    return () => controller.abort();
+  }, [groupId2, path, revision]);
+  y2(() => {
+    if (!url) return void 0;
+    const expectedOrigin = new URL(url).origin;
+    const onMessage = (event) => {
+      if (event.origin !== expectedOrigin || event.source !== frameRef.current?.contentWindow) return;
+      if (event.data?.type !== "nanoclaw-private-web-expired" || refreshingRef.current) return;
+      refreshingRef.current = true;
+      setRevision((value) => value + 1);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [url]);
+  if (error) {
+    return /* @__PURE__ */ u4("div", { class: "private-web-view private-web-state", role: "alert", children: [
+      /* @__PURE__ */ u4("p", { children: error }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => {
+        refreshingRef.current = true;
+        setRevision((value) => value + 1);
+      }, children: "Try again" })
+    ] });
+  }
+  if (!url) return /* @__PURE__ */ u4("div", { class: "private-web-view private-web-state", "aria-busy": "true", children: "Loading page" });
+  return /* @__PURE__ */ u4("div", { class: "private-web-view", children: /* @__PURE__ */ u4(
+    "iframe",
+    {
+      ref: frameRef,
+      src: url,
+      title: title || path,
+      sandbox: "allow-scripts allow-same-origin",
+      referrerPolicy: "no-referrer",
+      allow: "camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'"
+    }
+  ) });
+}
+
 // node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
@@ -22260,6 +22347,8 @@ function mimeFromKind(kind) {
       return "video";
     case "pdf":
       return "application/pdf";
+    case "html":
+      return "text/html";
     case "markdown":
       return "text/markdown";
     case "text":
@@ -22301,7 +22390,7 @@ function Preview() {
   if (!p5) return /* @__PURE__ */ u4("div", { class: "preview-body", id: "preview", ref });
   const pinned = !!fp && pinnedContext.value.includes(fp);
   const clippyTitle = pinned ? "Detach from next message" : "Attach to next message";
-  const editable = isAdmin.value && (p5.kind === "text" || p5.kind === "markdown");
+  const editable = isAdmin.value && (p5.kind === "text" || p5.kind === "markdown" || p5.kind === "html");
   const beginEdit = () => {
     setDraft(p5.text || "");
     setEditing(true);
@@ -22452,7 +22541,9 @@ function Preview() {
     );
   } else if (p5.kind === "image") body = /* @__PURE__ */ u4("img", { alt: p5.name, src: p5.url });
   else if (p5.kind === "pdf") body = /* @__PURE__ */ u4("iframe", { src: p5.url, style: "width:100%;height:90vh;border:0" });
-  else if (p5.kind === "markdown") {
+  else if (p5.kind === "html" && fp && groupId.value) {
+    body = /* @__PURE__ */ u4(PrivateWebView, { groupId: groupId.value, path: fp, title: p5.name }, `${p5.url || ""}:${p5.etag || ""}`);
+  } else if (p5.kind === "markdown") {
     const md = renderMarkdown(p5.text);
     body = md != null ? /* @__PURE__ */ u4("div", { class: "markdown-preview", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("pre", { children: p5.text });
   } else if (p5.kind === "text") {

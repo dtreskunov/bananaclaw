@@ -21,14 +21,24 @@ function fileUrl(gid: string, relPath: string): string {
   return `api/groups/${encodeURIComponent(gid)}/files/${segs.join('/')}`;
 }
 
+function privateViewUrl(gid: string, relPath: string): string {
+  const segs = String(relPath || '').split('/').filter(Boolean).map(encodeURIComponent);
+  return `/ui/view/${encodeURIComponent(gid)}/${segs.join('/')}`;
+}
+
+function isHtmlPath(relPath: string): boolean {
+  return /\.html?$/i.test(relPath);
+}
+
 function openInNewTab(gid: string | null, relPath: string | null): void {
   if (!gid || !relPath) return;
-  window.open(fileUrl(gid, relPath), '_blank', 'noopener');
+  window.open(isHtmlPath(relPath) ? privateViewUrl(gid, relPath) : fileUrl(gid, relPath), '_blank', 'noopener');
 }
 
 export async function sharePrivate(gid: string | null, entry: { path?: string; name?: string } | null | undefined): Promise<void> {
   if (!gid || !entry?.path) return;
-  const url = new URL(fileUrl(gid, entry.path), window.location.href).toString();
+  const relativeUrl = isHtmlPath(entry.path) ? privateViewUrl(gid, entry.path) : fileUrl(gid, entry.path);
+  const url = new URL(relativeUrl, window.location.href).toString();
   const title = entry.name || entry.path.slice(entry.path.lastIndexOf('/') + 1);
   const navAny = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
   if (navAny.share) {

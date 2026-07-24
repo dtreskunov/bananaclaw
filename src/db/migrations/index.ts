@@ -28,6 +28,7 @@ import { migration027 } from './027-messaging-group-instance.js';
 import { migration028 } from './028-durable-questions.js';
 import { migration029 } from './029-shared-web-chats.js';
 import { migration030 } from './030-shared-web-destinations.js';
+import { migration031 } from './031-ui-private-web-sessions.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 import { moduleContainerConfigsPip } from './module-container-configs-pip.js';
@@ -82,6 +83,7 @@ export const migrations: Migration[] = [
   migration028,
   migration029,
   migration030,
+  migration031,
   moduleResendThreadRoots,
   moduleContainerConfigsPip,
   moduleContainerConfigsVoiceMode,

@@ -50,12 +50,12 @@ export function redeemAndCreateSession(token: string): { token: string; userId: 
   return { ...createUiSessionForUser(userId), userId };
 }
 
-export function authenticate(req: http.IncomingMessage): { userId: string } | null {
+export function authenticate(req: http.IncomingMessage): { userId: string; sessionHash: string } | null {
   const token = readCookie(req, COOKIE_NAME);
   if (!token) return null;
   const session = lookupSession(token);
   if (!session) return null;
-  return { userId: session.userId };
+  return { userId: session.userId, sessionHash: session.tokenHash };
 }
 
 export function logout(req: http.IncomingMessage): void {
@@ -76,7 +76,7 @@ export function buildClearCookie(secure: boolean): string {
   return parts.join('; ');
 }
 
-function readCookie(req: http.IncomingMessage, name: string): string | null {
+export function readCookie(req: http.IncomingMessage, name: string): string | null {
   const header = req.headers.cookie;
   if (!header) return null;
   for (const part of header.split(';')) {

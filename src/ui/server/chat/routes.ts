@@ -10,7 +10,7 @@ import { URL } from 'url';
 
 import Router from 'find-my-way';
 
-import { GROUPS_DIR } from '../../../config.js';
+import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
 import { getSession } from '../../../db/sessions.js';
@@ -30,6 +30,8 @@ import type { PendingApproval } from '../../../types.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
 import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js';
+import { createPrivateWebSession } from '../private-web-db.js';
+import { resolvePrivateWebEntry } from '../private-web-path.js';
 import { uiBaseUrl } from '../server.js';
 import { siteFqdn } from '../pages/site.js';
 import { classify, resolveSafe } from './classify.js';
@@ -147,14 +149,16 @@ function on(method: FmwMethod, route: string, handler: RouteHandler): void {
  * navigate, GET, accepts HTML), redirect to the shared login page with
  * `?next=` set to the original URL so the user lands back on the file
  * after signing in. XHR/fetch from the SPA still gets a JSON 401. */
-function authed(fn: (ctx: Ctx, userId: string, params: Record<string, string>) => void | Promise<void>): RouteHandler {
+function authed(
+  fn: (ctx: Ctx, userId: string, params: Record<string, string>, sessionHash: string) => void | Promise<void>,
+): RouteHandler {
   return async (ctx, params) => {
     const session = authenticate(ctx.req);
     if (!session) {
       if (isBrowserNavigation(ctx.req)) return redirectToLogin(ctx);
       return json(ctx, 401, { error: 'unauthorized' });
     }
-    return fn(ctx, session.userId, params);
+    return fn(ctx, session.userId, params, session.sessionHash);
   };
 }
 
@@ -247,6 +251,11 @@ on(
   '/api/groups/:gid/share-token',
   authed((ctx, userId, params) => handleShareToken(ctx, userId, params.gid)),
 );
+on(
+  'POST',
+  '/api/groups/:gid/private-web-session',
+  authed((ctx, userId, params, sessionHash) => handleCreatePrivateWebSession(ctx, userId, sessionHash, params.gid)),
+);
 // Pending approvals visible to this user (banner inbox in ChatMain).
 on(
   'GET',
@@ -298,6 +307,43 @@ function handleMe(ctx: Ctx, userId: string): void {
   // spectator mode). Group-level admins do NOT get isElevated.
   const isElevated = isOwner(userId) || isGlobalAdmin(userId);
   json(ctx, 200, { userId, displayName, isElevated });
+}
+
+async function handleCreatePrivateWebSession(
+  ctx: Ctx,
+  userId: string,
+  parentSessionHash: string,
+  groupId: string,
+): Promise<void> {
+  if (!PAGES_BASE_DOMAIN) return json(ctx, 503, { error: 'private_web_disabled' });
+  const expectedOrigin = new URL(uiBaseUrl()).origin;
+  if (ctx.req.headers.origin !== expectedOrigin) return json(ctx, 403, { error: 'invalid_origin' });
+  if (!canAccessAgentGroup(userId, groupId).allowed) return json(ctx, 403, { error: 'forbidden' });
+  const group = getAgentGroup(groupId);
+  if (!group) return json(ctx, 404, { error: 'not_found' });
+
+  let body: { path?: unknown };
+  try {
+    body = (await readJsonBody(ctx.req)) as { path?: unknown };
+  } catch {
+    return json(ctx, 400, { error: 'invalid_json' });
+  }
+  const relPath = typeof body.path === 'string' ? body.path : '';
+  if (!relPath || path.isAbsolute(relPath) || !/\.html?$/i.test(relPath)) {
+    return json(ctx, 400, { error: 'invalid_path' });
+  }
+  const classification = classify(relPath);
+  if (classification.kind !== 'visible' || classification.tier !== 'member') {
+    return json(ctx, 404, { error: 'not_found' });
+  }
+  if (!resolvePrivateWebEntry(group, relPath)) return json(ctx, 404, { error: 'not_found' });
+
+  const issued = createPrivateWebSession({ parentSessionHash, userId, agentGroupId: groupId });
+  const redeemUrl = new URL(`https://secure-${issued.id}.${PAGES_BASE_DOMAIN}/_auth/redeem`);
+  redeemUrl.searchParams.set('t', issued.handoffToken);
+  redeemUrl.searchParams.set('next', `/${relPath}`);
+  ctx.res.writeHead(201, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' });
+  ctx.res.end(JSON.stringify({ url: redeemUrl.toString(), expiresAt: issued.expiresAt }));
 }
 
 function handleGroups(ctx: Ctx, userId: string): void {

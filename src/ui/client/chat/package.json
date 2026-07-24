@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Browser chat UI for NanoClaw. Bundled with esbuild; output checked in at dist/app.js.",
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/index.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/app.js",
-    "build:no-typecheck": "esbuild src/index.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/app.js",
+    "build": "tsc --noEmit && esbuild src/index.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/app.js && esbuild src/private-web-entry.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/private-web.js",
+    "build:no-typecheck": "esbuild src/index.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/app.js && esbuild src/private-web-entry.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/private-web.js",
     "watch": "esbuild src/index.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/app.js --watch",
     "typecheck": "tsc --noEmit"
   },
