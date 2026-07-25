@@ -22059,8 +22059,16 @@ function formatTime(s5) {
   return `${m6}:${String(sec).padStart(2, "0")}`;
 }
 
+// src/private-web-fragment.ts
+function forwardedFragment(hash) {
+  if (!hash) return "";
+  const value = hash.startsWith("#") ? hash.slice(1) : hash;
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, "");
+  return cleaned ? `#${cleaned}` : "";
+}
+
 // src/components/PrivateWebView.tsx
-function PrivateWebView({ groupId: groupId2, path, title }) {
+function PrivateWebView({ groupId: groupId2, path, title, fragment }) {
   const [url, setUrl] = h2(null);
   const [error, setError] = h2(null);
   const [revision, setRevision] = h2(0);
@@ -22087,7 +22095,7 @@ function PrivateWebView({ groupId: groupId2, path, title }) {
     }).then((issued) => {
       if (issued && !controller.signal.aborted) {
         refreshingRef.current = false;
-        setUrl(issued.url);
+        setUrl(issued.url + forwardedFragment(fragment));
       }
     }).catch((reason) => {
       if (controller.signal.aborted) return;
@@ -22095,7 +22103,7 @@ function PrivateWebView({ groupId: groupId2, path, title }) {
       setError(reason instanceof Error ? reason.message : "Unable to open page.");
     });
     return () => controller.abort();
-  }, [groupId2, path, revision]);
+  }, [groupId2, path, fragment, revision]);
   y2(() => {
     if (!url) return void 0;
     const expectedOrigin = new URL(url).origin;

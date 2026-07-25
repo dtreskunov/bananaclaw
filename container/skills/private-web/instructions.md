@@ -9,6 +9,8 @@ They can replace existing member-visible regular files with same-origin `PUT` on
 Pre-create writable state files; browser code cannot create, delete, rename, or make directories.
 Handle `412 Precondition Failed` by re-reading and resolving the conflict before retrying.
 Browser writes do not wake the agent or send a chat message.
+The stable launcher URL forwards its fragment to the app but not its query string; read deep-link and bookmarklet input from `location.hash`.
+Bookmarklets open the launcher URL with `#key=value` pairs, encoding only the values, and must not pass `noopener` or `noreferrer` to `window.open`.
 Users launch HTML from the authenticated file browser or a stable launcher created by the UI.
 Never construct, retain, or share temporary `secure-*` execution URLs.
 Use Pages for public read-only static sites and Vercel for server runtimes or external deployment.

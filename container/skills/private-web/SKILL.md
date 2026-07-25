@@ -51,6 +51,8 @@ interaction or persistence. It is not a server runtime.
   each one with a local asset. Build responsive loading, empty, error, save,
   and conflict states. Verify the app in a real browser at desktop and mobile
   sizes before presenting it.
+6. If the app takes input from a link or bookmarklet, read it from
+  `location.hash`. See "Receive input from the launcher URL" below.
 
 ## Read and persist workspace data
 
@@ -96,6 +98,45 @@ Rules:
 - Browser writes do not send a message or wake this agent. Read the file on a
   later turn, poll it from a scheduled task, or add an explicit messaging flow
   when the agent must react.
+
+## Receive input from the launcher URL
+
+The launcher URL is the stable, shareable entry point:
+`https://<ui-host>/ui/view/<agent-group-id>/<path>/index.html`. Its **fragment**
+reaches the application; its **query string does not**, because the private
+session redirect only carries the target path. Read parameters from
+`location.hash`:
+
+```js
+const params = new URLSearchParams(location.hash.slice(1));
+const url = params.get('url');
+```
+
+Deep links and bookmarklets therefore use `#`, never `?`:
+
+```text
+https://<ui-host>/ui/view/<agent-group-id>/<path>/index.html#url=...&title=...
+```
+
+Name the entry file explicitly. Directories are not rewritten to `index.html`.
+
+A `javascript:` bookmarklet only needs to open that URL with an encoded
+fragment:
+
+```js
+javascript:void(window.open("<launcher-url>#url="+encodeURIComponent(location.href)+"&title="+encodeURIComponent(document.title),"_blank"))
+```
+
+Rules for bookmarklets:
+
+- Encode only the values. Percent-encoding the `#`, `&`, or `=` delimiters turns
+  the whole tail into a path segment and returns `404`.
+- Do not pass `noopener` or `noreferrer` to `window.open`; either one makes it
+  return `null`.
+- Never try to reach the application with `postMessage` from the opener. The
+  application runs in a nested isolated origin that the opener cannot address
+  reliably. The fragment is the supported input channel.
+- Confirm the exact launcher URL with the user rather than guessing the UI host.
 
 ## Present it to the user
 

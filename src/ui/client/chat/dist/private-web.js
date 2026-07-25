@@ -394,6 +394,14 @@ function D2(n2, t3) {
   return "function" == typeof t3 ? t3(n2) : t3;
 }
 
+// src/private-web-fragment.ts
+function forwardedFragment(hash) {
+  if (!hash) return "";
+  const value = hash.startsWith("#") ? hash.slice(1) : hash;
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, "");
+  return cleaned ? `#${cleaned}` : "";
+}
+
 // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f3 = 0;
 var i3 = Array.isArray;
@@ -407,7 +415,7 @@ function u3(e3, t3, n2, o3, i4, u4) {
 }
 
 // src/components/PrivateWebView.tsx
-function PrivateWebView({ groupId, path, title }) {
+function PrivateWebView({ groupId, path, title, fragment }) {
   const [url, setUrl] = h2(null);
   const [error, setError] = h2(null);
   const [revision, setRevision] = h2(0);
@@ -434,7 +442,7 @@ function PrivateWebView({ groupId, path, title }) {
     }).then((issued) => {
       if (issued && !controller.signal.aborted) {
         refreshingRef.current = false;
-        setUrl(issued.url);
+        setUrl(issued.url + forwardedFragment(fragment));
       }
     }).catch((reason) => {
       if (controller.signal.aborted) return;
@@ -442,7 +450,7 @@ function PrivateWebView({ groupId, path, title }) {
       setError(reason instanceof Error ? reason.message : "Unable to open page.");
     });
     return () => controller.abort();
-  }, [groupId, path, revision]);
+  }, [groupId, path, fragment, revision]);
   y2(() => {
     if (!url) return void 0;
     const expectedOrigin = new URL(url).origin;
@@ -483,6 +491,15 @@ var root = document.getElementById("private-web-root");
 if (root) {
   const groupId = root.dataset.groupId;
   const path = root.dataset.path;
-  if (groupId && path) D(/* @__PURE__ */ u3(PrivateWebView, { groupId, path, title: path }), root);
+  if (groupId && path) {
+    const mount = () => {
+      D(
+        /* @__PURE__ */ u3(PrivateWebView, { groupId, path, title: path, fragment: window.location.hash }),
+        root
+      );
+    };
+    mount();
+    window.addEventListener("hashchange", mount);
+  }
 }
 //# sourceMappingURL=private-web.js.map

@@ -1,10 +1,13 @@
 import './PrivateWebView.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { forwardedFragment } from '../private-web-fragment';
 
 interface Props {
   groupId: string;
   path: string;
   title?: string;
+  /** Launcher fragment forwarded to the app, e.g. `#url=...` from a bookmarklet. */
+  fragment?: string;
 }
 
 interface IssuedSession {
@@ -12,7 +15,7 @@ interface IssuedSession {
   expiresAt: string;
 }
 
-export function PrivateWebView({ groupId, path, title }: Props) {
+export function PrivateWebView({ groupId, path, title, fragment }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -42,7 +45,7 @@ export function PrivateWebView({ groupId, path, title }: Props) {
       .then((issued) => {
         if (issued && !controller.signal.aborted) {
           refreshingRef.current = false;
-          setUrl(issued.url);
+          setUrl(issued.url + forwardedFragment(fragment));
         }
       })
       .catch((reason: unknown) => {
@@ -51,7 +54,7 @@ export function PrivateWebView({ groupId, path, title }: Props) {
         setError(reason instanceof Error ? reason.message : 'Unable to open page.');
       });
     return () => controller.abort();
-  }, [groupId, path, revision]);
+  }, [groupId, path, fragment, revision]);
 
   useEffect(() => {
     if (!url) return undefined;
