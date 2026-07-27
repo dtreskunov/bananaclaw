@@ -92,7 +92,11 @@ function privateCsp(): string {
   return [
     'sandbox allow-scripts allow-same-origin',
     "default-src 'none'",
-    "script-src 'self' 'unsafe-inline' blob:",
+    // 'wasm-unsafe-eval' permits WebAssembly compilation without permitting JS
+    // eval()/new Function(). Applications are first-party workspace files on a
+    // disposable per-session origin, and script-src already allows inline
+    // script, so this grants no authority an app does not already have.
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "media-src 'self' data: blob:",

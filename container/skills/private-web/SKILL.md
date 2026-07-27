@@ -41,17 +41,21 @@ interaction or persistence. It is not a server runtime.
   programmatic connections are blocked; same-origin `fetch()` is allowed. Do
   not treat this CSP as hard network isolation: the document can still
   navigate its own frame to another URL.
-3. Treat every member-visible workspace file as readable by the application.
+3. WebAssembly runs, but the `.wasm` file must load from the workspace like any
+  other asset. JavaScript `eval()` and `new Function()` stay blocked, so avoid
+  toolchains and glue code that rely on them. Web workers are unavailable, so
+  choose single-threaded builds.
+4. Treat every member-visible workspace file as readable by the application.
    Never place secrets in member-visible files. Hidden and admin-tier files are
    unavailable from private web origins.
-4. Pre-create every file the browser must persist. A private app can replace an
+5. Pre-create every file the browser must persist. A private app can replace an
    existing member-visible regular file, but cannot create, delete, rename, or
    make directories.
-5. Scan the final HTML, CSS, and JavaScript for remote runtime URLs and replace
+6. Scan the final HTML, CSS, and JavaScript for remote runtime URLs and replace
   each one with a local asset. Build responsive loading, empty, error, save,
   and conflict states. Verify the app in a real browser at desktop and mobile
   sizes before presenting it.
-6. If the app takes input from a link or bookmarklet, read it from
+7. If the app takes input from a link or bookmarklet, read it from
   `location.hash`. See "Receive input from the launcher URL" below.
 
 ## Read and persist workspace data

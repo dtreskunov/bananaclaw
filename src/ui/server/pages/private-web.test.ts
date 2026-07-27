@@ -187,6 +187,9 @@ describe('private web host', () => {
     expect(html.body()).toContain('../style.css');
     expect(html.header('content-security-policy')).toContain("connect-src 'self'");
     expect(html.header('content-security-policy')).toContain('sandbox allow-scripts allow-same-origin');
+    // WebAssembly is allowed, but plain eval() is not.
+    expect(html.header('content-security-policy')).toContain("'wasm-unsafe-eval'");
+    expect(html.header('content-security-policy')).not.toContain("'unsafe-eval'");
 
     const css = await call({ host, url: '/style.css', cookie });
     expect(css.status()).toBe(200);
