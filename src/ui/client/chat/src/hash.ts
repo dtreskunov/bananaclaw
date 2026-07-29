@@ -1,7 +1,7 @@
 // URL hash routing.
 import { batch } from '@preact/signals';
 import { match, compile } from 'path-to-regexp';
-import { groups, groupId, treePath, filePath, threads, threadId, refs } from './state';
+import { groups, groupId, treePath, filePath, threads, threadId, refs, paneOpen, drawerOpen, isMobile } from './state';
 import { parentPath } from './utils';
 import type { Thread, ThreadCtx, RouterApi } from './types';
 
@@ -17,10 +17,15 @@ export interface ParsedHash {
   threadId: string | null;
   path: string;
   isDir: boolean;
+  threadsOpen: boolean;
+  filesOpen: boolean;
 }
 
 export function parseHash(): ParsedHash | null {
-  const raw = location.hash.replace(/^#/, '').replace(/\/$/, '');
+  const fragment = location.hash.replace(/^#/, '');
+  const queryAt = fragment.indexOf('?');
+  const raw = (queryAt === -1 ? fragment : fragment.slice(0, queryAt)).replace(/\/$/, '');
+  const panelParams = new URLSearchParams(queryAt === -1 ? '' : fragment.slice(queryAt + 1));
   if (!raw) return null;
   const test = '/' + raw;
   for (const m of matchers) {
@@ -38,6 +43,8 @@ export function parseHash(): ParsedHash | null {
       threadId: tid,
       path,
       isDir: !kind || kind === 'd',
+      threadsOpen: panelParams.get('threads') === 'open',
+      filesOpen: panelParams.get('files') === 'open',
     };
   }
   return null;
@@ -61,13 +68,22 @@ export function buildHash(): string {
   }
   let s = builders[pattern]!(params);
   if (hasPath && !filePath.value) s += '/';
-  return '#' + s.slice(1);
+  const panelParams = new URLSearchParams();
+  const open = isMobile.value ? drawerOpen : paneOpen;
+  if (open.threads.value) panelParams.set('threads', 'open');
+  if (open.files.value) panelParams.set('files', 'open');
+  const query = panelParams.toString();
+  return '#' + s.slice(1) + (query ? '?' + query : '');
 }
 
-export function writeHash(): void {
+export function writeHash(replace = false): void {
   const h = buildHash();
   if (!h) return;
   if (location.hash !== h) {
+    if (replace) {
+      history.replaceState(null, '', h);
+      return;
+    }
     refs.suppressHashCount++;
     location.hash = h;
   }
@@ -93,6 +109,10 @@ export async function applyHash(router: RouterApi): Promise<void> {
   batch(() => {
     groupId.value = parsed.groupId;
     filePath.value = null;
+    paneOpen.threads.value = parsed.threadsOpen;
+    paneOpen.files.value = parsed.filesOpen;
+    drawerOpen.threads.value = parsed.threadsOpen;
+    drawerOpen.files.value = parsed.filesOpen;
   });
   if (groupChanged) await router.loadThreads(parsed.groupId);
 

@@ -17082,7 +17082,10 @@ var builders = Object.fromEntries(
   PATTERNS.map((p5) => [p5, (0, import_path_to_regexp.compile)(p5)])
 );
 function parseHash() {
-  const raw = location.hash.replace(/^#/, "").replace(/\/$/, "");
+  const fragment = location.hash.replace(/^#/, "");
+  const queryAt = fragment.indexOf("?");
+  const raw = (queryAt === -1 ? fragment : fragment.slice(0, queryAt)).replace(/\/$/, "");
+  const panelParams = new URLSearchParams(queryAt === -1 ? "" : fragment.slice(queryAt + 1));
   if (!raw) return null;
   const test = "/" + raw;
   for (const m6 of matchers) {
@@ -17099,7 +17102,9 @@ function parseHash() {
       groupId: gid,
       threadId: tid,
       path,
-      isDir: !kind || kind === "d"
+      isDir: !kind || kind === "d",
+      threadsOpen: panelParams.get("threads") === "open",
+      filesOpen: panelParams.get("files") === "open"
     };
   }
   return null;
@@ -17122,12 +17127,21 @@ function buildHash() {
   }
   let s5 = builders[pattern](params);
   if (hasPath && !filePath.value) s5 += "/";
-  return "#" + s5.slice(1);
+  const panelParams = new URLSearchParams();
+  const open = isMobile.value ? drawerOpen : paneOpen;
+  if (open.threads.value) panelParams.set("threads", "open");
+  if (open.files.value) panelParams.set("files", "open");
+  const query = panelParams.toString();
+  return "#" + s5.slice(1) + (query ? "?" + query : "");
 }
-function writeHash() {
+function writeHash(replace = false) {
   const h5 = buildHash();
   if (!h5) return;
   if (location.hash !== h5) {
+    if (replace) {
+      history.replaceState(null, "", h5);
+      return;
+    }
     refs.suppressHashCount++;
     location.hash = h5;
   }
@@ -17151,6 +17165,10 @@ async function applyHash(router2) {
   n2(() => {
     groupId.value = parsed.groupId;
     filePath.value = null;
+    paneOpen.threads.value = parsed.threadsOpen;
+    paneOpen.files.value = parsed.filesOpen;
+    drawerOpen.threads.value = parsed.threadsOpen;
+    drawerOpen.files.value = parsed.filesOpen;
   });
   if (groupChanged) await router2.loadThreads(parsed.groupId);
   if (parsed.threadId) {
@@ -26743,10 +26761,6 @@ function SettingsTab({ gid, section, onClose, onActions }) {
 }
 
 // src/panels.ts
-function restorePanelState() {
-}
-function persistPanelState() {
-}
 function applyPanelClasses() {
   const mobile = MOBILE_MQ.matches;
   isMobile.value = mobile;
@@ -26792,11 +26806,14 @@ function App() {
   }, []);
   const threadsOpen = paneOpen.threads.value;
   const filesOpen = paneOpen.files.value;
+  const threadsDrawerOpen = drawerOpen.threads.value;
+  const filesDrawerOpen = drawerOpen.files.value;
+  const mobile = isMobile.value;
   y2(() => {
-    persistPanelState();
-  }, [threadsOpen, filesOpen]);
+    writeHash(true);
+  }, [threadsOpen, filesOpen, threadsDrawerOpen, filesDrawerOpen, mobile]);
   const mainCls = (threadsOpen ? "" : " threads-collapsed") + (filesOpen ? "" : " files-collapsed");
-  const backdropShown = drawerOpen.threads.value || drawerOpen.files.value;
+  const backdropShown = threadsDrawerOpen || filesDrawerOpen;
   const onBackdrop = () => {
     drawerOpen.threads.value = false;
     drawerOpen.files.value = false;
@@ -26886,7 +26903,6 @@ async function init() {
   initBadge();
   setupViewportFit();
   installLivenessHandlers();
-  restorePanelState();
   applyPanelClasses();
   maybeShowIosInstallHint();
   try {

@@ -1,6 +1,6 @@
 // Top-level App component.
 import { useEffect } from 'preact/hooks';
-import { paneOpen, drawerOpen, MOBILE_MQ, refs } from '../state';
+import { paneOpen, drawerOpen, isMobile, MOBILE_MQ, refs } from '../state';
 import { Header } from './Header';
 import { ThreadsRail } from './ThreadsRail';
 import { ChatMain } from './ChatMain';
@@ -13,8 +13,8 @@ import { Toast } from './Toast';
 import { GroupPickerModal } from './GroupPicker';
 import { CreateGroupModal } from './CreateGroupModal';
 import { GroupAdmin } from './GroupAdmin';
-import { persistPanelState, applyPanelClasses } from '../panels';
-import { applyHash } from '../hash';
+import { applyPanelClasses } from '../panels';
+import { applyHash, writeHash } from '../hash';
 import { router } from '../router';
 
 export function App() {
@@ -34,12 +34,15 @@ export function App() {
 
   const threadsOpen = paneOpen.threads.value;
   const filesOpen = paneOpen.files.value;
-  useEffect(() => { persistPanelState(); }, [threadsOpen, filesOpen]);
+  const threadsDrawerOpen = drawerOpen.threads.value;
+  const filesDrawerOpen = drawerOpen.files.value;
+  const mobile = isMobile.value;
+  useEffect(() => { writeHash(true); }, [threadsOpen, filesOpen, threadsDrawerOpen, filesDrawerOpen, mobile]);
 
   const mainCls = ''
     + (threadsOpen ? '' : ' threads-collapsed')
     + (filesOpen ? '' : ' files-collapsed');
-  const backdropShown = drawerOpen.threads.value || drawerOpen.files.value;
+  const backdropShown = threadsDrawerOpen || filesDrawerOpen;
   const onBackdrop = (): void => { drawerOpen.threads.value = false; drawerOpen.files.value = false; };
   return (
     <>

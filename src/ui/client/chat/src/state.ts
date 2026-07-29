@@ -82,9 +82,7 @@ export const highlightMessageId: Signal<string | null> = signal<string | null>(n
 export const scrollToBottomTick: Signal<number> = signal(0);
 
 // Panels / drawers
-// Desktop panes default to collapsed on every load — the user wanted a
-// composer-first initial state. Toggling during a session is not
-// persisted (see panels.ts).
+// Pane state defaults to collapsed and is restored from the URL hash.
 export const paneOpen: Record<'threads' | 'files', Signal<boolean>> = {
   threads: signal(false),
   files: signal(false),

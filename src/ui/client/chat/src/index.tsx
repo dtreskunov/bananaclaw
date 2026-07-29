@@ -9,7 +9,7 @@ import { initNotif, shouldShowIosInstallHint } from './notify';
 import { initSound } from './sound';
 import { initInstall } from './install';
 import { initBadge } from './badge';
-import { restorePanelState, applyPanelClasses } from './panels';
+import { applyPanelClasses } from './panels';
 import { applyHash, parseHash } from './hash';
 import { router } from './router';
 import { installLivenessHandlers, startSyncPoll } from './actions';
@@ -85,7 +85,6 @@ async function init(): Promise<void> {
   initBadge();
   setupViewportFit();
   installLivenessHandlers();
-  restorePanelState();
   applyPanelClasses();
   maybeShowIosInstallHint();
   try {
