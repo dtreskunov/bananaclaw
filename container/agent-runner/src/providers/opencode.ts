@@ -388,7 +388,7 @@ export function generateSkillsIndex(skillsDir = SKILLS_DIR, outPath = SKILLS_IND
   return outPath;
 }
 
-function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> {
+export function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> {
   const provider = process.env.OPENCODE_PROVIDER || 'anthropic';
   const model = options.model || process.env.OPENCODE_MODEL;
   const smallModel = process.env.OPENCODE_SMALL_MODEL;
@@ -467,6 +467,9 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
       webfetch: 'allow',
       doom_loop: 'allow',
       external_directory: 'allow',
+    },
+    tools: {
+      question: false,
     },
     autoupdate: false,
     snapshot: false,

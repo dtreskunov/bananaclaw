@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  buildOpenCodeConfig,
   finalTextFromAssistantMessages,
   finalTextFromParts,
   formatProgressFromPart,
@@ -8,6 +9,14 @@ import {
   isEventForSession,
   isRecoverableReasoningOnlyCompletion,
 } from './opencode.js';
+
+describe('buildOpenCodeConfig', () => {
+  it('disables the native question tool', () => {
+    const config = buildOpenCodeConfig({});
+
+    expect(config.tools).toEqual({ question: false });
+  });
+});
 
 describe('formatProgressFromPart', () => {
   it('ignores missing, streaming text, snapshots, and private thinking', () => {
