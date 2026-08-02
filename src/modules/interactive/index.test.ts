@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockWriteSessionMessage = vi.fn();
-const mockWakeContainer = vi.fn().mockResolvedValue(undefined);
+const mockWakeContainer = vi.fn().mockResolvedValue(true);
+const mockStartTypingRefresh = vi.fn();
+const mockStopTypingRefresh = vi.fn();
 
 vi.mock('../../session-manager.js', () => ({
   writeSessionMessage: (...args: unknown[]) => mockWriteSessionMessage(...args),
@@ -9,6 +11,11 @@ vi.mock('../../session-manager.js', () => ({
 
 vi.mock('../../container-runner.js', () => ({
   wakeContainer: (...args: unknown[]) => mockWakeContainer(...args),
+}));
+
+vi.mock('../typing/index.js', () => ({
+  startTypingRefresh: (...args: unknown[]) => mockStartTypingRefresh(...args),
+  stopTypingRefresh: (...args: unknown[]) => mockStopTypingRefresh(...args),
 }));
 
 import {
@@ -56,7 +63,9 @@ beforeEach(() => {
     created_at: '2026-01-01T00:00:00Z',
   });
   mockWriteSessionMessage.mockClear();
-  mockWakeContainer.mockClear();
+  mockWakeContainer.mockReset().mockResolvedValue(true);
+  mockStartTypingRefresh.mockClear();
+  mockStopTypingRefresh.mockClear();
 });
 
 afterEach(() => closeDb());
@@ -120,7 +129,21 @@ describe('handleInteractiveResponse', () => {
         idempotent: true,
       }),
     );
+    expect(mockStartTypingRefresh).toHaveBeenCalledWith('session-1', 'group-1', 'web', 'user-1', 'thread-1', 'web');
     expect(mockWakeContainer).toHaveBeenCalledOnce();
+    expect(mockStartTypingRefresh.mock.invocationCallOrder[0]).toBeLessThan(
+      mockWakeContainer.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('stops typing when the session cannot be woken', async () => {
+    seedQuestion('text');
+    mockWakeContainer.mockResolvedValue(false);
+
+    await handleInteractiveResponse(response('Staging'));
+
+    expect(mockStartTypingRefresh).toHaveBeenCalledOnce();
+    expect(mockStopTypingRefresh).toHaveBeenCalledWith('session-1');
   });
 
   it('replays the canonical first answer when a duplicate differs', async () => {

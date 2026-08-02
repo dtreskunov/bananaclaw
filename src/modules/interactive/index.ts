@@ -10,11 +10,13 @@
  * modularizing it adds more registry surface than it saves.
  */
 import { getDb, hasTable } from '../../db/connection.js';
+import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { answerQuestion, getQuestion, getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { registerResponseHandler, type ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
+import { startTypingRefresh, stopTypingRefresh } from '../typing/index.js';
 
 export async function handleInteractiveResponse(payload: ResponsePayload): Promise<boolean> {
   if (!hasTable(getDb(), 'questions')) return false;
@@ -73,7 +75,19 @@ export async function handleInteractiveResponse(payload: ResponsePayload): Promi
     sessionId: session.id,
   });
 
-  await wakeContainer(session);
+  const messagingGroup = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+  if (messagingGroup) {
+    startTypingRefresh(
+      session.id,
+      session.agent_group_id,
+      messagingGroup.channel_type,
+      messagingGroup.platform_id,
+      session.thread_id,
+      messagingGroup.instance,
+    );
+  }
+  const woke = await wakeContainer(session);
+  if (!woke && messagingGroup) stopTypingRefresh(session.id);
   return true;
 }
 
