@@ -775,24 +775,11 @@ nav.tab-bar-strip.group-strip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--surface);
-  color: var(--surface-fg);
-  font-family: inherit;
   font-size: var(--font-sm);
-  font-weight: 700;
   line-height: 1;
-  cursor: pointer;
 }
-.avatar-btn:hover,
 .user-menu.open .avatar-btn {
   background: var(--wash);
-  border-color: var(--muted);
-}
-.avatar-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 .user-menu-panel {
   position: absolute;
