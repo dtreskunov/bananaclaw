@@ -1466,7 +1466,7 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .msg.out {
   align-self: flex-start;
-  background: var(--wash);
+  background: var(--wash-strong);
 }
 .chat-main .msg.agent-action {
   box-shadow: inset 2px 0 var(--accent-strong);
