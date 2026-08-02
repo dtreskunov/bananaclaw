@@ -3,7 +3,7 @@
 :root {
   color-scheme: light dark;
 
-  /* Surface (auto-themed by `color-scheme`). */
+  /* Surface (auto-themed by `color-scheme`, with an OLED dark override). */
   --surface: Canvas;
   --surface-fg: CanvasText;
 
@@ -82,9 +82,13 @@
   --bottom-row-h: 49px;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root { --surface: #000; }
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll-behavior-x: none; }
-body { font: 14px/1.4 system-ui, -apple-system, sans-serif; height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; }
+body { font: 14px/1.4 system-ui, -apple-system, sans-serif; height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }
 #app { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 button { font: inherit; padding: 4px 10px; border: 1px solid var(--border); background: transparent; border-radius: var(--radius-md); cursor: pointer; color: inherit; }
 button:hover { background: var(--wash); }

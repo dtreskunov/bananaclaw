@@ -294,7 +294,7 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
     position: fixed;
     top: 0; height: var(--app-height, 100dvh);
     width: min(86vw, 340px) !important;
-    background: Canvas;
+    background: var(--surface);
     z-index: 10;
     transition: transform 0.18s ease-out;
     padding-top: env(safe-area-inset-top);

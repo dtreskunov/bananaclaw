@@ -57,6 +57,11 @@
   --rail-w: minmax(220px, 320px);
   --bottom-row-h: 49px;
 }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #000;
+  }
+}
 * {
   box-sizing: border-box;
 }
@@ -77,6 +82,8 @@ body {
   height: 100dvh;
   height: var(--app-height, 100dvh);
   overflow-y: hidden;
+  background: var(--surface);
+  color: var(--surface-fg);
 }
 #app {
   height: 100%;
@@ -1231,7 +1238,7 @@ nav.tab-bar-strip.group-strip {
     top: 0;
     height: var(--app-height, 100dvh);
     width: min(86vw, 340px) !important;
-    background: Canvas;
+    background: var(--surface);
     z-index: 10;
     transition: transform 0.18s ease-out;
     padding-top: env(safe-area-inset-top);
@@ -3430,7 +3437,7 @@ body.is-admin .files-pane.collapsed .admin-only {
     top: 0;
     height: var(--app-height, 100dvh);
     width: min(86vw, 340px) !important;
-    background: Canvas;
+    background: var(--surface);
     z-index: 10;
     transition: transform 0.18s ease-out;
     padding-top: env(safe-area-inset-top);
