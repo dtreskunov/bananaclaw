@@ -117,6 +117,7 @@ function renderRow(t: Thread) {
 
 function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[]; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
+  const expanded = ct === 'web' || open;
   const meta = channelMeta(ct);
   const totalMsgs = items.reduce((sum, t) => sum + (t.messageCount || 0), 0);
   const lastActivityAt = items.reduce((latest, t) => {
@@ -129,27 +130,29 @@ function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[
     : handles.length === 1 ? handles[0]
       : `${handles[0]} +${handles.length - 1}`;
   return (
-    <div class={'thread-section' + (open ? ' open' : ' collapsed')}>
-      <button
-        type="button"
-        class="thread-section-header"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        <span class="row">
-          <span class="chev" aria-hidden="true">{open ? '\u25BE' : '\u25B8'}</span>
-          <span class="ch-pill" aria-hidden="true">{meta.icon}</span>
-          <span class="label">{meta.label}</span>
-          <span class="count">
-            {lastActivityAt ? <><RelativeTime ts={lastActivityAt} />{' \u00b7 '}</> : null}
-            {items.length} threads {'\u00b7'} {totalMsgs} msg
+    <div class={'thread-section' + (expanded ? ' open' : ' collapsed')}>
+      {ct === 'web'
+        ? null
+        : <button
+          type="button"
+          class="thread-section-header"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={expanded}
+        >
+          <span class="row">
+            <span class="chev" aria-hidden="true">{expanded ? '\u25BE' : '\u25B8'}</span>
+            <span class="ch-pill" aria-hidden="true">{meta.icon}</span>
+            <span class="label">{meta.label}</span>
+            <span class="count">
+              {lastActivityAt ? <><RelativeTime ts={lastActivityAt} />{' \u00b7 '}</> : null}
+              {items.length} threads {'\u00b7'} {totalMsgs} msg
+            </span>
           </span>
-        </span>
-        {handleStr
-          ? <span class="handle" title={handles.join(', ')}>{handleStr}</span>
-          : null}
-      </button>
-      {open ? <div class="thread-section-body">{items.map(renderRow)}</div> : null}
+          {handleStr
+            ? <span class="handle" title={handles.join(', ')}>{handleStr}</span>
+            : null}
+        </button>}
+      {expanded ? <div class="thread-section-body">{items.map(renderRow)}</div> : null}
     </div>
   );
 }
@@ -281,20 +284,23 @@ export function ThreadsRail() {
     s.items.sort((a, b) => tsKey(b.lastActivityAt) - tsKey(a.lastActivityAt));
   }
 
-  const onSearchKeyDown = (ev: JSX.TargetedKeyboardEvent<HTMLInputElement>): void => {
-    if (ev.key === 'Enter') {
-      const q = ev.currentTarget.value.trim();
-      if (q && groupId.value) searchThreads(groupId.value, q).catch(console.error);
-    }
-    if (ev.key === 'Escape') {
+  const runSearch = (): void => {
+    const q = searchInputRef.current?.value.trim();
+    if (!q) {
       clearSearch();
-      ev.currentTarget.value = '';
+      return;
     }
+    if (groupId.value) searchThreads(groupId.value, q).catch(console.error);
   };
 
-  const onSearchClear = (): void => {
-    clearSearch();
-    if (searchInputRef.current) searchInputRef.current.value = '';
+  const onSearchKeyDown = (ev: JSX.TargetedKeyboardEvent<HTMLInputElement>): void => {
+    if (ev.key === 'Enter') {
+      runSearch();
+    }
+    if (ev.key === 'Escape') {
+      ev.currentTarget.value = '';
+      clearSearch();
+    }
   };
 
   const onOpenSearch = (ev: JSX.TargetedMouseEvent<HTMLButtonElement>): void => {
@@ -302,18 +308,6 @@ export function ThreadsRail() {
     paneOpen.threads.value = true;
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
-
-  const headActions = (
-    <div class="head-actions">
-      <button
-        type="button"
-        class="icon-btn new-thread-btn"
-        title="New thread"
-        aria-label="New thread"
-        onClick={onNewChat}
-      >+</button>
-    </div>
-  );
 
   const collapsedActions = (
     <>
@@ -327,22 +321,31 @@ export function ThreadsRail() {
       paneKey="threads"
       name="threads-rail"
       label="Threads"
-      headActions={headActions}
       collapsedActions={collapsedActions}
     >
       <div class="threads-actions">
-        <span class="search-icon" aria-hidden="true">{'\uD83D\uDD0D'}</span>
+        <button
+          type="button"
+          class="thread-action-btn new-thread-action-btn"
+          title="New thread"
+          aria-label="New thread"
+          onClick={onNewChat}
+        >+</button>
         <input
           ref={searchInputRef}
           type="text"
           class="search-input"
-          placeholder="Search threads…"
+          placeholder="Search all threads..."
           onKeyDown={onSearchKeyDown}
           aria-label="Search threads"
         />
-        {isSearching
-          ? <button type="button" class="search-clear" onClick={onSearchClear} title="Clear search">{'\u00d7'}</button>
-          : null}
+        <button
+          type="button"
+          class="thread-action-btn search-submit-btn"
+          title="Search threads"
+          aria-label="Search threads"
+          onClick={runSearch}
+        >{'\uD83D\uDD0D'}</button>
       </div>
       {isSearching
         ? <SearchResults />

@@ -19383,6 +19383,7 @@ function renderRow(t4) {
 }
 function ChannelSection({ ct, items, defaultOpen }) {
   const [open, setOpen] = h2(defaultOpen);
+  const expanded = ct === "web" || open;
   const meta = channelMeta(ct);
   const totalMsgs = items.reduce((sum, t4) => sum + (t4.messageCount || 0), 0);
   const lastActivityAt = items.reduce((latest, t4) => {
@@ -19391,17 +19392,17 @@ function ChannelSection({ ct, items, defaultOpen }) {
   }, "");
   const handles = Array.from(new Set(items.map((t4) => t4.counterparty).filter((h5) => !!h5)));
   const handleStr = handles.length === 0 ? "" : handles.length === 1 ? handles[0] : `${handles[0]} +${handles.length - 1}`;
-  return /* @__PURE__ */ u4("div", { class: "thread-section" + (open ? " open" : " collapsed"), children: [
-    /* @__PURE__ */ u4(
+  return /* @__PURE__ */ u4("div", { class: "thread-section" + (expanded ? " open" : " collapsed"), children: [
+    ct === "web" ? null : /* @__PURE__ */ u4(
       "button",
       {
         type: "button",
         class: "thread-section-header",
         onClick: () => setOpen((o4) => !o4),
-        "aria-expanded": open,
+        "aria-expanded": expanded,
         children: [
           /* @__PURE__ */ u4("span", { class: "row", children: [
-            /* @__PURE__ */ u4("span", { class: "chev", "aria-hidden": "true", children: open ? "\u25BE" : "\u25B8" }),
+            /* @__PURE__ */ u4("span", { class: "chev", "aria-hidden": "true", children: expanded ? "\u25BE" : "\u25B8" }),
             /* @__PURE__ */ u4("span", { class: "ch-pill", "aria-hidden": "true", children: meta.icon }),
             /* @__PURE__ */ u4("span", { class: "label", children: meta.label }),
             /* @__PURE__ */ u4("span", { class: "count", children: [
@@ -19421,7 +19422,7 @@ function ChannelSection({ ct, items, defaultOpen }) {
         ]
       }
     ),
-    open ? /* @__PURE__ */ u4("div", { class: "thread-section-body", children: items.map(renderRow) }) : null
+    expanded ? /* @__PURE__ */ u4("div", { class: "thread-section-body", children: items.map(renderRow) }) : null
   ] });
 }
 function SearchResultRow({ r: r4 }) {
@@ -19523,36 +19524,28 @@ function ThreadsRail() {
   for (const s5 of sections) {
     s5.items.sort((a4, b5) => tsKey(b5.lastActivityAt) - tsKey(a4.lastActivityAt));
   }
+  const runSearch = () => {
+    const q5 = searchInputRef.current?.value.trim();
+    if (!q5) {
+      clearSearch();
+      return;
+    }
+    if (groupId.value) searchThreads(groupId.value, q5).catch(console.error);
+  };
   const onSearchKeyDown = (ev) => {
     if (ev.key === "Enter") {
-      const q5 = ev.currentTarget.value.trim();
-      if (q5 && groupId.value) searchThreads(groupId.value, q5).catch(console.error);
+      runSearch();
     }
     if (ev.key === "Escape") {
-      clearSearch();
       ev.currentTarget.value = "";
+      clearSearch();
     }
-  };
-  const onSearchClear = () => {
-    clearSearch();
-    if (searchInputRef.current) searchInputRef.current.value = "";
   };
   const onOpenSearch = (ev) => {
     ev.stopPropagation();
     paneOpen.threads.value = true;
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
-  const headActions = /* @__PURE__ */ u4("div", { class: "head-actions", children: /* @__PURE__ */ u4(
-    "button",
-    {
-      type: "button",
-      class: "icon-btn new-thread-btn",
-      title: "New thread",
-      "aria-label": "New thread",
-      onClick: onNewChat,
-      children: "+"
-    }
-  ) });
   const collapsedActions = /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn new-thread-btn", title: "New thread", "aria-label": "New thread", onClick: onNewChat, children: "+" }),
     /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn search-toggle-btn", title: "Search threads", "aria-label": "Search threads", onClick: onOpenSearch, children: "\u{1F50D}" })
@@ -19563,23 +19556,42 @@ function ThreadsRail() {
       paneKey: "threads",
       name: "threads-rail",
       label: "Threads",
-      headActions,
       collapsedActions,
       children: [
         /* @__PURE__ */ u4("div", { class: "threads-actions", children: [
-          /* @__PURE__ */ u4("span", { class: "search-icon", "aria-hidden": "true", children: "\u{1F50D}" }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "thread-action-btn new-thread-action-btn",
+              title: "New thread",
+              "aria-label": "New thread",
+              onClick: onNewChat,
+              children: "+"
+            }
+          ),
           /* @__PURE__ */ u4(
             "input",
             {
               ref: searchInputRef,
               type: "text",
               class: "search-input",
-              placeholder: "Search threads\u2026",
+              placeholder: "Search all threads...",
               onKeyDown: onSearchKeyDown,
               "aria-label": "Search threads"
             }
           ),
-          isSearching ? /* @__PURE__ */ u4("button", { type: "button", class: "search-clear", onClick: onSearchClear, title: "Clear search", children: "\xD7" }) : null
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "thread-action-btn search-submit-btn",
+              title: "Search threads",
+              "aria-label": "Search threads",
+              onClick: runSearch,
+              children: "\u{1F50D}"
+            }
+          )
         ] }),
         isSearching ? /* @__PURE__ */ u4(SearchResults, {}) : /* @__PURE__ */ u4("div", { class: "list", id: "threads-list", children: list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No threads yet" }) : sections.map((s5) => /* @__PURE__ */ u4(ChannelSection, { ct: s5.ct, items: s5.items, defaultOpen: s5.ct === "web" }, s5.ct)) })
       ]
