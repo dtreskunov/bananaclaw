@@ -56,6 +56,7 @@
   --font-xl: 15px;
   --message-input-font-size: var(--font-lg);
   --accent-icon-font-size: 18px;
+  --rail-control-height: 32px;
   --control-action-size: 28px;
   --plus-glyph-size: 12px;
 
@@ -109,6 +110,7 @@ html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll
   :root {
     --message-input-font-size: 16px;
     --accent-icon-font-size: 22px;
+    --rail-control-height: 48px;
     --control-action-size: 40px;
     --plus-glyph-size: 14px;
   }
@@ -135,6 +137,25 @@ button:hover { background: var(--wash); }
 }
 .accent-icon-btn:hover:not(:disabled) { background: var(--accent-strong, var(--accent)); opacity: 0.9; }
 .accent-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.rail-control-btn {
+  flex: 0 0 var(--rail-control-height);
+  width: var(--rail-control-height);
+  height: var(--rail-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.rail-control-btn:hover:not(:disabled) { background: var(--wash); opacity: 1; }
 .plus-glyph {
   position: relative;
   display: block;

@@ -19585,7 +19585,7 @@ function ThreadsRail() {
             "button",
             {
               type: "button",
-              class: "thread-action-btn search-submit-btn",
+              class: "thread-action-btn rail-control-btn search-submit-btn",
               title: "Search threads",
               "aria-label": "Search threads",
               onClick: runSearch,
@@ -21849,7 +21849,7 @@ function entriesByPath(paths) {
   const set = new Set(paths);
   return treeEntries.value.filter((e4) => set.has(e4.path));
 }
-function ActionsMenu({ mode, entry, onUpload }) {
+function ActionsMenu({ mode, entry, onUpload, triggerClassName = "text-btn" }) {
   const [open, setOpen] = h2(false);
   const wrapRef = A2(null);
   y2(() => {
@@ -21874,7 +21874,7 @@ function ActionsMenu({ mode, entry, onUpload }) {
       "button",
       {
         type: "button",
-        class: "text-btn action-trigger",
+        class: `${triggerClassName} action-trigger`,
         "aria-haspopup": "menu",
         "aria-expanded": open,
         title: "Actions",
@@ -22265,6 +22265,7 @@ function highlightCode(text, name) {
 // src/components/FilesPane.tsx
 function Crumb() {
   const ref = A2(null);
+  const uploadInputRef = A2(null);
   const p5 = treePath.value;
   const fp = filePath.value;
   const segs = p5 ? p5.split("/").filter(Boolean) : [];
@@ -22275,46 +22276,86 @@ function Crumb() {
     });
   }, [p5, fp]);
   let acc = "";
-  return /* @__PURE__ */ u4("div", { class: "breadcrumb", id: "crumb", ref, children: [
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "crumb root" + (segs.length === 0 && !fileName ? " current" : ""),
-        "data-path": "",
-        title: "Root",
-        onClick: () => {
-          navTree("");
-        },
-        children: "/"
-      }
-    ),
-    segs.map((s5, i5) => {
-      acc = acc ? acc + "/" + s5 : s5;
-      const path = acc;
-      const last = i5 === segs.length - 1 && !fileName;
-      const onClick = last ? void 0 : () => {
-        navTree(path);
-      };
-      return /* @__PURE__ */ u4(k, { children: [
+  return /* @__PURE__ */ u4("div", { class: "breadcrumb", id: "crumb", children: [
+    /* @__PURE__ */ u4("div", { class: "breadcrumb-path", ref, children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "crumb root" + (segs.length === 0 && !fileName ? " current" : ""),
+          "data-path": "",
+          title: "Root",
+          onClick: () => {
+            navTree("");
+          },
+          children: "/"
+        }
+      ),
+      segs.map((s5, i5) => {
+        acc = acc ? acc + "/" + s5 : s5;
+        const path = acc;
+        const last = i5 === segs.length - 1 && !fileName;
+        const onClick = last ? void 0 : () => {
+          navTree(path);
+        };
+        return /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "crumb" + (last ? " current" : ""),
+              "data-path": path,
+              title: "/" + path,
+              onClick,
+              children: s5
+            }
+          )
+        ] });
+      }),
+      fileName ? /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "crumb" + (last ? " current" : ""),
-            "data-path": path,
-            title: "/" + path,
-            onClick,
-            children: s5
+        /* @__PURE__ */ u4("span", { class: "crumb file current", title: "/" + fp, children: fileName })
+      ] }) : null
+    ] }),
+    /* @__PURE__ */ u4("div", { class: "breadcrumb-actions", children: [
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "file",
+          id: "upload-input",
+          multiple: true,
+          hidden: true,
+          ref: uploadInputRef,
+          onChange: (ev) => {
+            const files = ev.currentTarget.files;
+            if (files && files.length) uploadFiles(files);
+            ev.currentTarget.value = "";
           }
-        )
-      ] });
-    }),
-    fileName ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
-      /* @__PURE__ */ u4("span", { class: "crumb file current", title: "/" + fp, children: fileName })
-    ] }) : null
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "rail-control-btn refresh-btn",
+          title: "Refresh",
+          "aria-label": "Refresh",
+          onClick: () => {
+            loadTree(treePath.peek()).catch(console.error);
+          },
+          children: "\u21BB"
+        }
+      ),
+      /* @__PURE__ */ u4(
+        ActionsMenu,
+        {
+          mode: "header",
+          triggerClassName: "rail-control-btn",
+          onUpload: () => uploadInputRef.current?.click()
+        }
+      )
+    ] })
   ] });
 }
 function Row({ e: e4 }) {
@@ -22347,7 +22388,7 @@ function Listing() {
 }
 function UploadStrip() {
   const items = uploadItems.value;
-  if (items.length === 0) return /* @__PURE__ */ u4("div", { class: "upload-strip", id: "upload-strip", hidden: true });
+  if (items.length === 0) return null;
   const allDone = items.every((i5) => i5.status !== "uploading");
   const okPaths = items.filter((i5) => i5.status === "ok" && i5.path).map((i5) => i5.path);
   const wakeTitle = !threadId.value ? "Open a thread first" : `Send a message to the agent listing ${okPaths.length} updated file(s)`;
@@ -22653,39 +22694,7 @@ function FilesPane() {
       body.removeEventListener("drop", onDrop);
     };
   }, []);
-  const uploadInputRef = A2(null);
-  const headActions = /* @__PURE__ */ u4("div", { class: "head-actions", children: [
-    /* @__PURE__ */ u4(
-      "input",
-      {
-        type: "file",
-        id: "upload-input",
-        multiple: true,
-        hidden: true,
-        ref: uploadInputRef,
-        onChange: (ev) => {
-          const f5 = ev.currentTarget.files;
-          if (f5 && f5.length) uploadFiles(f5);
-          ev.currentTarget.value = "";
-        }
-      }
-    ),
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "icon-btn refresh-btn",
-        title: "Refresh",
-        "aria-label": "Refresh",
-        onClick: () => {
-          loadTree(treePath.peek()).catch(console.error);
-        },
-        children: "\u21BB"
-      }
-    ),
-    /* @__PURE__ */ u4(ActionsMenu, { mode: "header", onUpload: () => uploadInputRef.current?.click() })
-  ] });
-  return /* @__PURE__ */ u4(Pane, { paneKey: "files", name: "files-pane", label: "Files", extraClass: previewing ? "previewing" : "", headActions, children: /* @__PURE__ */ u4("div", { class: "files-body", ref: bodyRef, children: [
+  return /* @__PURE__ */ u4(Pane, { paneKey: "files", name: "files-pane", label: "Files", extraClass: previewing ? "previewing" : "", children: /* @__PURE__ */ u4("div", { class: "files-body", ref: bodyRef, children: [
     /* @__PURE__ */ u4(Crumb, {}),
     /* @__PURE__ */ u4(UploadStrip, {}),
     /* @__PURE__ */ u4(Listing, {}),

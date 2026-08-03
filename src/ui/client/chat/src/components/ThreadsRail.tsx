@@ -341,7 +341,7 @@ export function ThreadsRail() {
         />
         <button
           type="button"
-          class="thread-action-btn search-submit-btn"
+          class="thread-action-btn rail-control-btn search-submit-btn"
           title="Search threads"
           aria-label="Search threads"
           onClick={runSearch}

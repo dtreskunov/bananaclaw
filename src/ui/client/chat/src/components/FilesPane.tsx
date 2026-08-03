@@ -24,6 +24,7 @@ import type { TreeEntry, PreviewKind } from '../types';
 
 function Crumb() {
   const ref = useRef<HTMLDivElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const p = treePath.value;
   const fp = filePath.value;
   const segs = p ? p.split('/').filter(Boolean) : [];
@@ -35,38 +36,66 @@ function Crumb() {
   }, [p, fp]);
   let acc = '';
   return (
-    <div class="breadcrumb" id="crumb" ref={ref}>
-      <button
-        type="button"
-        class={'crumb root' + (segs.length === 0 && !fileName ? ' current' : '')}
-        data-path=""
-        title="Root"
-        onClick={() => { navTree(''); }}
-      >/</button>
-      {segs.map((s, i) => {
-        acc = acc ? acc + '/' + s : s;
-        const path = acc;
-        const last = i === segs.length - 1 && !fileName;
-        const onClick = last ? undefined : () => { navTree(path); };
-        return (
+    <div class="breadcrumb" id="crumb">
+      <div class="breadcrumb-path" ref={ref}>
+        <button
+          type="button"
+          class={'crumb root' + (segs.length === 0 && !fileName ? ' current' : '')}
+          data-path=""
+          title="Root"
+          onClick={() => { navTree(''); }}
+        >/</button>
+        {segs.map((s, i) => {
+          acc = acc ? acc + '/' + s : s;
+          const path = acc;
+          const last = i === segs.length - 1 && !fileName;
+          const onClick = last ? undefined : () => { navTree(path); };
+          return (
+            <>
+              <span class="sep" aria-hidden="true">{'\u203a'}</span>
+              <button
+                type="button"
+                class={'crumb' + (last ? ' current' : '')}
+                data-path={path}
+                title={'/' + path}
+                onClick={onClick}
+              >{s}</button>
+            </>
+          );
+        })}
+        {fileName ? (
           <>
             <span class="sep" aria-hidden="true">{'\u203a'}</span>
-            <button
-              type="button"
-              class={'crumb' + (last ? ' current' : '')}
-              data-path={path}
-              title={'/' + path}
-              onClick={onClick}
-            >{s}</button>
+            <span class="crumb file current" title={'/' + fp}>{fileName}</span>
           </>
-        );
-      })}
-      {fileName ? (
-        <>
-          <span class="sep" aria-hidden="true">{'\u203a'}</span>
-          <span class="crumb file current" title={'/' + fp}>{fileName}</span>
-        </>
-      ) : null}
+        ) : null}
+      </div>
+      <div class="breadcrumb-actions">
+        <input
+          type="file"
+          id="upload-input"
+          multiple
+          hidden
+          ref={uploadInputRef}
+          onChange={(ev: JSX.TargetedEvent<HTMLInputElement>) => {
+            const files = ev.currentTarget.files;
+            if (files && files.length) uploadFiles(files);
+            ev.currentTarget.value = '';
+          }}
+        />
+        <button
+          type="button"
+          class="rail-control-btn refresh-btn"
+          title="Refresh"
+          aria-label="Refresh"
+          onClick={() => { loadTree(treePath.peek()).catch(console.error); }}
+        >{'\u21BB'}</button>
+        <ActionsMenu
+          mode="header"
+          triggerClassName="rail-control-btn"
+          onUpload={() => uploadInputRef.current?.click()}
+        />
+      </div>
     </div>
   );
 }
@@ -111,7 +140,7 @@ function Listing() {
 
 function UploadStrip() {
   const items = uploadItems.value;
-  if (items.length === 0) return <div class="upload-strip" id="upload-strip" hidden></div>;
+  if (items.length === 0) return null;
   const allDone = items.every((i) => i.status !== 'uploading');
   const okPaths = items.filter((i) => i.status === 'ok' && i.path).map((i) => i.path!);
   const wakeTitle = !threadId.value ? 'Open a thread first' : `Send a message to the agent listing ${okPaths.length} updated file(s)`;
@@ -402,33 +431,8 @@ export function FilesPane() {
     };
   }, []);
 
-  const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  const headActions = (
-    <div class="head-actions">
-      <input
-        type="file"
-        id="upload-input"
-        multiple
-        hidden
-        ref={uploadInputRef}
-        onChange={(ev: JSX.TargetedEvent<HTMLInputElement>) => {
-          const f = ev.currentTarget.files;
-          if (f && f.length) uploadFiles(f);
-          ev.currentTarget.value = '';
-        }}
-      />
-      <button
-        type="button"
-        class="icon-btn refresh-btn"
-        title="Refresh"
-        aria-label="Refresh"
-        onClick={() => { loadTree(treePath.peek()).catch(console.error); }}
-      >{'\u21BB'}</button>
-      <ActionsMenu mode="header" onUpload={() => uploadInputRef.current?.click()} />
-    </div>
-  );
   return (
-    <Pane paneKey="files" name="files-pane" label="Files" extraClass={previewing ? 'previewing' : ''} headActions={headActions}>
+    <Pane paneKey="files" name="files-pane" label="Files" extraClass={previewing ? 'previewing' : ''}>
       <div class="files-body" ref={bodyRef}>
         <Crumb />
         <UploadStrip />

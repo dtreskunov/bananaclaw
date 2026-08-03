@@ -1,15 +1,17 @@
 /* Unified actions menu (⋯) used in row, header, and preview. */
 
 .action-menu { position: relative; display: inline-block; }
-.action-menu .action-trigger {
+.action-menu .action-trigger:not(.rail-control-btn) {
   font-size: var(--font-lg); line-height: 1; padding: 2px 6px;
   border: 1px solid transparent;
 }
-.action-menu.open .action-trigger { border-color: var(--border); background: var(--wash); }
+.action-menu.open .action-trigger:not(.rail-control-btn) { border-color: var(--border); background: var(--wash); }
+.action-menu.open .rail-control-btn { background: var(--wash); opacity: 1; }
 .action-panel {
   position: absolute; top: 100%; right: 0; margin-top: 4px;
   min-width: 180px; z-index: 50;
   background: var(--surface); color: var(--surface-fg);
+  font-family: system-ui, -apple-system, sans-serif;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px var(--shadow-color);

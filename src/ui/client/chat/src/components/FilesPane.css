@@ -8,16 +8,28 @@
   display: flex; flex-direction: column; min-height: 0;
 }
 .files-pane .breadcrumb {
-  display: flex; align-items: center; gap: 2px;
-  padding: 6px 8px;
+  display: flex; align-items: stretch;
+  min-height: var(--rail-control-height);
   border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: var(--font-sm);
+  overflow: visible;
+}
+.files-pane .breadcrumb-path {
+  display: flex; align-items: center; gap: 2px;
+  flex: 1; min-width: 0;
+  padding: 6px 8px;
   overflow-x: auto;
   scrollbar-width: none;
   white-space: nowrap;
 }
-.files-pane .breadcrumb::-webkit-scrollbar { display: none; }
+.files-pane .breadcrumb-path::-webkit-scrollbar { display: none; }
+.files-pane .breadcrumb-actions {
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.files-pane .breadcrumb-actions .action-menu { display: flex; }
 .files-pane .breadcrumb .crumb {
   display: inline-flex; align-items: center;
   padding: 3px 6px; border-radius: var(--radius-md);
@@ -49,16 +61,6 @@
 body.is-admin .files-pane .drop-hint { display: flex; }
 /* Hide admin actions when the files pane is collapsed. */
 body.is-admin .files-pane.collapsed .admin-only { display: none; }
-/* Action overlay anchored to the right edge of the files pane,
-   sitting on top of the .head so the title can flex underneath. */
-.files-pane .head-actions {
-  position: absolute; top: 0; right: 0;
-  height: var(--handle-h);
-  display: flex; align-items: center; gap: 6px;
-  padding: 0 10px;
-  z-index: 3;
-}
-.files-pane.collapsed .head-actions { display: none; }
 /* Small text button for header actions like UPL. */
 .files-pane .text-btn {
   background: transparent; border: 1px solid var(--border);
@@ -68,15 +70,6 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
   font-family: inherit;
 }
 .files-pane .text-btn:hover { color: inherit; background: var(--wash); }
-
-.files-pane .head-actions .refresh-btn {
-  background: transparent; border: 1px solid transparent;
-  color: var(--muted); cursor: pointer;
-  font-size: var(--font-lg); line-height: 1;
-  padding: 2px 6px; border-radius: var(--radius-sm);
-  font-family: inherit;
-}
-.files-pane .head-actions .refresh-btn:hover { color: inherit; background: var(--wash); border-color: var(--border); }
 
 .files-pane .preview-toolbar {
   display: flex; align-items: center; gap: 10px;
@@ -228,7 +221,6 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 .files-pane.previewing .upload-strip,
 .files-pane.previewing .drop-hint { display: none !important; }
 .files-pane.previewing .preview-body { display: block; }
-.files-pane.previewing .head-actions { display: none !important; }
 .files-pane pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: var(--font-sm); line-height: 1.5; font-family: var(--font-mono); }
 .files-pane img, .files-pane iframe { max-width: 100%; }
 .markdown-preview { max-width: 100%; line-height: 1.5; }

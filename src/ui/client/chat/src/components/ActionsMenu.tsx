@@ -81,9 +81,10 @@ interface Props {
   mode: 'header' | 'row' | 'preview';
   entry?: TreeEntry;
   onUpload?: () => void;
+  triggerClassName?: string;
 }
 
-export function ActionsMenu({ mode, entry, onUpload }: Props) {
+export function ActionsMenu({ mode, entry, onUpload, triggerClassName = 'text-btn' }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -108,7 +109,7 @@ export function ActionsMenu({ mode, entry, onUpload }: Props) {
     <div class={'action-menu' + (open ? ' open' : '')} ref={wrapRef}>
       <button
         type="button"
-        class="text-btn action-trigger"
+        class={`${triggerClassName} action-trigger`}
         aria-haspopup="menu"
         aria-expanded={open}
         title="Actions"

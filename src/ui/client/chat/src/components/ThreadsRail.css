@@ -2,7 +2,6 @@
    banner / chat subnotice that ride directly under it on mobile. */
 
 .threads-rail {
-  --thread-search-height: 32px;
   border-right: 1px solid var(--border);
 }
 
@@ -33,17 +32,17 @@
 .threads-rail .threads-actions {
   position: absolute; top: var(--handle-h); left: 0; right: 0;
   display: flex; align-items: center;
-  min-height: var(--thread-search-height);
+  min-height: var(--rail-control-height);
   margin: 8px; padding: 0;
   border: 0;
   border-radius: var(--radius-md);
   overflow: hidden;
 }
 .threads-rail .thread-action-btn {
-  flex: 0 0 var(--thread-search-height);
-  width: var(--thread-search-height); height: var(--thread-search-height);
+  flex: 0 0 var(--rail-control-height);
+  width: var(--rail-control-height); height: var(--rail-control-height);
 }
-.threads-rail .thread-action-btn:not(.accent-icon-btn) {
+.threads-rail .thread-action-btn:not(.accent-icon-btn):not(.rail-control-btn) {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0;
   border: 0;
@@ -55,17 +54,17 @@
   line-height: 1;
   opacity: 0.7;
 }
-.threads-rail .thread-action-btn:not(.accent-icon-btn):hover { opacity: 1; background: var(--wash); }
+.threads-rail .thread-action-btn:not(.accent-icon-btn):not(.rail-control-btn):hover { opacity: 1; background: var(--wash); }
 .threads-rail .new-thread-action-btn {
   flex-basis: var(--control-action-size);
   width: var(--control-action-size); height: var(--control-action-size);
-  margin-block: calc((var(--thread-search-height) - var(--control-action-size)) / 2);
+  margin-block: calc((var(--rail-control-height) - var(--control-action-size)) / 2);
   margin-inline: 0;
 }
 
 .threads-rail .list {
   position: absolute; left: 0; right: 0; bottom: 0;
-  top: calc(var(--handle-h) + var(--thread-search-height) + 16px);
+  top: calc(var(--handle-h) + var(--rail-control-height) + 16px);
   overflow: hidden;
   display: flex; flex-direction: column;
 }
@@ -145,7 +144,7 @@
 
 /* ── Search input (inside .threads-actions) ──────────────────────── */
 .threads-rail .threads-actions .search-input {
-  flex: 1; min-width: 0; width: auto; height: var(--thread-search-height);
+  flex: 1; min-width: 0; width: auto; height: var(--rail-control-height);
   padding: 0 14px;
   border: 0;
   border-radius: 0;
@@ -163,7 +162,7 @@
 /* ── Search results ────────────────────────────────────────────────── */
 .threads-rail .search-results {
   position: absolute; left: 0; right: 0; bottom: 0;
-  top: calc(var(--handle-h) + var(--thread-search-height) + 16px);
+  top: calc(var(--handle-h) + var(--rail-control-height) + 16px);
   overflow-y: auto;
 }
 .threads-rail .search-result {
@@ -195,7 +194,6 @@
 
 @media (max-width: 720px) {
   .nc-pane.threads-rail {
-    --thread-search-height: 48px;
     position: fixed;
     top: 0; height: var(--app-height, 100dvh);
     width: min(86vw, 340px) !important;
