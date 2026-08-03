@@ -60,6 +60,7 @@ describe('searchThreads', () => {
     expect(searchQuery.value).toBe('second');
     expect(searchResults.value?.map((item) => item.messageId)).toEqual(['second']);
     expect(searchLoading.value).toBe(false);
+    expect(searchOpen.value).toBe(true);
   });
 
   it('does not reopen search after clear while a request is pending', async () => {

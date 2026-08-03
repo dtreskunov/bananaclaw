@@ -5,11 +5,12 @@ import { useState, useRef } from 'preact/hooks';
 import {
   threads, threadId, groupId, paneOpen, drawerOpen, channelMeta,
   searchQuery, searchResults, searchLoading, searchError, highlightMessageId,
-  isAdmin,
+  searchOpen, isAdmin,
 } from '../state';
 import {
   openChat,
   deleteThread,
+  loadThreads,
   searchThreads,
   clearSearch,
   openTaskPanel,
@@ -256,7 +257,7 @@ function SearchResults() {
 export function ThreadsRail() {
   const list = threads.value;
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const isSearching = searchResults.value !== null || searchLoading.value;
+  const isSearching = searchOpen.value;
 
   const onNewChat = (): void => {
     if (!groupId.value) return;
@@ -285,7 +286,7 @@ export function ThreadsRail() {
   }
 
   const runSearch = (): void => {
-    const q = searchInputRef.current?.value.trim();
+    const q = searchQuery.peek().trim();
     if (!q) {
       clearSearch();
       return;
@@ -307,6 +308,17 @@ export function ThreadsRail() {
     ev.stopPropagation();
     paneOpen.threads.value = true;
     requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
+  const refreshThreads = (): void => {
+    const gid = groupId.peek();
+    const query = searchQuery.peek().trim();
+    if (!gid) return;
+    if (searchOpen.peek() && query) {
+      searchThreads(gid, query).catch(console.error);
+      return;
+    }
+    loadThreads(gid).catch(console.error);
   };
 
   const collapsedActions = (
@@ -335,17 +347,28 @@ export function ThreadsRail() {
           ref={searchInputRef}
           type="text"
           class="rail-search-input search-input"
+          value={searchQuery.value}
           placeholder="Search all threads..."
+          onInput={(ev: JSX.TargetedInputEvent<HTMLInputElement>) => { searchQuery.value = ev.currentTarget.value; }}
           onKeyDown={onSearchKeyDown}
           aria-label="Search threads"
         />
+        {isSearching ? (
+          <button
+            type="button"
+            class="thread-action-btn rail-control-btn clear-search-btn"
+            title="Close thread search"
+            aria-label="Close thread search"
+            onClick={clearSearch}
+          >{'\u00D7'}</button>
+        ) : null}
         <button
           type="button"
-          class="thread-action-btn rail-control-btn search-submit-btn"
-          title="Search threads"
-          aria-label="Search threads"
-          onClick={runSearch}
-        >{'\uD83D\uDD0D'}</button>
+          class="thread-action-btn rail-control-btn refresh-btn"
+          title={isSearching ? 'Refresh search' : 'Refresh threads'}
+          aria-label={isSearching ? 'Refresh search' : 'Refresh threads'}
+          onClick={refreshThreads}
+        >{'\u21BB'}</button>
       </div>
       {isSearching
         ? <SearchResults />

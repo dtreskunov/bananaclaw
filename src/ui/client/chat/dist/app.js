@@ -17645,6 +17645,7 @@ async function searchThreads(gid, query) {
   const controller = new AbortController();
   searchController = controller;
   n2(() => {
+    searchOpen.value = true;
     searchLoading.value = true;
     searchError.value = "";
     searchQuery.value = query;
@@ -19666,7 +19667,7 @@ function SearchResults() {
 function ThreadsRail() {
   const list = threads.value;
   const searchInputRef = A2(null);
-  const isSearching = searchResults.value !== null || searchLoading.value;
+  const isSearching = searchOpen.value;
   const onNewChat = () => {
     if (!groupId.value) return;
     openChat(groupId.value, null, null).then(() => {
@@ -19689,7 +19690,7 @@ function ThreadsRail() {
     s5.items.sort((a4, b5) => tsKey(b5.lastActivityAt) - tsKey(a4.lastActivityAt));
   }
   const runSearch = () => {
-    const q5 = searchInputRef.current?.value.trim();
+    const q5 = searchQuery.peek().trim();
     if (!q5) {
       clearSearch();
       return;
@@ -19709,6 +19710,16 @@ function ThreadsRail() {
     ev.stopPropagation();
     paneOpen.threads.value = true;
     requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+  const refreshThreads = () => {
+    const gid = groupId.peek();
+    const query = searchQuery.peek().trim();
+    if (!gid) return;
+    if (searchOpen.peek() && query) {
+      searchThreads(gid, query).catch(console.error);
+      return;
+    }
+    loadThreads(gid).catch(console.error);
   };
   const collapsedActions = /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn", title: "New thread", "aria-label": "New thread", onClick: onNewChat, children: "+" }),
@@ -19740,20 +19751,35 @@ function ThreadsRail() {
               ref: searchInputRef,
               type: "text",
               class: "rail-search-input search-input",
+              value: searchQuery.value,
               placeholder: "Search all threads...",
+              onInput: (ev) => {
+                searchQuery.value = ev.currentTarget.value;
+              },
               onKeyDown: onSearchKeyDown,
               "aria-label": "Search threads"
             }
           ),
+          isSearching ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "thread-action-btn rail-control-btn clear-search-btn",
+              title: "Close thread search",
+              "aria-label": "Close thread search",
+              onClick: clearSearch,
+              children: "\xD7"
+            }
+          ) : null,
           /* @__PURE__ */ u4(
             "button",
             {
               type: "button",
-              class: "thread-action-btn rail-control-btn search-submit-btn",
-              title: "Search threads",
-              "aria-label": "Search threads",
-              onClick: runSearch,
-              children: "\u{1F50D}"
+              class: "thread-action-btn rail-control-btn refresh-btn",
+              title: isSearching ? "Refresh search" : "Refresh threads",
+              "aria-label": isSearching ? "Refresh search" : "Refresh threads",
+              onClick: refreshThreads,
+              children: "\u21BB"
             }
           )
         ] }),

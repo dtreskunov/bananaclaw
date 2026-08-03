@@ -214,6 +214,7 @@ export async function searchThreads(gid: string, query: string): Promise<void> {
   const controller = new AbortController();
   searchController = controller;
   batch(() => {
+    searchOpen.value = true;
     searchLoading.value = true;
     searchError.value = '';
     searchQuery.value = query;
