@@ -24,6 +24,7 @@
   white-space: nowrap;
 }
 .files-pane .breadcrumb-path::-webkit-scrollbar { display: none; }
+.files-pane .breadcrumb .crumb-node { display: inline-flex; align-items: center; flex: 0 0 auto; }
 .files-pane .breadcrumb-actions {
   display: flex;
   flex: 0 0 auto;
@@ -71,21 +72,8 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 }
 .files-pane .text-btn:hover { color: inherit; background: var(--wash); }
 
-.files-pane .preview-toolbar {
-  display: flex; align-items: center; gap: 10px;
-  padding-bottom: 8px; margin-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-.files-pane .preview-toolbar .preview-spacer { flex: 1; }
-.files-pane .preview-toolbar .preview-actions {
-  display: flex; align-items: center; gap: 4px;
-}
-.files-pane .preview-toolbar .close-preview { font-size: 16px; padding: 0 6px; line-height: 1; }
-.files-pane .preview-toolbar .clippy { font-size: var(--font-base); padding: 2px 6px; }
-.files-pane .preview-toolbar .clippy.active { color: inherit; background: var(--accent); }
-.files-pane .preview-toolbar button:disabled { opacity: 0.4; cursor: default; background: transparent; }
-.files-pane .preview-toolbar .save-btn { color: var(--accent); border-color: var(--accent); }
-.files-pane .preview-toolbar .save-btn:hover:not(:disabled) { color: white; background: var(--accent); }
+.files-pane .breadcrumb-actions .attach-btn.active { background: var(--accent); opacity: 1; }
+.files-pane .breadcrumb-actions .save-btn { color: var(--accent); opacity: 1; }
 
 /* In-place text editor for the file preview. */
 .files-pane .file-editor {

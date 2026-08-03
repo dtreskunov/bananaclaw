@@ -21595,6 +21595,12 @@ function curDir() {
 function joinPath(dir, name) {
   return dir ? dir + "/" + name : name;
 }
+function isAtOrBelow(path, ancestor) {
+  return !!path && (path === ancestor || path.startsWith(ancestor + "/"));
+}
+function movePath(path, from, to) {
+  return path === from ? to : to + path.slice(from.length);
+}
 function dropPinned(paths) {
   if (paths.length === 0) return;
   pinnedContext.value = pinnedContext.value.filter((p5) => !paths.some((d5) => p5 === d5 || p5.startsWith(d5 + "/")));
@@ -21638,6 +21644,8 @@ async function renameEntry(entry) {
   if (!trimmed || trimmed === entry.name) return;
   const dir = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
   const toPath = joinPath(dir, trimmed);
+  const activeTreePath = treePath.peek();
+  const activeFilePath = filePath.peek();
   const r4 = await postJson(`api/groups/${groupId.value}/rename`, { from: entry.path, to: toPath });
   if (!r4.ok) {
     showToast("rename failed: " + (r4.data.error || r4.status), "err");
@@ -21646,6 +21654,15 @@ async function renameEntry(entry) {
   pinnedContext.value = pinnedContext.value.map(
     (p5) => p5 === entry.path ? toPath : p5.startsWith(entry.path + "/") ? toPath + p5.slice(entry.path.length) : p5
   );
+  if (isAtOrBelow(activeFilePath, entry.path)) {
+    const nextFilePath = movePath(activeFilePath, entry.path, toPath);
+    await navFile({ path: nextFilePath, name: nextFilePath.slice(nextFilePath.lastIndexOf("/") + 1) });
+    return;
+  }
+  if (isAtOrBelow(activeTreePath, entry.path)) {
+    await navTree(movePath(activeTreePath, entry.path, toPath));
+    return;
+  }
   await loadTree(treePath.value);
 }
 async function deleteEntry(entry) {
@@ -21657,12 +21674,18 @@ async function deleteEntry(entry) {
     danger: true
   });
   if (!ok) return;
+  const activeTreePath = treePath.peek();
+  const activeFilePath = filePath.peek();
   const r4 = await postJson(`api/groups/${groupId.value}/delete`, { path: entry.path });
   if (!r4.ok) {
     showToast("delete failed: " + (r4.data.error || r4.status), "err");
     return;
   }
   dropPinned([entry.path]);
+  if (isAtOrBelow(activeFilePath, entry.path) || isAtOrBelow(activeTreePath, entry.path)) {
+    await navTree(parentPath(entry.path));
+    return;
+  }
   await loadTree(treePath.value);
 }
 async function deletePaths(paths) {
@@ -21849,7 +21872,30 @@ function entriesByPath(paths) {
   const set = new Set(paths);
   return treeEntries.value.filter((e4) => set.has(e4.path));
 }
-function ActionsMenu({ mode, entry, onUpload, triggerClassName = "text-btn" }) {
+function buildEntryItems(entry, gid, admin, onEdit) {
+  const items = [];
+  if (onEdit) items.push({ ico: "\u270E", label: "Edit", onClick: onEdit });
+  items.push({ ico: "\u2B07", label: "Download", onClick: () => downloadPaths([entry.path], [entry]) });
+  if (entry.type !== "dir") {
+    items.push({ ico: "\u2197", label: "Open in new tab", onClick: () => openInNewTab(gid, entry.path) });
+    items.push({ ico: "\u21AA", label: "Share privately", onClick: () => sharePrivate(gid, entry) });
+    items.push({ ico: "\u{1F517}", label: "Share with link\u2026", onClick: () => shareWithToken(gid, entry) });
+  }
+  if (admin) {
+    items.push("---");
+    items.push({ ico: "\u270E", label: "Rename", onClick: () => renameEntry(entry) });
+    items.push({ ico: "\u{1F5D1}", label: "Delete", danger: true, onClick: () => deleteEntry(entry) });
+  }
+  return items;
+}
+function ActionsMenu({
+  mode,
+  entry,
+  onUpload,
+  onEdit,
+  triggerClassName = "text-btn",
+  triggerTitle = "Actions"
+}) {
   const [open, setOpen] = h2(false);
   const wrapRef = A2(null);
   y2(() => {
@@ -21867,7 +21913,7 @@ function ActionsMenu({ mode, entry, onUpload, triggerClassName = "text-btn" }) {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-  const items = buildItems(mode, entry, onUpload);
+  const items = buildItems(mode, entry, onUpload, onEdit);
   if (items.length === 0) return null;
   return /* @__PURE__ */ u4("div", { class: "action-menu" + (open ? " open" : ""), ref: wrapRef, children: [
     /* @__PURE__ */ u4(
@@ -21877,10 +21923,11 @@ function ActionsMenu({ mode, entry, onUpload, triggerClassName = "text-btn" }) {
         class: `${triggerClassName} action-trigger`,
         "aria-haspopup": "menu",
         "aria-expanded": open,
-        title: "Actions",
+        title: triggerTitle,
+        "aria-label": triggerTitle,
         onClick: (ev) => {
           ev.stopPropagation();
-          setOpen((o4) => !o4);
+          setOpen(!open);
         },
         children: "\u22EF"
       }
@@ -21902,65 +21949,42 @@ function ActionsMenu({ mode, entry, onUpload, triggerClassName = "text-btn" }) {
           /* @__PURE__ */ u4("span", { class: "lbl", children: it.label })
         ]
       },
-      it.label
+      `${i5}:${it.label}`
     )) }) : null
   ] });
 }
-function buildItems(mode, entry, onUpload) {
+function appendGroup(items, group) {
+  if (group.length === 0) return;
+  if (items.length > 0) items.push("---");
+  items.push(...group);
+}
+function buildItems(mode, entry, onUpload, onEdit) {
   const admin = isAdmin.value;
   const gid = groupId.value;
-  if (mode === "row" && entry) {
-    const items2 = [];
-    items2.push({ ico: "\u2B07", label: "Download", onClick: () => downloadPaths([entry.path], [entry]) });
-    if (entry.type !== "dir") {
-      items2.push({ ico: "\u2197", label: "Open in new tab", onClick: () => openInNewTab(gid, entry.path) });
-      items2.push({ ico: "\u21AA", label: "Share privately", onClick: () => sharePrivate(gid, entry) });
-      items2.push({ ico: "\u{1F517}", label: "Share with link\u2026", onClick: () => shareWithToken(gid, entry) });
-    }
-    if (admin) {
-      items2.push("---");
-      items2.push({ ico: "\u270E", label: "Rename", onClick: () => renameEntry(entry) });
-      items2.push({ ico: "\u{1F5D1}", label: "Delete", danger: true, onClick: () => deleteEntry(entry) });
-    }
-    return items2;
-  }
-  if (mode === "preview") {
-    const p5 = previewBlock.value;
-    const fp = filePath.value;
-    if (!p5) return [];
-    const entryForPath = treeEntries.value.find((e4) => e4.path === fp) || (fp ? { path: fp, name: p5.name || "", type: "file" } : null);
-    const items2 = [];
-    items2.push({ ico: "\u21AA", label: "Share privately", onClick: () => sharePrivate(gid, entryForPath), disabled: !fp || !gid });
-    items2.push({ ico: "\u{1F517}", label: "Share with link\u2026", onClick: () => shareWithToken(gid, entryForPath), disabled: !fp || !gid });
-    items2.push({ ico: "\u2197", label: "Open in new tab", onClick: () => openInNewTab(gid, fp), disabled: !fp || !gid });
-    items2.push({ ico: "\u2B07", label: "Download", onClick: () => {
-      if (fp && entryForPath) downloadPaths([fp], [entryForPath]);
-    }, disabled: !fp });
-    if (admin && entryForPath) {
-      items2.push("---");
-      items2.push({ ico: "\u270E", label: "Rename", onClick: () => renameEntry(entryForPath) });
-      items2.push({ ico: "\u{1F5D1}", label: "Delete", danger: true, onClick: () => deleteEntry(entryForPath) });
-    }
-    return items2;
-  }
+  if (mode === "entry") return entry ? buildEntryItems(entry, gid, admin, onEdit) : [];
   const sel = pinnedContext.value;
   const selEntries = entriesByPath(sel);
   const items = [];
+  const createItems = [];
   if (admin) {
-    items.push({ ico: "\u{1F4C1}", label: "New folder", onClick: mkdirPrompt });
-    if (onUpload) items.push({ ico: "\u2B06", label: "Upload files\u2026", onClick: onUpload });
+    createItems.push({ ico: "\u{1F4C1}", label: "New folder", onClick: mkdirPrompt });
+    if (onUpload) createItems.push({ ico: "\u2B06", label: "Upload files\u2026", onClick: onUpload });
   }
+  appendGroup(items, createItems);
+  if (entry) appendGroup(items, buildEntryItems(entry, gid, admin));
   if (sel.length > 0) {
-    if (items.length) items.push("---");
-    items.push({ ico: "\u2B07", label: sel.length > 1 ? `Download ${sel.length} (zip)` : "Download", onClick: () => downloadPaths(sel, selEntries) });
+    const selectionItems = [
+      { ico: "\u2B07", label: sel.length > 1 ? `Download ${sel.length} (zip)` : "Download selection", onClick: () => downloadPaths(sel, selEntries) }
+    ];
     if (admin) {
       if (sel.length === 1 && selEntries.length === 1) {
-        items.push({ ico: "\u270E", label: "Rename", onClick: () => renameEntry(selEntries[0]) });
+        selectionItems.push({ ico: "\u270E", label: "Rename selection", onClick: () => renameEntry(selEntries[0]) });
       }
-      items.push({ ico: "\u{1F5D1}", label: sel.length > 1 ? `Delete ${sel.length}` : "Delete", danger: true, onClick: () => deletePaths(sel) });
+      selectionItems.push({ ico: "\u{1F5D1}", label: sel.length > 1 ? `Delete ${sel.length}` : "Delete selection", danger: true, onClick: () => deletePaths(sel) });
     }
-    items.push("---");
-    items.push({ ico: "\u2715", label: "Clear selection", onClick: clearPinnedContext });
+    selectionItems.push("---");
+    selectionItems.push({ ico: "\u2715", label: "Clear selection", onClick: clearPinnedContext });
+    appendGroup(items, selectionItems);
   }
   return items;
 }
@@ -22263,11 +22287,69 @@ function highlightCode(text, name) {
 }
 
 // src/components/FilesPane.tsx
-function Crumb() {
+function usePreviewEditor() {
+  const [editing, setEditing] = h2(false);
+  const [draft, setDraft] = h2("");
+  const [saving, setSaving] = h2(false);
+  const p5 = previewBlock.value;
+  const fp = filePath.value;
+  const editable = !!p5 && isAdmin.value && (p5.kind === "text" || p5.kind === "markdown" || p5.kind === "html");
+  y2(() => {
+    setEditing(false);
+    setSaving(false);
+  }, [fp]);
+  const beginEdit = () => {
+    setDraft(p5?.text || "");
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+  };
+  const commitEdit = async () => {
+    if (!fp) return;
+    setSaving(true);
+    let res = await saveFile(fp, draft, previewBlock.peek()?.etag);
+    if (res && "conflict" in res) {
+      const overwrite = await requestConfirm({
+        title: "File changed on disk",
+        message: "This file was modified since you opened it. Overwrite the newer version with your changes, or reload it?",
+        okLabel: "Overwrite",
+        cancelLabel: "Reload",
+        danger: true
+      });
+      if (!overwrite) {
+        setSaving(false);
+        setEditing(false);
+        await selectFile({ path: fp, name: fp.slice(fp.lastIndexOf("/") + 1) });
+        return;
+      }
+      res = await saveFile(fp, draft, res.etag);
+    }
+    setSaving(false);
+    if (!res || "conflict" in res) return;
+    const cur = previewBlock.peek();
+    if (cur && cur.path === fp) {
+      previewBlock.value = {
+        ...cur,
+        text: draft,
+        size: res.size ?? cur.size,
+        mtime: res.mtime ?? cur.mtime,
+        etag: res.etag ?? cur.etag
+      };
+    }
+    setEditing(false);
+  };
+  return { editing, saving, editable, draft, beginEdit, cancelEdit, commitEdit, setDraft };
+}
+function Crumb({ editor }) {
   const ref = A2(null);
   const uploadInputRef = A2(null);
   const p5 = treePath.value;
   const fp = filePath.value;
+  const preview = previewBlock.value;
+  const currentDirectory = p5 ? { path: p5, name: p5.slice(p5.lastIndexOf("/") + 1), type: "dir" } : void 0;
+  const previewEntry = fp ? { path: fp, name: preview?.name || fp.slice(fp.lastIndexOf("/") + 1), type: "file" } : void 0;
+  const pinned = !!fp && pinnedContext.value.includes(fp);
   const segs = p5 ? p5.split("/").filter(Boolean) : [];
   const fileName = fp ? fp.slice(fp.lastIndexOf("/") + 1) : "";
   y2(() => {
@@ -22298,7 +22380,7 @@ function Crumb() {
         const onClick = last ? void 0 : () => {
           navTree(path);
         };
-        return /* @__PURE__ */ u4(k, { children: [
+        return /* @__PURE__ */ u4("span", { class: "crumb-node", children: [
           /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
           /* @__PURE__ */ u4(
             "button",
@@ -22311,7 +22393,7 @@ function Crumb() {
               children: s5
             }
           )
-        ] });
+        ] }, path);
       }),
       fileName ? /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
@@ -22334,27 +22416,105 @@ function Crumb() {
           }
         }
       ),
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "rail-control-btn refresh-btn",
-          title: "Refresh",
-          "aria-label": "Refresh",
-          onClick: () => {
-            loadTree(treePath.peek()).catch(console.error);
-          },
-          children: "\u21BB"
-        }
-      ),
-      /* @__PURE__ */ u4(
-        ActionsMenu,
-        {
-          mode: "header",
-          triggerClassName: "rail-control-btn",
-          onUpload: () => uploadInputRef.current?.click()
-        }
-      )
+      editor.editing ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "rail-control-btn save-btn",
+            title: editor.saving ? "Saving" : "Save",
+            "aria-label": editor.saving ? "Saving" : "Save",
+            disabled: editor.saving,
+            onClick: () => {
+              editor.commitEdit().catch(console.error);
+            },
+            children: editor.saving ? "\u2026" : "\u2713"
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "rail-control-btn cancel-btn",
+            title: "Discard changes",
+            "aria-label": "Discard changes",
+            disabled: editor.saving,
+            onClick: editor.cancelEdit,
+            children: "\xD7"
+          }
+        )
+      ] }) : previewEntry ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "rail-control-btn attach-btn" + (pinned ? " active" : ""),
+            title: pinned ? "Detach from next message" : "Attach to next message",
+            "aria-label": pinned ? "Detach from next message" : "Attach to next message",
+            "aria-pressed": pinned,
+            onClick: () => togglePinnedFile(fp),
+            children: "\u{1F4CE}"
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "rail-control-btn refresh-btn",
+            title: "Refresh file",
+            "aria-label": "Refresh file",
+            onClick: () => {
+              selectFile(previewEntry).catch(console.error);
+            },
+            children: "\u21BB"
+          }
+        ),
+        /* @__PURE__ */ u4(
+          ActionsMenu,
+          {
+            mode: "entry",
+            entry: previewEntry,
+            onEdit: editor.editable ? editor.beginEdit : void 0,
+            triggerClassName: "rail-control-btn",
+            triggerTitle: `Actions for ${previewEntry.name}`
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "rail-control-btn close-preview",
+            title: "Close preview",
+            "aria-label": "Close preview",
+            onClick: closePreview,
+            children: "\xD7"
+          }
+        )
+      ] }) : /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "rail-control-btn refresh-btn",
+            title: "Refresh folder",
+            "aria-label": "Refresh folder",
+            onClick: () => {
+              loadTree(treePath.peek()).catch(console.error);
+            },
+            children: "\u21BB"
+          }
+        ),
+        /* @__PURE__ */ u4(
+          ActionsMenu,
+          {
+            mode: "directory",
+            entry: currentDirectory,
+            triggerClassName: "rail-control-btn",
+            triggerTitle: currentDirectory ? `Actions for ${currentDirectory.name}` : "Root folder actions",
+            onUpload: () => uploadInputRef.current?.click()
+          }
+        )
+      ] })
     ] })
   ] });
 }
@@ -22373,7 +22533,7 @@ function Row({ e: e4 }) {
     /* @__PURE__ */ u4("div", { class: "name", children: e4.name }),
     /* @__PURE__ */ u4("div", { class: "size", children: fmtBytes(e4.size) }),
     /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: e4.mtime }) }),
-    /* @__PURE__ */ u4("div", { class: "row-actions", children: /* @__PURE__ */ u4(ActionsMenu, { mode: "row", entry: e4 }) })
+    /* @__PURE__ */ u4("div", { class: "row-actions", children: /* @__PURE__ */ u4(ActionsMenu, { mode: "entry", entry: e4, triggerTitle: `Actions for ${e4.name}` }) })
   ] });
 }
 function Listing() {
@@ -22456,142 +22616,11 @@ function renderMetaPanel(rows) {
     ] }, k4)) })
   ] });
 }
-function Preview() {
+function Preview({ editor }) {
   const ref = A2(null);
-  const [editing, setEditing] = h2(false);
-  const [draft, setDraft] = h2("");
-  const [saving, setSaving] = h2(false);
   const p5 = previewBlock.value;
   const fp = filePath.value;
-  y2(() => {
-    setEditing(false);
-    setSaving(false);
-  }, [fp]);
   if (!p5) return /* @__PURE__ */ u4("div", { class: "preview-body", id: "preview", ref });
-  const pinned = !!fp && pinnedContext.value.includes(fp);
-  const clippyTitle = pinned ? "Detach from next message" : "Attach to next message";
-  const editable = isAdmin.value && (p5.kind === "text" || p5.kind === "markdown" || p5.kind === "html");
-  const beginEdit = () => {
-    setDraft(p5.text || "");
-    setEditing(true);
-  };
-  const cancelEdit = () => {
-    setEditing(false);
-  };
-  const commitEdit = async () => {
-    if (!fp) return;
-    setSaving(true);
-    let res = await saveFile(fp, draft, previewBlock.peek()?.etag);
-    if (res && "conflict" in res) {
-      const overwrite = await requestConfirm({
-        title: "File changed on disk",
-        message: "This file was modified since you opened it. Overwrite the newer version with your changes, or reload it?",
-        okLabel: "Overwrite",
-        cancelLabel: "Reload",
-        danger: true
-      });
-      if (!overwrite) {
-        setSaving(false);
-        setEditing(false);
-        if (fp) await selectFile({ path: fp, name: fp.slice(fp.lastIndexOf("/") + 1) });
-        return;
-      }
-      res = await saveFile(fp, draft, res.etag);
-    }
-    setSaving(false);
-    if (!res || "conflict" in res) return;
-    const cur = previewBlock.peek();
-    if (cur && cur.path === fp) {
-      previewBlock.value = {
-        ...cur,
-        text: draft,
-        size: res.size ?? cur.size,
-        mtime: res.mtime ?? cur.mtime,
-        etag: res.etag ?? cur.etag
-      };
-    }
-    setEditing(false);
-  };
-  const editActions = editing ? /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "text-btn save-btn",
-        onClick: () => {
-          commitEdit().catch(console.error);
-        },
-        disabled: saving,
-        title: "Save",
-        children: saving ? "Saving\u2026" : "Save"
-      }
-    ),
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "text-btn cancel-btn",
-        onClick: cancelEdit,
-        disabled: saving,
-        title: "Discard changes",
-        children: "Cancel"
-      }
-    )
-  ] }) : editable ? /* @__PURE__ */ u4(
-    "button",
-    {
-      type: "button",
-      class: "text-btn edit-btn",
-      onClick: beginEdit,
-      title: "Edit",
-      "aria-label": "Edit",
-      children: "\u270E"
-    }
-  ) : null;
-  const toolbar = /* @__PURE__ */ u4("div", { class: "preview-toolbar", children: [
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        class: "text-btn clippy" + (pinned ? " active" : ""),
-        onClick: () => togglePinnedFile(fp),
-        disabled: !fp || editing,
-        title: clippyTitle,
-        "aria-pressed": pinned,
-        children: "\u{1F4CE}"
-      }
-    ),
-    /* @__PURE__ */ u4("span", { class: "preview-spacer" }),
-    /* @__PURE__ */ u4("span", { class: "preview-actions", children: [
-      editActions,
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "text-btn refresh-btn",
-          onClick: () => {
-            if (!p5.name || !fp) return;
-            selectFile({ path: fp, name: p5.name }).catch(console.error);
-          },
-          disabled: !fp || !p5.name || editing,
-          title: "Refresh",
-          "aria-label": "Refresh",
-          children: "\u21BB"
-        }
-      ),
-      /* @__PURE__ */ u4(ActionsMenu, { mode: "preview" }),
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "text-btn close-preview",
-          onClick: closePreview,
-          title: "Close preview",
-          "aria-label": "Close preview",
-          children: "\xD7"
-        }
-      )
-    ] })
-  ] });
   const fileRows = [];
   if (p5.size != null) fileRows.push(["Size", fmtBytes(p5.size)]);
   const mimeOrKind = p5.mime || mimeFromKind(p5.kind);
@@ -22605,18 +22634,18 @@ function Preview() {
   const player = isAudio || isVideo ? /* @__PURE__ */ u4(MediaPlayer, { kind: p5.kind, url: p5.url || "", name: p5.name || "", floating: isAudio }) : null;
   const lyrics = p5.lyrics ? /* @__PURE__ */ u4(LyricsPanel, { text: p5.lyrics }) : null;
   let body = null;
-  if (editing) {
+  if (editor.editing) {
     body = /* @__PURE__ */ u4(
       "textarea",
       {
         class: "file-editor",
-        value: draft,
+        value: editor.draft,
         spellcheck: false,
         autocomplete: "off",
         autocapitalize: "off",
         autocorrect: "off",
-        disabled: saving,
-        onInput: (ev) => setDraft(ev.currentTarget.value)
+        disabled: editor.saving,
+        onInput: (ev) => editor.setDraft(ev.currentTarget.value)
       }
     );
   } else if (p5.kind === "image") body = /* @__PURE__ */ u4("img", { alt: p5.name, src: p5.url });
@@ -22636,7 +22665,6 @@ function Preview() {
   ] });
   else if (p5.kind === "error") body = /* @__PURE__ */ u4("div", { class: "empty", children: p5.text });
   return /* @__PURE__ */ u4("div", { class: "preview-body" + (isAudio ? " has-floating-player" : ""), id: "preview", ref, children: [
-    toolbar,
     meta,
     isVideo ? player : null,
     lyrics,
@@ -22646,6 +22674,7 @@ function Preview() {
 }
 function FilesPane() {
   const previewing = !!previewBlock.value;
+  const editor = usePreviewEditor();
   const bodyRef = A2(null);
   y2(() => {
     const body = bodyRef.current;
@@ -22695,7 +22724,7 @@ function FilesPane() {
     };
   }, []);
   return /* @__PURE__ */ u4(Pane, { paneKey: "files", name: "files-pane", label: "Files", extraClass: previewing ? "previewing" : "", children: /* @__PURE__ */ u4("div", { class: "files-body", ref: bodyRef, children: [
-    /* @__PURE__ */ u4(Crumb, {}),
+    /* @__PURE__ */ u4(Crumb, { editor }),
     /* @__PURE__ */ u4(UploadStrip, {}),
     /* @__PURE__ */ u4(Listing, {}),
     /* @__PURE__ */ u4("div", { class: "drop-hint admin-only", id: "dropzone", children: [
@@ -22705,7 +22734,7 @@ function FilesPane() {
         treePath.value
       ] })
     ] }),
-    /* @__PURE__ */ u4(Preview, {})
+    /* @__PURE__ */ u4(Preview, { editor })
   ] }) });
 }
 

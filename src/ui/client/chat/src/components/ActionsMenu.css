@@ -19,8 +19,9 @@
 }
 .action-item {
   display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: var(--menu-item-min-height);
   background: transparent; border: 0; cursor: pointer;
-  padding: 6px 12px; font-size: var(--font-sm); line-height: 1.4;
+  padding: 6px 12px; font-size: var(--menu-item-font-size); line-height: 1.4;
   color: inherit; text-align: left; font-family: inherit;
 }
 .action-item:hover:not(:disabled) { background: var(--wash); }
@@ -28,3 +29,10 @@
 .action-item .ico { width: 16px; text-align: center; opacity: 0.8; }
 .action-item.danger { color: var(--danger); }
 .action-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+@media (max-width: 720px) {
+  .action-menu .action-trigger:not(.rail-control-btn) {
+    min-width: 40px; min-height: 40px; padding: 0;
+  }
+  .action-item { gap: 10px; padding-inline: 14px; }
+}

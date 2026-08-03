@@ -59,6 +59,8 @@
   --rail-control-height: 32px;
   --control-action-size: 28px;
   --plus-glyph-size: 12px;
+  --menu-item-min-height: 32px;
+  --menu-item-font-size: var(--font-sm);
 
   /* Monospace font stack. */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -113,6 +115,8 @@ html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll
     --rail-control-height: 48px;
     --control-action-size: 40px;
     --plus-glyph-size: 14px;
+    --menu-item-min-height: 44px;
+    --menu-item-font-size: var(--font-lg);
   }
 }
 body { font: 14px/1.4 system-ui, -apple-system, sans-serif; height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }

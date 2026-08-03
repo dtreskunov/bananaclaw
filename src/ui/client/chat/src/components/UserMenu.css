@@ -18,9 +18,9 @@
   color: var(--muted); font-size: var(--font-xs); border-bottom: 1px solid var(--border);
 }
 .user-menu-panel button {
-  display: block; width: 100%; padding: 8px 12px;
+  display: flex; align-items: center; width: 100%; min-height: var(--menu-item-min-height); padding: 8px 12px;
   border: 0; background: transparent; color: inherit;
-  font: inherit; font-size: var(--font-sm); text-align: left; cursor: pointer;
+  font: inherit; font-size: var(--menu-item-font-size); text-align: left; cursor: pointer;
 }
 .user-menu-panel button:hover, .user-menu-panel button:focus-visible { background: var(--wash); outline: none; }
 .user-menu-logout-form { margin: 0; }

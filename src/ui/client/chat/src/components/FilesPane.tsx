@@ -22,11 +22,86 @@ import { requestConfirm } from './PromptModal';
 import { highlightCode } from '../highlight';
 import type { TreeEntry, PreviewKind } from '../types';
 
-function Crumb() {
+interface PreviewEditorState {
+  editing: boolean;
+  saving: boolean;
+  editable: boolean;
+  draft: string;
+  beginEdit: () => void;
+  cancelEdit: () => void;
+  commitEdit: () => Promise<void>;
+  setDraft: (value: string) => void;
+}
+
+function usePreviewEditor(): PreviewEditorState {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const p = previewBlock.value;
+  const fp = filePath.value;
+  const editable = !!p && isAdmin.value && (p.kind === 'text' || p.kind === 'markdown' || p.kind === 'html');
+
+  useEffect(() => {
+    setEditing(false);
+    setSaving(false);
+  }, [fp]);
+
+  const beginEdit = (): void => {
+    setDraft(p?.text || '');
+    setEditing(true);
+  };
+  const cancelEdit = (): void => { setEditing(false); };
+  const commitEdit = async (): Promise<void> => {
+    if (!fp) return;
+    setSaving(true);
+    let res = await saveFile(fp, draft, previewBlock.peek()?.etag);
+    if (res && 'conflict' in res) {
+      const overwrite = await requestConfirm({
+        title: 'File changed on disk',
+        message: 'This file was modified since you opened it. Overwrite the newer version with your changes, or reload it?',
+        okLabel: 'Overwrite',
+        cancelLabel: 'Reload',
+        danger: true,
+      });
+      if (!overwrite) {
+        setSaving(false);
+        setEditing(false);
+        await selectFile({ path: fp, name: fp.slice(fp.lastIndexOf('/') + 1) });
+        return;
+      }
+      res = await saveFile(fp, draft, res.etag);
+    }
+    setSaving(false);
+    if (!res || 'conflict' in res) return;
+    const cur = previewBlock.peek();
+    if (cur && cur.path === fp) {
+      previewBlock.value = {
+        ...cur,
+        text: draft,
+        size: res.size ?? cur.size,
+        mtime: res.mtime ?? cur.mtime,
+        etag: res.etag ?? cur.etag,
+      };
+    }
+    setEditing(false);
+  };
+
+  return { editing, saving, editable, draft, beginEdit, cancelEdit, commitEdit, setDraft };
+}
+
+function Crumb({ editor }: { editor: PreviewEditorState }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const p = treePath.value;
   const fp = filePath.value;
+  const preview = previewBlock.value;
+  const currentDirectory = p
+    ? { path: p, name: p.slice(p.lastIndexOf('/') + 1), type: 'dir' as const }
+    : undefined;
+  const previewEntry = fp
+    ? { path: fp, name: preview?.name || fp.slice(fp.lastIndexOf('/') + 1), type: 'file' as const }
+    : undefined;
+  const pinned = !!fp && pinnedContext.value.includes(fp);
   const segs = p ? p.split('/').filter(Boolean) : [];
   const fileName = fp ? fp.slice(fp.lastIndexOf('/') + 1) : '';
   useEffect(() => {
@@ -51,7 +126,7 @@ function Crumb() {
           const last = i === segs.length - 1 && !fileName;
           const onClick = last ? undefined : () => { navTree(path); };
           return (
-            <>
+            <span class="crumb-node" key={path}>
               <span class="sep" aria-hidden="true">{'\u203a'}</span>
               <button
                 type="button"
@@ -60,7 +135,7 @@ function Crumb() {
                 title={'/' + path}
                 onClick={onClick}
               >{s}</button>
-            </>
+            </span>
           );
         })}
         {fileName ? (
@@ -83,18 +158,75 @@ function Crumb() {
             ev.currentTarget.value = '';
           }}
         />
-        <button
-          type="button"
-          class="rail-control-btn refresh-btn"
-          title="Refresh"
-          aria-label="Refresh"
-          onClick={() => { loadTree(treePath.peek()).catch(console.error); }}
-        >{'\u21BB'}</button>
-        <ActionsMenu
-          mode="header"
-          triggerClassName="rail-control-btn"
-          onUpload={() => uploadInputRef.current?.click()}
-        />
+        {editor.editing ? (
+          <>
+            <button
+              type="button"
+              class="rail-control-btn save-btn"
+              title={editor.saving ? 'Saving' : 'Save'}
+              aria-label={editor.saving ? 'Saving' : 'Save'}
+              disabled={editor.saving}
+              onClick={() => { editor.commitEdit().catch(console.error); }}
+            >{editor.saving ? '\u2026' : '\u2713'}</button>
+            <button
+              type="button"
+              class="rail-control-btn cancel-btn"
+              title="Discard changes"
+              aria-label="Discard changes"
+              disabled={editor.saving}
+              onClick={editor.cancelEdit}
+            >{'\u00D7'}</button>
+          </>
+        ) : previewEntry ? (
+          <>
+            <button
+              type="button"
+              class={'rail-control-btn attach-btn' + (pinned ? ' active' : '')}
+              title={pinned ? 'Detach from next message' : 'Attach to next message'}
+              aria-label={pinned ? 'Detach from next message' : 'Attach to next message'}
+              aria-pressed={pinned}
+              onClick={() => togglePinnedFile(fp)}
+            >{'\uD83D\uDCCE'}</button>
+            <button
+              type="button"
+              class="rail-control-btn refresh-btn"
+              title="Refresh file"
+              aria-label="Refresh file"
+              onClick={() => { selectFile(previewEntry).catch(console.error); }}
+            >{'\u21BB'}</button>
+            <ActionsMenu
+              mode="entry"
+              entry={previewEntry}
+              onEdit={editor.editable ? editor.beginEdit : undefined}
+              triggerClassName="rail-control-btn"
+              triggerTitle={`Actions for ${previewEntry.name}`}
+            />
+            <button
+              type="button"
+              class="rail-control-btn close-preview"
+              title="Close preview"
+              aria-label="Close preview"
+              onClick={closePreview}
+            >{'\u00D7'}</button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              class="rail-control-btn refresh-btn"
+              title="Refresh folder"
+              aria-label="Refresh folder"
+              onClick={() => { loadTree(treePath.peek()).catch(console.error); }}
+            >{'\u21BB'}</button>
+            <ActionsMenu
+              mode="directory"
+              entry={currentDirectory}
+              triggerClassName="rail-control-btn"
+              triggerTitle={currentDirectory ? `Actions for ${currentDirectory.name}` : 'Root folder actions'}
+              onUpload={() => uploadInputRef.current?.click()}
+            />
+          </>
+        )}
       </div>
     </div>
   );
@@ -118,7 +250,7 @@ function Row({ e }: { e: TreeEntry }) {
       <div class="name">{e.name}</div>
       <div class="size">{fmtBytes(e.size)}</div>
       <div class="meta"><RelativeTime ts={e.mtime} /></div>
-      <div class="row-actions"><ActionsMenu mode="row" entry={e} /></div>
+      <div class="row-actions"><ActionsMenu mode="entry" entry={e} triggerTitle={`Actions for ${e.name}`} /></div>
     </div>
   );
 }
@@ -213,133 +345,11 @@ function renderMetaPanel(rows: [string, string][]): VNode {
   );
 }
 
-function Preview() {
+function Preview({ editor }: { editor: PreviewEditorState }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [saving, setSaving] = useState(false);
   const p = previewBlock.value;
   const fp = filePath.value;
-  // Leave edit mode whenever the previewed file changes.
-  useEffect(() => {
-    setEditing(false);
-    setSaving(false);
-  }, [fp]);
   if (!p) return <div class="preview-body" id="preview" ref={ref}></div>;
-  const pinned = !!fp && pinnedContext.value.includes(fp);
-  const clippyTitle = pinned ? 'Detach from next message' : 'Attach to next message';
-  const editable = isAdmin.value && (p.kind === 'text' || p.kind === 'markdown' || p.kind === 'html');
-
-  const beginEdit = (): void => {
-    setDraft(p.text || '');
-    setEditing(true);
-  };
-  const cancelEdit = (): void => {
-    setEditing(false);
-  };
-  const commitEdit = async (): Promise<void> => {
-    if (!fp) return;
-    setSaving(true);
-    // First attempt carries the etag of the version we loaded, so the write
-    // only lands if the file hasn't changed underneath us.
-    let res = await saveFile(fp, draft, previewBlock.peek()?.etag);
-    if (res && 'conflict' in res) {
-      // Someone else changed the file since we opened it. Let the user pick
-      // between reloading their copy or clobbering it.
-      const overwrite = await requestConfirm({
-        title: 'File changed on disk',
-        message: 'This file was modified since you opened it. Overwrite the newer version with your changes, or reload it?',
-        okLabel: 'Overwrite',
-        cancelLabel: 'Reload',
-        danger: true,
-      });
-      if (!overwrite) {
-        setSaving(false);
-        setEditing(false);
-        // Reload the current on-disk version (and its fresh etag).
-        if (fp) await selectFile({ path: fp, name: fp.slice(fp.lastIndexOf('/') + 1) });
-        return;
-      }
-      // Retry against the current version reported by the 412.
-      res = await saveFile(fp, draft, res.etag);
-    }
-    setSaving(false);
-    if (!res || 'conflict' in res) return;
-    const cur = previewBlock.peek();
-    if (cur && cur.path === fp) {
-      previewBlock.value = {
-        ...cur,
-        text: draft,
-        size: res.size ?? cur.size,
-        mtime: res.mtime ?? cur.mtime,
-        etag: res.etag ?? cur.etag,
-      };
-    }
-    setEditing(false);
-  };
-
-  const editActions = editing ? (
-    <>
-      <button
-        type="button"
-        class="text-btn save-btn"
-        onClick={() => { commitEdit().catch(console.error); }}
-        disabled={saving}
-        title="Save"
-      >{saving ? 'Saving\u2026' : 'Save'}</button>
-      <button
-        type="button"
-        class="text-btn cancel-btn"
-        onClick={cancelEdit}
-        disabled={saving}
-        title="Discard changes"
-      >Cancel</button>
-    </>
-  ) : editable ? (
-    <button
-      type="button"
-      class="text-btn edit-btn"
-      onClick={beginEdit}
-      title="Edit"
-      aria-label="Edit"
-    >{'\u270E'}</button>
-  ) : null;
-
-  const toolbar = (
-    <div class="preview-toolbar">
-      <button
-        class={'text-btn clippy' + (pinned ? ' active' : '')}
-        onClick={() => togglePinnedFile(fp)}
-        disabled={!fp || editing}
-        title={clippyTitle}
-        aria-pressed={pinned}
-      >{'\uD83D\uDCCE'}</button>
-      <span class="preview-spacer"></span>
-      <span class="preview-actions">
-        {editActions}
-        <button
-          type="button"
-          class="text-btn refresh-btn"
-          onClick={() => {
-            if (!p.name || !fp) return;
-            selectFile({ path: fp, name: p.name }).catch(console.error);
-          }}
-          disabled={!fp || !p.name || editing}
-          title="Refresh"
-          aria-label="Refresh"
-        >{'\u21BB'}</button>
-        <ActionsMenu mode="preview" />
-        <button
-          type="button"
-          class="text-btn close-preview"
-          onClick={closePreview}
-          title="Close preview"
-          aria-label="Close preview"
-        >{'\u00D7'}</button>
-      </span>
-    </div>
-  );
-
 
   const fileRows: [string, string][] = [];
   if (p.size != null) fileRows.push(['Size', fmtBytes(p.size)]);
@@ -359,17 +369,17 @@ function Preview() {
     : null;
   const lyrics = p.lyrics ? <LyricsPanel text={p.lyrics} /> : null;
   let body: ComponentChildren = null;
-  if (editing) {
+  if (editor.editing) {
     body = (
       <textarea
         class="file-editor"
-        value={draft}
+        value={editor.draft}
         spellcheck={false}
         autocomplete="off"
         autocapitalize="off"
         autocorrect="off"
-        disabled={saving}
-        onInput={(ev: JSX.TargetedEvent<HTMLTextAreaElement>) => setDraft(ev.currentTarget.value)}
+        disabled={editor.saving}
+        onInput={(ev: JSX.TargetedEvent<HTMLTextAreaElement>) => editor.setDraft(ev.currentTarget.value)}
       />
     );
   } else if (p.kind === 'image') body = <img alt={p.name} src={p.url} />;
@@ -392,13 +402,14 @@ function Preview() {
   else if (p.kind === 'error') body = <div class="empty">{p.text}</div>;
   return (
     <div class={'preview-body' + (isAudio ? ' has-floating-player' : '')} id="preview" ref={ref}>
-      {toolbar}{meta}{isVideo ? player : null}{lyrics}{body}{isAudio ? player : null}
+      {meta}{isVideo ? player : null}{lyrics}{body}{isAudio ? player : null}
     </div>
   );
 }
 
 export function FilesPane() {
   const previewing = !!previewBlock.value;
+  const editor = usePreviewEditor();
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -434,13 +445,13 @@ export function FilesPane() {
   return (
     <Pane paneKey="files" name="files-pane" label="Files" extraClass={previewing ? 'previewing' : ''}>
       <div class="files-body" ref={bodyRef}>
-        <Crumb />
+        <Crumb editor={editor} />
         <UploadStrip />
         <Listing />
         <div class="drop-hint admin-only" id="dropzone">
           Drag &amp; drop files here to upload to <code id="dropzone-path">/{treePath.value}</code>
         </div>
-        <Preview />
+        <Preview editor={editor} />
       </div>
     </Pane>
   );

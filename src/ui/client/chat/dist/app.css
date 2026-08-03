@@ -39,6 +39,8 @@
   --rail-control-height: 32px;
   --control-action-size: 28px;
   --plus-glyph-size: 12px;
+  --menu-item-min-height: 32px;
+  --menu-item-font-size: var(--font-sm);
   --font-mono:
     ui-monospace,
     SFMono-Regular,
@@ -96,6 +98,8 @@ body {
     --rail-control-height: 48px;
     --control-action-size: 40px;
     --plus-glyph-size: 14px;
+    --menu-item-min-height: 44px;
+    --menu-item-font-size: var(--font-lg);
   }
 }
 body {
@@ -904,14 +908,16 @@ nav.tab-bar-strip.group-strip {
   border-bottom: 1px solid var(--border);
 }
 .user-menu-panel button {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
+  min-height: var(--menu-item-min-height);
   padding: 8px 12px;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: var(--font-sm);
+  font-size: var(--menu-item-font-size);
   text-align: left;
   cursor: pointer;
 }
@@ -2416,11 +2422,12 @@ nav.tab-bar-strip.group-strip {
   align-items: center;
   gap: 10px;
   width: 100%;
+  min-height: var(--menu-item-min-height);
   background: transparent;
   border: 0;
   cursor: pointer;
   padding: 8px 14px;
-  font-size: var(--font-sm);
+  font-size: var(--menu-item-font-size);
   line-height: 1.4;
   color: inherit;
   text-align: left;
@@ -2913,6 +2920,11 @@ nav.tab-bar-strip.group-strip {
 .files-pane .breadcrumb-path::-webkit-scrollbar {
   display: none;
 }
+.files-pane .breadcrumb .crumb-node {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
 .files-pane .breadcrumb-actions {
   display: flex;
   flex: 0 0 auto;
@@ -3038,47 +3050,13 @@ body.is-admin .files-pane.collapsed .admin-only {
   color: inherit;
   background: var(--wash);
 }
-.files-pane .preview-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 8px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-.files-pane .preview-toolbar .preview-spacer {
-  flex: 1;
-}
-.files-pane .preview-toolbar .preview-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.files-pane .preview-toolbar .close-preview {
-  font-size: 16px;
-  padding: 0 6px;
-  line-height: 1;
-}
-.files-pane .preview-toolbar .clippy {
-  font-size: var(--font-base);
-  padding: 2px 6px;
-}
-.files-pane .preview-toolbar .clippy.active {
-  color: inherit;
+.files-pane .breadcrumb-actions .attach-btn.active {
   background: var(--accent);
+  opacity: 1;
 }
-.files-pane .preview-toolbar button:disabled {
-  opacity: 0.4;
-  cursor: default;
-  background: transparent;
-}
-.files-pane .preview-toolbar .save-btn {
+.files-pane .breadcrumb-actions .save-btn {
   color: var(--accent);
-  border-color: var(--accent);
-}
-.files-pane .preview-toolbar .save-btn:hover:not(:disabled) {
-  color: white;
-  background: var(--accent);
+  opacity: 1;
 }
 .files-pane .file-editor {
   display: block;
@@ -3555,11 +3533,12 @@ body.is-admin .files-pane.collapsed .admin-only {
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-height: var(--menu-item-min-height);
   background: transparent;
   border: 0;
   cursor: pointer;
   padding: 6px 12px;
-  font-size: var(--font-sm);
+  font-size: var(--menu-item-font-size);
   line-height: 1.4;
   color: inherit;
   text-align: left;
@@ -3584,6 +3563,17 @@ body.is-admin .files-pane.collapsed .admin-only {
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+@media (max-width: 720px) {
+  .action-menu .action-trigger:not(.rail-control-btn) {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+  }
+  .action-item {
+    gap: 10px;
+    padding-inline: 14px;
+  }
 }
 
 /* src/components/MediaPlayer.css */

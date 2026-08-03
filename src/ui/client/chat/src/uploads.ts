@@ -1,7 +1,8 @@
 // Admin write operations + upload progress strip.
-import { groupId, isAdmin, uploadItems, threadId, treePath, pinnedContext } from './state';
+import { groupId, isAdmin, uploadItems, threadId, treePath, filePath, pinnedContext } from './state';
 import { postJson } from './api';
-import { loadTree } from './actions';
+import { loadTree, navFile, navTree } from './actions';
+import { parentPath } from './utils';
 import { requestInput, requestConfirm } from './components/PromptModal';
 import { showToast } from './components/Toast';
 import type { TreeEntry, UploadItem } from './types';
@@ -11,6 +12,14 @@ function curDir(): string {
 }
 function joinPath(dir: string, name: string): string {
   return dir ? dir + '/' + name : name;
+}
+
+function isAtOrBelow(path: string | null, ancestor: string): path is string {
+  return !!path && (path === ancestor || path.startsWith(ancestor + '/'));
+}
+
+function movePath(path: string, from: string, to: string): string {
+  return path === from ? to : to + path.slice(from.length);
 }
 
 interface ApiError {
@@ -95,6 +104,8 @@ export async function renameEntry(entry: TreeEntry): Promise<void> {
   if (!trimmed || trimmed === entry.name) return;
   const dir = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : '';
   const toPath = joinPath(dir, trimmed);
+  const activeTreePath = treePath.peek();
+  const activeFilePath = filePath.peek();
   const r = await postJson<ApiError>(`api/groups/${groupId.value}/rename`, { from: entry.path, to: toPath });
   if (!r.ok) {
     showToast('rename failed: ' + (r.data.error || r.status), 'err');
@@ -103,6 +114,15 @@ export async function renameEntry(entry: TreeEntry): Promise<void> {
   pinnedContext.value = pinnedContext.value.map((p) =>
     p === entry.path ? toPath : p.startsWith(entry.path + '/') ? toPath + p.slice(entry.path.length) : p,
   );
+  if (isAtOrBelow(activeFilePath, entry.path)) {
+    const nextFilePath = movePath(activeFilePath, entry.path, toPath);
+    await navFile({ path: nextFilePath, name: nextFilePath.slice(nextFilePath.lastIndexOf('/') + 1) });
+    return;
+  }
+  if (isAtOrBelow(activeTreePath, entry.path)) {
+    await navTree(movePath(activeTreePath, entry.path, toPath));
+    return;
+  }
   await loadTree(treePath.value);
 }
 
@@ -115,12 +135,18 @@ export async function deleteEntry(entry: TreeEntry): Promise<void> {
     danger: true,
   });
   if (!ok) return;
+  const activeTreePath = treePath.peek();
+  const activeFilePath = filePath.peek();
   const r = await postJson<ApiError>(`api/groups/${groupId.value}/delete`, { path: entry.path });
   if (!r.ok) {
     showToast('delete failed: ' + (r.data.error || r.status), 'err');
     return;
   }
   dropPinned([entry.path]);
+  if (isAtOrBelow(activeFilePath, entry.path) || isAtOrBelow(activeTreePath, entry.path)) {
+    await navTree(parentPath(entry.path));
+    return;
+  }
   await loadTree(treePath.value);
 }
 

@@ -373,11 +373,12 @@
   align-items: center;
   gap: 10px;
   width: 100%;
+  min-height: var(--menu-item-min-height);
   background: transparent;
   border: 0;
   cursor: pointer;
   padding: 8px 14px;
-  font-size: var(--font-sm);
+  font-size: var(--menu-item-font-size);
   line-height: 1.4;
   color: inherit;
   text-align: left;
