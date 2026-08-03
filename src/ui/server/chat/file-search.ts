@@ -10,7 +10,7 @@ export const FILE_SEARCH_SCAN_LIMIT = 50_000;
 export interface FileSearchResult {
   path: string;
   name: string;
-  type: 'file';
+  type: 'file' | 'dir';
   size?: number;
   mtime?: string;
   tier?: 'member' | 'admin';
@@ -78,12 +78,14 @@ export async function searchFilesByName(
       if (classification.kind === 'hidden') continue;
       if (classification.tier === 'admin' && !isAdmin) continue;
 
+      const isDirectory = entry.isDirectory();
+      const isFile = entry.isFile();
+      if (!isDirectory && !isFile) continue;
+
       if (entry.isDirectory()) {
         const child = resolveSafe(groupDir, relative);
         if (child) queue.push({ absolute: child, relative });
-        continue;
       }
-      if (!entry.isFile()) continue;
 
       const rank = matchRank(entry.name, needle);
       if (rank == null) continue;
@@ -91,12 +93,12 @@ export async function searchFilesByName(
       const result: FileSearchResult = {
         path: relative,
         name: entry.name,
-        type: 'file',
+        type: isDirectory ? 'dir' : 'file',
         tier: classification.tier,
       };
       try {
         const stat = await fs.stat(path.join(directory.absolute, entry.name));
-        result.size = stat.size;
+        if (isFile) result.size = stat.size;
         result.mtime = stat.mtime.toISOString();
       } catch {
         // A matching file can disappear between readdir and stat.

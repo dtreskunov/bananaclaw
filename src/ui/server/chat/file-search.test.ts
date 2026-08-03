@@ -30,12 +30,24 @@ describe('searchFilesByName', () => {
 
     const response = await searchFilesByName(ROOT, 'docs', 'NOTES', false);
 
-    expect(response?.results.map((entry) => entry.path)).toEqual([
-      'docs/nested/notes.md',
-      'docs/notes-archive.md',
-      'docs/my-notes.txt',
+    expect(response?.results.map((entry) => [entry.path, entry.type])).toEqual([
+      ['docs/nested/notes.md', 'file'],
+      ['docs/notes-archive.md', 'file'],
+      ['docs/my-notes.txt', 'file'],
     ]);
     expect(response?.truncated).toBe(false);
+  });
+
+  it('returns matching directories and still searches inside them', async () => {
+    write('docs/notes/reference.txt');
+    write('docs/archive/notes.txt');
+
+    const response = await searchFilesByName(ROOT, 'docs', 'notes', false);
+
+    expect(response?.results.map((entry) => [entry.path, entry.type])).toEqual([
+      ['docs/notes', 'dir'],
+      ['docs/archive/notes.txt', 'file'],
+    ]);
   });
 
   it('applies hidden and admin visibility rules throughout the traversal', async () => {
@@ -49,6 +61,7 @@ describe('searchFilesByName', () => {
 
     expect(member?.results.map((entry) => entry.path)).toEqual(['docs/public.txt']);
     expect(admin?.results.map((entry) => entry.path)).toEqual([
+      'docs/.private',
       'docs/.private/secret.txt',
       'docs/container.json',
       'docs/public.txt',

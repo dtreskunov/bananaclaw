@@ -11,7 +11,7 @@ import {
 } from '../state';
 import {
   navTree, navFile, closePreview, togglePinnedFile, loadTree, selectFile,
-  openFileSearch, openFileSearchResult, searchFiles, clearFileSearch,
+  openFileSearch, openFileSearchDirectory, openFileSearchResult, searchFiles, clearFileSearch,
 } from '../actions';
 import {
   uploadFiles, clearUploadStrip, resolveConflict, notifyAgent, saveFile,
@@ -457,6 +457,10 @@ function SearchListing({ onEdit, onNewFile, onUpload }: Omit<RowProps, 'e'>) {
     if (groupId.value && fileSearchQuery.value) searchFiles(groupId.value, fileSearchQuery.value).catch(console.error);
   };
   const openResult = (entry: TreeEntry): void => {
+    if (entry.type === 'dir') {
+      if (groupId.value) openFileSearchDirectory(groupId.value, entry.path, fileSearchQuery.value).catch(console.error);
+      return;
+    }
     fileSearchSelectedPath.value = entry.path;
     openFileSearchResult(entry).catch(console.error);
   };
@@ -474,9 +478,9 @@ function SearchListing({ onEdit, onNewFile, onUpload }: Omit<RowProps, 'e'>) {
     );
   }
   if (results === null) return <div class="listing search-listing"></div>;
-  if (results.length === 0) return <div class="listing search-listing"><div class="empty" role="status">No matching files</div></div>;
+  if (results.length === 0) return <div class="listing search-listing"><div class="empty" role="status">No matching files or folders</div></div>;
   return (
-    <div class="listing search-listing" aria-label={`${results.length} file search results`}>
+    <div class="listing search-listing" aria-label={`${results.length} file and folder search results`}>
       {fileSearchTruncated.value ? <div class="search-limit" role="status">Showing first {results.length} matches</div> : null}
       {results.map((entry) => (
         <Row

@@ -18429,6 +18429,12 @@ async function openFileSearchResult(entry) {
   writeHash();
   await selection;
 }
+async function openFileSearchDirectory(gid, path, query) {
+  fileSearchRoot.value = path;
+  fileSearchSelectedPath.value = null;
+  await navTree(path);
+  await searchFiles(gid, query);
+}
 var filePreviewRevision = 0;
 function refreshableFileUrl(url) {
   filePreviewRevision += 1;
@@ -18473,8 +18479,7 @@ async function selectFile(entry) {
   if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) setPreview({ kind: "image", ...refreshableMeta() });
   else if (["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"].includes(ext))
     setPreview({ kind: "audio", ...refreshableMeta() });
-  else if (["mp4", "m4v", "mov", "webm", "ogv"].includes(ext))
-    setPreview({ kind: "video", ...refreshableMeta() });
+  else if (["mp4", "m4v", "mov", "webm", "ogv"].includes(ext)) setPreview({ kind: "video", ...refreshableMeta() });
   else if (ext === "pdf") setPreview({ kind: "pdf", ...refreshableMeta() });
   else {
     try {
@@ -22976,6 +22981,10 @@ function SearchListing({ onEdit, onNewFile, onUpload }) {
     if (groupId.value && fileSearchQuery.value) searchFiles(groupId.value, fileSearchQuery.value).catch(console.error);
   };
   const openResult = (entry) => {
+    if (entry.type === "dir") {
+      if (groupId.value) openFileSearchDirectory(groupId.value, entry.path, fileSearchQuery.value).catch(console.error);
+      return;
+    }
     fileSearchSelectedPath.value = entry.path;
     openFileSearchResult(entry).catch(console.error);
   };
@@ -22992,8 +23001,8 @@ function SearchListing({ onEdit, onNewFile, onUpload }) {
     ] }) });
   }
   if (results === null) return /* @__PURE__ */ u4("div", { class: "listing search-listing" });
-  if (results.length === 0) return /* @__PURE__ */ u4("div", { class: "listing search-listing", children: /* @__PURE__ */ u4("div", { class: "empty", role: "status", children: "No matching files" }) });
-  return /* @__PURE__ */ u4("div", { class: "listing search-listing", "aria-label": `${results.length} file search results`, children: [
+  if (results.length === 0) return /* @__PURE__ */ u4("div", { class: "listing search-listing", children: /* @__PURE__ */ u4("div", { class: "empty", role: "status", children: "No matching files or folders" }) });
+  return /* @__PURE__ */ u4("div", { class: "listing search-listing", "aria-label": `${results.length} file and folder search results`, children: [
     fileSearchTruncated.value ? /* @__PURE__ */ u4("div", { class: "search-limit", role: "status", children: [
       "Showing first ",
       results.length,

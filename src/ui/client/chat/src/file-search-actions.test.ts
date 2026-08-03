@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearFileSearch, closePreview, openFileSearch, searchFiles, selectFile } from './actions';
+import {
+  clearFileSearch,
+  closePreview,
+  openFileSearch,
+  openFileSearchDirectory,
+  searchFiles,
+  selectFile,
+} from './actions';
 import {
   fileSearchLoading,
   fileSearchOpen,
@@ -9,6 +16,7 @@ import {
   fileSearchTruncated,
   groupId,
   previewBlock,
+  treePath,
 } from './state';
 import type { TreeEntry } from './types';
 
@@ -92,6 +100,28 @@ describe('searchFiles', () => {
     expect(fileSearchOpen.value).toBe(false);
     expect(fileSearchResults.value).toBeNull();
     expect(fileSearchLoading.value).toBe(false);
+  });
+
+  it('drills into a directory result and reruns the retained query in that scope', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ entries: [] }),
+      } as Response)
+      .mockResolvedValueOnce(responseWith([result('docs/notes/reference.txt')]));
+    vi.stubGlobal('fetch', fetchMock);
+    groupId.value = 'agent';
+    openFileSearch('docs');
+
+    await openFileSearchDirectory('agent', 'docs/notes', 'reference');
+
+    expect(treePath.value).toBe('docs/notes');
+    expect(fileSearchRoot.value).toBe('docs/notes');
+    expect(fileSearchQuery.value).toBe('reference');
+    expect(fileSearchResults.value?.map((entry) => entry.path)).toEqual(['docs/notes/reference.txt']);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('path=docs%2Fnotes&q=reference');
   });
 });
 

@@ -1189,6 +1189,13 @@ export async function openFileSearchResult(
   await selection;
 }
 
+export async function openFileSearchDirectory(gid: string, path: string, query: string): Promise<void> {
+  fileSearchRoot.value = path;
+  fileSearchSelectedPath.value = null;
+  await navTree(path);
+  await searchFiles(gid, query);
+}
+
 let filePreviewRevision = 0;
 
 function refreshableFileUrl(url: string): string {
