@@ -15,14 +15,15 @@ interface Props {
 
 export function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions, children }: Props) {
   const mobile = isMobile.value;
-  const collapsed = !mobile && !paneOpen[paneKey].value;
-  const drawer = drawerOpen[paneKey].value;
+  const open = mobile ? drawerOpen[paneKey] : paneOpen[paneKey];
+  const collapsed = !mobile && !open.value;
+  const drawer = mobile && open.value;
   const cls = 'nc-pane ' + name
     + (collapsed ? ' collapsed' : '')
     + (drawer ? ' open' : '')
     + (extraClass ? ' ' + extraClass : '');
 
-  const toggle = (): void => { paneOpen[paneKey].value = !paneOpen[paneKey].value; };
+  const toggle = (): void => { open.value = !open.value; };
 
   const onPaneClick = (ev: JSX.TargetedMouseEvent<HTMLElement>): void => {
     if (!collapsed) return;
@@ -31,7 +32,6 @@ export function Pane({ paneKey, name, label, extraClass, headActions, collapsedA
   };
 
   const onHeadClick = (ev: JSX.TargetedMouseEvent<HTMLElement>): void => {
-    if (mobile) return;
     if ((ev.target as HTMLElement).closest('button, a')) return;
     ev.stopPropagation();
     toggle();

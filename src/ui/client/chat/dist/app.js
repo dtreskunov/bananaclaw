@@ -19246,11 +19246,12 @@ function ConfirmModal() {
 // src/components/Pane.tsx
 function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions, children }) {
   const mobile = isMobile.value;
-  const collapsed = !mobile && !paneOpen[paneKey].value;
-  const drawer = drawerOpen[paneKey].value;
+  const open = mobile ? drawerOpen[paneKey] : paneOpen[paneKey];
+  const collapsed = !mobile && !open.value;
+  const drawer = mobile && open.value;
   const cls = "nc-pane " + name + (collapsed ? " collapsed" : "") + (drawer ? " open" : "") + (extraClass ? " " + extraClass : "");
   const toggle = () => {
-    paneOpen[paneKey].value = !paneOpen[paneKey].value;
+    open.value = !open.value;
   };
   const onPaneClick = (ev) => {
     if (!collapsed) return;
@@ -19258,7 +19259,6 @@ function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions,
     paneOpen[paneKey].value = true;
   };
   const onHeadClick = (ev) => {
-    if (mobile) return;
     if (ev.target.closest("button, a")) return;
     ev.stopPropagation();
     toggle();
