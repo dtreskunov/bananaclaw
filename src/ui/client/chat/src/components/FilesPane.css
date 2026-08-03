@@ -10,7 +10,6 @@
 .files-pane .breadcrumb {
   display: flex; align-items: stretch;
   min-height: var(--rail-control-height);
-  border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: var(--font-sm);
   overflow: visible;
@@ -25,12 +24,8 @@
 }
 .files-pane .breadcrumb-path::-webkit-scrollbar { display: none; }
 .files-pane .breadcrumb .crumb-node { display: inline-flex; align-items: center; flex: 0 0 auto; }
-.files-pane .breadcrumb-actions {
-  display: flex;
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-.files-pane .breadcrumb-actions .action-menu { display: flex; }
+.files-pane .files-actions { flex: 0 0 auto; justify-content: flex-end; }
+.files-pane .files-actions .action-menu { display: flex; }
 .files-pane .breadcrumb .crumb {
   display: inline-flex; align-items: center;
   padding: 3px 6px; border-radius: var(--radius-md);
@@ -72,8 +67,8 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 }
 .files-pane .text-btn:hover { color: inherit; background: var(--wash); }
 
-.files-pane .breadcrumb-actions .attach-btn.active { background: var(--accent); opacity: 1; }
-.files-pane .breadcrumb-actions .save-btn { color: var(--accent); opacity: 1; }
+.files-pane .files-actions .attach-btn.active { background: var(--accent); opacity: 1; }
+.files-pane .files-actions .save-btn { color: var(--accent); opacity: 1; }
 
 /* In-place text editor for the file preview. */
 .files-pane .file-editor {

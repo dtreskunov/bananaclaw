@@ -323,7 +323,7 @@ export function ThreadsRail() {
       label="Threads"
       collapsedActions={collapsedActions}
     >
-      <div class="threads-actions">
+      <div class="threads-actions rail-actions-row rail-divider-row">
         <button
           type="button"
           class="thread-action-btn accent-icon-btn new-thread-action-btn"

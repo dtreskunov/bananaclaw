@@ -111,41 +111,8 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
   }, [p, fp]);
   let acc = '';
   return (
-    <div class="breadcrumb" id="crumb">
-      <div class="breadcrumb-path" ref={ref}>
-        <button
-          type="button"
-          class={'crumb root' + (segs.length === 0 && !fileName ? ' current' : '')}
-          data-path=""
-          title="Root"
-          onClick={() => { navTree(''); }}
-        >/</button>
-        {segs.map((s, i) => {
-          acc = acc ? acc + '/' + s : s;
-          const path = acc;
-          const last = i === segs.length - 1 && !fileName;
-          const onClick = last ? undefined : () => { navTree(path); };
-          return (
-            <span class="crumb-node" key={path}>
-              <span class="sep" aria-hidden="true">{'\u203a'}</span>
-              <button
-                type="button"
-                class={'crumb' + (last ? ' current' : '')}
-                data-path={path}
-                title={'/' + path}
-                onClick={onClick}
-              >{s}</button>
-            </span>
-          );
-        })}
-        {fileName ? (
-          <>
-            <span class="sep" aria-hidden="true">{'\u203a'}</span>
-            <span class="crumb file current" title={'/' + fp}>{fileName}</span>
-          </>
-        ) : null}
-      </div>
-      <div class="breadcrumb-actions">
+    <>
+      <div class="files-actions rail-actions-row rail-divider-row">
         <input
           type="file"
           id="upload-input"
@@ -228,7 +195,42 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
           </>
         )}
       </div>
-    </div>
+      <div class="breadcrumb rail-divider-row" id="crumb">
+        <div class="breadcrumb-path" ref={ref}>
+          <button
+            type="button"
+            class={'crumb root' + (segs.length === 0 && !fileName ? ' current' : '')}
+            data-path=""
+            title="Root"
+            onClick={() => { navTree(''); }}
+          >/</button>
+          {segs.map((s, i) => {
+            acc = acc ? acc + '/' + s : s;
+            const path = acc;
+            const last = i === segs.length - 1 && !fileName;
+            const onClick = last ? undefined : () => { navTree(path); };
+            return (
+              <span class="crumb-node" key={path}>
+                <span class="sep" aria-hidden="true">{'\u203a'}</span>
+                <button
+                  type="button"
+                  class={'crumb' + (last ? ' current' : '')}
+                  data-path={path}
+                  title={'/' + path}
+                  onClick={onClick}
+                >{s}</button>
+              </span>
+            );
+          })}
+          {fileName ? (
+            <>
+              <span class="sep" aria-hidden="true">{'\u203a'}</span>
+              <span class="crumb file current" title={'/' + fp}>{fileName}</span>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </>
   );
 }
 

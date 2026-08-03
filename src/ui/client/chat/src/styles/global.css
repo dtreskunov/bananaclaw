@@ -160,6 +160,25 @@ button:hover { background: var(--wash); }
   cursor: pointer;
 }
 .rail-control-btn:hover:not(:disabled) { background: var(--wash); opacity: 1; }
+.rail-actions-row {
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--rail-control-height) + 16px);
+  margin: 0;
+  padding: 8px;
+  border: 0;
+  border-radius: 0;
+}
+.rail-divider-row { position: relative; }
+.rail-divider-row::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-bottom: 1px solid var(--border);
+  pointer-events: none;
+}
 .plus-glyph {
   position: relative;
   display: block;

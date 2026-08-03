@@ -178,6 +178,27 @@ button:hover {
   background: var(--wash);
   opacity: 1;
 }
+.rail-actions-row {
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--rail-control-height) + 16px);
+  margin: 0;
+  padding: 8px;
+  border: 0;
+  border-radius: 0;
+}
+.rail-divider-row {
+  position: relative;
+}
+.rail-divider-row::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-bottom: 1px solid var(--border);
+  pointer-events: none;
+}
 .plus-glyph {
   position: relative;
   display: block;
@@ -995,13 +1016,6 @@ nav.tab-bar-strip.group-strip {
   top: var(--handle-h);
   left: 0;
   right: 0;
-  display: flex;
-  align-items: center;
-  min-height: var(--rail-control-height);
-  margin: 8px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .threads-rail .thread-action-btn {
@@ -2901,7 +2915,6 @@ nav.tab-bar-strip.group-strip {
   display: flex;
   align-items: stretch;
   min-height: var(--rail-control-height);
-  border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: var(--font-sm);
   overflow: visible;
@@ -2925,12 +2938,11 @@ nav.tab-bar-strip.group-strip {
   align-items: center;
   flex: 0 0 auto;
 }
-.files-pane .breadcrumb-actions {
-  display: flex;
+.files-pane .files-actions {
   flex: 0 0 auto;
-  margin-left: auto;
+  justify-content: flex-end;
 }
-.files-pane .breadcrumb-actions .action-menu {
+.files-pane .files-actions .action-menu {
   display: flex;
 }
 .files-pane .breadcrumb .crumb {
@@ -3050,11 +3062,11 @@ body.is-admin .files-pane.collapsed .admin-only {
   color: inherit;
   background: var(--wash);
 }
-.files-pane .breadcrumb-actions .attach-btn.active {
+.files-pane .files-actions .attach-btn.active {
   background: var(--accent);
   opacity: 1;
 }
-.files-pane .breadcrumb-actions .save-btn {
+.files-pane .files-actions .save-btn {
   color: var(--accent);
   opacity: 1;
 }

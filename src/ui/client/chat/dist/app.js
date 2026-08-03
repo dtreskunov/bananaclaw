@@ -19558,7 +19558,7 @@ function ThreadsRail() {
       label: "Threads",
       collapsedActions,
       children: [
-        /* @__PURE__ */ u4("div", { class: "threads-actions", children: [
+        /* @__PURE__ */ u4("div", { class: "threads-actions rail-actions-row rail-divider-row", children: [
           /* @__PURE__ */ u4(
             "button",
             {
@@ -22358,49 +22358,8 @@ function Crumb({ editor }) {
     });
   }, [p5, fp]);
   let acc = "";
-  return /* @__PURE__ */ u4("div", { class: "breadcrumb", id: "crumb", children: [
-    /* @__PURE__ */ u4("div", { class: "breadcrumb-path", ref, children: [
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "crumb root" + (segs.length === 0 && !fileName ? " current" : ""),
-          "data-path": "",
-          title: "Root",
-          onClick: () => {
-            navTree("");
-          },
-          children: "/"
-        }
-      ),
-      segs.map((s5, i5) => {
-        acc = acc ? acc + "/" + s5 : s5;
-        const path = acc;
-        const last = i5 === segs.length - 1 && !fileName;
-        const onClick = last ? void 0 : () => {
-          navTree(path);
-        };
-        return /* @__PURE__ */ u4("span", { class: "crumb-node", children: [
-          /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "crumb" + (last ? " current" : ""),
-              "data-path": path,
-              title: "/" + path,
-              onClick,
-              children: s5
-            }
-          )
-        ] }, path);
-      }),
-      fileName ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
-        /* @__PURE__ */ u4("span", { class: "crumb file current", title: "/" + fp, children: fileName })
-      ] }) : null
-    ] }),
-    /* @__PURE__ */ u4("div", { class: "breadcrumb-actions", children: [
+  return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("div", { class: "files-actions rail-actions-row rail-divider-row", children: [
       /* @__PURE__ */ u4(
         "input",
         {
@@ -22515,7 +22474,48 @@ function Crumb({ editor }) {
           }
         )
       ] })
-    ] })
+    ] }),
+    /* @__PURE__ */ u4("div", { class: "breadcrumb rail-divider-row", id: "crumb", children: /* @__PURE__ */ u4("div", { class: "breadcrumb-path", ref, children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "crumb root" + (segs.length === 0 && !fileName ? " current" : ""),
+          "data-path": "",
+          title: "Root",
+          onClick: () => {
+            navTree("");
+          },
+          children: "/"
+        }
+      ),
+      segs.map((s5, i5) => {
+        acc = acc ? acc + "/" + s5 : s5;
+        const path = acc;
+        const last = i5 === segs.length - 1 && !fileName;
+        const onClick = last ? void 0 : () => {
+          navTree(path);
+        };
+        return /* @__PURE__ */ u4("span", { class: "crumb-node", children: [
+          /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "crumb" + (last ? " current" : ""),
+              "data-path": path,
+              title: "/" + path,
+              onClick,
+              children: s5
+            }
+          )
+        ] }, path);
+      }),
+      fileName ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
+        /* @__PURE__ */ u4("span", { class: "crumb file current", title: "/" + fp, children: fileName })
+      ] }) : null
+    ] }) })
   ] });
 }
 function Row({ e: e4 }) {

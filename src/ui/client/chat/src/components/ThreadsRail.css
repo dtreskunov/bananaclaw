@@ -31,11 +31,6 @@
 
 .threads-rail .threads-actions {
   position: absolute; top: var(--handle-h); left: 0; right: 0;
-  display: flex; align-items: center;
-  min-height: var(--rail-control-height);
-  margin: 8px; padding: 0;
-  border: 0;
-  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .threads-rail .thread-action-btn {
