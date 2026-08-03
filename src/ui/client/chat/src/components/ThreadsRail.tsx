@@ -326,11 +326,11 @@ export function ThreadsRail() {
       <div class="threads-actions">
         <button
           type="button"
-          class="thread-action-btn new-thread-action-btn"
+          class="thread-action-btn accent-icon-btn new-thread-action-btn"
           title="New thread"
           aria-label="New thread"
           onClick={onNewChat}
-        >+</button>
+        ><span class="plus-glyph" aria-hidden="true">+</span></button>
         <input
           ref={searchInputRef}
           type="text"

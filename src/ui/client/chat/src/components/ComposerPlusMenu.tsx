@@ -61,7 +61,7 @@ export function ComposerPlusMenu({
           ev.stopPropagation();
           setOpen((o) => !o);
         }}
-      >{'\u002B'}</button>
+      ><span class="plus-glyph" aria-hidden="true">{'\u002B'}</span></button>
       {open ? (
         <div class="composer-plus-panel" role="menu">
           {showQuickCapture ? (

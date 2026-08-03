@@ -55,6 +55,9 @@
   --font-lg: 14px;
   --font-xl: 15px;
   --message-input-font-size: var(--font-lg);
+  --accent-icon-font-size: 18px;
+  --control-action-size: 28px;
+  --plus-glyph-size: 12px;
 
   /* Monospace font stack. */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -92,17 +95,66 @@ html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll
 
 .chat-main textarea::placeholder,
 .threads-rail .search-input::placeholder {
+  font-family: inherit;
+  font-size: inherit;
+  font-style: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
   color: var(--muted);
   opacity: 0.7;
 }
 
 @media (max-width: 720px) {
-  :root { --message-input-font-size: 16px; }
+  :root {
+    --message-input-font-size: 16px;
+    --accent-icon-font-size: 22px;
+    --control-action-size: 40px;
+    --plus-glyph-size: 14px;
+  }
 }
 body { font: 14px/1.4 system-ui, -apple-system, sans-serif; height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }
 #app { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 button { font: inherit; padding: 4px 10px; border: 1px solid var(--border); background: transparent; border-radius: var(--radius-md); cursor: pointer; color: inherit; }
 button:hover { background: var(--wash); }
+.accent-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent-strong, var(--accent));
+  color: var(--accent-fg, #fff);
+  font: inherit;
+  font-size: var(--accent-icon-font-size);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+}
+.accent-icon-btn:hover:not(:disabled) { background: var(--accent-strong, var(--accent)); opacity: 0.9; }
+.accent-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.plus-glyph {
+  position: relative;
+  display: block;
+  width: var(--plus-glyph-size);
+  height: var(--plus-glyph-size);
+  font-size: 0;
+  pointer-events: none;
+}
+.plus-glyph::before,
+.plus-glyph::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 1px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+.plus-glyph::before { width: 100%; height: 2px; }
+.plus-glyph::after { width: 2px; height: 100%; }
 .icon-btn { padding: 4px 8px; }
 .empty { color: var(--muted); padding: 16px; font-style: italic; font-size: var(--font-base); }
 

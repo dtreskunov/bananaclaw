@@ -19563,11 +19563,11 @@ function ThreadsRail() {
             "button",
             {
               type: "button",
-              class: "thread-action-btn new-thread-action-btn",
+              class: "thread-action-btn accent-icon-btn new-thread-action-btn",
               title: "New thread",
               "aria-label": "New thread",
               onClick: onNewChat,
-              children: "+"
+              children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
             }
           ),
           /* @__PURE__ */ u4(
@@ -19878,7 +19878,7 @@ function ComposerPlusMenu({
           ev.stopPropagation();
           setOpen((o4) => !o4);
         },
-        children: "+"
+        children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
       }
     ),
     open ? /* @__PURE__ */ u4("div", { class: "composer-plus-panel", role: "menu", children: [
@@ -21107,7 +21107,7 @@ function QuestionCardItem({ question: q5, busy }) {
               "button",
               {
                 type: "submit",
-                class: "question-response-send",
+                class: "accent-icon-btn question-response-send",
                 "aria-label": "Send answer",
                 title: recording || transcribeStatus ? "Stop, transcribe, and send" : "Send answer",
                 disabled: busy || !answer.trim() && !recording && !transcribeStatus,
@@ -21486,6 +21486,7 @@ function Composer() {
               {
                 type: "submit",
                 id: "chat-send",
+                class: "accent-icon-btn",
                 "aria-label": "Send",
                 title: recording || transcribeStatus ? "Stop, transcribe, and send" : "Send",
                 disabled: composerDisabled,

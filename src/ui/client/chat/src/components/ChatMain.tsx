@@ -1290,7 +1290,7 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
                 ) : null}
                 <button
                   type="submit"
-                  class="question-response-send"
+                  class="accent-icon-btn question-response-send"
                   aria-label="Send answer"
                   title={recording || transcribeStatus ? 'Stop, transcribe, and send' : 'Send answer'}
                   disabled={busy || (!answer.trim() && !recording && !transcribeStatus)}
@@ -1744,6 +1744,7 @@ function Composer() {
           <button
             type="submit"
             id="chat-send"
+            class="accent-icon-btn"
             aria-label="Send"
             title={recording || transcribeStatus ? 'Stop, transcribe, and send' : 'Send'}
             disabled={composerDisabled}
