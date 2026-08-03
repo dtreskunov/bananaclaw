@@ -95,6 +95,12 @@ export function parentPath(p: string): string {
   return i < 0 ? '' : p.slice(0, i);
 }
 
+export function pathBelowRoot(path: string, root: string): string {
+  if (!root) return path ? '/' + path : '';
+  if (path === root) return '';
+  return path.startsWith(root + '/') ? path.slice(root.length) : '/' + path;
+}
+
 // Pre-process raw markdown to make file-link destinations parseable when the
 // model emits unescaped spaces or parens in the URL — e.g.
 // [`Foo (v2).mp3`](music/Foo (v2).mp3). CommonMark allows wrapping the

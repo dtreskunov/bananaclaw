@@ -16960,6 +16960,11 @@ function parentPath(p5) {
   const i5 = p5.lastIndexOf("/");
   return i5 < 0 ? "" : p5.slice(0, i5);
 }
+function pathBelowRoot(path, root) {
+  if (!root) return path ? "/" + path : "";
+  if (path === root) return "";
+  return path.startsWith(root + "/") ? path.slice(root.length) : "/" + path;
+}
 function normalizeFileLinks(text) {
   const re = /\[([^\]\n]+)\]\(([^<>\n()]*(?:\([^()\n]*\)[^<>\n()]*)*)\)/g;
   return text.replace(re, (match2, label, dest) => {
@@ -22946,6 +22951,7 @@ function Crumb({
 function Row({ e: e4, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntryChanged }) {
   const active = e4.path === filePath.value || showPath && e4.path === fileSearchSelectedPath.value;
   const selected = pinnedContext.value.includes(e4.path);
+  const resultPath = showPath ? pathBelowRoot(parentPath(e4.path), fileSearchRoot.value) : "";
   const onClick = (ev) => {
     const t4 = ev.target;
     if (t4.closest(".row-sel") || t4.closest(".action-menu")) return;
@@ -22958,10 +22964,7 @@ function Row({ e: e4, onEdit, onNewFile, onUpload, onOpen, showPath = false, onE
     /* @__PURE__ */ u4("div", { children: e4.type === "dir" ? "\u{1F4C1}" : "\u{1F4C4}" }),
     /* @__PURE__ */ u4("div", { class: "name", children: [
       /* @__PURE__ */ u4("span", { children: e4.name }),
-      showPath ? /* @__PURE__ */ u4("span", { class: "result-path", children: [
-        "/",
-        parentPath(e4.path)
-      ] }) : null
+      resultPath ? /* @__PURE__ */ u4("span", { class: "result-path", children: resultPath }) : null
     ] }),
     /* @__PURE__ */ u4("div", { class: "size", children: fmtBytes(e4.size) }),
     /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: e4.mtime }) }),

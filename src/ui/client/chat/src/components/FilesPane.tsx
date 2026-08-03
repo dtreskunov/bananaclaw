@@ -18,7 +18,7 @@ import {
   uploadFiles, clearUploadStrip, resolveConflict, notifyAgent, saveFile,
   createFile, promptNewFilePath, promptSaveAsPath, isEditableFileName,
 } from '../uploads';
-import { fmtBytes, renderMarkdown, parentPath } from '../utils';
+import { fmtBytes, renderMarkdown, parentPath, pathBelowRoot } from '../utils';
 import { Pane } from './Pane';
 import { RelativeTime } from './RelativeTime';
 import { ActionsMenu } from './ActionsMenu';
@@ -423,6 +423,7 @@ interface RowProps {
 function Row({ e, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntryChanged }: RowProps) {
   const active = e.path === filePath.value || (showPath && e.path === fileSearchSelectedPath.value);
   const selected = pinnedContext.value.includes(e.path);
+  const resultPath = showPath ? pathBelowRoot(parentPath(e.path), fileSearchRoot.value) : '';
   const onClick = (ev: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
     const t = ev.target as HTMLElement;
     if (t.closest('.row-sel') || t.closest('.action-menu')) return;
@@ -438,7 +439,7 @@ function Row({ e, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntry
       <div>{e.type === 'dir' ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}</div>
       <div class="name">
         <span>{e.name}</span>
-        {showPath ? <span class="result-path">/{parentPath(e.path)}</span> : null}
+        {resultPath ? <span class="result-path">{resultPath}</span> : null}
       </div>
       <div class="size">{fmtBytes(e.size)}</div>
       <div class="meta"><RelativeTime ts={e.mtime} /></div>
