@@ -1,6 +1,6 @@
 // Unified actions menu for a directory context or a single file-system entry.
 import './ActionsMenu.css';
-import type { JSX } from 'preact';
+import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
   pinnedContext, isAdmin, treeEntries, groupId, shareModalRequest,
@@ -92,7 +92,7 @@ type Sep = '---';
 type Item = ItemDef | Sep;
 
 interface Props {
-  mode: 'directory' | 'entry';
+  mode: 'create' | 'directory' | 'entry';
   entry?: TreeEntry;
   onNewFile?: () => void;
   onUpload?: () => void;
@@ -101,6 +101,10 @@ interface Props {
   includeSelection?: boolean;
   triggerClassName?: string;
   triggerTitle?: string;
+  triggerContent?: ComponentChildren;
+  showWhenEmpty?: boolean;
+  onAction?: () => void;
+  panelAlign?: 'start' | 'end';
 }
 
 export function ActionsMenu({
@@ -113,6 +117,10 @@ export function ActionsMenu({
   includeSelection = mode === 'directory',
   triggerClassName = 'text-btn',
   triggerTitle = 'Actions',
+  triggerContent = '\u22EF',
+  showWhenEmpty = false,
+  onAction,
+  panelAlign = 'end',
 }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -132,10 +140,10 @@ export function ActionsMenu({
   }, [open]);
 
   const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, onEntryChanged, includeSelection);
-  if (items.length === 0) return null;
+  if (items.length === 0 && !showWhenEmpty) return null;
 
   return (
-    <div class={'action-menu' + (open ? ' open' : '')} ref={wrapRef}>
+    <div class={`action-menu align-${panelAlign}${open ? ' open' : ''}`} ref={wrapRef}>
       <button
         type="button"
         class={`${triggerClassName} action-trigger`}
@@ -143,11 +151,12 @@ export function ActionsMenu({
         aria-expanded={open}
         title={triggerTitle}
         aria-label={triggerTitle}
+        disabled={items.length === 0}
         onClick={(ev: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
           ev.stopPropagation();
           setOpen(!open);
         }}
-      >{'\u22EF'}</button>
+      >{triggerContent}</button>
       {open ? (
         <div class="action-panel flush-menu-panel" role="menu">
           {items.map((it, i) => it === '---'
@@ -159,7 +168,12 @@ export function ActionsMenu({
                 role="menuitem"
                 key={`${i}:${it.label}`}
                 disabled={it.disabled}
-                onClick={(ev: JSX.TargetedMouseEvent<HTMLButtonElement>) => { ev.stopPropagation(); setOpen(false); it.onClick(); }}
+                onClick={(ev: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
+                  ev.stopPropagation();
+                  setOpen(false);
+                  onAction?.();
+                  it.onClick();
+                }}
               >
                 <span class="ico">{it.ico}</span>
                 <span class="lbl">{it.label}</span>
@@ -178,7 +192,7 @@ function appendGroup(items: Item[], group: Item[]): void {
 }
 
 function buildItems(
-  mode: 'directory' | 'entry',
+  mode: 'create' | 'directory' | 'entry',
   entry: TreeEntry | undefined,
   onNewFile?: () => void,
   onUpload?: () => void,
@@ -190,16 +204,18 @@ function buildItems(
   const gid = groupId.value;
   if (mode === 'entry') return entry ? buildEntryItems(entry, gid, admin, onEdit, onEntryChanged) : [];
 
+  if (mode === 'create') {
+    if (!admin) return [];
+    const items: Item[] = [];
+    if (onNewFile) items.push({ ico: '\uD83D\uDCC4', label: 'New file', onClick: onNewFile });
+    items.push({ ico: '\uD83D\uDCC1', label: 'New folder', onClick: () => mkdirPrompt(entry?.path) });
+    if (onUpload) items.push({ ico: '\u2B06', label: 'Upload files\u2026', onClick: onUpload });
+    return items;
+  }
+
   const sel = pinnedContext.value;
   const selEntries = entriesByPath(sel);
   const items: Item[] = [];
-  const createItems: Item[] = [];
-  if (admin) {
-    if (onNewFile) createItems.push({ ico: '\uD83D\uDCC4', label: 'New file', onClick: onNewFile });
-    createItems.push({ ico: '\uD83D\uDCC1', label: 'New folder', onClick: () => mkdirPrompt(entry?.path) });
-    if (onUpload) createItems.push({ ico: '\u2B06', label: 'Upload files\u2026', onClick: onUpload });
-  }
-  appendGroup(items, createItems);
   if (entry) appendGroup(items, buildEntryItems(entry, gid, admin, undefined, onEntryChanged));
   if (includeSelection && sel.length > 0) {
     const selectionItems: Item[] = [

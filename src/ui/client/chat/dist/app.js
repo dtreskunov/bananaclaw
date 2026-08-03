@@ -19719,7 +19719,7 @@ function ThreadsRail() {
             "button",
             {
               type: "button",
-              class: "thread-action-btn accent-icon-btn new-thread-action-btn",
+              class: "thread-action-btn accent-icon-btn rail-primary-action-btn new-thread-action-btn",
               title: "New thread",
               "aria-label": "New thread",
               onClick: onNewChat,
@@ -19731,7 +19731,7 @@ function ThreadsRail() {
             {
               ref: searchInputRef,
               type: "text",
-              class: "search-input",
+              class: "rail-search-input search-input",
               placeholder: "Search all threads...",
               onKeyDown: onSearchKeyDown,
               "aria-label": "Search threads"
@@ -22158,7 +22158,11 @@ function ActionsMenu({
   onEntryChanged,
   includeSelection = mode === "directory",
   triggerClassName = "text-btn",
-  triggerTitle = "Actions"
+  triggerTitle = "Actions",
+  triggerContent = "\u22EF",
+  showWhenEmpty = false,
+  onAction,
+  panelAlign = "end"
 }) {
   const [open, setOpen] = h2(false);
   const wrapRef = A2(null);
@@ -22178,8 +22182,8 @@ function ActionsMenu({
     };
   }, [open]);
   const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, onEntryChanged, includeSelection);
-  if (items.length === 0) return null;
-  return /* @__PURE__ */ u4("div", { class: "action-menu" + (open ? " open" : ""), ref: wrapRef, children: [
+  if (items.length === 0 && !showWhenEmpty) return null;
+  return /* @__PURE__ */ u4("div", { class: `action-menu align-${panelAlign}${open ? " open" : ""}`, ref: wrapRef, children: [
     /* @__PURE__ */ u4(
       "button",
       {
@@ -22189,11 +22193,12 @@ function ActionsMenu({
         "aria-expanded": open,
         title: triggerTitle,
         "aria-label": triggerTitle,
+        disabled: items.length === 0,
         onClick: (ev) => {
           ev.stopPropagation();
           setOpen(!open);
         },
-        children: "\u22EF"
+        children: triggerContent
       }
     ),
     open ? /* @__PURE__ */ u4("div", { class: "action-panel flush-menu-panel", role: "menu", children: items.map((it, i5) => it === "---" ? /* @__PURE__ */ u4("div", { class: "action-sep" }, "s" + i5) : /* @__PURE__ */ u4(
@@ -22206,6 +22211,7 @@ function ActionsMenu({
         onClick: (ev) => {
           ev.stopPropagation();
           setOpen(false);
+          onAction?.();
           it.onClick();
         },
         children: [
@@ -22226,16 +22232,17 @@ function buildItems(mode, entry, onNewFile, onUpload, onEdit, onEntryChanged, in
   const admin = isAdmin.value;
   const gid = groupId.value;
   if (mode === "entry") return entry ? buildEntryItems(entry, gid, admin, onEdit, onEntryChanged) : [];
+  if (mode === "create") {
+    if (!admin) return [];
+    const items2 = [];
+    if (onNewFile) items2.push({ ico: "\u{1F4C4}", label: "New file", onClick: onNewFile });
+    items2.push({ ico: "\u{1F4C1}", label: "New folder", onClick: () => mkdirPrompt(entry?.path) });
+    if (onUpload) items2.push({ ico: "\u2B06", label: "Upload files\u2026", onClick: onUpload });
+    return items2;
+  }
   const sel = pinnedContext.value;
   const selEntries = entriesByPath(sel);
   const items = [];
-  const createItems = [];
-  if (admin) {
-    if (onNewFile) createItems.push({ ico: "\u{1F4C4}", label: "New file", onClick: onNewFile });
-    createItems.push({ ico: "\u{1F4C1}", label: "New folder", onClick: () => mkdirPrompt(entry?.path) });
-    if (onUpload) createItems.push({ ico: "\u2B06", label: "Upload files\u2026", onClick: onUpload });
-  }
-  appendGroup(items, createItems);
   if (entry) appendGroup(items, buildEntryItems(entry, gid, admin, void 0, onEntryChanged));
   if (includeSelection && sel.length > 0) {
     const selectionItems = [
@@ -22687,12 +22694,30 @@ function usePreviewEditor() {
     setDraft
   };
 }
-function Crumb({ editor }) {
+function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName, onAction, panelAlign }) {
+  return /* @__PURE__ */ u4(
+    ActionsMenu,
+    {
+      mode: "create",
+      entry: directory,
+      onNewFile,
+      onUpload: () => uploadInputRef.current?.click(),
+      triggerClassName,
+      triggerTitle: "Create or upload",
+      triggerContent: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }),
+      onAction,
+      panelAlign
+    }
+  );
+}
+function Crumb({
+  editor,
+  uploadInputRef,
+  searchInputRef
+}) {
   const ref = A2(null);
-  const uploadInputRef = A2(null);
   const fp = editor.creating ? editor.path : filePath.value;
   const p5 = fp ? parentPath(fp) : treePath.value;
-  const searchInputRef = A2(null);
   const preview = previewBlock.value;
   const currentDirectory = p5 ? { path: p5, name: p5.slice(p5.lastIndexOf("/") + 1), type: "dir" } : void 0;
   const previewEntry = fp ? { path: fp, name: preview?.name || fp.slice(fp.lastIndexOf("/") + 1), type: "file" } : void 0;
@@ -22721,172 +22746,164 @@ function Crumb({ editor }) {
   };
   const runSearch = () => {
     const query = searchInputRef.current?.value.trim();
-    if (query && groupId.value) searchFiles(groupId.value, query).catch(console.error);
+    if (!query) {
+      clearFileSearch();
+      return;
+    }
+    if (!groupId.value) return;
+    if (!fileSearchOpen.peek()) openFileSearch(p5);
+    searchFiles(groupId.value, query).catch(console.error);
   };
   const onSearchKeyDown = (ev) => {
     if (ev.key === "Enter") runSearch();
-    if (ev.key === "Escape") clearFileSearch();
+    if (ev.key === "Escape") {
+      ev.currentTarget.value = "";
+      clearFileSearch();
+    }
   };
   let acc = "";
   return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("div", { class: "files-actions rail-actions-row rail-divider-row" + (fileSearchOpen.value && !fp ? " searching" : ""), children: [
+    /* @__PURE__ */ u4("div", { class: "files-actions rail-actions-row rail-divider-row" + (fileSearchOpen.value && !fp ? " searching" : ""), children: editor.editing ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "rail-control-btn save-btn",
+          title: editor.saving ? "Saving" : "Save",
+          "aria-label": editor.saving ? "Saving" : "Save",
+          disabled: editor.saving,
+          onClick: () => {
+            editor.commitEdit().catch(console.error);
+          },
+          children: editor.saving ? "\u2026" : "\u2713"
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "rail-control-btn cancel-btn",
+          title: "Discard changes",
+          "aria-label": "Discard changes",
+          disabled: editor.saving,
+          onClick: () => {
+            editor.cancelEdit().catch(console.error);
+          },
+          children: "\xD7"
+        }
+      )
+    ] }) : previewEntry ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "rail-control-btn attach-btn" + (pinned ? " active" : ""),
+          title: pinned ? "Detach from next message" : "Attach to next message",
+          "aria-label": pinned ? "Detach from next message" : "Attach to next message",
+          "aria-pressed": pinned,
+          onClick: () => togglePinnedFile(fp),
+          children: "\u{1F4CE}"
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "rail-control-btn refresh-btn",
+          title: "Refresh file",
+          "aria-label": "Refresh file",
+          onClick: () => {
+            selectFile(previewEntry).catch(console.error);
+          },
+          children: "\u21BB"
+        }
+      ),
+      /* @__PURE__ */ u4(
+        ActionsMenu,
+        {
+          mode: "entry",
+          entry: previewEntry,
+          onEdit: editor.editable ? editor.beginEdit : void 0,
+          triggerClassName: "rail-control-btn",
+          triggerTitle: `Actions for ${previewEntry.name}`
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "rail-control-btn close-preview",
+          title: "Close preview",
+          "aria-label": "Close preview",
+          onClick: closePreview,
+          children: "\xD7"
+        }
+      )
+    ] }) : /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(
+        FileCreateMenu,
+        {
+          directory: currentDirectory,
+          uploadInputRef,
+          onNewFile: () => {
+            promptNewFilePath().then((path) => {
+              if (path) editor.beginCreate(path);
+            }).catch(console.error);
+          },
+          triggerClassName: "thread-action-btn accent-icon-btn rail-primary-action-btn file-create-btn",
+          panelAlign: "start"
+        }
+      ),
       /* @__PURE__ */ u4(
         "input",
         {
-          type: "file",
-          id: "upload-input",
-          multiple: true,
-          hidden: true,
-          ref: uploadInputRef,
-          onChange: (ev) => {
-            const files = ev.currentTarget.files;
-            if (files && files.length) uploadFiles(files);
-            ev.currentTarget.value = "";
-          }
+          ref: searchInputRef,
+          type: "text",
+          class: "rail-search-input file-search-input",
+          value: fileSearchQuery.value,
+          placeholder: fileSearchRoot.value ? `Search /${fileSearchRoot.value}...` : "Search all files...",
+          "aria-label": "Search files by name",
+          onInput: (ev) => {
+            fileSearchQuery.value = ev.currentTarget.value;
+          },
+          onKeyDown: onSearchKeyDown
         }
       ),
-      editor.editing ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "rail-control-btn save-btn",
-            title: editor.saving ? "Saving" : "Save",
-            "aria-label": editor.saving ? "Saving" : "Save",
-            disabled: editor.saving,
-            onClick: () => {
-              editor.commitEdit().catch(console.error);
-            },
-            children: editor.saving ? "\u2026" : "\u2713"
-          }
-        ),
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "rail-control-btn cancel-btn",
-            title: "Discard changes",
-            "aria-label": "Discard changes",
-            disabled: editor.saving,
-            onClick: () => {
-              editor.cancelEdit().catch(console.error);
-            },
-            children: "\xD7"
-          }
-        )
-      ] }) : previewEntry ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "rail-control-btn attach-btn" + (pinned ? " active" : ""),
-            title: pinned ? "Detach from next message" : "Attach to next message",
-            "aria-label": pinned ? "Detach from next message" : "Attach to next message",
-            "aria-pressed": pinned,
-            onClick: () => togglePinnedFile(fp),
-            children: "\u{1F4CE}"
-          }
-        ),
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "rail-control-btn refresh-btn",
-            title: "Refresh file",
-            "aria-label": "Refresh file",
-            onClick: () => {
-              selectFile(previewEntry).catch(console.error);
-            },
-            children: "\u21BB"
-          }
-        ),
-        /* @__PURE__ */ u4(
-          ActionsMenu,
-          {
-            mode: "entry",
-            entry: previewEntry,
-            onEdit: editor.editable ? editor.beginEdit : void 0,
-            triggerClassName: "rail-control-btn",
-            triggerTitle: `Actions for ${previewEntry.name}`
-          }
-        ),
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "rail-control-btn close-preview",
-            title: "Close preview",
-            "aria-label": "Close preview",
-            onClick: closePreview,
-            children: "\xD7"
-          }
-        )
-      ] }) : fileSearchOpen.value ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4(
-          "input",
-          {
-            ref: searchInputRef,
-            type: "search",
-            class: "file-search-input",
-            defaultValue: fileSearchQuery.value,
-            placeholder: fileSearchRoot.value ? `Search /${fileSearchRoot.value}` : "Search files",
-            "aria-label": "Search files by name",
-            onKeyDown: onSearchKeyDown
-          }
-        ),
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "rail-control-btn search-submit-btn",
-            title: "Search files",
-            "aria-label": "Search files",
-            onClick: runSearch,
-            children: fileSearchLoading.value ? "\u2026" : "\u{1F50D}"
-          }
-        )
-      ] }) : /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "rail-control-btn refresh-btn",
-            title: "Refresh folder",
-            "aria-label": "Refresh folder",
-            onClick: () => {
-              loadTree(treePath.peek()).catch(console.error);
-            },
-            children: "\u21BB"
-          }
-        ),
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "rail-control-btn search-toggle-btn",
-            title: "Search files",
-            "aria-label": "Search files",
-            onClick: () => openFileSearch(treePath.peek()),
-            children: "\u{1F50D}"
-          }
-        ),
-        /* @__PURE__ */ u4(
-          ActionsMenu,
-          {
-            mode: "directory",
-            entry: currentDirectory,
-            onNewFile: () => {
-              promptNewFilePath().then((path) => {
-                if (path) editor.beginCreate(path);
-              }).catch(console.error);
-            },
-            triggerClassName: "rail-control-btn",
-            triggerTitle: currentDirectory ? `Actions for ${currentDirectory.name}` : "Root folder actions",
-            onUpload: () => uploadInputRef.current?.click()
-          }
-        )
-      ] })
-    ] }),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "thread-action-btn rail-control-btn search-submit-btn",
+          title: "Search files",
+          "aria-label": "Search files",
+          onClick: runSearch,
+          children: fileSearchLoading.value ? "\u2026" : "\u{1F50D}"
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "thread-action-btn rail-control-btn refresh-btn",
+          title: "Refresh folder",
+          "aria-label": "Refresh folder",
+          onClick: () => {
+            loadTree(treePath.peek()).catch(console.error);
+          },
+          children: "\u21BB"
+        }
+      ),
+      /* @__PURE__ */ u4(
+        ActionsMenu,
+        {
+          mode: "directory",
+          entry: currentDirectory,
+          triggerClassName: "thread-action-btn rail-control-btn",
+          triggerTitle: currentDirectory ? `Actions for ${currentDirectory.name}` : "Root folder actions",
+          showWhenEmpty: true
+        }
+      )
+    ] }) }),
     /* @__PURE__ */ u4("div", { class: "breadcrumb rail-divider-row", id: "crumb", children: /* @__PURE__ */ u4("div", { class: "breadcrumb-path", ref, children: [
       /* @__PURE__ */ u4(
         "button",
@@ -23158,6 +23175,8 @@ function Preview({ editor }) {
 function FilesPane() {
   const editor = usePreviewEditor();
   const previewing = !!previewBlock.value || editor.editing;
+  const toolbarUploadRef = A2(null);
+  const searchInputRef = A2(null);
   const listingUploadRef = A2(null);
   const listingUploadDirectory = A2("");
   const editEntry = (entry) => {
@@ -23173,6 +23192,48 @@ function FilesPane() {
     listingUploadDirectory.current = directory;
     listingUploadRef.current?.click();
   };
+  const beginToolbarCreate = () => {
+    const ready = editor.editing ? editor.cancelEdit() : Promise.resolve(true);
+    ready.then((discarded) => discarded ? promptNewFilePath() : null).then((path) => {
+      if (path) editor.beginCreate(path);
+    }).catch(console.error);
+  };
+  const currentDirectory = treePath.value ? { path: treePath.value, name: treePath.value.slice(treePath.value.lastIndexOf("/") + 1), type: "dir" } : void 0;
+  const collapsedActions = /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4(
+      FileCreateMenu,
+      {
+        directory: currentDirectory,
+        uploadInputRef: toolbarUploadRef,
+        onNewFile: beginToolbarCreate,
+        triggerClassName: "icon-btn file-create-btn",
+        onAction: () => {
+          paneOpen.files.value = true;
+        }
+      }
+    ),
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "icon-btn search-toggle-btn",
+        title: "Search files",
+        "aria-label": "Search files",
+        onClick: (ev) => {
+          ev.stopPropagation();
+          const ready = editor.editing ? editor.cancelEdit() : Promise.resolve(true);
+          ready.then((discarded) => {
+            if (!discarded) return;
+            closePreview();
+            paneOpen.files.value = true;
+            openFileSearch(treePath.peek());
+            requestAnimationFrame(() => searchInputRef.current?.focus());
+          }).catch(console.error);
+        },
+        children: "\u{1F50D}"
+      }
+    )
+  ] });
   const bodyRef = A2(null);
   y2(() => {
     const body = bodyRef.current;
@@ -23221,33 +23282,58 @@ function FilesPane() {
       body.removeEventListener("drop", onDrop);
     };
   }, []);
-  return /* @__PURE__ */ u4(Pane, { paneKey: "files", name: "files-pane", label: "Files", extraClass: previewing ? "previewing" : "", children: /* @__PURE__ */ u4("div", { class: "files-body", ref: bodyRef, children: [
-    /* @__PURE__ */ u4(
-      "input",
-      {
-        type: "file",
-        multiple: true,
-        hidden: true,
-        ref: listingUploadRef,
-        onChange: (ev) => {
-          const files = ev.currentTarget.files;
-          if (files && files.length) uploadFiles(files, listingUploadDirectory.current);
-          ev.currentTarget.value = "";
-        }
-      }
-    ),
-    /* @__PURE__ */ u4(Crumb, { editor }),
-    /* @__PURE__ */ u4(UploadStrip, {}),
-    fileSearchOpen.value ? /* @__PURE__ */ u4(SearchListing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }) : /* @__PURE__ */ u4(Listing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }),
-    /* @__PURE__ */ u4("div", { class: "drop-hint admin-only", id: "dropzone", children: [
-      "Drag & drop files here to upload to ",
-      /* @__PURE__ */ u4("code", { id: "dropzone-path", children: [
-        "/",
-        treePath.value
+  return /* @__PURE__ */ u4(
+    Pane,
+    {
+      paneKey: "files",
+      name: "files-pane",
+      label: "Files",
+      extraClass: previewing ? "previewing" : "",
+      collapsedActions,
+      children: /* @__PURE__ */ u4("div", { class: "files-body", ref: bodyRef, children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "file",
+            id: "upload-input",
+            multiple: true,
+            hidden: true,
+            ref: toolbarUploadRef,
+            onChange: (ev) => {
+              const files = ev.currentTarget.files;
+              if (files && files.length) uploadFiles(files);
+              ev.currentTarget.value = "";
+            }
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "file",
+            multiple: true,
+            hidden: true,
+            ref: listingUploadRef,
+            onChange: (ev) => {
+              const files = ev.currentTarget.files;
+              if (files && files.length) uploadFiles(files, listingUploadDirectory.current);
+              ev.currentTarget.value = "";
+            }
+          }
+        ),
+        /* @__PURE__ */ u4(Crumb, { editor, uploadInputRef: toolbarUploadRef, searchInputRef }),
+        /* @__PURE__ */ u4(UploadStrip, {}),
+        fileSearchOpen.value ? /* @__PURE__ */ u4(SearchListing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }) : /* @__PURE__ */ u4(Listing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }),
+        /* @__PURE__ */ u4("div", { class: "drop-hint admin-only", id: "dropzone", children: [
+          "Drag & drop files here to upload to ",
+          /* @__PURE__ */ u4("code", { id: "dropzone-path", children: [
+            "/",
+            treePath.value
+          ] })
+        ] }),
+        /* @__PURE__ */ u4(Preview, { editor })
       ] })
-    ] }),
-    /* @__PURE__ */ u4(Preview, { editor })
-  ] }) });
+    }
+  );
 }
 
 // src/install.ts

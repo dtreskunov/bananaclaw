@@ -326,7 +326,7 @@ export function ThreadsRail() {
       <div class="threads-actions rail-actions-row rail-divider-row">
         <button
           type="button"
-          class="thread-action-btn accent-icon-btn new-thread-action-btn"
+          class="thread-action-btn accent-icon-btn rail-primary-action-btn new-thread-action-btn"
           title="New thread"
           aria-label="New thread"
           onClick={onNewChat}
@@ -334,7 +334,7 @@ export function ThreadsRail() {
         <input
           ref={searchInputRef}
           type="text"
-          class="search-input"
+          class="rail-search-input search-input"
           placeholder="Search all threads..."
           onKeyDown={onSearchKeyDown}
           aria-label="Search threads"

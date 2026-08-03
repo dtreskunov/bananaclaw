@@ -1,13 +1,14 @@
 // Files pane: head + breadcrumb + upload strip + listing + drop hint +
 // preview body.
 import './FilesPane.css';
-import type { ComponentChildren, JSX, VNode } from 'preact';
+import type { ComponentChildren, JSX, RefObject, VNode } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
   treePath, treeEntries, treeError, filePath, isAdmin,
   previewBlock, uploadItems, threadId, pinnedContext, groupId,
   fileSearchOpen, fileSearchRoot, fileSearchQuery, fileSearchResults,
   fileSearchLoading, fileSearchError, fileSearchTruncated, fileSearchSelectedPath,
+  paneOpen,
 } from '../state';
 import {
   navTree, navFile, closePreview, togglePinnedFile, loadTree, selectFile,
@@ -182,12 +183,43 @@ function usePreviewEditor(): PreviewEditorState {
   };
 }
 
-function Crumb({ editor }: { editor: PreviewEditorState }) {
+interface FileCreateMenuProps {
+  directory?: TreeEntry;
+  uploadInputRef: RefObject<HTMLInputElement>;
+  onNewFile: () => void;
+  triggerClassName: string;
+  onAction?: () => void;
+  panelAlign?: 'start' | 'end';
+}
+
+function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName, onAction, panelAlign }: FileCreateMenuProps) {
+  return (
+    <ActionsMenu
+      mode="create"
+      entry={directory}
+      onNewFile={onNewFile}
+      onUpload={() => uploadInputRef.current?.click()}
+      triggerClassName={triggerClassName}
+      triggerTitle="Create or upload"
+      triggerContent={<span class="plus-glyph" aria-hidden="true">+</span>}
+      onAction={onAction}
+      panelAlign={panelAlign}
+    />
+  );
+}
+
+function Crumb({
+  editor,
+  uploadInputRef,
+  searchInputRef,
+}: {
+  editor: PreviewEditorState;
+  uploadInputRef: RefObject<HTMLInputElement>;
+  searchInputRef: RefObject<HTMLInputElement>;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const fp = editor.creating ? editor.path : filePath.value;
   const p = fp ? parentPath(fp) : treePath.value;
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const preview = previewBlock.value;
   const currentDirectory = p
     ? { path: p, name: p.slice(p.lastIndexOf('/') + 1), type: 'dir' as const }
@@ -222,28 +254,25 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
   };
   const runSearch = (): void => {
     const query = searchInputRef.current?.value.trim();
-    if (query && groupId.value) searchFiles(groupId.value, query).catch(console.error);
+    if (!query) {
+      clearFileSearch();
+      return;
+    }
+    if (!groupId.value) return;
+    if (!fileSearchOpen.peek()) openFileSearch(p);
+    searchFiles(groupId.value, query).catch(console.error);
   };
   const onSearchKeyDown = (ev: JSX.TargetedKeyboardEvent<HTMLInputElement>): void => {
     if (ev.key === 'Enter') runSearch();
-    if (ev.key === 'Escape') clearFileSearch();
+    if (ev.key === 'Escape') {
+      ev.currentTarget.value = '';
+      clearFileSearch();
+    }
   };
   let acc = '';
   return (
     <>
       <div class={'files-actions rail-actions-row rail-divider-row' + (fileSearchOpen.value && !fp ? ' searching' : '')}>
-        <input
-          type="file"
-          id="upload-input"
-          multiple
-          hidden
-          ref={uploadInputRef}
-          onChange={(ev: JSX.TargetedEvent<HTMLInputElement>) => {
-            const files = ev.currentTarget.files;
-            if (files && files.length) uploadFiles(files);
-            ev.currentTarget.value = '';
-          }}
-        />
         {editor.editing ? (
           <>
             <button
@@ -295,52 +324,49 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
               onClick={closePreview}
             >{'\u00D7'}</button>
           </>
-        ) : fileSearchOpen.value ? (
-          <>
-            <input
-              ref={searchInputRef}
-              type="search"
-              class="file-search-input"
-              defaultValue={fileSearchQuery.value}
-              placeholder={fileSearchRoot.value ? `Search /${fileSearchRoot.value}` : 'Search files'}
-              aria-label="Search files by name"
-              onKeyDown={onSearchKeyDown}
-            />
-            <button
-              type="button"
-              class="rail-control-btn search-submit-btn"
-              title="Search files"
-              aria-label="Search files"
-              onClick={runSearch}
-            >{fileSearchLoading.value ? '\u2026' : '\uD83D\uDD0D'}</button>
-          </>
         ) : (
           <>
-            <button
-              type="button"
-              class="rail-control-btn refresh-btn"
-              title="Refresh folder"
-              aria-label="Refresh folder"
-              onClick={() => { loadTree(treePath.peek()).catch(console.error); }}
-            >{'\u21BB'}</button>
-            <button
-              type="button"
-              class="rail-control-btn search-toggle-btn"
-              title="Search files"
-              aria-label="Search files"
-              onClick={() => openFileSearch(treePath.peek())}
-            >{'\uD83D\uDD0D'}</button>
-            <ActionsMenu
-              mode="directory"
-              entry={currentDirectory}
+            <FileCreateMenu
+              directory={currentDirectory}
+              uploadInputRef={uploadInputRef}
               onNewFile={() => {
                 promptNewFilePath()
                   .then((path) => { if (path) editor.beginCreate(path); })
                   .catch(console.error);
               }}
-              triggerClassName="rail-control-btn"
+              triggerClassName="thread-action-btn accent-icon-btn rail-primary-action-btn file-create-btn"
+              panelAlign="start"
+            />
+            <input
+              ref={searchInputRef}
+              type="text"
+              class="rail-search-input file-search-input"
+              value={fileSearchQuery.value}
+              placeholder={fileSearchRoot.value ? `Search /${fileSearchRoot.value}...` : 'Search all files...'}
+              aria-label="Search files by name"
+              onInput={(ev: JSX.TargetedInputEvent<HTMLInputElement>) => { fileSearchQuery.value = ev.currentTarget.value; }}
+              onKeyDown={onSearchKeyDown}
+            />
+            <button
+              type="button"
+              class="thread-action-btn rail-control-btn search-submit-btn"
+              title="Search files"
+              aria-label="Search files"
+              onClick={runSearch}
+            >{fileSearchLoading.value ? '\u2026' : '\uD83D\uDD0D'}</button>
+            <button
+              type="button"
+              class="thread-action-btn rail-control-btn refresh-btn"
+              title="Refresh folder"
+              aria-label="Refresh folder"
+              onClick={() => { loadTree(treePath.peek()).catch(console.error); }}
+            >{'\u21BB'}</button>
+            <ActionsMenu
+              mode="directory"
+              entry={currentDirectory}
+              triggerClassName="thread-action-btn rail-control-btn"
               triggerTitle={currentDirectory ? `Actions for ${currentDirectory.name}` : 'Root folder actions'}
-              onUpload={() => uploadInputRef.current?.click()}
+              showWhenEmpty
             />
           </>
         )}
@@ -646,6 +672,8 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
 export function FilesPane() {
   const editor = usePreviewEditor();
   const previewing = !!previewBlock.value || editor.editing;
+  const toolbarUploadRef = useRef<HTMLInputElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const listingUploadRef = useRef<HTMLInputElement | null>(null);
   const listingUploadDirectory = useRef('');
   const editEntry = (entry: TreeEntry): void => {
@@ -664,6 +692,44 @@ export function FilesPane() {
     listingUploadDirectory.current = directory;
     listingUploadRef.current?.click();
   };
+  const beginToolbarCreate = (): void => {
+    const ready = editor.editing ? editor.cancelEdit() : Promise.resolve(true);
+    ready
+      .then((discarded) => discarded ? promptNewFilePath() : null)
+      .then((path) => { if (path) editor.beginCreate(path); })
+      .catch(console.error);
+  };
+  const currentDirectory = treePath.value
+    ? { path: treePath.value, name: treePath.value.slice(treePath.value.lastIndexOf('/') + 1), type: 'dir' as const }
+    : undefined;
+  const collapsedActions = (
+    <>
+      <FileCreateMenu
+        directory={currentDirectory}
+        uploadInputRef={toolbarUploadRef}
+        onNewFile={beginToolbarCreate}
+        triggerClassName="icon-btn file-create-btn"
+        onAction={() => { paneOpen.files.value = true; }}
+      />
+      <button
+        type="button"
+        class="icon-btn search-toggle-btn"
+        title="Search files"
+        aria-label="Search files"
+        onClick={(ev: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
+          ev.stopPropagation();
+          const ready = editor.editing ? editor.cancelEdit() : Promise.resolve(true);
+          ready.then((discarded) => {
+            if (!discarded) return;
+            closePreview();
+            paneOpen.files.value = true;
+            openFileSearch(treePath.peek());
+            requestAnimationFrame(() => searchInputRef.current?.focus());
+          }).catch(console.error);
+        }}
+      >{'\uD83D\uDD0D'}</button>
+    </>
+  );
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -697,8 +763,26 @@ export function FilesPane() {
   }, []);
 
   return (
-    <Pane paneKey="files" name="files-pane" label="Files" extraClass={previewing ? 'previewing' : ''}>
+    <Pane
+      paneKey="files"
+      name="files-pane"
+      label="Files"
+      extraClass={previewing ? 'previewing' : ''}
+      collapsedActions={collapsedActions}
+    >
       <div class="files-body" ref={bodyRef}>
+        <input
+          type="file"
+          id="upload-input"
+          multiple
+          hidden
+          ref={toolbarUploadRef}
+          onChange={(ev: JSX.TargetedEvent<HTMLInputElement>) => {
+            const files = ev.currentTarget.files;
+            if (files && files.length) uploadFiles(files);
+            ev.currentTarget.value = '';
+          }}
+        />
         <input
           type="file"
           multiple
@@ -710,7 +794,7 @@ export function FilesPane() {
             ev.currentTarget.value = '';
           }}
         />
-        <Crumb editor={editor} />
+        <Crumb editor={editor} uploadInputRef={toolbarUploadRef} searchInputRef={searchInputRef} />
         <UploadStrip />
         {fileSearchOpen.value
           ? <SearchListing onEdit={editEntry} onNewFile={beginCreateIn} onUpload={chooseUploadTo} />

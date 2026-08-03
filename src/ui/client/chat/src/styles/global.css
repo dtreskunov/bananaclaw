@@ -97,7 +97,7 @@
 html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll-behavior-x: none; }
 
 .chat-main textarea::placeholder,
-.threads-rail .search-input::placeholder {
+.rail-search-input::placeholder {
   font-family: inherit;
   font-size: inherit;
   font-style: inherit;
@@ -141,6 +141,32 @@ button:hover { background: var(--wash); }
 }
 .accent-icon-btn:hover:not(:disabled) { background: var(--accent-strong, var(--accent)); opacity: 0.9; }
 .accent-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.thread-action-btn {
+  flex: 0 0 var(--rail-control-height);
+  width: var(--rail-control-height);
+  height: var(--rail-control-height);
+}
+.rail-primary-action-btn {
+  flex: 0 0 var(--control-action-size);
+  width: var(--control-action-size);
+  height: var(--control-action-size);
+  margin-block: calc((var(--rail-control-height) - var(--control-action-size)) / 2);
+  margin-inline: 0;
+}
+.rail-search-input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: var(--rail-control-height);
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  font-size: var(--message-input-font-size);
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+}
 .rail-control-btn {
   flex: 0 0 var(--rail-control-height);
   width: var(--rail-control-height);
