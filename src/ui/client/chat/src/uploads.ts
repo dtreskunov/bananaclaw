@@ -55,6 +55,14 @@ function newFileNameError(name: string): string | null {
   return null;
 }
 
+function copyFileName(path: string): string {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const dot = name.lastIndexOf('.');
+  if (dot > 0) return `${name.slice(0, dot)} copy${name.slice(dot)}`;
+  if (dot === 0) return `${name} copy.${name.slice(1)}`;
+  return `${name} copy.txt`;
+}
+
 function isAtOrBelow(path: string | null, ancestor: string): path is string {
   return !!path && (path === ancestor || path.startsWith(ancestor + '/'));
 }
@@ -111,7 +119,6 @@ export async function createFile(relPath: string, content: string): Promise<Crea
     create: true,
   });
   if (r.status === 409) {
-    showToast('A file or folder with that name already exists.', 'err');
     return { exists: true };
   }
   if (!r.ok || !r.data.ok) {
@@ -135,6 +142,20 @@ export async function promptNewFilePath(): Promise<string | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
   return joinPath(dir, trimmed);
+}
+
+export async function promptSaveAsPath(sourcePath: string, title = 'Save a copy'): Promise<string | null> {
+  if (!groupId.value || !isAdmin.value) return null;
+  const dir = parentPath(sourcePath);
+  const name = await requestInput({
+    title,
+    label: `Choose another name in /${dir}`,
+    initialValue: copyFileName(sourcePath),
+    placeholder: 'notes copy.md',
+    okLabel: 'Save',
+    validate: newFileNameError,
+  });
+  return name ? joinPath(dir, name.trim()) : null;
 }
 
 export async function mkdirPrompt(): Promise<void> {

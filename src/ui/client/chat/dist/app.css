@@ -460,6 +460,22 @@ header .mobile-only {
 .settings-body button.ghost {
   background: transparent;
 }
+.choice-dialog-footer {
+  flex-wrap: wrap;
+}
+.choice-dialog-footer button.primary {
+  border-color: transparent;
+  background: var(--accent-strong, var(--accent));
+  color: var(--accent-fg, #fff);
+}
+.choice-dialog-footer button.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.choice-dialog-footer button.danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
 .create-group-body {
   display: flex;
   flex-direction: column;

@@ -19255,6 +19255,52 @@ function ConfirmModal() {
     }
   );
 }
+var choiceRequest = y3(null);
+function requestChoice(opts) {
+  return new Promise((resolve) => {
+    choiceRequest.value = { ...opts, resolve };
+  });
+}
+function ChoiceModal() {
+  const req = choiceRequest.value;
+  const preferredRef = A2(null);
+  y2(() => {
+    if (!req) return;
+    requestAnimationFrame(() => preferredRef.current?.focus());
+  }, [req]);
+  if (!req) return null;
+  function close(value) {
+    const current = choiceRequest.value;
+    choiceRequest.value = null;
+    current?.resolve(value);
+  }
+  return /* @__PURE__ */ u4(
+    MobileDialog,
+    {
+      title: req.title,
+      onClose: () => close(null),
+      maxWidth: "480px",
+      role: "alertdialog",
+      onKeyDown: (event) => {
+        if (event.key === "Escape") close(null);
+      },
+      children: [
+        /* @__PURE__ */ u4("div", { class: "settings-body", style: "white-space:pre-wrap", children: req.message }),
+        /* @__PURE__ */ u4(MobileDialogFooter, { className: "choice-dialog-footer", children: req.options.map((option) => /* @__PURE__ */ u4(
+          "button",
+          {
+            ref: option.tone === "primary" ? preferredRef : void 0,
+            type: "button",
+            class: option.tone,
+            onClick: () => close(option.value),
+            children: option.label
+          },
+          option.value
+        )) })
+      ]
+    }
+  );
+}
 
 // src/components/Pane.tsx
 function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions, children }) {
@@ -21647,6 +21693,13 @@ function newFileNameError(name) {
   }
   return null;
 }
+function copyFileName(path) {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  if (dot > 0) return `${name.slice(0, dot)} copy${name.slice(dot)}`;
+  if (dot === 0) return `${name} copy.${name.slice(1)}`;
+  return `${name} copy.txt`;
+}
 function isAtOrBelow(path, ancestor) {
   return !!path && (path === ancestor || path.startsWith(ancestor + "/"));
 }
@@ -21677,7 +21730,6 @@ async function createFile(relPath, content) {
     create: true
   });
   if (r4.status === 409) {
-    showToast("A file or folder with that name already exists.", "err");
     return { exists: true };
   }
   if (!r4.ok || !r4.data.ok) {
@@ -21700,6 +21752,19 @@ async function promptNewFilePath() {
   const trimmed = name.trim();
   if (!trimmed) return null;
   return joinPath(dir, trimmed);
+}
+async function promptSaveAsPath(sourcePath, title = "Save a copy") {
+  if (!groupId.value || !isAdmin.value) return null;
+  const dir = parentPath(sourcePath);
+  const name = await requestInput({
+    title,
+    label: `Choose another name in /${dir}`,
+    initialValue: copyFileName(sourcePath),
+    placeholder: "notes copy.md",
+    okLabel: "Save",
+    validate: newFileNameError
+  });
+  return name ? joinPath(dir, name.trim()) : null;
 }
 async function mkdirPrompt() {
   if (!groupId.value || !isAdmin.value) return;
@@ -22424,33 +22489,58 @@ function usePreviewEditor() {
     setCreatePath(null);
     return true;
   };
+  const createDraft = async (initialPath) => {
+    let targetPath = initialPath;
+    while (targetPath) {
+      const created = await createFile(targetPath, draft);
+      if (!created) return null;
+      if (!("exists" in created)) return targetPath;
+      targetPath = await promptSaveAsPath(targetPath, "File already exists");
+    }
+    return null;
+  };
+  const openCreatedFile = async (path) => {
+    await loadTree(parentPath(path));
+    await navFile({ path, name: path.slice(path.lastIndexOf("/") + 1) });
+    setCreatePath(null);
+    setEditing(false);
+  };
   const commitEdit = async () => {
     const targetPath = createPath || fp;
     if (!targetPath) return;
     setSaving(true);
     if (createPath) {
-      const created = await createFile(createPath, draft);
+      const createdPath = await createDraft(createPath);
       setSaving(false);
-      if (!created || "exists" in created) return;
-      await loadTree(parentPath(createPath));
-      await navFile({ path: createPath, name: createPath.slice(createPath.lastIndexOf("/") + 1) });
-      setCreatePath(null);
-      setEditing(false);
+      if (!createdPath) return;
+      await openCreatedFile(createdPath);
       return;
     }
     let res = await saveFile(targetPath, draft, previewBlock.peek()?.etag);
     if (res && "conflict" in res) {
-      const overwrite = await requestConfirm({
+      const resolution = await requestChoice({
         title: "File changed on disk",
-        message: "This file was modified since you opened it. Overwrite the newer version with your changes, or reload it?",
-        okLabel: "Overwrite",
-        cancelLabel: "Reload",
-        danger: true
+        message: "This file was modified since you opened it. Save your draft as a separate file, overwrite the newer version, or keep editing.",
+        options: [
+          { value: "keep", label: "Keep editing" },
+          { value: "overwrite", label: "Overwrite", tone: "danger" },
+          { value: "copy", label: "Save a copy", tone: "primary" }
+        ]
       });
-      if (!overwrite) {
+      if (!resolution || resolution === "keep") {
         setSaving(false);
-        setEditing(false);
-        await selectFile({ path: targetPath, name: targetPath.slice(targetPath.lastIndexOf("/") + 1) });
+        return;
+      }
+      if (resolution === "copy") {
+        const copyPath = await promptSaveAsPath(targetPath);
+        if (!copyPath) {
+          setSaving(false);
+          return;
+        }
+        const createdPath = await createDraft(copyPath);
+        setSaving(false);
+        if (!createdPath) return;
+        await openCreatedFile(createdPath);
         return;
       }
       res = await saveFile(targetPath, draft, res.etag);
@@ -27042,6 +27132,7 @@ function App() {
     /* @__PURE__ */ u4(TaskPanel, {}),
     /* @__PURE__ */ u4(PromptModal, {}),
     /* @__PURE__ */ u4(ConfirmModal, {}),
+    /* @__PURE__ */ u4(ChoiceModal, {}),
     /* @__PURE__ */ u4(GroupPickerModal, {}),
     /* @__PURE__ */ u4(GroupAdmin, {}),
     /* @__PURE__ */ u4(CreateGroupModal, {}),

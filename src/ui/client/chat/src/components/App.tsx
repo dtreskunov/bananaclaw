@@ -8,7 +8,7 @@ import { FilesPane } from './FilesPane';
 import { Settings } from './Settings';
 import { ShareLinkModal } from './ShareLinkModal';
 import { TaskPanel } from './TaskPanel';
-import { PromptModal, ConfirmModal } from './PromptModal';
+import { PromptModal, ConfirmModal, ChoiceModal } from './PromptModal';
 import { Toast } from './Toast';
 import { GroupPickerModal } from './GroupPicker';
 import { CreateGroupModal } from './CreateGroupModal';
@@ -58,6 +58,7 @@ export function App() {
       <TaskPanel />
       <PromptModal />
       <ConfirmModal />
+      <ChoiceModal />
       <GroupPickerModal />
       <GroupAdmin />
       <CreateGroupModal />

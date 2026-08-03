@@ -149,3 +149,67 @@ export function ConfirmModal() {
     </MobileDialog>
   );
 }
+
+interface ChoiceOption {
+  value: string;
+  label: string;
+  tone?: 'primary' | 'danger';
+}
+
+interface ChoiceRequest {
+  title: string;
+  message: string;
+  options: ChoiceOption[];
+  resolve: (value: string | null) => void;
+}
+
+const choiceRequest: Signal<ChoiceRequest | null> = signal<ChoiceRequest | null>(null);
+
+export function requestChoice(opts: Omit<ChoiceRequest, 'resolve'>): Promise<string | null> {
+  return new Promise((resolve) => {
+    choiceRequest.value = { ...opts, resolve };
+  });
+}
+
+export function ChoiceModal() {
+  const req = choiceRequest.value;
+  const preferredRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!req) return;
+    requestAnimationFrame(() => preferredRef.current?.focus());
+  }, [req]);
+
+  if (!req) return null;
+
+  function close(value: string | null): void {
+    const current = choiceRequest.value;
+    choiceRequest.value = null;
+    current?.resolve(value);
+  }
+
+  return (
+    <MobileDialog
+      title={req.title}
+      onClose={() => close(null)}
+      maxWidth="480px"
+      role="alertdialog"
+      onKeyDown={(event) => { if (event.key === 'Escape') close(null); }}
+    >
+      <div class="settings-body" style="white-space:pre-wrap">{req.message}</div>
+      <MobileDialogFooter className="choice-dialog-footer">
+        {req.options.map((option) => (
+          <button
+            key={option.value}
+            ref={option.tone === 'primary' ? preferredRef : undefined}
+            type="button"
+            class={option.tone}
+            onClick={() => close(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </MobileDialogFooter>
+    </MobileDialog>
+  );
+}

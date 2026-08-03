@@ -10,7 +10,7 @@ import {
 import { navTree, navFile, closePreview, togglePinnedFile, loadTree, selectFile } from '../actions';
 import {
   uploadFiles, clearUploadStrip, resolveConflict, notifyAgent, saveFile,
-  createFile, promptNewFilePath,
+  createFile, promptNewFilePath, promptSaveAsPath,
 } from '../uploads';
 import { fmtBytes, renderMarkdown, parentPath } from '../utils';
 import { Pane } from './Pane';
@@ -19,7 +19,7 @@ import { ActionsMenu } from './ActionsMenu';
 import { MediaPlayer } from './MediaPlayer';
 import { LyricsPanel } from './LyricsPanel';
 import { PrivateWebView } from './PrivateWebView';
-import { requestConfirm } from './PromptModal';
+import { requestChoice, requestConfirm } from './PromptModal';
 import { highlightCode } from '../highlight';
 import type { TreeEntry, PreviewKind } from '../types';
 
@@ -91,33 +91,58 @@ function usePreviewEditor(): PreviewEditorState {
     setCreatePath(null);
     return true;
   };
+  const createDraft = async (initialPath: string): Promise<string | null> => {
+    let targetPath: string | null = initialPath;
+    while (targetPath) {
+      const created = await createFile(targetPath, draft);
+      if (!created) return null;
+      if (!('exists' in created)) return targetPath;
+      targetPath = await promptSaveAsPath(targetPath, 'File already exists');
+    }
+    return null;
+  };
+  const openCreatedFile = async (path: string): Promise<void> => {
+    await loadTree(parentPath(path));
+    await navFile({ path, name: path.slice(path.lastIndexOf('/') + 1) });
+    setCreatePath(null);
+    setEditing(false);
+  };
   const commitEdit = async (): Promise<void> => {
     const targetPath = createPath || fp;
     if (!targetPath) return;
     setSaving(true);
     if (createPath) {
-      const created = await createFile(createPath, draft);
+      const createdPath = await createDraft(createPath);
       setSaving(false);
-      if (!created || 'exists' in created) return;
-      await loadTree(parentPath(createPath));
-      await navFile({ path: createPath, name: createPath.slice(createPath.lastIndexOf('/') + 1) });
-      setCreatePath(null);
-      setEditing(false);
+      if (!createdPath) return;
+      await openCreatedFile(createdPath);
       return;
     }
     let res = await saveFile(targetPath, draft, previewBlock.peek()?.etag);
     if (res && 'conflict' in res) {
-      const overwrite = await requestConfirm({
+      const resolution = await requestChoice({
         title: 'File changed on disk',
-        message: 'This file was modified since you opened it. Overwrite the newer version with your changes, or reload it?',
-        okLabel: 'Overwrite',
-        cancelLabel: 'Reload',
-        danger: true,
+        message: 'This file was modified since you opened it. Save your draft as a separate file, overwrite the newer version, or keep editing.',
+        options: [
+          { value: 'keep', label: 'Keep editing' },
+          { value: 'overwrite', label: 'Overwrite', tone: 'danger' },
+          { value: 'copy', label: 'Save a copy', tone: 'primary' },
+        ],
       });
-      if (!overwrite) {
+      if (!resolution || resolution === 'keep') {
         setSaving(false);
-        setEditing(false);
-        await selectFile({ path: targetPath, name: targetPath.slice(targetPath.lastIndexOf('/') + 1) });
+        return;
+      }
+      if (resolution === 'copy') {
+        const copyPath = await promptSaveAsPath(targetPath);
+        if (!copyPath) {
+          setSaving(false);
+          return;
+        }
+        const createdPath = await createDraft(copyPath);
+        setSaving(false);
+        if (!createdPath) return;
+        await openCreatedFile(createdPath);
         return;
       }
       res = await saveFile(targetPath, draft, res.etag);
