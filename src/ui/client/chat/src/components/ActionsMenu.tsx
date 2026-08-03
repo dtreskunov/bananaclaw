@@ -102,7 +102,6 @@ interface Props {
   triggerClassName?: string;
   triggerTitle?: string;
   triggerContent?: ComponentChildren;
-  showWhenEmpty?: boolean;
   onAction?: () => void;
   panelAlign?: 'start' | 'end';
 }
@@ -118,7 +117,6 @@ export function ActionsMenu({
   triggerClassName = 'text-btn',
   triggerTitle = 'Actions',
   triggerContent = '\u22EF',
-  showWhenEmpty = false,
   onAction,
   panelAlign = 'end',
 }: Props) {
@@ -140,7 +138,7 @@ export function ActionsMenu({
   }, [open]);
 
   const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, onEntryChanged, includeSelection);
-  if (items.length === 0 && !showWhenEmpty) return null;
+  if (items.length === 0) return null;
 
   return (
     <div class={`action-menu align-${panelAlign}${open ? ' open' : ''}`} ref={wrapRef}>
@@ -151,7 +149,6 @@ export function ActionsMenu({
         aria-expanded={open}
         title={triggerTitle}
         aria-label={triggerTitle}
-        disabled={items.length === 0}
         onClick={(ev: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
           ev.stopPropagation();
           setOpen(!open);

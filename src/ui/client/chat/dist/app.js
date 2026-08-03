@@ -22165,7 +22165,6 @@ function ActionsMenu({
   triggerClassName = "text-btn",
   triggerTitle = "Actions",
   triggerContent = "\u22EF",
-  showWhenEmpty = false,
   onAction,
   panelAlign = "end"
 }) {
@@ -22187,7 +22186,7 @@ function ActionsMenu({
     };
   }, [open]);
   const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, onEntryChanged, includeSelection);
-  if (items.length === 0 && !showWhenEmpty) return null;
+  if (items.length === 0) return null;
   return /* @__PURE__ */ u4("div", { class: `action-menu align-${panelAlign}${open ? " open" : ""}`, ref: wrapRef, children: [
     /* @__PURE__ */ u4(
       "button",
@@ -22198,7 +22197,6 @@ function ActionsMenu({
         "aria-expanded": open,
         title: triggerTitle,
         "aria-label": triggerTitle,
-        disabled: items.length === 0,
         onClick: (ev) => {
           ev.stopPropagation();
           setOpen(!open);
@@ -22904,8 +22902,7 @@ function Crumb({
           mode: "directory",
           entry: currentDirectory,
           triggerClassName: "thread-action-btn rail-control-btn",
-          triggerTitle: currentDirectory ? `Actions for ${currentDirectory.name}` : "Root folder actions",
-          showWhenEmpty: true
+          triggerTitle: currentDirectory ? `Actions for ${currentDirectory.name}` : "Root folder actions"
         }
       )
     ] }) }),

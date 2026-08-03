@@ -366,7 +366,6 @@ function Crumb({
               entry={currentDirectory}
               triggerClassName="thread-action-btn rail-control-btn"
               triggerTitle={currentDirectory ? `Actions for ${currentDirectory.name}` : 'Root folder actions'}
-              showWhenEmpty
             />
           </>
         )}
