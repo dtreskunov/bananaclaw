@@ -145,7 +145,7 @@ export function ActionsMenu({
         }}
       >{'\u22EF'}</button>
       {open ? (
-        <div class="action-panel" role="menu">
+        <div class="action-panel flush-menu-panel" role="menu">
           {items.map((it, i) => it === '---'
             ? <div class="action-sep" key={'s' + i}></div>
             : (

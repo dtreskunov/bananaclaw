@@ -366,7 +366,6 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px var(--shadow-color);
-  padding: 4px 0;
 }
 .chat-main .composer-plus-item {
   display: flex;

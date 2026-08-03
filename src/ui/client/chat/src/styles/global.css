@@ -179,6 +179,10 @@ button:hover { background: var(--wash); }
   border-bottom: 1px solid var(--border);
   pointer-events: none;
 }
+.flush-menu-panel {
+  padding: 0;
+  overflow: hidden;
+}
 .plus-glyph {
   position: relative;
   display: block;

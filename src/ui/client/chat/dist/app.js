@@ -19940,7 +19940,7 @@ function ComposerPlusMenu({
         children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
       }
     ),
-    open ? /* @__PURE__ */ u4("div", { class: "composer-plus-panel", role: "menu", children: [
+    open ? /* @__PURE__ */ u4("div", { class: "composer-plus-panel flush-menu-panel", role: "menu", children: [
       showQuickCapture ? /* @__PURE__ */ u4("button", { type: "button", class: "composer-plus-item", role: "menuitem", onClick: pick(onQuickCapture), children: [
         /* @__PURE__ */ u4("span", { class: "ico", children: "\u{1F4F7}" }),
         /* @__PURE__ */ u4("span", { class: "lbl", children: "Take photo" })
@@ -22082,7 +22082,7 @@ function ActionsMenu({
         children: "\u22EF"
       }
     ),
-    open ? /* @__PURE__ */ u4("div", { class: "action-panel", role: "menu", children: items.map((it, i5) => it === "---" ? /* @__PURE__ */ u4("div", { class: "action-sep" }, "s" + i5) : /* @__PURE__ */ u4(
+    open ? /* @__PURE__ */ u4("div", { class: "action-panel flush-menu-panel", role: "menu", children: items.map((it, i5) => it === "---" ? /* @__PURE__ */ u4("div", { class: "action-sep" }, "s" + i5) : /* @__PURE__ */ u4(
       "button",
       {
         type: "button",

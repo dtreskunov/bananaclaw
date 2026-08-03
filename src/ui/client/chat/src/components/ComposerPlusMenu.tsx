@@ -63,7 +63,7 @@ export function ComposerPlusMenu({
         }}
       ><span class="plus-glyph" aria-hidden="true">{'\u002B'}</span></button>
       {open ? (
-        <div class="composer-plus-panel" role="menu">
+        <div class="composer-plus-panel flush-menu-panel" role="menu">
           {showQuickCapture ? (
             <button type="button" class="composer-plus-item" role="menuitem" onClick={pick(onQuickCapture)}>
               <span class="ico">{'\uD83D\uDCF7'}</span>

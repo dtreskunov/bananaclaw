@@ -199,6 +199,10 @@ button:hover {
   border-bottom: 1px solid var(--border);
   pointer-events: none;
 }
+.flush-menu-panel {
+  padding: 0;
+  overflow: hidden;
+}
 .plus-glyph {
   position: relative;
   display: block;
@@ -2445,7 +2449,6 @@ nav.tab-bar-strip.group-strip {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px var(--shadow-color);
-  padding: 4px 0;
 }
 .chat-main .composer-plus-item {
   display: flex;
@@ -3554,8 +3557,6 @@ body.is-admin .files-pane.collapsed .admin-only {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px var(--shadow-color);
-  padding: 0;
-  overflow: hidden;
 }
 .action-item {
   display: flex;
