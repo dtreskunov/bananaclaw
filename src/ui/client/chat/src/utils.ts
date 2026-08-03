@@ -95,10 +95,14 @@ export function parentPath(p: string): string {
   return i < 0 ? '' : p.slice(0, i);
 }
 
+export function displayWorkspacePath(path: string): string {
+  return path ? '~/' + path : '~';
+}
+
 export function pathBelowRoot(path: string, root: string): string {
-  if (!root) return path ? '/' + path : '';
+  if (!root) return path ? displayWorkspacePath(path) : '';
   if (path === root) return '';
-  return path.startsWith(root + '/') ? path.slice(root.length) : '/' + path;
+  return path.startsWith(root + '/') ? displayWorkspacePath(path.slice(root.length + 1)) : displayWorkspacePath(path);
 }
 
 // Pre-process raw markdown to make file-link destinations parseable when the

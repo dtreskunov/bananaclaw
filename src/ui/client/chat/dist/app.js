@@ -16960,10 +16960,13 @@ function parentPath(p5) {
   const i5 = p5.lastIndexOf("/");
   return i5 < 0 ? "" : p5.slice(0, i5);
 }
+function displayWorkspacePath(path) {
+  return path ? "~/" + path : "~";
+}
 function pathBelowRoot(path, root) {
-  if (!root) return path ? "/" + path : "";
+  if (!root) return path ? displayWorkspacePath(path) : "";
   if (path === root) return "";
-  return path.startsWith(root + "/") ? path.slice(root.length) : "/" + path;
+  return path.startsWith(root + "/") ? displayWorkspacePath(path.slice(root.length + 1)) : displayWorkspacePath(path);
 }
 function normalizeFileLinks(text) {
   const re = /\[([^\]\n]+)\]\(([^<>\n()]*(?:\([^()\n]*\)[^<>\n()]*)*)\)/g;
@@ -20711,7 +20714,7 @@ function Message({ m: m6 }) {
       {
         type: "button",
         class: "file-chip",
-        title: "/" + f5.path,
+        title: displayWorkspacePath(f5.path),
         onClick: () => navFile({ path: f5.path, name: f5.filename, size: f5.size }).catch(console.error),
         children: [
           "\u{1F4CE} ",
@@ -21048,7 +21051,7 @@ function ContextChip() {
   if (pins.length === 0) return /* @__PURE__ */ u4("div", { class: "context", id: "chat-context", hidden: true });
   return /* @__PURE__ */ u4("div", { class: "context", id: "chat-context", children: pins.map((p5) => /* @__PURE__ */ u4("span", { class: "chip", children: [
     /* @__PURE__ */ u4("span", { children: "\u{1F4CE}" }),
-    /* @__PURE__ */ u4("span", { class: "path", title: p5, children: p5 }),
+    /* @__PURE__ */ u4("span", { class: "path", title: displayWorkspacePath(p5), children: displayWorkspacePath(p5) }),
     /* @__PURE__ */ u4("button", { type: "button", title: "Unpin", onClick: () => removePinnedPath(p5), children: "\xD7" })
   ] }, p5)) });
 }
@@ -21847,7 +21850,7 @@ async function promptNewFilePath(directory = curDir()) {
   if (!groupId.value || !isAdmin.value) return null;
   const name = await requestInput({
     title: "New file",
-    label: `Create in /${directory}`,
+    label: `Create in ${displayWorkspacePath(directory)}`,
     placeholder: "notes.md",
     okLabel: "Continue",
     validate: newFileNameError
@@ -21862,7 +21865,7 @@ async function promptSaveAsPath(sourcePath, title = "Save a copy") {
   const dir = parentPath(sourcePath);
   const name = await requestInput({
     title,
-    label: `Choose another name in /${dir}`,
+    label: `Choose another name in ${displayWorkspacePath(dir)}`,
     initialValue: copyFileName(sourcePath),
     placeholder: "notes copy.md",
     okLabel: "Save",
@@ -22727,6 +22730,7 @@ function Crumb({
   const pinned = !!fp && pinnedContext.value.includes(fp);
   const segs = p5 ? p5.split("/").filter(Boolean) : [];
   const fileName = fp ? fp.slice(fp.lastIndexOf("/") + 1) : "";
+  const searchPlaceholder = p5 ? `Search in ${p5.slice(p5.lastIndexOf("/") + 1)}...` : "Search all files...";
   y2(() => {
     if (ref.current) requestAnimationFrame(() => {
       if (ref.current) ref.current.scrollLeft = ref.current.scrollWidth;
@@ -22764,6 +22768,16 @@ function Crumb({
       clearFileSearch();
     }
   };
+  const refreshFiles = () => {
+    const gid = groupId.peek();
+    const query = fileSearchQuery.peek();
+    if (fileSearchOpen.peek() && gid && query) {
+      searchFiles(gid, query).catch(console.error);
+      return;
+    }
+    loadTree(treePath.peek()).catch(console.error);
+  };
+  const refreshLabel = fileSearchOpen.value ? "Refresh search" : "Refresh folder";
   let acc = "";
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("div", { class: "files-actions rail-actions-row rail-divider-row" + (fileSearchOpen.value && !fp ? " searching" : ""), children: editor.editing ? /* @__PURE__ */ u4(k, { children: [
@@ -22864,7 +22878,7 @@ function Crumb({
           type: "text",
           class: "rail-search-input file-search-input",
           value: fileSearchQuery.value,
-          placeholder: fileSearchRoot.value ? `Search /${fileSearchRoot.value}...` : "Search all files...",
+          placeholder: searchPlaceholder,
           "aria-label": "Search files by name",
           onInput: (ev) => {
             fileSearchQuery.value = ev.currentTarget.value;
@@ -22872,27 +22886,25 @@ function Crumb({
           onKeyDown: onSearchKeyDown
         }
       ),
-      /* @__PURE__ */ u4(
+      fileSearchQuery.value ? /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
-          class: "thread-action-btn rail-control-btn search-submit-btn",
-          title: "Search files",
-          "aria-label": "Search files",
-          onClick: runSearch,
-          children: fileSearchLoading.value ? "\u2026" : "\u{1F50D}"
+          class: "thread-action-btn rail-control-btn clear-search-btn",
+          title: "Clear file search",
+          "aria-label": "Clear file search",
+          onClick: clearFileSearch,
+          children: "\xD7"
         }
-      ),
+      ) : null,
       /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
           class: "thread-action-btn rail-control-btn refresh-btn",
-          title: "Refresh folder",
-          "aria-label": "Refresh folder",
-          onClick: () => {
-            loadTree(treePath.peek()).catch(console.error);
-          },
+          title: refreshLabel,
+          "aria-label": refreshLabel,
+          onClick: refreshFiles,
           children: "\u21BB"
         }
       ),
@@ -22915,7 +22927,7 @@ function Crumb({
           "data-path": "",
           title: "Root",
           onClick: () => navigateTree(""),
-          children: "/"
+          children: "~"
         }
       ),
       segs.map((s5, i5) => {
@@ -22931,7 +22943,7 @@ function Crumb({
               type: "button",
               class: "crumb" + (last ? " current" : ""),
               "data-path": path,
-              title: "/" + path,
+              title: displayWorkspacePath(path),
               onClick,
               children: s5
             }
@@ -22940,7 +22952,7 @@ function Crumb({
       }),
       fileName ? /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
-        /* @__PURE__ */ u4("span", { class: "crumb file current", title: "/" + fp, children: fileName })
+        /* @__PURE__ */ u4("span", { class: "crumb file current", title: displayWorkspacePath(fp || ""), children: fileName })
       ] }) : null
     ] }) })
   ] });
@@ -23325,10 +23337,7 @@ function FilesPane() {
         fileSearchOpen.value ? /* @__PURE__ */ u4(SearchListing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }) : /* @__PURE__ */ u4(Listing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }),
         /* @__PURE__ */ u4("div", { class: "drop-hint admin-only", id: "dropzone", children: [
           "Drag & drop files here to upload to ",
-          /* @__PURE__ */ u4("code", { id: "dropzone-path", children: [
-            "/",
-            treePath.value
-          ] })
+          /* @__PURE__ */ u4("code", { id: "dropzone-path", children: displayWorkspacePath(treePath.value) })
         ] }),
         /* @__PURE__ */ u4(Preview, { editor })
       ] })

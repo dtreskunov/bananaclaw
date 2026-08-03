@@ -12,7 +12,7 @@ import {
   currentUserId,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
 } from '../state';
-import { renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
+import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
 import {
   sendChat, addPendingFiles, removePending, clearPending,
   navFile, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
@@ -626,7 +626,7 @@ function Message({ m }: { m: ChatMessage }) {
                 <button
                   type="button"
                   class="file-chip"
-                  title={'/' + f.path}
+                  title={displayWorkspacePath(f.path)}
                   onClick={() => navFile({ path: f.path!, name: f.filename, size: f.size }).catch(console.error)}
                   key={f.path}
                 >{'\uD83D\uDCCE '}{f.filename}</button>
@@ -1055,7 +1055,7 @@ function ContextChip() {
       {pins.map((p) => (
         <span class="chip" key={p}>
           <span>{'\uD83D\uDCCE'}</span>
-          <span class="path" title={p}>{p}</span>
+          <span class="path" title={displayWorkspacePath(p)}>{displayWorkspacePath(p)}</span>
           <button type="button" title="Unpin" onClick={() => removePinnedPath(p)}>{'\u00d7'}</button>
         </span>
       ))}

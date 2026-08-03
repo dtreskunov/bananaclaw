@@ -12,7 +12,7 @@ import {
 } from './state';
 import { postJson } from './api';
 import { closePreview, loadTree, navFile, navTree, selectFile } from './actions';
-import { parentPath } from './utils';
+import { displayWorkspacePath, parentPath } from './utils';
 import { requestInput, requestConfirm } from './components/PromptModal';
 import { showToast } from './components/Toast';
 import type { TreeEntry, UploadItem } from './types';
@@ -146,7 +146,7 @@ export async function promptNewFilePath(directory = curDir()): Promise<string | 
   if (!groupId.value || !isAdmin.value) return null;
   const name = await requestInput({
     title: 'New file',
-    label: `Create in /${directory}`,
+    label: `Create in ${displayWorkspacePath(directory)}`,
     placeholder: 'notes.md',
     okLabel: 'Continue',
     validate: newFileNameError,
@@ -162,7 +162,7 @@ export async function promptSaveAsPath(sourcePath: string, title = 'Save a copy'
   const dir = parentPath(sourcePath);
   const name = await requestInput({
     title,
-    label: `Choose another name in /${dir}`,
+    label: `Choose another name in ${displayWorkspacePath(dir)}`,
     initialValue: copyFileName(sourcePath),
     placeholder: 'notes copy.md',
     okLabel: 'Save',

@@ -18,7 +18,7 @@ import {
   uploadFiles, clearUploadStrip, resolveConflict, notifyAgent, saveFile,
   createFile, promptNewFilePath, promptSaveAsPath, isEditableFileName,
 } from '../uploads';
-import { fmtBytes, renderMarkdown, parentPath, pathBelowRoot } from '../utils';
+import { displayWorkspacePath, fmtBytes, renderMarkdown, parentPath, pathBelowRoot } from '../utils';
 import { Pane } from './Pane';
 import { RelativeTime } from './RelativeTime';
 import { ActionsMenu } from './ActionsMenu';
@@ -230,6 +230,9 @@ function Crumb({
   const pinned = !!fp && pinnedContext.value.includes(fp);
   const segs = p ? p.split('/').filter(Boolean) : [];
   const fileName = fp ? fp.slice(fp.lastIndexOf('/') + 1) : '';
+  const searchPlaceholder = p
+    ? `Search in ${p.slice(p.lastIndexOf('/') + 1)}...`
+    : 'Search all files...';
   useEffect(() => {
     if (ref.current) requestAnimationFrame(() => {
       if (ref.current) ref.current.scrollLeft = ref.current.scrollWidth;
@@ -269,6 +272,16 @@ function Crumb({
       clearFileSearch();
     }
   };
+  const refreshFiles = (): void => {
+    const gid = groupId.peek();
+    const query = fileSearchQuery.peek();
+    if (fileSearchOpen.peek() && gid && query) {
+      searchFiles(gid, query).catch(console.error);
+      return;
+    }
+    loadTree(treePath.peek()).catch(console.error);
+  };
+  const refreshLabel = fileSearchOpen.value ? 'Refresh search' : 'Refresh folder';
   let acc = '';
   return (
     <>
@@ -342,24 +355,26 @@ function Crumb({
               type="text"
               class="rail-search-input file-search-input"
               value={fileSearchQuery.value}
-              placeholder={fileSearchRoot.value ? `Search /${fileSearchRoot.value}...` : 'Search all files...'}
+              placeholder={searchPlaceholder}
               aria-label="Search files by name"
               onInput={(ev: JSX.TargetedInputEvent<HTMLInputElement>) => { fileSearchQuery.value = ev.currentTarget.value; }}
               onKeyDown={onSearchKeyDown}
             />
-            <button
-              type="button"
-              class="thread-action-btn rail-control-btn search-submit-btn"
-              title="Search files"
-              aria-label="Search files"
-              onClick={runSearch}
-            >{fileSearchLoading.value ? '\u2026' : '\uD83D\uDD0D'}</button>
+            {fileSearchQuery.value ? (
+              <button
+                type="button"
+                class="thread-action-btn rail-control-btn clear-search-btn"
+                title="Clear file search"
+                aria-label="Clear file search"
+                onClick={clearFileSearch}
+              >{'\u00D7'}</button>
+            ) : null}
             <button
               type="button"
               class="thread-action-btn rail-control-btn refresh-btn"
-              title="Refresh folder"
-              aria-label="Refresh folder"
-              onClick={() => { loadTree(treePath.peek()).catch(console.error); }}
+              title={refreshLabel}
+              aria-label={refreshLabel}
+              onClick={refreshFiles}
             >{'\u21BB'}</button>
             <ActionsMenu
               mode="directory"
@@ -378,7 +393,7 @@ function Crumb({
             data-path=""
             title="Root"
             onClick={() => navigateTree('')}
-          >/</button>
+          >~</button>
           {segs.map((s, i) => {
             acc = acc ? acc + '/' + s : s;
             const path = acc;
@@ -391,7 +406,7 @@ function Crumb({
                   type="button"
                   class={'crumb' + (last ? ' current' : '')}
                   data-path={path}
-                  title={'/' + path}
+                  title={displayWorkspacePath(path)}
                   onClick={onClick}
                 >{s}</button>
               </span>
@@ -400,7 +415,7 @@ function Crumb({
           {fileName ? (
             <>
               <span class="sep" aria-hidden="true">{'\u203a'}</span>
-              <span class="crumb file current" title={'/' + fp}>{fileName}</span>
+              <span class="crumb file current" title={displayWorkspacePath(fp || '')}>{fileName}</span>
             </>
           ) : null}
         </div>
@@ -800,7 +815,7 @@ export function FilesPane() {
           ? <SearchListing onEdit={editEntry} onNewFile={beginCreateIn} onUpload={chooseUploadTo} />
           : <Listing onEdit={editEntry} onNewFile={beginCreateIn} onUpload={chooseUploadTo} />}
         <div class="drop-hint admin-only" id="dropzone">
-          Drag &amp; drop files here to upload to <code id="dropzone-path">/{treePath.value}</code>
+          Drag &amp; drop files here to upload to <code id="dropzone-path">{displayWorkspacePath(treePath.value)}</code>
         </div>
         <Preview editor={editor} />
       </div>
