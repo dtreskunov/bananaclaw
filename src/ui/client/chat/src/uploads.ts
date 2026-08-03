@@ -42,11 +42,15 @@ const EDITABLE_FILE_EXTENSIONS = new Set([
   'xml',
 ]);
 
-function newFileNameError(name: string): string | null {
-  if (name.includes('/') || name.includes('\\')) return 'Enter a file name, not a path.';
+export function isEditableFileName(name: string): boolean {
   const dot = name.lastIndexOf('.');
   const extension = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
-  if (!EDITABLE_FILE_EXTENSIONS.has(extension)) {
+  return EDITABLE_FILE_EXTENSIONS.has(extension);
+}
+
+function newFileNameError(name: string): string | null {
+  if (name.includes('/') || name.includes('\\')) return 'Enter a file name, not a path.';
+  if (!isEditableFileName(name)) {
     return 'Use an editable text file type, such as .md, .txt, .json, .html, .css, .js, .ts, .py, .sh, .yaml, or .xml.';
   }
   if (treeEntries.peek().some((entry) => entry.name === name)) {
@@ -128,12 +132,11 @@ export async function createFile(relPath: string, content: string): Promise<Crea
   return { ok: true, size: r.data.size, mtime: r.data.mtime, etag: r.data.etag };
 }
 
-export async function promptNewFilePath(): Promise<string | null> {
+export async function promptNewFilePath(directory = curDir()): Promise<string | null> {
   if (!groupId.value || !isAdmin.value) return null;
-  const dir = curDir();
   const name = await requestInput({
     title: 'New file',
-    label: `Create in /${dir}`,
+    label: `Create in /${directory}`,
     placeholder: 'notes.md',
     okLabel: 'Continue',
     validate: newFileNameError,
@@ -141,7 +144,7 @@ export async function promptNewFilePath(): Promise<string | null> {
   if (!name) return null;
   const trimmed = name.trim();
   if (!trimmed) return null;
-  return joinPath(dir, trimmed);
+  return joinPath(directory, trimmed);
 }
 
 export async function promptSaveAsPath(sourcePath: string, title = 'Save a copy'): Promise<string | null> {
@@ -158,13 +161,13 @@ export async function promptSaveAsPath(sourcePath: string, title = 'Save a copy'
   return name ? joinPath(dir, name.trim()) : null;
 }
 
-export async function mkdirPrompt(): Promise<void> {
+export async function mkdirPrompt(directory = curDir()): Promise<void> {
   if (!groupId.value || !isAdmin.value) return;
   const name = await requestInput({ title: 'New folder', placeholder: 'folder name', okLabel: 'Create' });
   if (!name) return;
   const trimmed = name.trim();
   if (!trimmed) return;
-  const target = joinPath(curDir(), trimmed);
+  const target = joinPath(directory, trimmed);
   const r = await postJson<ApiError>(`api/groups/${groupId.value}/mkdir`, { path: target });
   if (!r.ok) {
     showToast('mkdir failed: ' + (r.data.error || r.status), 'err');
@@ -283,6 +286,8 @@ function triggerDownload(url: string, filename?: string): void {
 }
 
 // ── upload + progress strip ─────────────────────────────────────────
+let uploadDirectory = '';
+
 function updateItem(idx: number, patch: Partial<UploadItem>): void {
   const next = uploadItems.value.slice();
   const cur = next[idx];
@@ -328,7 +333,7 @@ function uploadOne(idx: number, mode: string): Promise<void> {
     const fd = new FormData();
     fd.append('file', item.file, item.name);
     const xhr = new XMLHttpRequest();
-    const url = `api/groups/${groupId.value}/upload?path=${encodeURIComponent(curDir())}&mode=${encodeURIComponent(mode)}`;
+    const url = `api/groups/${groupId.value}/upload?path=${encodeURIComponent(uploadDirectory)}&mode=${encodeURIComponent(mode)}`;
     xhr.open('POST', url);
     xhr.upload.onprogress = (ev: ProgressEvent) => {
       if (ev.lengthComputable) updateItem(idx, { pct: (ev.loaded / ev.total) * 100 });
@@ -358,8 +363,9 @@ function uploadOne(idx: number, mode: string): Promise<void> {
   });
 }
 
-export async function uploadFiles(fileList: FileList | File[] | null | undefined): Promise<void> {
+export async function uploadFiles(fileList: FileList | File[] | null | undefined, directory = curDir()): Promise<void> {
   if (!groupId.value || !isAdmin.value || !fileList || fileList.length === 0) return;
+  uploadDirectory = directory;
   uploadItems.value = Array.from(fileList).map((file) => ({
     file,
     name: file.name,

@@ -10,7 +10,7 @@ import {
 import { navTree, navFile, closePreview, togglePinnedFile, loadTree, selectFile } from '../actions';
 import {
   uploadFiles, clearUploadStrip, resolveConflict, notifyAgent, saveFile,
-  createFile, promptNewFilePath, promptSaveAsPath,
+  createFile, promptNewFilePath, promptSaveAsPath, isEditableFileName,
 } from '../uploads';
 import { fmtBytes, renderMarkdown, parentPath } from '../utils';
 import { Pane } from './Pane';
@@ -64,7 +64,7 @@ function usePreviewEditor(): PreviewEditorState {
   }, [editing, draft]);
 
   const beginEdit = (): void => {
-    const text = p?.text || '';
+    const text = previewBlock.peek()?.text || '';
     initialDraft.current = text;
     setCreatePath(null);
     setDraft(text);
@@ -336,7 +336,14 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
   );
 }
 
-function Row({ e }: { e: TreeEntry }) {
+interface RowProps {
+  e: TreeEntry;
+  onEdit: (entry: TreeEntry) => void;
+  onNewFile: (directory: string) => void;
+  onUpload: (directory: string) => void;
+}
+
+function Row({ e, onEdit, onNewFile, onUpload }: RowProps) {
   const active = e.path === filePath.value;
   const selected = pinnedContext.value.includes(e.path);
   const onClick = (ev: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
@@ -354,12 +361,22 @@ function Row({ e }: { e: TreeEntry }) {
       <div class="name">{e.name}</div>
       <div class="size">{fmtBytes(e.size)}</div>
       <div class="meta"><RelativeTime ts={e.mtime} /></div>
-      <div class="row-actions"><ActionsMenu mode="entry" entry={e} triggerTitle={`Actions for ${e.name}`} /></div>
+      <div class="row-actions">
+        <ActionsMenu
+          mode={e.type === 'dir' ? 'directory' : 'entry'}
+          entry={e}
+          onNewFile={e.type === 'dir' ? () => onNewFile(e.path) : undefined}
+          onUpload={e.type === 'dir' ? () => onUpload(e.path) : undefined}
+          onEdit={e.type === 'file' && isEditableFileName(e.name) ? () => onEdit(e) : undefined}
+          includeSelection={false}
+          triggerTitle={`Actions for ${e.name}`}
+        />
+      </div>
     </div>
   );
 }
 
-function Listing() {
+function Listing({ onEdit, onNewFile, onUpload }: Omit<RowProps, 'e'>) {
   const p = treePath.value;
   const err = treeError.value;
   const entries = treeEntries.value;
@@ -369,7 +386,9 @@ function Listing() {
       {p ? <div class="row" onClick={() => navTree(parentPath(p))}><div class="name">..</div></div> : null}
       {entries.length === 0
         ? <div class="empty">Empty directory</div>
-        : entries.map((e) => <Row key={e.path} e={e} />)}
+        : entries.map((e) => (
+          <Row key={e.path} e={e} onEdit={onEdit} onNewFile={onNewFile} onUpload={onUpload} />
+        ))}
     </div>
   );
 }
@@ -522,6 +541,23 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
 export function FilesPane() {
   const editor = usePreviewEditor();
   const previewing = !!previewBlock.value || editor.editing;
+  const listingUploadRef = useRef<HTMLInputElement | null>(null);
+  const listingUploadDirectory = useRef('');
+  const editEntry = (entry: TreeEntry): void => {
+    navFile(entry)
+      .then(editor.beginEdit)
+      .catch(console.error);
+  };
+  const beginCreateIn = (directory: string): void => {
+    navTree(directory)
+      .then(() => promptNewFilePath(directory))
+      .then((path) => { if (path) editor.beginCreate(path); })
+      .catch(console.error);
+  };
+  const chooseUploadTo = (directory: string): void => {
+    listingUploadDirectory.current = directory;
+    listingUploadRef.current?.click();
+  };
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -557,9 +593,20 @@ export function FilesPane() {
   return (
     <Pane paneKey="files" name="files-pane" label="Files" extraClass={previewing ? 'previewing' : ''}>
       <div class="files-body" ref={bodyRef}>
+        <input
+          type="file"
+          multiple
+          hidden
+          ref={listingUploadRef}
+          onChange={(ev: JSX.TargetedEvent<HTMLInputElement>) => {
+            const files = ev.currentTarget.files;
+            if (files && files.length) uploadFiles(files, listingUploadDirectory.current);
+            ev.currentTarget.value = '';
+          }}
+        />
         <Crumb editor={editor} />
         <UploadStrip />
-        <Listing />
+        <Listing onEdit={editEntry} onNewFile={beginCreateIn} onUpload={chooseUploadTo} />
         <div class="drop-hint admin-only" id="dropzone">
           Drag &amp; drop files here to upload to <code id="dropzone-path">/{treePath.value}</code>
         </div>

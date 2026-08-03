@@ -21681,11 +21681,14 @@ var EDITABLE_FILE_EXTENSIONS = /* @__PURE__ */ new Set([
   "env",
   "xml"
 ]);
-function newFileNameError(name) {
-  if (name.includes("/") || name.includes("\\")) return "Enter a file name, not a path.";
+function isEditableFileName(name) {
   const dot = name.lastIndexOf(".");
   const extension = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
-  if (!EDITABLE_FILE_EXTENSIONS.has(extension)) {
+  return EDITABLE_FILE_EXTENSIONS.has(extension);
+}
+function newFileNameError(name) {
+  if (name.includes("/") || name.includes("\\")) return "Enter a file name, not a path.";
+  if (!isEditableFileName(name)) {
     return "Use an editable text file type, such as .md, .txt, .json, .html, .css, .js, .ts, .py, .sh, .yaml, or .xml.";
   }
   if (treeEntries.peek().some((entry) => entry.name === name)) {
@@ -21738,12 +21741,11 @@ async function createFile(relPath, content) {
   }
   return { ok: true, size: r4.data.size, mtime: r4.data.mtime, etag: r4.data.etag };
 }
-async function promptNewFilePath() {
+async function promptNewFilePath(directory = curDir()) {
   if (!groupId.value || !isAdmin.value) return null;
-  const dir = curDir();
   const name = await requestInput({
     title: "New file",
-    label: `Create in /${dir}`,
+    label: `Create in /${directory}`,
     placeholder: "notes.md",
     okLabel: "Continue",
     validate: newFileNameError
@@ -21751,7 +21753,7 @@ async function promptNewFilePath() {
   if (!name) return null;
   const trimmed = name.trim();
   if (!trimmed) return null;
-  return joinPath(dir, trimmed);
+  return joinPath(directory, trimmed);
 }
 async function promptSaveAsPath(sourcePath, title = "Save a copy") {
   if (!groupId.value || !isAdmin.value) return null;
@@ -21766,13 +21768,13 @@ async function promptSaveAsPath(sourcePath, title = "Save a copy") {
   });
   return name ? joinPath(dir, name.trim()) : null;
 }
-async function mkdirPrompt() {
+async function mkdirPrompt(directory = curDir()) {
   if (!groupId.value || !isAdmin.value) return;
   const name = await requestInput({ title: "New folder", placeholder: "folder name", okLabel: "Create" });
   if (!name) return;
   const trimmed = name.trim();
   if (!trimmed) return;
-  const target = joinPath(curDir(), trimmed);
+  const target = joinPath(directory, trimmed);
   const r4 = await postJson(`api/groups/${groupId.value}/mkdir`, { path: target });
   if (!r4.ok) {
     showToast("mkdir failed: " + (r4.data.error || r4.status), "err");
@@ -21881,6 +21883,7 @@ function triggerDownload(url, filename) {
   a4.click();
   a4.remove();
 }
+var uploadDirectory = "";
 function updateItem(idx, patch) {
   const next = uploadItems.value.slice();
   const cur = next[idx];
@@ -21914,7 +21917,7 @@ function uploadOne(idx, mode) {
     const fd = new FormData();
     fd.append("file", item.file, item.name);
     const xhr = new XMLHttpRequest();
-    const url = `api/groups/${groupId.value}/upload?path=${encodeURIComponent(curDir())}&mode=${encodeURIComponent(mode)}`;
+    const url = `api/groups/${groupId.value}/upload?path=${encodeURIComponent(uploadDirectory)}&mode=${encodeURIComponent(mode)}`;
     xhr.open("POST", url);
     xhr.upload.onprogress = (ev) => {
       if (ev.lengthComputable) updateItem(idx, { pct: ev.loaded / ev.total * 100 });
@@ -21942,8 +21945,9 @@ function uploadOne(idx, mode) {
     xhr.send(fd);
   });
 }
-async function uploadFiles(fileList) {
+async function uploadFiles(fileList, directory = curDir()) {
   if (!groupId.value || !isAdmin.value || !fileList || fileList.length === 0) return;
+  uploadDirectory = directory;
   uploadItems.value = Array.from(fileList).map((file) => ({
     file,
     name: file.name,
@@ -22043,6 +22047,7 @@ function ActionsMenu({
   onNewFile,
   onUpload,
   onEdit,
+  includeSelection = mode === "directory",
   triggerClassName = "text-btn",
   triggerTitle = "Actions"
 }) {
@@ -22063,7 +22068,7 @@ function ActionsMenu({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit);
+  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, includeSelection);
   if (items.length === 0) return null;
   return /* @__PURE__ */ u4("div", { class: "action-menu" + (open ? " open" : ""), ref: wrapRef, children: [
     /* @__PURE__ */ u4(
@@ -22108,7 +22113,7 @@ function appendGroup(items, group) {
   if (items.length > 0) items.push("---");
   items.push(...group);
 }
-function buildItems(mode, entry, onNewFile, onUpload, onEdit) {
+function buildItems(mode, entry, onNewFile, onUpload, onEdit, includeSelection = true) {
   const admin = isAdmin.value;
   const gid = groupId.value;
   if (mode === "entry") return entry ? buildEntryItems(entry, gid, admin, onEdit) : [];
@@ -22118,12 +22123,12 @@ function buildItems(mode, entry, onNewFile, onUpload, onEdit) {
   const createItems = [];
   if (admin) {
     if (onNewFile) createItems.push({ ico: "\u{1F4C4}", label: "New file", onClick: onNewFile });
-    createItems.push({ ico: "\u{1F4C1}", label: "New folder", onClick: mkdirPrompt });
+    createItems.push({ ico: "\u{1F4C1}", label: "New folder", onClick: () => mkdirPrompt(entry?.path) });
     if (onUpload) createItems.push({ ico: "\u2B06", label: "Upload files\u2026", onClick: onUpload });
   }
   appendGroup(items, createItems);
   if (entry) appendGroup(items, buildEntryItems(entry, gid, admin));
-  if (sel.length > 0) {
+  if (includeSelection && sel.length > 0) {
     const selectionItems = [
       { ico: "\u2B07", label: sel.length > 1 ? `Download ${sel.length} (zip)` : "Download selection", onClick: () => downloadPaths(sel, selEntries) }
     ];
@@ -22462,7 +22467,7 @@ function usePreviewEditor() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [editing, draft]);
   const beginEdit = () => {
-    const text = p5?.text || "";
+    const text = previewBlock.peek()?.text || "";
     initialDraft.current = text;
     setCreatePath(null);
     setDraft(text);
@@ -22762,7 +22767,7 @@ function Crumb({ editor }) {
     ] }) })
   ] });
 }
-function Row({ e: e4 }) {
+function Row({ e: e4, onEdit, onNewFile, onUpload }) {
   const active = e4.path === filePath.value;
   const selected = pinnedContext.value.includes(e4.path);
   const onClick = (ev) => {
@@ -22777,17 +22782,28 @@ function Row({ e: e4 }) {
     /* @__PURE__ */ u4("div", { class: "name", children: e4.name }),
     /* @__PURE__ */ u4("div", { class: "size", children: fmtBytes(e4.size) }),
     /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: e4.mtime }) }),
-    /* @__PURE__ */ u4("div", { class: "row-actions", children: /* @__PURE__ */ u4(ActionsMenu, { mode: "entry", entry: e4, triggerTitle: `Actions for ${e4.name}` }) })
+    /* @__PURE__ */ u4("div", { class: "row-actions", children: /* @__PURE__ */ u4(
+      ActionsMenu,
+      {
+        mode: e4.type === "dir" ? "directory" : "entry",
+        entry: e4,
+        onNewFile: e4.type === "dir" ? () => onNewFile(e4.path) : void 0,
+        onUpload: e4.type === "dir" ? () => onUpload(e4.path) : void 0,
+        onEdit: e4.type === "file" && isEditableFileName(e4.name) ? () => onEdit(e4) : void 0,
+        includeSelection: false,
+        triggerTitle: `Actions for ${e4.name}`
+      }
+    ) })
   ] });
 }
-function Listing() {
+function Listing({ onEdit, onNewFile, onUpload }) {
   const p5 = treePath.value;
   const err = treeError.value;
   const entries = treeEntries.value;
   if (err) return /* @__PURE__ */ u4("div", { class: "listing", id: "listing", children: /* @__PURE__ */ u4("div", { class: "empty", children: err }) });
   return /* @__PURE__ */ u4("div", { class: "listing", id: "listing", children: [
     p5 ? /* @__PURE__ */ u4("div", { class: "row", onClick: () => navTree(parentPath(p5)), children: /* @__PURE__ */ u4("div", { class: "name", children: ".." }) }) : null,
-    entries.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "Empty directory" }) : entries.map((e4) => /* @__PURE__ */ u4(Row, { e: e4 }, e4.path))
+    entries.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "Empty directory" }) : entries.map((e4) => /* @__PURE__ */ u4(Row, { e: e4, onEdit, onNewFile, onUpload }, e4.path))
   ] });
 }
 function UploadStrip() {
@@ -22925,6 +22941,20 @@ function Preview({ editor }) {
 function FilesPane() {
   const editor = usePreviewEditor();
   const previewing = !!previewBlock.value || editor.editing;
+  const listingUploadRef = A2(null);
+  const listingUploadDirectory = A2("");
+  const editEntry = (entry) => {
+    navFile(entry).then(editor.beginEdit).catch(console.error);
+  };
+  const beginCreateIn = (directory) => {
+    navTree(directory).then(() => promptNewFilePath(directory)).then((path) => {
+      if (path) editor.beginCreate(path);
+    }).catch(console.error);
+  };
+  const chooseUploadTo = (directory) => {
+    listingUploadDirectory.current = directory;
+    listingUploadRef.current?.click();
+  };
   const bodyRef = A2(null);
   y2(() => {
     const body = bodyRef.current;
@@ -22974,9 +23004,23 @@ function FilesPane() {
     };
   }, []);
   return /* @__PURE__ */ u4(Pane, { paneKey: "files", name: "files-pane", label: "Files", extraClass: previewing ? "previewing" : "", children: /* @__PURE__ */ u4("div", { class: "files-body", ref: bodyRef, children: [
+    /* @__PURE__ */ u4(
+      "input",
+      {
+        type: "file",
+        multiple: true,
+        hidden: true,
+        ref: listingUploadRef,
+        onChange: (ev) => {
+          const files = ev.currentTarget.files;
+          if (files && files.length) uploadFiles(files, listingUploadDirectory.current);
+          ev.currentTarget.value = "";
+        }
+      }
+    ),
     /* @__PURE__ */ u4(Crumb, { editor }),
     /* @__PURE__ */ u4(UploadStrip, {}),
-    /* @__PURE__ */ u4(Listing, {}),
+    /* @__PURE__ */ u4(Listing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }),
     /* @__PURE__ */ u4("div", { class: "drop-hint admin-only", id: "dropzone", children: [
       "Drag & drop files here to upload to ",
       /* @__PURE__ */ u4("code", { id: "dropzone-path", children: [

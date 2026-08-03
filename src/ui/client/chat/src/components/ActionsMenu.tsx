@@ -97,6 +97,7 @@ interface Props {
   onNewFile?: () => void;
   onUpload?: () => void;
   onEdit?: () => void;
+  includeSelection?: boolean;
   triggerClassName?: string;
   triggerTitle?: string;
 }
@@ -107,6 +108,7 @@ export function ActionsMenu({
   onNewFile,
   onUpload,
   onEdit,
+  includeSelection = mode === 'directory',
   triggerClassName = 'text-btn',
   triggerTitle = 'Actions',
 }: Props) {
@@ -127,7 +129,7 @@ export function ActionsMenu({
     };
   }, [open]);
 
-  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit);
+  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, includeSelection);
   if (items.length === 0) return null;
 
   return (
@@ -179,6 +181,7 @@ function buildItems(
   onNewFile?: () => void,
   onUpload?: () => void,
   onEdit?: () => void,
+  includeSelection = true,
 ): Item[] {
   const admin = isAdmin.value;
   const gid = groupId.value;
@@ -190,12 +193,12 @@ function buildItems(
   const createItems: Item[] = [];
   if (admin) {
     if (onNewFile) createItems.push({ ico: '\uD83D\uDCC4', label: 'New file', onClick: onNewFile });
-    createItems.push({ ico: '\uD83D\uDCC1', label: 'New folder', onClick: mkdirPrompt });
+    createItems.push({ ico: '\uD83D\uDCC1', label: 'New folder', onClick: () => mkdirPrompt(entry?.path) });
     if (onUpload) createItems.push({ ico: '\u2B06', label: 'Upload files\u2026', onClick: onUpload });
   }
   appendGroup(items, createItems);
   if (entry) appendGroup(items, buildEntryItems(entry, gid, admin));
-  if (sel.length > 0) {
+  if (includeSelection && sel.length > 0) {
     const selectionItems: Item[] = [
       { ico: '\u2B07', label: sel.length > 1 ? `Download ${sel.length} (zip)` : 'Download selection', onClick: () => downloadPaths(sel, selEntries) },
     ];
