@@ -3538,7 +3538,8 @@ body.is-admin .files-pane.collapsed .admin-only {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px var(--shadow-color);
-  padding: 4px 0;
+  padding: 0;
+  overflow: hidden;
 }
 .action-item {
   display: flex;
