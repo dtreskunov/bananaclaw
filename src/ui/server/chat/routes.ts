@@ -35,7 +35,7 @@ import { resolvePrivateWebEntry } from '../private-web-path.js';
 import { uiBaseUrl } from '../server.js';
 import { classify, resolveSafe } from './classify.js';
 import { fileEtag } from './etag.js';
-import { searchFilesByName } from './file-search.js';
+import { compareEntriesByDate, searchFilesByName } from './file-search.js';
 import {
   handleChatRequest,
   handleChatUpgrade,
@@ -748,10 +748,7 @@ function handleTree(ctx: Ctx, userId: string, groupId: string, relPath: string):
       tier: cls.tier,
     });
   }
-  out.sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
+  out.sort(compareEntriesByDate);
   recordAccess({ userId, groupId: group.id, path: relPath, action: 'tree', req: ctx.req });
   json(ctx, 200, { path: relPath, entries: out });
 }

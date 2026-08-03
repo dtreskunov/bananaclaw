@@ -21,16 +21,23 @@ export interface FileSearchResponse {
   truncated: boolean;
 }
 
-interface RankedResult {
-  result: FileSearchResult;
-  rank: number;
+interface DateSortablePath {
+  path: string;
+  mtime?: string | null;
 }
 
-function matchRank(name: string, query: string): number | null {
+function matchesName(name: string, query: string): boolean {
   const candidate = name.toLowerCase();
-  if (candidate === query) return 0;
-  if (candidate.startsWith(query)) return 1;
-  return candidate.includes(query) ? 2 : null;
+  return candidate.includes(query);
+}
+
+export function compareEntriesByDate(left: DateSortablePath, right: DateSortablePath): number {
+  if (left.mtime !== right.mtime) {
+    if (!left.mtime) return 1;
+    if (!right.mtime) return -1;
+    return right.mtime.localeCompare(left.mtime);
+  }
+  return left.path.localeCompare(right.path);
 }
 
 export async function searchFilesByName(
@@ -51,7 +58,7 @@ export async function searchFilesByName(
   if (!needle) return { results: [], truncated: false };
 
   const queue = [{ absolute: root, relative: rootPath }];
-  const matches: RankedResult[] = [];
+  const matches: FileSearchResult[] = [];
   let directoryIndex = 0;
   let scanned = 0;
   let truncated = false;
@@ -87,8 +94,7 @@ export async function searchFilesByName(
         if (child) queue.push({ absolute: child, relative });
       }
 
-      const rank = matchRank(entry.name, needle);
-      if (rank == null) continue;
+      if (!matchesName(entry.name, needle)) continue;
 
       const result: FileSearchResult = {
         path: relative,
@@ -103,14 +109,14 @@ export async function searchFilesByName(
       } catch {
         // A matching file can disappear between readdir and stat.
       }
-      matches.push({ result, rank });
+      matches.push(result);
     }
   }
 
-  matches.sort((left, right) => left.rank - right.rank || left.result.path.localeCompare(right.result.path));
+  matches.sort(compareEntriesByDate);
   if (matches.length > FILE_SEARCH_LIMIT) truncated = true;
   return {
-    results: matches.slice(0, FILE_SEARCH_LIMIT).map(({ result }) => result),
+    results: matches.slice(0, FILE_SEARCH_LIMIT),
     truncated,
   };
 }
