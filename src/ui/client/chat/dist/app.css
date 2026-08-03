@@ -182,6 +182,59 @@ button:hover {
   color: var(--fg);
   outline: none;
 }
+.path-breadcrumb {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  min-height: var(--rail-control-height);
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+}
+.path-breadcrumb-track {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.path-breadcrumb-track::-webkit-scrollbar {
+  display: none;
+}
+.path-breadcrumb-node {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.path-breadcrumb-segment {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+}
+.path-breadcrumb-segment.current {
+  color: inherit;
+}
+.path-breadcrumb-segment.root {
+  font-size: var(--font-lg);
+  line-height: 1;
+}
+.path-breadcrumb-separator {
+  padding: 0 1px;
+  color: var(--muted);
+  opacity: 0.5;
+  user-select: none;
+}
 .rail-control-btn {
   flex: 0 0 var(--rail-control-height);
   width: var(--rail-control-height);
@@ -454,6 +507,15 @@ header .mobile-only {
   margin: 4px 0 12px;
   color: var(--muted);
   font-size: var(--font-base);
+}
+.prompt-path-breadcrumb {
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.prompt-input {
+  width: 100%;
+  flex: 0 0 var(--rail-control-height);
+  border-radius: var(--radius-md);
 }
 .settings-row {
   display: flex;
@@ -2917,31 +2979,7 @@ nav.tab-bar-strip.group-strip {
   min-height: 0;
 }
 .files-pane .breadcrumb {
-  display: flex;
-  align-items: stretch;
-  min-height: var(--rail-control-height);
-  font-family: var(--font-mono);
-  font-size: var(--font-sm);
   overflow: visible;
-}
-.files-pane .breadcrumb-path {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  white-space: nowrap;
-}
-.files-pane .breadcrumb-path::-webkit-scrollbar {
-  display: none;
-}
-.files-pane .breadcrumb .crumb-node {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
 }
 .files-pane .files-actions {
   flex: 0 0 auto;
@@ -2952,39 +2990,18 @@ nav.tab-bar-strip.group-strip {
   display: flex;
 }
 .files-pane .breadcrumb .crumb {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 6px;
-  border-radius: var(--radius-md);
-  color: var(--muted);
   cursor: pointer;
   text-decoration: none;
-  background: transparent;
-  border: 0;
-  font: inherit;
-  flex: 0 0 auto;
 }
 .files-pane .breadcrumb .crumb:hover {
   background: var(--wash);
   color: inherit;
 }
 .files-pane .breadcrumb .crumb.current {
-  color: inherit;
   cursor: default;
 }
 .files-pane .breadcrumb .crumb.current:hover {
   background: transparent;
-}
-.files-pane .breadcrumb .crumb.root {
-  padding: 3px 6px;
-  font-size: var(--font-lg);
-  line-height: 1;
-}
-.files-pane .breadcrumb .sep {
-  color: var(--muted);
-  opacity: 0.5;
-  padding: 0 1px;
-  user-select: none;
 }
 .files-pane .listing {
   flex: 1;

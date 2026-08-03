@@ -9,6 +9,7 @@ import { MobileDialog, MobileDialogFooter } from './MobileDialog';
 interface PromptRequest {
   title: string;
   label?: string;
+  basePath?: string;
   placeholder?: string;
   initialValue?: string;
   okLabel?: string;
@@ -17,6 +18,22 @@ interface PromptRequest {
 }
 
 const promptRequest: Signal<PromptRequest | null> = signal<PromptRequest | null>(null);
+
+function BasePathBreadcrumb({ path }: { path: string }) {
+  return (
+    <nav class="prompt-path-breadcrumb path-breadcrumb" aria-label="Base path">
+      <div class="path-breadcrumb-track">
+        <span class="path-breadcrumb-segment root">~</span>
+        {path.split('/').filter(Boolean).map((segment, index) => (
+          <span class="path-breadcrumb-node" key={`${segment}-${index}`}>
+            <span class="path-breadcrumb-separator" aria-hidden="true">{'\u203A'}</span>
+            <span class="path-breadcrumb-segment">{segment}</span>
+          </span>
+        ))}
+      </div>
+    </nav>
+  );
+}
 
 export function requestInput(opts: Omit<PromptRequest, 'resolve'>): Promise<string | null> {
   return new Promise((resolve) => {
@@ -63,9 +80,11 @@ export function PromptModal() {
       <form class="mobile-dialog-form" onSubmit={onSubmit}>
         <div class="settings-body">
           {req.label ? <label style="display:block;margin-bottom:6px;font-size:12px;color:var(--muted)">{req.label}</label> : null}
+          {req.basePath !== undefined ? <BasePathBreadcrumb path={req.basePath} /> : null}
           <input
             ref={inputRef}
             type="text"
+            class="rail-search-input prompt-input"
             value={value}
             placeholder={req.placeholder || ''}
             aria-invalid={!!error}
@@ -75,7 +94,6 @@ export function PromptModal() {
               setError(null);
             }}
             onKeyDown={onKey}
-            style="width:100%"
           />
           {error ? <div id="prompt-input-error" style="margin-top:6px;color:var(--danger);font-size:12px">{error}</div> : null}
         </div>

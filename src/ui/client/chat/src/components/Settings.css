@@ -5,6 +5,15 @@
 .settings-body h3 { margin: 0 0 8px; font-size: var(--font-lg); font-weight: 600; }
 .settings-body h4 { margin: 16px 0 8px; font-size: var(--font-base); font-weight: 600; }
 .settings-body p.muted { margin: 4px 0 12px; color: var(--muted); font-size: var(--font-base); }
+.prompt-path-breadcrumb {
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.prompt-input {
+  width: 100%;
+  flex: 0 0 var(--rail-control-height);
+  border-radius: var(--radius-md);
+}
 .settings-row {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   margin: 6px 0;

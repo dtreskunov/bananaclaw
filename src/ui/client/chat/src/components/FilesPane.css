@@ -8,36 +8,16 @@
   display: flex; flex-direction: column; min-height: 0;
 }
 .files-pane .breadcrumb {
-  display: flex; align-items: stretch;
-  min-height: var(--rail-control-height);
-  font-family: var(--font-mono);
-  font-size: var(--font-sm);
   overflow: visible;
 }
-.files-pane .breadcrumb-path {
-  display: flex; align-items: center; gap: 2px;
-  flex: 1; min-width: 0;
-  padding: 6px 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  white-space: nowrap;
-}
-.files-pane .breadcrumb-path::-webkit-scrollbar { display: none; }
-.files-pane .breadcrumb .crumb-node { display: inline-flex; align-items: center; flex: 0 0 auto; }
 .files-pane .files-actions { flex: 0 0 auto; justify-content: stretch; overflow: visible; }
 .files-pane .files-actions .action-menu { display: flex; }
 .files-pane .breadcrumb .crumb {
-  display: inline-flex; align-items: center;
-  padding: 3px 6px; border-radius: var(--radius-md);
-  color: var(--muted); cursor: pointer; text-decoration: none;
-  background: transparent; border: 0; font: inherit;
-  flex: 0 0 auto;
+  cursor: pointer; text-decoration: none;
 }
 .files-pane .breadcrumb .crumb:hover { background: var(--wash); color: inherit; }
-.files-pane .breadcrumb .crumb.current { color: inherit; cursor: default; }
+.files-pane .breadcrumb .crumb.current { cursor: default; }
 .files-pane .breadcrumb .crumb.current:hover { background: transparent; }
-.files-pane .breadcrumb .crumb.root { padding: 3px 6px; font-size: var(--font-lg); line-height: 1; }
-.files-pane .breadcrumb .sep { color: var(--muted); opacity: 0.5; padding: 0 1px; user-select: none; }
 .files-pane .listing { flex: 1; overflow: auto; }
 .files-pane .row { display: flex; align-items: center; gap: 8px; padding: 4px 10px; cursor: pointer; font-size: var(--font-base); }
 .files-pane .row:hover { background: var(--wash); }

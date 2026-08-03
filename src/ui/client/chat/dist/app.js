@@ -19248,6 +19248,15 @@ function Header() {
 
 // src/components/PromptModal.tsx
 var promptRequest = y3(null);
+function BasePathBreadcrumb({ path }) {
+  return /* @__PURE__ */ u4("nav", { class: "prompt-path-breadcrumb path-breadcrumb", "aria-label": "Base path", children: /* @__PURE__ */ u4("div", { class: "path-breadcrumb-track", children: [
+    /* @__PURE__ */ u4("span", { class: "path-breadcrumb-segment root", children: "~" }),
+    path.split("/").filter(Boolean).map((segment, index) => /* @__PURE__ */ u4("span", { class: "path-breadcrumb-node", children: [
+      /* @__PURE__ */ u4("span", { class: "path-breadcrumb-separator", "aria-hidden": "true", children: "\u203A" }),
+      /* @__PURE__ */ u4("span", { class: "path-breadcrumb-segment", children: segment })
+    ] }, `${segment}-${index}`))
+  ] }) });
+}
 function requestInput(opts) {
   return new Promise((resolve) => {
     promptRequest.value = { ...opts, resolve };
@@ -19286,11 +19295,13 @@ function PromptModal() {
   return /* @__PURE__ */ u4(MobileDialog, { title: req.title, onClose: () => close(null), maxWidth: "420px", children: /* @__PURE__ */ u4("form", { class: "mobile-dialog-form", onSubmit, children: [
     /* @__PURE__ */ u4("div", { class: "settings-body", children: [
       req.label ? /* @__PURE__ */ u4("label", { style: "display:block;margin-bottom:6px;font-size:12px;color:var(--muted)", children: req.label }) : null,
+      req.basePath !== void 0 ? /* @__PURE__ */ u4(BasePathBreadcrumb, { path: req.basePath }) : null,
       /* @__PURE__ */ u4(
         "input",
         {
           ref: inputRef,
           type: "text",
+          class: "rail-search-input prompt-input",
           value,
           placeholder: req.placeholder || "",
           "aria-invalid": !!error,
@@ -19299,8 +19310,7 @@ function PromptModal() {
             setValue(e4.currentTarget.value);
             setError(null);
           },
-          onKeyDown: onKey,
-          style: "width:100%"
+          onKeyDown: onKey
         }
       ),
       error ? /* @__PURE__ */ u4("div", { id: "prompt-input-error", style: "margin-top:6px;color:var(--danger);font-size:12px", children: error }) : null
@@ -21876,7 +21886,7 @@ async function promptNewFilePath(directory = curDir()) {
   if (!groupId.value || !isAdmin.value) return null;
   const name = await requestInput({
     title: "New file",
-    label: `Create in ${displayWorkspacePath(directory)}`,
+    basePath: directory,
     placeholder: "notes.md",
     okLabel: "Continue",
     validate: newFileNameError
@@ -21901,7 +21911,12 @@ async function promptSaveAsPath(sourcePath, title = "Save a copy") {
 }
 async function mkdirPrompt(directory = curDir()) {
   if (!groupId.value || !isAdmin.value) return;
-  const name = await requestInput({ title: "New folder", placeholder: "folder name", okLabel: "Create" });
+  const name = await requestInput({
+    title: "New folder",
+    basePath: directory,
+    placeholder: "folder name",
+    okLabel: "Create"
+  });
   if (!name) return;
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -22944,12 +22959,12 @@ function Crumb({
         }
       )
     ] }) }),
-    /* @__PURE__ */ u4("div", { class: "breadcrumb rail-divider-row", id: "crumb", children: /* @__PURE__ */ u4("div", { class: "breadcrumb-path", ref, children: [
+    /* @__PURE__ */ u4("div", { class: "breadcrumb path-breadcrumb rail-divider-row", id: "crumb", children: /* @__PURE__ */ u4("div", { class: "breadcrumb-path path-breadcrumb-track", ref, children: [
       /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
-          class: "crumb root" + (segs.length === 0 && !fileName ? " current" : ""),
+          class: "crumb root path-breadcrumb-segment" + (segs.length === 0 && !fileName ? " current" : ""),
           "data-path": "",
           title: "Root",
           onClick: () => navigateTree(""),
@@ -22961,13 +22976,13 @@ function Crumb({
         const path = acc;
         const last = i5 === segs.length - 1 && !fileName;
         const onClick = last ? void 0 : () => navigateTree(path);
-        return /* @__PURE__ */ u4("span", { class: "crumb-node", children: [
-          /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
+        return /* @__PURE__ */ u4("span", { class: "crumb-node path-breadcrumb-node", children: [
+          /* @__PURE__ */ u4("span", { class: "sep path-breadcrumb-separator", "aria-hidden": "true", children: "\u203A" }),
           /* @__PURE__ */ u4(
             "button",
             {
               type: "button",
-              class: "crumb" + (last ? " current" : ""),
+              class: "crumb path-breadcrumb-segment" + (last ? " current" : ""),
               "data-path": path,
               title: displayWorkspacePath(path),
               onClick,
@@ -22977,8 +22992,8 @@ function Crumb({
         ] }, path);
       }),
       fileName ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
-        /* @__PURE__ */ u4("span", { class: "crumb file current", title: displayWorkspacePath(fp || ""), children: fileName })
+        /* @__PURE__ */ u4("span", { class: "sep path-breadcrumb-separator", "aria-hidden": "true", children: "\u203A" }),
+        /* @__PURE__ */ u4("span", { class: "crumb file current path-breadcrumb-segment", title: displayWorkspacePath(fp || ""), children: fileName })
       ] }) : null
     ] }) })
   ] });

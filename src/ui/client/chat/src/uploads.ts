@@ -146,7 +146,7 @@ export async function promptNewFilePath(directory = curDir()): Promise<string | 
   if (!groupId.value || !isAdmin.value) return null;
   const name = await requestInput({
     title: 'New file',
-    label: `Create in ${displayWorkspacePath(directory)}`,
+    basePath: directory,
     placeholder: 'notes.md',
     okLabel: 'Continue',
     validate: newFileNameError,
@@ -173,7 +173,12 @@ export async function promptSaveAsPath(sourcePath: string, title = 'Save a copy'
 
 export async function mkdirPrompt(directory = curDir()): Promise<void> {
   if (!groupId.value || !isAdmin.value) return;
-  const name = await requestInput({ title: 'New folder', placeholder: 'folder name', okLabel: 'Create' });
+  const name = await requestInput({
+    title: 'New folder',
+    basePath: directory,
+    placeholder: 'folder name',
+    okLabel: 'Create',
+  });
   if (!name) return;
   const trimmed = name.trim();
   if (!trimmed) return;

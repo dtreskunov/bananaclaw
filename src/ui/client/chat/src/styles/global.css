@@ -167,6 +167,48 @@ button:hover { background: var(--wash); }
   color: var(--fg);
   outline: none;
 }
+.path-breadcrumb {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  min-height: var(--rail-control-height);
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+}
+.path-breadcrumb-track {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.path-breadcrumb-track::-webkit-scrollbar { display: none; }
+.path-breadcrumb-node { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.path-breadcrumb-segment {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+}
+.path-breadcrumb-segment.current { color: inherit; }
+.path-breadcrumb-segment.root { font-size: var(--font-lg); line-height: 1; }
+.path-breadcrumb-separator {
+  padding: 0 1px;
+  color: var(--muted);
+  opacity: 0.5;
+  user-select: none;
+}
 .rail-control-btn {
   flex: 0 0 var(--rail-control-height);
   width: var(--rail-control-height);

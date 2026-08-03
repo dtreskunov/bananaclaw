@@ -386,11 +386,11 @@ function Crumb({
           </>
         )}
       </div>
-      <div class="breadcrumb rail-divider-row" id="crumb">
-        <div class="breadcrumb-path" ref={ref}>
+      <div class="breadcrumb path-breadcrumb rail-divider-row" id="crumb">
+        <div class="breadcrumb-path path-breadcrumb-track" ref={ref}>
           <button
             type="button"
-            class={'crumb root' + (segs.length === 0 && !fileName ? ' current' : '')}
+            class={'crumb root path-breadcrumb-segment' + (segs.length === 0 && !fileName ? ' current' : '')}
             data-path=""
             title="Root"
             onClick={() => navigateTree('')}
@@ -401,11 +401,11 @@ function Crumb({
             const last = i === segs.length - 1 && !fileName;
             const onClick = last ? undefined : () => navigateTree(path);
             return (
-              <span class="crumb-node" key={path}>
-                <span class="sep" aria-hidden="true">{'\u203a'}</span>
+              <span class="crumb-node path-breadcrumb-node" key={path}>
+                <span class="sep path-breadcrumb-separator" aria-hidden="true">{'\u203a'}</span>
                 <button
                   type="button"
-                  class={'crumb' + (last ? ' current' : '')}
+                  class={'crumb path-breadcrumb-segment' + (last ? ' current' : '')}
                   data-path={path}
                   title={displayWorkspacePath(path)}
                   onClick={onClick}
@@ -415,8 +415,8 @@ function Crumb({
           })}
           {fileName ? (
             <>
-              <span class="sep" aria-hidden="true">{'\u203a'}</span>
-              <span class="crumb file current" title={displayWorkspacePath(fp || '')}>{fileName}</span>
+              <span class="sep path-breadcrumb-separator" aria-hidden="true">{'\u203a'}</span>
+              <span class="crumb file current path-breadcrumb-segment" title={displayWorkspacePath(fp || '')}>{fileName}</span>
             </>
           ) : null}
         </div>
