@@ -1,11 +1,11 @@
 /* Unified actions menu (⋯) used in row, header, and preview. */
 
 .action-menu { position: relative; display: inline-block; }
-.action-menu .action-trigger:not(.rail-control-btn):not(.rail-primary-action-btn) {
+.action-menu .action-trigger:not(.rail-control-btn):not(.rail-primary-action-btn):not(.collapsed-action-btn) {
   font-size: var(--font-lg); line-height: 1; padding: 2px 6px;
   border: 1px solid transparent;
 }
-.action-menu.open .action-trigger:not(.rail-control-btn):not(.rail-primary-action-btn) { border-color: var(--border); background: var(--wash); }
+.action-menu.open .action-trigger:not(.rail-control-btn):not(.rail-primary-action-btn):not(.collapsed-action-btn) { border-color: var(--border); background: var(--wash); }
 .action-menu.open .rail-control-btn { background: var(--wash); opacity: 1; }
 .action-panel {
   position: absolute; top: 100%; right: 0; margin-top: 4px;
@@ -31,7 +31,7 @@
 .action-sep { height: 1px; background: var(--border); margin: 4px 0; }
 
 @media (max-width: 720px) {
-  .action-menu .action-trigger:not(.rail-control-btn):not(.rail-primary-action-btn) {
+  .action-menu .action-trigger:not(.rail-control-btn):not(.rail-primary-action-btn):not(.collapsed-action-btn) {
     min-width: 40px; min-height: 40px; padding: 0;
   }
   .action-item { gap: 10px; padding-inline: 14px; }

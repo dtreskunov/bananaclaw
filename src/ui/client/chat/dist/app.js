@@ -19433,7 +19433,7 @@ function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions,
         "button",
         {
           type: "button",
-          class: "icon-btn desktop-only",
+          class: "icon-btn rail-icon-btn desktop-only",
           id: "btn-" + paneKey + "-toggle",
           "aria-label": collapsed ? "Expand " + label : "Collapse " + label,
           onClick: (e4) => {
@@ -19711,8 +19711,8 @@ function ThreadsRail() {
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
   const collapsedActions = /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn new-thread-btn", title: "New thread", "aria-label": "New thread", onClick: onNewChat, children: "+" }),
-    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn search-toggle-btn", title: "Search threads", "aria-label": "Search threads", onClick: onOpenSearch, children: "\u{1F50D}" })
+    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn", title: "New thread", "aria-label": "New thread", onClick: onNewChat, children: "+" }),
+    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn", title: "Search threads", "aria-label": "Search threads", onClick: onOpenSearch, children: "\u{1F50D}" })
   ] });
   return /* @__PURE__ */ u4(
     Pane,
@@ -22700,7 +22700,7 @@ function usePreviewEditor() {
     setDraft
   };
 }
-function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName, onAction, panelAlign }) {
+function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName, triggerContent, onAction, panelAlign }) {
   return /* @__PURE__ */ u4(
     ActionsMenu,
     {
@@ -22710,7 +22710,7 @@ function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName
       onUpload: () => uploadInputRef.current?.click(),
       triggerClassName,
       triggerTitle: "Create or upload",
-      triggerContent: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }),
+      triggerContent: triggerContent ?? /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }),
       onAction,
       panelAlign
     }
@@ -23218,7 +23218,8 @@ function FilesPane() {
         directory: currentDirectory,
         uploadInputRef: toolbarUploadRef,
         onNewFile: beginToolbarCreate,
-        triggerClassName: "icon-btn file-create-btn",
+        triggerClassName: "icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn",
+        triggerContent: "+",
         onAction: () => {
           paneOpen.files.value = true;
         }
@@ -23228,7 +23229,7 @@ function FilesPane() {
       "button",
       {
         type: "button",
-        class: "icon-btn search-toggle-btn",
+        class: "icon-btn rail-icon-btn collapsed-action-btn",
         title: "Search files",
         "aria-label": "Search files",
         onClick: (ev) => {

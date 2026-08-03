@@ -188,11 +188,12 @@ interface FileCreateMenuProps {
   uploadInputRef: RefObject<HTMLInputElement>;
   onNewFile: () => void;
   triggerClassName: string;
+  triggerContent?: ComponentChildren;
   onAction?: () => void;
   panelAlign?: 'start' | 'end';
 }
 
-function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName, onAction, panelAlign }: FileCreateMenuProps) {
+function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName, triggerContent, onAction, panelAlign }: FileCreateMenuProps) {
   return (
     <ActionsMenu
       mode="create"
@@ -201,7 +202,7 @@ function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName
       onUpload={() => uploadInputRef.current?.click()}
       triggerClassName={triggerClassName}
       triggerTitle="Create or upload"
-      triggerContent={<span class="plus-glyph" aria-hidden="true">+</span>}
+      triggerContent={triggerContent ?? <span class="plus-glyph" aria-hidden="true">+</span>}
       onAction={onAction}
       panelAlign={panelAlign}
     />
@@ -723,12 +724,13 @@ export function FilesPane() {
         directory={currentDirectory}
         uploadInputRef={toolbarUploadRef}
         onNewFile={beginToolbarCreate}
-        triggerClassName="icon-btn file-create-btn"
+        triggerClassName="icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn"
+        triggerContent="+"
         onAction={() => { paneOpen.files.value = true; }}
       />
       <button
         type="button"
-        class="icon-btn search-toggle-btn"
+        class="icon-btn rail-icon-btn collapsed-action-btn"
         title="Search files"
         aria-label="Search files"
         onClick={(ev: JSX.TargetedMouseEvent<HTMLButtonElement>) => {

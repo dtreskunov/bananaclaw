@@ -311,8 +311,8 @@ export function ThreadsRail() {
 
   const collapsedActions = (
     <>
-      <button type="button" class="icon-btn new-thread-btn" title="New thread" aria-label="New thread" onClick={onNewChat}>+</button>
-      <button type="button" class="icon-btn search-toggle-btn" title="Search threads" aria-label="Search threads" onClick={onOpenSearch}>{'\uD83D\uDD0D'}</button>
+      <button type="button" class="icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn" title="New thread" aria-label="New thread" onClick={onNewChat}>+</button>
+      <button type="button" class="icon-btn rail-icon-btn collapsed-action-btn" title="Search threads" aria-label="Search threads" onClick={onOpenSearch}>{'\uD83D\uDD0D'}</button>
     </>
   );
 

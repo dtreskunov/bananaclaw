@@ -14,21 +14,6 @@
   z-index: 3;
 }
 .threads-rail.collapsed > .head-actions { display: none; }
-.threads-rail .search-toggle-btn,
-.threads-rail .new-thread-btn {
-  background: transparent; border: 1px solid transparent;
-  color: var(--muted); cursor: pointer;
-  font-size: var(--font-base); line-height: 1;
-  padding: 2px 6px; border-radius: var(--radius-sm);
-}
-.threads-rail .new-thread-btn { font-size: var(--font-xl); }
-.threads-rail .search-toggle-btn:hover,
-.threads-rail .new-thread-btn:hover { color: inherit; background: var(--wash); border-color: var(--border); }
-.threads-rail .collapsed-actions .icon-btn {
-  width: 28px; height: 28px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-
 .threads-rail .threads-actions {
   position: absolute; top: var(--handle-h); left: 0; right: 0;
   overflow: hidden;

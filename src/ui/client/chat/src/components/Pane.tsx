@@ -42,7 +42,7 @@ export function Pane({ paneKey, name, label, extraClass, headActions, collapsedA
       <div class="head" onClick={onHeadClick}>
         <button
           type="button"
-          class="icon-btn desktop-only"
+          class="icon-btn rail-icon-btn desktop-only"
           id={'btn-' + paneKey + '-toggle'}
           aria-label={collapsed ? 'Expand ' + label : 'Collapse ' + label}
           onClick={(e: JSX.TargetedMouseEvent<HTMLButtonElement>) => { e.stopPropagation(); toggle(); }}
