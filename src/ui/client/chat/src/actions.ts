@@ -22,6 +22,14 @@ import {
   filePath,
   treeEntries,
   treeError,
+  fileSearchOpen,
+  fileSearchRoot,
+  fileSearchQuery,
+  fileSearchResults,
+  fileSearchLoading,
+  fileSearchError,
+  fileSearchTruncated,
+  fileSearchSelectedPath,
   pending,
   previewBlock,
   paneOpen,
@@ -1041,6 +1049,7 @@ export async function selectGroup(gid: string): Promise<void> {
     filePath.value = null;
   });
   clearSearch();
+  clearFileSearch();
   await loadThreads(gid);
   // Threads list refresh now happens via the unified sync ticker
   // (startSyncPoll), which picks up groupId.value automatically.
@@ -1056,7 +1065,82 @@ export async function selectGroup(gid: string): Promise<void> {
   }
 }
 
+let fileSearchGeneration = 0;
+let fileSearchController: AbortController | null = null;
+
+export function openFileSearch(root: string): void {
+  batch(() => {
+    fileSearchOpen.value = true;
+    fileSearchRoot.value = root;
+    fileSearchQuery.value = '';
+    fileSearchResults.value = null;
+    fileSearchLoading.value = false;
+    fileSearchError.value = '';
+    fileSearchTruncated.value = false;
+    fileSearchSelectedPath.value = null;
+  });
+}
+
+export async function searchFiles(gid: string, query: string): Promise<void> {
+  const trimmed = query.trim();
+  if (!trimmed) return;
+
+  const generation = ++fileSearchGeneration;
+  fileSearchController?.abort();
+  const controller = new AbortController();
+  fileSearchController = controller;
+  const root = fileSearchRoot.peek();
+  batch(() => {
+    fileSearchOpen.value = true;
+    fileSearchQuery.value = trimmed;
+    fileSearchLoading.value = true;
+    fileSearchError.value = '';
+    fileSearchTruncated.value = false;
+    fileSearchSelectedPath.value = null;
+  });
+  try {
+    const url = `api/groups/${encodeURIComponent(gid)}/search-files?path=${encodeURIComponent(root)}&q=${encodeURIComponent(trimmed)}`;
+    const response = await api<{ results: TreeEntry[]; truncated?: boolean }>(url, { signal: controller.signal });
+    if (generation !== fileSearchGeneration || controller.signal.aborted) return;
+    batch(() => {
+      fileSearchResults.value = response.results ?? [];
+      fileSearchTruncated.value = !!response.truncated;
+    });
+  } catch (err) {
+    if (generation !== fileSearchGeneration || controller.signal.aborted) return;
+    console.error('file search failed', err);
+    batch(() => {
+      fileSearchError.value = 'Search failed. Check your connection and try again.';
+      fileSearchResults.value = [];
+    });
+  } finally {
+    if (generation === fileSearchGeneration) {
+      fileSearchLoading.value = false;
+      fileSearchController = null;
+    }
+  }
+}
+
+export function clearFileSearch(): void {
+  fileSearchGeneration++;
+  fileSearchController?.abort();
+  fileSearchController = null;
+  batch(() => {
+    fileSearchOpen.value = false;
+    fileSearchRoot.value = '';
+    fileSearchQuery.value = '';
+    fileSearchResults.value = null;
+    fileSearchLoading.value = false;
+    fileSearchError.value = '';
+    fileSearchTruncated.value = false;
+    fileSearchSelectedPath.value = null;
+  });
+}
+
+let fileSelectionGeneration = 0;
+
 export async function loadTree(p: string): Promise<void> {
+  fileSelectionGeneration++;
   batch(() => {
     treePath.value = p;
     filePath.value = null;
@@ -1095,6 +1179,16 @@ export async function navFile(entry: Pick<TreeEntry, 'path' | 'name'> & Partial<
   writeHash();
 }
 
+export async function openFileSearchResult(
+  entry: Pick<TreeEntry, 'path' | 'name'> & Partial<TreeEntry>,
+): Promise<void> {
+  if (isMobile.value) drawerOpen.files.value = true;
+  else paneOpen.files.value = true;
+  const selection = selectFile(entry);
+  writeHash();
+  await selection;
+}
+
 let filePreviewRevision = 0;
 
 function refreshableFileUrl(url: string): string {
@@ -1103,8 +1197,13 @@ function refreshableFileUrl(url: string): string {
 }
 
 export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Partial<TreeEntry>): Promise<void> {
+  const selectionGeneration = ++fileSelectionGeneration;
   filePath.value = entry.path;
   if (!groupId.value) return;
+  const setPreview = (block: PreviewBlock): void => {
+    if (selectionGeneration !== fileSelectionGeneration || filePath.peek() !== entry.path) return;
+    previewBlock.value = block;
+  };
   const segs = String(entry.path || '')
     .split('/')
     .filter(Boolean)
@@ -1116,7 +1215,7 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
     const h = await fetch(url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' });
     if (h.status >= 400) {
       const msg = h.status === 404 ? 'File not found. It may have been renamed or deleted.' : `HTTP ${h.status}`;
-      previewBlock.value = { kind: 'error', text: msg, name: entry.name, url };
+      setPreview({ kind: 'error', text: msg, name: entry.name, url });
       return;
     }
     if (size == null) {
@@ -1133,20 +1232,20 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
   } catch {
     /* ignore */
   }
+  if (selectionGeneration !== fileSelectionGeneration || filePath.peek() !== entry.path) return;
   const ext = entry.name.toLowerCase().split('.').pop() || '';
   const meta = { name: entry.name, size: size ?? null, mtime: mtime ?? null, url, path: entry.path };
   const refreshableMeta = (): typeof meta => ({ ...meta, url: refreshableFileUrl(url) });
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) previewBlock.value = { kind: 'image', ...refreshableMeta() };
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) setPreview({ kind: 'image', ...refreshableMeta() });
   else if (['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'weba'].includes(ext))
-    previewBlock.value = { kind: 'audio', ...refreshableMeta() };
-  else if (['mp4', 'm4v', 'mov', 'webm', 'ogv'].includes(ext))
-    previewBlock.value = { kind: 'video', ...refreshableMeta() };
-  else if (ext === 'pdf') previewBlock.value = { kind: 'pdf', ...refreshableMeta() };
+    setPreview({ kind: 'audio', ...refreshableMeta() });
+  else if (['mp4', 'm4v', 'mov', 'webm', 'ogv'].includes(ext)) setPreview({ kind: 'video', ...refreshableMeta() });
+  else if (ext === 'pdf') setPreview({ kind: 'pdf', ...refreshableMeta() });
   else {
     try {
       const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
       if (!r.ok) {
-        previewBlock.value = { kind: 'error', text: `HTTP ${r.status}`, ...meta };
+        setPreview({ kind: 'error', text: `HTTP ${r.status}`, ...meta });
         return;
       }
       const ctType = r.headers.get('content-type') || '';
@@ -1155,18 +1254,18 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
         const txt = await r.text();
         const isMd = ext === 'md' || ext === 'markdown';
         const isHtml = ext === 'html' || ext === 'htm';
-        previewBlock.value = {
+        setPreview({
           kind: isHtml ? 'html' : isMd ? 'markdown' : 'text',
           text: txt,
           etag,
           ...meta,
           ...(isHtml ? { url: refreshableFileUrl(url) } : {}),
-        };
+        });
       } else {
-        previewBlock.value = { kind: 'binary', mime: ctType, etag, ...meta };
+        setPreview({ kind: 'binary', mime: ctType, etag, ...meta });
       }
     } catch (err) {
-      previewBlock.value = { kind: 'error', text: String((err as Error)?.message || err), ...meta };
+      setPreview({ kind: 'error', text: String((err as Error)?.message || err), ...meta });
     }
   }
   fetchAndAttachMeta(entry.path).catch(() => {
@@ -1214,6 +1313,7 @@ async function fetchAndAttachMeta(p: string): Promise<void> {
 }
 
 export function closePreview(): void {
+  fileSelectionGeneration++;
   batch(() => {
     filePath.value = null;
     previewBlock.value = null;

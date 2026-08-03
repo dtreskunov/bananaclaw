@@ -35,6 +35,7 @@ import { resolvePrivateWebEntry } from '../private-web-path.js';
 import { uiBaseUrl } from '../server.js';
 import { classify, resolveSafe } from './classify.js';
 import { fileEtag } from './etag.js';
+import { searchFilesByName } from './file-search.js';
 import {
   handleChatRequest,
   handleChatUpgrade,
@@ -221,6 +222,12 @@ const dirsHandler = authed((ctx, userId, params) => {
 });
 on('GET', '/api/groups/:gid/dirs', dirsHandler);
 on('GET', '/api/groups/:gid/dirs/*', dirsHandler);
+
+on(
+  'GET',
+  '/api/groups/:gid/search-files',
+  authed((ctx, userId, params) => handleFileSearch(ctx, userId, params.gid)),
+);
 
 on(
   'GET',
@@ -747,6 +754,22 @@ function handleTree(ctx: Ctx, userId: string, groupId: string, relPath: string):
   });
   recordAccess({ userId, groupId: group.id, path: relPath, action: 'tree', req: ctx.req });
   json(ctx, 200, { path: relPath, entries: out });
+}
+
+async function handleFileSearch(ctx: Ctx, userId: string, groupId: string): Promise<void> {
+  const group = resolveGroupAccess(userId, groupId);
+  if (!group) return json(ctx, 403, { error: 'forbidden' });
+
+  const query = (ctx.url.searchParams.get('q') || '').trim();
+  const rootPath = (ctx.url.searchParams.get('path') || '').replace(/^\/+|\/+$/g, '');
+  if (!query || query.length > 200) return json(ctx, 400, { error: 'invalid_query' });
+
+  const groupDir = path.resolve(GROUPS_DIR, group.folder);
+  const result = await searchFilesByName(groupDir, rootPath, query, hasAdminPrivilege(userId, group.id));
+  if (!result) return json(ctx, 400, { error: 'invalid_path' });
+
+  recordAccess({ userId, groupId: group.id, path: rootPath, action: 'file_search', req: ctx.req });
+  json(ctx, 200, { path: rootPath, query, ...result });
 }
 
 function handleFile(ctx: Ctx, userId: string, groupId: string, relPath: string): void {

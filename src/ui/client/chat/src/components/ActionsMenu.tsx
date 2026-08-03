@@ -63,7 +63,7 @@ function entriesByPath(paths: string[]): TreeEntry[] {
   return treeEntries.value.filter((e) => set.has(e.path));
 }
 
-function buildEntryItems(entry: TreeEntry, gid: string | null, admin: boolean, onEdit?: () => void): Item[] {
+function buildEntryItems(entry: TreeEntry, gid: string | null, admin: boolean, onEdit?: () => void, onEntryChanged?: () => void): Item[] {
   const items: Item[] = [];
   if (onEdit) items.push({ ico: '\u270E', label: 'Edit', onClick: onEdit });
   items.push({ ico: '\u2B07', label: 'Download', onClick: () => downloadPaths([entry.path], [entry]) });
@@ -74,8 +74,8 @@ function buildEntryItems(entry: TreeEntry, gid: string | null, admin: boolean, o
   }
   if (admin) {
     items.push('---');
-    items.push({ ico: '\u270E', label: 'Rename', onClick: () => renameEntry(entry) });
-    items.push({ ico: '\uD83D\uDDD1', label: 'Delete', danger: true, onClick: () => deleteEntry(entry) });
+    items.push({ ico: '\u270E', label: 'Rename', onClick: () => { renameEntry(entry).then(onEntryChanged).catch(console.error); } });
+    items.push({ ico: '\uD83D\uDDD1', label: 'Delete', danger: true, onClick: () => { deleteEntry(entry).then(onEntryChanged).catch(console.error); } });
   }
   return items;
 }
@@ -97,6 +97,7 @@ interface Props {
   onNewFile?: () => void;
   onUpload?: () => void;
   onEdit?: () => void;
+  onEntryChanged?: () => void;
   includeSelection?: boolean;
   triggerClassName?: string;
   triggerTitle?: string;
@@ -108,6 +109,7 @@ export function ActionsMenu({
   onNewFile,
   onUpload,
   onEdit,
+  onEntryChanged,
   includeSelection = mode === 'directory',
   triggerClassName = 'text-btn',
   triggerTitle = 'Actions',
@@ -129,7 +131,7 @@ export function ActionsMenu({
     };
   }, [open]);
 
-  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, includeSelection);
+  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, onEntryChanged, includeSelection);
   if (items.length === 0) return null;
 
   return (
@@ -181,11 +183,12 @@ function buildItems(
   onNewFile?: () => void,
   onUpload?: () => void,
   onEdit?: () => void,
+  onEntryChanged?: () => void,
   includeSelection = true,
 ): Item[] {
   const admin = isAdmin.value;
   const gid = groupId.value;
-  if (mode === 'entry') return entry ? buildEntryItems(entry, gid, admin, onEdit) : [];
+  if (mode === 'entry') return entry ? buildEntryItems(entry, gid, admin, onEdit, onEntryChanged) : [];
 
   const sel = pinnedContext.value;
   const selEntries = entriesByPath(sel);
@@ -197,7 +200,7 @@ function buildItems(
     if (onUpload) createItems.push({ ico: '\u2B06', label: 'Upload files\u2026', onClick: onUpload });
   }
   appendGroup(items, createItems);
-  if (entry) appendGroup(items, buildEntryItems(entry, gid, admin));
+  if (entry) appendGroup(items, buildEntryItems(entry, gid, admin, undefined, onEntryChanged));
   if (includeSelection && sel.length > 0) {
     const selectionItems: Item[] = [
       { ico: '\u2B07', label: sel.length > 1 ? `Download ${sel.length} (zip)` : 'Download selection', onClick: () => downloadPaths(sel, selEntries) },

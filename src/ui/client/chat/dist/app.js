@@ -15527,6 +15527,14 @@ var treePath = y3("");
 var filePath = y3(null);
 var treeEntries = y3([]);
 var treeError = y3("");
+var fileSearchOpen = y3(false);
+var fileSearchRoot = y3("");
+var fileSearchQuery = y3("");
+var fileSearchResults = y3(null);
+var fileSearchLoading = y3(false);
+var fileSearchError = y3("");
+var fileSearchTruncated = y3(false);
+var fileSearchSelectedPath = y3(null);
 var mediaCurrentTime = y3(0);
 var threads = y3([]);
 var threadId = y3(null);
@@ -18304,6 +18312,7 @@ async function selectGroup(gid) {
     filePath.value = null;
   });
   clearSearch();
+  clearFileSearch();
   await loadThreads(gid);
   await loadTree("");
   const latest = threads.value.length > 0 ? threads.value[0] : null;
@@ -18313,7 +18322,76 @@ async function selectGroup(gid) {
     openChat(gid, null, null).catch((err) => console.error("auto-start chat failed", err));
   }
 }
+var fileSearchGeneration = 0;
+var fileSearchController = null;
+function openFileSearch(root) {
+  n2(() => {
+    fileSearchOpen.value = true;
+    fileSearchRoot.value = root;
+    fileSearchQuery.value = "";
+    fileSearchResults.value = null;
+    fileSearchLoading.value = false;
+    fileSearchError.value = "";
+    fileSearchTruncated.value = false;
+    fileSearchSelectedPath.value = null;
+  });
+}
+async function searchFiles(gid, query) {
+  const trimmed = query.trim();
+  if (!trimmed) return;
+  const generation = ++fileSearchGeneration;
+  fileSearchController?.abort();
+  const controller = new AbortController();
+  fileSearchController = controller;
+  const root = fileSearchRoot.peek();
+  n2(() => {
+    fileSearchOpen.value = true;
+    fileSearchQuery.value = trimmed;
+    fileSearchLoading.value = true;
+    fileSearchError.value = "";
+    fileSearchTruncated.value = false;
+    fileSearchSelectedPath.value = null;
+  });
+  try {
+    const url = `api/groups/${encodeURIComponent(gid)}/search-files?path=${encodeURIComponent(root)}&q=${encodeURIComponent(trimmed)}`;
+    const response = await api(url, { signal: controller.signal });
+    if (generation !== fileSearchGeneration || controller.signal.aborted) return;
+    n2(() => {
+      fileSearchResults.value = response.results ?? [];
+      fileSearchTruncated.value = !!response.truncated;
+    });
+  } catch (err) {
+    if (generation !== fileSearchGeneration || controller.signal.aborted) return;
+    console.error("file search failed", err);
+    n2(() => {
+      fileSearchError.value = "Search failed. Check your connection and try again.";
+      fileSearchResults.value = [];
+    });
+  } finally {
+    if (generation === fileSearchGeneration) {
+      fileSearchLoading.value = false;
+      fileSearchController = null;
+    }
+  }
+}
+function clearFileSearch() {
+  fileSearchGeneration++;
+  fileSearchController?.abort();
+  fileSearchController = null;
+  n2(() => {
+    fileSearchOpen.value = false;
+    fileSearchRoot.value = "";
+    fileSearchQuery.value = "";
+    fileSearchResults.value = null;
+    fileSearchLoading.value = false;
+    fileSearchError.value = "";
+    fileSearchTruncated.value = false;
+    fileSearchSelectedPath.value = null;
+  });
+}
+var fileSelectionGeneration = 0;
 async function loadTree(p5) {
+  fileSelectionGeneration++;
   n2(() => {
     treePath.value = p5;
     filePath.value = null;
@@ -18344,14 +18422,26 @@ async function navFile(entry) {
   await selectFile(entry);
   writeHash();
 }
+async function openFileSearchResult(entry) {
+  if (isMobile.value) drawerOpen.files.value = true;
+  else paneOpen.files.value = true;
+  const selection = selectFile(entry);
+  writeHash();
+  await selection;
+}
 var filePreviewRevision = 0;
 function refreshableFileUrl(url) {
   filePreviewRevision += 1;
   return `${url}${url.includes("?") ? "&" : "?"}preview=${filePreviewRevision}`;
 }
 async function selectFile(entry) {
+  const selectionGeneration = ++fileSelectionGeneration;
   filePath.value = entry.path;
   if (!groupId.value) return;
+  const setPreview = (block) => {
+    if (selectionGeneration !== fileSelectionGeneration || filePath.peek() !== entry.path) return;
+    previewBlock.value = block;
+  };
   const segs = String(entry.path || "").split("/").filter(Boolean).map(encodeURIComponent);
   const url = `api/groups/${encodeURIComponent(groupId.value)}/files/${segs.join("/")}`;
   let size = entry.size;
@@ -18360,7 +18450,7 @@ async function selectFile(entry) {
     const h5 = await fetch(url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
     if (h5.status >= 400) {
       const msg = h5.status === 404 ? "File not found. It may have been renamed or deleted." : `HTTP ${h5.status}`;
-      previewBlock.value = { kind: "error", text: msg, name: entry.name, url };
+      setPreview({ kind: "error", text: msg, name: entry.name, url });
       return;
     }
     if (size == null) {
@@ -18376,20 +18466,21 @@ async function selectFile(entry) {
     }
   } catch {
   }
+  if (selectionGeneration !== fileSelectionGeneration || filePath.peek() !== entry.path) return;
   const ext = entry.name.toLowerCase().split(".").pop() || "";
   const meta = { name: entry.name, size: size ?? null, mtime: mtime ?? null, url, path: entry.path };
   const refreshableMeta = () => ({ ...meta, url: refreshableFileUrl(url) });
-  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) previewBlock.value = { kind: "image", ...refreshableMeta() };
+  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) setPreview({ kind: "image", ...refreshableMeta() });
   else if (["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"].includes(ext))
-    previewBlock.value = { kind: "audio", ...refreshableMeta() };
+    setPreview({ kind: "audio", ...refreshableMeta() });
   else if (["mp4", "m4v", "mov", "webm", "ogv"].includes(ext))
-    previewBlock.value = { kind: "video", ...refreshableMeta() };
-  else if (ext === "pdf") previewBlock.value = { kind: "pdf", ...refreshableMeta() };
+    setPreview({ kind: "video", ...refreshableMeta() });
+  else if (ext === "pdf") setPreview({ kind: "pdf", ...refreshableMeta() });
   else {
     try {
       const r4 = await fetch(url, { credentials: "same-origin", cache: "no-store" });
       if (!r4.ok) {
-        previewBlock.value = { kind: "error", text: `HTTP ${r4.status}`, ...meta };
+        setPreview({ kind: "error", text: `HTTP ${r4.status}`, ...meta });
         return;
       }
       const ctType = r4.headers.get("content-type") || "";
@@ -18398,18 +18489,18 @@ async function selectFile(entry) {
         const txt = await r4.text();
         const isMd = ext === "md" || ext === "markdown";
         const isHtml = ext === "html" || ext === "htm";
-        previewBlock.value = {
+        setPreview({
           kind: isHtml ? "html" : isMd ? "markdown" : "text",
           text: txt,
           etag,
           ...meta,
           ...isHtml ? { url: refreshableFileUrl(url) } : {}
-        };
+        });
       } else {
-        previewBlock.value = { kind: "binary", mime: ctType, etag, ...meta };
+        setPreview({ kind: "binary", mime: ctType, etag, ...meta });
       }
     } catch (err) {
-      previewBlock.value = { kind: "error", text: String(err?.message || err), ...meta };
+      setPreview({ kind: "error", text: String(err?.message || err), ...meta });
     }
   }
   fetchAndAttachMeta(entry.path).catch(() => {
@@ -18437,6 +18528,7 @@ async function fetchAndAttachMeta(p5) {
   previewBlock.value = next;
 }
 function closePreview() {
+  fileSelectionGeneration++;
   n2(() => {
     filePath.value = null;
     previewBlock.value = null;
@@ -21807,7 +21899,9 @@ async function renameEntry(entry) {
   );
   if (isAtOrBelow(activeFilePath, entry.path)) {
     const nextFilePath = movePath(activeFilePath, entry.path, toPath);
-    await navFile({ path: nextFilePath, name: nextFilePath.slice(nextFilePath.lastIndexOf("/") + 1) });
+    const nextEntry = { path: nextFilePath, name: nextFilePath.slice(nextFilePath.lastIndexOf("/") + 1) };
+    if (fileSearchOpen.peek()) await selectFile(nextEntry);
+    else await navFile(nextEntry);
     return;
   }
   if (isAtOrBelow(activeTreePath, entry.path)) {
@@ -21833,6 +21927,11 @@ async function deleteEntry(entry) {
     return;
   }
   dropPinned([entry.path]);
+  if (fileSearchOpen.peek() && isAtOrBelow(activeFilePath, entry.path)) {
+    closePreview();
+    await loadTree(treePath.peek());
+    return;
+  }
   if (isAtOrBelow(activeFilePath, entry.path) || isAtOrBelow(activeTreePath, entry.path)) {
     await navTree(parentPath(entry.path));
     return;
@@ -22025,7 +22124,7 @@ function entriesByPath(paths) {
   const set = new Set(paths);
   return treeEntries.value.filter((e4) => set.has(e4.path));
 }
-function buildEntryItems(entry, gid, admin, onEdit) {
+function buildEntryItems(entry, gid, admin, onEdit, onEntryChanged) {
   const items = [];
   if (onEdit) items.push({ ico: "\u270E", label: "Edit", onClick: onEdit });
   items.push({ ico: "\u2B07", label: "Download", onClick: () => downloadPaths([entry.path], [entry]) });
@@ -22036,8 +22135,12 @@ function buildEntryItems(entry, gid, admin, onEdit) {
   }
   if (admin) {
     items.push("---");
-    items.push({ ico: "\u270E", label: "Rename", onClick: () => renameEntry(entry) });
-    items.push({ ico: "\u{1F5D1}", label: "Delete", danger: true, onClick: () => deleteEntry(entry) });
+    items.push({ ico: "\u270E", label: "Rename", onClick: () => {
+      renameEntry(entry).then(onEntryChanged).catch(console.error);
+    } });
+    items.push({ ico: "\u{1F5D1}", label: "Delete", danger: true, onClick: () => {
+      deleteEntry(entry).then(onEntryChanged).catch(console.error);
+    } });
   }
   return items;
 }
@@ -22047,6 +22150,7 @@ function ActionsMenu({
   onNewFile,
   onUpload,
   onEdit,
+  onEntryChanged,
   includeSelection = mode === "directory",
   triggerClassName = "text-btn",
   triggerTitle = "Actions"
@@ -22068,7 +22172,7 @@ function ActionsMenu({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, includeSelection);
+  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit, onEntryChanged, includeSelection);
   if (items.length === 0) return null;
   return /* @__PURE__ */ u4("div", { class: "action-menu" + (open ? " open" : ""), ref: wrapRef, children: [
     /* @__PURE__ */ u4(
@@ -22113,10 +22217,10 @@ function appendGroup(items, group) {
   if (items.length > 0) items.push("---");
   items.push(...group);
 }
-function buildItems(mode, entry, onNewFile, onUpload, onEdit, includeSelection = true) {
+function buildItems(mode, entry, onNewFile, onUpload, onEdit, onEntryChanged, includeSelection = true) {
   const admin = isAdmin.value;
   const gid = groupId.value;
-  if (mode === "entry") return entry ? buildEntryItems(entry, gid, admin, onEdit) : [];
+  if (mode === "entry") return entry ? buildEntryItems(entry, gid, admin, onEdit, onEntryChanged) : [];
   const sel = pinnedContext.value;
   const selEntries = entriesByPath(sel);
   const items = [];
@@ -22127,7 +22231,7 @@ function buildItems(mode, entry, onNewFile, onUpload, onEdit, includeSelection =
     if (onUpload) createItems.push({ ico: "\u2B06", label: "Upload files\u2026", onClick: onUpload });
   }
   appendGroup(items, createItems);
-  if (entry) appendGroup(items, buildEntryItems(entry, gid, admin));
+  if (entry) appendGroup(items, buildEntryItems(entry, gid, admin, void 0, onEntryChanged));
   if (includeSelection && sel.length > 0) {
     const selectionItems = [
       { ico: "\u2B07", label: sel.length > 1 ? `Download ${sel.length} (zip)` : "Download selection", onClick: () => downloadPaths(sel, selEntries) }
@@ -22581,8 +22685,9 @@ function usePreviewEditor() {
 function Crumb({ editor }) {
   const ref = A2(null);
   const uploadInputRef = A2(null);
-  const p5 = treePath.value;
   const fp = editor.creating ? editor.path : filePath.value;
+  const p5 = fp ? parentPath(fp) : treePath.value;
+  const searchInputRef = A2(null);
   const preview = previewBlock.value;
   const currentDirectory = p5 ? { path: p5, name: p5.slice(p5.lastIndexOf("/") + 1), type: "dir" } : void 0;
   const previewEntry = fp ? { path: fp, name: preview?.name || fp.slice(fp.lastIndexOf("/") + 1), type: "file" } : void 0;
@@ -22594,18 +22699,32 @@ function Crumb({ editor }) {
       if (ref.current) ref.current.scrollLeft = ref.current.scrollWidth;
     });
   }, [p5, fp]);
+  y2(() => {
+    if (fileSearchOpen.value && !fp) requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [fileSearchOpen.value, fp]);
   const navigateTree = (path) => {
     if (!editor.editing) {
+      if (fileSearchOpen.peek()) clearFileSearch();
       navTree(path);
       return;
     }
     editor.cancelEdit().then((discarded) => {
-      if (discarded) return navTree(path);
+      if (!discarded) return;
+      if (fileSearchOpen.peek()) clearFileSearch();
+      return navTree(path);
     }).catch(console.error);
+  };
+  const runSearch = () => {
+    const query = searchInputRef.current?.value.trim();
+    if (query && groupId.value) searchFiles(groupId.value, query).catch(console.error);
+  };
+  const onSearchKeyDown = (ev) => {
+    if (ev.key === "Enter") runSearch();
+    if (ev.key === "Escape") clearFileSearch();
   };
   let acc = "";
   return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("div", { class: "files-actions rail-actions-row rail-divider-row", children: [
+    /* @__PURE__ */ u4("div", { class: "files-actions rail-actions-row rail-divider-row" + (fileSearchOpen.value && !fp ? " searching" : ""), children: [
       /* @__PURE__ */ u4(
         "input",
         {
@@ -22697,6 +22816,30 @@ function Crumb({ editor }) {
             children: "\xD7"
           }
         )
+      ] }) : fileSearchOpen.value ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            ref: searchInputRef,
+            type: "search",
+            class: "file-search-input",
+            defaultValue: fileSearchQuery.value,
+            placeholder: fileSearchRoot.value ? `Search /${fileSearchRoot.value}` : "Search files",
+            "aria-label": "Search files by name",
+            onKeyDown: onSearchKeyDown
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "rail-control-btn search-submit-btn",
+            title: "Search files",
+            "aria-label": "Search files",
+            onClick: runSearch,
+            children: fileSearchLoading.value ? "\u2026" : "\u{1F50D}"
+          }
+        )
       ] }) : /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4(
           "button",
@@ -22709,6 +22852,17 @@ function Crumb({ editor }) {
               loadTree(treePath.peek()).catch(console.error);
             },
             children: "\u21BB"
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "rail-control-btn search-toggle-btn",
+            title: "Search files",
+            "aria-label": "Search files",
+            onClick: () => openFileSearch(treePath.peek()),
+            children: "\u{1F50D}"
           }
         ),
         /* @__PURE__ */ u4(
@@ -22767,19 +22921,26 @@ function Crumb({ editor }) {
     ] }) })
   ] });
 }
-function Row({ e: e4, onEdit, onNewFile, onUpload }) {
-  const active = e4.path === filePath.value;
+function Row({ e: e4, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntryChanged }) {
+  const active = e4.path === filePath.value || showPath && e4.path === fileSearchSelectedPath.value;
   const selected = pinnedContext.value.includes(e4.path);
   const onClick = (ev) => {
     const t4 = ev.target;
     if (t4.closest(".row-sel") || t4.closest(".action-menu")) return;
-    if (e4.type === "dir") navTree(e4.path);
+    if (onOpen) onOpen(e4);
+    else if (e4.type === "dir") navTree(e4.path);
     else navFile(e4).catch(console.error);
   };
   return /* @__PURE__ */ u4("div", { class: "row tier-" + e4.tier + (active ? " active" : "") + (selected ? " selected" : ""), "data-path": e4.path, onClick, children: [
     /* @__PURE__ */ u4("label", { class: "row-sel", onClick: (ev) => ev.stopPropagation(), title: selected ? "Detach from next message" : "Attach to next message", children: /* @__PURE__ */ u4("input", { type: "checkbox", checked: selected, onChange: () => togglePinnedFile(e4.path) }) }),
     /* @__PURE__ */ u4("div", { children: e4.type === "dir" ? "\u{1F4C1}" : "\u{1F4C4}" }),
-    /* @__PURE__ */ u4("div", { class: "name", children: e4.name }),
+    /* @__PURE__ */ u4("div", { class: "name", children: [
+      /* @__PURE__ */ u4("span", { children: e4.name }),
+      showPath ? /* @__PURE__ */ u4("span", { class: "result-path", children: [
+        "/",
+        parentPath(e4.path)
+      ] }) : null
+    ] }),
     /* @__PURE__ */ u4("div", { class: "size", children: fmtBytes(e4.size) }),
     /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: e4.mtime }) }),
     /* @__PURE__ */ u4("div", { class: "row-actions", children: /* @__PURE__ */ u4(
@@ -22790,6 +22951,7 @@ function Row({ e: e4, onEdit, onNewFile, onUpload }) {
         onNewFile: e4.type === "dir" ? () => onNewFile(e4.path) : void 0,
         onUpload: e4.type === "dir" ? () => onUpload(e4.path) : void 0,
         onEdit: e4.type === "file" && isEditableFileName(e4.name) ? () => onEdit(e4) : void 0,
+        onEntryChanged,
         includeSelection: false,
         triggerTitle: `Actions for ${e4.name}`
       }
@@ -22804,6 +22966,52 @@ function Listing({ onEdit, onNewFile, onUpload }) {
   return /* @__PURE__ */ u4("div", { class: "listing", id: "listing", children: [
     p5 ? /* @__PURE__ */ u4("div", { class: "row", onClick: () => navTree(parentPath(p5)), children: /* @__PURE__ */ u4("div", { class: "name", children: ".." }) }) : null,
     entries.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "Empty directory" }) : entries.map((e4) => /* @__PURE__ */ u4(Row, { e: e4, onEdit, onNewFile, onUpload }, e4.path))
+  ] });
+}
+function SearchListing({ onEdit, onNewFile, onUpload }) {
+  const results = fileSearchResults.value;
+  const loading = fileSearchLoading.value;
+  const error = fileSearchError.value;
+  const refresh = () => {
+    if (groupId.value && fileSearchQuery.value) searchFiles(groupId.value, fileSearchQuery.value).catch(console.error);
+  };
+  const openResult = (entry) => {
+    fileSearchSelectedPath.value = entry.path;
+    openFileSearchResult(entry).catch(console.error);
+  };
+  if (loading) return /* @__PURE__ */ u4("div", { class: "listing search-listing", children: /* @__PURE__ */ u4("div", { class: "empty", role: "status", children: [
+    "Searching",
+    "\u2026"
+  ] }) });
+  if (error) {
+    return /* @__PURE__ */ u4("div", { class: "listing search-listing", children: /* @__PURE__ */ u4("div", { class: "empty search-error", role: "alert", children: [
+      /* @__PURE__ */ u4("span", { children: error }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => {
+        if (groupId.value && fileSearchQuery.value) searchFiles(groupId.value, fileSearchQuery.value).catch(console.error);
+      }, children: "Retry" })
+    ] }) });
+  }
+  if (results === null) return /* @__PURE__ */ u4("div", { class: "listing search-listing" });
+  if (results.length === 0) return /* @__PURE__ */ u4("div", { class: "listing search-listing", children: /* @__PURE__ */ u4("div", { class: "empty", role: "status", children: "No matching files" }) });
+  return /* @__PURE__ */ u4("div", { class: "listing search-listing", "aria-label": `${results.length} file search results`, children: [
+    fileSearchTruncated.value ? /* @__PURE__ */ u4("div", { class: "search-limit", role: "status", children: [
+      "Showing first ",
+      results.length,
+      " matches"
+    ] }) : null,
+    results.map((entry) => /* @__PURE__ */ u4(
+      Row,
+      {
+        e: entry,
+        onEdit,
+        onNewFile,
+        onUpload,
+        onOpen: openResult,
+        showPath: true,
+        onEntryChanged: refresh
+      },
+      entry.path
+    ))
   ] });
 }
 function UploadStrip() {
@@ -22944,7 +23152,8 @@ function FilesPane() {
   const listingUploadRef = A2(null);
   const listingUploadDirectory = A2("");
   const editEntry = (entry) => {
-    navFile(entry).then(editor.beginEdit).catch(console.error);
+    const open = fileSearchOpen.peek() ? openFileSearchResult(entry) : navFile(entry);
+    open.then(editor.beginEdit).catch(console.error);
   };
   const beginCreateIn = (directory) => {
     navTree(directory).then(() => promptNewFilePath(directory)).then((path) => {
@@ -23020,7 +23229,7 @@ function FilesPane() {
     ),
     /* @__PURE__ */ u4(Crumb, { editor }),
     /* @__PURE__ */ u4(UploadStrip, {}),
-    /* @__PURE__ */ u4(Listing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }),
+    fileSearchOpen.value ? /* @__PURE__ */ u4(SearchListing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }) : /* @__PURE__ */ u4(Listing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }),
     /* @__PURE__ */ u4("div", { class: "drop-hint admin-only", id: "dropzone", children: [
       "Drag & drop files here to upload to ",
       /* @__PURE__ */ u4("code", { id: "dropzone-path", children: [

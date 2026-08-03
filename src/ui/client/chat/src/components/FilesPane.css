@@ -26,6 +26,15 @@
 .files-pane .breadcrumb .crumb-node { display: inline-flex; align-items: center; flex: 0 0 auto; }
 .files-pane .files-actions { flex: 0 0 auto; justify-content: flex-end; }
 .files-pane .files-actions .action-menu { display: flex; }
+.files-pane .files-actions.searching { justify-content: stretch; }
+.files-pane .file-search-input {
+  flex: 1; min-width: 0;
+  border: 0; border-right: 1px solid var(--border);
+  background: transparent; color: inherit;
+  padding: 0 10px;
+  font: inherit; font-size: var(--font-sm);
+}
+.files-pane .file-search-input:focus { outline: none; }
 .files-pane .breadcrumb .crumb {
   display: inline-flex; align-items: center;
   padding: 3px 6px; border-radius: var(--radius-md);
@@ -44,7 +53,16 @@
 .files-pane .row.active { background: var(--accent); }
 .files-pane .row.selected { background: var(--selection); }
 .files-pane .row.selected.active { background: var(--accent); }
-.files-pane .row .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.files-pane .row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.files-pane .search-listing .row .name { display: flex; flex-direction: column; }
+.files-pane .search-listing .row .name > span { overflow: hidden; text-overflow: ellipsis; }
+.files-pane .search-listing .result-path { color: var(--muted); font-size: var(--font-xs); }
+.files-pane .search-listing .search-limit {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--font-xs);
+}
 .files-pane .row .size { font-size: var(--font-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
 .files-pane .row .meta { font-size: var(--font-xs); color: var(--muted); white-space: nowrap; opacity: 0.7; }
 .files-pane .row .row-sel { display: inline-flex; align-items: center; cursor: pointer; }

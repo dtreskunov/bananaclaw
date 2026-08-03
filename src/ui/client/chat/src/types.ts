@@ -184,7 +184,7 @@ export interface TreeEntry {
   type: 'file' | 'dir';
   size?: number;
   mtime?: string;
-  tier?: number;
+  tier?: 'member' | 'admin';
 }
 
 export type PreviewKind = 'image' | 'audio' | 'video' | 'pdf' | 'html' | 'markdown' | 'text' | 'binary' | 'error';

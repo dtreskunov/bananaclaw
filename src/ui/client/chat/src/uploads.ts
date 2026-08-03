@@ -1,7 +1,17 @@
 // Admin write operations + upload progress strip.
-import { groupId, isAdmin, uploadItems, threadId, treePath, treeEntries, filePath, pinnedContext } from './state';
+import {
+  groupId,
+  isAdmin,
+  uploadItems,
+  threadId,
+  treePath,
+  treeEntries,
+  filePath,
+  pinnedContext,
+  fileSearchOpen,
+} from './state';
 import { postJson } from './api';
-import { loadTree, navFile, navTree } from './actions';
+import { closePreview, loadTree, navFile, navTree, selectFile } from './actions';
 import { parentPath } from './utils';
 import { requestInput, requestConfirm } from './components/PromptModal';
 import { showToast } from './components/Toast';
@@ -201,7 +211,9 @@ export async function renameEntry(entry: TreeEntry): Promise<void> {
   );
   if (isAtOrBelow(activeFilePath, entry.path)) {
     const nextFilePath = movePath(activeFilePath, entry.path, toPath);
-    await navFile({ path: nextFilePath, name: nextFilePath.slice(nextFilePath.lastIndexOf('/') + 1) });
+    const nextEntry = { path: nextFilePath, name: nextFilePath.slice(nextFilePath.lastIndexOf('/') + 1) };
+    if (fileSearchOpen.peek()) await selectFile(nextEntry);
+    else await navFile(nextEntry);
     return;
   }
   if (isAtOrBelow(activeTreePath, entry.path)) {
@@ -228,6 +240,11 @@ export async function deleteEntry(entry: TreeEntry): Promise<void> {
     return;
   }
   dropPinned([entry.path]);
+  if (fileSearchOpen.peek() && isAtOrBelow(activeFilePath, entry.path)) {
+    closePreview();
+    await loadTree(treePath.peek());
+    return;
+  }
   if (isAtOrBelow(activeFilePath, entry.path) || isAtOrBelow(activeTreePath, entry.path)) {
     await navTree(parentPath(entry.path));
     return;

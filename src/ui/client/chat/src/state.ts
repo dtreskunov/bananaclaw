@@ -46,6 +46,14 @@ export const treePath: Signal<string> = signal('');
 export const filePath: Signal<string | null> = signal<string | null>(null);
 export const treeEntries: Signal<TreeEntry[]> = signal<TreeEntry[]>([]);
 export const treeError: Signal<string> = signal('');
+export const fileSearchOpen: Signal<boolean> = signal(false);
+export const fileSearchRoot: Signal<string> = signal('');
+export const fileSearchQuery: Signal<string> = signal('');
+export const fileSearchResults: Signal<TreeEntry[] | null> = signal<TreeEntry[] | null>(null);
+export const fileSearchLoading: Signal<boolean> = signal(false);
+export const fileSearchError: Signal<string> = signal('');
+export const fileSearchTruncated: Signal<boolean> = signal(false);
+export const fileSearchSelectedPath: Signal<string | null> = signal<string | null>(null);
 
 // Current playback position of the preview media player (seconds).
 export const mediaCurrentTime: Signal<number> = signal(0);
