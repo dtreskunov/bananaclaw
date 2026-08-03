@@ -10,6 +10,7 @@ import {
 import { navTree, navFile, closePreview, togglePinnedFile, loadTree, selectFile } from '../actions';
 import {
   uploadFiles, clearUploadStrip, resolveConflict, notifyAgent, saveFile,
+  createFile, promptNewFilePath,
 } from '../uploads';
 import { fmtBytes, renderMarkdown, parentPath } from '../utils';
 import { Pane } from './Pane';
@@ -24,37 +25,87 @@ import type { TreeEntry, PreviewKind } from '../types';
 
 interface PreviewEditorState {
   editing: boolean;
+  creating: boolean;
   saving: boolean;
   editable: boolean;
   draft: string;
+  path: string | null;
   beginEdit: () => void;
-  cancelEdit: () => void;
+  beginCreate: (path: string) => void;
+  cancelEdit: () => Promise<boolean>;
   commitEdit: () => Promise<void>;
   setDraft: (value: string) => void;
 }
 
 function usePreviewEditor(): PreviewEditorState {
   const [editing, setEditing] = useState(false);
+  const [createPath, setCreatePath] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const initialDraft = useRef('');
   const p = previewBlock.value;
   const fp = filePath.value;
   const editable = !!p && isAdmin.value && (p.kind === 'text' || p.kind === 'markdown' || p.kind === 'html');
 
   useEffect(() => {
     setEditing(false);
+    setCreatePath(null);
     setSaving(false);
   }, [fp]);
 
+  useEffect(() => {
+    if (!editing || draft === initialDraft.current) return undefined;
+    const onBeforeUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [editing, draft]);
+
   const beginEdit = (): void => {
-    setDraft(p?.text || '');
+    const text = p?.text || '';
+    initialDraft.current = text;
+    setCreatePath(null);
+    setDraft(text);
     setEditing(true);
   };
-  const cancelEdit = (): void => { setEditing(false); };
+  const beginCreate = (path: string): void => {
+    initialDraft.current = '';
+    setCreatePath(path);
+    setDraft('');
+    setEditing(true);
+  };
+  const cancelEdit = async (): Promise<boolean> => {
+    if (draft !== initialDraft.current) {
+      const discard = await requestConfirm({
+        title: 'Discard unsaved changes?',
+        message: 'Your changes have not been saved.',
+        okLabel: 'Discard',
+        cancelLabel: 'Keep editing',
+        danger: true,
+      });
+      if (!discard) return false;
+    }
+    setEditing(false);
+    setCreatePath(null);
+    return true;
+  };
   const commitEdit = async (): Promise<void> => {
-    if (!fp) return;
+    const targetPath = createPath || fp;
+    if (!targetPath) return;
     setSaving(true);
-    let res = await saveFile(fp, draft, previewBlock.peek()?.etag);
+    if (createPath) {
+      const created = await createFile(createPath, draft);
+      setSaving(false);
+      if (!created || 'exists' in created) return;
+      await loadTree(parentPath(createPath));
+      await navFile({ path: createPath, name: createPath.slice(createPath.lastIndexOf('/') + 1) });
+      setCreatePath(null);
+      setEditing(false);
+      return;
+    }
+    let res = await saveFile(targetPath, draft, previewBlock.peek()?.etag);
     if (res && 'conflict' in res) {
       const overwrite = await requestConfirm({
         title: 'File changed on disk',
@@ -66,15 +117,15 @@ function usePreviewEditor(): PreviewEditorState {
       if (!overwrite) {
         setSaving(false);
         setEditing(false);
-        await selectFile({ path: fp, name: fp.slice(fp.lastIndexOf('/') + 1) });
+        await selectFile({ path: targetPath, name: targetPath.slice(targetPath.lastIndexOf('/') + 1) });
         return;
       }
-      res = await saveFile(fp, draft, res.etag);
+      res = await saveFile(targetPath, draft, res.etag);
     }
     setSaving(false);
     if (!res || 'conflict' in res) return;
     const cur = previewBlock.peek();
-    if (cur && cur.path === fp) {
+    if (cur && cur.path === targetPath) {
       previewBlock.value = {
         ...cur,
         text: draft,
@@ -86,14 +137,26 @@ function usePreviewEditor(): PreviewEditorState {
     setEditing(false);
   };
 
-  return { editing, saving, editable, draft, beginEdit, cancelEdit, commitEdit, setDraft };
+  return {
+    editing,
+    creating: !!createPath,
+    saving,
+    editable,
+    draft,
+    path: createPath || fp,
+    beginEdit,
+    beginCreate,
+    cancelEdit,
+    commitEdit,
+    setDraft,
+  };
 }
 
 function Crumb({ editor }: { editor: PreviewEditorState }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const p = treePath.value;
-  const fp = filePath.value;
+  const fp = editor.creating ? editor.path : filePath.value;
   const preview = previewBlock.value;
   const currentDirectory = p
     ? { path: p, name: p.slice(p.lastIndexOf('/') + 1), type: 'dir' as const }
@@ -109,6 +172,15 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
       if (ref.current) ref.current.scrollLeft = ref.current.scrollWidth;
     });
   }, [p, fp]);
+  const navigateTree = (path: string): void => {
+    if (!editor.editing) {
+      navTree(path);
+      return;
+    }
+    editor.cancelEdit()
+      .then((discarded) => { if (discarded) return navTree(path); })
+      .catch(console.error);
+  };
   let acc = '';
   return (
     <>
@@ -141,7 +213,7 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
               title="Discard changes"
               aria-label="Discard changes"
               disabled={editor.saving}
-              onClick={editor.cancelEdit}
+              onClick={() => { editor.cancelEdit().catch(console.error); }}
             >{'\u00D7'}</button>
           </>
         ) : previewEntry ? (
@@ -188,6 +260,11 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
             <ActionsMenu
               mode="directory"
               entry={currentDirectory}
+              onNewFile={() => {
+                promptNewFilePath()
+                  .then((path) => { if (path) editor.beginCreate(path); })
+                  .catch(console.error);
+              }}
               triggerClassName="rail-control-btn"
               triggerTitle={currentDirectory ? `Actions for ${currentDirectory.name}` : 'Root folder actions'}
               onUpload={() => uploadInputRef.current?.click()}
@@ -202,13 +279,13 @@ function Crumb({ editor }: { editor: PreviewEditorState }) {
             class={'crumb root' + (segs.length === 0 && !fileName ? ' current' : '')}
             data-path=""
             title="Root"
-            onClick={() => { navTree(''); }}
+            onClick={() => navigateTree('')}
           >/</button>
           {segs.map((s, i) => {
             acc = acc ? acc + '/' + s : s;
             const path = acc;
             const last = i === segs.length - 1 && !fileName;
-            const onClick = last ? undefined : () => { navTree(path); };
+            const onClick = last ? undefined : () => navigateTree(path);
             return (
               <span class="crumb-node" key={path}>
                 <span class="sep" aria-hidden="true">{'\u203a'}</span>
@@ -349,8 +426,15 @@ function renderMetaPanel(rows: [string, string][]): VNode {
 
 function Preview({ editor }: { editor: PreviewEditorState }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const p = previewBlock.value;
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const p = previewBlock.value ?? (editor.creating
+    ? { kind: 'text' as const, text: '', name: editor.path?.slice(editor.path.lastIndexOf('/') + 1) || 'New file', path: editor.path || undefined }
+    : null);
   const fp = filePath.value;
+  useEffect(() => {
+    if (!editor.editing) return;
+    requestAnimationFrame(() => editorRef.current?.focus());
+  }, [editor.editing, editor.path]);
   if (!p) return <div class="preview-body" id="preview" ref={ref}></div>;
 
   const fileRows: [string, string][] = [];
@@ -374,6 +458,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
   if (editor.editing) {
     body = (
       <textarea
+        ref={editorRef}
         class="file-editor"
         value={editor.draft}
         spellcheck={false}
@@ -410,8 +495,8 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
 }
 
 export function FilesPane() {
-  const previewing = !!previewBlock.value;
   const editor = usePreviewEditor();
+  const previewing = !!previewBlock.value || editor.editing;
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {

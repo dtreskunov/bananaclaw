@@ -12,6 +12,7 @@ interface PromptRequest {
   placeholder?: string;
   initialValue?: string;
   okLabel?: string;
+  validate?: (value: string) => string | null;
   resolve: (value: string | null) => void;
 }
 
@@ -26,11 +27,13 @@ export function requestInput(opts: Omit<PromptRequest, 'resolve'>): Promise<stri
 export function PromptModal() {
   const req = promptRequest.value;
   const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!req) return;
     setValue(req.initialValue || '');
+    setError(null);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [req]);
 
@@ -44,6 +47,11 @@ export function PromptModal() {
   function onSubmit(e: JSX.TargetedEvent<HTMLFormElement>): void {
     e.preventDefault();
     const trimmed = value.trim();
+    const validationError = trimmed ? promptRequest.peek()?.validate?.(trimmed) : null;
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     close(trimmed ? trimmed : null);
   }
   function onKey(e: JSX.TargetedKeyboardEvent<HTMLInputElement>): void {
@@ -60,10 +68,16 @@ export function PromptModal() {
             type="text"
             value={value}
             placeholder={req.placeholder || ''}
-            onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setValue(e.currentTarget.value)}
+            aria-invalid={!!error}
+            aria-describedby={error ? 'prompt-input-error' : undefined}
+            onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => {
+              setValue(e.currentTarget.value);
+              setError(null);
+            }}
             onKeyDown={onKey}
             style="width:100%"
           />
+          {error ? <div id="prompt-input-error" style="margin-top:6px;color:var(--danger);font-size:12px">{error}</div> : null}
         </div>
         <MobileDialogFooter>
           <button type="button" onClick={() => close(null)}>Cancel</button>

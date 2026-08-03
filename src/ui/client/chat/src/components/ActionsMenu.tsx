@@ -94,6 +94,7 @@ type Item = ItemDef | Sep;
 interface Props {
   mode: 'directory' | 'entry';
   entry?: TreeEntry;
+  onNewFile?: () => void;
   onUpload?: () => void;
   onEdit?: () => void;
   triggerClassName?: string;
@@ -103,6 +104,7 @@ interface Props {
 export function ActionsMenu({
   mode,
   entry,
+  onNewFile,
   onUpload,
   onEdit,
   triggerClassName = 'text-btn',
@@ -125,7 +127,7 @@ export function ActionsMenu({
     };
   }, [open]);
 
-  const items = buildItems(mode, entry, onUpload, onEdit);
+  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit);
   if (items.length === 0) return null;
 
   return (
@@ -174,6 +176,7 @@ function appendGroup(items: Item[], group: Item[]): void {
 function buildItems(
   mode: 'directory' | 'entry',
   entry: TreeEntry | undefined,
+  onNewFile?: () => void,
   onUpload?: () => void,
   onEdit?: () => void,
 ): Item[] {
@@ -186,6 +189,7 @@ function buildItems(
   const items: Item[] = [];
   const createItems: Item[] = [];
   if (admin) {
+    if (onNewFile) createItems.push({ ico: '\uD83D\uDCC4', label: 'New file', onClick: onNewFile });
     createItems.push({ ico: '\uD83D\uDCC1', label: 'New folder', onClick: mkdirPrompt });
     if (onUpload) createItems.push({ ico: '\u2B06', label: 'Upload files\u2026', onClick: onUpload });
   }

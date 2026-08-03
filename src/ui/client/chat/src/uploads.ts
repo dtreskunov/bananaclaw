@@ -1,5 +1,5 @@
 // Admin write operations + upload progress strip.
-import { groupId, isAdmin, uploadItems, threadId, treePath, filePath, pinnedContext } from './state';
+import { groupId, isAdmin, uploadItems, threadId, treePath, treeEntries, filePath, pinnedContext } from './state';
 import { postJson } from './api';
 import { loadTree, navFile, navTree } from './actions';
 import { parentPath } from './utils';
@@ -12,6 +12,47 @@ function curDir(): string {
 }
 function joinPath(dir: string, name: string): string {
   return dir ? dir + '/' + name : name;
+}
+
+const EDITABLE_FILE_EXTENSIONS = new Set([
+  'txt',
+  'md',
+  'json',
+  'yaml',
+  'yml',
+  'log',
+  'csv',
+  'tsv',
+  'html',
+  'htm',
+  'css',
+  'js',
+  'mjs',
+  'cjs',
+  'map',
+  'ts',
+  'tsx',
+  'jsx',
+  'py',
+  'sh',
+  'toml',
+  'ini',
+  'conf',
+  'env',
+  'xml',
+]);
+
+function newFileNameError(name: string): string | null {
+  if (name.includes('/') || name.includes('\\')) return 'Enter a file name, not a path.';
+  const dot = name.lastIndexOf('.');
+  const extension = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
+  if (!EDITABLE_FILE_EXTENSIONS.has(extension)) {
+    return 'Use an editable text file type, such as .md, .txt, .json, .html, .css, .js, .ts, .py, .sh, .yaml, or .xml.';
+  }
+  if (treeEntries.peek().some((entry) => entry.name === name)) {
+    return 'A file or folder with that name already exists.';
+  }
+  return null;
 }
 
 function isAtOrBelow(path: string | null, ancestor: string): path is string {
@@ -39,6 +80,7 @@ interface WriteFileResponse extends ApiError {
 }
 
 export type SaveResult = { ok: true; size?: number; mtime?: string; etag?: string } | { conflict: true; etag?: string };
+export type CreateResult = { ok: true; size?: number; mtime?: string; etag?: string } | { exists: true };
 
 /**
  * Overwrite an existing file's text content. When `ifMatch` is supplied it is
@@ -61,6 +103,40 @@ export async function saveFile(relPath: string, content: string, ifMatch?: strin
   return { ok: true, size: r.data.size, mtime: r.data.mtime, etag: r.data.etag };
 }
 
+export async function createFile(relPath: string, content: string): Promise<CreateResult | null> {
+  if (!groupId.value || !isAdmin.value) return null;
+  const r = await postJson<WriteFileResponse>(`api/groups/${groupId.value}/write`, {
+    path: relPath,
+    content,
+    create: true,
+  });
+  if (r.status === 409) {
+    showToast('A file or folder with that name already exists.', 'err');
+    return { exists: true };
+  }
+  if (!r.ok || !r.data.ok) {
+    showToast('create file failed: ' + (r.data.error || r.status), 'err');
+    return null;
+  }
+  return { ok: true, size: r.data.size, mtime: r.data.mtime, etag: r.data.etag };
+}
+
+export async function promptNewFilePath(): Promise<string | null> {
+  if (!groupId.value || !isAdmin.value) return null;
+  const dir = curDir();
+  const name = await requestInput({
+    title: 'New file',
+    label: `Create in /${dir}`,
+    placeholder: 'notes.md',
+    okLabel: 'Continue',
+    validate: newFileNameError,
+  });
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  return joinPath(dir, trimmed);
+}
+
 export async function mkdirPrompt(): Promise<void> {
   if (!groupId.value || !isAdmin.value) return;
   const name = await requestInput({ title: 'New folder', placeholder: 'folder name', okLabel: 'Create' });
@@ -71,21 +147,6 @@ export async function mkdirPrompt(): Promise<void> {
   const r = await postJson<ApiError>(`api/groups/${groupId.value}/mkdir`, { path: target });
   if (!r.ok) {
     showToast('mkdir failed: ' + (r.data.error || r.status), 'err');
-    return;
-  }
-  await loadTree(treePath.value);
-}
-
-export async function touchPrompt(): Promise<void> {
-  if (!groupId.value || !isAdmin.value) return;
-  const name = await requestInput({ title: 'New file', placeholder: 'file name', okLabel: 'Create' });
-  if (!name) return;
-  const trimmed = name.trim();
-  if (!trimmed) return;
-  const target = joinPath(curDir(), trimmed);
-  const r = await postJson<ApiError>(`api/groups/${groupId.value}/touch`, { path: target });
-  if (!r.ok) {
-    showToast('create file failed: ' + (r.data.error || r.status), 'err');
     return;
   }
   await loadTree(treePath.value);

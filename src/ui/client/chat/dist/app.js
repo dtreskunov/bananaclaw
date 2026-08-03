@@ -19150,10 +19150,12 @@ function requestInput(opts) {
 function PromptModal() {
   const req = promptRequest.value;
   const [value, setValue] = h2("");
+  const [error, setError] = h2(null);
   const inputRef = A2(null);
   y2(() => {
     if (!req) return;
     setValue(req.initialValue || "");
+    setError(null);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [req]);
   if (!req) return null;
@@ -19165,6 +19167,11 @@ function PromptModal() {
   function onSubmit(e4) {
     e4.preventDefault();
     const trimmed = value.trim();
+    const validationError = trimmed ? promptRequest.peek()?.validate?.(trimmed) : null;
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     close(trimmed ? trimmed : null);
   }
   function onKey(e4) {
@@ -19180,11 +19187,17 @@ function PromptModal() {
           type: "text",
           value,
           placeholder: req.placeholder || "",
-          onInput: (e4) => setValue(e4.currentTarget.value),
+          "aria-invalid": !!error,
+          "aria-describedby": error ? "prompt-input-error" : void 0,
+          onInput: (e4) => {
+            setValue(e4.currentTarget.value);
+            setError(null);
+          },
           onKeyDown: onKey,
           style: "width:100%"
         }
-      )
+      ),
+      error ? /* @__PURE__ */ u4("div", { id: "prompt-input-error", style: "margin-top:6px;color:var(--danger);font-size:12px", children: error }) : null
     ] }),
     /* @__PURE__ */ u4(MobileDialogFooter, { children: [
       /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(null), children: "Cancel" }),
@@ -21595,6 +21608,45 @@ function curDir() {
 function joinPath(dir, name) {
   return dir ? dir + "/" + name : name;
 }
+var EDITABLE_FILE_EXTENSIONS = /* @__PURE__ */ new Set([
+  "txt",
+  "md",
+  "json",
+  "yaml",
+  "yml",
+  "log",
+  "csv",
+  "tsv",
+  "html",
+  "htm",
+  "css",
+  "js",
+  "mjs",
+  "cjs",
+  "map",
+  "ts",
+  "tsx",
+  "jsx",
+  "py",
+  "sh",
+  "toml",
+  "ini",
+  "conf",
+  "env",
+  "xml"
+]);
+function newFileNameError(name) {
+  if (name.includes("/") || name.includes("\\")) return "Enter a file name, not a path.";
+  const dot = name.lastIndexOf(".");
+  const extension = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+  if (!EDITABLE_FILE_EXTENSIONS.has(extension)) {
+    return "Use an editable text file type, such as .md, .txt, .json, .html, .css, .js, .ts, .py, .sh, .yaml, or .xml.";
+  }
+  if (treeEntries.peek().some((entry) => entry.name === name)) {
+    return "A file or folder with that name already exists.";
+  }
+  return null;
+}
 function isAtOrBelow(path, ancestor) {
   return !!path && (path === ancestor || path.startsWith(ancestor + "/"));
 }
@@ -21616,6 +21668,38 @@ async function saveFile(relPath, content, ifMatch) {
     return null;
   }
   return { ok: true, size: r4.data.size, mtime: r4.data.mtime, etag: r4.data.etag };
+}
+async function createFile(relPath, content) {
+  if (!groupId.value || !isAdmin.value) return null;
+  const r4 = await postJson(`api/groups/${groupId.value}/write`, {
+    path: relPath,
+    content,
+    create: true
+  });
+  if (r4.status === 409) {
+    showToast("A file or folder with that name already exists.", "err");
+    return { exists: true };
+  }
+  if (!r4.ok || !r4.data.ok) {
+    showToast("create file failed: " + (r4.data.error || r4.status), "err");
+    return null;
+  }
+  return { ok: true, size: r4.data.size, mtime: r4.data.mtime, etag: r4.data.etag };
+}
+async function promptNewFilePath() {
+  if (!groupId.value || !isAdmin.value) return null;
+  const dir = curDir();
+  const name = await requestInput({
+    title: "New file",
+    label: `Create in /${dir}`,
+    placeholder: "notes.md",
+    okLabel: "Continue",
+    validate: newFileNameError
+  });
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  return joinPath(dir, trimmed);
 }
 async function mkdirPrompt() {
   if (!groupId.value || !isAdmin.value) return;
@@ -21891,6 +21975,7 @@ function buildEntryItems(entry, gid, admin, onEdit) {
 function ActionsMenu({
   mode,
   entry,
+  onNewFile,
   onUpload,
   onEdit,
   triggerClassName = "text-btn",
@@ -21913,7 +21998,7 @@ function ActionsMenu({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-  const items = buildItems(mode, entry, onUpload, onEdit);
+  const items = buildItems(mode, entry, onNewFile, onUpload, onEdit);
   if (items.length === 0) return null;
   return /* @__PURE__ */ u4("div", { class: "action-menu" + (open ? " open" : ""), ref: wrapRef, children: [
     /* @__PURE__ */ u4(
@@ -21958,7 +22043,7 @@ function appendGroup(items, group) {
   if (items.length > 0) items.push("---");
   items.push(...group);
 }
-function buildItems(mode, entry, onUpload, onEdit) {
+function buildItems(mode, entry, onNewFile, onUpload, onEdit) {
   const admin = isAdmin.value;
   const gid = groupId.value;
   if (mode === "entry") return entry ? buildEntryItems(entry, gid, admin, onEdit) : [];
@@ -21967,6 +22052,7 @@ function buildItems(mode, entry, onUpload, onEdit) {
   const items = [];
   const createItems = [];
   if (admin) {
+    if (onNewFile) createItems.push({ ico: "\u{1F4C4}", label: "New file", onClick: onNewFile });
     createItems.push({ ico: "\u{1F4C1}", label: "New folder", onClick: mkdirPrompt });
     if (onUpload) createItems.push({ ico: "\u2B06", label: "Upload files\u2026", onClick: onUpload });
   }
@@ -22289,26 +22375,70 @@ function highlightCode(text, name) {
 // src/components/FilesPane.tsx
 function usePreviewEditor() {
   const [editing, setEditing] = h2(false);
+  const [createPath, setCreatePath] = h2(null);
   const [draft, setDraft] = h2("");
   const [saving, setSaving] = h2(false);
+  const initialDraft = A2("");
   const p5 = previewBlock.value;
   const fp = filePath.value;
   const editable = !!p5 && isAdmin.value && (p5.kind === "text" || p5.kind === "markdown" || p5.kind === "html");
   y2(() => {
     setEditing(false);
+    setCreatePath(null);
     setSaving(false);
   }, [fp]);
+  y2(() => {
+    if (!editing || draft === initialDraft.current) return void 0;
+    const onBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [editing, draft]);
   const beginEdit = () => {
-    setDraft(p5?.text || "");
+    const text = p5?.text || "";
+    initialDraft.current = text;
+    setCreatePath(null);
+    setDraft(text);
     setEditing(true);
   };
-  const cancelEdit = () => {
+  const beginCreate = (path) => {
+    initialDraft.current = "";
+    setCreatePath(path);
+    setDraft("");
+    setEditing(true);
+  };
+  const cancelEdit = async () => {
+    if (draft !== initialDraft.current) {
+      const discard = await requestConfirm({
+        title: "Discard unsaved changes?",
+        message: "Your changes have not been saved.",
+        okLabel: "Discard",
+        cancelLabel: "Keep editing",
+        danger: true
+      });
+      if (!discard) return false;
+    }
     setEditing(false);
+    setCreatePath(null);
+    return true;
   };
   const commitEdit = async () => {
-    if (!fp) return;
+    const targetPath = createPath || fp;
+    if (!targetPath) return;
     setSaving(true);
-    let res = await saveFile(fp, draft, previewBlock.peek()?.etag);
+    if (createPath) {
+      const created = await createFile(createPath, draft);
+      setSaving(false);
+      if (!created || "exists" in created) return;
+      await loadTree(parentPath(createPath));
+      await navFile({ path: createPath, name: createPath.slice(createPath.lastIndexOf("/") + 1) });
+      setCreatePath(null);
+      setEditing(false);
+      return;
+    }
+    let res = await saveFile(targetPath, draft, previewBlock.peek()?.etag);
     if (res && "conflict" in res) {
       const overwrite = await requestConfirm({
         title: "File changed on disk",
@@ -22320,15 +22450,15 @@ function usePreviewEditor() {
       if (!overwrite) {
         setSaving(false);
         setEditing(false);
-        await selectFile({ path: fp, name: fp.slice(fp.lastIndexOf("/") + 1) });
+        await selectFile({ path: targetPath, name: targetPath.slice(targetPath.lastIndexOf("/") + 1) });
         return;
       }
-      res = await saveFile(fp, draft, res.etag);
+      res = await saveFile(targetPath, draft, res.etag);
     }
     setSaving(false);
     if (!res || "conflict" in res) return;
     const cur = previewBlock.peek();
-    if (cur && cur.path === fp) {
+    if (cur && cur.path === targetPath) {
       previewBlock.value = {
         ...cur,
         text: draft,
@@ -22339,13 +22469,25 @@ function usePreviewEditor() {
     }
     setEditing(false);
   };
-  return { editing, saving, editable, draft, beginEdit, cancelEdit, commitEdit, setDraft };
+  return {
+    editing,
+    creating: !!createPath,
+    saving,
+    editable,
+    draft,
+    path: createPath || fp,
+    beginEdit,
+    beginCreate,
+    cancelEdit,
+    commitEdit,
+    setDraft
+  };
 }
 function Crumb({ editor }) {
   const ref = A2(null);
   const uploadInputRef = A2(null);
   const p5 = treePath.value;
-  const fp = filePath.value;
+  const fp = editor.creating ? editor.path : filePath.value;
   const preview = previewBlock.value;
   const currentDirectory = p5 ? { path: p5, name: p5.slice(p5.lastIndexOf("/") + 1), type: "dir" } : void 0;
   const previewEntry = fp ? { path: fp, name: preview?.name || fp.slice(fp.lastIndexOf("/") + 1), type: "file" } : void 0;
@@ -22357,6 +22499,15 @@ function Crumb({ editor }) {
       if (ref.current) ref.current.scrollLeft = ref.current.scrollWidth;
     });
   }, [p5, fp]);
+  const navigateTree = (path) => {
+    if (!editor.editing) {
+      navTree(path);
+      return;
+    }
+    editor.cancelEdit().then((discarded) => {
+      if (discarded) return navTree(path);
+    }).catch(console.error);
+  };
   let acc = "";
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("div", { class: "files-actions rail-actions-row rail-divider-row", children: [
@@ -22398,7 +22549,9 @@ function Crumb({ editor }) {
             title: "Discard changes",
             "aria-label": "Discard changes",
             disabled: editor.saving,
-            onClick: editor.cancelEdit,
+            onClick: () => {
+              editor.cancelEdit().catch(console.error);
+            },
             children: "\xD7"
           }
         )
@@ -22468,6 +22621,11 @@ function Crumb({ editor }) {
           {
             mode: "directory",
             entry: currentDirectory,
+            onNewFile: () => {
+              promptNewFilePath().then((path) => {
+                if (path) editor.beginCreate(path);
+              }).catch(console.error);
+            },
             triggerClassName: "rail-control-btn",
             triggerTitle: currentDirectory ? `Actions for ${currentDirectory.name}` : "Root folder actions",
             onUpload: () => uploadInputRef.current?.click()
@@ -22483,9 +22641,7 @@ function Crumb({ editor }) {
           class: "crumb root" + (segs.length === 0 && !fileName ? " current" : ""),
           "data-path": "",
           title: "Root",
-          onClick: () => {
-            navTree("");
-          },
+          onClick: () => navigateTree(""),
           children: "/"
         }
       ),
@@ -22493,9 +22649,7 @@ function Crumb({ editor }) {
         acc = acc ? acc + "/" + s5 : s5;
         const path = acc;
         const last = i5 === segs.length - 1 && !fileName;
-        const onClick = last ? void 0 : () => {
-          navTree(path);
-        };
+        const onClick = last ? void 0 : () => navigateTree(path);
         return /* @__PURE__ */ u4("span", { class: "crumb-node", children: [
           /* @__PURE__ */ u4("span", { class: "sep", "aria-hidden": "true", children: "\u203A" }),
           /* @__PURE__ */ u4(
@@ -22618,8 +22772,13 @@ function renderMetaPanel(rows) {
 }
 function Preview({ editor }) {
   const ref = A2(null);
-  const p5 = previewBlock.value;
+  const editorRef = A2(null);
+  const p5 = previewBlock.value ?? (editor.creating ? { kind: "text", text: "", name: editor.path?.slice(editor.path.lastIndexOf("/") + 1) || "New file", path: editor.path || void 0 } : null);
   const fp = filePath.value;
+  y2(() => {
+    if (!editor.editing) return;
+    requestAnimationFrame(() => editorRef.current?.focus());
+  }, [editor.editing, editor.path]);
   if (!p5) return /* @__PURE__ */ u4("div", { class: "preview-body", id: "preview", ref });
   const fileRows = [];
   if (p5.size != null) fileRows.push(["Size", fmtBytes(p5.size)]);
@@ -22638,6 +22797,7 @@ function Preview({ editor }) {
     body = /* @__PURE__ */ u4(
       "textarea",
       {
+        ref: editorRef,
         class: "file-editor",
         value: editor.draft,
         spellcheck: false,
@@ -22673,8 +22833,8 @@ function Preview({ editor }) {
   ] });
 }
 function FilesPane() {
-  const previewing = !!previewBlock.value;
   const editor = usePreviewEditor();
+  const previewing = !!previewBlock.value || editor.editing;
   const bodyRef = A2(null);
   y2(() => {
     const body = bodyRef.current;

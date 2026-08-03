@@ -196,6 +196,25 @@ describe('file API origin policy', () => {
 });
 
 describe('file write optimistic concurrency', () => {
+  it('atomically creates a new file with its initial content', async () => {
+    const w = await call('POST', `/api/groups/${GID}/write`, {
+      body: { path: 'notes.md', content: '# Notes\n', create: true },
+    });
+    expect(w.status()).toBe(201);
+    expect(readFile('notes.md')).toBe('# Notes\n');
+    expect((w.body() as { etag?: string }).etag).toMatch(/^"[0-9a-f]{16}"$/);
+  });
+
+  it('create mode rejects a collision without changing the existing file', async () => {
+    writeFile('notes.md', 'existing');
+    const w = await call('POST', `/api/groups/${GID}/write`, {
+      body: { path: 'notes.md', content: 'replacement', create: true },
+    });
+    expect(w.status()).toBe(409);
+    expect((w.body() as { error: string }).error).toBe('exists');
+    expect(readFile('notes.md')).toBe('existing');
+  });
+
   it('meta exposes an ETag; read + write round-trips it', async () => {
     writeFile('state.json', '{"n":1}');
     const meta = await call('GET', `/api/groups/${GID}/files/state.json?meta=1`);

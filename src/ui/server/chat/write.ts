@@ -1,5 +1,6 @@
 /**
- * Write operations for the file browser: upload, mkdir, rename, delete.
+ * Write operations for the file browser: upload, create, edit, mkdir, rename,
+ * and delete.
  *
  * All ops require admin privilege over the group. `canWrite()` from
  * classify.ts gates the target path on top of that. Path safety always
@@ -383,6 +384,33 @@ async function handleFileWrite(
     writeJson(res, 400, { error: 'invalid_path' });
     return true;
   }
+  const buf = Buffer.from(content, 'utf8');
+  if (buf.length > WRITE_MAX_BODY_SIZE) {
+    writeJson(res, 413, { error: 'too_large' });
+    return true;
+  }
+  if ((body as Record<string, unknown>)?.create === true) {
+    try {
+      await fs.promises.writeFile(abs, buf, { flag: 'wx' });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        writeJson(res, 400, { error: 'parent_missing' });
+        return true;
+      }
+      if (code === 'EEXIST') {
+        writeJson(res, 409, { error: 'exists' });
+        return true;
+      }
+      throw err;
+    }
+    const created = await fs.promises.stat(abs);
+    const etag = fileEtag(created);
+    res.setHeader('ETag', etag);
+    recordAccess({ userId, groupId, path: relPath, action: 'write', req });
+    writeJson(res, 201, { ok: true, path: relPath, size: created.size, mtime: created.mtime.toISOString(), etag });
+    return true;
+  }
   let st: fs.Stats;
   try {
     st = await fs.promises.stat(abs);
@@ -408,11 +436,6 @@ async function handleFileWrite(
   if (ifMatchSatisfied(ifMatch, currentEtag) === false) {
     res.setHeader('ETag', currentEtag);
     writeJson(res, 412, { error: 'precondition_failed', etag: currentEtag });
-    return true;
-  }
-  const buf = Buffer.from(content, 'utf8');
-  if (buf.length > WRITE_MAX_BODY_SIZE) {
-    writeJson(res, 413, { error: 'too_large' });
     return true;
   }
   // Write via a sibling tmp file + atomic rename so a partial write never
