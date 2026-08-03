@@ -42,7 +42,7 @@ export function App() {
   const mainCls = ''
     + (threadsOpen ? '' : ' threads-collapsed')
     + (filesOpen ? '' : ' files-collapsed');
-  const backdropShown = threadsDrawerOpen || filesDrawerOpen;
+  const backdropShown = mobile && (threadsDrawerOpen || filesDrawerOpen);
   const onBackdrop = (): void => { drawerOpen.threads.value = false; drawerOpen.files.value = false; };
   return (
     <>

@@ -26835,7 +26835,7 @@ function App() {
     writeHash(true);
   }, [threadsOpen, filesOpen, threadsDrawerOpen, filesDrawerOpen, mobile]);
   const mainCls = (threadsOpen ? "" : " threads-collapsed") + (filesOpen ? "" : " files-collapsed");
-  const backdropShown = threadsDrawerOpen || filesDrawerOpen;
+  const backdropShown = mobile && (threadsDrawerOpen || filesDrawerOpen);
   const onBackdrop = () => {
     drawerOpen.threads.value = false;
     drawerOpen.files.value = false;
