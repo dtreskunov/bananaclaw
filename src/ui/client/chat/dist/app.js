@@ -22886,13 +22886,13 @@ function Crumb({
           onKeyDown: onSearchKeyDown
         }
       ),
-      fileSearchQuery.value ? /* @__PURE__ */ u4(
+      fileSearchOpen.value ? /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
           class: "thread-action-btn rail-control-btn clear-search-btn",
-          title: "Clear file search",
-          "aria-label": "Clear file search",
+          title: "Close file search",
+          "aria-label": "Close file search",
           onClick: clearFileSearch,
           children: "\xD7"
         }

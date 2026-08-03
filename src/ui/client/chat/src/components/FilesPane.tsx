@@ -361,12 +361,12 @@ function Crumb({
               onInput={(ev: JSX.TargetedInputEvent<HTMLInputElement>) => { fileSearchQuery.value = ev.currentTarget.value; }}
               onKeyDown={onSearchKeyDown}
             />
-            {fileSearchQuery.value ? (
+            {fileSearchOpen.value ? (
               <button
                 type="button"
                 class="thread-action-btn rail-control-btn clear-search-btn"
-                title="Clear file search"
-                aria-label="Clear file search"
+                title="Close file search"
+                aria-label="Close file search"
                 onClick={clearFileSearch}
               >{'\u00D7'}</button>
             ) : null}
