@@ -8,6 +8,7 @@
   --muted: rgba(127, 127, 127, 0.7);
   --accent: rgba(100, 150, 255, 0.18);
   --accent-strong: rgba(100, 150, 255, 0.35);
+  --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 70%, var(--surface));
   --wash-subtle: rgba(127, 127, 127, 0.05);
   --wash-soft: rgba(127, 127, 127, 0.08);
   --wash: rgba(127, 127, 127, 0.12);
@@ -67,6 +68,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --surface: #000;
+    --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 35%, var(--surface));
   }
 }
 * {
@@ -140,7 +142,7 @@ button:hover {
   padding: 0;
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--accent-strong, var(--accent));
+  background: var(--accent-strong-opaque);
   color: var(--accent-fg, #fff);
   font: inherit;
   font-size: var(--accent-icon-font-size);
@@ -150,8 +152,8 @@ button:hover {
   transition: opacity 0.15s, background 0.15s;
 }
 .accent-icon-btn:hover:not(:disabled) {
-  background: var(--accent-strong, var(--accent));
-  opacity: 0.9;
+  background: var(--accent-strong-opaque);
+  opacity: 1;
 }
 .accent-icon-btn:disabled {
   opacity: 0.35;
@@ -1647,14 +1649,10 @@ nav.tab-bar-strip.group-strip {
   line-height: 1;
 }
 .chat-main .scroll-to-bottom.new-message {
-  background: var(--accent-strong, var(--accent));
-  color: var(--accent-fg, #fff);
-  font-weight: 700;
-  opacity: 1;
+  background: var(--accent-strong-opaque);
 }
 .chat-main .scroll-to-bottom.new-message:hover {
-  background: var(--accent-strong, var(--accent));
-  opacity: 0.9;
+  background: var(--accent-strong-opaque);
 }
 .chat-main .log .task-indicator.msg.event .event-meta {
   margin-left: 4px;

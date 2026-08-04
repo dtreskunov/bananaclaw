@@ -15,6 +15,7 @@
   /* Accent wash (used for selected rows, in-bubble bg, etc.). */
   --accent: rgba(100, 150, 255, 0.18);
   --accent-strong: rgba(100, 150, 255, 0.35);
+  --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 70%, var(--surface));
 
   /* Neutral overlays — mid-gray so they read identically in light
      and dark. Used for hover, dividers, code blocks, fills. */
@@ -90,7 +91,10 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root { --surface: #000; }
+  :root {
+    --surface: #000;
+    --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 35%, var(--surface));
+  }
 }
 
 * { box-sizing: border-box; }
@@ -130,7 +134,7 @@ button:hover { background: var(--wash); }
   padding: 0;
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--accent-strong, var(--accent));
+  background: var(--accent-strong-opaque);
   color: var(--accent-fg, #fff);
   font: inherit;
   font-size: var(--accent-icon-font-size);
@@ -139,7 +143,7 @@ button:hover { background: var(--wash); }
   cursor: pointer;
   transition: opacity 0.15s, background 0.15s;
 }
-.accent-icon-btn:hover:not(:disabled) { background: var(--accent-strong, var(--accent)); opacity: 0.9; }
+.accent-icon-btn:hover:not(:disabled) { background: var(--accent-strong-opaque); opacity: 1; }
 .accent-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .thread-action-btn {
   flex: 0 0 var(--rail-control-height);

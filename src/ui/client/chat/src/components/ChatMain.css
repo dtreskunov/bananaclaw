@@ -54,12 +54,9 @@
 .chat-main .scroll-to-bottom:hover { color: var(--surface-fg); }
 .chat-main .scroll-to-bottom-arrow { font-size: var(--accent-icon-font-size); line-height: 1; }
 .chat-main .scroll-to-bottom.new-message {
-  background: var(--accent-strong, var(--accent));
-  color: var(--accent-fg, #fff);
-  font-weight: 700;
-  opacity: 1;
+  background: var(--accent-strong-opaque);
 }
-.chat-main .scroll-to-bottom.new-message:hover { background: var(--accent-strong, var(--accent)); opacity: 0.9; }
+.chat-main .scroll-to-bottom.new-message:hover { background: var(--accent-strong-opaque); }
 /* Persistent scheduled-task pill (same style as the task-run bubble), rendered
    as the last entry in the log so tasks are discoverable without expanding the
    rail. */
