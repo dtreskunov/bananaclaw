@@ -1,0 +1,23 @@
+.zoomable-image {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  cursor: zoom-in;
+}
+.zoomable-image.zoomed { cursor: grab; }
+.zoomable-image.zoomed:active { cursor: grabbing; }
+.zoomable-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  transform-origin: center;
+  user-select: none;
+  will-change: transform;
+}

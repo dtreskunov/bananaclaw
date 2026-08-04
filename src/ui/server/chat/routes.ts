@@ -331,6 +331,7 @@ async function handleCreatePrivateWebSession(
   const redeemUrl = new URL(`https://secure-${issued.id}.${PAGES_BASE_DOMAIN}/_auth/redeem`);
   redeemUrl.searchParams.set('t', issued.handoffToken);
   redeemUrl.searchParams.set('next', `/${relPath}`);
+  redeemUrl.searchParams.set('preview', '1');
   ctx.res.writeHead(201, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' });
   ctx.res.end(JSON.stringify({ url: redeemUrl.toString(), expiresAt: issued.expiresAt }));
 }

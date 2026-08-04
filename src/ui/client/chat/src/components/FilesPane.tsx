@@ -25,6 +25,8 @@ import { ActionsMenu } from './ActionsMenu';
 import { MediaPlayer } from './MediaPlayer';
 import { LyricsPanel } from './LyricsPanel';
 import { PrivateWebView } from './PrivateWebView';
+import { ZoomableImage } from './ZoomableImage';
+import './ZoomableImage.css';
 import { requestChoice, requestConfirm } from './PromptModal';
 import { highlightCode } from '../highlight';
 import type { TreeEntry, PreviewKind } from '../types';
@@ -641,7 +643,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
 
   const isAudio = p.kind === 'audio';
   const isVideo = p.kind === 'video';
-  const isEmbedded = p.kind === 'pdf' || p.kind === 'html';
+  const isEmbedded = p.kind === 'image' || p.kind === 'pdf' || p.kind === 'html';
   const player = (isAudio || isVideo)
     ? <MediaPlayer kind={p.kind} url={p.url || ''} name={p.name || ''} floating={isAudio} />
     : null;
@@ -661,7 +663,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
         onInput={(ev: JSX.TargetedEvent<HTMLTextAreaElement>) => editor.setDraft(ev.currentTarget.value)}
       />
     );
-  } else if (p.kind === 'image') body = <img alt={p.name} src={p.url} />;
+  } else if (p.kind === 'image') body = <ZoomableImage src={p.url || ''} alt={p.name || ''} className="file-image-preview" />;
   else if (p.kind === 'pdf') body = <iframe class="embedded-preview-frame" src={p.url} title={p.name} />;
   else if (p.kind === 'html' && fp && groupId.value) {
     body = <PrivateWebView key={`${p.url || ''}:${p.etag || ''}`} groupId={groupId.value} path={fp} title={p.name} />;

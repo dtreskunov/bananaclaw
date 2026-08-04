@@ -184,7 +184,7 @@ describe('private web host', () => {
     const { host, cookie } = await redeem();
     const html = await call({ host, url: '/report/index.html', cookie });
     expect(html.status()).toBe(200);
-    expect(html.body()).toContain('../style.css');
+    expect(html.body()).toBe('<link rel="stylesheet" href="../style.css">');
     expect(html.header('content-security-policy')).toContain("connect-src 'self'");
     expect(html.header('content-security-policy')).toContain('sandbox allow-scripts allow-same-origin');
     // WebAssembly is allowed, but plain eval() is not.
@@ -194,6 +194,26 @@ describe('private web host', () => {
     const css = await call({ host, url: '/style.css', cookie });
     expect(css.status()).toBe(200);
     expect(css.body()).toBe('body{color:red}');
+  });
+
+  it('redeems preview sessions into a system shell without transforming workspace HTML', async () => {
+    const issued = issue();
+    const redeemed = await call({
+      host: issued.host,
+      url: `/_auth/redeem?t=${encodeURIComponent(issued.handoffToken)}&next=${encodeURIComponent('/report/index.html')}&preview=1`,
+    });
+    expect(redeemed.status()).toBe(303);
+    expect(redeemed.header('location')).toBe('/_preview?path=%2Freport%2Findex.html');
+    const cookie = redeemed.header('set-cookie')!.split(';')[0];
+
+    const shell = await call({ host: issued.host, url: redeemed.header('location'), cookie });
+    expect(shell.status()).toBe(200);
+    expect(shell.body()).toContain('id="preview-content" src="/report/index.html"');
+    expect(shell.body()).toContain("frame.style.transform = 'scale(' + scale + ')'");
+    expect(shell.body()).toContain("event.data?.type === 'nanoclaw-private-web-expired'");
+
+    const document = await call({ host: issued.host, url: '/report/index.html', cookie });
+    expect(document.body()).toBe('<link rel="stylesheet" href="../style.css">');
   });
 
   it('redirects special-character entry paths with exactly one encoding pass', async () => {

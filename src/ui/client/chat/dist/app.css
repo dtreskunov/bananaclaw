@@ -79,6 +79,7 @@ body {
   height: 100%;
   overflow-x: hidden;
   overscroll-behavior-x: none;
+  touch-action: pan-x pan-y;
 }
 .chat-main textarea::placeholder,
 .rail-search-input::placeholder {
@@ -1924,31 +1925,6 @@ nav.tab-bar-strip.group-strip {
 }
 .image-viewer-stage {
   flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  touch-action: none;
-  cursor: zoom-in;
-}
-.image-viewer-stage.zoomed {
-  cursor: grab;
-}
-.image-viewer-stage.zoomed:active {
-  cursor: grabbing;
-}
-.image-viewer-stage img {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  transform-origin: center;
-  user-select: none;
-  will-change: transform;
 }
 .chat-main .typing {
   align-self: flex-start;
@@ -2964,6 +2940,35 @@ nav.tab-bar-strip.group-strip {
   flex: 0 0 120px;
 }
 
+/* src/components/ZoomableImage.css */
+.zoomable-image {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  cursor: zoom-in;
+}
+.zoomable-image.zoomed {
+  cursor: grab;
+}
+.zoomable-image.zoomed:active {
+  cursor: grabbing;
+}
+.zoomable-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  transform-origin: center;
+  user-select: none;
+  will-change: transform;
+}
+
 /* src/components/FilesPane.css */
 .files-pane {
   border-left: 1px solid var(--border);
@@ -3336,6 +3341,9 @@ body.is-admin .files-pane.collapsed .admin-only {
   width: 100%;
   min-height: 0;
   border: 0;
+}
+.files-pane .file-image-preview {
+  flex: 1 1 0;
 }
 .files-pane pre {
   margin: 0;

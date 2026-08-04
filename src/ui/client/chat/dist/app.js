@@ -20251,22 +20251,20 @@ function QuickCapture({ onCapture, onClose }) {
   );
 }
 
-// src/components/ChatMain.tsx
-var activeRecordingTarget = y3(null);
-var imageViewer = y3(null);
-var MIN_IMAGE_SCALE = 1;
-var MAX_IMAGE_SCALE = 5;
-function imageFileName(src) {
-  try {
-    const name = new URL(src, window.location.href).pathname.split("/").filter(Boolean).pop();
-    return name ? decodeURIComponent(name) : "Image preview";
-  } catch {
-    return "Image preview";
-  }
+// src/components/ZoomableImage.tsx
+var MIN_SCALE = 1;
+var MAX_SCALE = 5;
+function midpoint(points) {
+  return {
+    x: (points[0].x + points[1].x) / 2,
+    y: (points[0].y + points[1].y) / 2
+  };
 }
-function ImageViewer() {
-  const image = imageViewer.value;
-  const [scale, setScale] = h2(MIN_IMAGE_SCALE);
+function distance(points) {
+  return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+}
+function ZoomableImage({ src, alt, className = "", autoFocus = false }) {
+  const [scale, setScale] = h2(MIN_SCALE);
   const [offset, setOffset] = h2({ x: 0, y: 0 });
   const stageRef = A2(null);
   const scaleRef = A2(scale);
@@ -20275,33 +20273,18 @@ function ImageViewer() {
   const gestureRef = A2(null);
   const dragRef = A2(null);
   const updateTransform = (nextScale, nextOffset = offsetRef.current) => {
-    const clampedScale = Math.min(MAX_IMAGE_SCALE, Math.max(MIN_IMAGE_SCALE, nextScale));
-    const clampedOffset = clampedScale === MIN_IMAGE_SCALE ? { x: 0, y: 0 } : nextOffset;
+    const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale));
+    const clampedOffset = clampedScale === MIN_SCALE ? { x: 0, y: 0 } : nextOffset;
     scaleRef.current = clampedScale;
     offsetRef.current = clampedOffset;
     setScale(clampedScale);
     setOffset(clampedOffset);
   };
   y2(() => {
-    if (!image) return void 0;
-    updateTransform(MIN_IMAGE_SCALE, { x: 0, y: 0 });
+    updateTransform(MIN_SCALE, { x: 0, y: 0 });
     pointersRef.current.clear();
-    requestAnimationFrame(() => stageRef.current?.focus());
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") imageViewer.value = null;
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [image?.src]);
-  if (!image) return null;
-  const midpoint = (points) => ({
-    x: (points[0].x + points[1].x) / 2,
-    y: (points[0].y + points[1].y) / 2
-  });
-  const distance = (points) => Math.hypot(
-    points[0].x - points[1].x,
-    points[0].y - points[1].y
-  );
+    if (autoFocus) requestAnimationFrame(() => stageRef.current?.focus());
+  }, [src]);
   const beginPinch = () => {
     const points = Array.from(pointersRef.current.values());
     if (points.length < 2) return;
@@ -20332,7 +20315,7 @@ function ImageViewer() {
         x: gesture.offset.x + currentMidpoint.x - gesture.midpoint.x,
         y: gesture.offset.y + currentMidpoint.y - gesture.midpoint.y
       });
-    } else if (points.length === 1 && dragRef.current && scaleRef.current > MIN_IMAGE_SCALE) {
+    } else if (points.length === 1 && dragRef.current && scaleRef.current > MIN_SCALE) {
       updateTransform(scaleRef.current, {
         x: dragRef.current.offset.x + event.clientX - dragRef.current.pointer.x,
         y: dragRef.current.offset.y + event.clientY - dragRef.current.pointer.y
@@ -20350,6 +20333,52 @@ function ImageViewer() {
     updateTransform(scaleRef.current * Math.exp(-event.deltaY * 2e-3));
   };
   return /* @__PURE__ */ u4(
+    "div",
+    {
+      ref: stageRef,
+      class: `zoomable-image${scale > MIN_SCALE ? " zoomed" : ""}${className ? ` ${className}` : ""}`,
+      tabIndex: autoFocus ? -1 : void 0,
+      onWheel,
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: onPointerEnd,
+      onPointerCancel: onPointerEnd,
+      children: /* @__PURE__ */ u4(
+        "img",
+        {
+          src,
+          alt,
+          draggable: false,
+          style: { transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }
+        }
+      )
+    }
+  );
+}
+
+// src/components/ChatMain.tsx
+var activeRecordingTarget = y3(null);
+var imageViewer = y3(null);
+function imageFileName(src) {
+  try {
+    const name = new URL(src, window.location.href).pathname.split("/").filter(Boolean).pop();
+    return name ? decodeURIComponent(name) : "Image preview";
+  } catch {
+    return "Image preview";
+  }
+}
+function ImageViewer() {
+  const image = imageViewer.value;
+  y2(() => {
+    if (!image) return void 0;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") imageViewer.value = null;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [image?.src]);
+  if (!image) return null;
+  return /* @__PURE__ */ u4(
     MobileDialog,
     {
       title: image.name,
@@ -20359,28 +20388,7 @@ function ImageViewer() {
       className: "image-viewer-dialog",
       backdropClassName: "image-viewer-backdrop",
       maxWidth: "calc(100vw - 32px)",
-      children: /* @__PURE__ */ u4(
-        "div",
-        {
-          ref: stageRef,
-          class: "image-viewer-stage" + (scale > MIN_IMAGE_SCALE ? " zoomed" : ""),
-          tabIndex: -1,
-          onWheel,
-          onPointerDown,
-          onPointerMove,
-          onPointerUp: onPointerEnd,
-          onPointerCancel: onPointerEnd,
-          children: /* @__PURE__ */ u4(
-            "img",
-            {
-              src: image.src,
-              alt: image.alt,
-              draggable: false,
-              style: { transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }
-            }
-          )
-        }
-      )
+      children: /* @__PURE__ */ u4(ZoomableImage, { src: image.src, alt: image.alt, className: "image-viewer-stage", autoFocus: true })
     }
   );
 }
@@ -23183,7 +23191,7 @@ function Preview({ editor }) {
   const meta = metaRows.length > 0 ? renderMetaPanel(metaRows) : null;
   const isAudio = p5.kind === "audio";
   const isVideo = p5.kind === "video";
-  const isEmbedded = p5.kind === "pdf" || p5.kind === "html";
+  const isEmbedded = p5.kind === "image" || p5.kind === "pdf" || p5.kind === "html";
   const player = isAudio || isVideo ? /* @__PURE__ */ u4(MediaPlayer, { kind: p5.kind, url: p5.url || "", name: p5.name || "", floating: isAudio }) : null;
   const lyrics = p5.lyrics ? /* @__PURE__ */ u4(LyricsPanel, { text: p5.lyrics }) : null;
   let body = null;
@@ -23202,7 +23210,7 @@ function Preview({ editor }) {
         onInput: (ev) => editor.setDraft(ev.currentTarget.value)
       }
     );
-  } else if (p5.kind === "image") body = /* @__PURE__ */ u4("img", { alt: p5.name, src: p5.url });
+  } else if (p5.kind === "image") body = /* @__PURE__ */ u4(ZoomableImage, { src: p5.url || "", alt: p5.name || "", className: "file-image-preview" });
   else if (p5.kind === "pdf") body = /* @__PURE__ */ u4("iframe", { class: "embedded-preview-frame", src: p5.url, title: p5.name });
   else if (p5.kind === "html" && fp && groupId.value) {
     body = /* @__PURE__ */ u4(PrivateWebView, { groupId: groupId.value, path: fp, title: p5.name }, `${p5.url || ""}:${p5.etag || ""}`);

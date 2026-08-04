@@ -155,6 +155,7 @@ describe('POST private-web-session', () => {
     expect(url.hostname).toMatch(/^secure-[a-f0-9]{48}\.pages\.test$/);
     expect(url.pathname).toBe('/_auth/redeem');
     expect(url.searchParams.get('next')).toBe('/reports/daily.html');
+    expect(url.searchParams.get('preview')).toBe('1');
     expect(url.searchParams.get('t')).toBeTruthy();
 
     const columns = getDb().prepare('PRAGMA table_info(ui_private_web_sessions)').all() as { name: string }[];

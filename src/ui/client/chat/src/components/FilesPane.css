@@ -202,6 +202,7 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 .files-pane .embedded-preview-frame {
   flex: 1 1 0; width: 100%; min-height: 0; border: 0;
 }
+.files-pane .file-image-preview { flex: 1 1 0; }
 .files-pane pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: var(--font-sm); line-height: 1.5; font-family: var(--font-mono); }
 .files-pane img, .files-pane iframe { max-width: 100%; }
 .markdown-preview { max-width: 100%; line-height: 1.5; }

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import fs from 'fs';
 import http from 'http';
 import path from 'path';
 
@@ -21,6 +22,7 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_WRITE_BYTES = 10 * 1024 * 1024;
 const WRITE_LIMIT = 30;
 const WRITE_WINDOW_MS = 60_000;
+const PREVIEW_SHELL_PATH = path.resolve(process.cwd(), 'src', 'ui', 'server', 'pages', 'private-web-shell.html');
 const writeWindows = new Map<string, number[]>();
 
 function hostId(hostHeader: string | undefined): { owned: boolean; id: string | null } {
@@ -58,7 +60,7 @@ function expired(req: http.IncomingMessage, res: http.ServerResponse): void {
     return;
   }
   const parentOrigin = new URL(uiBaseUrl()).origin;
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Session expired</title></head><body><p>Private web session expired.</p><script>if(parent!==window)parent.postMessage({type:'nanoclaw-private-web-expired'},${JSON.stringify(parentOrigin)})</script></body></html>`;
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Session expired</title></head><body><p>Private web session expired.</p><script>if(parent!==window)parent.postMessage({type:'nanoclaw-private-web-expired'},parent===top?${JSON.stringify(parentOrigin)}:location.origin)</script></body></html>`;
   res.writeHead(401, {
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
@@ -107,8 +109,31 @@ function privateCsp(): string {
     "worker-src 'none'",
     "form-action 'none'",
     "base-uri 'none'",
-    `frame-ancestors ${frameAncestor}`,
+    `frame-ancestors 'self' ${frameAncestor}`,
   ].join('; ');
+}
+
+function previewShell(relativePath: string): string {
+  const src = `/${relativePath.split('/').map(encodeURIComponent).join('/')}`;
+  const parentOrigin = new URL(uiBaseUrl()).origin;
+  return fs
+    .readFileSync(PREVIEW_SHELL_PATH, 'utf8')
+    .replace('"{{PREVIEW_SRC}}"', JSON.stringify(src))
+    .replace('"{{PARENT_ORIGIN}}"', JSON.stringify(parentOrigin));
+}
+
+function servePreviewShell(res: http.ServerResponse, relativePath: string, headOnly: boolean): void {
+  const body = previewShell(relativePath);
+  const parentOrigin = new URL(uiBaseUrl()).origin;
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'private, no-store',
+    'Content-Security-Policy': `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; frame-ancestors ${parentOrigin}`,
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.end(headOnly ? undefined : body);
 }
 
 function allowWrite(principal: string): boolean {
@@ -135,7 +160,9 @@ async function redeem(req: http.IncomingMessage, res: http.ServerResponse, id: s
   }
   const redeemed = redeemPrivateWebHandoff(id, token);
   if (!redeemed) return text(res, 401, 'Expired or already used handoff.');
-  const location = `/${next.split('/').map(encodeURIComponent).join('/')}`;
+  const entryLocation = `/${next.split('/').map(encodeURIComponent).join('/')}`;
+  const location =
+    url.searchParams.get('preview') === '1' ? `/_preview?path=${encodeURIComponent(entryLocation)}` : entryLocation;
   res.writeHead(303, {
     Location: location,
     'Set-Cookie': `${COOKIE_NAME}=${redeemed.secureToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=28800`,
@@ -171,6 +198,19 @@ export async function handlePrivateWebRequest(req: http.IncomingMessage, res: ht
   const group = getAgentGroup(session.agentGroupId);
   if (!group || !canAccessAgentGroup(session.userId, group.id).allowed) {
     text(res, 404, 'Not found.');
+    return true;
+  }
+  if (url.pathname === '/_preview') {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      text(res, 405, 'Method not allowed.', { Allow: 'GET, HEAD' });
+      return true;
+    }
+    const next = normalizeNext(url.searchParams.get('path'));
+    if (!next || !memberVisible(next) || !resolvePrivateWebEntry(group, next)) {
+      text(res, 404, 'Not found.');
+      return true;
+    }
+    servePreviewShell(res, next, req.method === 'HEAD');
     return true;
   }
   if (req.method === 'PUT' && !allowWrite(`${session.userId}:${session.agentGroupId}`)) {
