@@ -97,22 +97,22 @@ export function returnToUserMenu(source: Signal<boolean>): void {
 }
 
 /**
- * Focus the composer textarea once it's both mounted and enabled. The
- * element is unmounted while a group has no active thread and disabled
- * while the WebSocket is reconnecting, so a naive focus() after openChat
- * resolves often hits a dead element. Poll briefly with rAF instead
+ * Focus the composer textarea once it's mounted, enabled, and visible. Its
+ * form is hidden while a thread starts or reconnects, so a naive focus()
+ * after openChat resolves often targets an element that cannot retain focus.
+ * Poll briefly with rAF instead
  * (budget ~3s — enough for a typical WS handshake, not so long that a
  * later user click steals focus back from us).
  *
- * No-op on mobile: focusing the textarea pops up the OS keyboard, which
- * is unwanted on load / thread-switch. The user taps to type explicitly.
+ * No-op on mobile unless the caller is opening a blank thread. Existing
+ * threads may be opened for reading, while a blank thread is ready for input.
  */
-function focusComposerSoon(): void {
-  if (isMobile.value) return;
+function focusComposerSoon(options: { mobile?: boolean } = {}): void {
+  if (isMobile.value && !options.mobile) return;
   let tries = 0;
   const attempt = (): void => {
     const el = document.getElementById('chat-input') as HTMLTextAreaElement | null;
-    if (el && !el.disabled) {
+    if (el && !el.disabled && el.offsetParent !== null) {
       el.focus();
       return;
     }
@@ -608,7 +608,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     writeHash();
     connectChatWs({ gid, tid: empty.threadId, mg: empty.messagingGroupId || null, generation });
     void runSync();
-    focusComposerSoon();
+    focusComposerSoon({ mobile: true });
     return;
   }
   // Guard against rapid double-clicks while POST /chat/start is in
@@ -663,7 +663,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     generation,
   });
   void runSync();
-  focusComposerSoon();
+  focusComposerSoon({ mobile: true });
   refs.newChatInFlight = false;
 }
 

@@ -17570,12 +17570,12 @@ function returnToUserMenu(source) {
     userMenuOpen.value = true;
   });
 }
-function focusComposerSoon() {
-  if (isMobile.value) return;
+function focusComposerSoon(options = {}) {
+  if (isMobile.value && !options.mobile) return;
   let tries = 0;
   const attempt = () => {
     const el = document.getElementById("chat-input");
-    if (el && !el.disabled) {
+    if (el && !el.disabled && el.offsetParent !== null) {
       el.focus();
       return;
     }
@@ -17958,7 +17958,7 @@ async function openChat(gid, resumeTid, opts) {
     writeHash();
     connectChatWs({ gid, tid: empty.threadId, mg: empty.messagingGroupId || null, generation });
     void runSync();
-    focusComposerSoon();
+    focusComposerSoon({ mobile: true });
     return;
   }
   refs.newChatInFlight = true;
@@ -18010,7 +18010,7 @@ async function openChat(gid, resumeTid, opts) {
     generation
   });
   void runSync();
-  focusComposerSoon();
+  focusComposerSoon({ mobile: true });
   refs.newChatInFlight = false;
 }
 function connectChatWs(ctx2) {
