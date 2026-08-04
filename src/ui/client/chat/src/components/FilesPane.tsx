@@ -641,6 +641,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
 
   const isAudio = p.kind === 'audio';
   const isVideo = p.kind === 'video';
+  const isEmbedded = p.kind === 'pdf' || p.kind === 'html';
   const player = (isAudio || isVideo)
     ? <MediaPlayer kind={p.kind} url={p.url || ''} name={p.name || ''} floating={isAudio} />
     : null;
@@ -661,7 +662,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
       />
     );
   } else if (p.kind === 'image') body = <img alt={p.name} src={p.url} />;
-  else if (p.kind === 'pdf') body = <iframe src={p.url} style="width:100%;height:90vh;border:0" />;
+  else if (p.kind === 'pdf') body = <iframe class="embedded-preview-frame" src={p.url} title={p.name} />;
   else if (p.kind === 'html' && fp && groupId.value) {
     body = <PrivateWebView key={`${p.url || ''}:${p.etag || ''}`} groupId={groupId.value} path={fp} title={p.name} />;
   }
@@ -679,7 +680,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
   else if (p.kind === 'binary') body = <div class="empty">Binary file ({p.mime}).</div>;
   else if (p.kind === 'error') body = <div class="empty">{p.text}</div>;
   return (
-    <div class={'preview-body' + (isAudio ? ' has-floating-player' : '')} id="preview" ref={ref}>
+    <div class={'preview-body' + (isAudio ? ' has-floating-player' : '') + (isEmbedded ? ' embedded-preview' : '')} id="preview" ref={ref}>
       {meta}{isVideo ? player : null}{lyrics}{body}{isAudio ? player : null}
     </div>
   );

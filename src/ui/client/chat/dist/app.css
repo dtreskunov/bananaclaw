@@ -3326,6 +3326,17 @@ body.is-admin .files-pane.collapsed .admin-only {
 .files-pane.previewing .preview-body {
   display: block;
 }
+.files-pane.previewing .preview-body.embedded-preview {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.files-pane .embedded-preview-frame {
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
 .files-pane pre {
   margin: 0;
   white-space: pre-wrap;
@@ -3767,6 +3778,11 @@ body.is-admin .files-pane.collapsed .admin-only {
   height: 100%;
   border: 0;
   background: #fff;
+}
+.files-pane .preview-body.embedded-preview .private-web-view {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
 }
 .private-web-state {
   display: grid;

@@ -23183,6 +23183,7 @@ function Preview({ editor }) {
   const meta = metaRows.length > 0 ? renderMetaPanel(metaRows) : null;
   const isAudio = p5.kind === "audio";
   const isVideo = p5.kind === "video";
+  const isEmbedded = p5.kind === "pdf" || p5.kind === "html";
   const player = isAudio || isVideo ? /* @__PURE__ */ u4(MediaPlayer, { kind: p5.kind, url: p5.url || "", name: p5.name || "", floating: isAudio }) : null;
   const lyrics = p5.lyrics ? /* @__PURE__ */ u4(LyricsPanel, { text: p5.lyrics }) : null;
   let body = null;
@@ -23202,7 +23203,7 @@ function Preview({ editor }) {
       }
     );
   } else if (p5.kind === "image") body = /* @__PURE__ */ u4("img", { alt: p5.name, src: p5.url });
-  else if (p5.kind === "pdf") body = /* @__PURE__ */ u4("iframe", { src: p5.url, style: "width:100%;height:90vh;border:0" });
+  else if (p5.kind === "pdf") body = /* @__PURE__ */ u4("iframe", { class: "embedded-preview-frame", src: p5.url, title: p5.name });
   else if (p5.kind === "html" && fp && groupId.value) {
     body = /* @__PURE__ */ u4(PrivateWebView, { groupId: groupId.value, path: fp, title: p5.name }, `${p5.url || ""}:${p5.etag || ""}`);
   } else if (p5.kind === "markdown") {
@@ -23217,7 +23218,7 @@ function Preview({ editor }) {
     ")."
   ] });
   else if (p5.kind === "error") body = /* @__PURE__ */ u4("div", { class: "empty", children: p5.text });
-  return /* @__PURE__ */ u4("div", { class: "preview-body" + (isAudio ? " has-floating-player" : ""), id: "preview", ref, children: [
+  return /* @__PURE__ */ u4("div", { class: "preview-body" + (isAudio ? " has-floating-player" : "") + (isEmbedded ? " embedded-preview" : ""), id: "preview", ref, children: [
     meta,
     isVideo ? player : null,
     lyrics,

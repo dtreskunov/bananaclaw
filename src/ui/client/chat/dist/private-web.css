@@ -21,6 +21,11 @@
   border: 0;
   background: #fff;
 }
+.files-pane .preview-body.embedded-preview .private-web-view {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+}
 .private-web-state {
   display: grid;
   place-content: center;
