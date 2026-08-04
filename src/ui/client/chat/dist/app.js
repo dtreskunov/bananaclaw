@@ -21057,26 +21057,59 @@ function MessageLog() {
   const prevTraceLenRef = A2(0);
   const prevExpandedRef = A2(false);
   const [traceExpanded, setTraceExpanded] = h2(false);
+  const [scrollable, setScrollable] = h2(false);
+  const [atBottom, setAtBottom] = h2(true);
+  const [newMessageBelow, setNewMessageBelow] = h2(false);
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
   const msgCount = timeline.length;
   const typing = isTyping.value && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
+  const activeThreadId = threadId.value;
   const traceLen = activityLog.value.length;
-  const scrollToBottom = () => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  };
   const atBottomRef = A2(true);
-  const onLogScroll = () => {
+  const measureScroll = () => {
+    const el = ref.current;
+    if (!el) return true;
+    const nextScrollable = el.scrollHeight - el.clientHeight > 1;
+    const nextAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    atBottomRef.current = nextAtBottom;
+    setScrollable(nextScrollable);
+    setAtBottom(nextAtBottom);
+    if (nextAtBottom) setNewMessageBelow(false);
+    return nextAtBottom;
+  };
+  const scrollToBottom = (smooth = false) => {
     const el = ref.current;
     if (!el) return;
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    else el.scrollTop = el.scrollHeight;
+    atBottomRef.current = true;
+    setAtBottom(true);
+    setNewMessageBelow(false);
   };
+  const onLogScroll = () => {
+    measureScroll();
+  };
+  y2(() => {
+    const onResize = () => {
+      measureScroll();
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  y2(() => {
+    prevMsgCountRef.current = 0;
+    atBottomRef.current = true;
+    setAtBottom(true);
+    setNewMessageBelow(false);
+  }, [activeThreadId]);
   y2(() => {
     if (!ref.current) return;
     if (scrollTick !== prevScrollTickRef.current) {
       prevScrollTickRef.current = scrollTick;
       scrollToBottom();
+      requestAnimationFrame(() => scrollToBottom());
       return;
     }
     if (highlight) {
@@ -21092,7 +21125,8 @@ function MessageLog() {
       }
     } else {
       appliedHighlightRef.current = null;
-      const newMessages = msgCount !== prevMsgCountRef.current;
+      const currentlyAtBottom = measureScroll();
+      const newMessages = msgCount > prevMsgCountRef.current;
       const typingJustStarted = typing && !wasTypingRef.current;
       const traceGrew = traceLen > prevTraceLenRef.current;
       const justExpanded = traceExpanded && !prevExpandedRef.current;
@@ -21100,10 +21134,15 @@ function MessageLog() {
         const ul = ref.current.querySelector(".activity-trace");
         if (ul) ul.scrollTop = ul.scrollHeight;
       }
-      if (newMessages || typingJustStarted || justExpanded || traceExpanded && traceGrew && atBottomRef.current) {
-        prevMsgCountRef.current = msgCount;
+      const shouldFollow = currentlyAtBottom && (newMessages || typingJustStarted || justExpanded || traceExpanded && traceGrew);
+      if (newMessages && !currentlyAtBottom) setNewMessageBelow(true);
+      if (shouldFollow) {
         scrollToBottom();
+        requestAnimationFrame(() => scrollToBottom());
+      } else {
+        requestAnimationFrame(measureScroll);
       }
+      prevMsgCountRef.current = msgCount;
       prevTraceLenRef.current = traceLen;
     }
     wasTypingRef.current = !!typing;
@@ -21111,10 +21150,27 @@ function MessageLog() {
   });
   const list = timeline;
   const groups2 = groupMessages(list);
-  return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, onScroll: onLogScroll, children: [
-    chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
-    typing ? /* @__PURE__ */ u4(TypingIndicator, { traceExpanded, onToggleTrace: () => setTraceExpanded((v5) => !v5) }) : null,
-    /* @__PURE__ */ u4(TaskIndicator, {})
+  return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
+    /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
+      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
+      typing ? /* @__PURE__ */ u4(TypingIndicator, { traceExpanded, onToggleTrace: () => setTraceExpanded((v5) => !v5) }) : null,
+      /* @__PURE__ */ u4(TaskIndicator, {})
+    ] }),
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "scroll-to-bottom" + (newMessageBelow ? " new-message" : ""),
+        hidden: !scrollable || atBottom,
+        title: newMessageBelow ? "New message below" : "Scroll to bottom",
+        "aria-label": newMessageBelow ? "New message below; scroll to bottom" : "Scroll to bottom",
+        onClick: () => scrollToBottom(true),
+        children: [
+          /* @__PURE__ */ u4("span", { children: "Scroll to bottom" }),
+          /* @__PURE__ */ u4("span", { class: "scroll-to-bottom-arrow", "aria-hidden": "true", children: "\u2193" })
+        ]
+      }
+    )
   ] });
 }
 function ContextChip() {

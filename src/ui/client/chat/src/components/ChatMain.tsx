@@ -858,28 +858,59 @@ function MessageLog() {
   // the bubble shows only the dots + latest hint + a chevron, and expands to
   // the scrollable step list on demand.
   const [traceExpanded, setTraceExpanded] = useState(false);
+  const [scrollable, setScrollable] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
+  const [newMessageBelow, setNewMessageBelow] = useState(false);
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
   const msgCount = timeline.length;
   const typing = isTyping.value && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
+  const activeThreadId = threadId.value;
   // Subscribe to trace growth so the effect re-runs as steps stream in.
   const traceLen = activityLog.value.length;
+  const atBottomRef = useRef<boolean>(true);
 
-  const scrollToBottom = () => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  const measureScroll = (): boolean => {
+    const el = ref.current;
+    if (!el) return true;
+    const nextScrollable = el.scrollHeight - el.clientHeight > 1;
+    const nextAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    atBottomRef.current = nextAtBottom;
+    setScrollable(nextScrollable);
+    setAtBottom(nextAtBottom);
+    if (nextAtBottom) setNewMessageBelow(false);
+    return nextAtBottom;
+  };
+
+  const scrollToBottom = (smooth = false) => {
+    const el = ref.current;
+    if (!el) return;
+    if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    else el.scrollTop = el.scrollHeight;
+    atBottomRef.current = true;
+    setAtBottom(true);
+    setNewMessageBelow(false);
   };
 
   // Whether the user is pinned to the bottom of the log. Updated on every
   // scroll so trace-follow can distinguish "following along" from "scrolled
   // up to read history". Programmatic scrollToBottom also fires scroll, which
   // keeps this true while we tail the trace.
-  const atBottomRef = useRef<boolean>(true);
-  const onLogScroll = () => {
-    const el = ref.current;
-    if (!el) return;
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-  };
+  const onLogScroll = () => { measureScroll(); };
+
+  useEffect(() => {
+    const onResize = (): void => { measureScroll(); };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    prevMsgCountRef.current = 0;
+    atBottomRef.current = true;
+    setAtBottom(true);
+    setNewMessageBelow(false);
+  }, [activeThreadId]);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -887,6 +918,7 @@ function MessageLog() {
     if (scrollTick !== prevScrollTickRef.current) {
       prevScrollTickRef.current = scrollTick;
       scrollToBottom();
+      requestAnimationFrame(() => scrollToBottom());
       return;
     }
     if (highlight) {
@@ -904,7 +936,8 @@ function MessageLog() {
       // While a highlight is active (pending or applied), don't scroll to bottom.
     } else {
       appliedHighlightRef.current = null;
-      const newMessages = msgCount !== prevMsgCountRef.current;
+      const currentlyAtBottom = measureScroll();
+      const newMessages = msgCount > prevMsgCountRef.current;
       const typingJustStarted = typing && !wasTypingRef.current;
       const traceGrew = traceLen > prevTraceLenRef.current;
       const justExpanded = traceExpanded && !prevExpandedRef.current;
@@ -920,10 +953,16 @@ function MessageLog() {
       // bubble grows), or as an expanded trace grows — the last only while
       // the user is pinned to the bottom, so we never yank them down if
       // they've scrolled up to read earlier messages.
-      if (newMessages || typingJustStarted || justExpanded || (traceExpanded && traceGrew && atBottomRef.current)) {
-        prevMsgCountRef.current = msgCount;
+      const shouldFollow = currentlyAtBottom
+        && (newMessages || typingJustStarted || justExpanded || (traceExpanded && traceGrew));
+      if (newMessages && !currentlyAtBottom) setNewMessageBelow(true);
+      if (shouldFollow) {
         scrollToBottom();
+        requestAnimationFrame(() => scrollToBottom());
+      } else {
+        requestAnimationFrame(measureScroll);
       }
+      prevMsgCountRef.current = msgCount;
       prevTraceLenRef.current = traceLen;
     }
     wasTypingRef.current = !!typing;
@@ -932,22 +971,35 @@ function MessageLog() {
   const list = timeline;
   const groups = groupMessages(list);
   return (
-    <div class="log" id="chat-log" ref={ref} onScroll={onLogScroll}>
-      {chatLoading.value
-        ? null
-        : !threadId.value
-          ? <div class="empty">Pick or start a chat.</div>
-          : list.length === 0
-            ? <div class="empty">No messages yet.</div>
-            : groups.map((g, i) => g.kind === 'thoughts'
-                ? <ThoughtGroup key={i} thoughts={g.thoughts} answer={g.answer} />
-                : g.kind === 'events'
-                  ? <EventsGroup key={i} events={g.events} />
-                  : <Message key={i} m={g.m} />)}
-      {typing
-        ? <TypingIndicator traceExpanded={traceExpanded} onToggleTrace={() => setTraceExpanded((v) => !v)} />
-        : null}
-      <TaskIndicator />
+    <div class="log-viewport">
+      <div class="log" id="chat-log" ref={ref} onScroll={onLogScroll} onLoadCapture={measureScroll}>
+        {chatLoading.value
+          ? null
+          : !threadId.value
+            ? <div class="empty">Pick or start a chat.</div>
+            : list.length === 0
+              ? <div class="empty">No messages yet.</div>
+              : groups.map((g, i) => g.kind === 'thoughts'
+                  ? <ThoughtGroup key={i} thoughts={g.thoughts} answer={g.answer} />
+                  : g.kind === 'events'
+                    ? <EventsGroup key={i} events={g.events} />
+                    : <Message key={i} m={g.m} />)}
+        {typing
+          ? <TypingIndicator traceExpanded={traceExpanded} onToggleTrace={() => setTraceExpanded((v) => !v)} />
+          : null}
+        <TaskIndicator />
+      </div>
+      <button
+        type="button"
+        class={'scroll-to-bottom' + (newMessageBelow ? ' new-message' : '')}
+        hidden={!scrollable || atBottom}
+        title={newMessageBelow ? 'New message below' : 'Scroll to bottom'}
+        aria-label={newMessageBelow ? 'New message below; scroll to bottom' : 'Scroll to bottom'}
+        onClick={() => scrollToBottom(true)}
+      >
+        <span>Scroll to bottom</span>
+        <span class="scroll-to-bottom-arrow" aria-hidden="true">{'\u2193'}</span>
+      </button>
     </div>
   );
 }
