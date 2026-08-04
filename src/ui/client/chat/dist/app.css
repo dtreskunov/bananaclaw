@@ -416,21 +416,30 @@ header .mobile-only {
   top: max(24px, env(safe-area-inset-top));
   transform: translateX(-50%);
   z-index: 100;
-  padding: 10px 18px;
-  border-radius: var(--radius-pill);
-  font-size: var(--font-lg);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  background: var(--primary);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55), 0 0 0 4px rgba(26, 115, 232, 0.28);
-  pointer-events: none;
+  width: auto;
+  max-width: calc(100vw - 32px);
+  min-height: var(--control-action-size);
+  padding: 6px 14px;
+  font-size: var(--message-input-font-size);
+  letter-spacing: 0;
+  box-shadow: 0 2px 10px var(--shadow-color);
+  pointer-events: auto;
   animation: toast-in 160ms ease-out, toast-out 220ms ease-in 1.45s forwards;
 }
 .toast-err {
   background: var(--toast-error);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55), 0 0 0 4px rgba(216, 57, 43, 0.32);
+}
+.toast-err:hover:not(:disabled) {
+  background: var(--toast-error);
+}
+.toast:focus-visible {
+  outline: 2px solid var(--surface-fg);
+  outline-offset: 2px;
+}
+.toast-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 @keyframes toast-in {
   from {
@@ -455,33 +464,9 @@ header .mobile-only {
 }
 .toast-sticky {
   animation: toast-in 160ms ease-out;
-  pointer-events: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 8px 8px 18px;
 }
 .toast-sticky .toast-text {
   white-space: nowrap;
-}
-.toast-action {
-  appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  font-weight: 600;
-  font-size: var(--font-sm);
-  letter-spacing: 0;
-  padding: 4px 11px;
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-}
-.toast-action:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-.toast-action:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.6);
-  outline-offset: 2px;
 }
 
 /* src/components/Settings.css */

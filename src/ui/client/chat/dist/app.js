@@ -17248,13 +17248,20 @@ function showToast(text, kind = "ok", ms = 1800) {
     hideTimer = null;
   }, ms);
 }
-function showStickyToast(text, action, kind = "ok") {
+function showStickyToast(text, onClick, kind = "ok") {
   if (hideTimer) {
     clearTimeout(hideTimer);
     hideTimer = null;
   }
   const id = nextId++;
-  toastMessage.value = { id, text, kind, action };
+  toastMessage.value = { id, text, kind, action: onClick };
+}
+function dismissToast() {
+  if (hideTimer) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+  toastMessage.value = null;
 }
 function Toast() {
   const t4 = toastMessage.value;
@@ -17262,15 +17269,13 @@ function Toast() {
   if (!t4) return null;
   const sticky = !!t4.action;
   return /* @__PURE__ */ u4(
-    "div",
+    "button",
     {
-      class: "toast toast-" + (t4.kind || "ok") + (sticky ? " toast-sticky" : ""),
-      role: "status",
+      type: "button",
+      class: "toast accent-icon-btn toast-" + (t4.kind || "ok") + (sticky ? " toast-sticky" : ""),
       "aria-live": "polite",
-      children: [
-        /* @__PURE__ */ u4("span", { class: "toast-text", children: t4.text }),
-        t4.action ? /* @__PURE__ */ u4("button", { type: "button", class: "toast-action", onClick: t4.action.onClick, children: t4.action.label }) : null
-      ]
+      onClick: t4.action || dismissToast,
+      children: /* @__PURE__ */ u4("span", { class: "toast-text", children: t4.text })
     },
     t4.id
   );
@@ -17380,16 +17385,13 @@ function watchForUpdates(reg) {
 function promptForUpdate(worker) {
   if (updatePromptShown) return;
   updatePromptShown = true;
-  showStickyToast("New version available", {
-    label: "Reload",
-    onClick: () => {
-      const reloadWhenActivated = () => {
-        if (worker.state === "activated") reloadForUpdate();
-      };
-      worker.addEventListener("statechange", reloadWhenActivated);
-      worker.postMessage({ type: "SKIP_WAITING" });
-      reloadWhenActivated();
-    }
+  showStickyToast("Reload to use new version", () => {
+    const reloadWhenActivated = () => {
+      if (worker.state === "activated") reloadForUpdate();
+    };
+    worker.addEventListener("statechange", reloadWhenActivated);
+    worker.postMessage({ type: "SKIP_WAITING" });
+    reloadWhenActivated();
   });
 }
 function toggleMute() {

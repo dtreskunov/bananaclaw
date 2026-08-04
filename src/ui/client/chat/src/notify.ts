@@ -94,16 +94,13 @@ function watchForUpdates(reg: ServiceWorkerRegistration): void {
 function promptForUpdate(worker: ServiceWorker): void {
   if (updatePromptShown) return;
   updatePromptShown = true;
-  showStickyToast('New version available', {
-    label: 'Reload',
-    onClick: () => {
-      const reloadWhenActivated = (): void => {
-        if (worker.state === 'activated') reloadForUpdate();
-      };
-      worker.addEventListener('statechange', reloadWhenActivated);
-      worker.postMessage({ type: 'SKIP_WAITING' });
-      reloadWhenActivated();
-    },
+  showStickyToast('Reload to use new version', () => {
+    const reloadWhenActivated = (): void => {
+      if (worker.state === 'activated') reloadForUpdate();
+    };
+    worker.addEventListener('statechange', reloadWhenActivated);
+    worker.postMessage({ type: 'SKIP_WAITING' });
+    reloadWhenActivated();
   });
 }
 
