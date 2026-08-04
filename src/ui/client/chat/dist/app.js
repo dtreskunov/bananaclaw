@@ -22728,7 +22728,7 @@ function usePreviewEditor() {
   const initialDraft = A2("");
   const p5 = previewBlock.value;
   const fp = filePath.value;
-  const editable = !!p5 && isAdmin.value && (p5.kind === "text" || p5.kind === "markdown" || p5.kind === "html" || p5.kind === "image") && typeof p5.text === "string" && isEditableFileName(p5.name || fp || "");
+  const editable = !!p5 && isAdmin.value && isEditableFileName(p5.name || fp || "");
   y2(() => {
     setEditing(false);
     setCreatePath(null);
@@ -22744,11 +22744,25 @@ function usePreviewEditor() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [editing, draft]);
   const beginEdit = () => {
-    const text = previewBlock.peek()?.text || "";
-    initialDraft.current = text;
-    setCreatePath(null);
-    setDraft(text);
-    setEditing(true);
+    const openEditor = async () => {
+      const path = filePath.peek();
+      let current = previewBlock.peek();
+      if (!path || !current) return;
+      if (current.kind === "error" || typeof current.text !== "string") {
+        await selectFile({ path, name: current.name || path.slice(path.lastIndexOf("/") + 1) });
+        if (filePath.peek() !== path) return;
+        current = previewBlock.peek();
+      }
+      if (!current || current.kind === "error" || typeof current.text !== "string") {
+        showToast("Could not load file for editing", "err");
+        return;
+      }
+      initialDraft.current = current.text;
+      setCreatePath(null);
+      setDraft(current.text);
+      setEditing(true);
+    };
+    openEditor().catch(() => showToast("Could not load file for editing", "err"));
   };
   const beginCreate = (path) => {
     initialDraft.current = "";

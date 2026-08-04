@@ -28,6 +28,7 @@ import { PrivateWebView } from './PrivateWebView';
 import { ZoomableImage } from './ZoomableImage';
 import './ZoomableImage.css';
 import { requestChoice, requestConfirm } from './PromptModal';
+import { showToast } from './Toast';
 import { highlightCode } from '../highlight';
 import type { TreeEntry, PreviewKind } from '../types';
 
@@ -55,8 +56,6 @@ function usePreviewEditor(): PreviewEditorState {
   const fp = filePath.value;
   const editable = !!p
     && isAdmin.value
-    && (p.kind === 'text' || p.kind === 'markdown' || p.kind === 'html' || p.kind === 'image')
-    && typeof p.text === 'string'
     && isEditableFileName(p.name || fp || '');
 
   useEffect(() => {
@@ -76,11 +75,25 @@ function usePreviewEditor(): PreviewEditorState {
   }, [editing, draft]);
 
   const beginEdit = (): void => {
-    const text = previewBlock.peek()?.text || '';
-    initialDraft.current = text;
-    setCreatePath(null);
-    setDraft(text);
-    setEditing(true);
+    const openEditor = async (): Promise<void> => {
+      const path = filePath.peek();
+      let current = previewBlock.peek();
+      if (!path || !current) return;
+      if (current.kind === 'error' || typeof current.text !== 'string') {
+        await selectFile({ path, name: current.name || path.slice(path.lastIndexOf('/') + 1) });
+        if (filePath.peek() !== path) return;
+        current = previewBlock.peek();
+      }
+      if (!current || current.kind === 'error' || typeof current.text !== 'string') {
+        showToast('Could not load file for editing', 'err');
+        return;
+      }
+      initialDraft.current = current.text;
+      setCreatePath(null);
+      setDraft(current.text);
+      setEditing(true);
+    };
+    openEditor().catch(() => showToast('Could not load file for editing', 'err'));
   };
   const beginCreate = (path: string): void => {
     initialDraft.current = '';
