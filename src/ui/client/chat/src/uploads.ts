@@ -50,6 +50,7 @@ const EDITABLE_FILE_EXTENSIONS = new Set([
   'conf',
   'env',
   'xml',
+  'svg',
 ]);
 
 export function isEditableFileName(name: string): boolean {

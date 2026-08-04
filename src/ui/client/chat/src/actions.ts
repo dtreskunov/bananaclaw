@@ -1261,8 +1261,28 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
   const ext = entry.name.toLowerCase().split('.').pop() || '';
   const meta = { name: entry.name, size: size ?? null, mtime: mtime ?? null, url, path: entry.path };
   const refreshableMeta = (): typeof meta => ({ ...meta, url: refreshableFileUrl(url) });
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) setPreview({ kind: 'image', ...refreshableMeta() });
-  else if (['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'weba'].includes(ext))
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+    if (ext === 'svg') {
+      try {
+        const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+        if (!r.ok) {
+          setPreview({ kind: 'error', text: `HTTP ${r.status}`, ...meta });
+          return;
+        }
+        setPreview({
+          kind: 'image',
+          text: await r.text(),
+          mime: r.headers.get('content-type') || 'image/svg+xml',
+          etag: r.headers.get('etag') ?? undefined,
+          ...refreshableMeta(),
+        });
+      } catch (err) {
+        setPreview({ kind: 'error', text: String((err as Error)?.message || err), ...meta });
+      }
+    } else {
+      setPreview({ kind: 'image', ...refreshableMeta() });
+    }
+  } else if (['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'weba'].includes(ext))
     setPreview({ kind: 'audio', ...refreshableMeta() });
   else if (['mp4', 'm4v', 'mov', 'webm', 'ogv'].includes(ext)) setPreview({ kind: 'video', ...refreshableMeta() });
   else if (ext === 'pdf') setPreview({ kind: 'pdf', ...refreshableMeta() });

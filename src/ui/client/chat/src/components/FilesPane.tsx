@@ -53,7 +53,11 @@ function usePreviewEditor(): PreviewEditorState {
   const initialDraft = useRef('');
   const p = previewBlock.value;
   const fp = filePath.value;
-  const editable = !!p && isAdmin.value && (p.kind === 'text' || p.kind === 'markdown' || p.kind === 'html');
+  const editable = !!p
+    && isAdmin.value
+    && (p.kind === 'text' || p.kind === 'markdown' || p.kind === 'html' || p.kind === 'image')
+    && typeof p.text === 'string'
+    && isEditableFileName(p.name || fp || '');
 
   useEffect(() => {
     setEditing(false);

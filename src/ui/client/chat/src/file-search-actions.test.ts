@@ -20,6 +20,7 @@ import {
   treePath,
 } from './state';
 import type { TreeEntry } from './types';
+import { isEditableFileName } from './uploads';
 
 vi.hoisted(() => {
   vi.stubGlobal('window', {
@@ -139,6 +140,37 @@ describe('searchFiles', () => {
 });
 
 describe('file preview cancellation', () => {
+  it('loads SVG image metadata and editable source text', async () => {
+    const source = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h10v10z"/></svg>';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: new Headers({ 'content-length': String(source.length) }),
+      } as Response)
+      .mockResolvedValueOnce(
+        new Response(source, {
+          status: 200,
+          headers: { 'content-type': 'image/svg+xml', etag: '"svg-v1"' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    groupId.value = 'agent';
+
+    await selectFile({ path: 'assets/icon.svg', name: 'icon.svg' });
+
+    expect(previewBlock.value).toMatchObject({
+      kind: 'image',
+      name: 'icon.svg',
+      path: 'assets/icon.svg',
+      text: source,
+      mime: 'image/svg+xml',
+      etag: '"svg-v1"',
+    });
+    expect(previewBlock.value?.url).toContain('assets/icon.svg?preview=');
+    expect(isEditableFileName('icon.svg')).toBe(true);
+  });
+
   it('does not reopen a preview when a file response arrives after close', async () => {
     const head = deferredResponse();
     vi.stubGlobal('fetch', vi.fn().mockReturnValueOnce(head.promise));

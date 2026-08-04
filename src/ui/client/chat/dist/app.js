@@ -18514,8 +18514,28 @@ async function selectFile(entry) {
   const ext = entry.name.toLowerCase().split(".").pop() || "";
   const meta = { name: entry.name, size: size ?? null, mtime: mtime ?? null, url, path: entry.path };
   const refreshableMeta = () => ({ ...meta, url: refreshableFileUrl(url) });
-  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) setPreview({ kind: "image", ...refreshableMeta() });
-  else if (["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"].includes(ext))
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) {
+    if (ext === "svg") {
+      try {
+        const r4 = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+        if (!r4.ok) {
+          setPreview({ kind: "error", text: `HTTP ${r4.status}`, ...meta });
+          return;
+        }
+        setPreview({
+          kind: "image",
+          text: await r4.text(),
+          mime: r4.headers.get("content-type") || "image/svg+xml",
+          etag: r4.headers.get("etag") ?? void 0,
+          ...refreshableMeta()
+        });
+      } catch (err) {
+        setPreview({ kind: "error", text: String(err?.message || err), ...meta });
+      }
+    } else {
+      setPreview({ kind: "image", ...refreshableMeta() });
+    }
+  } else if (["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"].includes(ext))
     setPreview({ kind: "audio", ...refreshableMeta() });
   else if (["mp4", "m4v", "mov", "webm", "ogv"].includes(ext)) setPreview({ kind: "video", ...refreshableMeta() });
   else if (ext === "pdf") setPreview({ kind: "pdf", ...refreshableMeta() });
@@ -21913,7 +21933,8 @@ var EDITABLE_FILE_EXTENSIONS = /* @__PURE__ */ new Set([
   "ini",
   "conf",
   "env",
-  "xml"
+  "xml",
+  "svg"
 ]);
 function isEditableFileName(name) {
   const dot = name.lastIndexOf(".");
@@ -22707,7 +22728,7 @@ function usePreviewEditor() {
   const initialDraft = A2("");
   const p5 = previewBlock.value;
   const fp = filePath.value;
-  const editable = !!p5 && isAdmin.value && (p5.kind === "text" || p5.kind === "markdown" || p5.kind === "html");
+  const editable = !!p5 && isAdmin.value && (p5.kind === "text" || p5.kind === "markdown" || p5.kind === "html" || p5.kind === "image") && typeof p5.text === "string" && isEditableFileName(p5.name || fp || "");
   y2(() => {
     setEditing(false);
     setCreatePath(null);
