@@ -280,6 +280,7 @@ export interface RouterApi {
   clearChat: () => void;
   loadTree: (p: string) => Promise<void>;
   selectFile: (entry: Pick<TreeEntry, 'path' | 'name'> & Partial<TreeEntry>) => Promise<void>;
+  restoreFileSearch: (open: boolean, root: string, query: string) => Promise<void>;
   notFound: (msg: string) => void;
 }
 

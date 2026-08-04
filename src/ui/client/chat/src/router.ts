@@ -1,5 +1,5 @@
 // Shared router used by hash routing and the App component.
-import { loadThreads, openChat, clearChat, selectGroup, loadTree, selectFile } from './actions';
+import { loadThreads, openChat, clearChat, selectGroup, loadTree, selectFile, restoreFileSearch } from './actions';
 import type { RouterApi } from './types';
 
 export const router: RouterApi = {
@@ -9,6 +9,7 @@ export const router: RouterApi = {
   clearChat,
   loadTree,
   selectFile,
+  restoreFileSearch,
   notFound: (msg: string) => {
     console.warn(msg);
   },

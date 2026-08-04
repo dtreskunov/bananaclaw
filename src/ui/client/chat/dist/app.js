@@ -17120,7 +17120,10 @@ function parseHash() {
       path,
       isDir: !kind || kind === "d",
       threadsOpen: panelParams.get("threads") === "open",
-      filesOpen: panelParams.get("files") === "open"
+      filesOpen: panelParams.get("files") === "open",
+      fileSearchOpen: panelParams.get("file-search") === "open",
+      fileSearchRoot: panelParams.has("file-root") ? panelParams.get("file-root") : null,
+      fileSearchQuery: panelParams.get("file-query") || ""
     };
   }
   return null;
@@ -17147,6 +17150,9 @@ function buildHash() {
   const open = isMobile.value ? drawerOpen : paneOpen;
   if (open.threads.value) panelParams.set("threads", "open");
   if (open.files.value) panelParams.set("files", "open");
+  if (fileSearchOpen.value) panelParams.set("file-search", "open");
+  if (fileSearchQuery.value) panelParams.set("file-query", fileSearchQuery.value);
+  if (fileSearchOpen.value) panelParams.set("file-root", fileSearchRoot.value);
   const query = panelParams.toString();
   return "#" + s5.slice(1) + (query ? "?" + query : "");
 }
@@ -17178,14 +17184,18 @@ async function applyHash(router2) {
     return;
   }
   const groupChanged = groupId.value !== parsed.groupId;
+  const routedParent = parsed.isDir ? parsed.path : parentPath(parsed.path);
   n2(() => {
     groupId.value = parsed.groupId;
-    filePath.value = null;
+    treePath.value = routedParent;
+    filePath.value = parsed.isDir ? null : parsed.path;
     paneOpen.threads.value = parsed.threadsOpen;
     paneOpen.files.value = parsed.filesOpen;
     drawerOpen.threads.value = parsed.threadsOpen;
     drawerOpen.files.value = parsed.filesOpen;
   });
+  const searchRoot = parsed.fileSearchRoot ?? routedParent;
+  const restoredSearch = router2.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
   if (groupChanged) await router2.loadThreads(parsed.groupId);
   if (parsed.threadId) {
     router2.openChat(parsed.groupId, parsed.threadId, null).catch((err) => console.error("chat open failed", err));
@@ -17203,6 +17213,7 @@ async function applyHash(router2) {
     const name = parent ? parsed.path.slice(parent.length + 1) : parsed.path;
     await router2.selectFile({ path: parsed.path, name });
   }
+  await restoredSearch;
 }
 
 // src/chat-protocol.ts
@@ -18397,6 +18408,22 @@ function clearFileSearch() {
     fileSearchTruncated.value = false;
     fileSearchSelectedPath.value = null;
   });
+}
+async function restoreFileSearch(open, root, query) {
+  fileSearchGeneration++;
+  fileSearchController?.abort();
+  fileSearchController = null;
+  n2(() => {
+    fileSearchOpen.value = open;
+    fileSearchRoot.value = open ? root : "";
+    fileSearchQuery.value = query;
+    fileSearchResults.value = null;
+    fileSearchLoading.value = false;
+    fileSearchError.value = "";
+    fileSearchTruncated.value = false;
+    fileSearchSelectedPath.value = null;
+  });
+  if (open && groupId.value && query.trim()) await searchFiles(groupId.value, query);
 }
 var fileSelectionGeneration = 0;
 async function loadTree(p5) {
@@ -27490,6 +27517,7 @@ var router = {
   clearChat,
   loadTree,
   selectFile,
+  restoreFileSearch,
   notFound: (msg) => {
     console.warn(msg);
   }
@@ -27518,9 +27546,21 @@ function App() {
   const threadsDrawerOpen = drawerOpen.threads.value;
   const filesDrawerOpen = drawerOpen.files.value;
   const mobile = isMobile.value;
+  const filesSearching = fileSearchOpen.value;
+  const fileSearchScope = fileSearchRoot.value;
+  const fileQuery = fileSearchQuery.value;
   y2(() => {
     writeHash(true);
-  }, [threadsOpen, filesOpen, threadsDrawerOpen, filesDrawerOpen, mobile]);
+  }, [
+    threadsOpen,
+    filesOpen,
+    threadsDrawerOpen,
+    filesDrawerOpen,
+    mobile,
+    filesSearching,
+    fileSearchScope,
+    fileQuery
+  ]);
   const mainCls = (threadsOpen ? "" : " threads-collapsed") + (filesOpen ? "" : " files-collapsed");
   const backdropShown = mobile && (threadsDrawerOpen || filesDrawerOpen);
   const onBackdrop = () => {

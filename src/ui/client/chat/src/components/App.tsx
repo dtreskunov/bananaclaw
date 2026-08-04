@@ -1,6 +1,9 @@
 // Top-level App component.
 import { useEffect } from 'preact/hooks';
-import { paneOpen, drawerOpen, isMobile, MOBILE_MQ, refs } from '../state';
+import {
+  paneOpen, drawerOpen, isMobile, MOBILE_MQ, refs,
+  fileSearchOpen, fileSearchRoot, fileSearchQuery,
+} from '../state';
 import { Header } from './Header';
 import { ThreadsRail } from './ThreadsRail';
 import { ChatMain } from './ChatMain';
@@ -37,7 +40,13 @@ export function App() {
   const threadsDrawerOpen = drawerOpen.threads.value;
   const filesDrawerOpen = drawerOpen.files.value;
   const mobile = isMobile.value;
-  useEffect(() => { writeHash(true); }, [threadsOpen, filesOpen, threadsDrawerOpen, filesDrawerOpen, mobile]);
+  const filesSearching = fileSearchOpen.value;
+  const fileSearchScope = fileSearchRoot.value;
+  const fileQuery = fileSearchQuery.value;
+  useEffect(() => { writeHash(true); }, [
+    threadsOpen, filesOpen, threadsDrawerOpen, filesDrawerOpen, mobile,
+    filesSearching, fileSearchScope, fileQuery,
+  ]);
 
   const mainCls = ''
     + (threadsOpen ? '' : ' threads-collapsed')

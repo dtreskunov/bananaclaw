@@ -1,7 +1,21 @@
 // URL hash routing.
 import { batch } from '@preact/signals';
 import { match, compile } from 'path-to-regexp';
-import { groups, groupId, treePath, filePath, threads, threadId, refs, paneOpen, drawerOpen, isMobile } from './state';
+import {
+  groups,
+  groupId,
+  treePath,
+  filePath,
+  threads,
+  threadId,
+  refs,
+  paneOpen,
+  drawerOpen,
+  isMobile,
+  fileSearchOpen,
+  fileSearchRoot,
+  fileSearchQuery,
+} from './state';
 import { parentPath } from './utils';
 import type { Thread, ThreadCtx, RouterApi } from './types';
 
@@ -19,6 +33,9 @@ export interface ParsedHash {
   isDir: boolean;
   threadsOpen: boolean;
   filesOpen: boolean;
+  fileSearchOpen: boolean;
+  fileSearchRoot: string | null;
+  fileSearchQuery: string;
 }
 
 export function parseHash(): ParsedHash | null {
@@ -45,6 +62,9 @@ export function parseHash(): ParsedHash | null {
       isDir: !kind || kind === 'd',
       threadsOpen: panelParams.get('threads') === 'open',
       filesOpen: panelParams.get('files') === 'open',
+      fileSearchOpen: panelParams.get('file-search') === 'open',
+      fileSearchRoot: panelParams.has('file-root') ? panelParams.get('file-root')! : null,
+      fileSearchQuery: panelParams.get('file-query') || '',
     };
   }
   return null;
@@ -72,6 +92,9 @@ export function buildHash(): string {
   const open = isMobile.value ? drawerOpen : paneOpen;
   if (open.threads.value) panelParams.set('threads', 'open');
   if (open.files.value) panelParams.set('files', 'open');
+  if (fileSearchOpen.value) panelParams.set('file-search', 'open');
+  if (fileSearchQuery.value) panelParams.set('file-query', fileSearchQuery.value);
+  if (fileSearchOpen.value) panelParams.set('file-root', fileSearchRoot.value);
   const query = panelParams.toString();
   return '#' + s.slice(1) + (query ? '?' + query : '');
 }
@@ -106,14 +129,18 @@ export async function applyHash(router: RouterApi): Promise<void> {
     return;
   }
   const groupChanged = groupId.value !== parsed.groupId;
+  const routedParent = parsed.isDir ? parsed.path : parentPath(parsed.path);
   batch(() => {
     groupId.value = parsed.groupId;
-    filePath.value = null;
+    treePath.value = routedParent;
+    filePath.value = parsed.isDir ? null : parsed.path;
     paneOpen.threads.value = parsed.threadsOpen;
     paneOpen.files.value = parsed.filesOpen;
     drawerOpen.threads.value = parsed.threadsOpen;
     drawerOpen.files.value = parsed.filesOpen;
   });
+  const searchRoot = parsed.fileSearchRoot ?? routedParent;
+  const restoredSearch = router.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
   if (groupChanged) await router.loadThreads(parsed.groupId);
 
   if (parsed.threadId) {
@@ -134,4 +161,5 @@ export async function applyHash(router: RouterApi): Promise<void> {
     const name = parent ? parsed.path.slice(parent.length + 1) : parsed.path;
     await router.selectFile({ path: parsed.path, name });
   }
+  await restoredSearch;
 }

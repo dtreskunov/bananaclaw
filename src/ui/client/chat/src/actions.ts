@@ -1138,6 +1138,23 @@ export function clearFileSearch(): void {
   });
 }
 
+export async function restoreFileSearch(open: boolean, root: string, query: string): Promise<void> {
+  fileSearchGeneration++;
+  fileSearchController?.abort();
+  fileSearchController = null;
+  batch(() => {
+    fileSearchOpen.value = open;
+    fileSearchRoot.value = open ? root : '';
+    fileSearchQuery.value = query;
+    fileSearchResults.value = null;
+    fileSearchLoading.value = false;
+    fileSearchError.value = '';
+    fileSearchTruncated.value = false;
+    fileSearchSelectedPath.value = null;
+  });
+  if (open && groupId.value && query.trim()) await searchFiles(groupId.value, query);
+}
+
 let fileSelectionGeneration = 0;
 
 export async function loadTree(p: string): Promise<void> {

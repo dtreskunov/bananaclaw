@@ -4,6 +4,7 @@ import {
   closePreview,
   openFileSearch,
   openFileSearchDirectory,
+  restoreFileSearch,
   searchFiles,
   selectFile,
 } from './actions';
@@ -122,6 +123,18 @@ describe('searchFiles', () => {
     expect(fileSearchQuery.value).toBe('reference');
     expect(fileSearchResults.value?.map((entry) => entry.path)).toEqual(['docs/notes/reference.txt']);
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('path=docs%2Fnotes&q=reference');
+  });
+
+  it('restores search mode and reruns the retained query after navigation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(responseWith([result('docs/notes.md')])));
+    groupId.value = 'agent';
+
+    await restoreFileSearch(true, 'docs', 'notes');
+
+    expect(fileSearchOpen.value).toBe(true);
+    expect(fileSearchRoot.value).toBe('docs');
+    expect(fileSearchQuery.value).toBe('notes');
+    expect(fileSearchResults.value?.map((entry) => entry.path)).toEqual(['docs/notes.md']);
   });
 });
 
