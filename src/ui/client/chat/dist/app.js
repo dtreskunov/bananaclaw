@@ -16964,9 +16964,9 @@ function displayWorkspacePath(path) {
   return path ? "~/" + path : "~";
 }
 function pathBelowRoot(path, root) {
-  if (!root) return path ? displayWorkspacePath(path) : "";
+  if (!root) return path;
   if (path === root) return "";
-  return path.startsWith(root + "/") ? displayWorkspacePath(path.slice(root.length + 1)) : displayWorkspacePath(path);
+  return path.startsWith(root + "/") ? path.slice(root.length + 1) : path;
 }
 function normalizeFileLinks(text) {
   const re = /\[([^\]\n]+)\]\(([^<>\n()]*(?:\([^()\n]*\)[^<>\n()]*)*)\)/g;

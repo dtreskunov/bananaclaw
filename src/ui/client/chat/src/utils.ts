@@ -100,9 +100,9 @@ export function displayWorkspacePath(path: string): string {
 }
 
 export function pathBelowRoot(path: string, root: string): string {
-  if (!root) return path ? displayWorkspacePath(path) : '';
+  if (!root) return path;
   if (path === root) return '';
-  return path.startsWith(root + '/') ? displayWorkspacePath(path.slice(root.length + 1)) : displayWorkspacePath(path);
+  return path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
 }
 
 // Pre-process raw markdown to make file-link destinations parseable when the
