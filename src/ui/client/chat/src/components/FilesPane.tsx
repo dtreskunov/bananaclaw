@@ -318,6 +318,13 @@ function Crumb({
             >{'\uD83D\uDCCE'}</button>
             <button
               type="button"
+              class="rail-control-btn close-preview"
+              title="Close preview"
+              aria-label="Close preview"
+              onClick={closePreview}
+            >{'\u00D7'}</button>
+            <button
+              type="button"
               class="rail-control-btn refresh-btn"
               title="Refresh file"
               aria-label="Refresh file"
@@ -330,13 +337,6 @@ function Crumb({
               triggerClassName="rail-control-btn"
               triggerTitle={`Actions for ${previewEntry.name}`}
             />
-            <button
-              type="button"
-              class="rail-control-btn close-preview"
-              title="Close preview"
-              aria-label="Close preview"
-              onClick={closePreview}
-            >{'\u00D7'}</button>
           </>
         ) : (
           <>

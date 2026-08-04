@@ -22867,6 +22867,17 @@ function Crumb({
         "button",
         {
           type: "button",
+          class: "rail-control-btn close-preview",
+          title: "Close preview",
+          "aria-label": "Close preview",
+          onClick: closePreview,
+          children: "\xD7"
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
           class: "rail-control-btn refresh-btn",
           title: "Refresh file",
           "aria-label": "Refresh file",
@@ -22884,17 +22895,6 @@ function Crumb({
           onEdit: editor.editable ? editor.beginEdit : void 0,
           triggerClassName: "rail-control-btn",
           triggerTitle: `Actions for ${previewEntry.name}`
-        }
-      ),
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "rail-control-btn close-preview",
-          title: "Close preview",
-          "aria-label": "Close preview",
-          onClick: closePreview,
-          children: "\xD7"
         }
       )
     ] }) : /* @__PURE__ */ u4(k, { children: [

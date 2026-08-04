@@ -2967,6 +2967,10 @@ nav.tab-bar-strip.group-strip {
 /* src/components/FilesPane.css */
 .files-pane {
   border-left: 1px solid var(--border);
+  z-index: 4;
+}
+.files-pane:has(.action-menu.open) {
+  overflow: visible;
 }
 .files-pane .files-body {
   position: absolute;
@@ -2985,6 +2989,9 @@ nav.tab-bar-strip.group-strip {
   flex: 0 0 auto;
   justify-content: stretch;
   overflow: visible;
+}
+.files-pane .files-actions .close-preview {
+  margin-left: auto;
 }
 .files-pane .files-actions .action-menu {
   display: flex;
@@ -3087,7 +3094,6 @@ body.is-admin .files-pane .drop-hint {
 }
 .files-pane.collapsed {
   overflow: visible;
-  z-index: 4;
 }
 body.is-admin .files-pane.collapsed .admin-only {
   display: none;

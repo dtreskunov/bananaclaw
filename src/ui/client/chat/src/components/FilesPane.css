@@ -2,7 +2,8 @@
    preview body shell + markdown preview + hljs syntax highlighting,
    plus the .files-pane.previewing visibility toggles. */
 
-.files-pane { border-left: 1px solid var(--border); }
+.files-pane { border-left: 1px solid var(--border); z-index: 4; }
+.files-pane:has(.action-menu.open) { overflow: visible; }
 .files-pane .files-body {
   position: absolute; top: var(--handle-h); left: 0; right: 0; bottom: 0;
   display: flex; flex-direction: column; min-height: 0;
@@ -11,6 +12,7 @@
   overflow: visible;
 }
 .files-pane .files-actions { flex: 0 0 auto; justify-content: stretch; overflow: visible; }
+.files-pane .files-actions .close-preview { margin-left: auto; }
 .files-pane .files-actions .action-menu { display: flex; }
 .files-pane .breadcrumb .crumb {
   cursor: pointer; text-decoration: none;
@@ -44,7 +46,7 @@
 .files-pane .row .action-menu.open .action-trigger { color: inherit; }
 
 body.is-admin .files-pane .drop-hint { display: flex; }
-.files-pane.collapsed { overflow: visible; z-index: 4; }
+.files-pane.collapsed { overflow: visible; }
 /* Hide admin actions when the files pane is collapsed. */
 body.is-admin .files-pane.collapsed .admin-only { display: none; }
 /* Small text button for header actions like UPL. */
