@@ -239,8 +239,9 @@ function Crumb({
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const fp = editor.creating ? editor.path : filePath.value;
-  const p = fp ? parentPath(fp) : treePath.value;
   const preview = previewBlock.value;
+  const externalPreview = !!preview && !fp;
+  const p = fp ? parentPath(fp) : externalPreview ? '' : treePath.value;
   const currentDirectory = p
     ? { path: p, name: p.slice(p.lastIndexOf('/') + 1), type: 'dir' as const }
     : undefined;
@@ -249,7 +250,7 @@ function Crumb({
     : undefined;
   const pinned = !!fp && pinnedContext.value.includes(fp);
   const segs = p ? p.split('/').filter(Boolean) : [];
-  const fileName = fp ? fp.slice(fp.lastIndexOf('/') + 1) : '';
+  const fileName = fp ? fp.slice(fp.lastIndexOf('/') + 1) : externalPreview ? preview.name || 'Attachment' : '';
   const searchPlaceholder = p
     ? `Search in ${p.slice(p.lastIndexOf('/') + 1)}...`
     : 'Search all files...';
@@ -324,6 +325,26 @@ function Crumb({
               disabled={editor.saving}
               onClick={() => { editor.cancelEdit().catch(console.error); }}
             >{'\u00D7'}</button>
+          </>
+        ) : externalPreview ? (
+          <>
+            <button
+              type="button"
+              class="rail-control-btn close-preview"
+              title="Close preview"
+              aria-label="Close preview"
+              onClick={closePreview}
+            >{'\u00D7'}</button>
+            {preview.url ? (
+              <a
+                class="rail-control-btn"
+                href={preview.url}
+                target="_blank"
+                rel="noopener"
+                title="Open original attachment"
+                aria-label="Open original attachment"
+              >{'\u2197'}</a>
+            ) : null}
           </>
         ) : previewEntry ? (
           <>
@@ -407,13 +428,15 @@ function Crumb({
       </div>
       <div class="breadcrumb path-breadcrumb rail-divider-row" id="crumb">
         <div class="breadcrumb-path path-breadcrumb-track" ref={ref}>
-          <button
-            type="button"
-            class={'crumb root path-breadcrumb-segment' + (segs.length === 0 && !fileName ? ' current' : '')}
-            data-path=""
-            title="Root"
-            onClick={() => navigateTree('')}
-          >~</button>
+          {!externalPreview ? (
+            <button
+              type="button"
+              class={'crumb root path-breadcrumb-segment' + (segs.length === 0 && !fileName ? ' current' : '')}
+              data-path=""
+              title="Root"
+              onClick={() => navigateTree('')}
+            >~</button>
+          ) : null}
           {segs.map((s, i) => {
             acc = acc ? acc + '/' + s : s;
             const path = acc;
@@ -434,8 +457,8 @@ function Crumb({
           })}
           {fileName ? (
             <>
-              <span class="sep path-breadcrumb-separator" aria-hidden="true">{'\u203a'}</span>
-              <span class="crumb file current path-breadcrumb-segment" title={displayWorkspacePath(fp || '')}>{fileName}</span>
+              {!externalPreview ? <span class="sep path-breadcrumb-separator" aria-hidden="true">{'\u203a'}</span> : null}
+              <span class="crumb file current path-breadcrumb-segment" title={externalPreview ? fileName : displayWorkspacePath(fp || '')}>{fileName}</span>
             </>
           ) : null}
         </div>
@@ -682,8 +705,19 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
     );
   } else if (p.kind === 'image') body = <ZoomableImage src={p.url || ''} alt={p.name || ''} className="file-image-preview" />;
   else if (p.kind === 'pdf') body = <iframe class="embedded-preview-frame" src={p.url} title={p.name} />;
-  else if (p.kind === 'html' && fp && groupId.value) {
-    body = <PrivateWebView key={`${p.url || ''}:${p.etag || ''}`} groupId={groupId.value} path={fp} title={p.name} />;
+  else if (p.kind === 'html') {
+    body = fp && groupId.value
+      ? <PrivateWebView key={`${p.url || ''}:${p.etag || ''}`} groupId={groupId.value} path={fp} title={p.name} />
+      : (
+        <iframe
+          class="embedded-preview-frame"
+          src={p.url}
+          title={p.name || 'HTML attachment'}
+          sandbox=""
+          referrerPolicy="no-referrer"
+          allow="camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'"
+        />
+      );
   }
   else if (p.kind === 'markdown') {
     const md = renderMarkdown(p.text);

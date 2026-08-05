@@ -18460,6 +18460,84 @@ async function navFile(entry) {
   await selectFile(entry);
   writeHash();
 }
+async function previewAttachment(file) {
+  if (!file.url) return;
+  if (isMobile.value) drawerOpen.files.value = true;
+  else paneOpen.files.value = true;
+  const selectionGeneration = ++fileSelectionGeneration;
+  n2(() => {
+    filePath.value = null;
+    previewBlock.value = null;
+  });
+  writeHash();
+  const setPreview = (block) => {
+    if (selectionGeneration !== fileSelectionGeneration || filePath.peek() !== null) return;
+    previewBlock.value = block;
+  };
+  let size = file.size;
+  let mime = file.contentType || "";
+  let mtime = null;
+  try {
+    const response = await fetch(file.url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) {
+      setPreview({ kind: "error", text: response.status === 404 ? "Attachment not found." : `HTTP ${response.status}`, name: file.filename, url: file.url });
+      return;
+    }
+    const contentLength = response.headers.get("content-length");
+    if ((size == null || size <= 0) && contentLength) size = Number(contentLength);
+    const lastModified = response.headers.get("last-modified");
+    if (lastModified) {
+      const timestamp = Date.parse(lastModified);
+      if (Number.isFinite(timestamp)) mtime = new Date(timestamp).toISOString();
+    }
+    mime = response.headers.get("content-type") || mime;
+  } catch {
+  }
+  const ext = file.filename.toLowerCase().split(".").pop() || "";
+  const meta = {
+    name: file.filename,
+    size: size ?? null,
+    mtime,
+    mime: mime || void 0,
+    url: refreshableFileUrl(file.url)
+  };
+  if (mime.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) {
+    setPreview({ kind: "image", ...meta });
+    return;
+  }
+  if (mime.startsWith("audio/") || ["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "weba"].includes(ext)) {
+    setPreview({ kind: "audio", ...meta });
+    return;
+  }
+  if (mime.startsWith("video/") || ["mp4", "m4v", "mov", "webm", "ogv"].includes(ext)) {
+    setPreview({ kind: "video", ...meta });
+    return;
+  }
+  if (mime === "application/pdf" || ext === "pdf") {
+    setPreview({ kind: "pdf", ...meta });
+    return;
+  }
+  if (mime.startsWith("text/html") || ext === "html" || ext === "htm") {
+    setPreview({ kind: "html", ...meta });
+    return;
+  }
+  try {
+    const response = await fetch(file.url, { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) {
+      setPreview({ kind: "error", text: `HTTP ${response.status}`, ...meta });
+      return;
+    }
+    const contentType = response.headers.get("content-type") || mime;
+    if (contentType.startsWith("text/") || contentType.includes("json") || contentType.includes("xml")) {
+      const text = await response.text();
+      setPreview({ kind: ext === "md" || ext === "markdown" ? "markdown" : "text", text, ...meta, mime: contentType });
+      return;
+    }
+    setPreview({ kind: "binary", ...meta, mime: contentType });
+  } catch (err) {
+    setPreview({ kind: "error", text: String(err?.message || err), ...meta });
+  }
+}
 async function openFileSearchResult(entry) {
   if (isMobile.value) drawerOpen.files.value = true;
   else paneOpen.files.value = true;
@@ -20815,6 +20893,21 @@ function Message({ m: m6 }) {
         ]
       },
       f5.path
+    ) : f5.url ? /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "file-chip",
+        title: `Preview ${f5.filename}`,
+        onClick: () => {
+          previewAttachment(f5).catch(console.error);
+        },
+        children: [
+          "\u{1F4CE} ",
+          f5.filename
+        ]
+      },
+      f5.url
     ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: [
       "\u{1F4CE} ",
       f5.filename
@@ -22900,13 +22993,14 @@ function Crumb({
 }) {
   const ref = A2(null);
   const fp = editor.creating ? editor.path : filePath.value;
-  const p5 = fp ? parentPath(fp) : treePath.value;
   const preview = previewBlock.value;
+  const externalPreview = !!preview && !fp;
+  const p5 = fp ? parentPath(fp) : externalPreview ? "" : treePath.value;
   const currentDirectory = p5 ? { path: p5, name: p5.slice(p5.lastIndexOf("/") + 1), type: "dir" } : void 0;
   const previewEntry = fp ? { path: fp, name: preview?.name || fp.slice(fp.lastIndexOf("/") + 1), type: "file" } : void 0;
   const pinned = !!fp && pinnedContext.value.includes(fp);
   const segs = p5 ? p5.split("/").filter(Boolean) : [];
-  const fileName = fp ? fp.slice(fp.lastIndexOf("/") + 1) : "";
+  const fileName = fp ? fp.slice(fp.lastIndexOf("/") + 1) : externalPreview ? preview.name || "Attachment" : "";
   const searchPlaceholder = p5 ? `Search in ${p5.slice(p5.lastIndexOf("/") + 1)}...` : "Search all files...";
   y2(() => {
     if (ref.current) requestAnimationFrame(() => {
@@ -22986,6 +23080,30 @@ function Crumb({
           children: "\xD7"
         }
       )
+    ] }) : externalPreview ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "rail-control-btn close-preview",
+          title: "Close preview",
+          "aria-label": "Close preview",
+          onClick: closePreview,
+          children: "\xD7"
+        }
+      ),
+      preview.url ? /* @__PURE__ */ u4(
+        "a",
+        {
+          class: "rail-control-btn",
+          href: preview.url,
+          target: "_blank",
+          rel: "noopener",
+          title: "Open original attachment",
+          "aria-label": "Open original attachment",
+          children: "\u2197"
+        }
+      ) : null
     ] }) : previewEntry ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4(
         "button",
@@ -23096,7 +23214,7 @@ function Crumb({
       )
     ] }) }),
     /* @__PURE__ */ u4("div", { class: "breadcrumb path-breadcrumb rail-divider-row", id: "crumb", children: /* @__PURE__ */ u4("div", { class: "breadcrumb-path path-breadcrumb-track", ref, children: [
-      /* @__PURE__ */ u4(
+      !externalPreview ? /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
@@ -23106,7 +23224,7 @@ function Crumb({
           onClick: () => navigateTree(""),
           children: "~"
         }
-      ),
+      ) : null,
       segs.map((s5, i5) => {
         acc = acc ? acc + "/" + s5 : s5;
         const path = acc;
@@ -23128,8 +23246,8 @@ function Crumb({
         ] }, path);
       }),
       fileName ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("span", { class: "sep path-breadcrumb-separator", "aria-hidden": "true", children: "\u203A" }),
-        /* @__PURE__ */ u4("span", { class: "crumb file current path-breadcrumb-segment", title: displayWorkspacePath(fp || ""), children: fileName })
+        !externalPreview ? /* @__PURE__ */ u4("span", { class: "sep path-breadcrumb-separator", "aria-hidden": "true", children: "\u203A" }) : null,
+        /* @__PURE__ */ u4("span", { class: "crumb file current path-breadcrumb-segment", title: externalPreview ? fileName : displayWorkspacePath(fp || ""), children: fileName })
       ] }) : null
     ] }) })
   ] });
@@ -23340,8 +23458,18 @@ function Preview({ editor }) {
     );
   } else if (p5.kind === "image") body = /* @__PURE__ */ u4(ZoomableImage, { src: p5.url || "", alt: p5.name || "", className: "file-image-preview" });
   else if (p5.kind === "pdf") body = /* @__PURE__ */ u4("iframe", { class: "embedded-preview-frame", src: p5.url, title: p5.name });
-  else if (p5.kind === "html" && fp && groupId.value) {
-    body = /* @__PURE__ */ u4(PrivateWebView, { groupId: groupId.value, path: fp, title: p5.name }, `${p5.url || ""}:${p5.etag || ""}`);
+  else if (p5.kind === "html") {
+    body = fp && groupId.value ? /* @__PURE__ */ u4(PrivateWebView, { groupId: groupId.value, path: fp, title: p5.name }, `${p5.url || ""}:${p5.etag || ""}`) : /* @__PURE__ */ u4(
+      "iframe",
+      {
+        class: "embedded-preview-frame",
+        src: p5.url,
+        title: p5.name || "HTML attachment",
+        sandbox: "",
+        referrerPolicy: "no-referrer",
+        allow: "camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'; usb 'none'"
+      }
+    );
   } else if (p5.kind === "markdown") {
     const md = renderMarkdown(p5.text);
     body = md != null ? /* @__PURE__ */ u4("div", { class: "markdown-preview", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("pre", { children: p5.text });

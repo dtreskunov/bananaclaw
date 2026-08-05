@@ -15,7 +15,7 @@ import {
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
 import {
   sendChat, addPendingFiles, removePending, clearPending,
-  navFile, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
+  navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
   openChat, openTaskPanel,
 } from '../actions';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
@@ -536,6 +536,16 @@ function Message({ m }: { m: ChatMessage }) {
                   key={f.path}
                 >{'\uD83D\uDCCE '}{f.filename}</button>
               )
+              : f.url
+                ? (
+                  <button
+                    type="button"
+                    class="file-chip"
+                    title={`Preview ${f.filename}`}
+                    onClick={() => { previewAttachment(f).catch(console.error); }}
+                    key={f.url}
+                  >{'\uD83D\uDCCE '}{f.filename}</button>
+                )
               : <span class="file-chip inert" title="Source not in workspace" key={f.filename}>{'\uD83D\uDCCE '}{f.filename}</span>)}
           </div>
         )

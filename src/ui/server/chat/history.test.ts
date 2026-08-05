@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { chatSdkHistoryContent, createBufferedFrameSender, matchChatPath, parseOutboundContent } from './chat.js';
+import {
+  chatSdkHistoryContent,
+  createBufferedFrameSender,
+  inboundAttachmentSecurityHeaders,
+  matchChatPath,
+  parseOutboundContent,
+} from './chat.js';
 
 describe('chat socket bootstrap', () => {
   it('orders history before buffered live frames and ready', () => {
@@ -21,6 +27,28 @@ describe('chat socket bootstrap', () => {
 
   it('does not expose a REST history route', () => {
     expect(matchChatPath('/api/groups/group-1/chat/thread-1/history')).toBeNull();
+  });
+});
+
+describe('inboundAttachmentSecurityHeaders', () => {
+  it('sandboxes HTML attachments and disables active content', () => {
+    const headers = inboundAttachmentSecurityHeaders('text/html; charset=utf-8');
+
+    expect(headers['Content-Security-Policy']).toContain('sandbox');
+    expect(headers['Content-Security-Policy']).toContain("script-src 'none'");
+    expect(headers['Content-Security-Policy']).toContain("form-action 'none'");
+    expect(headers['Content-Security-Policy']).toContain("frame-ancestors 'self'");
+    expect(headers['Permissions-Policy']).toContain('camera=()');
+    expect(headers['Referrer-Policy']).toBe('no-referrer');
+    expect(headers['X-Content-Type-Options']).toBe('nosniff');
+    expect(inboundAttachmentSecurityHeaders('application/xhtml+xml')).toHaveProperty('Content-Security-Policy');
+    expect(inboundAttachmentSecurityHeaders('application/octet-stream', 'message.html')).toHaveProperty(
+      'Content-Security-Policy',
+    );
+  });
+
+  it('does not add HTML policies to other attachment types', () => {
+    expect(inboundAttachmentSecurityHeaders('text/plain')).toEqual({});
   });
 });
 

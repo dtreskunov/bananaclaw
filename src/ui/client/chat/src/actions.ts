@@ -1197,6 +1197,94 @@ export async function navFile(entry: Pick<TreeEntry, 'path' | 'name'> & Partial<
   writeHash();
 }
 
+export async function previewAttachment(file: ChatMessageFile): Promise<void> {
+  if (!file.url) return;
+  if (isMobile.value) drawerOpen.files.value = true;
+  else paneOpen.files.value = true;
+
+  const selectionGeneration = ++fileSelectionGeneration;
+  batch(() => {
+    filePath.value = null;
+    previewBlock.value = null;
+  });
+  writeHash();
+
+  const setPreview = (block: PreviewBlock): void => {
+    if (selectionGeneration !== fileSelectionGeneration || filePath.peek() !== null) return;
+    previewBlock.value = block;
+  };
+  let size = file.size;
+  let mime = file.contentType || '';
+  let mtime: string | null = null;
+  try {
+    const response = await fetch(file.url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) {
+      setPreview({
+        kind: 'error',
+        text: response.status === 404 ? 'Attachment not found.' : `HTTP ${response.status}`,
+        name: file.filename,
+        url: file.url,
+      });
+      return;
+    }
+    const contentLength = response.headers.get('content-length');
+    if ((size == null || size <= 0) && contentLength) size = Number(contentLength);
+    const lastModified = response.headers.get('last-modified');
+    if (lastModified) {
+      const timestamp = Date.parse(lastModified);
+      if (Number.isFinite(timestamp)) mtime = new Date(timestamp).toISOString();
+    }
+    mime = response.headers.get('content-type') || mime;
+  } catch {
+    /* Let the preview element surface transient loading failures. */
+  }
+
+  const ext = file.filename.toLowerCase().split('.').pop() || '';
+  const meta = {
+    name: file.filename,
+    size: size ?? null,
+    mtime,
+    mime: mime || undefined,
+    url: refreshableFileUrl(file.url),
+  };
+  if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+    setPreview({ kind: 'image', ...meta });
+    return;
+  }
+  if (mime.startsWith('audio/') || ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'weba'].includes(ext)) {
+    setPreview({ kind: 'audio', ...meta });
+    return;
+  }
+  if (mime.startsWith('video/') || ['mp4', 'm4v', 'mov', 'webm', 'ogv'].includes(ext)) {
+    setPreview({ kind: 'video', ...meta });
+    return;
+  }
+  if (mime === 'application/pdf' || ext === 'pdf') {
+    setPreview({ kind: 'pdf', ...meta });
+    return;
+  }
+  if (mime.startsWith('text/html') || ext === 'html' || ext === 'htm') {
+    setPreview({ kind: 'html', ...meta });
+    return;
+  }
+  try {
+    const response = await fetch(file.url, { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) {
+      setPreview({ kind: 'error', text: `HTTP ${response.status}`, ...meta });
+      return;
+    }
+    const contentType = response.headers.get('content-type') || mime;
+    if (contentType.startsWith('text/') || contentType.includes('json') || contentType.includes('xml')) {
+      const text = await response.text();
+      setPreview({ kind: ext === 'md' || ext === 'markdown' ? 'markdown' : 'text', text, ...meta, mime: contentType });
+      return;
+    }
+    setPreview({ kind: 'binary', ...meta, mime: contentType });
+  } catch (err) {
+    setPreview({ kind: 'error', text: String((err as Error)?.message || err), ...meta });
+  }
+}
+
 export async function openFileSearchResult(
   entry: Pick<TreeEntry, 'path' | 'name'> & Partial<TreeEntry>,
 ): Promise<void> {

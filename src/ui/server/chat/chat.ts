@@ -904,7 +904,13 @@ export function readChatHistory(
       // resume. Strip the suffix here so history matches the echo.
       const suffix = `:${groupId}`;
       for (const r of rows) {
-        const parsed = parseInboundContent(r.content, groupId, threadId, target.channelType === WEB_CHANNEL_TYPE);
+        const parsed = parseInboundContent(
+          r.content,
+          groupId,
+          threadId,
+          target.channelType === WEB_CHANNEL_TYPE,
+          session.id,
+        );
         if (parsed != null) {
           const id = r.id.endsWith(suffix) ? r.id.slice(0, -suffix.length) : r.id;
           // HA replays the full transcript on every turn (see buildTurn);
@@ -1424,6 +1430,7 @@ function parseInboundContent(
   groupId?: string,
   threadId?: string,
   includeAttachmentUrls = false,
+  sessionId?: string,
 ): {
   text: string;
   files?: { filename: string; size: number; url?: string; contentType?: string }[];
@@ -1449,13 +1456,26 @@ function parseInboundContent(
                 mimeType?: string;
                 contentType?: string;
               }) => {
-                const size =
+                let size =
                   typeof a?.size === 'number'
                     ? a.size
                     : typeof a?.data === 'string'
                       ? Math.floor((a.data.length * 3) / 4)
                       : 0;
                 const localPath = typeof a?.localPath === 'string' ? a.localPath : undefined;
+                if (size <= 0 && localPath && groupId && sessionId) {
+                  try {
+                    const root = fs.realpathSync(sessionDir(groupId, sessionId));
+                    const absolutePath = fs.realpathSync(path.join(root, localPath));
+                    const relativePath = path.relative(root, absolutePath);
+                    if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+                      const stat = fs.statSync(absolutePath);
+                      if (stat.isFile()) size = stat.size;
+                    }
+                  } catch {
+                    // Attachment may have expired or been removed.
+                  }
+                }
                 const contentType =
                   typeof a?.mimeType === 'string'
                     ? a.mimeType
@@ -1506,6 +1526,33 @@ function mimeFromFilename(filename: string): string {
     default:
       return 'application/octet-stream';
   }
+}
+
+export function inboundAttachmentSecurityHeaders(contentType: string, filename = ''): Record<string, string> {
+  const mime = contentType.split(';', 1)[0].trim().toLowerCase();
+  const extension = path.extname(filename).toLowerCase();
+  if (mime !== 'text/html' && mime !== 'application/xhtml+xml' && !['.html', '.htm', '.xhtml'].includes(extension))
+    return {};
+  return {
+    'Content-Security-Policy': [
+      'sandbox',
+      "default-src 'none'",
+      "script-src 'none'",
+      "style-src 'unsafe-inline'",
+      'img-src data:',
+      'font-src data:',
+      'media-src data:',
+      "connect-src 'none'",
+      "frame-src 'none'",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "frame-ancestors 'self'",
+    ].join('; '),
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+  };
 }
 
 function serveInboundAttachment(
@@ -1588,6 +1635,8 @@ function serveInboundAttachment(
     'Cache-Control': 'private, max-age=3600',
     'Content-Type': found.contentType,
     'Content-Disposition': `inline; filename="${found.filename.replace(/["\\]/g, '_')}"`,
+    'Last-Modified': stat.mtime.toUTCString(),
+    ...inboundAttachmentSecurityHeaders(found.contentType, found.filename),
   };
   if (range) {
     const match = /^bytes=(\d*)-(\d*)$/.exec(range);
