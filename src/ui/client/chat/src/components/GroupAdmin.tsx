@@ -33,7 +33,7 @@ type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'members' | '
 const SETTINGS_SECTIONS = new Set<Tab>(['models', 'settings', 'packages', 'mcp', 'skills']);
 
 const TAB_ITEMS: TabItem[] = [
-  { id: 'settings', label: 'Settings', sublabel: 'Image, scope, public site' },
+  { id: 'settings', label: 'Settings', sublabel: 'Image, scope, website, email' },
   { id: 'models', label: 'Models', sublabel: 'Provider, model, voice' },
   { id: 'packages', label: 'Packages', sublabel: 'apt / npm / pip in the image' },
   { id: 'mcp', label: 'MCP servers', sublabel: 'External tools wired to the agent' },
@@ -93,6 +93,13 @@ interface SettingsResponse {
     slug: string | null;
     fqdn: string | null;
     url: string | null;
+    enabled: boolean;
+  };
+  email: {
+    available: boolean;
+    baseDomain: string | null;
+    slug: string | null;
+    address: string | null;
     enabled: boolean;
   };
 }
@@ -252,6 +259,8 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
   const [draftName, setDraftName] = useState('');
   const [siteEnabled, setSiteEnabled] = useState(false);
   const [siteSlug, setSiteSlug] = useState('');
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [emailSlug, setEmailSlug] = useState('');
   const [draftModelParams, setDraftModelParams] = useState<Record<string, unknown>>({});
   const [draftPackages, setDraftPackages] = useState<{ apt: string[]; npm: string[]; pip: string[] }>({ apt: [], npm: [], pip: [] });
   const [draftMcpServers, setDraftMcpServers] = useState<Record<string, McpServerConfigDto>>({});
@@ -270,6 +279,8 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
       setDraftName(r.data.name);
       setSiteEnabled(r.data.site.enabled);
       setSiteSlug(r.data.site.slug ?? '');
+      setEmailEnabled(r.data.email.enabled);
+      setEmailSlug(r.data.email.slug ?? '');
       setDraftModelParams(r.data.modelParams);
       setDraftPackages({
         apt: [...(r.data.packages?.apt ?? [])],
@@ -335,6 +346,10 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
       if (siteEnabled !== data.site.enabled) out.add('site_enabled');
       if (data.actorIsElevated && siteSlug.trim() !== (data.site.slug ?? '')) out.add('site_slug');
     }
+    if (data.email.available) {
+      if (emailEnabled !== data.email.enabled) out.add('email_enabled');
+      if (data.actorIsElevated && emailSlug.trim() !== (data.email.slug ?? '')) out.add('email_slug');
+    }
     if (JSON.stringify(draftModelParams) !== JSON.stringify(data.modelParams ?? {})) out.add('model_params');
     const dataPkg = data.packages ?? { apt: [], npm: [], pip: [] };
     if (JSON.stringify(draftPackages.apt) !== JSON.stringify(dataPkg.apt)) out.add('packages_apt');
@@ -390,6 +405,8 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
         if (data && draftName.trim() !== data.name) body.name = draftName.trim();
         if (pending.has('site_enabled')) body.site_enabled = siteEnabled;
         if (pending.has('site_slug')) body.site_slug = siteSlug.trim() || null;
+        if (pending.has('email_enabled')) body.email_enabled = emailEnabled;
+        if (pending.has('email_slug')) body.email_slug = emailSlug.trim() || null;
         const r = await call<SettingsResponse>(apiPath(gid, '/settings'), 'PATCH', body);
         if (!r.ok) { showToast(errMsg(r.data, `HTTP ${r.status}`), 'err'); return; }
       }
@@ -421,6 +438,8 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
         setDraftName(fresh.data.name);
         setSiteEnabled(fresh.data.site.enabled);
         setSiteSlug(fresh.data.site.slug ?? '');
+        setEmailEnabled(fresh.data.email.enabled);
+        setEmailSlug(fresh.data.email.slug ?? '');
         setDraftModelParams(fresh.data.modelParams);
         setDraftPackages({
           apt: [...(fresh.data.packages?.apt ?? [])],
@@ -683,6 +702,44 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
               <p class="group-admin-help">Save to allocate a subdomain and go live.</p>
             ) : (
               <p class="group-admin-help">Disabled — enable to publish a public static site on its own subdomain.</p>
+            )}
+          </div>
+        </Field>
+      ) : null}
+
+      {data.email.available ? (
+        <Field
+          label="Email"
+          info="Give this agent its own Resend address for composing new email and receiving replies."
+        >
+          <div class="group-admin-stack">
+            <label class="group-admin-check">
+              <input
+                type="checkbox"
+                checked={emailEnabled}
+                disabled={busy}
+                onChange={(e) => setEmailEnabled((e.target as HTMLInputElement).checked)}
+              />
+              <span>Enable email</span>
+            </label>
+            {data.actorIsElevated ? (
+              <input
+                type="text"
+                value={emailSlug}
+                disabled={busy}
+                maxLength={63}
+                placeholder={data.email.baseDomain ? `address (@${data.email.baseDomain})` : 'address'}
+                onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setEmailSlug(e.currentTarget.value)}
+              />
+            ) : null}
+            {emailEnabled && data.email.address ? (
+              <p class="group-admin-help">
+                Send and receive as <a href={`mailto:${data.email.address}`}>{data.email.address}</a>.
+              </p>
+            ) : emailEnabled ? (
+              <p class="group-admin-help">Save to allocate an address and start receiving email.</p>
+            ) : (
+              <p class="group-admin-help">Disabled — enable to give this agent its own email address.</p>
             )}
           </div>
         </Field>

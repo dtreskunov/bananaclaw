@@ -26837,7 +26837,7 @@ function SkillsSection({
 // src/components/GroupAdmin.tsx
 var SETTINGS_SECTIONS = /* @__PURE__ */ new Set(["models", "settings", "packages", "mcp", "skills"]);
 var TAB_ITEMS = [
-  { id: "settings", label: "Settings", sublabel: "Image, scope, public site" },
+  { id: "settings", label: "Settings", sublabel: "Image, scope, website, email" },
   { id: "models", label: "Models", sublabel: "Provider, model, voice" },
   { id: "packages", label: "Packages", sublabel: "apt / npm / pip in the image" },
   { id: "mcp", label: "MCP servers", sublabel: "External tools wired to the agent" },
@@ -26982,6 +26982,8 @@ function SettingsTab({ gid, section, onClose, onActions }) {
   const [draftName, setDraftName] = h2("");
   const [siteEnabled, setSiteEnabled] = h2(false);
   const [siteSlug, setSiteSlug] = h2("");
+  const [emailEnabled, setEmailEnabled] = h2(false);
+  const [emailSlug, setEmailSlug] = h2("");
   const [draftModelParams, setDraftModelParams] = h2({});
   const [draftPackages, setDraftPackages] = h2({ apt: [], npm: [], pip: [] });
   const [draftMcpServers, setDraftMcpServers] = h2({});
@@ -27002,6 +27004,8 @@ function SettingsTab({ gid, section, onClose, onActions }) {
       setDraftName(r4.data.name);
       setSiteEnabled(r4.data.site.enabled);
       setSiteSlug(r4.data.site.slug ?? "");
+      setEmailEnabled(r4.data.email.enabled);
+      setEmailSlug(r4.data.email.slug ?? "");
       setDraftModelParams(r4.data.modelParams);
       setDraftPackages({
         apt: [...r4.data.packages?.apt ?? []],
@@ -27079,6 +27083,10 @@ function SettingsTab({ gid, section, onClose, onActions }) {
       if (siteEnabled !== data.site.enabled) out.add("site_enabled");
       if (data.actorIsElevated && siteSlug.trim() !== (data.site.slug ?? "")) out.add("site_slug");
     }
+    if (data.email.available) {
+      if (emailEnabled !== data.email.enabled) out.add("email_enabled");
+      if (data.actorIsElevated && emailSlug.trim() !== (data.email.slug ?? "")) out.add("email_slug");
+    }
     if (JSON.stringify(draftModelParams) !== JSON.stringify(data.modelParams ?? {})) out.add("model_params");
     const dataPkg = data.packages ?? { apt: [], npm: [], pip: [] };
     if (JSON.stringify(draftPackages.apt) !== JSON.stringify(dataPkg.apt)) out.add("packages_apt");
@@ -27131,6 +27139,8 @@ function SettingsTab({ gid, section, onClose, onActions }) {
         if (data && draftName.trim() !== data.name) body.name = draftName.trim();
         if (pending2.has("site_enabled")) body.site_enabled = siteEnabled;
         if (pending2.has("site_slug")) body.site_slug = siteSlug.trim() || null;
+        if (pending2.has("email_enabled")) body.email_enabled = emailEnabled;
+        if (pending2.has("email_slug")) body.email_slug = emailSlug.trim() || null;
         const r4 = await call(apiPath(gid, "/settings"), "PATCH", body);
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
@@ -27176,6 +27186,8 @@ function SettingsTab({ gid, section, onClose, onActions }) {
         setDraftName(fresh.data.name);
         setSiteEnabled(fresh.data.site.enabled);
         setSiteSlug(fresh.data.site.slug ?? "");
+        setEmailEnabled(fresh.data.email.enabled);
+        setEmailSlug(fresh.data.email.slug ?? "");
         setDraftModelParams(fresh.data.modelParams);
         setDraftPackages({
           apt: [...fresh.data.packages?.apt ?? []],
@@ -27436,6 +27448,43 @@ function SettingsTab({ gid, section, onClose, onActions }) {
               /* @__PURE__ */ u4("code", { children: data.site.fqdn }),
               " folder in the workspace."
             ] }) : siteEnabled ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Save to allocate a subdomain and go live." }) : /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Disabled \u2014 enable to publish a public static site on its own subdomain." })
+          ] })
+        }
+      ) : null,
+      data.email.available ? /* @__PURE__ */ u4(
+        GroupAdminField,
+        {
+          label: "Email",
+          info: "Give this agent its own Resend address for composing new email and receiving replies.",
+          children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
+            /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+              /* @__PURE__ */ u4(
+                "input",
+                {
+                  type: "checkbox",
+                  checked: emailEnabled,
+                  disabled: busy,
+                  onChange: (e4) => setEmailEnabled(e4.target.checked)
+                }
+              ),
+              /* @__PURE__ */ u4("span", { children: "Enable email" })
+            ] }),
+            data.actorIsElevated ? /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "text",
+                value: emailSlug,
+                disabled: busy,
+                maxLength: 63,
+                placeholder: data.email.baseDomain ? `address (@${data.email.baseDomain})` : "address",
+                onInput: (e4) => setEmailSlug(e4.currentTarget.value)
+              }
+            ) : null,
+            emailEnabled && data.email.address ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+              "Send and receive as ",
+              /* @__PURE__ */ u4("a", { href: `mailto:${data.email.address}`, children: data.email.address }),
+              "."
+            ] }) : emailEnabled ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Save to allocate an address and start receiving email." }) : /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Disabled \u2014 enable to give this agent its own email address." })
           ] })
         }
       ) : null,

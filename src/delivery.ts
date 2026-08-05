@@ -26,7 +26,7 @@ import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessi
 import { extractOutboundText, indexMessage } from './search-index.js';
 import { checkTurnEndedAndStop, flushActivity, setTypingAdapter } from './modules/typing/index.js';
 import { publishTitlesForDeliveredReplies } from './modules/thread-titles/db.js';
-import type { ActivityLine, OutboundFile, TypingMetadata } from './channels/adapter.js';
+import type { ActivityLine, DeliveryContext, OutboundFile, TypingMetadata } from './channels/adapter.js';
 import type { Session } from './types.js';
 
 const ACTIVE_POLL_MS = 1000;
@@ -74,6 +74,7 @@ export interface ChannelDeliveryAdapter {
     /** Delivering adapter instance (defaults to channelType downstream).
      *  Host-internal only — containers never see instance. */
     instance?: string,
+    context?: DeliveryContext,
   ): Promise<string | undefined>;
   setTyping?(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string, items?: ActivityLine[], metadata?: TypingMetadata): Promise<void>;
   clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
@@ -527,6 +528,7 @@ async function deliverMessage(
     files,
     msg.id,
     deliverInstance,
+    { sessionId: session.id, agentGroupId: session.agent_group_id },
   );
   log.info('Message delivered', {
     id: msg.id,

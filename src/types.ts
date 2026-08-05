@@ -15,6 +15,10 @@ export interface AgentGroup {
   site_slug?: string | null;
   /** 1 = static website serving enabled, 0/absent = disabled. */
   site_enabled?: number;
+  /** Local part for this group's Resend address. */
+  email_slug?: string | null;
+  /** 1 = inbound/outbound agent email enabled, 0/absent = disabled. */
+  email_enabled?: number;
   created_at: string;
 }
 

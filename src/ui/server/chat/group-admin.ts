@@ -54,6 +54,15 @@ import { applyAgentLink, AgentLinkError, validateLocalName } from '../../../modu
 import { writeDestinations } from '../../../modules/agent-to-agent/write-destinations.js';
 import { getSessionsByAgentGroup } from '../../../db/sessions.js';
 import { requestApproval } from '../../../modules/approvals/primitive.js';
+import {
+  agentEmailAddress,
+  allocateEmailSlug,
+  emailSlugAvailable,
+  getAgentEmailConfig,
+  isValidEmailSlug,
+  projectAgentEmailDestinations,
+  reconcileAgentEmail,
+} from '../../../modules/email/agent-email.js';
 import type { Session } from '../../../types.js';
 import type { AgentGroup, ContainerConfigRow } from '../../../types.js';
 import { authenticate } from '../auth.js';
@@ -258,6 +267,14 @@ interface SettingsResponse {
     url: string | null;
     enabled: boolean;
   };
+  /** Per-group Resend mailbox. */
+  email: {
+    available: boolean;
+    baseDomain: string | null;
+    slug: string | null;
+    address: string | null;
+    enabled: boolean;
+  };
   runningSessionCount: number;
   /** Tooltip / detail / age for the currently-selected model and image. */
   selectedModelDetail: { label: string; detail?: string; tooltip?: string } | null;
@@ -310,6 +327,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
   const defaultModel = envDefaults.DEFAULT_MODEL || null;
   const defaultTranscriptionModel = envDefaults.DEFAULT_TRANSCRIPTION_MODEL || null;
   const defaultImage = CONTAINER_IMAGE || null;
+  const emailConfig = getAgentEmailConfig();
 
   const body: SettingsResponse = {
     id: group.id,
@@ -354,6 +372,13 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
       fqdn: siteFqdn(group),
       url: siteUrl(group),
       enabled: !!group.site_enabled,
+    },
+    email: {
+      available: emailConfig.available,
+      baseDomain: emailConfig.baseDomain,
+      slug: group.email_slug ?? null,
+      address: agentEmailAddress(group, emailConfig.baseDomain),
+      enabled: !!group.email_enabled,
     },
     runningSessionCount,
     selectedModelDetail,
@@ -437,6 +462,44 @@ async function handlePatchSettings(
           siteUpdates.site_slug = derived;
         }
       }
+    }
+  }
+
+  const emailUpdates: Partial<Pick<AgentGroup, 'email_slug' | 'email_enabled'>> = {};
+  const emailTouched = 'email_slug' in body || 'email_enabled' in body;
+  const emailConfig = getAgentEmailConfig();
+  if (emailTouched) {
+    if (!emailConfig.available || !emailConfig.baseDomain) {
+      throw new BadRequest('email feature is not configured (Resend sender unavailable)');
+    }
+    const group = getAgentGroup(gid)!;
+    if ('email_slug' in body) {
+      if (!isElevated) throw new BadRequest('only owner or global admin may change the email address');
+      const raw = body['email_slug'];
+      if (raw == null || raw === '') {
+        emailUpdates.email_slug = null;
+      } else {
+        const slug = String(raw).trim().toLowerCase();
+        if (!isValidEmailSlug(slug)) {
+          throw new BadRequest('email address must use a-z, 0-9, and hyphens only');
+        }
+        if (!emailSlugAvailable(gid, slug, emailConfig.baseDomain)) {
+          throw new BadRequest('that email address is already in use');
+        }
+        emailUpdates.email_slug = slug;
+      }
+    }
+    if ('email_enabled' in body) {
+      const raw = body['email_enabled'];
+      emailUpdates.email_enabled = raw === true || raw === 'true' || raw === 1 ? 1 : 0;
+    }
+
+    const effectiveEnabled = emailUpdates.email_enabled ?? group.email_enabled ?? 0;
+    const effectiveSlug = 'email_slug' in emailUpdates ? emailUpdates.email_slug : group.email_slug;
+    if (effectiveEnabled && !effectiveSlug) {
+      const derived = allocateEmailSlug({ ...group, name: nameUpdate ?? group.name }, emailConfig.baseDomain);
+      if (!derived) throw new BadRequest('could not derive an email address from the group name; set one explicitly');
+      emailUpdates.email_slug = derived;
     }
   }
 
@@ -533,18 +596,25 @@ async function handlePatchSettings(
     updates.voice_mode = await deriveVoiceMode(effectiveProvider, effectiveModel ?? null, effectiveTranscriptionModel);
   }
 
-  if (Object.keys(updates).length === 0 && nameUpdate === undefined && Object.keys(siteUpdates).length === 0) {
+  if (
+    Object.keys(updates).length === 0 &&
+    nameUpdate === undefined &&
+    Object.keys(siteUpdates).length === 0 &&
+    Object.keys(emailUpdates).length === 0
+  ) {
     throw new BadRequest('no editable fields supplied');
   }
 
-  const agentGroupUpdates: Partial<Pick<AgentGroup, 'name' | 'site_slug' | 'site_enabled'>> = { ...siteUpdates };
+  const agentGroupUpdates: Partial<
+    Pick<AgentGroup, 'name' | 'site_slug' | 'site_enabled' | 'email_slug' | 'email_enabled'>
+  > = { ...siteUpdates, ...emailUpdates };
   if (nameUpdate !== undefined) agentGroupUpdates.name = nameUpdate;
-  if (Object.keys(agentGroupUpdates).length > 0) {
-    updateAgentGroup(gid, agentGroupUpdates);
-  }
-  if (Object.keys(updates).length > 0) {
-    updateContainerConfigScalars(gid, updates);
-  }
+  getDb().transaction(() => {
+    if (Object.keys(agentGroupUpdates).length > 0) updateAgentGroup(gid, agentGroupUpdates);
+    if (Object.keys(updates).length > 0) updateContainerConfigScalars(gid, updates);
+    if (emailTouched) reconcileAgentEmail(getAgentGroup(gid)!, emailConfig.baseDomain!);
+  })();
+  if (emailTouched) projectAgentEmailDestinations(gid);
   recordAdminAction({
     actorUserId,
     action: 'group_config_update',

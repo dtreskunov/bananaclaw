@@ -1,6 +1,38 @@
 import { describe, expect, it } from 'vitest';
 
-import { ensureBodyForAttachments } from './resend.js';
+import {
+  ensureBodyForAttachments,
+  prepareInboundEmailBody,
+  parseTokenizedReplyAddress,
+  tokenizedReplyAddress,
+} from './resend.js';
+
+describe('tokenizedReplyAddress', () => {
+  it('adds an opaque response token without changing the mailbox domain', () => {
+    expect(tokenizedReplyAddress('agent@example.com', 'abc_123-XYZ')).toBe('agent+r-abc_123-XYZ@example.com');
+  });
+
+  it('extracts the canonical alias and token from a display address', () => {
+    expect(parseTokenizedReplyAddress('Agent <agent+r-AbC_123@example.com>')).toEqual({
+      alias: 'agent@example.com',
+      token: 'abc_123',
+    });
+  });
+});
+
+describe('prepareInboundEmailBody', () => {
+  it('preserves plain text and HTML as separate inputs', () => {
+    const result = prepareInboundEmailBody('Plain body', '<p>HTML body</p>');
+    expect(result.body).toBe('Plain body');
+    expect(Buffer.from(result.htmlAttachment?.data || '', 'base64').toString()).toBe('<p>HTML body</p>');
+  });
+
+  it('attaches HTML without extracting text when the plain-text part is absent', () => {
+    const result = prepareInboundEmailBody(null, '<h1>Shipment ready</h1>');
+    expect(result.body).toBe('');
+    expect(Buffer.from(result.htmlAttachment?.data || '', 'base64').toString()).toBe('<h1>Shipment ready</h1>');
+  });
+});
 
 describe('ensureBodyForAttachments', () => {
   it('injects a filename list when markdown is empty and files are present', () => {

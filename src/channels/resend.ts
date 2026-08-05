@@ -16,22 +16,31 @@
  * send from the alias. Safe only because we ask the bridge for
  * `concurrency: 'queue'` (host serializes deliveries per channel).
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 import { createResendAdapter } from '@resend/chat-sdk-adapter';
-import { Message, parseMarkdown } from 'chat';
+import { Message, parseMarkdown, type Attachment } from 'chat';
 
 import { isSenderAllowed, provisionEmailBot, readBotFolder } from '../auto-provision.js';
+import { wakeContainer } from '../container-runner.js';
 import { getDb } from '../db/connection.js';
-import { getMessagingGroupByPlatform, getMessagingGroupAgents } from '../db/messaging-groups.js';
-import { getAskQuestionRender } from '../db/sessions.js';
+import { getMessagingGroup, getMessagingGroupByPlatform, getMessagingGroupAgents } from '../db/messaging-groups.js';
+import { getAskQuestionRender, getSession } from '../db/sessions.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
+import { getEnabledAgentGroupForEmailAlias } from '../modules/email/agent-email.js';
+import {
+  createResendOutboundCorrelation,
+  deleteResendOutboundCorrelation,
+  getResendOutboundCorrelationByToken,
+} from '../modules/email/resend-correlations.js';
 import { getUserDmByMessagingGroup } from '../modules/permissions/db/user-dms.js';
 import { getOwners, getGlobalAdmins, getAdminsOfAgentGroup } from '../modules/permissions/db/user-roles.js';
 import { getPrimaryIdentityForChannel } from '../modules/permissions/db/identities.js';
 import { dispatchResponse } from '../response-registry.js';
+import { writeSessionMessage } from '../session-manager.js';
 import { normalizeOptions } from './ask-question.js';
+import type { DeliveryContext } from './adapter.js';
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
@@ -49,6 +58,42 @@ function hardenSoftBreaks(text: string): string {
 function parseEmailAddress(field: string): string {
   const m = field.match(/<([^>]+)>/);
   return (m ? m[1] : field).trim().toLowerCase();
+}
+
+export function tokenizedReplyAddress(alias: string, token: string): string {
+  const at = alias.lastIndexOf('@');
+  if (at <= 0) throw new Error(`Cannot tokenize invalid email alias: ${alias}`);
+  return `${alias.slice(0, at)}+r-${token}${alias.slice(at)}`;
+}
+
+export function parseTokenizedReplyAddress(address: string): { alias: string; token: string } | null {
+  const parsed = parseEmailAddress(address);
+  const match = parsed.match(/^([^@+]+)\+r-([a-z0-9_-]+)@([^@]+)$/i);
+  if (!match) return null;
+  return { alias: `${match[1]}@${match[3]}`, token: match[2] };
+}
+
+export interface InboundEmailBody {
+  body: string;
+  htmlAttachment?: { type: 'file'; name: string; mimeType: 'text/html'; data: string };
+}
+
+export function prepareInboundEmailBody(text?: string | null, html?: string | null): InboundEmailBody {
+  const rawText = text || '';
+  const rawHtml = html || '';
+  return {
+    body: rawText,
+    ...(rawHtml
+      ? {
+          htmlAttachment: {
+            type: 'file' as const,
+            name: 'original-message.html',
+            mimeType: 'text/html' as const,
+            data: Buffer.from(rawHtml).toString('base64'),
+          },
+        }
+      : {}),
+  };
 }
 
 /**
@@ -222,7 +267,12 @@ registerChannelAdapter('resend', {
         email.attachments = result.event.data.attachments;
       }
       const senderAddress = parseEmailAddress(email.from);
-      const alias = email.to?.[0] ? parseEmailAddress(email.to[0]) : FROM;
+      const tokenizedRecipient = email.to?.map(parseTokenizedReplyAddress).find(Boolean) || null;
+      const alias = tokenizedRecipient?.alias || (email.to?.[0] ? parseEmailAddress(email.to[0]) : FROM);
+      const headers = headersOf(email);
+      const inReplyTo = headers['In-Reply-To'] || headers['in-reply-to'] || undefined;
+      const references = headers.References || headers.references || undefined;
+      const normalizedBody = prepareInboundEmailBody(email.text, email.html);
       log.info('Resend inbound', { from: senderAddress, alias, to: email.to, subject: email.subject });
 
       // ── Approval-reply matcher ───────────────────────────────────────
@@ -236,7 +286,8 @@ registerChannelAdapter('resend', {
       // alias gate because cold-DM approvals are sent from the default
       // FROM alias and the approver may not be in any allow-list.
       const approvalReply =
-        matchApprovalReplyFromSubject(email.subject || '', email.text || '') || matchApprovalReply(email.text || '');
+        matchApprovalReplyFromSubject(email.subject || '', normalizedBody.body) ||
+        matchApprovalReply(normalizedBody.body);
       if (approvalReply) {
         const { approvalId, optionValue } = approvalReply;
         log.info('Resend approval reply detected', { approvalId, from: senderAddress, optionValue });
@@ -262,6 +313,67 @@ registerChannelAdapter('resend', {
         return new Response(null, { status: 200 });
       }
 
+      // ── Correlated response ──────────────────────────────────────────
+      // A tokenized return address is the correlation capability. Correlated
+      // responses are written to the originating session with that session's
+      // existing routing fields, so the agent's result returns to the web/chat
+      // user who initiated the email rather than being sent back over email.
+      const correlation = tokenizedRecipient
+        ? getResendOutboundCorrelationByToken(tokenizedRecipient.token)
+        : undefined;
+      const originSession = correlation ? getSession(correlation.origin_session_id) : undefined;
+      if (correlation && originSession) {
+        const originMessagingGroup = originSession.messaging_group_id
+          ? getMessagingGroup(originSession.messaging_group_id)
+          : undefined;
+        const text = [
+          `Email response from ${senderAddress}`,
+          email.subject ? `Subject: ${email.subject}` : '',
+          normalizedBody.body,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        const attachments = (email.attachments || []).map((attachment: { filename: string; content_type: string }) => ({
+          type: 'file',
+          name: attachment.filename,
+          mimeType: attachment.content_type,
+        }));
+        if (normalizedBody.htmlAttachment) attachments.push(normalizedBody.htmlAttachment);
+
+        writeSessionMessage(originSession.agent_group_id, originSession.id, {
+          id: `email-response:${email.id}`,
+          kind: 'chat-sdk',
+          timestamp: email.created_at,
+          platformId: originMessagingGroup?.platform_id ?? null,
+          channelType: originMessagingGroup?.channel_type ?? null,
+          threadId: originSession.thread_id,
+          content: JSON.stringify({
+            text,
+            senderId: senderAddress,
+            sender: senderAddress,
+            senderName: senderAddress,
+            attachments,
+            emailResponse: {
+              from: email.from,
+              to: email.to,
+              cc: email.cc,
+              subject: email.subject,
+              messageId: email.message_id,
+              emailThreadId: correlation.email_thread_id,
+            },
+          }),
+          idempotent: true,
+        });
+        if (email.message_id) tr.trackMessage(correlation.email_thread_id, email.message_id);
+        tr.trackSubject(correlation.email_thread_id, email.subject);
+        log.info('Resend response routed to origin session', {
+          from: senderAddress,
+          originSessionId: originSession.id,
+        });
+        await wakeContainer(originSession);
+        return new Response(null, { status: 200 });
+      }
+
       // ── Email-bot gate ───────────────────────────────────────────────
       // Filesystem-driven allow-list: groups/<alias>/CLAUDE.local.md must
       // exist for the alias to be enabled, and the sender must match a
@@ -269,7 +381,8 @@ registerChannelAdapter('resend', {
       // no regex match → silent drop. The default alias (FROM) bypasses
       // this gate so the legacy single-mailbox setup keeps working without
       // a folder.
-      if (alias !== FROM) {
+      const managedAgent = getEnabledAgentGroupForEmailAlias(alias);
+      if (alias !== FROM && !managedAgent) {
         const bot = readBotFolder(alias);
         if (!bot) {
           log.info('Resend dropped — alias not enabled (no groups/<alias>/CLAUDE.local.md)', {
@@ -289,9 +402,6 @@ registerChannelAdapter('resend', {
         provisionEmailBot({ channelType: 'resend', platformId: `resend:${alias}`, bot });
       }
 
-      const headers = email.headers || {};
-      const inReplyTo = headers['In-Reply-To'] || headers['in-reply-to'] || undefined;
-      const references = headers.References || headers.references || undefined;
       const threadId = await tr.resolveThreadId({
         toAddress: senderAddress,
         alias,
@@ -305,10 +415,24 @@ registerChannelAdapter('resend', {
       // package, so re-create the Message here.
       // Prepend the subject line so the agent sees it (raw fields are
       // dropped by the bridge before reaching the session DB).
-      const body = email.text || '';
+      const body = normalizedBody.body;
       const text = email.subject ? `Subject: ${email.subject}\n\n${body}` : body;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const attachments = (email.attachments || []) as any[];
+      const messageAttachments: Attachment[] = attachments.map((a) => ({
+        type: 'file',
+        name: a.filename,
+        mimeType: a.content_type,
+      }));
+      if (normalizedBody.htmlAttachment) {
+        const htmlAttachment = normalizedBody.htmlAttachment;
+        messageAttachments.push({
+          type: htmlAttachment.type,
+          name: htmlAttachment.name,
+          mimeType: htmlAttachment.mimeType,
+          fetchData: async () => Buffer.from(htmlAttachment.data, 'base64'),
+        });
+      }
       const parsed = new Message({
         id: email.id,
         threadId,
@@ -335,7 +459,7 @@ registerChannelAdapter('resend', {
           isMe: senderAddress === FROM,
         },
         metadata: { dateSent: new Date(email.created_at), edited: false },
-        attachments: attachments.map((a) => ({ type: 'file', name: a.filename, mimeType: a.content_type })),
+        attachments: messageAttachments,
         isMention: true,
       });
       this.chat.processMessage(this, threadId, parsed, options);
@@ -343,9 +467,9 @@ registerChannelAdapter('resend', {
     };
 
     // ── Outbound: send from the alias encoded in the threadId ────────
-    // Also override fromName per-alias: bot.json.name wins, else the
-    // local-part of the alias. Without this, every alias would send as
-    // RESEND_FROM_NAME (the global default).
+    // Also override fromName per-alias: a managed agent group's current
+    // name wins, then legacy bot.json.name, then the local-part. Without
+    // this, every alias would send as RESEND_FROM_NAME (the global default).
     //
     // Also handle file attachments. The chat-sdk-adapter's postMessage
     // accepts a `files` field but its normalizer silently drops it on
@@ -368,6 +492,8 @@ registerChannelAdapter('resend', {
     // Extra BCC for audit trail of bot-initiated outreach. Owner sees every
     // outbound and any Reply-All response; recipient does not see the BCC.
     let pendingBcc: string | null = null;
+    let pendingCorrelation: { token: string; replyAddress: string } | null = null;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resendClient.emails.send = async (payload: any) => {
       if (pendingSubjectOverride) {
@@ -382,6 +508,17 @@ registerChannelAdapter('resend', {
         const existing = payload.bcc ? (Array.isArray(payload.bcc) ? payload.bcc : [payload.bcc]) : [];
         payload = { ...payload, bcc: [...existing, pendingBcc] };
         pendingBcc = null;
+      }
+      const correlation = pendingCorrelation;
+      pendingCorrelation = null;
+      if (correlation) {
+        const rawFrom = String(payload.from || '');
+        const displayName = rawFrom.match(/^\s*([^<]+?)\s*<[^>]+>\s*$/)?.[1]?.trim();
+        payload = {
+          ...payload,
+          from: displayName ? `${displayName} <${correlation.replyAddress}>` : correlation.replyAddress,
+          replyTo: correlation.replyAddress,
+        };
       }
       if (pendingAttachments) {
         payload = { ...payload, attachments: pendingAttachments };
@@ -415,8 +552,9 @@ registerChannelAdapter('resend', {
       const savedName = this.config.fromName;
       this.config.fromAddress = alias;
       if (alias !== FROM) {
+        const managedAgent = getEnabledAgentGroupForEmailAlias(alias);
         const bot = readBotFolder(alias);
-        this.config.fromName = bot?.config?.name || alias.split('@')[0];
+        this.config.fromName = managedAgent?.name || bot?.config?.name || alias.split('@')[0];
       }
       const files = message?.files as Array<{ data: Buffer; filename: string }> | undefined;
       if (files && files.length > 0) {
@@ -432,6 +570,9 @@ registerChannelAdapter('resend', {
         this.config.fromAddress = savedAddress;
         this.config.fromName = savedName;
         pendingAttachments = null;
+        pendingCorrelation = null;
+        pendingReplyTo = null;
+        pendingBcc = null;
       }
     };
 
@@ -453,7 +594,7 @@ registerChannelAdapter('resend', {
     //    list and an "Approval ref: <id>" footer; the inbound webhook
     //    parses that footer to route the reply back to the right approval.
     const origDeliver = bridge.deliver.bind(bridge);
-    bridge.deliver = async function (platformId, threadId, message) {
+    bridge.deliver = async function (platformId, threadId, message, context?: DeliveryContext) {
       const content = (message.content || {}) as Record<string, unknown>;
 
       // email_compose: send a NEW email to an arbitrary recipient (not a
@@ -479,6 +620,20 @@ registerChannelAdapter('resend', {
         const newTid = tr.encodeThreadId({ alias, toAddress: to, rootMessageIdHash: hash });
         tr.trackMessage(newTid, seedId);
         pendingSubjectOverride = subject;
+        let correlationToken: string | null = null;
+        if (context?.sessionId) {
+          correlationToken = randomBytes(16).toString('hex');
+          createResendOutboundCorrelation({
+            correlation_token: correlationToken,
+            origin_session_id: context.sessionId,
+            email_thread_id: newTid,
+            created_at: new Date().toISOString(),
+          });
+          pendingCorrelation = {
+            token: correlationToken,
+            replyAddress: tokenizedReplyAddress(alias, correlationToken),
+          };
+        }
         // Reply-To: prefer a scoped admin of the agent group sending this
         // email, then global admin, then owner. Any resend: identity wins.
         // Routes replies from unknown recipients straight to a human instead
@@ -486,12 +641,19 @@ registerChannelAdapter('resend', {
         const mgForReplyTo = getMessagingGroupByPlatform('resend', platformId);
         const agentGroupId = mgForReplyTo ? getMessagingGroupAgents(mgForReplyTo.id)[0]?.agent_group_id : undefined;
         const ownerEmail = pickReplyToEmail(agentGroupId);
-        if (ownerEmail && ownerEmail !== to) {
+        if (!correlationToken && ownerEmail && ownerEmail !== to) {
           pendingReplyTo = ownerEmail;
+        }
+        if (ownerEmail && ownerEmail !== to) {
           pendingBcc = ownerEmail;
         }
-        const result = await adapter.postMessage(newTid, { markdown: body, files: message.files });
-        return result?.id;
+        try {
+          const result = await adapter.postMessage(newTid, { markdown: body, files: message.files });
+          return result?.id;
+        } catch (err) {
+          if (correlationToken) deleteResendOutboundCorrelation(correlationToken);
+          throw err;
+        }
       }
 
       let tid = threadId;

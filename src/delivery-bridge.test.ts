@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ChannelAdapter, OutboundFile, OutboundMessage } from './channels/adapter.js';
+import type { ChannelAdapter, DeliveryContext, OutboundFile, OutboundMessage } from './channels/adapter.js';
 import { createDeliveryBridge } from './delivery-bridge.js';
 
 function mkFile(name: string): OutboundFile {
@@ -9,9 +9,14 @@ function mkFile(name: string): OutboundFile {
 
 function stubAdapter(opts: { supportsMultiFile?: boolean; idPrefix?: string }): {
   adapter: ChannelAdapter;
-  calls: Array<{ platformId: string; threadId: string | null; message: OutboundMessage }>;
+  calls: Array<{ platformId: string; threadId: string | null; message: OutboundMessage; context?: DeliveryContext }>;
 } {
-  const calls: Array<{ platformId: string; threadId: string | null; message: OutboundMessage }> = [];
+  const calls: Array<{
+    platformId: string;
+    threadId: string | null;
+    message: OutboundMessage;
+    context?: DeliveryContext;
+  }> = [];
   let counter = 0;
   const adapter = {
     name: 'mock',
@@ -23,8 +28,8 @@ function stubAdapter(opts: { supportsMultiFile?: boolean; idPrefix?: string }): 
     isConnected() {
       return true;
     },
-    async deliver(platformId: string, threadId: string | null, message: OutboundMessage) {
-      calls.push({ platformId, threadId, message });
+    async deliver(platformId: string, threadId: string | null, message: OutboundMessage, context?: DeliveryContext) {
+      calls.push({ platformId, threadId, message, context });
       counter += 1;
       return `${opts.idPrefix ?? 'mid'}-${counter}`;
     },
@@ -42,6 +47,14 @@ describe('createDeliveryBridge', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].message.files).toHaveLength(1);
     expect((calls[0].message.content as { text: string }).text).toBe('hi');
+  });
+
+  it('forwards source-session context to the channel adapter', async () => {
+    const { adapter, calls } = stubAdapter({});
+    const bridge = createDeliveryBridge({ getChannelAdapter: () => adapter });
+    const context = { sessionId: 'session-1', agentGroupId: 'agent-1' };
+    await bridge.deliver('mock', 'plat-1', null, 'chat', JSON.stringify({ text: 'hi' }), undefined, undefined, undefined, context);
+    expect(calls[0].context).toEqual(context);
   });
 
   it('splits multi-file messages into N single-file calls when the adapter does not support multi', async () => {

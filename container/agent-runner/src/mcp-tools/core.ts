@@ -311,7 +311,7 @@ export const sendEmail: McpToolDefinition = {
   tool: {
     name: 'send_email',
     description:
-      'Compose a NEW email to an arbitrary recipient using your wired email channel (Resend). Sender = your bot alias. Optional file attachments (paths under /workspace/agent or absolute). Use this when the user asks you to email someone other than the current correspondent. For replies in your existing email thread, use send_message / send_file instead.',
+      'Compose a NEW email to an arbitrary recipient using your wired email channel (Resend). Sender = your bot alias. Optional file attachments (paths under /workspace/agent or absolute). Use this when the user asks you to email someone other than the current correspondent. Responses are delivered to you automatically in the conversation that initiated the email, prefixed with "Email response from ..."; no inbox tool or session search is needed. A normal assistant reply stays in that originating conversation, so call send_email explicitly to contact the email sender again. For replies when the current conversation itself is an email thread, use send_message / send_file instead.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -335,7 +335,10 @@ export const sendEmail: McpToolDefinition = {
     if (!subject) return err('subject is required');
     if (!body) return err('body is required');
 
-    const resendDest = getAllDestinations().find((d) => d.type === 'channel' && d.channelType === 'resend');
+    const destinations = getAllDestinations();
+    const resendDest =
+      destinations.find((d) => d.name === 'email' && d.type === 'channel' && d.channelType === 'resend') ??
+      destinations.find((d) => d.type === 'channel' && d.channelType === 'resend');
     if (!resendDest || !resendDest.platformId) {
       return err('No Resend (email) channel destination configured for this agent.');
     }
@@ -375,7 +378,10 @@ export const sendEmail: McpToolDefinition = {
     });
 
     log(`send_email: #${seq} → ${to} (subject: ${subject}, files: ${filenames.length})`);
-    return ok(`Email queued to ${to} (id: ${seq}${filenames.length ? `, ${filenames.length} attachment(s)` : ''})`);
+    return ok(
+      `Email queued to ${to} (id: ${seq}${filenames.length ? `, ${filenames.length} attachment(s)` : ''}). ` +
+        'Responses will be delivered automatically to this conversation; do not ask the user to forward them or look for an inbox.',
+    );
   },
 };
 

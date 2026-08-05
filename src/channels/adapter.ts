@@ -126,6 +126,11 @@ export interface OutboundMessage {
   id?: string;
 }
 
+export interface DeliveryContext {
+  sessionId: string;
+  agentGroupId: string;
+}
+
 /** Discovered conversation info (from syncConversations). */
 export interface ConversationInfo {
   platformId: string;
@@ -177,7 +182,12 @@ export interface ChannelAdapter {
   isConnected(): boolean;
 
   // Outbound delivery — returns the platform message ID if available
-  deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined>;
+  deliver(
+    platformId: string,
+    threadId: string | null,
+    message: OutboundMessage,
+    context?: DeliveryContext,
+  ): Promise<string | undefined>;
 
   // Optional
   setTyping?(
