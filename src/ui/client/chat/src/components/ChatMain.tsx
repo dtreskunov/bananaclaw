@@ -900,9 +900,18 @@ function MessageLog() {
   const onLogScroll = () => { measureScroll(); };
 
   useEffect(() => {
-    const onResize = (): void => { measureScroll(); };
+    const el = ref.current;
+    const onResize = (): void => {
+      if (atBottomRef.current) scrollToBottom();
+      else measureScroll();
+    };
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    const observer = el && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
+    if (el && observer) observer.observe(el);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      observer?.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -936,6 +945,9 @@ function MessageLog() {
       // While a highlight is active (pending or applied), don't scroll to bottom.
     } else {
       appliedHighlightRef.current = null;
+      // Snapshot before measuring: this render may already include a new row,
+      // so the updated DOM can look unpinned even though the user was at bottom.
+      const wasAtBottom = atBottomRef.current;
       const currentlyAtBottom = measureScroll();
       const newMessages = msgCount > prevMsgCountRef.current;
       const typingJustStarted = typing && !wasTypingRef.current;
@@ -953,7 +965,7 @@ function MessageLog() {
       // bubble grows), or as an expanded trace grows — the last only while
       // the user is pinned to the bottom, so we never yank them down if
       // they've scrolled up to read earlier messages.
-      const shouldFollow = currentlyAtBottom
+      const shouldFollow = wasAtBottom
         && (newMessages || typingJustStarted || justExpanded || (traceExpanded && traceGrew));
       if (newMessages && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {

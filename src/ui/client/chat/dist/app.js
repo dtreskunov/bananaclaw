@@ -21114,11 +21114,18 @@ function MessageLog() {
     measureScroll();
   };
   y2(() => {
+    const el = ref.current;
     const onResize = () => {
-      measureScroll();
+      if (atBottomRef.current) scrollToBottom();
+      else measureScroll();
     };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    const observer = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+    if (el && observer) observer.observe(el);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      observer?.disconnect();
+    };
   }, []);
   y2(() => {
     prevMsgCountRef.current = 0;
@@ -21147,6 +21154,7 @@ function MessageLog() {
       }
     } else {
       appliedHighlightRef.current = null;
+      const wasAtBottom = atBottomRef.current;
       const currentlyAtBottom = measureScroll();
       const newMessages = msgCount > prevMsgCountRef.current;
       const typingJustStarted = typing && !wasTypingRef.current;
@@ -21156,7 +21164,7 @@ function MessageLog() {
         const ul = ref.current.querySelector(".activity-trace");
         if (ul) ul.scrollTop = ul.scrollHeight;
       }
-      const shouldFollow = currentlyAtBottom && (newMessages || typingJustStarted || justExpanded || traceExpanded && traceGrew);
+      const shouldFollow = wasAtBottom && (newMessages || typingJustStarted || justExpanded || traceExpanded && traceGrew);
       if (newMessages && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {
         scrollToBottom();
