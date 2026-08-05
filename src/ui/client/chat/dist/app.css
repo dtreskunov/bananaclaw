@@ -1567,6 +1567,7 @@ nav.tab-bar-strip.group-strip {
 .chat-main {
   display: grid;
   grid-template-rows: 1fr auto auto auto auto;
+  min-width: 0;
   min-height: 0;
   position: relative;
   --chat-max: 760px;
@@ -1584,6 +1585,7 @@ nav.tab-bar-strip.group-strip {
   padding-inline: max(12px, calc((100% - var(--chat-max)) / 2));
 }
 .chat-main .log-viewport {
+  min-width: 0;
   min-height: 0;
   position: relative;
 }
