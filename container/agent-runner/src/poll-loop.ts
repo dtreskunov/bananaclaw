@@ -649,12 +649,10 @@ async function processQuery(
   // to stay silent). Suppresses BOTH terminal notices — a deliberate no-op
   // must not surface as an error.
   let silenceConfirmed = false;
-  // Set when a `result` event arrives with empty text AND we did not nudge on
-  // it — i.e. the turn produced genuinely nothing recoverable (no bare reply,
-  // no reasoning that stripped away). Distinct from `event.strippedToEmpty`
-  // (a swallowed reply → nudged, above) and from a non-empty-but-all-<internal>
-  // turn (deliberate scratchpad, stays silent). This is the shape of a
-  // legitimately silent autonomous/task turn, so it is NOT nudged.
+  // Set when a `result` event has no deliverable response and we did not nudge
+  // it — either genuinely empty text or an initial all-<internal> scratchpad.
+  // Distinct from `event.strippedToEmpty` (a swallowed reply → nudged, above)
+  // and a post-nudge <internal> result (confirmed intentional silence).
   let emptyResultSeen = false;
   // A fresh batch is being processed \u2014 wipe any turn-ended marker from
   // the previous turn so the host typing module re-arms cleanly.
@@ -1174,6 +1172,12 @@ async function processQuery(
             } else if (willRetryWrapping) {
               log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
               pushDeliveryNudge();
+            } else if (sent === 0 && internalCount > 0 && !wasRecoveringDelivery) {
+              emptyResultSeen = true;
+              if (turnBatchQueue.length === 0 && !endedForCommand) {
+                endedForCommand = true;
+                query.end();
+              }
             }
             // Recovery retries answer the SAME user prompt — keep it queued so
             // the retry archives against it, not the nudge text.
@@ -1386,11 +1390,9 @@ async function processQuery(
   //     STILL delivered nothing. That's a genuine malfunction.
   //
   //  4. emptyResultSeen (never nudged) → "finished without producing a
-  //     response". The turn produced genuinely nothing recoverable: no bare
-  //     reply and no reasoning that stripped away. We deliberately did NOT
-  //     nudge this (see the result handler) because it is indistinguishable
-  //     from a legitimately silent autonomous/task turn, and nudging every
-  //     such turn would tax that hot path and fight the one-shot task query.
+  //     response". The turn produced no deliverable response: no bare reply,
+  //     no reasoning that stripped away, and at most an internal scratchpad.
+  //     We deliberately do not nudge this path.
   if (!sentAny && silenceConfirmed && !lastProviderError) {
     log('Turn confirmed intentional silence after nudge — delivering nothing');
   } else if (!sentAny && nudgedForPrematureCompletion && !lastProviderError) {
@@ -1428,10 +1430,9 @@ async function processQuery(
   }
 
   // Stream completed cleanly with a `result` event, but the model produced no
-  // final text at all — and reported no error, and there was nothing to
-  // recover (so we never nudged). Common with reasoning models that emit only
-  // <think>…</think> AND leave no answer buried inside. Tell the user plainly
-  // so a silent turn doesn't look like the agent is still working or died.
+  // deliverable response — and reported no error, and there was nothing to
+  // recover (so we never nudged). Tell the user plainly so a silent turn
+  // doesn't look like the agent is still working or died.
   else if (!sentAny && emptyResultSeen && !lastProviderError) {
     log('Turn completed with an empty result and no error — notifying user');
     try {

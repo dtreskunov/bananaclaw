@@ -834,6 +834,23 @@ describe('poll loop — empty result notice', () => {
     expect(provider.ended).toBe(true);
   });
 
+  it('notifies the user when a turn ends with only an internal note', async () => {
+    insertMessage('m-internal-only', { sender: 'Alice', text: 'update the files' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new EmptyResultProvider('<internal>Let me inspect the files first.</internal>');
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toContain('without producing a response');
+    expect(provider.ended).toBe(true);
+  });
+
   it('still notifies on an empty turn after an earlier turn in the same warm query delivered', async () => {
     // Regression: on a long-lived provider (OpenCode) the query stays open
     // across turns. `sentAny`/`emptyResultSeen` are query-scoped, so an earlier
@@ -878,6 +895,39 @@ describe('poll loop — empty result notice', () => {
       try { return JSON.parse(m.content).text?.includes('without producing a response'); } catch { return false; }
     });
     expect(notice).toBeDefined();
+  });
+
+  it('still notifies on an internal-only turn after an earlier warm-query reply', async () => {
+    insertMessage('warm-internal-1', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    let turn = 0;
+    const provider = new MockProvider({}, () => {
+      turn++;
+      return turn === 1
+        ? '<message to="discord-test">first reply</message>'
+        : '<internal>Let me inspect the files first.</internal>';
+    });
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'first reply'),
+      3000,
+    );
+    insertMessage('warm-internal-2', { sender: 'Alice', text: 'update the files' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => {
+        try { return JSON.parse(m.content).text?.includes('without producing a response'); } catch { return false; }
+      }),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
+    expect(texts).toContain('first reply');
+    expect(texts.some((text: string) => text?.includes('without producing a response'))).toBe(true);
   });
 });
 
@@ -1324,6 +1374,8 @@ class EmptyResultProvider {
   readonly supportsNativeSlashCommands = false;
   ended = false;
 
+  constructor(private readonly resultText = '') {}
+
   isSessionInvalid(): boolean {
     return false;
   }
@@ -1344,7 +1396,7 @@ class EmptyResultProvider {
       },
       events: (async function* () {
         yield { type: 'init' as const, continuation: 'empty-session' };
-        yield { type: 'result' as const, text: '' };
+        yield { type: 'result' as const, text: owner.resultText };
         // Block like OpenCode — only completes once the loop calls end().
         while (!owner.ended && !aborted) {
           await new Promise<void>((resolve) => {
