@@ -29,7 +29,6 @@ import { registerChannelAdapter } from './channel-registry.js';
 import { log } from '../log.js';
 import { sendToUser as sendPushToUser } from '../modules/push/sender.js';
 import { getMembers } from '../modules/permissions/db/agent-group-members.js';
-import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners } from '../modules/permissions/db/user-roles.js';
 import { onTaskRun as onTaskRunNotice, type TaskRunNotice } from '../task-events.js';
 
 export const WEB_CHANNEL_TYPE = 'web';
@@ -77,6 +76,10 @@ let unsubscribeTaskRun: (() => void) | null = null;
 
 function subKey(platformId: string, threadId: string | null): string {
   return `${platformId}::${threadId ?? ''}`;
+}
+
+export function getWebPushRecipientIds(agentGroupId: string): string[] {
+  return getMembers(agentGroupId).map((member) => member.user_id);
 }
 
 /**
@@ -226,7 +229,8 @@ export function createWebAdapter(): ChannelAdapter {
     },
 
     async deliver(platformId, threadId, message: OutboundMessage): Promise<string | undefined> {
-      // Shared web rooms notify every current member and administrator.
+      // Shared web rooms notify explicit members. Administrative access alone
+      // does not imply interest in every room an owner or global admin can see.
       // The service worker suppresses notifications in focused windows.
       if (
         platformId.startsWith('group:') &&
@@ -235,12 +239,7 @@ export function createWebAdapter(): ChannelAdapter {
         (message.kind === 'chat' || message.kind === 'text')
       ) {
         const groupId = platformId.slice('group:'.length);
-        const recipients = new Set<string>();
-        for (const member of getMembers(groupId)) recipients.add(member.user_id);
-        for (const admin of getAdminsOfAgentGroup(groupId)) recipients.add(admin.user_id);
-        for (const admin of getGlobalAdmins()) recipients.add(admin.user_id);
-        for (const owner of getOwners()) recipients.add(owner.user_id);
-        for (const userId of recipients) {
+        for (const userId of getWebPushRecipientIds(groupId)) {
           void sendPushToUser(userId, {
             v: 1,
             kind: 'message',
