@@ -22,6 +22,7 @@ export interface ChannelMetaEntry {
 export interface Group {
   id: string;
   name: string;
+  siteUrl?: string | null;
   isAdmin?: boolean;
   /** True when access depends solely on owner/global-admin privileges. */
   elevatedOnly?: boolean;

@@ -25,6 +25,7 @@ vi.mock('../../../config.js', async () => {
     ...actual,
     GROUPS_DIR: '/tmp/nanoclaw-test-ui-create-group/groups',
     DATA_DIR: '/tmp/nanoclaw-test-ui-create-group/data',
+    PAGES_BASE_DOMAIN: 'pages.test',
   };
 });
 
@@ -177,6 +178,7 @@ describe('GET /api/groups', () => {
       added_by: 'web:admin',
       added_at: now(),
     });
+    getDb().prepare('UPDATE agent_groups SET site_slug = ?, site_enabled = 1 WHERE id = ?').run('member', 'ag-member');
     grantRole({
       user_id: 'web:admin',
       role: 'admin',
@@ -188,12 +190,18 @@ describe('GET /api/groups', () => {
     mockUserId = 'web:admin';
     const res = await call('GET', '/ui/chat/api/groups');
     expect(res.status()).toBe(200);
-    const body = res.body() as { groups: Array<{ id: string; elevatedOnly: boolean }> };
+    const body = res.body() as { groups: Array<{ id: string; elevatedOnly: boolean; siteUrl: string | null }> };
     const elevatedById = Object.fromEntries(body.groups.map((group) => [group.id, group.elevatedOnly]));
     expect(elevatedById).toEqual({
       'ag-member': false,
       'ag-scoped': false,
       'ag-elevated': true,
+    });
+    const siteById = Object.fromEntries(body.groups.map((group) => [group.id, group.siteUrl]));
+    expect(siteById).toEqual({
+      'ag-member': 'https://member.pages.test/',
+      'ag-scoped': null,
+      'ag-elevated': null,
     });
   });
 });

@@ -30,7 +30,7 @@ import type { PendingApproval } from '../../../types.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
 import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js';
-import { siteFqdn } from '../pages/site.js';
+import { siteFqdn, siteUrl } from '../pages/site.js';
 import { createPrivateWebSession } from '../private-web-db.js';
 import { resolvePrivateWebEntry } from '../private-web-path.js';
 import { uiBaseUrl } from '../server.js';
@@ -357,6 +357,7 @@ function handleGroups(ctx: Ctx, userId: string): void {
     id: g.id,
     name: g.name,
     folder: g.folder,
+    siteUrl: g.site_enabled ? siteUrl(g) : null,
     isAdmin: hasAdminPrivilege(userId, g.id),
     elevatedOnly: !hasDirectAgentGroupAccess(userId, g.id),
     // Whether this viewer has any messaging context (web mg, or a non-web

@@ -28,7 +28,21 @@
 .files-pane .row.selected.active { background: var(--accent); }
 .files-pane .row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .files-pane .search-listing .row .name { display: flex; flex-direction: column; }
-.files-pane .search-listing .row .name > span { overflow: hidden; text-overflow: ellipsis; }
+.files-pane .row .name-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.files-pane .row .entry-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.files-pane .row .web-link {
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+}
+.files-pane .row .web-link:hover { background: var(--wash-strong); color: inherit; }
+.files-pane .search-listing .row .result-path { overflow: hidden; text-overflow: ellipsis; }
 .files-pane .search-listing .result-path { color: var(--muted); font-size: var(--font-xs); }
 .files-pane .search-listing .search-limit {
   padding: 6px 10px;

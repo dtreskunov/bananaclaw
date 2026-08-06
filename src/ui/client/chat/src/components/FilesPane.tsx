@@ -5,7 +5,7 @@ import type { ComponentChildren, JSX, RefObject, VNode } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
   treePath, treeEntries, treeError, filePath, isAdmin,
-  previewBlock, uploadItems, threadId, pinnedContext, groupId,
+  previewBlock, uploadItems, threadId, pinnedContext, groupId, groups,
   fileSearchOpen, fileSearchRoot, fileSearchQuery, fileSearchResults,
   fileSearchLoading, fileSearchError, fileSearchTruncated, fileSearchSelectedPath,
   paneOpen,
@@ -477,10 +477,22 @@ interface RowProps {
   onEntryChanged?: () => void;
 }
 
+function publicSiteUrl(entry: TreeEntry): string | null {
+  if (entry.type !== 'dir') return null;
+  const url = groups.value.find((group) => group.id === groupId.value)?.siteUrl;
+  if (!url) return null;
+  try {
+    return entry.path === new URL(url).hostname ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 function Row({ e, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntryChanged }: RowProps) {
   const active = e.path === filePath.value || (showPath && e.path === fileSearchSelectedPath.value);
   const selected = pinnedContext.value.includes(e.path);
   const resultPath = showPath ? pathBelowRoot(parentPath(e.path), fileSearchRoot.value) : '';
+  const siteUrl = publicSiteUrl(e);
   const onClick = (ev: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
     const t = ev.target as HTMLElement;
     if (t.closest('.row-sel') || t.closest('.action-menu')) return;
@@ -495,7 +507,19 @@ function Row({ e, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntry
       </label>
       <div>{e.type === 'dir' ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}</div>
       <div class="name">
-        <span>{e.name}</span>
+        <span class="name-line">
+          <span class="entry-label">{e.name}</span>
+          {siteUrl ? (
+            <a
+              class="web-link"
+              href={siteUrl}
+              target="_blank"
+              rel="noopener"
+              title={`Open ${new URL(siteUrl).hostname}`}
+              onClick={(ev) => ev.stopPropagation()}
+            >web</a>
+          ) : null}
+        </span>
         {resultPath ? <span class="result-path">{resultPath}</span> : null}
       </div>
       <div class="size">{fmtBytes(e.size)}</div>

@@ -23257,10 +23257,21 @@ function Crumb({
     ] }) })
   ] });
 }
+function publicSiteUrl(entry) {
+  if (entry.type !== "dir") return null;
+  const url = groups.value.find((group) => group.id === groupId.value)?.siteUrl;
+  if (!url) return null;
+  try {
+    return entry.path === new URL(url).hostname ? url : null;
+  } catch {
+    return null;
+  }
+}
 function Row({ e: e4, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntryChanged }) {
   const active = e4.path === filePath.value || showPath && e4.path === fileSearchSelectedPath.value;
   const selected = pinnedContext.value.includes(e4.path);
   const resultPath = showPath ? pathBelowRoot(parentPath(e4.path), fileSearchRoot.value) : "";
+  const siteUrl = publicSiteUrl(e4);
   const onClick = (ev) => {
     const t4 = ev.target;
     if (t4.closest(".row-sel") || t4.closest(".action-menu")) return;
@@ -23272,7 +23283,21 @@ function Row({ e: e4, onEdit, onNewFile, onUpload, onOpen, showPath = false, onE
     /* @__PURE__ */ u4("label", { class: "row-sel", onClick: (ev) => ev.stopPropagation(), title: selected ? "Detach from next message" : "Attach to next message", children: /* @__PURE__ */ u4("input", { type: "checkbox", checked: selected, onChange: () => togglePinnedFile(e4.path) }) }),
     /* @__PURE__ */ u4("div", { children: e4.type === "dir" ? "\u{1F4C1}" : "\u{1F4C4}" }),
     /* @__PURE__ */ u4("div", { class: "name", children: [
-      /* @__PURE__ */ u4("span", { children: e4.name }),
+      /* @__PURE__ */ u4("span", { class: "name-line", children: [
+        /* @__PURE__ */ u4("span", { class: "entry-label", children: e4.name }),
+        siteUrl ? /* @__PURE__ */ u4(
+          "a",
+          {
+            class: "web-link",
+            href: siteUrl,
+            target: "_blank",
+            rel: "noopener",
+            title: `Open ${new URL(siteUrl).hostname}`,
+            onClick: (ev) => ev.stopPropagation(),
+            children: "web"
+          }
+        ) : null
+      ] }),
       resultPath ? /* @__PURE__ */ u4("span", { class: "result-path", children: resultPath }) : null
     ] }),
     /* @__PURE__ */ u4("div", { class: "size", children: fmtBytes(e4.size) }),
