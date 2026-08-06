@@ -47,7 +47,7 @@ const DEFAULTS: Branding = {
   name: 'NanoClaw',
   shortName: 'NanoClaw',
   description: 'Personal Claude assistant — chat with your agent from any browser or installed device.',
-  themeColor: '#0d1117',
+  themeColor: '#151515',
   backgroundColor: '#0d1117',
   iconDir: null,
 };

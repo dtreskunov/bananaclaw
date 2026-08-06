@@ -15633,7 +15633,7 @@ var BRAND = {
   name: g4.name || "NanoClaw",
   shortName: g4.shortName || g4.name || "NanoClaw",
   description: g4.description || "",
-  themeColor: g4.themeColor || "#0d1117",
+  themeColor: g4.themeColor || "#151515",
   backgroundColor: g4.backgroundColor || "#0d1117"
 };
 
@@ -18480,7 +18480,12 @@ async function previewAttachment(file) {
   try {
     const response = await fetch(file.url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
     if (!response.ok) {
-      setPreview({ kind: "error", text: response.status === 404 ? "Attachment not found." : `HTTP ${response.status}`, name: file.filename, url: file.url });
+      setPreview({
+        kind: "error",
+        text: response.status === 404 ? "Attachment not found." : `HTTP ${response.status}`,
+        name: file.filename,
+        url: file.url
+      });
       return;
     }
     const contentLength = response.headers.get("content-length");

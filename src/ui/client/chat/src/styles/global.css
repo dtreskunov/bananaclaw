@@ -16,6 +16,7 @@
   --accent: rgba(100, 150, 255, 0.18);
   --accent-strong: rgba(100, 150, 255, 0.35);
   --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 70%, var(--surface));
+  --header-dark: #151515;
 
   /* Neutral overlays — mid-gray so they read identically in light
      and dark. Used for hover, dividers, code blocks, fills. */

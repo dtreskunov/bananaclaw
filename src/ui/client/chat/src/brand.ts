@@ -16,6 +16,6 @@ export const BRAND = {
   name: g.name || 'NanoClaw',
   shortName: g.shortName || g.name || 'NanoClaw',
   description: g.description || '',
-  themeColor: g.themeColor || '#0d1117',
+  themeColor: g.themeColor || '#151515',
   backgroundColor: g.backgroundColor || '#0d1117',
 };

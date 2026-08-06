@@ -5,6 +5,10 @@ header .brand { font-size: var(--font-lg); font-weight: 600; white-space: nowrap
 header .mobile-only { display: none; }
 .desktop-only { }
 
+@media (prefers-color-scheme: dark) {
+  header { background: var(--header-dark); }
+}
+
 @media (max-width: 720px) {
   header {
     padding: max(8px, env(safe-area-inset-top)) 10px 8px;

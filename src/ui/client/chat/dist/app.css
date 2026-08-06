@@ -9,6 +9,7 @@
   --accent: rgba(100, 150, 255, 0.18);
   --accent-strong: rgba(100, 150, 255, 0.35);
   --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 70%, var(--surface));
+  --header-dark: #151515;
   --wash-subtle: rgba(127, 127, 127, 0.05);
   --wash-soft: rgba(127, 127, 127, 0.08);
   --wash: rgba(127, 127, 127, 0.12);
@@ -381,6 +382,11 @@ header .mobile-only {
   display: none;
 }
 .desktop-only {
+}
+@media (prefers-color-scheme: dark) {
+  header {
+    background: var(--header-dark);
+  }
 }
 @media (max-width: 720px) {
   header {
