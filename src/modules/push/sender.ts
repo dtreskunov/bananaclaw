@@ -52,7 +52,7 @@ export function vapidPublicKey(): string {
   return getKeys()?.publicKey || '';
 }
 
-export interface PushPayload {
+export interface MessagePushPayload {
   v: 1;
   kind: 'message';
   groupId: string;
@@ -61,9 +61,18 @@ export interface PushPayload {
   ts: string;
 }
 
+export interface TestPushPayload {
+  v: 1;
+  kind: 'test';
+  ts: string;
+}
+
+export type PushPayload = MessagePushPayload | TestPushPayload;
+
 export const PUSH_TTL_SECONDS = 6 * 60 * 60;
 
 export function pushDeliveryOptions(payload: PushPayload): { TTL: number; topic: string } {
+  if (payload.kind === 'test') return { TTL: 60, topic: 'nanoclaw-test' };
   const topic = crypto
     .createHash('sha256')
     .update(`${payload.groupId}\0${payload.threadId}`)

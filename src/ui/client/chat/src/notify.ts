@@ -113,13 +113,13 @@ function promptForUpdate(worker: ServiceWorker): void {
   });
 }
 
-export function toggleMute(): void {
+export async function toggleMute(): Promise<void> {
   if (!notifMutedSig.value) {
     notifMutedSig.value = true;
-    void unsubscribePush();
+    await unsubscribePush();
     return;
   }
-  void enableNotifications();
+  await enableNotifications();
 }
 
 async function enableNotifications(): Promise<void> {

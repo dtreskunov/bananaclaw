@@ -144,6 +144,14 @@ async function handlePush(event) {
   } catch (_e) {
     payload = null;
   }
+  if (payload && payload.kind === 'test') {
+    return self.registration.showNotification('{{BRAND_NAME}}', {
+      body: 'Notifications are working',
+      icon: '/ui/chat/icon.svg',
+      tag: 'nanoclaw-test',
+      data: {},
+    });
+  }
   if (!payload || payload.kind !== 'message') {
     return self.registration.showNotification('{{BRAND_NAME}}', {
       body: 'New activity',

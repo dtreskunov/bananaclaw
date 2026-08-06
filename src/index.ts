@@ -19,6 +19,7 @@ import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, st
 import { createDeliveryBridge } from './delivery-bridge.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { ensureVapidKeys } from './modules/push/bootstrap.js';
+import { pruneExpiredSubscriptions } from './modules/push/db.js';
 import { resumeTypingForRunningSessions } from './modules/typing/index.js';
 import { routeInbound } from './router.js';
 import { initSearchDb, closeSearchDb } from './search-index.js';
@@ -86,6 +87,10 @@ async function main(): Promise<void> {
   // 1a. Ensure VAPID keys exist for Web Push (PWA notifications). First
   // boot generates them and persists to .env; idempotent thereafter.
   ensureVapidKeys();
+  const prunedPushSubscriptions = pruneExpiredSubscriptions(5, 90);
+  if (prunedPushSubscriptions > 0) {
+    log.info('Pruned abandoned push subscriptions', { count: prunedPushSubscriptions });
+  }
 
   // 1b. Backfill container_configs from legacy container.json files.
   // Idempotent — skips groups that already have a config row.

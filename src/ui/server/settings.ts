@@ -11,6 +11,8 @@
  *   DELETE /ui/settings/api/identities/:channel/:handle         → unlink
  *   GET    /ui/settings/api/profile                             → { displayName }
  *   PATCH  /ui/settings/api/profile                             → { displayName }
+ *   GET    /ui/settings/api/notifications                       → subscription health
+ *   POST   /ui/settings/api/notifications/test                  → send a test push
  *
  * All routes require an authenticated UI session — unauthenticated
  * requests get 401 from the API and a 303 → /ui/login from the HTML
@@ -53,6 +55,8 @@ import {
 import { sendHandleDm } from '../../modules/permissions/handle-dm.js';
 import { buildDeepLink, hasDeepLinkBuilder } from '../../modules/permissions/identity-link-deeplinks.js';
 import { getUser, updateDisplayName } from '../../modules/permissions/db/users.js';
+import { listSubscriptionsForUser } from '../../modules/push/db.js';
+import { pushAvailable, sendToUser as sendPushToUser } from '../../modules/push/sender.js';
 
 import { authenticate } from './auth.js';
 import { getBranding } from './branding.js';
@@ -107,6 +111,24 @@ async function handleApi(
   pathname: string,
   userId: string,
 ): Promise<void> {
+  if (req.method === 'GET' && pathname === '/notifications') {
+    const subscriptions = listSubscriptionsForUser(userId);
+    return json(res, 200, {
+      available: pushAvailable(),
+      count: subscriptions.length,
+      failing: subscriptions.filter((subscription) => subscription.fail_count > 0).length,
+    });
+  }
+
+  if (req.method === 'POST' && pathname === '/notifications/test') {
+    if (!pushAvailable()) return json(res, 503, { error: 'push_unavailable' });
+    if (listSubscriptionsForUser(userId).length === 0) {
+      return json(res, 409, { error: 'no_subscriptions' });
+    }
+    await sendPushToUser(userId, { v: 1, kind: 'test', ts: new Date().toISOString() });
+    return json(res, 200, { ok: true });
+  }
+
   if (req.method === 'GET' && pathname === '/identities') {
     const rows = getIdentitiesForUser(userId);
     // Only channels with credentials configured at boot have an active

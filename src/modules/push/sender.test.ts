@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { PUSH_TTL_SECONDS, pushDeliveryOptions, type PushPayload } from './sender.js';
+import { PUSH_TTL_SECONDS, pushDeliveryOptions, type MessagePushPayload } from './sender.js';
 
-function payload(threadId: string): PushPayload {
+function payload(threadId: string): MessagePushPayload {
   return {
     v: 1,
     kind: 'message',
@@ -27,5 +27,12 @@ describe('push delivery options', () => {
     expect(first).toBe(repeated);
     expect(first).not.toBe(otherThread);
     expect(first).toMatch(/^[A-Za-z0-9_-]{32}$/);
+  });
+
+  it('expires test pushes quickly without mixing them into message topics', () => {
+    expect(pushDeliveryOptions({ v: 1, kind: 'test', ts: '2026-08-06T12:00:00.000Z' })).toEqual({
+      TTL: 60,
+      topic: 'nanoclaw-test',
+    });
   });
 });

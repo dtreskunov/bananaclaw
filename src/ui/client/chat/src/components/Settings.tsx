@@ -57,6 +57,12 @@ interface ChallengeResponse {
 interface Status { ok?: string; err?: string }
 
 interface ProfileResponse { displayName?: string | null; error?: string; message?: string }
+interface NotificationHealthResponse {
+  available?: boolean;
+  count?: number;
+  failing?: number;
+  error?: string;
+}
 
 export function Settings() {
   const open = settingsOpen.value;
@@ -73,6 +79,13 @@ export function Settings() {
   const [displayName, setDisplayName] = useState<string>('');
   const [savedDisplayName, setSavedDisplayName] = useState<string>('');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [notificationHealth, setNotificationHealth] = useState<NotificationHealthResponse | null>(null);
+  const [testingNotification, setTestingNotification] = useState(false);
+
+  async function refreshNotificationHealth(): Promise<void> {
+    const r = await jget<NotificationHealthResponse>(`${API}/notifications`);
+    setNotificationHealth(r.ok ? r.data : null);
+  }
 
   async function refresh(): Promise<void> {
     const r = await jget<IdentitiesResponse>(`${API}/identities`);
@@ -98,6 +111,7 @@ export function Settings() {
     setDeepLink(null);
     setCode('');
     refresh();
+    void refreshNotificationHealth();
     (async () => {
       const r = await jget<ProfileResponse>(`${API}/profile`);
       if (r.ok) {
@@ -125,6 +139,26 @@ export function Settings() {
       me.value = next;
       showToast('Display name updated');
     } finally { setSavingProfile(false); }
+  }
+
+  async function handleNotificationToggle(): Promise<void> {
+    await toggleMute();
+    await refreshNotificationHealth();
+  }
+
+  async function sendTestNotification(): Promise<void> {
+    setTestingNotification(true);
+    try {
+      const r = await jsend<NotificationHealthResponse>(`${API}/notifications/test`, 'POST');
+      if (!r.ok) {
+        showToast(r.data.error === 'no_subscriptions' ? 'No notification devices are registered' : 'Test notification failed', 'err');
+        return;
+      }
+      showToast('Test notification sent');
+      await refreshNotificationHealth();
+    } finally {
+      setTestingNotification(false);
+    }
   }
 
   async function startLink(): Promise<void> {
@@ -244,10 +278,20 @@ export function Settings() {
           <section>
             <h3>Notifications</h3>
             <label class="settings-row">
-              <input type="checkbox" checked={!muted} onChange={toggleMute} />
+              <input type="checkbox" checked={!muted} onChange={() => { void handleNotificationToggle(); }} />
               <span>Browser notifications for new messages</span>
             </label>
-            <p class="muted">{notificationStatus(muted, notificationPermission())}</p>
+            <p class="muted">
+              {notificationStatus(muted, notificationPermission())}
+              {notificationHealth?.available && notificationHealth.count != null
+                ? ` ${notificationHealth.count} registered device${notificationHealth.count === 1 ? '' : 's'}${notificationHealth.failing ? `; ${notificationHealth.failing} need attention` : ''}.`
+                : ''}
+            </p>
+            <button
+              type="button"
+              disabled={muted || !notificationHealth?.count || testingNotification}
+              onClick={() => { void sendTestNotification(); }}
+            >{testingNotification ? 'Sending…' : 'Send test notification'}</button>
           </section>
 
           <section>

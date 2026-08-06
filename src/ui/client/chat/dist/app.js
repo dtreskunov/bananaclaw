@@ -17412,13 +17412,13 @@ function promptForUpdate(worker) {
     reloadWhenActivated();
   });
 }
-function toggleMute() {
+async function toggleMute() {
   if (!notifMutedSig.value) {
     notifMutedSig.value = true;
-    void unsubscribePush();
+    await unsubscribePush();
     return;
   }
-  void enableNotifications();
+  await enableNotifications();
 }
 async function enableNotifications() {
   const result = await ensureSubscribed(true);
@@ -23811,6 +23811,12 @@ function Settings() {
   const [displayName, setDisplayName] = h2("");
   const [savedDisplayName, setSavedDisplayName] = h2("");
   const [savingProfile, setSavingProfile] = h2(false);
+  const [notificationHealth, setNotificationHealth] = h2(null);
+  const [testingNotification, setTestingNotification] = h2(false);
+  async function refreshNotificationHealth() {
+    const r4 = await jget(`${API}/notifications`);
+    setNotificationHealth(r4.ok ? r4.data : null);
+  }
   async function refresh() {
     const r4 = await jget(`${API}/identities`);
     if (!r4.ok) {
@@ -23832,6 +23838,7 @@ function Settings() {
     setDeepLink(null);
     setCode("");
     refresh();
+    void refreshNotificationHealth();
     (async () => {
       const r4 = await jget(`${API}/profile`);
       if (r4.ok) {
@@ -23859,6 +23866,24 @@ function Settings() {
       showToast("Display name updated");
     } finally {
       setSavingProfile(false);
+    }
+  }
+  async function handleNotificationToggle() {
+    await toggleMute();
+    await refreshNotificationHealth();
+  }
+  async function sendTestNotification() {
+    setTestingNotification(true);
+    try {
+      const r4 = await jsend(`${API}/notifications/test`, "POST");
+      if (!r4.ok) {
+        showToast(r4.data.error === "no_subscriptions" ? "No notification devices are registered" : "Test notification failed", "err");
+        return;
+      }
+      showToast("Test notification sent");
+      await refreshNotificationHealth();
+    } finally {
+      setTestingNotification(false);
     }
   }
   async function startLink() {
@@ -24002,10 +24027,26 @@ function Settings() {
         /* @__PURE__ */ u4("section", { children: [
           /* @__PURE__ */ u4("h3", { children: "Notifications" }),
           /* @__PURE__ */ u4("label", { class: "settings-row", children: [
-            /* @__PURE__ */ u4("input", { type: "checkbox", checked: !muted, onChange: toggleMute }),
+            /* @__PURE__ */ u4("input", { type: "checkbox", checked: !muted, onChange: () => {
+              void handleNotificationToggle();
+            } }),
             /* @__PURE__ */ u4("span", { children: "Browser notifications for new messages" })
           ] }),
-          /* @__PURE__ */ u4("p", { class: "muted", children: notificationStatus(muted, notificationPermission()) })
+          /* @__PURE__ */ u4("p", { class: "muted", children: [
+            notificationStatus(muted, notificationPermission()),
+            notificationHealth?.available && notificationHealth.count != null ? ` ${notificationHealth.count} registered device${notificationHealth.count === 1 ? "" : "s"}${notificationHealth.failing ? `; ${notificationHealth.failing} need attention` : ""}.` : ""
+          ] }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              disabled: muted || !notificationHealth?.count || testingNotification,
+              onClick: () => {
+                void sendTestNotification();
+              },
+              children: testingNotification ? "Sending\u2026" : "Send test notification"
+            }
+          )
         ] }),
         /* @__PURE__ */ u4("section", { children: [
           /* @__PURE__ */ u4("h3", { children: "Sounds" }),
