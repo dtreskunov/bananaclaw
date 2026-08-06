@@ -12,7 +12,7 @@ interface Props {
 
 interface IssuedSession {
   url: string;
-  expiresAt: string;
+  expiresAt: string | null;
 }
 
 export function PrivateWebView({ groupId, path, title, fragment }: Props) {

@@ -167,6 +167,19 @@ describe('POST private-web-session', () => {
     expect((await call(GROUP_ID, { path: 'index.html' })).status()).toBe(201);
   });
 
+  it('previews enabled public-site HTML from its deployed web root', async () => {
+    getDb().prepare('UPDATE agent_groups SET site_slug = ?, site_enabled = 1 WHERE id = ?').run('private', GROUP_ID);
+    const siteRoot = path.join(TEST_GROUPS_DIR, FOLDER, 'private.pages.test');
+    fs.mkdirSync(path.join(siteRoot, 'blog'), { recursive: true });
+    fs.writeFileSync(path.join(siteRoot, 'index.html'), '<meta http-equiv="refresh" content="0;url=/blog/index.html">');
+    fs.writeFileSync(path.join(siteRoot, 'blog', 'index.html'), '<h1>blog</h1>');
+
+    const response = await call(GROUP_ID, { path: 'private.pages.test/index.html' });
+    expect(response.status()).toBe(201);
+    expect(response.body()).toMatchObject({ url: 'https://private.pages.test/index.html', expiresAt: null });
+    expect(getDb().prepare('SELECT COUNT(*) AS n FROM ui_private_web_sessions').get()).toEqual({ n: 0 });
+  });
+
   it('carries special-character paths without double encoding', async () => {
     const response = await call(GROUP_ID, { path: 'reports/daily 100%.html' });
     expect(response.status()).toBe(201);

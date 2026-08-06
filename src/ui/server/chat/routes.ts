@@ -30,6 +30,7 @@ import type { PendingApproval } from '../../../types.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
 import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js';
+import { siteFqdn } from '../pages/site.js';
 import { createPrivateWebSession } from '../private-web-db.js';
 import { resolvePrivateWebEntry } from '../private-web-path.js';
 import { uiBaseUrl } from '../server.js';
@@ -326,6 +327,13 @@ async function handleCreatePrivateWebSession(
     return json(ctx, 404, { error: 'not_found' });
   }
   if (!resolvePrivateWebEntry(group, relPath)) return json(ctx, 404, { error: 'not_found' });
+
+  const fqdn = group.site_enabled ? siteFqdn(group) : null;
+  const sitePrefix = fqdn ? `${fqdn}/` : null;
+  if (fqdn && sitePrefix && relPath.startsWith(sitePrefix)) {
+    const publicPath = relPath.slice(sitePrefix.length).split('/').map(encodeURIComponent).join('/');
+    return json(ctx, 201, { url: `https://${fqdn}/${publicPath}`, expiresAt: null });
+  }
 
   const issued = createPrivateWebSession({ parentSessionHash, userId, agentGroupId: groupId });
   const redeemUrl = new URL(`https://secure-${issued.id}.${PAGES_BASE_DOMAIN}/_auth/redeem`);
