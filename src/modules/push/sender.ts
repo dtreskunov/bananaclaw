@@ -6,6 +6,7 @@
  * text out of the push transport, which is end-to-end encrypted to the user
  * agent but otherwise visible to the push service operator's metadata.
  */
+import crypto from 'crypto';
 import webpush from 'web-push';
 
 import { readEnvFile } from '../../env.js';
@@ -60,6 +61,17 @@ export interface PushPayload {
   ts: string;
 }
 
+export const PUSH_TTL_SECONDS = 6 * 60 * 60;
+
+export function pushDeliveryOptions(payload: PushPayload): { TTL: number; topic: string } {
+  const topic = crypto
+    .createHash('sha256')
+    .update(`${payload.groupId}\0${payload.threadId}`)
+    .digest('base64url')
+    .slice(0, 32);
+  return { TTL: PUSH_TTL_SECONDS, topic };
+}
+
 /**
  * Fire push notifications to all subscriptions registered for `userId`.
  * Fire-and-forget from the caller's perspective — errors are logged and
@@ -74,9 +86,11 @@ export async function sendToUser(userId: string, payload: PushPayload): Promise<
   await Promise.all(
     subs.map(async (sub) => {
       try {
-        await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, body, {
-          TTL: 60,
-        });
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          body,
+          pushDeliveryOptions(payload),
+        );
         markSubscriptionSuccess(sub.endpoint);
       } catch (err) {
         const status = (err as { statusCode?: number }).statusCode;
