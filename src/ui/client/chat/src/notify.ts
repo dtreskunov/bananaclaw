@@ -10,8 +10,9 @@
 import { effect } from '@preact/signals';
 import { notifMutedSig, NOTIF_MUTE_KEY } from './state';
 import type { ChatMessageFile } from './types';
-import { showStickyToast } from './components/Toast';
+import { showStickyToast, showToast } from './components/Toast';
 import { bumpUnread } from './badge';
+import { shouldAutoSubscribe, type NotificationPermissionState } from './notification-policy';
 
 let registration: ServiceWorkerRegistration | null = null;
 let updatePromptShown = false;
@@ -32,7 +33,8 @@ export function loadMuted(): boolean {
 }
 
 export function initNotif(): void {
-  notifMutedSig.value = loadMuted();
+  const permission = notificationPermission();
+  notifMutedSig.value = loadMuted() || permission !== 'granted';
   effect(() => {
     try {
       localStorage.setItem(NOTIF_MUTE_KEY, notifMutedSig.value ? '1' : '0');
@@ -41,8 +43,15 @@ export function initNotif(): void {
     }
   });
   void registerServiceWorker().then(() => {
-    if (!notifMutedSig.value) void ensureSubscribed();
+    if (shouldAutoSubscribe(notifMutedSig.value, notificationPermission())) {
+      void ensureSubscribed(false);
+    }
   });
+}
+
+export function notificationPermission(): NotificationPermissionState {
+  if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';
+  return Notification.permission;
 }
 
 async function registerServiceWorker(): Promise<void> {
@@ -105,55 +114,76 @@ function promptForUpdate(worker: ServiceWorker): void {
 }
 
 export function toggleMute(): void {
-  notifMutedSig.value = !notifMutedSig.value;
-  if (notifMutedSig.value) {
+  if (!notifMutedSig.value) {
+    notifMutedSig.value = true;
     void unsubscribePush();
-  } else {
-    void ensureSubscribed();
+    return;
   }
+  void enableNotifications();
 }
 
-async function ensureSubscribed(): Promise<void> {
-  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+async function enableNotifications(): Promise<void> {
+  const result = await ensureSubscribed(true);
+  if (result === 'enabled') {
+    notifMutedSig.value = false;
+    return;
+  }
+  notifMutedSig.value = true;
+  showToast(
+    result === 'denied'
+      ? 'Notifications are blocked in browser settings'
+      : result === 'unsupported'
+        ? 'Notifications are not supported on this device'
+        : 'Could not enable notifications',
+    'err',
+    3000,
+  );
+}
+
+type SubscribeResult = 'enabled' | 'denied' | 'unsupported' | 'failed';
+
+async function ensureSubscribed(requestPermission: boolean): Promise<SubscribeResult> {
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return 'unsupported';
+  }
   let permission = Notification.permission;
-  if (permission === 'default') {
+  if (permission === 'default' && requestPermission) {
     try {
       permission = await Notification.requestPermission();
     } catch {
-      return;
+      return 'failed';
     }
   }
-  if (permission !== 'granted') {
-    notifMutedSig.value = true;
-    return;
-  }
+  if (permission !== 'granted') return 'denied';
   if (!registration) {
     try {
       registration = await navigator.serviceWorker.ready;
     } catch {
-      return;
+      return 'failed';
     }
   }
   try {
     let sub = await registration.pushManager.getSubscription();
     if (!sub) {
       const keyResp = await fetch('api/push/public-key', { credentials: 'include' });
-      if (!keyResp.ok) return;
+      if (!keyResp.ok) return 'failed';
       const { publicKey } = (await keyResp.json()) as { publicKey?: string };
-      if (!publicKey) return;
+      if (!publicKey) return 'failed';
       sub = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey).buffer as ArrayBuffer,
       });
     }
-    await fetch('api/push/subscribe', {
+    const response = await fetch('api/push/subscribe', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(sub.toJSON()),
     });
+    return response.ok ? 'enabled' : 'failed';
   } catch (err) {
     console.warn('push subscribe failed', err);
+    return 'failed';
   }
 }
 

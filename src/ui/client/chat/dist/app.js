@@ -17319,6 +17319,17 @@ function bumpUnread() {
   apply();
 }
 
+// src/notification-policy.ts
+function shouldAutoSubscribe(muted, permission) {
+  return !muted && permission === "granted";
+}
+function notificationStatus(muted, permission) {
+  if (permission === "unsupported") return "Browser notifications are not supported on this device.";
+  if (permission === "denied") return "Blocked by the browser. Allow notifications in site settings to enable them.";
+  if (muted) return "Off. Enabling will ask the browser for permission.";
+  return "Enabled for new messages.";
+}
+
 // src/notify.ts
 var registration = null;
 var updatePromptShown = false;
@@ -17336,7 +17347,8 @@ function loadMuted() {
   }
 }
 function initNotif() {
-  notifMutedSig.value = loadMuted();
+  const permission = notificationPermission();
+  notifMutedSig.value = loadMuted() || permission !== "granted";
   j3(() => {
     try {
       localStorage.setItem(NOTIF_MUTE_KEY, notifMutedSig.value ? "1" : "0");
@@ -17344,8 +17356,14 @@ function initNotif() {
     }
   });
   void registerServiceWorker().then(() => {
-    if (!notifMutedSig.value) void ensureSubscribed();
+    if (shouldAutoSubscribe(notifMutedSig.value, notificationPermission())) {
+      void ensureSubscribed(false);
+    }
   });
+}
+function notificationPermission() {
+  if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
+  return Notification.permission;
 }
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
@@ -17395,54 +17413,68 @@ function promptForUpdate(worker) {
   });
 }
 function toggleMute() {
-  notifMutedSig.value = !notifMutedSig.value;
-  if (notifMutedSig.value) {
+  if (!notifMutedSig.value) {
+    notifMutedSig.value = true;
     void unsubscribePush();
-  } else {
-    void ensureSubscribed();
+    return;
   }
+  void enableNotifications();
 }
-async function ensureSubscribed() {
-  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+async function enableNotifications() {
+  const result = await ensureSubscribed(true);
+  if (result === "enabled") {
+    notifMutedSig.value = false;
+    return;
+  }
+  notifMutedSig.value = true;
+  showToast(
+    result === "denied" ? "Notifications are blocked in browser settings" : result === "unsupported" ? "Notifications are not supported on this device" : "Could not enable notifications",
+    "err",
+    3e3
+  );
+}
+async function ensureSubscribed(requestPermission) {
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+    return "unsupported";
+  }
   let permission = Notification.permission;
-  if (permission === "default") {
+  if (permission === "default" && requestPermission) {
     try {
       permission = await Notification.requestPermission();
     } catch {
-      return;
+      return "failed";
     }
   }
-  if (permission !== "granted") {
-    notifMutedSig.value = true;
-    return;
-  }
+  if (permission !== "granted") return "denied";
   if (!registration) {
     try {
       registration = await navigator.serviceWorker.ready;
     } catch {
-      return;
+      return "failed";
     }
   }
   try {
     let sub = await registration.pushManager.getSubscription();
     if (!sub) {
       const keyResp = await fetch("api/push/public-key", { credentials: "include" });
-      if (!keyResp.ok) return;
+      if (!keyResp.ok) return "failed";
       const { publicKey } = await keyResp.json();
-      if (!publicKey) return;
+      if (!publicKey) return "failed";
       sub = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey).buffer
       });
     }
-    await fetch("api/push/subscribe", {
+    const response = await fetch("api/push/subscribe", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(sub.toJSON())
     });
+    return response.ok ? "enabled" : "failed";
   } catch (err) {
     console.warn("push subscribe failed", err);
+    return "failed";
   }
 }
 async function unsubscribePush() {
@@ -23973,7 +24005,7 @@ function Settings() {
             /* @__PURE__ */ u4("input", { type: "checkbox", checked: !muted, onChange: toggleMute }),
             /* @__PURE__ */ u4("span", { children: "Browser notifications for new messages" })
           ] }),
-          /* @__PURE__ */ u4("p", { class: "muted", children: muted ? "Currently muted. New messages will not raise notifications." : "Enabled. Permission is requested on first toggle." })
+          /* @__PURE__ */ u4("p", { class: "muted", children: notificationStatus(muted, notificationPermission()) })
         ] }),
         /* @__PURE__ */ u4("section", { children: [
           /* @__PURE__ */ u4("h3", { children: "Sounds" }),

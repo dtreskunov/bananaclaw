@@ -4,7 +4,8 @@ import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { settingsOpen, notifMutedSig, progressSoundMutedSig, completionSoundMutedSig, CHANNEL_META, isMobile, me } from '../state';
 import { returnToUserMenu } from '../actions';
-import { toggleMute, shouldShowIosInstallHint } from '../notify';
+import { notificationPermission, toggleMute, shouldShowIosInstallHint } from '../notify';
+import { notificationStatus } from '../notification-policy';
 import { installAvailable, installCompleted, triggerInstall } from '../install';
 import { useBackButtonCloses } from '../modalBackButton';
 import { showToast } from './Toast';
@@ -246,9 +247,7 @@ export function Settings() {
               <input type="checkbox" checked={!muted} onChange={toggleMute} />
               <span>Browser notifications for new messages</span>
             </label>
-            <p class="muted">{muted
-              ? 'Currently muted. New messages will not raise notifications.'
-              : 'Enabled. Permission is requested on first toggle.'}</p>
+            <p class="muted">{notificationStatus(muted, notificationPermission())}</p>
           </section>
 
           <section>
