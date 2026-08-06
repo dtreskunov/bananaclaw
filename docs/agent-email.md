@@ -6,7 +6,7 @@ Each agent group can own a Resend address such as `treskowitz@bananaclaw.app`. T
 
 The Resend channel must be installed and configured with both `RESEND_API_KEY` and `RESEND_FROM_ADDRESS`. The domain portion of `RESEND_FROM_ADDRESS` is the domain shown in Settings and used for agent addresses.
 
-Resend must be configured to receive mail for that domain and deliver `email.received` webhooks to NanoClaw. A catch-all receiving domain is required because addresses are allocated dynamically.
+Resend must be configured to receive mail for that domain and deliver `email.received`, `email.bounced`, `email.failed`, and `email.suppressed` webhooks to NanoClaw. A catch-all receiving domain is required because addresses are allocated dynamically.
 
 ## Enabling email
 
@@ -28,6 +28,8 @@ Fresh mail composed with `send_email` uses a tokenized return address derived fr
 2. Mail without a correlation match follows the normal cold inbound-email path and starts or resumes a mailbox thread.
 
 Direct response routing preserves the originating session's delivery destination. For example, if a web chat asks the agent to send an email, the recipient's response wakes that web session and the agent's result returns to the web chat. The external sender, subject, and email-thread metadata remain visible to the agent in the inbound message.
+
+Permanent delivery failures use the same return-address token. A matching `email.bounced`, `email.failed`, or `email.suppressed` webhook writes a durable internal delivery report to the originating session and wakes the agent. The report includes the recipient, subject, and provider reason so the agent can stop waiting, report the failure, and retry only with a corrected address. Terminal failures remove their correlation after a successful wake; a failed wake keeps the correlation so the webhook can be retried. Transient `email.delivery_delayed` events do not wake the agent.
 
 HTML is stored as an untrusted `original-message.html` attachment. The plain-text body is included in the message when the sender provides one; NanoClaw does not derive text from HTML-only mail.
 

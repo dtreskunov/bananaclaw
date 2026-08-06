@@ -66,7 +66,7 @@ Both must be clean before proceeding. `resend-registration.test.ts` is the one i
 4. Set up a webhook:
    - Go to **Webhooks** > **Add webhook**.
    - URL: `https://your-domain/webhook/resend`.
-   - Events: select **email.received**.
+   - Events: select **email.received**, **email.bounced**, **email.failed**, and **email.suppressed**.
    - Copy the signing secret.
 
 ### Configure environment

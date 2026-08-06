@@ -73,6 +73,118 @@ export function parseTokenizedReplyAddress(address: string): { alias: string; to
   return { alias: `${match[1]}@${match[3]}`, token: match[2] };
 }
 
+interface ResendEmailEventData {
+  created_at: string;
+  email_id: string;
+  from: string;
+  to: string[];
+  subject: string;
+}
+
+export type ResendDeliveryFailureEvent =
+  | {
+      type: 'email.bounced';
+      created_at: string;
+      data: ResendEmailEventData & { bounce: { message: string; type: string; subType: string } };
+    }
+  | {
+      type: 'email.failed';
+      created_at: string;
+      data: ResendEmailEventData & { failed: { reason: string } };
+    }
+  | {
+      type: 'email.suppressed';
+      created_at: string;
+      data: ResendEmailEventData & { suppressed: { message: string; type: string } };
+    };
+
+function isResendDeliveryFailureEvent(event: { type?: string }): event is ResendDeliveryFailureEvent {
+  return event.type === 'email.bounced' || event.type === 'email.failed' || event.type === 'email.suppressed';
+}
+
+function recipientFromEmailThreadId(threadId: string): string | null {
+  const parts = threadId.split(':');
+  if (parts[0] !== 'resend') return null;
+  if (parts.length === 4) return parts[2]?.toLowerCase() || null;
+  if (parts.length === 3) return parts[1]?.toLowerCase() || null;
+  return null;
+}
+
+export async function routeResendDeliveryFailure(event: ResendDeliveryFailureEvent): Promise<boolean> {
+  const tokenizedSender = parseTokenizedReplyAddress(event.data.from);
+  const correlation = tokenizedSender ? getResendOutboundCorrelationByToken(tokenizedSender.token) : undefined;
+  const originSession = correlation ? getSession(correlation.origin_session_id) : undefined;
+  if (!correlation || !originSession) return false;
+
+  const intendedRecipient = recipientFromEmailThreadId(correlation.email_thread_id);
+  const failedRecipients = event.data.to.map(parseEmailAddress);
+  if (!intendedRecipient || !failedRecipients.includes(intendedRecipient)) {
+    log.warn('Ignoring Resend delivery failure for non-primary recipient', {
+      eventType: event.type,
+      emailId: event.data.email_id,
+      intendedRecipient,
+      failedRecipients,
+    });
+    return false;
+  }
+
+  const failure =
+    event.type === 'email.bounced'
+      ? {
+          reason: event.data.bounce.message,
+          type: event.data.bounce.type,
+          subType: event.data.bounce.subType,
+        }
+      : event.type === 'email.failed'
+        ? { reason: event.data.failed.reason }
+        : { reason: event.data.suppressed.message, type: event.data.suppressed.type };
+
+  const details = [
+    'System delivery report: an email you sent was not delivered.',
+    `Recipient: ${intendedRecipient}`,
+    event.data.subject ? `Subject: ${event.data.subject}` : '',
+    `Failure event: ${event.type}`,
+    'Tell the user the email was not delivered. Do not continue waiting for a response. Retry only with a verified corrected address.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  writeSessionMessage(originSession.agent_group_id, originSession.id, {
+    id: `resend-delivery-failure:${event.data.email_id}`,
+    kind: 'chat',
+    timestamp: event.created_at || event.data.created_at,
+    platformId: originSession.agent_group_id,
+    channelType: 'agent',
+    threadId: null,
+    content: JSON.stringify({
+      text: details,
+      sender: 'NanoClaw email delivery',
+      senderId: 'system',
+      emailDeliveryFailure: {
+        provider: 'resend',
+        event: event.type,
+        recipient: intendedRecipient,
+        subject: event.data.subject,
+        ...failure,
+      },
+    }),
+    trigger: 1,
+    idempotent: true,
+  });
+  const woke = await wakeContainer(originSession);
+  if (!woke) {
+    throw new Error(`Failed to wake origin session ${originSession.id} for Resend delivery failure`);
+  }
+  deleteResendOutboundCorrelation(correlation.correlation_token);
+  log.info('Resend delivery failure routed to origin session', {
+    eventType: event.type,
+    emailId: event.data.email_id,
+    recipient: intendedRecipient,
+    originSessionId: originSession.id,
+  });
+  return true;
+}
+
 export interface InboundEmailBody {
   body: string;
   htmlAttachment?: { type: 'file'; name: string; mimeType: 'text/html'; data: string };
@@ -142,6 +254,7 @@ registerChannelAdapter('resend', {
       fromName: env.RESEND_FROM_NAME,
       webhookSecret: env.RESEND_WEBHOOK_SECRET,
     });
+    const resendClient = adapter.getResend();
 
     // ── Alias-aware threadId encoding ────────────────────────────────
     const tr = adapter.threadResolver;
@@ -253,18 +366,37 @@ registerChannelAdapter('resend', {
     };
 
     // ── Inbound: key messaging_group on recipient alias ──────────────
-    // Replaces upstream handleWebhook to extract the alias from email.to[0]
-    // and pass it through to the resolver. The rest mirrors upstream.
+    // Replaces upstream handleWebhook to route terminal delivery failures
+    // before its webhook handler filters out every event except email.received,
+    // then extracts the recipient alias for the normal inbound path.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     adapter.handleWebhook = async function (request: Request, options?: any): Promise<Response> {
       if (!(this.webhookHandler && this.chat)) {
         throw new Error('Adapter not initialized. Call initialize() first.');
       }
-      const result = await this.webhookHandler.parseWebhookRequest(request);
-      if (!result.event) return new Response(null, { status: result.status });
-      const email = await this.webhookHandler.fetchEmailContent(result.event.data.email_id);
-      if (result.event.data.attachments?.length && !email.attachments?.length) {
-        email.attachments = result.event.data.attachments;
+      const webhookBody = await request.text();
+      let event: any;
+      try {
+        event = resendClient.webhooks.verify({
+          payload: webhookBody,
+          headers: {
+            id: request.headers.get('svix-id') || '',
+            timestamp: request.headers.get('svix-timestamp') || '',
+            signature: request.headers.get('svix-signature') || '',
+          },
+          webhookSecret: env.RESEND_WEBHOOK_SECRET,
+        });
+      } catch {
+        return new Response(null, { status: 401 });
+      }
+      if (isResendDeliveryFailureEvent(event)) {
+        await routeResendDeliveryFailure(event);
+        return new Response(null, { status: 200 });
+      }
+      if (event.type !== 'email.received') return new Response(null, { status: 200 });
+      const email = await this.webhookHandler.fetchEmailContent(event.data.email_id);
+      if (event.data.attachments?.length && !email.attachments?.length) {
+        email.attachments = event.data.attachments;
       }
       const senderAddress = parseEmailAddress(email.from);
       const tokenizedRecipient = email.to?.map(parseTokenizedReplyAddress).find(Boolean) || null;
@@ -478,7 +610,6 @@ registerChannelAdapter('resend', {
     // per Resend's API) before the real send. Safe because the bridge
     // is `concurrency: 'queue'` — deliveries are serialized.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resendClient = (adapter as any).getResend();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const origSend = resendClient.emails.send.bind(resendClient.emails);
     let pendingAttachments: Array<{ filename: string; content: string }> | null = null;
