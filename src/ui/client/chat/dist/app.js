@@ -18231,11 +18231,11 @@ function connectChatWs(ctx2) {
         deliveryOrigin
       );
       bumpActiveThread();
+      if (dir === "out") maybeNotify(text, payload.files || []);
       if (finalResponse) {
         activityLog.value = [];
         refs.carryActivity = [];
         playCompletionChime();
-        maybeNotify(text, payload.files || []);
       }
       return;
     }

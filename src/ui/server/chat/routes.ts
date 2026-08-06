@@ -1210,6 +1210,7 @@ function handlePushNotification(ctx: Ctx, userId: string): void {
     groupId,
     threadId,
     msgId,
+    deliveryOrigin: msg.deliveryOrigin ?? null,
   });
 }
 

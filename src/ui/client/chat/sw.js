@@ -168,6 +168,7 @@ async function handlePush(event) {
   let body = 'New message';
   let icon = '/ui/chat/icon.svg';
   let timestamp = null;
+  let deliveryOrigin = null;
   try {
     const url = `${NOTIF_DETAILS_URL}?groupId=${encodeURIComponent(groupId)}&threadId=${encodeURIComponent(
       threadId,
@@ -178,6 +179,7 @@ async function handlePush(event) {
       if (detail.title) title = detail.title;
       if (detail.body) body = detail.body;
       if (detail.icon) icon = detail.icon;
+      if (detail.deliveryOrigin) deliveryOrigin = detail.deliveryOrigin;
       if (detail.timestamp) {
         // Server returns SQLite UTC format "YYYY-MM-DD HH:MM:SS" (no tz).
         // Normalize to ISO so Date.parse interprets as UTC, matching the
@@ -191,11 +193,23 @@ async function handlePush(event) {
     // Network/auth failed — fall through with generic body.
   }
 
+  // Alert on the first mid-turn update, then silently replace it with newer
+  // progress from the same thread. A final response always alerts again.
+  let renotify = true;
+  if (deliveryOrigin === 'send_message') {
+    try {
+      const existing = await self.registration.getNotifications({ tag });
+      renotify = shouldRenotify(deliveryOrigin, existing.length > 0);
+    } catch (_e) {
+      /* retain normal alert behavior when notification lookup is unavailable */
+    }
+  }
+
   await self.registration.showNotification(title, {
     body,
     icon,
     tag,
-    renotify: true,
+    renotify,
     timestamp: timestamp || undefined,
     data: { groupId, threadId, msgId },
     actions: [
@@ -203,6 +217,17 @@ async function handlePush(event) {
       { action: 'dismiss', title: 'Dismiss' },
     ],
   });
+  try {
+    if (self.navigator && typeof self.navigator.setAppBadge === 'function') {
+      await self.navigator.setAppBadge();
+    }
+  } catch (_e) {
+    /* Badging API is optional */
+  }
+}
+
+function shouldRenotify(deliveryOrigin, hasExistingNotification) {
+  return deliveryOrigin !== 'send_message' || !hasExistingNotification;
 }
 
 self.addEventListener('notificationclick', (event) => {

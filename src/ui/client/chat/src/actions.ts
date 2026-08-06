@@ -889,6 +889,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
         deliveryOrigin,
       );
       bumpActiveThread();
+      if (dir === 'out') maybeNotify(text, payload.files || []);
       if (finalResponse) {
         // Final response arrived — the live activity trace has been carried
         // onto the message bubble above; clear the live log and carry buffer
@@ -896,7 +897,6 @@ function connectChatWs(ctx: ChatSocketContext): void {
         activityLog.value = [];
         refs.carryActivity = [];
         playCompletionChime();
-        maybeNotify(text, payload.files || []);
       }
       return;
     }
