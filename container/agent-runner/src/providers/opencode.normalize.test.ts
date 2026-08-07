@@ -1,6 +1,61 @@
 import { describe, it, expect } from 'bun:test';
 
-import { normalizeAssistantText } from './opencode.js';
+import { classifyAssistantResult, hasPseudoToolCallMarkup, normalizeAssistantText } from './opencode.js';
+
+describe('hasPseudoToolCallMarkup', () => {
+  it('recognizes MiniMax tool XML emitted as text', () => {
+    expect(hasPseudoToolCallMarkup(
+      '<think>continue<tool_call><invoke name="bash"><command>cp a b</command></invoke></tool_call>',
+    )).toBe(true);
+    expect(hasPseudoToolCallMarkup(
+      '<think>continue]<]minimax[>[<invoke name="bash">',
+    )).toBe(true);
+  });
+
+  it('does not classify ordinary reasoning or delivered text', () => {
+    expect(hasPseudoToolCallMarkup('<think>checking the files</think>')).toBe(false);
+    expect(hasPseudoToolCallMarkup(
+      '<think>The documented format uses <command>ls</command>.</think>',
+    )).toBe(false);
+    expect(hasPseudoToolCallMarkup('<message to="web">Done.</message>')).toBe(false);
+    expect(hasPseudoToolCallMarkup(
+      '<message to="web">The syntax is <tool_call>...</tool_call>.</message>',
+    )).toBe(false);
+    expect(hasPseudoToolCallMarkup(
+      'Example:\n```xml\n<tool_call><invoke name="bash"></invoke></tool_call>\n```',
+    )).toBe(false);
+    expect(hasPseudoToolCallMarkup(
+      'Example:\n~~~xml\n<tool_call><invoke name="bash"></invoke></tool_call>\n~~~',
+    )).toBe(false);
+  });
+});
+
+describe('classifyAssistantResult', () => {
+  it('suppresses the entire apparent reply when strong pseudo-tool markup is present', () => {
+    expect(classifyAssistantResult(
+      '<tool_call><invoke name="bash"><command>publish</command></invoke></tool_call>' +
+        '<message to="web">Published.</message>',
+    )).toMatchObject({ text: '', strippedToEmpty: true, malformedToolCall: true });
+  });
+
+  it('preserves a valid reply after an earlier schema-rejected tool call', () => {
+    expect(classifyAssistantResult(
+      '<message to="web">Recovered without another retry.</message>',
+      true,
+    )).toMatchObject({
+      text: '<message to="web">Recovered without another retry.</message>',
+      malformedToolCall: false,
+    });
+  });
+
+  it('marks a schema rejection unresolved when no final reply follows it', () => {
+    expect(classifyAssistantResult('', true)).toMatchObject({
+      text: '',
+      strippedToEmpty: true,
+      malformedToolCall: true,
+    });
+  });
+});
 
 describe('normalizeAssistantText — leading "<" restore', () => {
   it('restores a stripped <message> open tag', () => {

@@ -4,7 +4,7 @@ import fs from 'fs';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
-import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions } from './types.js';
 import { pickActivityDetail } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { parseAssistantOutput } from '../formatter.js';
@@ -21,6 +21,47 @@ function log(msg: string): void {
  */
 export function normalizeAssistantText(raw: string): string {
   return parseAssistantOutput(raw).normalizedText;
+}
+
+const PSEUDO_TOOL_MARKER_RE = /<tool_call\b|<invoke\s+name=|\]<\]minimax\[>/i;
+
+function stripMarkdownCodeExamples(text: string): string {
+  return text
+    .replace(/(`{3,}|~{3,})[^\n]*\n[\s\S]*?\1/g, '')
+    .replace(/`[^`\n]*`/g, '');
+}
+
+function parsedOutputHasPseudoToolMarkup(parsed: ReturnType<typeof parseAssistantOutput>): boolean {
+  return parsed.segments.some((segment) =>
+    (segment.kind === 'think' || segment.kind === 'unwrapped') &&
+    PSEUDO_TOOL_MARKER_RE.test(stripMarkdownCodeExamples(segment.text)),
+  );
+}
+
+/** True when a model printed an XML-like tool invocation outside valid
+ * delivery/internal blocks and Markdown code examples. */
+export function hasPseudoToolCallMarkup(raw: string): boolean {
+  return parsedOutputHasPseudoToolMarkup(parseAssistantOutput(raw));
+}
+
+export function classifyAssistantResult(raw: string, schemaRejectedToolCall = false): {
+  text: string;
+  strippedToEmpty: boolean;
+  malformedToolCall: boolean;
+  recoveredFromUnclosedThink: boolean;
+} {
+  const rawResultNonEmpty = raw.trim().length > 0;
+  const parsed = parseAssistantOutput(raw);
+  const pseudoToolCall = parsedOutputHasPseudoToolMarkup(parsed);
+  const unresolvedSchemaRejection = schemaRejectedToolCall && parsed.normalizedText.trim().length === 0;
+  const malformedToolCall = pseudoToolCall || unresolvedSchemaRejection;
+  const text = malformedToolCall ? '' : parsed.normalizedText;
+  return {
+    text,
+    strippedToEmpty: malformedToolCall || (rawResultNonEmpty && text.trim().length === 0),
+    malformedToolCall,
+    recoveredFromUnclosedThink: parsed.diagnostics.includes('unclosed-think'),
+  };
 }
 
 // ── Model parameters (model_params bag) ──────────────────────────────────
@@ -173,6 +214,7 @@ export function formatProgressFromPart(
       return {
         kind: 'tool', id: part.callID || part.id, tool, status,
         ...(detail ? { detail } : {}),
+        ...(isSchemaRejectedNativeToolPart(part) ? { rejectedBeforeExecution: true } : {}),
         ...(part.state?.title ? { title: part.state.title } : {}),
         ...(status === 'error' && part.state?.error ? { error: part.state.error } : {}),
         ...(typeof start === 'number' && typeof end === 'number' ? { durationMs: Math.max(0, end - start) } : {}),
@@ -191,6 +233,17 @@ export function formatProgressFromPart(
     default:
       return null;
   }
+}
+
+/** True only when OpenCode's schema validator rejected a native tool call
+ * before execution. Tool-level failures are deliberately not inferred. */
+export function isSchemaRejectedNativeToolPart(part: OpenCodePart | undefined): boolean {
+  if (part?.type !== 'tool') return false;
+  const error = part.state?.error ?? '';
+  return (
+    part.state?.status === 'error' &&
+    /called with invalid arguments:\s*SchemaError\(/i.test(error)
+  );
 }
 
 function activityError(error: unknown): string | undefined {
@@ -618,14 +671,21 @@ export class OpenCodeProvider implements AgentProvider {
       this.activeSessionId = undefined;
     }
 
-    const pending: string[] = [];
+    const pending: Array<{
+      text: string;
+      files?: FileAttachment[];
+      tools: NonNullable<QueryPushOptions['tools']>;
+    }> = [];
     let waiting: (() => void) | null = null;
     let ended = false;
     let aborted = false;
-    let initialFiles: FileAttachment[] | undefined = input.files;
 
     const systemInstructions = input.systemContext?.instructions;
-    pending.push(wrapPromptWithContext(input.prompt, systemInstructions));
+    pending.push({
+      text: wrapPromptWithContext(input.prompt, systemInstructions),
+      files: input.files,
+      tools: 'enabled',
+    });
 
     const kick = (): void => {
       waiting?.();
@@ -650,7 +710,7 @@ export class OpenCodeProvider implements AgentProvider {
         if (aborted) return;
         if (pending.length === 0 && ended) return;
 
-        const text = pending.shift()!;
+        const turn = pending.shift()!;
         let sessionId = self.activeSessionId;
 
         if (!sessionId) {
@@ -670,10 +730,10 @@ export class OpenCodeProvider implements AgentProvider {
 
         // Build prompt parts: text + any inline file attachments (first turn only).
         const parts: Array<{ type: string; text?: string; mime?: string; url?: string; filename?: string }> = [
-          { type: 'text', text },
+          { type: 'text', text: turn.text },
         ];
-        if (initialFiles && initialFiles.length > 0) {
-          for (const file of initialFiles) {
+        if (turn.files && turn.files.length > 0) {
+          for (const file of turn.files) {
             try {
               const data = fs.readFileSync(file.path);
               const b64 = data.toString('base64');
@@ -682,15 +742,23 @@ export class OpenCodeProvider implements AgentProvider {
               log(`Failed to read attachment ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
-          initialFiles = undefined; // Only send on first prompt
         }
 
         const modelSelection = resolveModelForPrompt(self.options.model);
+        let toolOverrides: Record<string, boolean> | undefined;
+        if (turn.tools === 'disabled') {
+          const toolIds = await client.tool.ids({ query: { directory: input.cwd } });
+          if (toolIds.error || !toolIds.data) {
+            throw new Error(`OpenCode: failed to enumerate tools for tool-disabled turn: ${JSON.stringify(toolIds.error)}`);
+          }
+          toolOverrides = Object.fromEntries(toolIds.data.map((id) => [id, false]));
+        }
         const promptRes = await client.session.promptAsync({
           path: { id: sessionId },
           body: {
             parts: parts as any,
             ...(modelSelection ? { model: modelSelection } : {}),
+            ...(toolOverrides ? { tools: toolOverrides } : {}),
           },
         });
         if (promptRes.error) {
@@ -708,6 +776,7 @@ export class OpenCodeProvider implements AgentProvider {
         // provider id (TurnUsage itself doesn't carry it).
         let lastAssistantProviderID: string | undefined;
         let lastAssistantModelID: string | undefined;
+        let rejectedMalformedNativeToolCall = false;
         let lastEventAt = Date.now();
         let eventTimedOut = false;
         let timeoutReject: ((err: Error) => void) | undefined;
@@ -773,6 +842,7 @@ export class OpenCodeProvider implements AgentProvider {
               case 'message.part.updated': {
                 const part = ev.properties.part as OpenCodePart | undefined;
                 if (!isEventForSession(part?.sessionID, sessionId)) break;
+                rejectedMalformedNativeToolCall ||= isSchemaRejectedNativeToolPart(part);
                 if (part?.type === 'text' && part.messageID && part.text) {
                   let messageParts = textPartsByMessageId.get(part.messageID);
                   if (!messageParts) {
@@ -877,10 +947,9 @@ export class OpenCodeProvider implements AgentProvider {
         // normalization strips it to nothing, the reply was swallowed (e.g. an
         // unclosed `<think>` with no `<message>`), not genuinely absent. The
         // poll-loop keys its recovery nudge off this distinction.
-        const rawResultNonEmpty = resultText.trim().length > 0;
-        const parsedResult = parseAssistantOutput(resultText);
-        const recoveredFromUnclosedThink = parsedResult.diagnostics.includes('unclosed-think');
-        resultText = parsedResult.normalizedText;
+        const classifiedResult = classifyAssistantResult(resultText, rejectedMalformedNativeToolCall);
+        const malformedToolCall = classifiedResult.malformedToolCall;
+        resultText = classifiedResult.text;
         const lastFinish = lastAssistantId ? finishByMessageId.get(lastAssistantId) : undefined;
         // MiniMax/OpenRouter can terminate mid-reasoning with finish="unknown"
         // and no text/tool part. The reasoning proves this was an interrupted
@@ -940,30 +1009,32 @@ export class OpenCodeProvider implements AgentProvider {
         // (e.g. "length" = model hit max_output_tokens before producing any
         // user-visible text — common with heavy-reasoning models like
         // minimax-m3 capped low on OpenRouter).
-        if (!resultText && lastFinish && lastFinish !== 'stop' && !recoverableReasoningOnly) {
+        if (!resultText && lastFinish && lastFinish !== 'stop' && !recoverableReasoningOnly && !malformedToolCall) {
           const reasonMsg = describeFinishReason(lastFinish);
           yield { type: 'error', message: reasonMsg, retryable: false, classification: `opencode:finish:${lastFinish}` };
         }
-        const strippedToEmpty =
-          (rawResultNonEmpty || recoverableReasoningOnly) && resultText.trim().length === 0;
+        const strippedToEmpty = malformedToolCall || classifiedResult.strippedToEmpty ||
+          (recoverableReasoningOnly && resultText.trim().length === 0);
         yield {
           type: 'result',
           text: resultText || null,
           strippedToEmpty,
+          malformedToolCall,
           finishReason: lastFinish,
-          recoveredFromUnclosedThink,
+          recoveredFromUnclosedThink: classifiedResult.recoveredFromUnclosedThink,
         };
       }
     }
 
     return {
-      push: (message: string, files?: FileAttachment[]) => {
-        pending.push(wrapPromptWithContext(message, systemInstructions));
-        if (files && files.length > 0) {
-          // Re-arm initialFiles so the next prompt loop iteration picks them up.
-          initialFiles = files;
-        }
+      push: (message: string, files?: FileAttachment[], options?: QueryPushOptions) => {
+        pending.push({
+          text: wrapPromptWithContext(message, systemInstructions),
+          files,
+          tools: options?.tools ?? 'enabled',
+        });
         kick();
+        return true;
       },
       end: () => {
         ended = true;

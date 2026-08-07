@@ -7,6 +7,7 @@ import {
   formatProgressFromPart,
   hasNonEmptyReasoning,
   isEventForSession,
+  isSchemaRejectedNativeToolPart,
   isRecoverableReasoningOnlyCompletion,
 } from './opencode.js';
 
@@ -82,6 +83,52 @@ describe('formatProgressFromPart', () => {
       .toEqual({ kind: 'compaction', id: 'c', auto: true });
     expect(formatProgressFromPart({ id: 'q', type: 'subtask', agent: 'explore', description: 'Find callers' }))
       .toEqual({ kind: 'subtask', id: 'q', agent: 'explore', description: 'Find callers' });
+  });
+});
+
+describe('isSchemaRejectedNativeToolPart', () => {
+  it('recognizes OpenCode schema validation failures with empty tool input', () => {
+    const part = {
+      id: 'tool-schema', type: 'tool', tool: 'bash',
+      state: {
+        status: 'error', input: {},
+        error: 'The bash tool was called with invalid arguments: SchemaError(Missing key at ["command"]).',
+      },
+    } as const;
+    expect(isSchemaRejectedNativeToolPart(part)).toBe(true);
+    expect(formatProgressFromPart(part)).toMatchObject({ rejectedBeforeExecution: true });
+  });
+
+  it('does not infer schema rejection from tool arguments or execution output', () => {
+    expect(isSchemaRejectedNativeToolPart({
+      id: 'tool-xml', type: 'tool', tool: 'bash',
+      state: {
+        status: 'error', input: { command: 'cp a b</command>' },
+        error: "bash: syntax error near unexpected token `newline'",
+      },
+    })).toBe(false);
+  });
+
+  it('ignores ordinary tool errors and literal XML used inside a command', () => {
+    const ordinaryError = {
+      id: 'tool-missing', type: 'tool', tool: 'read',
+      state: { status: 'error', input: { filePath: '/missing' }, error: 'File not found' },
+    } as const;
+    expect(isSchemaRejectedNativeToolPart(ordinaryError)).toBe(false);
+    expect(isSchemaRejectedNativeToolPart({
+      id: 'tool-docs', type: 'tool', tool: 'bash',
+      state: { status: 'completed', input: { command: "printf '%s' '</command>'" } },
+    })).toBe(false);
+  });
+
+  it('treats an unwrapped SchemaError as a possibly effectful runtime failure', () => {
+    expect(isSchemaRejectedNativeToolPart({
+      id: 'tool-runtime-schema', type: 'tool', tool: 'publish',
+      state: {
+        status: 'error', input: { target: 'production' },
+        error: 'SchemaError(Missing key at ["receipt"]) after publish',
+      },
+    })).toBe(false);
   });
 });
 

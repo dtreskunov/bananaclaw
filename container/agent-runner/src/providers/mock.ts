@@ -60,6 +60,7 @@ export class MockProvider implements AgentProvider {
       push(message: string, _files?: import('./types.js').FileAttachment[]) {
         pending.push(message);
         waiting?.();
+        return true;
       },
       end() {
         ended = true;

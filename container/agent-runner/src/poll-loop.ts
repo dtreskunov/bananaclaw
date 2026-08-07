@@ -24,6 +24,7 @@ import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, Provider
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
+const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
 
 /**
  * Number of consecutive `database disk image is malformed` errors after which
@@ -316,7 +317,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // seeded here; follow-up pushes overwrite it. On failure we record
     // *that* prompt as the failed turn — not the initial one, which
     // may have completed cleanly turns earlier in the same query.
-    const promptTracker = { latest: prompt };
+    const promptTracker = { latest: prompt, routing };
     // Scheduled tasks run as isolated one-shot turns: a fresh provider
     // session (no chat continuation) so the model doesn't inherit the very
     // exchange that scheduled it — which made reasoning models treat the
@@ -363,15 +364,16 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             setContinuation(config.providerName, continuation);
           }
           if (result.unsurfacedError) {
+            const errorRouting = result.unsurfacedError.routing;
             const tag = result.unsurfacedError.classification
               ? ` [${result.unsurfacedError.classification}]`
               : '';
             writeMessageOut({
               id: generateId(),
               kind: 'chat',
-              platform_id: routing.platformId,
-              channel_type: routing.channelType,
-              thread_id: routing.threadId,
+              platform_id: errorRouting.platformId,
+              channel_type: errorRouting.channelType,
+              thread_id: errorRouting.threadId,
               content: JSON.stringify({
                 text: `⚠️ Agent provider error${tag}: ${result.unsurfacedError.message}\n\nYour message was not processed.`,
               }),
@@ -403,14 +405,15 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           } catch (e) {
             log(`Failed to persist failed-turn record: ${e instanceof Error ? e.message : String(e)}`);
           }
-          const ack = await tryAcknowledgeFailure(config, routing, errMsg, undefined);
+          const failureRouting = promptTracker.routing;
+          const ack = await tryAcknowledgeFailure(config, failureRouting, errMsg, undefined);
           if (!ack.delivered) {
             writeMessageOut({
               id: generateId(),
               kind: 'chat',
-              platform_id: routing.platformId,
-              channel_type: routing.channelType,
-              thread_id: routing.threadId,
+              platform_id: failureRouting.platformId,
+              channel_type: failureRouting.channelType,
+              thread_id: failureRouting.threadId,
               content: JSON.stringify({ text: friendlyProviderErrorFallback(errMsg) }),
             });
           }
@@ -612,7 +615,7 @@ interface QueryResult {
    * the error result, that throw goes through the outer retry/error path
    * in runPollLoop instead — preserving the silent stale-session retry.
    */
-  unsurfacedError?: { message: string; classification?: string };
+  unsurfacedError?: { message: string; classification?: string; routing: RoutingContext };
 }
 
 async function processQuery(
@@ -622,7 +625,7 @@ async function processQuery(
   providerName: string,
   priorContinuation: string | undefined,
   persistContinuation = true,
-  promptTracker?: { latest: string },
+  promptTracker?: { latest: string; routing: RoutingContext },
   onExchangeComplete?: (exchange: ProviderExchange) => void,
   initialPrompt = '',
 ): Promise<QueryResult> {
@@ -637,6 +640,19 @@ async function processQuery(
   // if the retry still delivers nothing we surface a generic error rather
   // than nudging again. Reset at every turn boundary (warm-query safety).
   let nudgedForDelivery = false;
+  let deliveryErrorRouting: RoutingContext = routing;
+  let malformedToolRecoveryAttempts = 0;
+  let malformedToolRecoveryExhausted = false;
+  let malformedToolErrorRouting: RoutingContext = routing;
+  let malformedToolRecoveryMode: 'tool' | 'delivery' | null = null;
+  let malformedToolRecoveryRouting: RoutingContext | null = null;
+  let malformedToolRecoveryHadNativeTool = false;
+  const executedToolCalls = new Map<string, {
+    tool: string;
+    detail?: string;
+    status: 'running' | 'completed' | 'error';
+  }>();
+  let activeTurnRouting = routing;
   // OpenCode reasoning models occasionally stop after placing a future-work
   // announcement inside an unclosed <think>, without invoking any tools. Keep
   // the original batch claimed while one corrective continuation runs.
@@ -764,6 +780,17 @@ async function processQuery(
   let pollInFlight = false;
   let endedForCommand = false;
   let corruptionStreak = 0;
+  const resetMalformedToolRecovery = (): void => {
+    malformedToolRecoveryAttempts = 0;
+    malformedToolRecoveryExhausted = false;
+    malformedToolRecoveryRouting = null;
+    malformedToolRecoveryHadNativeTool = false;
+    executedToolCalls.clear();
+  };
+  const exhaustMalformedToolRecovery = (failedRouting: RoutingContext): void => {
+    malformedToolRecoveryExhausted = true;
+    malformedToolErrorRouting = failedRouting;
+  };
   const pollHandle = setInterval(() => {
     if (done || pollInFlight || endedForCommand) return;
     pollInFlight = true;
@@ -824,6 +851,11 @@ async function processQuery(
         // turn. The next poll after the result resumes it as a distinct turn.
         if (shouldDeferInteractiveResponse(newMessages, turnActive)) return;
 
+        // Never interleave a user prompt with an unresolved provider turn.
+        // Apart from preserving FIFO order, this keeps native-tool activity
+        // attached to the result that decides whether recovery may rerun it.
+        if (turnActive) return;
+
         const newIds = newMessages.map((m) => m.id);
         markProcessing(newIds);
 
@@ -865,7 +897,9 @@ async function processQuery(
         // a response" notice, so a later turn that strips to empty (e.g. a
         // reasoning model emitting a mangled/unclosed <think> wrapper) leaves
         // the user with total silence. Reset all three so the notices key off
-        // THIS turn's delivery, not the whole warm query's history.
+        // THIS turn's delivery, not the whole warm query's history. The
+        // malformed-tool retry state resets below only at a real idle-to-active
+        // turn boundary; concurrent arrivals are deferred while it is in flight.
         nudgedForDelivery = false;
         nudgedForPrematureCompletion = false;
         prematureCompletionBatchIds = [];
@@ -875,26 +909,27 @@ async function processQuery(
         emptyResultSeen = false;
         silenceConfirmed = false;
         if (promptTracker) promptTracker.latest = prompt;
+        activeTurnRouting = extractRouting(keep);
+        if (promptTracker) promptTracker.routing = activeTurnRouting;
         // If the previous result already completed, this push starts a new
         // turn immediately. Clear its trace before the provider can emit the
         // first event. When a follow-up was queued during an active turn, the
         // result handler below performs this reset at the precise boundary.
-        if (!turnActive) resetActivityForNextTurn();
+        if (!turnActive) {
+          resetActivityForNextTurn();
+          resetMalformedToolRecovery();
+        }
         turnActive = true;
         turnStartTime = Date.now();
         try { clearTurnEnded(); } catch { /* best-effort */ }
+        setCurrentInReplyTo(activeTurnRouting.inReplyTo);
         query.push(prompt, followUpFiles.length > 0 ? followUpFiles : undefined);
         archivePrompts.push(prompt);
         // Enqueue this push as its own batch. We do NOT markCompleted here —
         // that happens when the corresponding `result` event drains the
         // queue. Marking at push time loses messages whose prompts the
         // provider collapsed into a single turn (no separate result fires).
-        // setCurrentInReplyTo is deliberately NOT updated here: in-flight
-        // MCP `send_message` calls from the still-running prior turn must
-        // continue to thread under that turn's batch, not jump ahead to
-        // this newly-queued one. The result handler advances setCurrent
-        // when this batch's turn actually begins.
-        turnBatchQueue.push({ ids: keptIds, routing: extractRouting(keep) });
+        turnBatchQueue.push({ ids: keptIds, routing: activeTurnRouting });
       } catch (err) {
         // Without this catch the rejection escapes the void IIFE and Node
         // terminates the container on unhandled-rejection. The initial-batch
@@ -962,28 +997,32 @@ async function processQuery(
   // loop doesn't touch the heartbeat either).
   let turnActive = true;
   let turnStartTime = Date.now();
+  const beginCorrectiveTurn = (activityText: string): void => {
+    try {
+      appendActivity({
+        kind: 'notification',
+        id: `nudge:${generateId()}`,
+        text: activityText,
+      });
+    } catch { /* best-effort */ }
+    turnActive = true;
+    try { clearTurnEnded(); } catch { /* best-effort */ }
+  };
   // Push the recovery nudge: a self-correction retry within the same warm
   // query. Used for both failure shapes — bare unwrapped text and a reply
   // swallowed by reasoning that normalized to empty. The nudge offers an
   // explicit escape hatch (re-send wrapped, OR emit <internal> to confirm
   // intentional silence) so a genuinely silent turn is never prodded into
   // fabricating a reply. One-shot: callers gate on `!nudgedForDelivery`.
-  const pushDeliveryNudge = (): void => {
+  const pushDeliveryNudge = (failedRouting: RoutingContext): void => {
     nudgedForDelivery = true;
+    deliveryErrorRouting = failedRouting;
     log('Recovery nudge: turn delivered nothing — asking the agent to re-send it wrapped');
     // Surface the recovery in the web-UI activity trace. The buffer carries
     // across the nudge→retry boundary (no reset without a queued user batch)
     // and flushes onto the recovered reply's row.
-    try {
-      appendActivity({
-        kind: 'notification',
-        id: `nudge:${generateId()}`,
-        text: 'Reply wasn’t formatted for delivery — asked the agent to re-send it.',
-      });
-    } catch { /* best-effort */ }
+    beginCorrectiveTurn('Reply wasn’t formatted for delivery — asked the agent to re-send it.');
     const names = getAllDestinations().map((d) => d.name).join(', ');
-    turnActive = true;
-    try { clearTurnEnded(); } catch { /* best-effort */ }
     query.push(
       `<system>Your reply was not delivered. Either it was not wrapped in ` +
         `<message to="name">...</message> blocks, or it was left inside your ` +
@@ -995,18 +1034,82 @@ async function processQuery(
         `<internal>…</internal> note explaining why (it will not be delivered).</system>`,
     );
   };
+  const pushMalformedToolNudge = (failedRouting: RoutingContext): void => {
+    if (malformedToolRecoveryAttempts === 0) malformedToolRecoveryHadNativeTool = false;
+    malformedToolRecoveryAttempts++;
+    malformedToolRecoveryMode = 'tool';
+    malformedToolRecoveryRouting = failedRouting;
+    log(
+      `Recovery nudge: model emitted a malformed tool invocation ` +
+        `(attempt ${malformedToolRecoveryAttempts}/${MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS})`,
+    );
+    beginCorrectiveTurn('A malformed tool call did not run - asked the agent to retry it natively.');
+    query.push(
+      `<system>Your previous tool invocation was malformed: it either omitted required arguments ` +
+        `or printed XML-like tool-call markup as ordinary text. That tool call did NOT execute. ` +
+        `Continue the original request now and invoke the required tools through the native tool ` +
+        `interface with all required arguments. Do not write <tool_call>, <invoke>, or <command> ` +
+        `markup yourself. After the tool work completes, send the result in a ` +
+        `<message to="name">...</message> block.</system>`,
+    );
+  };
+  const pushPostToolDeliveryNudge = (failedRouting: RoutingContext): void => {
+    nudgedForDelivery = true;
+    malformedToolRecoveryHadNativeTool = true;
+    malformedToolRecoveryMode = 'delivery';
+    malformedToolRecoveryRouting = failedRouting;
+    log('Recovery nudge: malformed final output followed native tool activity - requesting delivery only');
+    beginCorrectiveTurn(
+      'A tool ran but its final reply was malformed - asked the agent to report the result without repeating the action.',
+    );
+    const names = getAllDestinations().map((d) => d.name).join(', ');
+    const summarizeCall = ({ tool, detail }: { tool: string; detail?: string }): string => {
+        const safeDetail = detail
+          ? JSON.stringify(detail.slice(0, 240))
+              .replace(/&/g, '\\u0026')
+              .replace(/</g, '\\u003c')
+              .replace(/>/g, '\\u003e')
+          : '';
+        return `- ${tool}${safeDetail ? `: ${safeDetail}` : ''}`;
+    };
+    const calls = [...executedToolCalls.values()];
+    const completedCalls = calls
+      .filter((call) => call.status === 'completed')
+      .map(summarizeCall);
+    const uncertainCalls = calls
+      .filter((call) => call.status !== 'completed')
+      .map(summarizeCall);
+    const callSummary = [
+      ...(completedCalls.length > 0
+        ? [`Calls whose tool invocation completed (use their native results above to determine success or failure):\n${completedCalls.join('\n')}`]
+        : []),
+      ...(uncertainCalls.length > 0
+        ? [`Calls that started but did not complete cleanly (they may still have effects):\n${uncertainCalls.join('\n')}`]
+        : []),
+    ].join('\n');
+    const accepted = query.push(
+      `<system>At least one native tool already ran in the previous turn, but the final reply ` +
+        `was malformed. Here is the execution record:\n${callSummary || 'One or more native tools may have executed.'}\n` +
+        `Do NOT repeat any of those calls or make equivalent requests through other tools. ` +
+        `Tools are disabled for this recovery turn. Use the existing native results above and report ` +
+        `the actual result in ` +
+        `a <message to="name">...</message> block. Your destinations: ${names}.</system>`,
+      undefined,
+      { tools: 'disabled' },
+    );
+    if (!accepted) {
+      malformedToolRecoveryMode = null;
+      exhaustMalformedToolRecovery(failedRouting);
+      if (!endedForCommand) {
+        endedForCommand = true;
+        query.end();
+      }
+    }
+  };
   const pushPrematureCompletionNudge = (): void => {
     nudgedForPrematureCompletion = true;
     log('Recovery nudge: agent announced future work but ended the turn before using tools');
-    try {
-      appendActivity({
-        kind: 'notification',
-        id: `nudge:${generateId()}`,
-        text: 'The agent stopped after announcing work - asked it to continue the original request.',
-      });
-    } catch { /* best-effort */ }
-    turnActive = true;
-    try { clearTurnEnded(); } catch { /* best-effort */ }
+    beginCorrectiveTurn('The agent stopped after announcing work - asked it to continue the original request.');
     query.push(
       `<system>You ended the turn after announcing work that you had not performed. ` +
         `Continue the original request now. Invoke the required tools before returning a final ` +
@@ -1026,8 +1129,25 @@ async function processQuery(
 
       if (event.type === 'progress' && event.step.kind === 'tool') {
         toolActivityThisTurn = true;
-        if (event.step.tool !== 'nanoclaw_send_message' && !event.step.tool.endsWith('__send_message')) {
+        const isSubstantiveTool = event.step.tool !== 'nanoclaw_send_message' &&
+          !event.step.tool.endsWith('__send_message');
+        const priorCall = executedToolCalls.get(event.step.id);
+        const reachedExecution = !event.step.rejectedBeforeExecution && (
+          event.step.status === 'running' ||
+          event.step.status === 'completed' ||
+          event.step.status === 'error' ||
+          priorCall !== undefined
+        );
+        if (isSubstantiveTool && reachedExecution) {
           substantiveToolActivityThisTurn = true;
+          malformedToolRecoveryHadNativeTool = true;
+          executedToolCalls.set(event.step.id, {
+            tool: event.step.tool,
+            ...(event.step.detail || priorCall?.detail
+              ? { detail: event.step.detail ?? priorCall?.detail }
+              : {}),
+            status: event.step.status === 'pending' ? priorCall!.status : event.step.status,
+          });
         }
       }
 
@@ -1052,6 +1172,9 @@ async function processQuery(
         // "No conversation found"). If it does, the outer catch handles
         // the retry and the user never sees this transient error.
         lastProviderError = { message: event.message, classification: event.classification };
+        if (promptTracker) {
+          promptTracker.routing = malformedToolRecoveryRouting ?? activeTurnRouting;
+        }
 
         // Force the stream closed so the turn ends now. Without this, the
         // SDK can keep the stream alive after a non-retryable error (e.g.
@@ -1073,6 +1196,10 @@ async function processQuery(
         pendingUsage = event.data;
       } else if (event.type === 'result') {
         resultSeen = true;
+        const recoveryMode = malformedToolRecoveryMode;
+        const isMalformedToolRecoveryResult = recoveryMode !== null;
+        const isPostToolDeliveryRecovery = recoveryMode === 'delivery';
+        malformedToolRecoveryMode = null;
         // Drain the OLDEST batch from the queue — one result corresponds
         // to one batch of work. When providers run separate turns per
         // pushed prompt (typical case, including OpenCode when pushes
@@ -1086,9 +1213,11 @@ async function processQuery(
         // into a single assistant response (one result event for two
         // pushed prompts), the leftover batch stays in the queue and
         // gets drained by the stream-end finally block below.
-        let resultRouting = routing;
+        let resultRouting = isMalformedToolRecoveryResult && malformedToolRecoveryRouting
+          ? malformedToolRecoveryRouting
+          : routing;
         const drainedIds: string[] = [];
-        if (turnBatchQueue.length > 0) {
+        if (!isMalformedToolRecoveryResult && turnBatchQueue.length > 0) {
           const head = turnBatchQueue.shift()!;
           drainedIds.push(...head.ids);
           resultRouting = head.routing;
@@ -1156,8 +1285,23 @@ async function processQuery(
             // note is the model taking the escape hatch — confirming it meant to
             // stay silent. Treat as intentional silence, not a delivery failure.
             if (nudgedForDelivery && sent === 0 && internalCount > 0) silenceConfirmed = true;
+            if (isPostToolDeliveryRecovery && !mcpWroteReply && sent === 0) {
+              silenceConfirmed = false;
+              exhaustMalformedToolRecovery(resultRouting);
+              if (turnBatchQueue.length === 0 && !endedForCommand) {
+                endedForCommand = true;
+                query.end();
+              }
+            }
+            if (sent > 0 || mcpWroteReply) {
+              resetMalformedToolRecovery();
+            }
             const willRetryWrapping =
               !mcpWroteReply && hasUnwrapped &&
+              !malformedToolRecoveryHadNativeTool &&
+              !nudgedForDelivery && !nudgedForPrematureCompletion;
+            const willRecoverPostToolDelivery =
+              !mcpWroteReply && hasUnwrapped && malformedToolRecoveryHadNativeTool &&
               !nudgedForDelivery && !nudgedForPrematureCompletion;
             notifyExchangeComplete(onExchangeComplete, {
               prompt: archivePrompts[0] ?? initialPrompt,
@@ -1169,9 +1313,11 @@ async function processQuery(
               sentAny = true;
             } else if (prematureCompletion) {
               pushPrematureCompletionNudge();
+            } else if (willRecoverPostToolDelivery) {
+              pushPostToolDeliveryNudge(resultRouting);
             } else if (willRetryWrapping) {
               log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
-              pushDeliveryNudge();
+              pushDeliveryNudge(resultRouting);
             } else if (sent === 0 && internalCount > 0 && !wasRecoveringDelivery) {
               emptyResultSeen = true;
               if (turnBatchQueue.length === 0 && !endedForCommand) {
@@ -1181,7 +1327,9 @@ async function processQuery(
             }
             // Recovery retries answer the SAME user prompt — keep it queued so
             // the retry archives against it, not the nudge text.
-            if (!willRetryWrapping && !prematureCompletion) archivePrompts.shift();
+            if (!willRetryWrapping && !willRecoverPostToolDelivery && !prematureCompletion) {
+              archivePrompts.shift();
+            }
             if (
               wasRecoveringDelivery && !mcpWroteReply && sent === 0 && internalCount === 0 &&
               turnBatchQueue.length === 0 && !endedForCommand
@@ -1206,6 +1354,13 @@ async function processQuery(
           //      autonomous/task turn, so it is NOT nudged; it falls through
           //      to the terminal empty-result notice.
           const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
+          if (isPostToolDeliveryRecovery && !mcpWroteReply) {
+            exhaustMalformedToolRecovery(resultRouting);
+          }
+          if (mcpWroteReply) {
+            sentAny = true;
+            resetMalformedToolRecovery();
+          }
           const wasRecoveringPrematureCompletion = prematureCompletionBatchIds.length > 0;
           const progressOnlyCompletion =
             mcpWroteReply && !substantiveToolActivityThisTurn &&
@@ -1240,11 +1395,34 @@ async function processQuery(
             }
             const willNudge =
               !mcpWroteReply && event.strippedToEmpty === true &&
+              event.malformedToolCall !== true &&
               !nudgedForDelivery && !nudgedForPrematureCompletion && !lastProviderError;
-            if (mcpWroteReply) sentAny = true;
-            if (willNudge) {
+            const willRetryMalformedTool =
+              !mcpWroteReply && !malformedToolRecoveryHadNativeTool &&
+              event.malformedToolCall === true &&
+              malformedToolRecoveryAttempts < MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS &&
+              !nudgedForDelivery &&
+              !nudgedForPrematureCompletion && !lastProviderError;
+            const willRecoverPostToolDelivery =
+              !mcpWroteReply && malformedToolRecoveryHadNativeTool &&
+              event.strippedToEmpty === true && !nudgedForDelivery &&
+              !nudgedForPrematureCompletion && !lastProviderError;
+            if (willRetryMalformedTool) {
+              pushMalformedToolNudge(resultRouting);
+              // Keep the prompt queued: the retry continues the same work.
+            } else if (willRecoverPostToolDelivery) {
+              pushPostToolDeliveryNudge(resultRouting);
+              // Keep the prompt queued: the retry only reports prior results.
+            } else if (event.malformedToolCall && !mcpWroteReply) {
+              exhaustMalformedToolRecovery(malformedToolRecoveryRouting ?? resultRouting);
+              archivePrompts.shift();
+              if (turnBatchQueue.length === 0 && !endedForCommand) {
+                endedForCommand = true;
+                query.end();
+              }
+            } else if (willNudge) {
               log('Result stripped to empty (reply swallowed by reasoning) — nudging');
-              pushDeliveryNudge();
+              pushDeliveryNudge(resultRouting);
               // Keep the prompt queued: the retry answers the same user prompt.
             } else {
               emptyResultSeen = true;
@@ -1371,6 +1549,25 @@ async function processQuery(
     }
   }
 
+  const writeTurnNotice = (
+    noticeRouting: RoutingContext,
+    text: string,
+    failureLabel: string,
+  ): void => {
+    try {
+      writeMessageOut({
+        id: generateId(),
+        kind: 'chat',
+        platform_id: noticeRouting.platformId,
+        channel_type: noticeRouting.channelType,
+        thread_id: noticeRouting.threadId,
+        content: JSON.stringify({ text }),
+      });
+    } catch (e) {
+      log(`Failed to write ${failureLabel}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   // Three mutually-exclusive terminal outcomes for a turn that delivered
   // nothing (all gated on `!sentAny && !lastProviderError`). Ordered by
   // specificity — the first match wins:
@@ -1397,36 +1594,27 @@ async function processQuery(
     log('Turn confirmed intentional silence after nudge — delivering nothing');
   } else if (!sentAny && nudgedForPrematureCompletion && !lastProviderError) {
     log('Premature-completion recovery produced no answer — surfacing explicit error');
-    try {
-      writeMessageOut({
-        id: generateId(),
-        kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
-        content: JSON.stringify({
-          text: 'The agent stopped after announcing work without completing it. Please retry or use another model.',
-        }),
-      });
-    } catch (e) {
-      log(`Failed to write premature-completion error: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    writeTurnNotice(
+      routing,
+      'The agent stopped after announcing work without completing it. Please retry or use another model.',
+      'premature-completion error',
+    );
+  } else if (!sentAny && malformedToolRecoveryExhausted && !lastProviderError) {
+    log('Malformed tool-call recovery exhausted — surfacing specific error');
+    writeTurnNotice(
+      malformedToolErrorRouting,
+      malformedToolRecoveryHadNativeTool
+        ? '⚠️ A tool ran, but the model repeatedly failed to format its final reply. The action was not retried. Ask the agent to report the existing result or switch models.'
+        : '⚠️ The model repeatedly produced malformed tool calls, so no tool was executed. Retry the task or switch to a model with reliable native tool calling.',
+      'malformed-tool error',
+    );
   } else if (!sentAny && nudgedForDelivery && !lastProviderError) {
     log('Turn produced no deliverable output after recovery nudge — surfacing generic error');
-    try {
-      writeMessageOut({
-        id: generateId(),
-        kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
-        content: JSON.stringify({
-          text: "⚠️ Something went wrong producing a reply. Please try again.",
-        }),
-      });
-    } catch (e) {
-      log(`Failed to write generic delivery error: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    writeTurnNotice(
+      deliveryErrorRouting,
+      '⚠️ Something went wrong producing a reply. Please try again.',
+      'generic delivery error',
+    );
   }
 
   // Stream completed cleanly with a `result` event, but the model produced no
@@ -1435,20 +1623,11 @@ async function processQuery(
   // doesn't look like the agent is still working or died.
   else if (!sentAny && emptyResultSeen && !lastProviderError) {
     log('Turn completed with an empty result and no error — notifying user');
-    try {
-      writeMessageOut({
-        id: generateId(),
-        kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
-        content: JSON.stringify({
-          text: "⚠️ The agent finished without producing a response, and without reporting an error. Please try again.",
-        }),
-      });
-    } catch (e) {
-      log(`Failed to write empty-result notice: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    writeTurnNotice(
+      routing,
+      '⚠️ The agent finished without producing a response, and without reporting an error. Please try again.',
+      'empty-result notice',
+    );
   }
 
   return {
@@ -1457,7 +1636,9 @@ async function processQuery(
     // the turn produced nothing deliverable. If the SDK threw, that path
     // takes over (with stale-session retry); if a message did get sent,
     // a trailing error is best left in the logs.
-    unsurfacedError: !sentAny && lastProviderError ? lastProviderError : undefined,
+    unsurfacedError: !sentAny && lastProviderError
+      ? { ...lastProviderError, routing: promptTracker?.routing ?? activeTurnRouting }
+      : undefined,
   };
 }
 

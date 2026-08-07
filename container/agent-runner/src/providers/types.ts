@@ -145,9 +145,17 @@ export type McpHttpServerConfig = {
 
 export type McpServerConfig = McpStdioServerConfig | McpHttpServerConfig;
 
+export interface QueryPushOptions {
+  tools?: 'enabled' | 'disabled';
+}
+
 export interface AgentQuery {
   /** Push a follow-up message into the active query. */
-  push(message: string, files?: FileAttachment[]): void;
+  push(
+    message: string,
+    files?: FileAttachment[],
+    options?: QueryPushOptions,
+  ): boolean;
 
   /** Signal that no more input will be sent. */
   end(): void;
@@ -192,6 +200,7 @@ export type ActivityStep =
       kind: 'tool'; id: string; tool: string;
       status: 'pending' | 'running' | 'completed' | 'error';
       detail?: string; title?: string; error?: string; durationMs?: number;
+      rejectedBeforeExecution?: boolean;
     }
   | { kind: 'internal'; id: string; text: string }
   | { kind: 'file'; id: string; path?: string; name?: string; mime?: string }
@@ -272,6 +281,7 @@ export type ProviderEvent =
       type: 'result';
       text: string | null;
       strippedToEmpty?: boolean;
+      malformedToolCall?: boolean;
       finishReason?: string;
       recoveredFromUnclosedThink?: boolean;
     }

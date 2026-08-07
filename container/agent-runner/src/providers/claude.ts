@@ -635,7 +635,11 @@ export class ClaudeProvider implements AgentProvider {
     }
 
     return {
-      push: (msg) => stream.push(msg),
+      push: (msg, _files, options) => {
+        if (options?.tools === 'disabled') return false;
+        stream.push(msg);
+        return true;
+      },
       end: () => stream.end(),
       events: translateEvents(),
       abort: () => {

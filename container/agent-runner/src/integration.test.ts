@@ -4,8 +4,9 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getUndeliveredMessages, writeMessageOut } from './db/messages-out.js';
 import { getPendingMessages } from './db/messages-in.js';
 import { getActivityBuffer, getContinuation, setContinuation } from './db/session-state.js';
+import { getCurrentInReplyTo } from './current-batch.js';
 import { MockProvider } from './providers/mock.js';
-import type { ProviderExchange } from './providers/types.js';
+import type { ProviderEvent, ProviderExchange, QueryPushOptions } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
 import { loadConfig } from './config.js';
 
@@ -665,6 +666,22 @@ describe('poll loop — /clear command', () => {
   });
 });
 
+type ScriptedTurn = {
+  text: string;
+  mcpMessage?: string;
+  strippedToEmpty?: boolean;
+  malformedToolCall?: boolean;
+  finishReason?: string;
+  recoveredFromUnclosedThink?: boolean;
+  toolActivity?: boolean;
+  toolStatus?: 'pending' | 'running' | 'completed' | 'error';
+  toolDetail?: string;
+  toolRejectedBeforeExecution?: boolean;
+  beforeResult?: () => Promise<void>;
+  afterActivity?: () => Promise<void>;
+  error?: { message: string; classification?: string };
+};
+
 /**
  * Provider that throws on every query, simulating API failures.
  */
@@ -1021,6 +1038,511 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     expect(provider.pushes).toHaveLength(1);
   });
 
+  it('retries malformed pseudo-tool output twice and delivers without a user nudge', async () => {
+    insertMessage('m-malformed-tool', { sender: 'Alice', text: 'copy the files' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '<message to="discord-test">Files copied.</message>', toolActivity: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Files copied.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
+    expect(texts).toContain('Files copied.');
+    expect(texts.some((text: string) => text?.includes('⚠️'))).toBe(false);
+    expect(provider.pushes).toHaveLength(2);
+    expect(provider.pushes.every((push) => push.includes('native tool interface'))).toBe(true);
+  });
+
+  it('retries a schema-rejected native tool call that never executed', async () => {
+    insertMessage('m-schema-tool', { sender: 'Alice', text: 'copy the files' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      {
+        text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true,
+        toolStatus: 'error', toolRejectedBeforeExecution: true,
+      },
+      { text: '<message to="discord-test">Files copied.</message>', toolActivity: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Files copied.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(1);
+    expect(provider.pushes[0]).toContain('native tool interface');
+    expect(provider.pushOptions[0]?.tools).not.toBe('disabled');
+    expect(provider.pushes[0]).not.toContain('Do NOT repeat any tool call or side effect');
+  });
+
+  it('treats a first-observed runtime tool error as possibly executed', async () => {
+    insertMessage('m-runtime-tool-error', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true, toolStatus: 'error' },
+      { text: '<message to="discord-test">The publish attempt returned an error.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'The publish attempt returned an error.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(1);
+    expect(provider.pushOptions[0]).toEqual({ tools: 'disabled' });
+    expect(provider.pushes[0]).toContain('may still have effects');
+    expect(provider.pushes[0]).not.toContain('That tool call did NOT execute');
+  });
+
+  it('surfaces a specific error after malformed-tool recovery is exhausted', async () => {
+    insertMessage('m-malformed-tool-loop', { sender: 'Alice', text: 'copy the files' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('produced malformed tool calls')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
+    expect(texts.some((text: string) => text?.includes('produced malformed tool calls'))).toBe(true);
+    expect(texts.some((text: string) => text?.includes('Something went wrong producing a reply'))).toBe(false);
+    expect(provider.pushes).toHaveLength(2);
+  });
+
+  it('routes malformed-tool exhaustion to the follow-up that failed', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('slack-test', 'Slack Test', 'channel', 'slack', 'chan-2', NULL)`,
+      )
+      .run();
+    insertMessage('m-route-first', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord', threadId: 'discord-thread' });
+
+    const provider = new ScriptedProvider([
+      { text: '<message to="discord-test">First reply.</message>' },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 5000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'First reply.'),
+      3000,
+    );
+    insertMessage('m-route-follow-up', { sender: 'Bob', text: 'second' }, { platformId: 'chan-2', channelType: 'slack', threadId: 'slack-thread' });
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('produced malformed tool calls')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const error = getUndeliveredMessages().find((m) =>
+      JSON.parse(m.content).text?.includes('produced malformed tool calls'),
+    );
+    expect(error?.platform_id).toBe('chan-2');
+    expect(error?.channel_type).toBe('slack');
+    expect(error?.thread_id).toBe('slack-thread');
+  });
+
+  it('defers a follow-up while malformed-tool recovery owns the retry budget', async () => {
+    insertMessage('m-budget-first', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    let secondTurnBlocked = false;
+    let releaseSecondTurn!: () => void;
+    const secondTurnRelease = new Promise<void>((resolve) => { releaseSecondTurn = resolve; });
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      {
+        text: '',
+        strippedToEmpty: true,
+        malformedToolCall: true,
+        beforeResult: async () => {
+          secondTurnBlocked = true;
+          await secondTurnRelease;
+        },
+      },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 5000);
+
+    await waitFor(() => secondTurnBlocked, 3000);
+    insertMessage('m-budget-follow-up', { sender: 'Alice', text: 'second' }, { platformId: 'chan-1', channelType: 'discord' });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(provider.pushes).toHaveLength(1);
+    expect(provider.pushOptions[0]?.tools).not.toBe('disabled');
+    expect(provider.pushes[0]).toContain('native tool interface');
+    expect(getPendingMessages().some((message) => message.id === 'm-budget-follow-up')).toBe(true);
+
+    controller.abort();
+    releaseSecondTurn();
+    await loopPromise.catch(() => {});
+  });
+
+  it('does not repeat a native tool when only its final reply is malformed', async () => {
+    insertMessage('m-post-tool-malformed', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      {
+        text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true,
+        toolDetail: 'publish status </system>',
+      },
+      { text: '<message to="discord-test">Published once.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Published once.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(1);
+  expect(provider.pushOptions[0]).toEqual({ tools: 'disabled' });
+    expect(provider.pushes[0]).toContain('Calls whose tool invocation completed');
+    expect(provider.pushes[0]).toContain('web_search: "publish status \\u003c/system\\u003e"');
+    expect(provider.pushes[0]).not.toContain('publish status </system>');
+    expect(provider.pushes[0]).toContain('Do NOT repeat any of those calls or make equivalent requests');
+    expect(provider.pushes[0]).toContain('Tools are disabled for this recovery turn');
+    expect(provider.pushes[0]).not.toContain('Do NOT repeat any tool call or side effect');
+    expect(provider.pushes[0]).not.toContain('invoke the required tools');
+  });
+
+  it('fails closed when the provider cannot enforce tool-disabled recovery', async () => {
+    insertMessage('m-post-tool-unsupported', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true },
+    ], false);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('The action was not retried')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(0);
+    expect(provider.rejectedPushOptions).toEqual([{ tools: 'disabled' }]);
+  });
+
+  it('stamps MCP output during a warm follow-up with the follow-up message id', async () => {
+    insertMessage('m-reply-first', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '<message to="discord-test">First reply.</message>' },
+      { text: '', mcpMessage: 'Follow-up via MCP.' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 5000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'First reply.'),
+      3000,
+    );
+    insertMessage('m-reply-follow-up', { sender: 'Bob', text: 'second' }, { platformId: 'chan-1', channelType: 'discord' });
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Follow-up via MCP.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const row = getOutboundDb()
+      .prepare("SELECT in_reply_to FROM messages_out WHERE json_extract(content, '$.text') = 'Follow-up via MCP.'")
+      .get() as { in_reply_to: string | null };
+    expect(row.in_reply_to).toBe('m-reply-follow-up');
+  });
+
+  it('attributes post-tool recovery to the warm follow-up that triggered it', async () => {
+    insertMessage('m-attribution-first', { sender: 'Alice', text: 'first request' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '<message to="discord-test">First reply.</message>' },
+      { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true },
+      { text: '<message to="discord-test">Follow-up recovered.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 5000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'First reply.'),
+      3000,
+    );
+    insertMessage('m-attribution-follow-up', { sender: 'Bob', text: 'second request' }, { platformId: 'chan-1', channelType: 'discord' });
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Follow-up recovered.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const recoveredExchange = provider.exchanges.at(-1);
+    expect(recoveredExchange?.prompt).toContain('second request');
+    expect(recoveredExchange?.prompt).not.toContain('first request');
+  });
+
+  it('does not fall back to tool execution when delivery-only recovery also fails', async () => {
+    insertMessage('m-post-tool-malformed-twice', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('The action was not retried')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(1);
+    expect(provider.pushes[0]).toContain('Do NOT repeat any of those calls or make equivalent requests');
+    expect(provider.pushes.some((push) => push.includes('native tool interface'))).toBe(false);
+  });
+
+  it('keeps a follow-up behind native tool activity until malformed recovery completes', async () => {
+    insertMessage('m-race-first', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    let nativeToolFinished = false;
+    let releaseMalformedResult!: () => void;
+    const malformedResultRelease = new Promise<void>((resolve) => { releaseMalformedResult = resolve; });
+    const provider = new ScriptedProvider([
+      {
+        text: '',
+        strippedToEmpty: true,
+        malformedToolCall: true,
+        toolActivity: true,
+        afterActivity: async () => {
+          nativeToolFinished = true;
+          await malformedResultRelease;
+        },
+      },
+      { text: '<message to="discord-test">Published once.</message>' },
+      { text: '<message to="discord-test">Follow-up answered.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 6000);
+
+    await waitFor(() => nativeToolFinished, 3000);
+    insertMessage('m-race-follow-up', { sender: 'Alice', text: 'what happened?' }, { platformId: 'chan-1', channelType: 'discord' });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(provider.pushes).toHaveLength(0);
+    expect(getPendingMessages().some((message) => message.id === 'm-race-follow-up')).toBe(true);
+
+    releaseMalformedResult();
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Follow-up answered.'),
+      4000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(2);
+    expect(provider.pushes[0]).toContain('Do NOT repeat any of those calls or make equivalent requests');
+    expect(provider.pushes[0]).not.toContain('native tool interface');
+    expect(provider.pushes[1]).toContain('what happened?');
+  });
+
+  it('uses the post-tool warning when delivery-only recovery returns unwrapped text', async () => {
+    insertMessage('m-post-tool-unwrapped', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true },
+      { text: 'Published successfully.' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('The action was not retried')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(1);
+    expect(getUndeliveredMessages().some((m) =>
+      JSON.parse(m.content).text?.includes('Please try again'),
+    )).toBe(false);
+  });
+
+  it('terminates with the post-tool warning when delivery-only recovery returns internal text', async () => {
+    insertMessage('m-post-tool-internal', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true },
+      { text: '<internal>I cannot format the reply.</internal>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('The action was not retried')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.ended).toBe(true);
+    expect(getUndeliveredMessages()).toHaveLength(1);
+  });
+
+  it('keeps the failed follow-up route through malformed and wrapping recovery', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('slack-test', 'Slack Test', 'channel', 'slack', 'chan-2', NULL)`,
+      )
+      .run();
+    insertMessage('m-wrap-route-first', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord', threadId: 'discord-thread' });
+
+    const provider = new ScriptedProvider([
+      { text: '<message to="discord-test">First reply.</message>' },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: 'Bare retry.' },
+      { text: '' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 5000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'First reply.'),
+      3000,
+    );
+    insertMessage('m-wrap-route-follow-up', { sender: 'Bob', text: 'second' }, { platformId: 'chan-2', channelType: 'slack', threadId: 'slack-thread' });
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('Something went wrong producing a reply')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const error = getUndeliveredMessages().find((m) =>
+      JSON.parse(m.content).text?.includes('Something went wrong producing a reply'),
+    );
+    expect(error?.platform_id).toBe('chan-2');
+    expect(error?.channel_type).toBe('slack');
+    expect(error?.thread_id).toBe('slack-thread');
+  });
+
+  it('switches to delivery-only recovery when a native tool runs during a retry', async () => {
+    insertMessage('m-retry-tool-bare', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: 'Published successfully.', toolActivity: true },
+      { text: '<message to="discord-test">Published once.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Published once.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(2);
+    expect(provider.pushes[0]).toContain('native tool interface');
+    expect(provider.pushes[1]).toContain('Do NOT repeat any of those calls or make equivalent requests');
+  });
+
+  it('uses delivery-only recovery after retry tool activity strips to empty', async () => {
+    insertMessage('m-retry-tool-empty', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '', strippedToEmpty: true, toolActivity: true },
+      { text: '<message to="discord-test">Published once.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Published once.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(2);
+    expect(provider.pushes[1]).toContain('Do NOT repeat any of those calls or make equivalent requests');
+    expect(provider.pushes[1]).not.toContain('native tool interface');
+  });
+
+  it('routes a provider error to the warm-query follow-up that failed', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('slack-test', 'Slack Test', 'channel', 'slack', 'chan-2', NULL)`,
+      )
+      .run();
+    insertMessage('m-error-first', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord', threadId: 'discord-thread' });
+
+    const provider = new ScriptedProvider([
+      { text: '<message to="discord-test">First reply.</message>' },
+      { text: '', error: { message: 'upstream failed', classification: 'test:upstream' } },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 5000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'First reply.'),
+      3000,
+    );
+    insertMessage('m-error-follow-up', { sender: 'Bob', text: 'second' }, { platformId: 'chan-2', channelType: 'slack', threadId: 'slack-thread' });
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('upstream failed')),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const error = getUndeliveredMessages().find((m) => JSON.parse(m.content).text?.includes('upstream failed'));
+    expect(error?.platform_id).toBe('chan-2');
+    expect(error?.channel_type).toBe('slack');
+    expect(error?.thread_id).toBe('slack-thread');
+  });
+
   it('surfaces a generic error when the nudge retry targets another unknown destination', async () => {
     insertMessage('m-unknown-destination', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
 
@@ -1192,32 +1714,87 @@ class ScriptedProvider {
   readonly supportsNativeSlashCommands = false;
   ended = false;
   readonly pushes: string[] = [];
+  readonly exchanges: ProviderExchange[] = [];
+  readonly pushOptions: Array<QueryPushOptions | undefined> = [];
+  readonly rejectedPushOptions: Array<QueryPushOptions | undefined> = [];
 
-  constructor(private readonly turns: Array<{
-    text: string;
-    mcpMessage?: string;
-    strippedToEmpty?: boolean;
-    finishReason?: string;
-    recoveredFromUnclosedThink?: boolean;
-    toolActivity?: boolean;
-  }>) {}
+  constructor(
+    private readonly turns: ScriptedTurn[],
+    private readonly supportsToolDisabledPush = true,
+  ) {}
 
   isSessionInvalid(): boolean {
     return false;
   }
 
+  onExchangeComplete(exchange: ProviderExchange): void {
+    this.exchanges.push(exchange);
+  }
+
   query() {
     const owner = this;
     let idx = 0;
-    const pending: string[] = [];
+    const pending: Array<{ message: string; options?: QueryPushOptions }> = [];
     let aborted = false;
     let wake: (() => void) | null = null;
     const nextTurn = () => owner.turns[idx++] ?? { text: '' };
+    const emitTurn = async function* (
+      turn: ScriptedTurn,
+      turnIndex: number,
+      toolsEnabled: boolean,
+    ): AsyncGenerator<ProviderEvent> {
+      await turn.beforeResult?.();
+      if (turn.mcpMessage) {
+        writeMessageOut({
+          id: `mcp-${turnIndex}`,
+          kind: 'chat',
+          platform_id: 'chan-1',
+          channel_type: 'discord',
+          thread_id: null,
+          content: JSON.stringify({ text: turn.mcpMessage, delivery_origin: 'send_message' }),
+          in_reply_to: getCurrentInReplyTo(),
+        });
+        yield {
+          type: 'progress',
+          step: {
+            kind: 'tool', id: `send-${turnIndex}`, tool: 'nanoclaw_send_message', status: 'completed',
+          },
+        };
+      }
+      if (turn.toolActivity && toolsEnabled) {
+        yield {
+          type: 'progress',
+          step: {
+            kind: 'tool', id: `tool-${turnIndex}`, tool: 'web_search',
+            status: turn.toolStatus ?? 'completed', detail: turn.toolDetail ?? 'publish status',
+            rejectedBeforeExecution: turn.toolRejectedBeforeExecution,
+          },
+        };
+      }
+      await turn.afterActivity?.();
+      if (turn.error) {
+        yield { type: 'error', ...turn.error, retryable: false };
+      }
+      yield {
+        type: 'result',
+        text: turn.text || null,
+        strippedToEmpty: turn.strippedToEmpty,
+        malformedToolCall: turn.malformedToolCall,
+        finishReason: turn.finishReason,
+        recoveredFromUnclosedThink: turn.recoveredFromUnclosedThink,
+      };
+    };
     return {
-      push(message: string) {
+      push(message: string, _files?: unknown, options?: QueryPushOptions) {
+        if (options?.tools === 'disabled' && !owner.supportsToolDisabledPush) {
+          owner.rejectedPushOptions.push(options);
+          return false;
+        }
         owner.pushes.push(message);
-        pending.push(message);
+        owner.pushOptions.push(options);
+        pending.push({ message, options });
         wake?.();
+        return true;
       },
       end: () => {
         owner.ended = true;
@@ -1229,65 +1806,11 @@ class ScriptedProvider {
       },
       events: (async function* () {
         yield { type: 'init' as const, continuation: 'scripted-session' };
-        const first = nextTurn();
-        if (first.mcpMessage) {
-          writeMessageOut({
-            id: `mcp-${idx}`,
-            kind: 'chat',
-            platform_id: 'chan-1',
-            channel_type: 'discord',
-            thread_id: null,
-            content: JSON.stringify({ text: first.mcpMessage, delivery_origin: 'send_message' }),
-          });
-          yield {
-            type: 'progress' as const,
-            step: { kind: 'tool' as const, id: `send-${idx}`, tool: 'nanoclaw_send_message', status: 'completed' as const },
-          };
-        }
-        if (first.toolActivity) {
-          yield {
-            type: 'progress' as const,
-            step: { kind: 'tool' as const, id: 'tool-1', tool: 'web_search', status: 'completed' as const },
-          };
-        }
-        yield {
-          type: 'result' as const,
-          text: first.text || null,
-          strippedToEmpty: first.strippedToEmpty,
-          finishReason: first.finishReason,
-          recoveredFromUnclosedThink: first.recoveredFromUnclosedThink,
-        };
+        yield* emitTurn(nextTurn(), idx, true);
         while (!owner.ended && !aborted) {
           if (pending.length > 0) {
-            pending.shift();
-            const t = nextTurn();
-            if (t.mcpMessage) {
-              writeMessageOut({
-                id: `mcp-${idx}`,
-                kind: 'chat',
-                platform_id: 'chan-1',
-                channel_type: 'discord',
-                thread_id: null,
-                content: JSON.stringify({ text: t.mcpMessage, delivery_origin: 'send_message' }),
-              });
-              yield {
-                type: 'progress' as const,
-                step: { kind: 'tool' as const, id: `send-${idx}`, tool: 'nanoclaw_send_message', status: 'completed' as const },
-              };
-            }
-            if (t.toolActivity) {
-              yield {
-                type: 'progress' as const,
-                step: { kind: 'tool' as const, id: `tool-${idx}`, tool: 'web_search', status: 'completed' as const },
-              };
-            }
-            yield {
-              type: 'result' as const,
-              text: t.text || null,
-              strippedToEmpty: t.strippedToEmpty,
-              finishReason: t.finishReason,
-              recoveredFromUnclosedThink: t.recoveredFromUnclosedThink,
-            };
+            const pushed = pending.shift()!;
+            yield* emitTurn(nextTurn(), idx, pushed.options?.tools !== 'disabled');
             continue;
           }
           await new Promise<void>((resolve) => {
