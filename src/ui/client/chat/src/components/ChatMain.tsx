@@ -994,7 +994,7 @@ function MessageLog() {
   const groups = groupMessages(list);
   return (
     <div class="log-viewport">
-      <div class="log" id="chat-log" ref={ref} onScroll={onLogScroll} onLoadCapture={measureScroll}>
+      <div class="log" id="chat-log" ref={ref} tabIndex={-1} onScroll={onLogScroll} onLoadCapture={measureScroll}>
         {chatLoading.value
           ? null
           : !threadId.value
@@ -1389,6 +1389,7 @@ function Composer() {
     autosize();
     clearPending();
     clearPinnedContext();
+    if (isMobile.value) document.getElementById('chat-log')?.focus({ preventScroll: true });
     sendChat(fullText, files).catch(console.error);
   };
   // Set by onSubmit when the user presses Send while mic recording or

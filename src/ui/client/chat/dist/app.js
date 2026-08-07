@@ -21311,7 +21311,7 @@ function MessageLog() {
   const list = timeline;
   const groups2 = groupMessages(list);
   return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
-    /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
+    /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
       chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
       typing ? /* @__PURE__ */ u4(TypingIndicator, { traceExpanded, onToggleTrace: () => setTraceExpanded((v5) => !v5) }) : null,
       /* @__PURE__ */ u4(TaskIndicator, {})
@@ -21646,6 +21646,7 @@ function Composer() {
     autosize();
     clearPending();
     clearPinnedContext();
+    if (isMobile.value) document.getElementById("chat-log")?.focus({ preventScroll: true });
     sendChat(fullText, files).catch(console.error);
   };
   const autoSendRef = A2(false);
