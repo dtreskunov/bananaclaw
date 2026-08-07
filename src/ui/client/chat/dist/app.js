@@ -21220,6 +21220,7 @@ function MessageLog() {
   const activeThreadId = threadId.value;
   const traceLen = activityLog.value.length;
   const atBottomRef = A2(true);
+  const followingBottomRef = A2(true);
   const measureScroll = () => {
     const el = ref.current;
     if (!el) return true;
@@ -21237,11 +21238,12 @@ function MessageLog() {
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     else el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
+    followingBottomRef.current = true;
     setAtBottom(true);
     setNewMessageBelow(false);
   };
   const onLogScroll = () => {
-    measureScroll();
+    followingBottomRef.current = measureScroll();
   };
   y2(() => {
     const el = ref.current;
@@ -21258,8 +21260,18 @@ function MessageLog() {
     };
   }, []);
   y2(() => {
+    const bubble = ref.current?.querySelector(".typing");
+    if (!typing || !bubble || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (followingBottomRef.current) scrollToBottom();
+    });
+    observer.observe(bubble);
+    return () => observer.disconnect();
+  }, [typing, activeThreadId]);
+  y2(() => {
     prevMsgCountRef.current = 0;
     atBottomRef.current = true;
+    followingBottomRef.current = true;
     setAtBottom(true);
     setNewMessageBelow(false);
   }, [activeThreadId]);

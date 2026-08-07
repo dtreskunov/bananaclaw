@@ -1599,10 +1599,14 @@ nav.tab-bar-strip.group-strip {
   width: 100%;
   height: 100%;
   overflow: auto;
-  padding-block: 12px;
+  padding-block: 12px 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.chat-main .log::after {
+  content: "";
+  flex: 0 0 6px;
 }
 .chat-main .scroll-to-bottom {
   position: absolute;

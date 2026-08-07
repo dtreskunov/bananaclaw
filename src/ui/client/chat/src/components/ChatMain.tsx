@@ -880,6 +880,7 @@ function MessageLog() {
   // Subscribe to trace growth so the effect re-runs as steps stream in.
   const traceLen = activityLog.value.length;
   const atBottomRef = useRef<boolean>(true);
+  const followingBottomRef = useRef<boolean>(true);
 
   const measureScroll = (): boolean => {
     const el = ref.current;
@@ -899,6 +900,7 @@ function MessageLog() {
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     else el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
+    followingBottomRef.current = true;
     setAtBottom(true);
     setNewMessageBelow(false);
   };
@@ -907,7 +909,7 @@ function MessageLog() {
   // scroll so trace-follow can distinguish "following along" from "scrolled
   // up to read history". Programmatic scrollToBottom also fires scroll, which
   // keeps this true while we tail the trace.
-  const onLogScroll = () => { measureScroll(); };
+  const onLogScroll = () => { followingBottomRef.current = measureScroll(); };
 
   useEffect(() => {
     const el = ref.current;
@@ -925,8 +927,19 @@ function MessageLog() {
   }, []);
 
   useEffect(() => {
+    const bubble = ref.current?.querySelector('.typing');
+    if (!typing || !bubble || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (followingBottomRef.current) scrollToBottom();
+    });
+    observer.observe(bubble);
+    return () => observer.disconnect();
+  }, [typing, activeThreadId]);
+
+  useEffect(() => {
     prevMsgCountRef.current = 0;
     atBottomRef.current = true;
+    followingBottomRef.current = true;
     setAtBottom(true);
     setNewMessageBelow(false);
   }, [activeThreadId]);

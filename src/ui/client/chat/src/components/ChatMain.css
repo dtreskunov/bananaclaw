@@ -26,7 +26,10 @@
   padding-inline: max(12px, calc((100% - var(--chat-max)) / 2));
 }
 .chat-main .log-viewport { min-width: 0; min-height: 0; position: relative; }
-.chat-main .log { width: 100%; height: 100%; overflow: auto; padding-block: 12px; display: flex; flex-direction: column; gap: 6px; }
+.chat-main .log { width: 100%; height: 100%; overflow: auto; padding-block: 12px 0; display: flex; flex-direction: column; gap: 6px; }
+/* A flex item keeps trailing space in Chromium's scrollable overflow; with the
+  preceding flex gap this leaves 12px between the last bubble and composer. */
+.chat-main .log::after { content: ''; flex: 0 0 6px; }
 .chat-main .scroll-to-bottom {
   position: absolute;
   z-index: 2;
