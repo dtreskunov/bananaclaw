@@ -10,6 +10,7 @@ import {
   pendingQuestions, respondingQuestionIds,
   highlightMessageId, searchQuery, voiceMode, isMobile, scrollToBottomTick,
   currentUserId,
+  pendingWebSends,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
 } from '../state';
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
@@ -20,6 +21,7 @@ import {
 } from '../actions';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
 import { mergeQuestionTimeline } from '../question-timeline';
+import { CONTINUE_PROMPT, isFutureWorkMessage } from '../future-work';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
@@ -425,9 +427,10 @@ function AgentActionLabel({ label, title }: { label: string; title: string }) {
   return <span class="delivery-origin" title={title}>{label}</span>;
 }
 
-function Message({ m }: { m: ChatMessage }) {
+function Message({ m, allowContinue = false }: { m: ChatMessage; allowContinue?: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
+  const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
@@ -504,6 +507,11 @@ function Message({ m }: { m: ChatMessage }) {
   const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '');
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
+  const isWebChannel = !channelType.value || channelType.value === 'web';
+  const hasPendingSend = pendingWebSends.value.some((pendingSend) => pendingSend.threadId === threadId.value);
+  const showContinue = isWebChannel && allowContinue && m.direction === 'out' &&
+    !hasPendingSend &&
+    !m.files?.length && isFutureWorkMessage(m.text);
   return (
     <div class={cls} data-msg-id={m.id} ref={ref}>
       {m.direction === 'internal' ? <div class="internal-label">internal</div> : null}
@@ -547,6 +555,29 @@ function Message({ m }: { m: ChatMessage }) {
                   >{'\uD83D\uDCCE '}{f.filename}</button>
                 )
               : <span class="file-chip inert" title="Source not in workspace" key={f.filename}>{'\uD83D\uDCCE '}{f.filename}</span>)}
+          </div>
+        )
+        : null}
+      {showContinue
+        ? (
+          <div class="message-actions">
+            <button
+              type="button"
+              class="message-action-btn"
+              disabled={continueState !== 'idle' || !canSend.value || isTyping.value}
+              onClick={async () => {
+                if (continueState !== 'idle') return;
+                setContinueState('sending');
+                const sent = await sendChat(CONTINUE_PROMPT, null);
+                setContinueState(sent ? 'sent' : 'idle');
+              }}
+            >{
+              continueState === 'sent'
+                ? 'Sent'
+                : continueState === 'sending'
+                  ? 'Sending…'
+                  : 'Continue'
+            }</button>
           </div>
         )
         : null}
@@ -618,6 +649,16 @@ interface ThoughtsGroup { kind: 'thoughts'; thoughts: ChatMessage[]; answer: Cha
 interface SingleGroup { kind: 'single'; m: ChatMessage }
 interface EventsGroup { kind: 'events'; events: ChatMessage[] }
 type MsgGroup = ThoughtsGroup | SingleGroup | EventsGroup;
+
+function messageKey(message: ChatMessage): string {
+  return message.id || `${message.direction}:${message.ts}:${message.text}`;
+}
+
+function groupKey(group: MsgGroup): string {
+  if (group.kind === 'thoughts') return `thoughts:${messageKey(group.answer)}`;
+  if (group.kind === 'events') return `events:${messageKey(group.events[0]!)}`;
+  return `single:${messageKey(group.m)}`;
+}
 
 function groupMessages(list: ChatMessage[]): MsgGroup[] {
   const out: MsgGroup[] = [];
@@ -692,7 +733,15 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
   );
 }
 
-function ThoughtGroup({ thoughts, answer }: { thoughts: ChatMessage[]; answer: ChatMessage }) {
+function ThoughtGroup({
+  thoughts,
+  answer,
+  allowContinue,
+}: {
+  thoughts: ChatMessage[];
+  answer: ChatMessage;
+  allowContinue: boolean;
+}) {
   const [showThoughts, setShowThoughts] = useState(false);
   const n = thoughts.length;
   const label = showThoughts ? 'answer' : (n > 1 ? `thoughts (${n})` : 'thoughts');
@@ -700,8 +749,8 @@ function ThoughtGroup({ thoughts, answer }: { thoughts: ChatMessage[]; answer: C
   return (
     <div class={'thought-group' + (showThoughts ? ' showing-thoughts' : ' showing-answer')}>
       {showThoughts
-        ? thoughts.map((t, i) => <Message key={'t' + i} m={t} />)
-        : <Message m={answer} />}
+        ? thoughts.map((t) => <Message key={messageKey(t)} m={t} />)
+        : <Message m={answer} allowContinue={allowContinue} />}
       <button
         type="button"
         class="thoughts-toggle"
@@ -1005,6 +1054,14 @@ function MessageLog() {
   });
   const list = timeline;
   const groups = groupMessages(list);
+  let latestConversationalMessage: ChatMessage | undefined;
+  for (let index = list.length - 1; index >= 0; index--) {
+    const message = list[index]!;
+    if (message.direction !== 'internal' && message.direction !== 'event') {
+      latestConversationalMessage = message;
+      break;
+    }
+  }
   return (
     <div class="log-viewport">
       <div class="log" id="chat-log" ref={ref} tabIndex={-1} onScroll={onLogScroll} onLoadCapture={measureScroll}>
@@ -1014,11 +1071,20 @@ function MessageLog() {
             ? <div class="empty">Pick or start a chat.</div>
             : list.length === 0
               ? <div class="empty">No messages yet.</div>
-              : groups.map((g, i) => g.kind === 'thoughts'
-                  ? <ThoughtGroup key={i} thoughts={g.thoughts} answer={g.answer} />
+              : groups.map((g) => g.kind === 'thoughts'
+                  ? <ThoughtGroup
+                      key={`${threadId.value}:${groupKey(g)}`}
+                      thoughts={g.thoughts}
+                      answer={g.answer}
+                      allowContinue={g.answer === latestConversationalMessage}
+                    />
                   : g.kind === 'events'
-                    ? <EventsGroup key={i} events={g.events} />
-                    : <Message key={i} m={g.m} />)}
+                    ? <EventsGroup key={`${threadId.value}:${groupKey(g)}`} events={g.events} />
+                    : <Message
+                        key={`${threadId.value}:${groupKey(g)}`}
+                        m={g.m}
+                        allowContinue={g.m === latestConversationalMessage}
+                      />)}
         {typing
           ? <TypingIndicator traceExpanded={traceExpanded} onToggleTrace={() => setTraceExpanded((v) => !v)} />
           : null}

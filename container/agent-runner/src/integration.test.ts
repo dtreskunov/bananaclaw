@@ -1570,8 +1570,8 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
   });
 });
 
-describe('poll loop - premature completion recovery', () => {
-  it('continues when send_message only announces future work before an empty result', async () => {
+describe('poll loop - future-work announcements', () => {
+  it('delivers send_message announcements without an automatic recovery push', async () => {
     insertMessage('m-progress-only', { sender: 'Alice', text: 'update all issues' }, { platformId: 'chan-1', channelType: 'discord' });
 
     const provider = new ScriptedProvider([
@@ -1579,126 +1579,51 @@ describe('poll loop - premature completion recovery', () => {
         text: '',
         mcpMessage: 'Understood - working through all 8 issues. Starting with TRE-51 now.',
       },
-      { text: '<message to="discord-test">All issues are updated.</message>', toolActivity: true },
     ]);
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
 
     await waitFor(
-      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'All issues are updated.'),
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.startsWith('Understood - working')),
       3000,
     );
     controller.abort();
     await loopPromise.catch(() => {});
 
-    expect(provider.pushes).toHaveLength(1);
-    expect(provider.pushes[0]).toContain('Continue the original request now');
+    expect(provider.pushes).toHaveLength(0);
+    expect(provider.exchanges).toEqual([expect.objectContaining({
+      result: null,
+      status: 'completed',
+    })]);
     expect(getUndeliveredMessages().map((m) => JSON.parse(m.content).text)).toEqual([
       'Understood - working through all 8 issues. Starting with TRE-51 now.',
-      'All issues are updated.',
     ]);
+    const ack = getOutboundDb()
+      .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
+      .get('m-progress-only') as { status: string };
+    expect(ack.status).toBe('completed');
   });
 
-  it('keeps the inbound claim processing until the corrective turn finishes', async () => {
-    insertMessage('m-premature', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
-
-    const provider = new ControlledPrematureProvider();
-    const controller = new AbortController();
-    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
-
-    await waitFor(() => provider.pushes.length === 1, 3000);
-    const interimAck = getOutboundDb()
-      .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
-      .get('m-premature') as { status: string };
-    expect(interimAck.status).toBe('processing');
-    expect(provider.pushes[0]).toContain('Continue the original request now');
-
-    provider.releaseRecovery();
-    await waitFor(
-      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Here are the researched results.'),
-      3000,
-    );
-    controller.abort();
-    await loopPromise.catch(() => {});
-
-    const finalAck = getOutboundDb()
-      .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
-      .get('m-premature') as { status: string };
-    expect(finalAck.status).toBe('completed');
-    expect(getUndeliveredMessages().map((m) => JSON.parse(m.content).text)).toEqual([
-      'On it. Searching now for the requested details.',
-      'Here are the researched results.',
-    ]);
-  });
-
-  it('stops after one retry and replaces a repeated announcement with an error', async () => {
-    insertMessage('m-repeat', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
+  it('delivers result-text announcements without an automatic recovery push', async () => {
+    insertMessage('m-result-announcement', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
 
     const announcement = '<message to="discord-test">On it. Searching now for the requested details.</message>';
     const provider = new ScriptedProvider([
       { text: announcement, finishReason: 'stop', recoveredFromUnclosedThink: true },
-      { text: announcement, finishReason: 'stop', recoveredFromUnclosedThink: true },
     ]);
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
 
     await waitFor(
-      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('announcing work twice')),
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.startsWith('On it. Searching')),
       3000,
     );
     controller.abort();
     await loopPromise.catch(() => {});
 
     const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
-    expect(texts.filter((text) => text === 'On it. Searching now for the requested details.')).toHaveLength(1);
-    expect(texts.some((text) => text.includes('announcing work twice'))).toBe(true);
-    expect(provider.pushes).toHaveLength(1);
-  });
-
-  it('surfaces an explicit error when the corrective turn is empty', async () => {
-    insertMessage('m-empty-recovery', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
-
-    const provider = new ScriptedProvider([
-      {
-        text: '<message to="discord-test">On it. Searching now for the requested details.</message>',
-        finishReason: 'stop',
-        recoveredFromUnclosedThink: true,
-      },
-      { text: '' },
-    ]);
-    const controller = new AbortController();
-    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
-
-    await waitFor(
-      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('without completing it')),
-      3000,
-    );
-    controller.abort();
-    await loopPromise.catch(() => {});
-
-    expect(provider.pushes).toHaveLength(1);
-  });
-
-  it('does not recover an announcement-shaped final response after real tool activity', async () => {
-    insertMessage('m-tool-work', { sender: 'Alice', text: 'research this' }, { platformId: 'chan-1', channelType: 'discord' });
-
-    const provider = new ScriptedProvider([{
-      text: '<message to="discord-test">On it. Searching now for the requested details.</message>',
-      finishReason: 'stop',
-      recoveredFromUnclosedThink: true,
-      toolActivity: true,
-    }]);
-    const controller = new AbortController();
-    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
-
-    await waitFor(() => getUndeliveredMessages().length === 1, 3000);
-    controller.abort();
-    await loopPromise.catch(() => {});
-
+    expect(texts).toEqual(['On it. Searching now for the requested details.']);
     expect(provider.pushes).toHaveLength(0);
-    expect(JSON.parse(getUndeliveredMessages()[0].content).text).toBe(
-      'On it. Searching now for the requested details.',
-    );
   });
 });
 

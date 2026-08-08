@@ -8,7 +8,6 @@ import {
   isCorruptionError,
   isMissingDbError,
   friendlyProviderErrorFallback,
-  isFutureWorkAnnouncement,
   shouldDeferInteractiveResponse,
 } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
@@ -19,29 +18,6 @@ beforeEach(() => {
 
 afterEach(() => {
   closeSessionDb();
-});
-
-describe('isFutureWorkAnnouncement', () => {
-  it('recognizes the observed progress-only Minimax responses', () => {
-    expect(isFutureWorkAnnouncement(
-      '<message to="web">Let me dig into that specifically - I need to research what this looks like in practice.</message>',
-    )).toBe(true);
-    expect(isFutureWorkAnnouncement(
-      '<message to="web">On it. Searching now for the Next.js + self-hosted Firebase angle.</message>',
-    )).toBe(true);
-  });
-
-  it('does not classify substantive or structurally ambiguous replies', () => {
-    expect(isFutureWorkAnnouncement(
-      '<message to="web">Let me explain how the template works.</message>',
-    )).toBe(false);
-    expect(isFutureWorkAnnouncement(
-      '<message to="web">I researched it. Here are the results.</message>',
-    )).toBe(false);
-    expect(isFutureWorkAnnouncement(
-      '<message to="web">On it. Searching now.</message><message to="peer">Please help.</message>',
-    )).toBe(false);
-  });
 });
 
 function insertMessage(

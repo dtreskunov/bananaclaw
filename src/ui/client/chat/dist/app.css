@@ -1882,6 +1882,29 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg .delivery-origin {
   font-style: italic;
 }
+.chat-main .message-actions {
+  display: flex;
+  margin-top: 8px;
+}
+.chat-main .message-action-btn {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--accent-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--accent-strong);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.chat-main .message-action-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--fg);
+}
+.chat-main .message-action-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 .chat-main .msg .reactions {
   display: flex;
   flex-wrap: wrap;
@@ -2598,6 +2621,9 @@ nav.tab-bar-strip.group-strip {
   .chat-main #chat-mic.recording {
     min-width: 56px;
     font-size: 14px;
+  }
+  .chat-main .message-action-btn {
+    min-height: 44px;
   }
 }
 .chat-main .approvals-banner {

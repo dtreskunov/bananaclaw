@@ -13,6 +13,7 @@ import {
   chatLoading,
   chatReady,
   isTyping,
+  pendingWebSends,
   typingHint,
   typingStartedAt,
   typingModel,
@@ -403,6 +404,11 @@ function toChatMessage(m: ServerMessage): ChatMessage {
 function replaceIncomingMessages(messages: ServerMessage[]): void {
   chatMessages.value = messages.map(toChatMessage);
   refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
+  const echoedIds = new Set(messages.filter((m) => normDirection(m.direction) === 'in').map((m) => m.id));
+  const tid = threadId.value;
+  pendingWebSends.value = pendingWebSends.value.filter(
+    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.has(pendingSend.clientMessageId),
+  );
 }
 
 function mergeIncomingMessages(messages: ServerMessage[]): void {
@@ -775,6 +781,11 @@ function connectChatWs(ctx: ChatSocketContext): void {
     }
     if (payload.kind === 'inbound') {
       refs.carryActivity = [];
+      if (payload.id) {
+        pendingWebSends.value = pendingWebSends.value.filter(
+          (pendingSend) => pendingSend.clientMessageId !== payload.id,
+        );
+      }
       appendMsg(
         'in',
         payload.text || '',
@@ -963,8 +974,8 @@ function connectChatWs(ctx: ChatSocketContext): void {
   };
 }
 
-export async function sendChat(text: string, files: PendingFile[] | null | undefined): Promise<void> {
-  if (!groupId.value || !threadId.value) return;
+export async function sendChat(text: string, files: PendingFile[] | null | undefined): Promise<boolean> {
+  if (!groupId.value || !threadId.value) return false;
   const generation = refs.chatGeneration;
   const gid = groupId.value;
   const tid = threadId.value;
@@ -974,7 +985,10 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
   // Scroll to bottom immediately so user sees their message area
   requestScrollToBottom();
   const isWeb = !channelType.value || channelType.value === 'web';
-  if (isWeb && !chatReady.value) return;
+  if (isWeb && !chatReady.value) return false;
+  if (isWeb) {
+    pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, clientMessageId });
+  }
   const hasFiles = Array.isArray(files) && files.length > 0;
   if (!isWeb) {
     const now = new Date().toISOString();
@@ -1005,7 +1019,12 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
         body: JSON.stringify({ text, clientMessageId }),
       });
     }
-    if (generation !== refs.chatGeneration) return;
+    if (!res.ok) {
+      pendingWebSends.value = pendingWebSends.value.filter(
+        (pendingSend) => pendingSend.clientMessageId !== clientMessageId,
+      );
+    }
+    if (generation !== refs.chatGeneration) return false;
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
@@ -1015,6 +1034,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
         /* ignore */
       }
       chatStatus.value = `send failed: ${detail}`;
+      return false;
     } else if (!isWeb) {
       try {
         await runSync({ replaceThreadMessages: true });
@@ -1022,11 +1042,16 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
         /* ignore */
       }
     }
+    return true;
   } catch (err) {
     console.error('send failed', err);
-    if (generation !== refs.chatGeneration) return;
+    pendingWebSends.value = pendingWebSends.value.filter(
+      (pendingSend) => pendingSend.clientMessageId !== clientMessageId,
+    );
+    if (generation !== refs.chatGeneration) return false;
     const m = err instanceof Error ? err.message : 'network error';
     chatStatus.value = `send failed: ${m}`;
+    return false;
   }
 }
 

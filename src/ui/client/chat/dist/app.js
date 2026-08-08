@@ -15547,6 +15547,7 @@ var chatStatus = y3("");
 var chatLoading = y3(false);
 var chatReady = y3(false);
 var isTyping = y3(false);
+var pendingWebSends = y3([]);
 var typingHint = y3("");
 var typingStartedAt = y3(null);
 var typingModel = y3("");
@@ -17833,6 +17834,11 @@ function toChatMessage(m6) {
 function replaceIncomingMessages(messages) {
   chatMessages.value = messages.map(toChatMessage);
   refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
+  const echoedIds = new Set(messages.filter((m6) => normDirection(m6.direction) === "in").map((m6) => m6.id));
+  const tid = threadId.value;
+  pendingWebSends.value = pendingWebSends.value.filter(
+    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.has(pendingSend.clientMessageId)
+  );
 }
 function mergeIncomingMessages(messages) {
   let maxTs = "";
@@ -18141,6 +18147,11 @@ function connectChatWs(ctx2) {
     }
     if (payload.kind === "inbound") {
       refs.carryActivity = [];
+      if (payload.id) {
+        pendingWebSends.value = pendingWebSends.value.filter(
+          (pendingSend) => pendingSend.clientMessageId !== payload.id
+        );
+      }
       appendMsg(
         "in",
         payload.text || "",
@@ -18299,7 +18310,7 @@ function connectChatWs(ctx2) {
   };
 }
 async function sendChat(text, files) {
-  if (!groupId.value || !threadId.value) return;
+  if (!groupId.value || !threadId.value) return false;
   const generation = refs.chatGeneration;
   const gid = groupId.value;
   const tid = threadId.value;
@@ -18307,7 +18318,10 @@ async function sendChat(text, files) {
   refs.carryActivity = [];
   requestScrollToBottom();
   const isWeb = !channelType.value || channelType.value === "web";
-  if (isWeb && !chatReady.value) return;
+  if (isWeb && !chatReady.value) return false;
+  if (isWeb) {
+    pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, clientMessageId });
+  }
   const hasFiles = Array.isArray(files) && files.length > 0;
   if (!isWeb) {
     const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -18336,7 +18350,12 @@ async function sendChat(text, files) {
         body: JSON.stringify({ text, clientMessageId })
       });
     }
-    if (generation !== refs.chatGeneration) return;
+    if (!res.ok) {
+      pendingWebSends.value = pendingWebSends.value.filter(
+        (pendingSend) => pendingSend.clientMessageId !== clientMessageId
+      );
+    }
+    if (generation !== refs.chatGeneration) return false;
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
@@ -18345,17 +18364,23 @@ async function sendChat(text, files) {
       } catch {
       }
       chatStatus.value = `send failed: ${detail}`;
+      return false;
     } else if (!isWeb) {
       try {
         await runSync({ replaceThreadMessages: true });
       } catch {
       }
     }
+    return true;
   } catch (err) {
     console.error("send failed", err);
-    if (generation !== refs.chatGeneration) return;
+    pendingWebSends.value = pendingWebSends.value.filter(
+      (pendingSend) => pendingSend.clientMessageId !== clientMessageId
+    );
+    if (generation !== refs.chatGeneration) return false;
     const m6 = err instanceof Error ? err.message : "network error";
     chatStatus.value = `send failed: ${m6}`;
+    return false;
   }
 }
 async function selectGroup(gid) {
@@ -20194,6 +20219,20 @@ function mergeQuestionTimeline(messages, questions, currentThreadId) {
   });
 }
 
+// src/future-work.ts
+var CONTINUE_PROMPT = "Continue the original request. Do not acknowledge; perform the work and report when complete.";
+function isFutureWorkMessage(body) {
+  if (!body || body.length > 240 || body.includes("?")) return false;
+  const directedProgress = /^\s*(?:okay[,.!]?\s*)?(?:actually\s+)?(?:i(?:'m| am)\s+)?(?:working|starting|searching|researching|looking|checking|investigating|reviewing|testing|debugging)(?:\s+on)?\s+(?:it|this|that|now)(?:\s+now)?[.!]*\s*$/i;
+  const executionProgress = /^\s*(?:okay[,.!]?\s*)?(?:actually\s+)?(?:doing\s+(?:it|this|that)(?:\s+now)?|executing(?:\s+(?:it|this|that|now))?|running\s+(?:it|this|that)\s+now)[.!]*\s*$/i;
+  const futureClause = /(?:^|[.!]\s+)(?:understood|on it|let me|i(?:'ll| will| need to)|i(?:'m| am)\s+(?:going to|about to|starting to))\b[^.!?]*(?:search(?:ing)?|research(?:ing)?|look(?:ing)?\s+(?:into|up)|take\s+a\s+look|investigat(?:e|ing)|check(?:ing)?|dig(?:ging)?|review(?:ing)?|inspect(?:ing)?|test(?:ing)?|work(?:ing)?\s+(?:on|through)|start(?:ing)?|get\s+started|pull(?:ing)?|fix(?:ing)?|build(?:ing)?|render(?:ing)?|updat(?:e|ing)|implement(?:ing)?|creat(?:e|ing)|generat(?:e|ing)|run(?:ning)?|fetch(?:ing)?|analy[sz](?:e|ing)|compar(?:e|ing)|verif(?:y|ying)|debug(?:ging)?|set(?:ting)?\s+up|wir(?:e|ing)|edit(?:ing)?|writ(?:e|ing)|mak(?:e|ing))\b/i;
+  const observationPreface = /\blet me\s+(?:check|verify|inspect|review|test)\s*:\s*\S/i;
+  const negatedAction = /\b(?:will|would|can|could|should|do|does|did|let me)\s+(?:not|never)\b|\b(?:won't|wouldn't|can't|couldn't|shouldn't|don't|doesn't|didn't)\b/i;
+  const completedStatus = /\b(?:is|are|was|were|has|have|had)\s+(?:already\s+)?(?:complete|completed|done|finished|updated)\b/i;
+  const completedAction = /(?:^|[.!]\s+)(?:understood[,.]?\s*)?(?:i\s+)?(?:completed|finished|updated)\b[^.!?]*[.!]*\s*$/i;
+  return !observationPreface.test(body) && !negatedAction.test(body) && !completedStatus.test(body) && !completedAction.test(body) && (directedProgress.test(body) || executionProgress.test(body) || futureClause.test(body));
+}
+
 // src/components/ComposerPlusMenu.tsx
 function ComposerPlusMenu({
   disabled,
@@ -20825,9 +20864,10 @@ function UsageMeta({ u: u5 }) {
 function AgentActionLabel({ label, title }) {
   return /* @__PURE__ */ u4("span", { class: "delivery-origin", title, children: label });
 }
-function Message({ m: m6 }) {
+function Message({ m: m6, allowContinue = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
+  const [continueState, setContinueState] = h2("idle");
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -20909,6 +20949,9 @@ function Message({ m: m6 }) {
   const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
+  const isWebChannel = !channelType.value || channelType.value === "web";
+  const hasPendingSend = pendingWebSends.value.some((pendingSend) => pendingSend.threadId === threadId.value);
+  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && isFutureWorkMessage(m6.text);
   return /* @__PURE__ */ u4("div", { class: cls, "data-msg-id": m6.id, ref, children: [
     m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
     m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
@@ -20949,6 +20992,21 @@ function Message({ m: m6 }) {
       "\u{1F4CE} ",
       f5.filename
     ] }, f5.filename)) }) : null,
+    showContinue ? /* @__PURE__ */ u4("div", { class: "message-actions", children: /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "message-action-btn",
+        disabled: continueState !== "idle" || !canSend.value || isTyping.value,
+        onClick: async () => {
+          if (continueState !== "idle") return;
+          setContinueState("sending");
+          const sent = await sendChat(CONTINUE_PROMPT, null);
+          setContinueState(sent ? "sent" : "idle");
+        },
+        children: continueState === "sent" ? "Sent" : continueState === "sending" ? "Sending\u2026" : "Continue"
+      }
+    ) }) : null,
     m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,
     m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
     m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
@@ -20987,6 +21045,14 @@ function DisplayCardMessage({ message, card }) {
       /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" })
     ] }) : null
   ] });
+}
+function messageKey(message) {
+  return message.id || `${message.direction}:${message.ts}:${message.text}`;
+}
+function groupKey(group) {
+  if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
+  if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
+  return `single:${messageKey(group.m)}`;
 }
 function groupMessages(list) {
   const out = [];
@@ -21050,13 +21116,17 @@ function EventsGroup({ events }) {
     ] })
   ] });
 }
-function ThoughtGroup({ thoughts, answer }) {
+function ThoughtGroup({
+  thoughts,
+  answer,
+  allowContinue
+}) {
   const [showThoughts, setShowThoughts] = h2(false);
   const n3 = thoughts.length;
   const label = showThoughts ? "answer" : n3 > 1 ? `thoughts (${n3})` : "thoughts";
   const title = showThoughts ? "Show final answer" : "Show agent thoughts leading to this answer";
   return /* @__PURE__ */ u4("div", { class: "thought-group" + (showThoughts ? " showing-thoughts" : " showing-answer"), children: [
-    showThoughts ? thoughts.map((t4, i5) => /* @__PURE__ */ u4(Message, { m: t4 }, "t" + i5)) : /* @__PURE__ */ u4(Message, { m: answer }),
+    showThoughts ? thoughts.map((t4) => /* @__PURE__ */ u4(Message, { m: t4 }, messageKey(t4))) : /* @__PURE__ */ u4(Message, { m: answer, allowContinue }),
     /* @__PURE__ */ u4(
       "button",
       {
@@ -21322,9 +21392,32 @@ function MessageLog() {
   });
   const list = timeline;
   const groups2 = groupMessages(list);
+  let latestConversationalMessage;
+  for (let index = list.length - 1; index >= 0; index--) {
+    const message = list[index];
+    if (message.direction !== "internal" && message.direction !== "event") {
+      latestConversationalMessage = message;
+      break;
+    }
+  }
   return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
     /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
-      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8, i5) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(ThoughtGroup, { thoughts: g8.thoughts, answer: g8.answer }, i5) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, i5) : /* @__PURE__ */ u4(Message, { m: g8.m }, i5)),
+      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(
+        ThoughtGroup,
+        {
+          thoughts: g8.thoughts,
+          answer: g8.answer,
+          allowContinue: g8.answer === latestConversationalMessage
+        },
+        `${threadId.value}:${groupKey(g8)}`
+      ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, `${threadId.value}:${groupKey(g8)}`) : /* @__PURE__ */ u4(
+        Message,
+        {
+          m: g8.m,
+          allowContinue: g8.m === latestConversationalMessage
+        },
+        `${threadId.value}:${groupKey(g8)}`
+      )),
       typing ? /* @__PURE__ */ u4(TypingIndicator, { traceExpanded, onToggleTrace: () => setTraceExpanded((v5) => !v5) }) : null,
       /* @__PURE__ */ u4(TaskIndicator, {})
     ] }),
