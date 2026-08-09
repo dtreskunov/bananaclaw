@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   buildOpenCodeConfig,
+  buildOpenCodeToolOverrides,
   finalTextFromAssistantMessages,
   finalTextFromParts,
   formatProgressFromPart,
@@ -16,6 +17,32 @@ describe('buildOpenCodeConfig', () => {
     const config = buildOpenCodeConfig({});
 
     expect(config.tools).toEqual({ question: false });
+  });
+});
+
+describe('buildOpenCodeToolOverrides', () => {
+  const toolIds = ['bash', 'read', 'edit', 'write', 'question', 'nanoclaw_send_message'];
+
+  it('disables every discovered tool for a reporting-only recovery turn', () => {
+    expect(buildOpenCodeToolOverrides(toolIds, 'disabled')).toEqual({
+      bash: false,
+      read: false,
+      edit: false,
+      write: false,
+      question: false,
+      nanoclaw_send_message: false,
+    });
+  });
+
+  it('explicitly restores normal tools on the next turn while keeping question disabled', () => {
+    expect(buildOpenCodeToolOverrides(toolIds, 'enabled')).toEqual({
+      bash: true,
+      read: true,
+      edit: true,
+      write: true,
+      question: false,
+      nanoclaw_send_message: true,
+    });
   });
 });
 

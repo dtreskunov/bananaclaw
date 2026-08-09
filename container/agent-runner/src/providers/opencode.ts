@@ -123,6 +123,20 @@ function resolveModelForPrompt(
 
 const SESSION_STATUS_RETRY_ERROR_AFTER = 3;
 
+/**
+ * OpenCode can retain per-prompt tool overrides on a warm session. Omitting
+ * `tools` after a tool-disabled recovery therefore does not reliably restore
+ * native tools. Send an authoritative map on every turn while preserving the
+ * native question-tool policy from buildOpenCodeConfig().
+ */
+export function buildOpenCodeToolOverrides(
+  toolIds: string[],
+  mode: NonNullable<QueryPushOptions['tools']>,
+): Record<string, boolean> {
+  const enabled = mode === 'enabled';
+  return Object.fromEntries(toolIds.map((id) => [id, enabled && id !== 'question']));
+}
+
 /** Stale / dead OpenCode session heuristics (complement Claude-centric host patterns). */
 const STALE_SESSION_RE =
   /no conversation found|ENOENT.*\.jsonl|session.*not found|NotFoundError|connection reset|ECONNRESET|404|event timeout/i;
@@ -745,20 +759,17 @@ export class OpenCodeProvider implements AgentProvider {
         }
 
         const modelSelection = resolveModelForPrompt(self.options.model);
-        let toolOverrides: Record<string, boolean> | undefined;
-        if (turn.tools === 'disabled') {
-          const toolIds = await client.tool.ids({ query: { directory: input.cwd } });
-          if (toolIds.error || !toolIds.data) {
-            throw new Error(`OpenCode: failed to enumerate tools for tool-disabled turn: ${JSON.stringify(toolIds.error)}`);
-          }
-          toolOverrides = Object.fromEntries(toolIds.data.map((id) => [id, false]));
+        const toolIds = await client.tool.ids({ query: { directory: input.cwd } });
+        if (toolIds.error || !toolIds.data) {
+          throw new Error(`OpenCode: failed to enumerate tools for ${turn.tools} turn: ${JSON.stringify(toolIds.error)}`);
         }
+        const toolOverrides = buildOpenCodeToolOverrides(toolIds.data, turn.tools);
         const promptRes = await client.session.promptAsync({
           path: { id: sessionId },
           body: {
             parts: parts as any,
             ...(modelSelection ? { model: modelSelection } : {}),
-            ...(toolOverrides ? { tools: toolOverrides } : {}),
+            tools: toolOverrides,
           },
         });
         if (promptRes.error) {
