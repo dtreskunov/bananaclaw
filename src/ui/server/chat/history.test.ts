@@ -77,6 +77,37 @@ describe('parseOutboundContent', () => {
       files: undefined,
     });
   });
+
+  it('preserves recognized suggested actions', () => {
+    expect(
+      parseOutboundContent(
+        JSON.stringify({
+          text: 'The publish completed, but verification could not run.',
+          delivery_origin: 'response',
+          suggested_action: 'continue',
+        }),
+      ),
+    ).toEqual({
+      text: 'The publish completed, but verification could not run.',
+      files: undefined,
+      deliveryOrigin: 'response',
+      suggestedAction: 'continue',
+    });
+    expect(parseOutboundContent(JSON.stringify({ text: 'Try again.', suggested_action: 'retry' }))).toEqual({
+      text: 'Try again.',
+      files: undefined,
+      suggestedAction: 'retry',
+    });
+    expect(parseOutboundContent(JSON.stringify({ text: 'Report it.', suggested_action: 'report' }))).toEqual({
+      text: 'Report it.',
+      files: undefined,
+      suggestedAction: 'report',
+    });
+    expect(parseOutboundContent(JSON.stringify({ text: 'No action.', suggested_action: 'unknown' }))).toEqual({
+      text: 'No action.',
+      files: undefined,
+    });
+  });
 });
 
 describe('chatSdkHistoryContent', () => {

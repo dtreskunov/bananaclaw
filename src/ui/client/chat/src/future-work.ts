@@ -1,6 +1,25 @@
 export const CONTINUE_PROMPT =
   'Continue the original request. Do not acknowledge; perform the work and report when complete.';
 
+export const SUGGESTED_ACTIONS = {
+  continue: {
+    label: 'Continue',
+    sendingLabel: 'Continuing…',
+    prompt: CONTINUE_PROMPT,
+  },
+  retry: {
+    label: 'Retry',
+    sendingLabel: 'Retrying…',
+    prompt: 'Retry the original request. Do not acknowledge; perform the work and report when complete.',
+  },
+  report: {
+    label: 'Report result',
+    sendingLabel: 'Reporting…',
+    prompt:
+      'Report the result of the original request using only existing tool results. Do not repeat any action or use tools. State what succeeded, failed, and remains unfinished.',
+  },
+} as const;
+
 export function isFutureWorkMessage(body: string): boolean {
   if (!body || body.length > 240 || body.includes('?')) return false;
 

@@ -55,7 +55,7 @@ import {
 } from './state';
 import { api, postJson } from './api';
 import { writeHash } from './hash';
-import { isFinalResponse } from './chat-protocol';
+import { isFinalResponse, isWebEchoForClientMessage } from './chat-protocol';
 import { maybeNotify } from './notify';
 import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
@@ -73,6 +73,7 @@ import type {
   PendingQuestionDto,
   WsPayload,
   SearchResult,
+  SuggestedAction,
 } from './types';
 
 interface ServerMessage {
@@ -83,6 +84,7 @@ interface ServerMessage {
   files?: ChatMessageFile[] | null;
   timestamp: string;
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+  suggestedAction?: SuggestedAction;
   usage?: import('./types').TurnUsage;
   activity?: import('./types').ActivityLine[];
   event?: import('./types').TimelineEvent;
@@ -394,6 +396,7 @@ function toChatMessage(m: ServerMessage): ChatMessage {
     ts: m.timestamp,
     ...(m.author ? { author: m.author } : {}),
     ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
+    ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
     ...(m.usage ? { usage: m.usage } : {}),
     ...(m.activity ? { activity: m.activity } : {}),
     ...(m.event ? { event: m.event } : {}),
@@ -404,10 +407,12 @@ function toChatMessage(m: ServerMessage): ChatMessage {
 function replaceIncomingMessages(messages: ServerMessage[]): void {
   chatMessages.value = messages.map(toChatMessage);
   refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
-  const echoedIds = new Set(messages.filter((m) => normDirection(m.direction) === 'in').map((m) => m.id));
+  const echoedIds = messages.filter((m) => normDirection(m.direction) === 'in' && m.id).map((m) => m.id!);
   const tid = threadId.value;
   pendingWebSends.value = pendingWebSends.value.filter(
-    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.has(pendingSend.clientMessageId),
+    (pendingSend) =>
+      pendingSend.threadId !== tid ||
+      !echoedIds.some((id) => isWebEchoForClientMessage(id, pendingSend.clientMessageId)),
   );
 }
 
@@ -428,6 +433,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ts,
       ...(m.author ? { author: m.author } : {}),
       ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
+      ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
@@ -478,6 +484,7 @@ function appendMsg(
   card?: DisplayCard,
   deliveryOrigin?: 'send_message' | 'send_file' | 'response',
   author?: { userId: string; displayName: string },
+  suggestedAction?: SuggestedAction,
 ): void {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
@@ -491,6 +498,7 @@ function appendMsg(
     ts,
     ...(author ? { author } : {}),
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
+    ...(suggestedAction ? { suggestedAction } : {}),
     ...(activity && activity.length ? { activity } : {}),
   });
 }
@@ -783,7 +791,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
       refs.carryActivity = [];
       if (payload.id) {
         pendingWebSends.value = pendingWebSends.value.filter(
-          (pendingSend) => pendingSend.clientMessageId !== payload.id,
+          (pendingSend) => !isWebEchoForClientMessage(payload.id!, pendingSend.clientMessageId),
         );
       }
       appendMsg(
@@ -876,6 +884,11 @@ function connectChatWs(ctx: ChatSocketContext): void {
         (c.delivery_origin === 'send_message' || c.delivery_origin === 'send_file' || c.delivery_origin === 'response')
           ? c.delivery_origin
           : undefined;
+      const suggestedAction =
+        typeof c === 'object' &&
+        (c.suggested_action === 'continue' || c.suggested_action === 'retry' || c.suggested_action === 'report')
+          ? c.suggested_action
+          : undefined;
       const finalResponse = isFinalResponse(dir, deliveryOrigin);
       // For the final response, carry the live-accumulated trace onto the
       // message bubble so it stays visible immediately — the live outbound
@@ -898,6 +911,8 @@ function connectChatWs(ctx: ChatSocketContext): void {
         carriedActivity,
         undefined,
         deliveryOrigin,
+        undefined,
+        suggestedAction,
       );
       bumpActiveThread();
       if (dir === 'out') maybeNotify(text, payload.files || []);

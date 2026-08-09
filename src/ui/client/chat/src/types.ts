@@ -123,6 +123,8 @@ export interface DisplayCard {
   actions: DisplayCardAction[];
 }
 
+export type SuggestedAction = 'continue' | 'retry' | 'report';
+
 export interface ChatMessage {
   id?: string;
   direction: Direction;
@@ -132,6 +134,8 @@ export interface ChatMessage {
   author?: { userId: string; displayName: string };
   /** How the agent emitted this row. Absent for legacy/unclassified messages. */
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+  /** Safe next-turn action suggested by the agent runner. */
+  suggestedAction?: SuggestedAction;
   usage?: TurnUsage;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
@@ -297,6 +301,7 @@ export interface WsPayload {
     files?: ChatMessageFile[] | null;
     timestamp: string;
     deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+    suggestedAction?: SuggestedAction;
     usage?: TurnUsage;
     activity?: ActivityLine[];
     event?: TimelineEvent;
@@ -326,6 +331,7 @@ export interface WsPayload {
         markdown?: string;
         fallbackText?: string;
         delivery_origin?: 'send_message' | 'send_file' | 'response';
+        suggested_action?: SuggestedAction;
       };
   card?: DisplayCard;
   files?: ChatMessageFile[] | null;

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'bun:test';
 
-import { classifyAssistantResult, hasPseudoToolCallMarkup, normalizeAssistantText } from './opencode.js';
+import {
+  classifyAssistantResult,
+  hasPseudoToolCallMarkup,
+  normalizeAssistantText,
+  reasoningHasPseudoToolCallMarkup,
+} from './opencode.js';
 
 describe('hasPseudoToolCallMarkup', () => {
   it('recognizes MiniMax tool XML emitted as text', () => {
@@ -27,6 +32,24 @@ describe('hasPseudoToolCallMarkup', () => {
     expect(hasPseudoToolCallMarkup(
       'Example:\n~~~xml\n<tool_call><invoke name="bash"></invoke></tool_call>\n~~~',
     )).toBe(false);
+  });
+});
+
+describe('reasoningHasPseudoToolCallMarkup', () => {
+  it('recognizes the reasoning-only MiniMax payload from a silent transcript turn', () => {
+    expect(reasoningHasPseudoToolCallMarkup([{
+      type: 'reasoning',
+      text: 'Let me view the image.<function_calls>\n' +
+        '<invoke name="read">]<]minimax[>[<filePath>image.jpg</filePath>\n' +
+        '</invoke>\n]<]minimax[>[</tool_call>',
+    }])).toBe(true);
+  });
+
+  it('does not treat ordinary reasoning or visible examples as hidden tool calls', () => {
+    expect(reasoningHasPseudoToolCallMarkup([
+      { type: 'reasoning', text: 'I should summarize the completed result.' },
+      { type: 'text', text: '<tool_call><invoke name="read"></invoke></tool_call>' },
+    ])).toBe(false);
   });
 });
 

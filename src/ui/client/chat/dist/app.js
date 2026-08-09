@@ -17221,6 +17221,10 @@ async function applyHash(router2) {
 function isFinalResponse(direction, deliveryOrigin) {
   return direction === "out" && deliveryOrigin !== "send_message" && deliveryOrigin !== "send_file";
 }
+function isWebEchoForClientMessage(serverMessageId, clientMessageId) {
+  const webMessageId = `web-${clientMessageId}`;
+  return serverMessageId === clientMessageId || serverMessageId === webMessageId || serverMessageId.startsWith(`${webMessageId}:`);
+}
 
 // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
@@ -17825,6 +17829,7 @@ function toChatMessage(m6) {
     ts: m6.timestamp,
     ...m6.author ? { author: m6.author } : {},
     ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
+    ...m6.suggestedAction ? { suggestedAction: m6.suggestedAction } : {},
     ...m6.usage ? { usage: m6.usage } : {},
     ...m6.activity ? { activity: m6.activity } : {},
     ...m6.event ? { event: m6.event } : {},
@@ -17834,10 +17839,10 @@ function toChatMessage(m6) {
 function replaceIncomingMessages(messages) {
   chatMessages.value = messages.map(toChatMessage);
   refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
-  const echoedIds = new Set(messages.filter((m6) => normDirection(m6.direction) === "in").map((m6) => m6.id));
+  const echoedIds = messages.filter((m6) => normDirection(m6.direction) === "in" && m6.id).map((m6) => m6.id);
   const tid = threadId.value;
   pendingWebSends.value = pendingWebSends.value.filter(
-    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.has(pendingSend.clientMessageId)
+    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.some((id) => isWebEchoForClientMessage(id, pendingSend.clientMessageId))
   );
 }
 function mergeIncomingMessages(messages) {
@@ -17857,6 +17862,7 @@ function mergeIncomingMessages(messages) {
       ts,
       ...m6.author ? { author: m6.author } : {},
       ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
+      ...m6.suggestedAction ? { suggestedAction: m6.suggestedAction } : {},
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.activity ? { activity: m6.activity } : {},
       ...m6.event ? { event: m6.event } : {},
@@ -17888,7 +17894,7 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author) {
+function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author, suggestedAction) {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
   if (key) refs.seenIds.add(key);
@@ -17901,6 +17907,7 @@ function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigi
     ts,
     ...author ? { author } : {},
     ...deliveryOrigin ? { deliveryOrigin } : {},
+    ...suggestedAction ? { suggestedAction } : {},
     ...activity && activity.length ? { activity } : {}
   });
 }
@@ -18149,7 +18156,7 @@ function connectChatWs(ctx2) {
       refs.carryActivity = [];
       if (payload.id) {
         pendingWebSends.value = pendingWebSends.value.filter(
-          (pendingSend) => pendingSend.clientMessageId !== payload.id
+          (pendingSend) => !isWebEchoForClientMessage(payload.id, pendingSend.clientMessageId)
         );
       }
       appendMsg(
@@ -18229,6 +18236,7 @@ function connectChatWs(ctx2) {
       const text = typeof c4 === "string" ? c4 : c4.text || c4.markdown || "";
       const dir = payload.messageKind === "internal" ? "internal" : "out";
       const deliveryOrigin = typeof c4 === "object" && (c4.delivery_origin === "send_message" || c4.delivery_origin === "send_file" || c4.delivery_origin === "response") ? c4.delivery_origin : void 0;
+      const suggestedAction = typeof c4 === "object" && (c4.suggested_action === "continue" || c4.suggested_action === "retry" || c4.suggested_action === "report") ? c4.suggested_action : void 0;
       const finalResponse = isFinalResponse(dir, deliveryOrigin);
       const carriedActivity = finalResponse ? activityLog.value.length ? activityLog.value.slice() : refs.carryActivity : null;
       appendMsg(
@@ -18239,7 +18247,9 @@ function connectChatWs(ctx2) {
         payload.id,
         carriedActivity,
         void 0,
-        deliveryOrigin
+        deliveryOrigin,
+        void 0,
+        suggestedAction
       );
       bumpActiveThread();
       if (dir === "out") maybeNotify(text, payload.files || []);
@@ -20221,6 +20231,23 @@ function mergeQuestionTimeline(messages, questions, currentThreadId) {
 
 // src/future-work.ts
 var CONTINUE_PROMPT = "Continue the original request. Do not acknowledge; perform the work and report when complete.";
+var SUGGESTED_ACTIONS = {
+  continue: {
+    label: "Continue",
+    sendingLabel: "Continuing\u2026",
+    prompt: CONTINUE_PROMPT
+  },
+  retry: {
+    label: "Retry",
+    sendingLabel: "Retrying\u2026",
+    prompt: "Retry the original request. Do not acknowledge; perform the work and report when complete."
+  },
+  report: {
+    label: "Report result",
+    sendingLabel: "Reporting\u2026",
+    prompt: "Report the result of the original request using only existing tool results. Do not repeat any action or use tools. State what succeeded, failed, and remains unfinished."
+  }
+};
 function isFutureWorkMessage(body) {
   if (!body || body.length > 240 || body.includes("?")) return false;
   const directedProgress = /^\s*(?:okay[,.!]?\s*)?(?:actually\s+)?(?:i(?:'m| am)\s+)?(?:working|starting|searching|researching|looking|checking|investigating|reviewing|testing|debugging)(?:\s+on)?\s+(?:it|this|that|now)(?:\s+now)?[.!]*\s*$/i;
@@ -20951,7 +20978,9 @@ function Message({ m: m6, allowContinue = false }) {
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === "web";
   const hasPendingSend = pendingWebSends.value.some((pendingSend) => pendingSend.threadId === threadId.value);
-  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && isFutureWorkMessage(m6.text);
+  const suggestedAction = m6.suggestedAction ?? (isFutureWorkMessage(m6.text) ? "continue" : void 0);
+  const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
+  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && action != null;
   return /* @__PURE__ */ u4("div", { class: cls, "data-msg-id": m6.id, ref, children: [
     m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
     m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
@@ -21001,10 +21030,10 @@ function Message({ m: m6, allowContinue = false }) {
         onClick: async () => {
           if (continueState !== "idle") return;
           setContinueState("sending");
-          const sent = await sendChat(CONTINUE_PROMPT, null);
+          const sent = await sendChat(action.prompt, null);
           setContinueState(sent ? "sent" : "idle");
         },
-        children: continueState === "sent" ? "Sent" : continueState === "sending" ? "Sending\u2026" : "Continue"
+        children: continueState === "sent" ? "Sent" : continueState === "sending" ? action.sendingLabel : action.label
       }
     ) }) : null,
     m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,

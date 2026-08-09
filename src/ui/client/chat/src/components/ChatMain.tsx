@@ -21,7 +21,7 @@ import {
 } from '../actions';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
 import { mergeQuestionTimeline } from '../question-timeline';
-import { CONTINUE_PROMPT, isFutureWorkMessage } from '../future-work';
+import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
@@ -509,9 +509,11 @@ function Message({ m, allowContinue = false }: { m: ChatMessage; allowContinue?:
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === 'web';
   const hasPendingSend = pendingWebSends.value.some((pendingSend) => pendingSend.threadId === threadId.value);
+  const suggestedAction = m.suggestedAction ?? (isFutureWorkMessage(m.text) ? 'continue' : undefined);
+  const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : undefined;
   const showContinue = isWebChannel && allowContinue && m.direction === 'out' &&
     !hasPendingSend &&
-    !m.files?.length && isFutureWorkMessage(m.text);
+    !m.files?.length && action != null;
   return (
     <div class={cls} data-msg-id={m.id} ref={ref}>
       {m.direction === 'internal' ? <div class="internal-label">internal</div> : null}
@@ -568,15 +570,15 @@ function Message({ m, allowContinue = false }: { m: ChatMessage; allowContinue?:
               onClick={async () => {
                 if (continueState !== 'idle') return;
                 setContinueState('sending');
-                const sent = await sendChat(CONTINUE_PROMPT, null);
+                const sent = await sendChat(action!.prompt, null);
                 setContinueState(sent ? 'sent' : 'idle');
               }}
             >{
               continueState === 'sent'
                 ? 'Sent'
                 : continueState === 'sending'
-                  ? 'Sending…'
-                  : 'Continue'
+                  ? action!.sendingLabel
+                  : action!.label
             }</button>
           </div>
         )

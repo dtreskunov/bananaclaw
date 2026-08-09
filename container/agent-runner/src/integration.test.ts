@@ -55,6 +55,7 @@ describe('poll loop integration', () => {
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toBe('42');
     expect(JSON.parse(out[0].content).delivery_origin).toBe('response');
+    expect(JSON.parse(out[0].content).suggested_action).toBeUndefined();
     expect(out[0].platform_id).toBe('chan-1');
     expect(out[0].channel_type).toBe('discord');
     expect(out[0].in_reply_to).toBe('m1');
@@ -136,6 +137,7 @@ describe('poll loop integration', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toContain('Something went wrong producing a reply');
+    expect(JSON.parse(out[0].content).suggested_action).toBe('retry');
 
     await loopPromise.catch(() => {});
   });
@@ -590,6 +592,7 @@ describe('poll loop — provider error recovery', () => {
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toContain("couldn't be processed");
     expect(JSON.parse(out[0].content).text).toContain('API rate limit exceeded');
+    expect(JSON.parse(out[0].content).suggested_action).toBeUndefined();
 
     // Input message should be marked completed despite the error
     const pending = getPendingMessages();
@@ -847,6 +850,7 @@ describe('poll loop — empty result notice', () => {
     const text = JSON.parse(out[0].content).text;
     expect(text).toContain('without producing a response');
     expect(text).toContain('without reporting an error');
+    expect(JSON.parse(out[0].content).suggested_action).toBe('retry');
     // The loop, not the provider, ended the otherwise-open stream.
     expect(provider.ended).toBe(true);
   });
@@ -945,6 +949,24 @@ describe('poll loop — empty result notice', () => {
     const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
     expect(texts).toContain('first reply');
     expect(texts.some((text: string) => text?.includes('without producing a response'))).toBe(true);
+  });
+
+  it('suggests reporting rather than retrying when a tool ran before an empty result', async () => {
+    insertMessage('m-tool-empty', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', toolActivity: true },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const content = JSON.parse(getUndeliveredMessages()[0].content);
+    expect(content.text).toContain('without producing a response');
+    expect(content.suggested_action).toBe('report');
   });
 });
 
@@ -1132,6 +1154,10 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
 
     const texts = getUndeliveredMessages().map((m) => JSON.parse(m.content).text);
     expect(texts.some((text: string) => text?.includes('produced malformed tool calls'))).toBe(true);
+    const notice = getUndeliveredMessages().find((m) =>
+      JSON.parse(m.content).text?.includes('produced malformed tool calls'),
+    );
+    expect(JSON.parse(notice!.content).suggested_action).toBe('retry');
     expect(texts.some((text: string) => text?.includes('Something went wrong producing a reply'))).toBe(false);
     expect(provider.pushes).toHaveLength(2);
   });
@@ -1172,6 +1198,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     expect(error?.platform_id).toBe('chan-2');
     expect(error?.channel_type).toBe('slack');
     expect(error?.thread_id).toBe('slack-thread');
+    expect(JSON.parse(error!.content).suggested_action).toBe('retry');
   });
 
   it('defers a follow-up while malformed-tool recovery owns the retry budget', async () => {
@@ -1322,6 +1349,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     const provider = new ScriptedProvider([
       { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true },
       { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
     ]);
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
@@ -1333,9 +1361,40 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     controller.abort();
     await loopPromise.catch(() => {});
 
-    expect(provider.pushes).toHaveLength(1);
+    expect(provider.pushes).toHaveLength(2);
     expect(provider.pushes[0]).toContain('Do NOT repeat any of those calls or make equivalent requests');
+    expect(provider.pushes[1]).toContain('Do not continue, inspect, search, verify, or perform more work');
+    expect(provider.pushOptions).toEqual([{ tools: 'disabled' }, { tools: 'disabled' }]);
     expect(provider.pushes.some((push) => push.includes('native tool interface'))).toBe(false);
+  });
+
+  it('recovers when the second tools-disabled reporting attempt is correctly wrapped', async () => {
+    insertMessage('m-post-tool-report-retry', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([
+      { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true },
+      { text: '', strippedToEmpty: true, malformedToolCall: true },
+      { text: '<message to="discord-test">Published once.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Published once.'),
+      3000,
+    );
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(provider.pushes).toHaveLength(2);
+    expect(provider.pushOptions).toEqual([{ tools: 'disabled' }, { tools: 'disabled' }]);
+    expect(getUndeliveredMessages().some((m) => {
+      const content = JSON.parse(m.content);
+      return content.text === 'Published once.' && content.suggested_action === 'continue';
+    })).toBe(true);
+    expect(getUndeliveredMessages().some((m) =>
+      JSON.parse(m.content).text?.includes('The action was not retried'),
+    )).toBe(false);
   });
 
   it('keeps a follow-up behind native tool activity until malformed recovery completes', async () => {
@@ -1381,7 +1440,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     expect(provider.pushes[1]).toContain('what happened?');
   });
 
-  it('uses the post-tool warning when delivery-only recovery returns unwrapped text', async () => {
+  it('delivers plain text from tools-disabled reporting recovery to the current route', async () => {
     insertMessage('m-post-tool-unwrapped', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
 
     const provider = new ScriptedProvider([
@@ -1392,7 +1451,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
 
     await waitFor(
-      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text?.includes('The action was not retried')),
+      () => getUndeliveredMessages().some((m) => JSON.parse(m.content).text === 'Published successfully.'),
       3000,
     );
     controller.abort();
@@ -1400,7 +1459,12 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
 
     expect(provider.pushes).toHaveLength(1);
     expect(getUndeliveredMessages().some((m) =>
-      JSON.parse(m.content).text?.includes('Please try again'),
+      JSON.parse(m.content).text === 'Published successfully.' &&
+      JSON.parse(m.content).suggested_action === 'continue' &&
+      m.in_reply_to === 'm-post-tool-unwrapped',
+    )).toBe(true);
+    expect(getUndeliveredMessages().some((m) =>
+      JSON.parse(m.content).text?.includes('The action was not retried'),
     )).toBe(false);
   });
 
@@ -1410,6 +1474,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     const provider = new ScriptedProvider([
       { text: '', strippedToEmpty: true, malformedToolCall: true, toolActivity: true },
       { text: '<internal>I cannot format the reply.</internal>' },
+      { text: '<internal>I still cannot format the reply.</internal>' },
     ]);
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
@@ -1422,7 +1487,9 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     await loopPromise.catch(() => {});
 
     expect(provider.ended).toBe(true);
+    expect(provider.pushes).toHaveLength(2);
     expect(getUndeliveredMessages()).toHaveLength(1);
+    expect(JSON.parse(getUndeliveredMessages()[0].content).suggested_action).toBe('report');
   });
 
   it('keeps the failed follow-up route through malformed and wrapping recovery', async () => {

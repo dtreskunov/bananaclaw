@@ -44,7 +44,19 @@ export function hasPseudoToolCallMarkup(raw: string): boolean {
   return parsedOutputHasPseudoToolMarkup(parseAssistantOutput(raw));
 }
 
-export function classifyAssistantResult(raw: string, schemaRejectedToolCall = false): {
+/** Detect pseudo-tool XML that OpenCode persisted only as private reasoning.
+ * This is classification evidence only; reasoning text is never delivered. */
+export function reasoningHasPseudoToolCallMarkup(
+  parts: Array<{ type?: string; text?: string }>,
+): boolean {
+  return parts.some((part) =>
+    part.type === 'reasoning' &&
+    typeof part.text === 'string' &&
+    hasPseudoToolCallMarkup(part.text),
+  );
+}
+
+export function classifyAssistantResult(raw: string, unresolvedMalformedToolCall = false): {
   text: string;
   strippedToEmpty: boolean;
   malformedToolCall: boolean;
@@ -53,8 +65,8 @@ export function classifyAssistantResult(raw: string, schemaRejectedToolCall = fa
   const rawResultNonEmpty = raw.trim().length > 0;
   const parsed = parseAssistantOutput(raw);
   const pseudoToolCall = parsedOutputHasPseudoToolMarkup(parsed);
-  const unresolvedSchemaRejection = schemaRejectedToolCall && parsed.normalizedText.trim().length === 0;
-  const malformedToolCall = pseudoToolCall || unresolvedSchemaRejection;
+  const unresolvedToolCall = unresolvedMalformedToolCall && parsed.normalizedText.trim().length === 0;
+  const malformedToolCall = pseudoToolCall || unresolvedToolCall;
   const text = malformedToolCall ? '' : parsed.normalizedText;
   return {
     text,
@@ -925,6 +937,7 @@ export class OpenCodeProvider implements AgentProvider {
 
         let resultText = '';
         let reasoningOutputNonEmpty = false;
+        let reasoningHadPseudoToolCall = false;
         let lastAssistantId: string | undefined;
         const assistantMessageIds: string[] = [];
         for (const [msgId, role] of roleByMessageId) {
@@ -951,6 +964,7 @@ export class OpenCodeProvider implements AgentProvider {
           const parts = finalizedParts ?? [...(textPartsByMessageId.get(messageID)?.values() ?? [])];
           assistantMessageParts.push(parts);
           reasoningOutputNonEmpty ||= hasNonEmptyReasoning(parts);
+          reasoningHadPseudoToolCall ||= reasoningHasPseudoToolCallMarkup(parts);
         }
         resultText = finalTextFromAssistantMessages(assistantMessageParts);
         // Repair known malformed wrappers and drop inline chain-of-thought.
@@ -958,7 +972,10 @@ export class OpenCodeProvider implements AgentProvider {
         // normalization strips it to nothing, the reply was swallowed (e.g. an
         // unclosed `<think>` with no `<message>`), not genuinely absent. The
         // poll-loop keys its recovery nudge off this distinction.
-        const classifiedResult = classifyAssistantResult(resultText, rejectedMalformedNativeToolCall);
+        const classifiedResult = classifyAssistantResult(
+          resultText,
+          rejectedMalformedNativeToolCall || reasoningHadPseudoToolCall,
+        );
         const malformedToolCall = classifiedResult.malformedToolCall;
         resultText = classifiedResult.text;
         const lastFinish = lastAssistantId ? finishByMessageId.get(lastAssistantId) : undefined;

@@ -25,6 +25,8 @@ import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, Provider
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
 const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
+const MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS = 2;
+type SuggestedAction = 'continue' | 'retry' | 'report';
 
 /**
  * Number of consecutive `database disk image is malformed` errors after which
@@ -647,6 +649,7 @@ async function processQuery(
   let malformedToolRecoveryMode: 'tool' | 'delivery' | null = null;
   let malformedToolRecoveryRouting: RoutingContext | null = null;
   let malformedToolRecoveryHadNativeTool = false;
+  let postToolDeliveryRecoveryAttempts = 0;
   const executedToolCalls = new Map<string, {
     tool: string;
     detail?: string;
@@ -760,6 +763,7 @@ async function processQuery(
     malformedToolRecoveryExhausted = false;
     malformedToolRecoveryRouting = null;
     malformedToolRecoveryHadNativeTool = false;
+    postToolDeliveryRecoveryAttempts = 0;
     executedToolCalls.clear();
   };
   const exhaustMalformedToolRecovery = (failedRouting: RoutingContext): void => {
@@ -1024,12 +1028,16 @@ async function processQuery(
         `<message to="name">...</message> block.</system>`,
     );
   };
-  const pushPostToolDeliveryNudge = (failedRouting: RoutingContext): void => {
+  const pushPostToolDeliveryNudge = (failedRouting: RoutingContext): boolean => {
+    postToolDeliveryRecoveryAttempts++;
     nudgedForDelivery = true;
     malformedToolRecoveryHadNativeTool = true;
     malformedToolRecoveryMode = 'delivery';
     malformedToolRecoveryRouting = failedRouting;
-    log('Recovery nudge: malformed final output followed native tool activity - requesting delivery only');
+    log(
+      `Recovery nudge: malformed final output followed native tool activity - requesting delivery only ` +
+        `(attempt ${postToolDeliveryRecoveryAttempts}/${MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS})`,
+    );
     beginCorrectiveTurn(
       'A tool ran but its final reply was malformed - asked the agent to report the result without repeating the action.',
     );
@@ -1058,11 +1066,17 @@ async function processQuery(
         ? [`Calls that started but did not complete cleanly (they may still have effects):\n${uncertainCalls.join('\n')}`]
         : []),
     ].join('\n');
+    const retryInstruction = postToolDeliveryRecoveryAttempts > 1
+      ? `Your previous reporting-only response incorrectly tried to use another tool. ` +
+        `Do not continue, inspect, search, verify, or perform more work. Report only what the ` +
+        `completed calls already established and what remains unfinished. Output exactly one ` +
+        `<message to="name">...</message> block and no other text. `
+      : '';
     const accepted = query.push(
       `<system>At least one native tool already ran in the previous turn, but the final reply ` +
         `was malformed. Here is the execution record:\n${callSummary || 'One or more native tools may have executed.'}\n` +
         `Do NOT repeat any of those calls or make equivalent requests through other tools. ` +
-        `Tools are disabled for this recovery turn. Use the existing native results above and report ` +
+        `Tools are disabled for this recovery turn. ${retryInstruction}Use the existing native results above and report ` +
         `the actual result in ` +
         `a <message to="name">...</message> block. Your destinations: ${names}.</system>`,
       undefined,
@@ -1075,7 +1089,9 @@ async function processQuery(
         endedForCommand = true;
         query.end();
       }
+      return false;
     }
+    return true;
   };
   const liveHandle = setInterval(() => {
     if (!turnActive) return;
@@ -1198,18 +1214,28 @@ async function processQuery(
           const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
           if (drainedIds.length > 0) markCompleted(drainedIds);
           const wasRecoveringDelivery = nudgedForDelivery;
-          const { sent, hasUnwrapped, internalCount } = dispatchResultText(event.text, resultRouting);
+          const { sent, hasUnwrapped, internalCount } = dispatchResultText(
+            event.text,
+            resultRouting,
+            isPostToolDeliveryRecovery,
+            isPostToolDeliveryRecovery ? 'continue' : undefined,
+          );
           if (sent > 0) sentAny = true;
           // A post-nudge retry that delivers nothing but writes an <internal>
           // note is the model taking the escape hatch — confirming it meant to
           // stay silent. Treat as intentional silence, not a delivery failure.
           if (nudgedForDelivery && sent === 0 && internalCount > 0) silenceConfirmed = true;
+          let continuedPostToolDeliveryRecovery = false;
           if (isPostToolDeliveryRecovery && !mcpWroteReply && sent === 0) {
             silenceConfirmed = false;
-            exhaustMalformedToolRecovery(resultRouting);
-            if (turnBatchQueue.length === 0 && !endedForCommand) {
-              endedForCommand = true;
-              query.end();
+            if (postToolDeliveryRecoveryAttempts < MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS) {
+              continuedPostToolDeliveryRecovery = pushPostToolDeliveryNudge(resultRouting);
+            } else {
+              exhaustMalformedToolRecovery(resultRouting);
+              if (turnBatchQueue.length === 0 && !endedForCommand) {
+                endedForCommand = true;
+                query.end();
+              }
             }
           }
           if (sent > 0 || mcpWroteReply) {
@@ -1244,12 +1270,12 @@ async function processQuery(
           }
           // Recovery retries answer the SAME user prompt — keep it queued so
           // the retry archives against it, not the nudge text.
-          if (!willRetryWrapping && !willRecoverPostToolDelivery) {
+          if (!willRetryWrapping && !willRecoverPostToolDelivery && !continuedPostToolDeliveryRecovery) {
             archivePrompts.shift();
           }
           if (
             wasRecoveringDelivery && !mcpWroteReply && sent === 0 && internalCount === 0 &&
-            turnBatchQueue.length === 0 && !endedForCommand
+            !continuedPostToolDeliveryRecovery && turnBatchQueue.length === 0 && !endedForCommand
           ) {
             endedForCommand = true;
             query.end();
@@ -1265,8 +1291,13 @@ async function processQuery(
           //      autonomous/task turn, so it is NOT nudged; it falls through
           //      to the terminal empty-result notice.
           const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
+          let continuedPostToolDeliveryRecovery = false;
           if (isPostToolDeliveryRecovery && !mcpWroteReply) {
-            exhaustMalformedToolRecovery(resultRouting);
+            if (postToolDeliveryRecoveryAttempts < MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS) {
+              continuedPostToolDeliveryRecovery = pushPostToolDeliveryNudge(resultRouting);
+            } else {
+              exhaustMalformedToolRecovery(resultRouting);
+            }
           }
           if (mcpWroteReply) {
             sentAny = true;
@@ -1285,7 +1316,10 @@ async function processQuery(
           const willRecoverPostToolDelivery =
             !mcpWroteReply && malformedToolRecoveryHadNativeTool &&
             event.strippedToEmpty === true && !nudgedForDelivery && !lastProviderError;
-          if (willRetryMalformedTool) {
+          if (continuedPostToolDeliveryRecovery) {
+            // Keep the prompt queued: this is another tools-disabled attempt
+            // to report the existing result, never permission to resume work.
+          } else if (willRetryMalformedTool) {
             pushMalformedToolNudge(resultRouting);
             // Keep the prompt queued: the retry continues the same work.
           } else if (willRecoverPostToolDelivery) {
@@ -1437,6 +1471,7 @@ async function processQuery(
     noticeRouting: RoutingContext,
     text: string,
     failureLabel: string,
+    suggestedAction?: SuggestedAction,
   ): void => {
     try {
       writeMessageOut({
@@ -1445,7 +1480,10 @@ async function processQuery(
         platform_id: noticeRouting.platformId,
         channel_type: noticeRouting.channelType,
         thread_id: noticeRouting.threadId,
-        content: JSON.stringify({ text }),
+        content: JSON.stringify({
+          text,
+          ...(suggestedAction ? { suggested_action: suggestedAction } : {}),
+        }),
       });
     } catch (e) {
       log(`Failed to write ${failureLabel}: ${e instanceof Error ? e.message : String(e)}`);
@@ -1480,6 +1518,7 @@ async function processQuery(
         ? '⚠️ A tool ran, but the model repeatedly failed to format its final reply. The action was not retried. Ask the agent to report the existing result or switch models.'
         : '⚠️ The model repeatedly produced malformed tool calls, so no tool was executed. Retry the task or switch to a model with reliable native tool calling.',
       'malformed-tool error',
+      malformedToolRecoveryHadNativeTool ? 'report' : 'retry',
     );
   } else if (!sentAny && nudgedForDelivery && !lastProviderError) {
     log('Turn produced no deliverable output after recovery nudge — surfacing generic error');
@@ -1487,6 +1526,7 @@ async function processQuery(
       deliveryErrorRouting,
       '⚠️ Something went wrong producing a reply. Please try again.',
       'generic delivery error',
+      malformedToolRecoveryHadNativeTool ? 'report' : 'retry',
     );
   }
 
@@ -1500,6 +1540,7 @@ async function processQuery(
       routing,
       '⚠️ The agent finished without producing a response, and without reporting an error. Please try again.',
       'empty-result notice',
+      malformedToolRecoveryHadNativeTool ? 'report' : 'retry',
     );
   }
 
@@ -1565,6 +1606,8 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
 function dispatchResultText(
   text: string,
   routing: RoutingContext,
+  deliverUnwrappedToCurrentRoute = false,
+  suggestedAction?: SuggestedAction,
 ): { sent: number; hasUnwrapped: boolean; internalCount: number } {
   const parsed = parseAssistantOutput(text);
   if (parsed.diagnostics.length > 0) {
@@ -1585,7 +1628,26 @@ function dispatchResultText(
   }
 
   let sent = 0;
-  const scratchpadParts: string[] = parsed.unwrapped ? [parsed.unwrapped] : [];
+  const canDeliverUnwrapped = deliverUnwrappedToCurrentRoute &&
+    parsed.deliveries.length === 0 && !!parsed.unwrapped;
+  const scratchpadParts: string[] = parsed.unwrapped && !canDeliverUnwrapped ? [parsed.unwrapped] : [];
+
+  if (canDeliverUnwrapped) {
+    writeMessageOut({
+      id: generateId(),
+      in_reply_to: routing.inReplyTo,
+      kind: 'chat',
+      platform_id: routing.platformId,
+      channel_type: routing.channelType,
+      thread_id: routing.threadId,
+      content: JSON.stringify({
+        text: parsed.unwrapped,
+        delivery_origin: 'response',
+        ...(suggestedAction ? { suggested_action: suggestedAction } : {}),
+      }),
+    });
+    sent++;
+  }
 
   for (const delivery of parsed.deliveries) {
     const toName = delivery.to;
@@ -1606,7 +1668,7 @@ function dispatchResultText(
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
       continue;
     }
-    sendToDestination(dest, body, routing);
+    sendToDestination(dest, body, routing, suggestedAction);
     sent++;
   }
 
@@ -1620,7 +1682,12 @@ function dispatchResultText(
   return { sent, hasUnwrapped, internalCount: parsed.internal.length };
 }
 
-function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
+function sendToDestination(
+  dest: DestinationEntry,
+  body: string,
+  routing: RoutingContext,
+  suggestedAction?: SuggestedAction,
+): void {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
   // Same-channel reply: thread under the exact message the agent is
@@ -1646,7 +1713,11 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
     platform_id: platformId,
     channel_type: channelType,
     thread_id: threadId,
-    content: JSON.stringify({ text: body, delivery_origin: 'response' }),
+    content: JSON.stringify({
+      text: body,
+      delivery_origin: 'response',
+      ...(suggestedAction ? { suggested_action: suggestedAction } : {}),
+    }),
   });
 }
 

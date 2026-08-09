@@ -727,6 +727,8 @@ export interface TurnUsageDto {
   duration_ms?: number;
 }
 
+type SuggestedAction = 'continue' | 'retry' | 'report';
+
 export interface HistoryMessage {
   /** Human sender attribution for inbound messages. */
   author?: { userId: string; displayName: string };
@@ -738,6 +740,8 @@ export interface HistoryMessage {
   text: string;
   /** How an agent chat row was emitted. Absent for legacy/unclassified rows. */
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+  /** Safe next-turn action suggested by the agent runner. */
+  suggestedAction?: SuggestedAction;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
   files?: { filename: string; size: number; path?: string; url?: string; contentType?: string }[];
@@ -1085,6 +1089,7 @@ export function readChatHistory(
           text: parsed.text,
           files: parsed.files,
           ...(parsed.deliveryOrigin ? { deliveryOrigin: parsed.deliveryOrigin } : {}),
+          ...(parsed.suggestedAction ? { suggestedAction: parsed.suggestedAction } : {}),
           ...(usage ? { usage } : {}),
           ...(activity && activity.length > 0 ? { activity } : {}),
         });
@@ -1671,6 +1676,7 @@ export function parseOutboundContent(content: string): {
   text: string;
   files?: { filename: string; size: number; path?: string }[];
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+  suggestedAction?: SuggestedAction;
 } {
   try {
     const o = JSON.parse(content);
@@ -1679,6 +1685,10 @@ export function parseOutboundContent(content: string): {
     const deliveryOrigin =
       o?.delivery_origin === 'send_message' || o?.delivery_origin === 'send_file' || o?.delivery_origin === 'response'
         ? o.delivery_origin
+        : undefined;
+    const suggestedAction =
+      o?.suggested_action === 'continue' || o?.suggested_action === 'retry' || o?.suggested_action === 'report'
+        ? o.suggested_action
         : undefined;
     // file_paths is a parallel array to files written by send_file with
     // workspace-relative source paths (or null when the source isn't in
@@ -1702,7 +1712,12 @@ export function parseOutboundContent(content: string): {
           })
           .filter((f: { filename: string }) => f.filename)
       : undefined;
-    return { text, files, ...(deliveryOrigin ? { deliveryOrigin } : {}) };
+    return {
+      text,
+      files,
+      ...(deliveryOrigin ? { deliveryOrigin } : {}),
+      ...(suggestedAction ? { suggestedAction } : {}),
+    };
   } catch {
     return { text: content };
   }
