@@ -1218,7 +1218,6 @@ async function processQuery(
             event.text,
             resultRouting,
             isPostToolDeliveryRecovery,
-            isPostToolDeliveryRecovery ? 'continue' : undefined,
           );
           if (sent > 0) sentAny = true;
           // A post-nudge retry that delivers nothing but writes an <internal>

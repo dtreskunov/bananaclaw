@@ -1390,7 +1390,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     expect(provider.pushOptions).toEqual([{ tools: 'disabled' }, { tools: 'disabled' }]);
     expect(getUndeliveredMessages().some((m) => {
       const content = JSON.parse(m.content);
-      return content.text === 'Published once.' && content.suggested_action === 'continue';
+      return content.text === 'Published once.' && content.suggested_action === undefined;
     })).toBe(true);
     expect(getUndeliveredMessages().some((m) =>
       JSON.parse(m.content).text?.includes('The action was not retried'),
@@ -1460,7 +1460,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     expect(provider.pushes).toHaveLength(1);
     expect(getUndeliveredMessages().some((m) =>
       JSON.parse(m.content).text === 'Published successfully.' &&
-      JSON.parse(m.content).suggested_action === 'continue' &&
+      JSON.parse(m.content).suggested_action === undefined &&
       m.in_reply_to === 'm-post-tool-unwrapped',
     )).toBe(true);
     expect(getUndeliveredMessages().some((m) =>
