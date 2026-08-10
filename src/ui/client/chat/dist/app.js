@@ -15594,7 +15594,7 @@ var refs = {
   ws: null,
   chatGeneration: 0,
   syncRequestId: 0,
-  reconnectTimer: null,
+  reconnectCancel: null,
   reconnectAttempt: 0,
   syncTimer: null,
   wsPingTimer: null,
@@ -17520,6 +17520,35 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+// src/reconnect-countdown.ts
+function startReconnectCountdown(delayMs, onTick, onElapsed) {
+  const deadline = Date.now() + delayMs;
+  let timer = null;
+  let cancelled = false;
+  const tick = () => {
+    if (cancelled) return;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      cancelled = true;
+      onElapsed();
+      return;
+    }
+    onTick(Math.ceil(remaining / 1e3));
+    timer = setTimeout(tick, Math.min(1e3, remaining));
+  };
+  tick();
+  return () => {
+    cancelled = true;
+    if (timer) clearTimeout(timer);
+  };
+}
+function runReconnectImmediately(cancelCountdown, reconnect) {
+  if (!cancelCountdown) return false;
+  cancelCountdown();
+  reconnect();
+  return true;
+}
+
 // src/sound.ts
 var ctx = null;
 var unlocked = false;
@@ -17756,9 +17785,9 @@ function clearChat() {
     }
     refs.ws = null;
   }
-  if (refs.reconnectTimer) {
-    clearTimeout(refs.reconnectTimer);
-    refs.reconnectTimer = null;
+  if (refs.reconnectCancel) {
+    refs.reconnectCancel();
+    refs.reconnectCancel = null;
   }
   if (refs.wsPingTimer) {
     clearInterval(refs.wsPingTimer);
@@ -17936,9 +17965,9 @@ async function openChat(gid, resumeTid, opts) {
     }
     refs.ws = null;
   }
-  if (refs.reconnectTimer) {
-    clearTimeout(refs.reconnectTimer);
-    refs.reconnectTimer = null;
+  if (refs.reconnectCancel) {
+    refs.reconnectCancel();
+    refs.reconnectCancel = null;
   }
   if (refs.wsPingTimer) {
     clearInterval(refs.wsPingTimer);
@@ -18097,11 +18126,19 @@ function connectChatWs(ctx2) {
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
     const delay = Math.min(15e3, 500 * Math.pow(2, attempt - 1));
-    chatStatus.value = `disconnected \xB7 reconnecting in ${Math.round(delay / 1e3)}s\u2026`;
-    refs.reconnectTimer = setTimeout(() => {
-      refs.reconnectTimer = null;
-      if (generation === refs.chatGeneration && groupId.value === gid && threadId.value === tid) connectChatWs(ctx2);
-    }, delay);
+    refs.reconnectCancel = startReconnectCountdown(
+      delay,
+      (seconds) => {
+        if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
+        chatStatus.value = `disconnected \xB7 reconnecting in ${seconds}s\u2026`;
+      },
+      () => {
+        refs.reconnectCancel = null;
+        if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
+        chatStatus.value = "disconnected \xB7 reconnecting\u2026";
+        connectChatWs(ctx2);
+      }
+    );
   };
   ws.onerror = () => {
     if (refs.ws !== ws || generation !== refs.chatGeneration) return;
@@ -18759,6 +18796,21 @@ function removePinnedPath(path) {
 function clearPinnedContext() {
   pinnedContext.value = [];
 }
+function reconnectChatNow() {
+  const gid = groupId.value;
+  const tid = threadId.value;
+  if (!refs.reconnectCancel || channelType.value !== "web" || !gid || !tid) return;
+  runReconnectImmediately(refs.reconnectCancel, () => {
+    refs.reconnectCancel = null;
+    chatStatus.value = "disconnected \xB7 reconnecting\u2026";
+    connectChatWs({
+      gid,
+      tid,
+      mg: messagingGroupId.value,
+      generation: refs.chatGeneration
+    });
+  });
+}
 function addPendingFiles(fileList, max, maxSize, maxTotal) {
   if (!fileList || fileList.length === 0) return;
   const next = pending.value.slice();
@@ -18803,9 +18855,9 @@ function installLivenessHandlers() {
     const ws = refs.ws;
     const open = !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
     if (channelType.value === "web" && !open) {
-      if (refs.reconnectTimer) {
-        clearTimeout(refs.reconnectTimer);
-        refs.reconnectTimer = null;
+      if (refs.reconnectCancel) {
+        refs.reconnectCancel();
+        refs.reconnectCancel = null;
       }
       if (groupId.value) {
         connectChatWs({
@@ -22161,11 +22213,12 @@ function ChatMain() {
       el.removeEventListener("drop", onDrop);
     };
   }, []);
+  const reconnectPending = chatStatus.value.startsWith("disconnected \xB7 reconnecting in ");
   return /* @__PURE__ */ u4("section", { class: "chat-main", id: "chat-main", ref, children: [
     /* @__PURE__ */ u4(ApprovalsBanner, {}),
     /* @__PURE__ */ u4(MessageLog, {}),
     /* @__PURE__ */ u4(ImageViewer, {}),
-    /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatStatus.value === "connected", children: chatStatus.value }),
+    reconnectPending ? /* @__PURE__ */ u4("button", { class: "status reconnect-status", id: "chat-status", type: "button", onClick: reconnectChatNow, children: chatStatus.value }) : /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatStatus.value === "connected", children: chatStatus.value }),
     /* @__PURE__ */ u4(ContextChip, {}),
     /* @__PURE__ */ u4(PendingTray, {}),
     /* @__PURE__ */ u4(ReadonlyBanner, {}),

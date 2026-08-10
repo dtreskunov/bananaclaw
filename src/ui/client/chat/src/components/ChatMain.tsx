@@ -17,7 +17,7 @@ import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNo
 import {
   sendChat, addPendingFiles, removePending, clearPending,
   navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
-  openChat, openTaskPanel,
+  openChat, openTaskPanel, reconnectChatNow,
 } from '../actions';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
 import { mergeQuestionTimeline } from '../question-timeline';
@@ -1870,12 +1870,15 @@ export function ChatMain() {
       el.removeEventListener('drop', onDrop);
     };
   }, []);
+  const reconnectPending = chatStatus.value.startsWith('disconnected \u00b7 reconnecting in ');
   return (
     <section class="chat-main" id="chat-main" ref={ref}>
       <ApprovalsBanner />
       <MessageLog />
       <ImageViewer />
-      <div class="status" id="chat-status" hidden={chatStatus.value === 'connected'}>{chatStatus.value}</div>
+      {reconnectPending
+        ? <button class="status reconnect-status" id="chat-status" type="button" onClick={reconnectChatNow}>{chatStatus.value}</button>
+        : <div class="status" id="chat-status" hidden={chatStatus.value === 'connected'}>{chatStatus.value}</div>}
       <ContextChip />
       <PendingTray />
       <ReadonlyBanner />

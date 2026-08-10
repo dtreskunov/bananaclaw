@@ -57,6 +57,7 @@ import { api, postJson } from './api';
 import { writeHash } from './hash';
 import { isFinalResponse, isWebEchoForClientMessage } from './chat-protocol';
 import { maybeNotify } from './notify';
+import { runReconnectImmediately, startReconnectCountdown } from './reconnect-countdown';
 import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
 import type {
@@ -282,9 +283,9 @@ export function clearChat(): void {
     }
     refs.ws = null;
   }
-  if (refs.reconnectTimer) {
-    clearTimeout(refs.reconnectTimer);
-    refs.reconnectTimer = null;
+  if (refs.reconnectCancel) {
+    refs.reconnectCancel();
+    refs.reconnectCancel = null;
   }
   if (refs.wsPingTimer) {
     clearInterval(refs.wsPingTimer);
@@ -544,9 +545,9 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     }
     refs.ws = null;
   }
-  if (refs.reconnectTimer) {
-    clearTimeout(refs.reconnectTimer);
-    refs.reconnectTimer = null;
+  if (refs.reconnectCancel) {
+    refs.reconnectCancel();
+    refs.reconnectCancel = null;
   }
   if (refs.wsPingTimer) {
     clearInterval(refs.wsPingTimer);
@@ -729,11 +730,19 @@ function connectChatWs(ctx: ChatSocketContext): void {
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
     const delay = Math.min(15000, 500 * Math.pow(2, attempt - 1));
-    chatStatus.value = `disconnected \u00b7 reconnecting in ${Math.round(delay / 1000)}s\u2026`;
-    refs.reconnectTimer = setTimeout(() => {
-      refs.reconnectTimer = null;
-      if (generation === refs.chatGeneration && groupId.value === gid && threadId.value === tid) connectChatWs(ctx);
-    }, delay);
+    refs.reconnectCancel = startReconnectCountdown(
+      delay,
+      (seconds) => {
+        if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
+        chatStatus.value = `disconnected \u00b7 reconnecting in ${seconds}s\u2026`;
+      },
+      () => {
+        refs.reconnectCancel = null;
+        if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
+        chatStatus.value = 'disconnected \u00b7 reconnecting\u2026';
+        connectChatWs(ctx);
+      },
+    );
   };
   ws.onerror = () => {
     if (refs.ws !== ws || generation !== refs.chatGeneration) return;
@@ -1509,6 +1518,22 @@ export function clearPinnedContext(): void {
   pinnedContext.value = [];
 }
 
+export function reconnectChatNow(): void {
+  const gid = groupId.value;
+  const tid = threadId.value;
+  if (!refs.reconnectCancel || channelType.value !== 'web' || !gid || !tid) return;
+  runReconnectImmediately(refs.reconnectCancel, () => {
+    refs.reconnectCancel = null;
+    chatStatus.value = 'disconnected \u00b7 reconnecting\u2026';
+    connectChatWs({
+      gid,
+      tid,
+      mg: messagingGroupId.value,
+      generation: refs.chatGeneration,
+    });
+  });
+}
+
 // ── pending uploads in composer ─────────────────────────────────────
 export function addPendingFiles(
   fileList: File[] | FileList | null | undefined,
@@ -1564,9 +1589,9 @@ export function installLivenessHandlers(): void {
     const ws = refs.ws;
     const open = !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
     if (channelType.value === 'web' && !open) {
-      if (refs.reconnectTimer) {
-        clearTimeout(refs.reconnectTimer);
-        refs.reconnectTimer = null;
+      if (refs.reconnectCancel) {
+        refs.reconnectCancel();
+        refs.reconnectCancel = null;
       }
       if (groupId.value) {
         connectChatWs({

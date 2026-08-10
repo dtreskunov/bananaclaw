@@ -249,6 +249,9 @@
 }
 
 .chat-main .status { padding-block: 0; font-size: var(--font-xs); color: var(--muted); min-height: 14px; }
+.chat-main .reconnect-status { width: 100%; border: 0; background: transparent; text-align: left; font-family: inherit; cursor: pointer; }
+.chat-main .reconnect-status:hover { color: var(--text); text-decoration: underline; }
+.chat-main .reconnect-status:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
 .chat-main .context { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-block: 4px; font-size: var(--font-xs); color: var(--muted); }
 .chat-main .status[hidden],
 .chat-main .context[hidden],

@@ -132,7 +132,7 @@ export interface Refs {
   ws: WebSocket | null;
   chatGeneration: number;
   syncRequestId: number;
-  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  reconnectCancel: (() => void) | null;
   reconnectAttempt: number;
   syncTimer: ReturnType<typeof setInterval> | null;
   wsPingTimer: ReturnType<typeof setInterval> | null;
@@ -154,7 +154,7 @@ export const refs: Refs = {
   ws: null,
   chatGeneration: 0,
   syncRequestId: 0,
-  reconnectTimer: null,
+  reconnectCancel: null,
   reconnectAttempt: 0,
   syncTimer: null,
   wsPingTimer: null,
