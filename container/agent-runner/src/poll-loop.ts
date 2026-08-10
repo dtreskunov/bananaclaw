@@ -1218,6 +1218,7 @@ async function processQuery(
             event.text,
             resultRouting,
             isPostToolDeliveryRecovery,
+            outboundMaxAtTurnStart,
           );
           if (sent > 0) sentAny = true;
           // A post-nudge retry that delivers nothing but writes an <internal>
@@ -1606,6 +1607,7 @@ function dispatchResultText(
   text: string,
   routing: RoutingContext,
   deliverUnwrappedToCurrentRoute = false,
+  duplicateSince?: number,
   suggestedAction?: SuggestedAction,
 ): { sent: number; hasUnwrapped: boolean; internalCount: number } {
   const parsed = parseAssistantOutput(text);
@@ -1667,6 +1669,10 @@ function dispatchResultText(
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
       continue;
     }
+    if (duplicateSince !== undefined && isDuplicateSendMessage(dest, body, routing, duplicateSince)) {
+      log(`Duplicate final response to "${toName}" already sent via send_message, dropping block`);
+      continue;
+    }
     sendToDestination(dest, body, routing, suggestedAction);
     sent++;
   }
@@ -1681,30 +1687,83 @@ function dispatchResultText(
   return { sent, hasUnwrapped, internalCount: parsed.internal.length };
 }
 
+function normalizeDeliveryText(text: string): string {
+  return text
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/[*`~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function resolveDeliveryRouting(
+  dest: DestinationEntry,
+  routing: RoutingContext,
+): { platformId: string; channelType: string; threadId: string | null; inReplyTo: string | null } {
+  const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
+  const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
+  if (channelType === routing.channelType && platformId === routing.platformId) {
+    return { platformId, channelType, threadId: routing.threadId, inReplyTo: routing.inReplyTo };
+  }
+  const destRouting = resolveDestinationThread(channelType, platformId);
+  return {
+    platformId,
+    channelType,
+    threadId: destRouting?.threadId ?? null,
+    inReplyTo: destRouting?.inReplyTo ?? null,
+  };
+}
+
+function isDuplicateSendMessage(
+  dest: DestinationEntry,
+  body: string,
+  routing: RoutingContext,
+  since: number,
+): boolean {
+  const resolved = resolveDeliveryRouting(dest, routing);
+  const rows = getOutboundDb()
+    .prepare(
+      `SELECT platform_id, channel_type, thread_id, content
+       FROM messages_out
+       WHERE seq > ? AND kind = 'chat'`,
+    )
+    .all(since) as Array<{
+      platform_id: string | null;
+      channel_type: string | null;
+      thread_id: string | null;
+      content: string;
+    }>;
+  const normalizedBody = normalizeDeliveryText(body);
+  return rows.some((row) => {
+    if (
+      row.platform_id !== resolved.platformId ||
+      row.channel_type !== resolved.channelType ||
+      row.thread_id !== resolved.threadId
+    ) return false;
+    try {
+      const content = JSON.parse(row.content) as { text?: unknown; delivery_origin?: unknown };
+      return content.delivery_origin === 'send_message' &&
+        typeof content.text === 'string' &&
+        normalizeDeliveryText(content.text) === normalizedBody;
+    } catch {
+      return false;
+    }
+  });
+}
+
 function sendToDestination(
   dest: DestinationEntry,
   body: string,
   routing: RoutingContext,
   suggestedAction?: SuggestedAction,
 ): void {
-  const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
-  const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
   // Same-channel reply: thread under the exact message the agent is
   // responding to. Cross-channel (agent-shared sessions, broadcasts):
   // look up that channel's most recent inbound for thread_id. The
   // trigger's in_reply_to doesn't apply across channels, so leave it
   // null in that case rather than pinning the reply to an unrelated
   // message in the other channel.
-  let threadId: string | null;
-  let inReplyTo: string | null;
-  if (channelType === routing.channelType && platformId === routing.platformId) {
-    threadId = routing.threadId;
-    inReplyTo = routing.inReplyTo;
-  } else {
-    const destRouting = resolveDestinationThread(channelType, platformId);
-    threadId = destRouting?.threadId ?? null;
-    inReplyTo = destRouting?.inReplyTo ?? null;
-  }
+  const { platformId, channelType, threadId, inReplyTo } = resolveDeliveryRouting(dest, routing);
   writeMessageOut({
     id: generateId(),
     in_reply_to: inReplyTo,

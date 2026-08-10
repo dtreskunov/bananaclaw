@@ -1692,6 +1692,58 @@ describe('poll loop - future-work announcements', () => {
     expect(texts).toEqual(['On it. Searching now for the requested details.']);
     expect(provider.pushes).toHaveLength(0);
   });
+
+  it('suppresses a final response that duplicates same-turn send_message content', async () => {
+    insertMessage('m-duplicate-final', { sender: 'Alice', text: 'ingest this' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([{
+      mcpMessage: 'Done. [`result.json`](result.json) contains **490 Songs**.',
+      text: '<message to="discord-test">Done. `result.json` contains **490 songs**.</message>',
+    }]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(() => {
+      const ack = getOutboundDb()
+        .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
+        .get('m-duplicate-final') as { status: string } | undefined;
+      return ack?.status === 'completed';
+    }, 3000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content)).toMatchObject({
+      text: 'Done. [`result.json`](result.json) contains **490 Songs**.',
+      delivery_origin: 'send_message',
+    });
+  });
+
+  it('keeps a distinct final response after a same-turn send_message update', async () => {
+    insertMessage('m-distinct-final', { sender: 'Alice', text: 'ingest this' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new ScriptedProvider([{
+      mcpMessage: 'The catalog is downloaded; parsing it now.',
+      text: '<message to="discord-test">Done. The parsed catalog contains 490 songs.</message>',
+    }]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
+
+    await waitFor(() => {
+      const ack = getOutboundDb()
+        .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
+        .get('m-distinct-final') as { status: string } | undefined;
+      return ack?.status === 'completed';
+    }, 3000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(getUndeliveredMessages().map((m) => JSON.parse(m.content).text)).toEqual([
+      'The catalog is downloaded; parsing it now.',
+      'Done. The parsed catalog contains 490 songs.',
+    ]);
+  });
 });
 
 /**
