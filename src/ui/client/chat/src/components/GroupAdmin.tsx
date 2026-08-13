@@ -58,6 +58,7 @@ interface SettingsResponse {
   updatedAt: string | null;
   config: {
     provider: string | null;
+    upstream_provider: string | null;
     model: string | null;
     small_model: string | null;
     effort: string | null;
@@ -118,7 +119,8 @@ interface ImagesResponse {
 
 const PROVIDER_INFO: Record<string, string> = {
   claude: 'Claude — Anthropic models via the official SDK. Uses your OneCLI-injected Anthropic API key.',
-  opencode: 'OpenCode — multi-provider gateway (OpenRouter, DeepSeek, OpenCode Zen, Anthropic, etc.) selected by host OPENCODE_PROVIDER. Wire prefix is handled automatically.',
+  opencode:
+    'OpenCode — multi-provider gateway. The upstream (OpenRouter, MiniMax, DeepSeek, Anthropic, …) is not chosen here: it comes from whichever model you pick, since every models.dev id names its own gateway.',
 };
 
 function formatAge(iso: string | null): string | null {
@@ -546,10 +548,11 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
               onChange={(v) => update('model', v)}
             />
           </Field>
-          <Field label="Small model" info="Lighter model for background tasks like compaction and summaries (cost optimization). Used by OpenCode; other providers may use in future.">
+          <Field label="Small model" info="Lighter model for background tasks like compaction and summaries (cost optimization). Restricted to the same upstream as the main model — OpenCode only enables one gateway per session.">
             <ModelPickerDialog
               value={draft.small_model}
               provider={provider ?? data.defaults.provider}
+              upstream={draft.upstream_provider}
               placeholder="same as main model"
               disabled={busy}
               apiBasePath={apiPath(gid, '')}

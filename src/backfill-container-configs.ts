@@ -54,6 +54,7 @@ export function backfillContainerConfigs(): void {
     const row: ContainerConfigRow = {
       agent_group_id: group.id,
       provider,
+      upstream_provider: null,
       model: null,
       small_model: null,
       effort: null,

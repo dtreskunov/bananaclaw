@@ -27,6 +27,12 @@ export interface AgentGroup {
 export interface ContainerConfigRow {
   agent_group_id: string;
   provider: string | null;
+  /**
+   * Upstream gateway for the `opencode` provider (e.g. `openrouter`,
+   * `minimax`). NULL falls back to the global `OPENCODE_PROVIDER`. Ignored
+   * by every other agent provider.
+   */
+  upstream_provider: string | null;
   model: string | null;
   small_model: string | null;
   effort: string | null;

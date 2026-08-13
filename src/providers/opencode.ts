@@ -44,6 +44,7 @@ registerProviderContainerConfig('opencode', (ctx) => {
   };
   for (const key of [
     'OPENCODE_PROVIDER',
+    'OPENCODE_BASE_URL',
     'OPENCODE_MODEL',
     'OPENCODE_SMALL_MODEL',
     'OPENCODE_IDLE_TIMEOUT_MS',
@@ -56,6 +57,7 @@ registerProviderContainerConfig('opencode', (ctx) => {
   // OPENCODE_* vars even though they're configured. Fill in from .env.
   const fromFile = readEnvFile([
     'OPENCODE_PROVIDER',
+    'OPENCODE_BASE_URL',
     'OPENCODE_MODEL',
     'OPENCODE_SMALL_MODEL',
     'OPENCODE_IDLE_TIMEOUT_MS',
@@ -70,6 +72,27 @@ registerProviderContainerConfig('opencode', (ctx) => {
   }
   if (ctx.containerConfig.smallModel) {
     env.OPENCODE_SMALL_MODEL = ctx.containerConfig.smallModel;
+  }
+
+  // Per-group upstream override. The container reads OPENCODE_PROVIDER from
+  // the environment, so overriding it here transparently reaches every call
+  // site in the agent-runner with no container-side plumbing.
+  //
+  // Everything else in the fleet-wide OpenCode config describes the *default*
+  // upstream, so it must not leak into a group that points elsewhere:
+  //   - OPENCODE_BASE_URL names a different gateway's endpoint. Dropping it
+  //     lets OpenCode's models.dev catalog supply the new provider's own API
+  //     base.
+  //   - OPENCODE_SMALL_MODEL carries the default upstream's wire prefix (e.g.
+  //     `openrouter/deepseek/...`). The container sets
+  //     `enabled_providers: [provider]`, so a small model belonging to a
+  //     now-disabled provider would break compaction and summaries. Drop it
+  //     unless the group named its own; OpenCode then falls back to the main
+  //     model for those background tasks.
+  if (ctx.containerConfig.upstreamProvider) {
+    env.OPENCODE_PROVIDER = ctx.containerConfig.upstreamProvider;
+    delete env.OPENCODE_BASE_URL;
+    if (!ctx.containerConfig.smallModel) delete env.OPENCODE_SMALL_MODEL;
   }
 
   return {

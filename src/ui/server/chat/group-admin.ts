@@ -11,6 +11,7 @@
  * audit seam for a real DB table without touching handlers.
  */
 import http from 'http';
+import zlib from 'zlib';
 import { URL } from 'url';
 
 import { CONTAINER_IMAGE } from '../../../config.js';
@@ -72,6 +73,7 @@ import { SELECTABLE_AGENT_PROVIDERS, VALID_AGENT_PROVIDERS } from './agent-provi
 import { recordAdminAction } from './audit.js';
 import { listImages } from './image-catalog.js';
 import { bareIdForResponse, dbValueFromBareId, getModelDetails, listModelsForProvider } from './models-catalog.js';
+import { resolveUpstreamForWireId } from './models-dev-catalog.js';
 import { listAvailableSkills, type AvailableSkill } from './skill-catalog.js';
 import { deriveVoiceMode } from './voice-mode.js';
 import { allocateSiteSlug, isValidSlug, pagesBaseDomain, pagesEnabled, siteFqdn, siteUrl } from '../pages/site.js';
@@ -228,6 +230,7 @@ interface SettingsResponse {
   config: Pick<
     ContainerConfigRow,
     | 'provider'
+    | 'upstream_provider'
     | 'model'
     | 'small_model'
     | 'effort'
@@ -337,6 +340,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     updatedAt: cfg.updated_at ?? null,
     config: {
       provider: cfg.provider,
+      upstream_provider: cfg.upstream_provider,
       model: bareModelId,
       small_model: bareIdForResponse(cfg.provider, cfg.small_model),
       effort: cfg.effort,
@@ -403,6 +407,7 @@ async function handlePatchSettings(
     Pick<
       ContainerConfigRow,
       | 'provider'
+      | 'upstream_provider'
       | 'model'
       | 'small_model'
       | 'effort'
@@ -550,14 +555,32 @@ async function handlePatchSettings(
     }
   }
 
-  // Translate the bare model id back to the DB wire value once provider is
-  // known. If provider is also being patched, use the new value so the
-  // prefix matches the user's intent.
+  // The picked catalog id is already the canonical stored value, so there is
+  // nothing to translate. What we do derive is the upstream: for opencode,
+  // a models.dev id like `minimax/MiniMax-M3` names its own gateway, so the
+  // user never picks a provider separately and the two can't drift apart.
+  // `upstream_provider` is deliberately NOT in SCALAR_FIELDS — the client
+  // echoes the whole config back on save, and a stale value there would
+  // clobber the one implied by the new model.
   if ('model' in updates) {
     const existing = getContainerConfig(gid);
     const effectiveProvider = updates.provider ?? existing?.provider ?? null;
     updates.model = dbValueFromBareId(effectiveProvider, updates.model ?? null);
     const bareModel = bareIdForResponse(effectiveProvider, updates.model ?? null);
+    if (effectiveProvider === 'opencode') {
+      if (!bareModel) {
+        // Model cleared — the group falls back to DEFAULT_MODEL, whose
+        // upstream is the fleet-wide OPENCODE_PROVIDER. Clearing the override
+        // keeps those two consistent.
+        updates.upstream_provider = null;
+      } else {
+        const resolved = await resolveUpstreamForWireId(bareModel);
+        // No match means a freeform id models.dev doesn't know. Leave the
+        // existing upstream alone rather than guessing a prefix off a string
+        // that may not carry one.
+        if (resolved) updates.upstream_provider = resolved.upstream;
+      }
+    }
     if (effectiveProvider && bareModel) {
       const exact = await getModelDetails(effectiveProvider, bareModel);
       if (!exact) {
@@ -573,7 +596,6 @@ async function handlePatchSettings(
     }
   }
 
-  // Same prefix translation for small_model.
   if ('small_model' in updates) {
     const existing = getContainerConfig(gid);
     const effectiveProvider = updates.provider ?? existing?.provider ?? null;
@@ -1352,8 +1374,11 @@ async function handleListModels(req: http.IncomingMessage, res: http.ServerRespo
   }
   const inputModality = (url.searchParams.get('inputModality') || '').trim() || undefined;
   const outputModality = (url.searchParams.get('outputModality') || '').trim() || undefined;
-  const result = await listModelsForProvider(provider, { inputModality, outputModality });
-  writeJson(res, 200, result);
+  const upstream = (url.searchParams.get('upstream') || '').trim() || undefined;
+  const result = await listModelsForProvider(provider, { inputModality, outputModality, upstream });
+  // The models.dev catalog is ~5k entries / ~2MB of JSON. It compresses about
+  // 10x, and this is the only endpoint in the admin API big enough to care.
+  writeJsonMaybeGzip(req, res, 200, result);
 }
 
 // ── image catalog (for the image_tag dropdown) ────────────────────────────
@@ -1629,6 +1654,25 @@ function handleRemoveReverseDestination(
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
+}
+
+/** As writeJson, but gzips when the client advertised support and it's worth it. */
+function writeJsonMaybeGzip(req: http.IncomingMessage, res: http.ServerResponse, status: number, body: unknown): void {
+  const json = JSON.stringify(body);
+  const accepts = String(req.headers['accept-encoding'] || '').includes('gzip');
+  if (!accepts || json.length < 32 * 1024) {
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(json);
+    return;
+  }
+  const gz = zlib.gzipSync(json);
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Content-Encoding': 'gzip',
+    'Content-Length': String(gz.length),
+    Vary: 'Accept-Encoding',
+  });
+  res.end(gz);
 }
 
 async function readJsonBody(req: http.IncomingMessage, max = 64 * 1024): Promise<unknown> {

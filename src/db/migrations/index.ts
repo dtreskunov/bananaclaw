@@ -37,6 +37,7 @@ import { moduleContainerConfigsVoiceMode } from './module-container-configs-voic
 import { moduleContainerConfigsTranscriptionModel } from './module-container-configs-transcription-model.js';
 import { moduleContainerConfigsModelParams } from './module-container-configs-model-params.js';
 import { moduleContainerConfigsSmallModel } from './module-container-configs-small-model.js';
+import { moduleContainerConfigsUpstreamProvider } from './module-container-configs-upstream-provider.js';
 import { moduleResendThreadRoots } from './module-resend-thread-roots.js';
 
 export interface Migration {
@@ -92,6 +93,7 @@ export const migrations: Migration[] = [
   moduleContainerConfigsTranscriptionModel,
   moduleContainerConfigsModelParams,
   moduleContainerConfigsSmallModel,
+  moduleContainerConfigsUpstreamProvider,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a

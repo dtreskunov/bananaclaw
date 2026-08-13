@@ -21,6 +21,7 @@ function presentConfig(row: ContainerConfigRow): Record<string, unknown> {
   return {
     agent_group_id: row.agent_group_id,
     provider: row.provider,
+    upstream_provider: row.upstream_provider,
     model: row.model,
     effort: row.effort,
     image_tag: row.image_tag,
@@ -201,7 +202,7 @@ registerResource({
       access: 'approval',
       description:
         'Update container config scalar fields. Changes are saved but do NOT take effect until you run `ncl groups restart`. ' +
-        'Use --id <group-id> and any of: --provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope.',
+        'Use --id <group-id> and any of: --provider, --upstream-provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope.',
       handler: async (args) => {
         const id = args.id as string;
         if (!id) throw new Error('--id is required');
@@ -211,7 +212,14 @@ registerResource({
         const updates: Partial<
           Pick<
             ContainerConfigRow,
-            'provider' | 'model' | 'effort' | 'image_tag' | 'assistant_name' | 'max_messages_per_prompt' | 'cli_scope'
+            | 'provider'
+            | 'upstream_provider'
+            | 'model'
+            | 'effort'
+            | 'image_tag'
+            | 'assistant_name'
+            | 'max_messages_per_prompt'
+            | 'cli_scope'
           >
         > = {};
         if (args.provider !== undefined) {
@@ -228,6 +236,15 @@ registerResource({
           updates.provider = p;
         }
         if (args.model !== undefined) updates.model = args.model as string;
+        if (args['upstream-provider'] !== undefined || args.upstream_provider !== undefined) {
+          // Upstream gateway for provider=opencode (e.g. `openrouter`,
+          // `minimax`, `deepseek`). Must match a provider id in OpenCode's
+          // models.dev catalog; empty string clears back to OPENCODE_PROVIDER.
+          // Not validated against a fixed list — the catalog is remote and
+          // grows independently of this codebase.
+          const upstream = ((args['upstream-provider'] ?? args.upstream_provider) as string).trim();
+          updates.upstream_provider = upstream === '' ? null : upstream;
+        }
         if (args.effort !== undefined) updates.effort = args.effort as string;
         if (args.image_tag !== undefined) updates.image_tag = args.image_tag as string;
         if (args.assistant_name !== undefined) updates.assistant_name = args.assistant_name as string;
@@ -243,7 +260,7 @@ registerResource({
 
         if (Object.keys(updates).length === 0) {
           throw new Error(
-            'Nothing to update — provide at least one of: --provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope',
+            'Nothing to update — provide at least one of: --provider, --upstream-provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope',
           );
         }
 

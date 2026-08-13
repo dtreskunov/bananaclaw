@@ -34,6 +34,7 @@ function seedGroup(id: string): void {
   createContainerConfig({
     agent_group_id: id,
     provider: null,
+    upstream_provider: null,
     model: null,
     small_model: null,
     effort: null,

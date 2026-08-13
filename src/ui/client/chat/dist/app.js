@@ -25401,8 +25401,10 @@ var CTX_TIERS = [
 ];
 var ALL_INPUT_MODALITIES = ["text", "image", "audio", "video"];
 var ALL_OUTPUT_MODALITIES = ["text", "image"];
+var MAX_RENDERED = 200;
 function formatDetailLine(m6) {
   const parts = [];
+  if (m6.upstreamLabel) parts.push(m6.upstreamLabel);
   if (m6.contextWindow) {
     const k4 = m6.contextWindow >= 1e6 ? `${(m6.contextWindow / 1e6).toFixed(1).replace(/\.0$/, "")}M` : `${Math.round(m6.contextWindow / 1024)}k`;
     parts.push(`${k4} ctx`);
@@ -25447,6 +25449,7 @@ function ModelPickerDialog({
   apiBasePath,
   inputModality,
   outputModality,
+  upstream,
   onChange
 }) {
   const [open, setOpen] = h2(false);
@@ -25465,8 +25468,9 @@ function ModelPickerDialog({
     const params = new URLSearchParams({ provider });
     if (inputModality) params.set("inputModality", inputModality);
     if (outputModality) params.set("outputModality", outputModality);
+    if (upstream) params.set("upstream", upstream);
     return `${apiBasePath}/models?${params.toString()}`;
-  }, [provider, apiBasePath, inputModality, outputModality]);
+  }, [provider, apiBasePath, inputModality, outputModality, upstream]);
   y2(() => {
     if (!catalogUrl) {
       setModels([]);
@@ -25681,7 +25685,7 @@ function ModelPickerDialog({
               loading && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "Loading\u2026" }),
               !loading && source === "unavailable" && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "Model catalog unavailable." }),
               !loading && source !== "unavailable" && filtered.length === 0 && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "No models match filters." }),
-              !loading && filtered.map((m6) => /* @__PURE__ */ u4(
+              !loading && filtered.slice(0, MAX_RENDERED).map((m6) => /* @__PURE__ */ u4(
                 "button",
                 {
                   type: "button",
@@ -25693,7 +25697,14 @@ function ModelPickerDialog({
                   ]
                 },
                 m6.id
-              ))
+              )),
+              !loading && filtered.length > MAX_RENDERED && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: [
+                "Showing ",
+                MAX_RENDERED,
+                " of ",
+                filtered.length,
+                " \u2014 search or filter to narrow down."
+              ] })
             ] }),
             /* @__PURE__ */ u4("div", { class: "mpd-freeform", children: [
               /* @__PURE__ */ u4(
@@ -27267,7 +27278,7 @@ var TAB_ITEMS = [
 ];
 var PROVIDER_INFO = {
   claude: "Claude \u2014 Anthropic models via the official SDK. Uses your OneCLI-injected Anthropic API key.",
-  opencode: "OpenCode \u2014 multi-provider gateway (OpenRouter, DeepSeek, OpenCode Zen, Anthropic, etc.) selected by host OPENCODE_PROVIDER. Wire prefix is handled automatically."
+  opencode: "OpenCode \u2014 multi-provider gateway. The upstream (OpenRouter, MiniMax, DeepSeek, Anthropic, \u2026) is not chosen here: it comes from whichever model you pick, since every models.dev id names its own gateway."
 };
 function formatAge(iso) {
   if (!iso) return null;
@@ -27714,11 +27725,12 @@ function SettingsTab({ gid, section, onClose, onActions }) {
           onChange: (v5) => update("model", v5)
         }
       ) }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Small model", info: "Lighter model for background tasks like compaction and summaries (cost optimization). Used by OpenCode; other providers may use in future.", children: /* @__PURE__ */ u4(
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Small model", info: "Lighter model for background tasks like compaction and summaries (cost optimization). Restricted to the same upstream as the main model \u2014 OpenCode only enables one gateway per session.", children: /* @__PURE__ */ u4(
         ModelPickerDialog,
         {
           value: draft.small_model,
           provider: provider ?? data.defaults.provider,
+          upstream: draft.upstream_provider,
           placeholder: "same as main model",
           disabled: busy,
           apiBasePath: apiPath(gid, ""),

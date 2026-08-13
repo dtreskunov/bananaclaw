@@ -29,11 +29,14 @@ interface ModelSuggestion {
   releaseDate?: string;
   modalitiesIn?: string[];
   modalitiesOut?: string[];
+  /** models.dev only: the gateway this model is served through. */
+  upstream?: string;
+  upstreamLabel?: string;
 }
 
 interface ModelsResponse {
   models: ModelSuggestion[];
-  source: 'openrouter' | 'unavailable';
+  source: 'openrouter' | 'models.dev' | 'unavailable';
   upstream: string | null;
 }
 
@@ -52,6 +55,12 @@ export interface ModelPickerDialogProps {
   inputModality?: string;
   /** Pre-filter: only models producing this output modality. */
   outputModality?: string;
+  /**
+   * opencode only: restrict the catalog to one models.dev upstream. Used by
+   * the small-model picker so background tasks can't be pointed at a gateway
+   * the group isn't connected to.
+   */
+  upstream?: string | null;
   /** Called when the user picks or types a model id. */
   onChange: (value: string | null) => void;
 }
@@ -79,10 +88,21 @@ const CTX_TIERS: { id: CtxTier; label: string; min: number }[] = [
 const ALL_INPUT_MODALITIES = ['text', 'image', 'audio', 'video'];
 const ALL_OUTPUT_MODALITIES = ['text', 'image'];
 
+/**
+ * Cap on rendered rows. The models.dev catalog is ~5k entries; painting all of
+ * them locks up a phone for seconds. Anyone past the cap is better served by
+ * typing than by scrolling, so we prompt for that instead of virtualizing.
+ */
+const MAX_RENDERED = 200;
+
 // ── helpers ───────────────────────────────────────────────────────────────
 
 function formatDetailLine(m: ModelSuggestion): string {
   const parts: string[] = [];
+  // Lead with the gateway: the models.dev catalog lists the same model under
+  // many providers, so "DeepSeek Chat" alone is ambiguous — and the gateway
+  // is what actually decides price and context window.
+  if (m.upstreamLabel) parts.push(m.upstreamLabel);
   if (m.contextWindow) {
     const k = m.contextWindow >= 1_000_000
       ? `${(m.contextWindow / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
@@ -142,11 +162,12 @@ export function ModelPickerDialog({
   apiBasePath,
   inputModality,
   outputModality,
+  upstream,
   onChange,
 }: ModelPickerDialogProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelSuggestion[]>([]);
-  const [source, setSource] = useState<'openrouter' | 'unavailable'>('unavailable');
+  const [source, setSource] = useState<'openrouter' | 'models.dev' | 'unavailable'>('unavailable');
   const [loading, setLoading] = useState(false);
 
   // Filters
@@ -167,8 +188,9 @@ export function ModelPickerDialog({
     const params = new URLSearchParams({ provider });
     if (inputModality) params.set('inputModality', inputModality);
     if (outputModality) params.set('outputModality', outputModality);
+    if (upstream) params.set('upstream', upstream);
     return `${apiBasePath}/models?${params.toString()}`;
-  }, [provider, apiBasePath, inputModality, outputModality]);
+  }, [provider, apiBasePath, inputModality, outputModality, upstream]);
 
   // Eagerly fetch models when provider is set (even while dialog is closed)
   // so the trigger can show the detail line for the current value.
@@ -415,7 +437,7 @@ export function ModelPickerDialog({
                   {!loading && source !== 'unavailable' && filtered.length === 0 && (
                     <div class="mpd-empty">No models match filters.</div>
                   )}
-                  {!loading && filtered.map((m) => (
+                  {!loading && filtered.slice(0, MAX_RENDERED).map((m) => (
                     <button
                       key={m.id}
                       type="button"
@@ -426,6 +448,11 @@ export function ModelPickerDialog({
                       <div class="mpd-item-detail">{formatDetailLine(m)}</div>
                     </button>
                   ))}
+                  {!loading && filtered.length > MAX_RENDERED && (
+                    <div class="mpd-empty">
+                      Showing {MAX_RENDERED} of {filtered.length} — search or filter to narrow down.
+                    </div>
+                  )}
                 </div>
 
                 {/* Free-form entry */}

@@ -467,14 +467,35 @@ export function generateSkillsIndex(skillsDir = SKILLS_DIR, outPath = SKILLS_IND
   return outPath;
 }
 
+/**
+ * Peel the upstream prefix off a stored model value.
+ *
+ * `OPENCODE_MODEL` is canonically `<OPENCODE_PROVIDER>/<model-id>` — the host
+ * exports the two together precisely so this boundary never has to be guessed
+ * (see src/model-wire.ts on the host for the history). Plain string handling,
+ * not a regex: the provider name comes from config and could contain regex
+ * metacharacters.
+ *
+ * Values missing the prefix (hand-edited rows, or configs written before
+ * normalization) are passed through unchanged.
+ */
+function stripUpstreamPrefix(value: string, provider: string): string {
+  const prefix = `${provider}/`;
+  return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+}
+
 export function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> {
   const provider = process.env.OPENCODE_PROVIDER || 'anthropic';
   const model = options.model || process.env.OPENCODE_MODEL;
   const smallModel = process.env.OPENCODE_SMALL_MODEL;
-  const proxyUrl = process.env.ANTHROPIC_BASE_URL;
+  // Base URL for the upstream gateway. Normally unset — OpenCode's models.dev
+  // catalog already knows each provider's API base (e.g. openrouter.ai/api/v1,
+  // api.minimax.io/anthropic/v1), and OneCLI injects credentials on the wire.
+  // Only override for a non-standard endpoint.
+  const proxyUrl = process.env.OPENCODE_BASE_URL || process.env.ANTHROPIC_BASE_URL;
 
-  const providerModelId = model ? model.replace(new RegExp(`^${provider}/`), '') : undefined;
-  const providerSmallModelId = smallModel ? smallModel.replace(new RegExp(`^${provider}/`), '') : undefined;
+  const providerModelId = model ? stripUpstreamPrefix(model, provider) : undefined;
+  const providerSmallModelId = smallModel ? stripUpstreamPrefix(smallModel, provider) : undefined;
   const modelsToRegister: string[] = [providerModelId, providerSmallModelId].filter(
     (m): m is string => typeof m === 'string' && m.length > 0,
   );
@@ -506,7 +527,7 @@ export function buildOpenCodeConfig(options: ProviderOptions): Record<string, un
   } else {
     providerOptions = {
       [provider]: {
-        options: { apiKey: 'placeholder', baseURL: proxyUrl },
+        options: { apiKey: 'placeholder', ...(proxyUrl ? { baseURL: proxyUrl } : {}) },
         ...(dedupedModels.length > 0
           ? { models: Object.fromEntries(dedupedModels.map((mid) => [mid, buildModelEntry(mid)])) }
           : {}),

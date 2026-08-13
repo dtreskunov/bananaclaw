@@ -1,29 +1,46 @@
 /**
- * Model catalog backed by OpenRouter /api/v1/models.
+ * Model catalog for the admin UI.
  *
- * Wire format is opaque to the client. The host translates between the bare
- * model id (what users see and pick) and the on-disk `container_configs.model`
- * value at the API boundary:
+ * Both agent providers are served from models.dev (./models-dev-catalog.ts),
+ * the catalog OpenCode itself boots against. They differ only in what the
+ * stored value looks like:
  *
- *   - claude   → DB value === bare id (no provider prefix, e.g. "claude-sonnet-4.6").
- *                The OpenRouter catalog uses "anthropic/claude-sonnet-4.6"; we
- *                strip the prefix before exposing to the client.
- *   - opencode → DB value === `<OPENCODE_PROVIDER>/<bare-id>` (e.g.
- *                `openrouter/anthropic/claude-sonnet-4.6`). The opencode
- *                container provider sets OPENCODE_MODEL from the DB value
- *                verbatim, so the prefix is required at storage time.
- *                See src/providers/opencode.ts. The client always works
- *                with the bare id (the full OpenRouter model id).
+ *   - opencode → the suggestion id IS the canonical `<upstream>/<model-id>`
+ *                wire value, so picking a model also picks the gateway.
+ *                Nothing is prefixed or stripped — see src/model-wire.ts for
+ *                why guessing at the prefix was unsound.
+ *   - claude   → restricted to the `anthropic` upstream, with that one known
+ *                prefix peeled off, because the Claude provider passes the
+ *                model straight to the Anthropic Messages API, which wants a
+ *                bare id (e.g. "claude-sonnet-4-5-20250929").
  *   - mock     → no UI catalog; not exposed by the admin endpoint.
+ *
+ * `claude` used to be served from OpenRouter's /api/v1/models filtered to
+ * `anthropic/*`, which was wrong in a way that never threw on our side:
+ * OpenRouter renames Anthropic's models. It publishes `claude-sonnet-4.5`
+ * and `claude-opus-4.5:batch` where the Anthropic API only answers to
+ * `claude-sonnet-4-5-20250929` / `claude-sonnet-4-5`. Of the 28 ids under
+ * `anthropic/*` exactly 3 were spelled the way Anthropic spells them, so the
+ * picker was mostly an invalid-model generator — the 404 only surfaced later,
+ * from inside the container, on the group's next message. models.dev lists
+ * Anthropic's own ids.
+ *
+ * The one remaining OpenRouter-backed path is the `openrouter` pseudo-
+ * provider, used by the transcription model selector — see
+ * ./voice-transcribe.ts, which posts to OpenRouter's endpoint directly and
+ * therefore genuinely needs OpenRouter's spelling.
  *
  * Catalog cached in memory (~1h TTL + brief negative cache on failure).
  */
 import { log } from '../../../log.js';
-import { readEnvFile } from '../../../env.js';
 import { proxyFetch } from './onecli-proxy.js';
+import { listOpenCodeModels } from './models-dev-catalog.js';
 
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+/** models.dev provider id backing the `claude` agent provider. */
+const ANTHROPIC_UPSTREAM = 'anthropic';
 
 export interface ModelSuggestion {
   /** Bare model id (what the user sees and the input stores). */
@@ -159,7 +176,7 @@ function mapModel(m: OpenRouterModel, bareId: string): ModelSuggestion {
 
 export interface ModelCatalogResult {
   models: ModelSuggestion[];
-  source: 'openrouter' | 'unavailable';
+  source: 'openrouter' | 'models.dev' | 'unavailable';
   /** Label for the upstream catalog (e.g. "openrouter", "anthropic"). */
   upstream: string | null;
 }
@@ -169,6 +186,8 @@ export interface ModelFilterOptions {
   inputModality?: string;
   /** Only include models whose output modalities contain this value. */
   outputModality?: string;
+  /** opencode only: restrict to a single models.dev upstream provider. */
+  upstream?: string;
 }
 
 /** Returns suggestions whose `id` is the bare model id (no prefix). */
@@ -180,41 +199,47 @@ export async function listModelsForProvider(
   // test-only provider and the dropdown shouldn't tempt users into picking
   // it. If you need it, set via `ncl groups config update --provider mock`.
   if (agentProvider === 'mock') {
-    return { models: [], source: 'openrouter', upstream: null };
+    return { models: [], source: 'unavailable', upstream: null };
+  }
+
+  // opencode is served from models.dev, where the upstream is part of every
+  // id rather than a single catalog-wide value.
+  if (agentProvider === 'opencode') {
+    const models = await listOpenCodeModels(filter);
+    if (!models) return { models: [], source: 'unavailable', upstream: null };
+    return { models, source: 'models.dev', upstream: filter?.upstream ?? null };
+  }
+
+  // claude is the same catalog pinned to one upstream. Peeling the prefix is
+  // safe here in a way it is not for opencode: we asked models.dev for the
+  // `anthropic` provider specifically, so every id is known to be
+  // `anthropic/<model-id>` and the boundary isn't being guessed at.
+  if (agentProvider === 'claude') {
+    const models = await listOpenCodeModels({ ...filter, upstream: ANTHROPIC_UPSTREAM });
+    if (!models) return { models: [], source: 'unavailable', upstream: null };
+    const prefix = `${ANTHROPIC_UPSTREAM}/`;
+    const bare = models.map((m) => (m.id.startsWith(prefix) ? { ...m, id: m.id.slice(prefix.length) } : m));
+    return { models: bare, source: 'models.dev', upstream: ANTHROPIC_UPSTREAM };
+  }
+
+  // Everything below is the OpenRouter-backed path, which now serves only the
+  // `openrouter` pseudo-provider (the transcription model selector).
+  if (agentProvider !== 'openrouter') {
+    return { models: [], source: 'unavailable', upstream: null };
   }
 
   const allModels = await fetchCatalog();
   if (!allModels) return { models: [], source: 'unavailable', upstream: null };
 
-  // Determine which models to show and how to derive the bare ID.
-  let filterPrefix: string | null = null;
-  let upstream: string | null = null;
-
-  if (agentProvider === 'claude') {
-    filterPrefix = 'anthropic/';
-    upstream = 'anthropic';
-  } else if (agentProvider === 'opencode') {
-    upstream = opencodeUpstream();
-    // opencode uses the full OpenRouter model id as the bare id
-    filterPrefix = null;
-  } else if (agentProvider === 'openrouter') {
-    upstream = 'openrouter';
-    filterPrefix = null;
-  }
-
-  if (!upstream) return { models: [], source: 'openrouter', upstream: null };
-
   const models: ModelSuggestion[] = [];
   for (const m of allModels) {
-    if (filterPrefix && !m.id.startsWith(filterPrefix)) continue;
     if (filter?.inputModality && !m.architecture?.input_modalities?.includes(filter.inputModality)) continue;
     if (filter?.outputModality && !m.architecture?.output_modalities?.includes(filter.outputModality)) continue;
-    const bareId = filterPrefix ? m.id.slice(filterPrefix.length) : m.id;
-    models.push(mapModel(m, bareId));
+    models.push(mapModel(m, m.id));
   }
 
   models.sort((a, b) => a.label.localeCompare(b.label));
-  return { models, source: 'openrouter', upstream };
+  return { models, source: 'openrouter', upstream: 'openrouter' };
 }
 
 /** Look up details for a specific bare id (used for the "current selection" panel). */
@@ -223,35 +248,24 @@ export async function getModelDetails(agentProvider: string, bareId: string): Pr
   return result.models.find((m) => m.id === bareId) ?? null;
 }
 
-// ── prefix translation (opencode opaqueness boundary) ─────────────────────
+// ── id translation (catalog ↔ DB) ─────────────────────────────────────────
+//
+// Both directions are now the identity, and these functions exist only to
+// keep the call sites honest about the boundary.
+//
+// For `claude` the `anthropic/` prefix is peeled off inside the catalog
+// builder, so the ids it hands out already match the stored values. For
+// `opencode` the models.dev id IS the stored value. The host no longer
+// synthesizes or peels a prefix at this layer — doing so is what made the
+// stored format ambiguous in the first place (src/model-wire.ts).
 
-function opencodeUpstream(): string | null {
-  const env = readEnvFile(['OPENCODE_PROVIDER']);
-  const v = (env.OPENCODE_PROVIDER || '').trim();
-  return v || null;
-}
-
-/** Translate a stored DB model value to the bare id the user sees. */
-export function bareIdForResponse(agentProvider: string | null, dbValue: string | null): string | null {
-  if (!dbValue) return dbValue;
-  if (agentProvider === 'opencode') {
-    const prefix = opencodeUpstream();
-    if (prefix && dbValue.startsWith(prefix + '/')) {
-      return dbValue.slice(prefix.length + 1);
-    }
-  }
+/** Translate a stored DB model value to the id the user sees. */
+export function bareIdForResponse(_agentProvider: string | null, dbValue: string | null): string | null {
   return dbValue;
 }
 
-/** Translate a bare id (from the user) back to the DB wire value. */
-export function dbValueFromBareId(agentProvider: string | null, bareId: string | null): string | null {
+/** Translate a picked catalog id back to the DB wire value. */
+export function dbValueFromBareId(_agentProvider: string | null, bareId: string | null): string | null {
   if (bareId == null || bareId === '') return null;
-  if (agentProvider === 'opencode') {
-    const prefix = opencodeUpstream();
-    // Always prepend — the bare id may itself start with `<prefix>/`
-    // (e.g. OpenRouter's `openrouter/free` router model), so a "tolerant"
-    // skip would conflate two different DB values.
-    if (prefix) return `${prefix}/${bareId}`;
-  }
   return bareId;
 }

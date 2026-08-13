@@ -3,6 +3,7 @@ import { getDb } from './connection.js';
 
 const SCALAR_COLUMNS = new Set([
   'provider',
+  'upstream_provider',
   'model',
   'small_model',
   'effort',
@@ -67,6 +68,7 @@ export function updateContainerConfigScalars(
     Pick<
       ContainerConfigRow,
       | 'provider'
+      | 'upstream_provider'
       | 'model'
       | 'small_model'
       | 'effort'
