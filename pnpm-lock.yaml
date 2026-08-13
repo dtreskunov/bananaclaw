@@ -18,8 +18,8 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0
       '@onecli-sh/sdk':
-        specifier: 2.2.1
-        version: 2.2.1
+        specifier: 3.1.0
+        version: 3.1.0
       '@resend/chat-sdk-adapter':
         specifier: 0.2.2
         version: 0.2.2(@chat-adapter/shared@4.26.0)(@react-email/render@2.0.8(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(chat@4.26.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -561,8 +561,8 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@onecli-sh/sdk@2.2.1':
-    resolution: {integrity: sha512-q2mCW4ZsARlLEoTxz/P0NQ4MiCh7Z2n28pxkSc7srS+tozyw40PdTnWYW7NI8hfSYplZTx5856Adq1iPi4KN3Q==}
+  '@onecli-sh/sdk@3.1.0':
+    resolution: {integrity: sha512-Akf4T32/pIGWJO0FQBwlPXYFUVMn200lFxWaZWtB8dNpORDjT7cMykd5W+aTA/4//YV1XiXBOoaTUUL1yqIf4w==}
     engines: {node: '>=20'}
 
   '@oxc-project/types@0.124.0':
@@ -2777,7 +2777,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.1
     optional: true
 
-  '@onecli-sh/sdk@2.2.1': {}
+  '@onecli-sh/sdk@3.1.0': {}
 
   '@oxc-project/types@0.124.0': {}
 

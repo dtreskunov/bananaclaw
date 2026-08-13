@@ -14,7 +14,7 @@ curl -s http://127.0.0.1:10254/api/health           # reports the running gatewa
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:10254/v1/health
 ```
 
-If the last command prints `404`, the server predates the `/v1` API that `@onecli-sh/sdk` 2.x requires — every SDK call will fail with 404s that look transient but are permanent. If your gateway is remote, substitute its host for `127.0.0.1` (it's in `.env` as `ONECLI_URL` / `NANOCLAW_ONECLI_API_HOST`).
+If the last command prints `404`, the server predates the `/v1` API that `@onecli-sh/sdk` 2.x and later require — every SDK call will fail with 404s that look transient but are permanent. If your gateway is remote, substitute its host for `127.0.0.1` (it's in `.env` as `ONECLI_URL` / `NANOCLAW_ONECLI_API_HOST`). The compose commands in the next section must run on that remote host, not on the NanoClaw host.
 
 Why gateways fall behind: the OneCLI installer's docker-compose tracks the `latest` image tag, but Docker never re-pulls a tag — the server freezes at whatever `latest` meant on install day.
 
@@ -22,10 +22,15 @@ Why gateways fall behind: the OneCLI installer's docker-compose tracks the `late
 
 The gateway runs as a Docker service in `~/.onecli`. Upgrade just that container to the pinned `onecli-gateway` version — vault data lives in named Docker volumes and survives. This upgrades only the gateway; the CLI binary is pinned separately (see below).
 
+Before crossing a release that migrates the database or policy model, back up the gateway's PostgreSQL database and record its current image digest. OneCLI 1.42 migrates policies and 1.43 removes the legacy policy model, so rolling the image back across those versions may also require restoring the database backup.
+
 **Local gateway (the common case):**
 
 ```bash
-cd ~/.onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker compose pull onecli && docker compose up -d
+cd ~/.onecli
+export ONECLI_VERSION=<onecli-gateway pin from versions.json>
+docker compose pull onecli
+docker compose up -d --wait
 ```
 
 **Remote gateway** — run the same command on the gateway's host (NanoClaw can't reach it over SSH).
@@ -35,7 +40,8 @@ cd ~/.onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker co
 Host-side health is necessary but **not sufficient**:
 
 ```bash
-curl -s http://127.0.0.1:10254/v1/health     # must return {"status":"ok",...}
+curl -s http://127.0.0.1:10254/v1/health
+# Must return {"status":"ok","version":"<onecli-gateway pin>",...}
 ```
 
 **Verify the bind interface (container reachability).** Agent containers reach the gateway over the docker bridge (`host.docker.internal` → e.g. `172.17.0.1`), so a server bound only to `127.0.0.1` boots clean host-side while every credentialed call from containers dies at the proxy:
@@ -45,7 +51,9 @@ docker run --rm --add-host=host.docker.internal:host-gateway \
   curlimages/curl -s -o /dev/null -w '%{http_code}' http://host.docker.internal:10254/v1/health
 ```
 
-This must print `200`. If it can't connect while the host-side check passed, set the bind address in `~/.onecli/.env` to the docker-bridge IP (or `0.0.0.0` on a host with a closed firewall) and `cd ~/.onecli && docker compose up -d`. Symptom if skipped: host log clean, agents fail all API calls.
+This must print `200`. Also exercise one credentialed request from an agent: control-plane health uses port 10254, while the injected CONNECT proxy uses port 10255. A healthy control plane does not prove that credential traffic can reach the proxy or that migrated policies/grants still permit the agent.
+
+If the container check can't connect while the host-side check passed, set the bind address in `~/.onecli/.env` to the docker-bridge IP (or `0.0.0.0` on a host with a closed firewall) and `cd ~/.onecli && docker compose up -d`. Symptom if skipped: host log clean, agents fail all API calls.
 
 Finally, restart the NanoClaw service (per-install names — derive with `setup/lib/install-slug.sh`):
 
@@ -59,25 +67,33 @@ source setup/lib/install-slug.sh && systemctl --user restart $(systemd_unit)
 ## 4. Rollback
 
 ```bash
-cd ~/.onecli && ONECLI_VERSION=<old-version> docker compose up -d
+cd ~/.onecli
+export ONECLI_VERSION=<old-version>
+docker compose pull onecli
+docker compose up -d --wait
 ```
 
-If the NanoClaw update itself is being rolled back, also pin `@onecli-sh/sdk` back to its previous version in `package.json` and run `pnpm install`. Vault data is unaffected in both directions.
+If the target release migrated the database or policy model, restore the matching pre-upgrade database backup as part of rollback. If the NanoClaw update itself is being rolled back, also pin `@onecli-sh/sdk` back to its previous version in `package.json` and run `pnpm install`.
 
 ## The CLI binary (`onecli-cli` pin)
 
 The `onecli` host CLI is pinned the same way, under `onecli-cli` in `versions.json`. Setup installs exactly that version by direct release download — it never resolves "latest". When an update moves this pin, replace the binary with the pinned release:
 
 ```bash
-onecli --version                                            # detect: what is installed
+onecli version                                              # detect: what is installed
 V=<onecli-cli pin from versions.json>
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')                 # darwin | linux
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')   # amd64 | arm64
 curl -fsSL -o /tmp/onecli.tgz \
   "https://github.com/onecli/onecli-cli/releases/download/v${V}/onecli_${V}_${OS}_${ARCH}.tar.gz"
 tar -xzf /tmp/onecli.tgz -C /tmp
-install -m 0755 /tmp/onecli "$(command -v onecli || echo ~/.local/bin/onecli)"
-onecli --version                                            # verify: must match versions.json
+DEST=$(command -v onecli || true)
+if [[ -z "$DEST" || ! -w "$DEST" ]]; then
+  DEST="$HOME/.local/bin/onecli"
+  mkdir -p "$(dirname "$DEST")"
+fi
+install -m 0755 /tmp/onecli "$DEST"
+onecli version                                              # verify: must match versions.json
 ```
 
 To roll back, run the same block after reverting `versions.json` (or checking out the previous NanoClaw version). The CLI is stateless — vault data lives in the gateway, so swapping the binary in either direction loses nothing.
