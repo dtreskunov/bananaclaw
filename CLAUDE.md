@@ -156,17 +156,24 @@ Key files: `src/container-restart.ts`, `src/container-runner.ts` (`killContainer
 
 API keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway. Secrets are injected into per-agent containers at request time — none are passed in env vars or through chat context. The container agent sees this via the `onecli-gateway` container skill (`container/skills/onecli-gateway/SKILL.md`), which teaches it how the proxy works, how to handle auth errors, and to never ask for raw credentials. Host-side wiring: `src/modules/approvals/onecli-approvals.ts`, `ensureAgent()` in `container-runner.ts`. Run `onecli --help`.
 
-### Secret modes
+### Agent credential grants
 
-Auto-created agents default to `all` secret mode — every vault secret whose host pattern matches is injected automatically, so the common case needs no per-agent setup. If an agent is in `selective` mode it gets no secrets until you assign them, which shows up as a `401` from an API whose credential *is* in the vault. The SDK can't change this; use the CLI (or the web UI at `http://127.0.0.1:10254`):
+New OneCLI agents start with no credential grants. NanoClaw can attach an
+operator allow-list at creation time: set `ONECLI_NEW_AGENT_SECRET_IDS` in
+`.env` to comma-separated IDs from `onecli secrets list`. This affects only
+agents created afterward and never reconciles or removes existing grants.
+
+For an existing agent, use the OneCLI web UI or the current grants CLI:
 
 ```bash
-onecli agents list                                          # check secretMode
-onecli agents set-secret-mode --id <agent-id> --mode all    # inject all matching secrets
-onecli agents set-secrets --id <agent-id> --secret-ids ...  # or stay selective, assign specific ones
+onecli agents grants list --id <agent-id>
+onecli agents grants attach-secret --id <agent-id> --secret-id <secret-id>
+onecli agents grants detach-secret --id <agent-id> --secret-id <secret-id>
 ```
 
-No container restart needed — the gateway looks up secrets per request.
+Grant changes take effect immediately; no container restart is needed. The
+retired `set-secret-mode` and `set-secrets` commands return `410 Gone` on
+current gateways.
 
 ### Requiring approval for credential use
 

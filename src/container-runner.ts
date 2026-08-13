@@ -45,6 +45,7 @@ import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
+import { ensureOneCliAgent } from './onecli-agent.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
 import './providers/index.js';
@@ -891,7 +892,7 @@ async function buildContainerArgs(
   // the throw, leaves the inbound message pending, and the next sweep tick
   // retries.
   if (agentIdentifier) {
-    await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+    await ensureOneCliAgent(onecli, agentGroup.name, agentIdentifier);
   }
   const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
   if (!onecliApplied) {

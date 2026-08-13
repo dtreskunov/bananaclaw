@@ -19,6 +19,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import { ONECLI_API_KEY, ONECLI_URL } from '../../../config.js';
 import { log } from '../../../log.js';
+import { ensureOneCliAgent as ensureOneCliAgentWithGrants } from '../../../onecli-agent.js';
 
 interface ProxyConfig {
   proxyUrl: URL;
@@ -113,7 +114,7 @@ export async function ensureOneCliAgent(name: string, identifier: string): Promi
   if (ensuredAgents.has(identifier)) return true;
   try {
     const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
-    await onecli.ensureAgent({ name, identifier });
+    await ensureOneCliAgentWithGrants(onecli, name, identifier);
     ensuredAgents.add(identifier);
     return true;
   } catch (err) {
