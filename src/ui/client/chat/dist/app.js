@@ -17654,7 +17654,7 @@ function requestScrollToBottom() {
   scrollToBottomTick.value++;
 }
 async function loadThreads(_gid) {
-  await runSync();
+  await runSync({ forceRefresh: true });
 }
 async function deleteThread(tid) {
   if (!groupId.value) return;
@@ -17820,7 +17820,10 @@ async function runSync(options = {}) {
   }
   let res;
   try {
-    res = await api("api/sync" + (params.toString() ? "?" + params.toString() : ""));
+    res = await api(
+      "api/sync" + (params.toString() ? "?" + params.toString() : ""),
+      options.forceRefresh ? { cache: "no-store" } : void 0
+    );
   } catch {
     return;
   }
@@ -18191,9 +18194,7 @@ function connectChatWs(ctx2) {
     if (payload.kind === "inbound") {
       refs.carryActivity = [];
       if (payload.id) {
-        pendingWebSends.value = pendingWebSends.value.filter(
-          (pendingSend) => pendingSend.messageId !== payload.id
-        );
+        pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== payload.id);
       }
       appendMsg(
         "in",
@@ -18398,9 +18399,7 @@ async function sendChat(text, files) {
       });
     }
     if (!res.ok) {
-      pendingWebSends.value = pendingWebSends.value.filter(
-        (pendingSend) => pendingSend.messageId !== messageId
-      );
+      pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     }
     if (generation !== refs.chatGeneration) return false;
     if (!res.ok) {
@@ -18421,9 +18420,7 @@ async function sendChat(text, files) {
     return true;
   } catch (err) {
     console.error("send failed", err);
-    pendingWebSends.value = pendingWebSends.value.filter(
-      (pendingSend) => pendingSend.messageId !== messageId
-    );
+    pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     if (generation !== refs.chatGeneration) return false;
     const m6 = err instanceof Error ? err.message : "network error";
     chatStatus.value = `send failed: ${m6}`;

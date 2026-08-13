@@ -139,7 +139,7 @@ export function requestScrollToBottom(): void {
 // `threads` signal. Callers that just want a fresh snapshot before
 // rendering can await this; everything else gets updated by the ticker.
 export async function loadThreads(_gid: string): Promise<void> {
-  await runSync();
+  await runSync({ forceRefresh: true });
 }
 
 export async function deleteThread(tid: string): Promise<void> {
@@ -324,7 +324,9 @@ interface SyncResponse {
   threadMessages?: ServerMessage[];
 }
 
-export async function runSync(options: { replaceThreadMessages?: boolean } = {}): Promise<void> {
+export async function runSync(
+  options: { replaceThreadMessages?: boolean; forceRefresh?: boolean } = {},
+): Promise<void> {
   const requestId = ++refs.syncRequestId;
   const gid = groupId.value;
   const tid = threadId.value;
@@ -341,7 +343,10 @@ export async function runSync(options: { replaceThreadMessages?: boolean } = {})
   }
   let res: SyncResponse;
   try {
-    res = await api<SyncResponse>('api/sync' + (params.toString() ? '?' + params.toString() : ''));
+    res = await api<SyncResponse>(
+      'api/sync' + (params.toString() ? '?' + params.toString() : ''),
+      options.forceRefresh ? { cache: 'no-store' } : undefined,
+    );
   } catch {
     return;
   }
