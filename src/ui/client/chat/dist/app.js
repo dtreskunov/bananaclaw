@@ -17221,9 +17221,8 @@ async function applyHash(router2) {
 function isFinalResponse(direction, deliveryOrigin) {
   return direction === "out" && deliveryOrigin !== "send_message" && deliveryOrigin !== "send_file";
 }
-function isWebEchoForClientMessage(serverMessageId, clientMessageId) {
-  const webMessageId = `web-${clientMessageId}`;
-  return serverMessageId === clientMessageId || serverMessageId === webMessageId || serverMessageId.startsWith(`${webMessageId}:`);
+function publicWebMessageId(clientMessageId) {
+  return `web-${clientMessageId}`;
 }
 
 // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
@@ -17871,7 +17870,7 @@ function replaceIncomingMessages(messages) {
   const echoedIds = messages.filter((m6) => normDirection(m6.direction) === "in" && m6.id).map((m6) => m6.id);
   const tid = threadId.value;
   pendingWebSends.value = pendingWebSends.value.filter(
-    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.some((id) => isWebEchoForClientMessage(id, pendingSend.clientMessageId))
+    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.includes(pendingSend.messageId)
   );
 }
 function mergeIncomingMessages(messages) {
@@ -18193,7 +18192,7 @@ function connectChatWs(ctx2) {
       refs.carryActivity = [];
       if (payload.id) {
         pendingWebSends.value = pendingWebSends.value.filter(
-          (pendingSend) => !isWebEchoForClientMessage(payload.id, pendingSend.clientMessageId)
+          (pendingSend) => pendingSend.messageId !== payload.id
         );
       }
       appendMsg(
@@ -18362,12 +18361,13 @@ async function sendChat(text, files) {
   const gid = groupId.value;
   const tid = threadId.value;
   const clientMessageId = crypto.randomUUID();
+  const messageId = publicWebMessageId(clientMessageId);
   refs.carryActivity = [];
   requestScrollToBottom();
   const isWeb = !channelType.value || channelType.value === "web";
   if (isWeb && !chatReady.value) return false;
   if (isWeb) {
-    pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, clientMessageId });
+    pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, messageId });
   }
   const hasFiles = Array.isArray(files) && files.length > 0;
   if (!isWeb) {
@@ -18399,7 +18399,7 @@ async function sendChat(text, files) {
     }
     if (!res.ok) {
       pendingWebSends.value = pendingWebSends.value.filter(
-        (pendingSend) => pendingSend.clientMessageId !== clientMessageId
+        (pendingSend) => pendingSend.messageId !== messageId
       );
     }
     if (generation !== refs.chatGeneration) return false;
@@ -18422,7 +18422,7 @@ async function sendChat(text, files) {
   } catch (err) {
     console.error("send failed", err);
     pendingWebSends.value = pendingWebSends.value.filter(
-      (pendingSend) => pendingSend.clientMessageId !== clientMessageId
+      (pendingSend) => pendingSend.messageId !== messageId
     );
     if (generation !== refs.chatGeneration) return false;
     const m6 = err instanceof Error ? err.message : "network error";

@@ -758,6 +758,11 @@ export interface HistoryMessage {
   reactions?: { emoji: string; ts: string }[];
 }
 
+export function publicInboundMessageId(id: string, groupId: string): string {
+  const suffix = `:${groupId}`;
+  return id.endsWith(suffix) ? id.slice(0, -suffix.length) : id;
+}
+
 /**
  * Look up `turn_usage` for a single outbound message id. Used by the live
  * WS subscriber to push usage to the client as soon as it's written —
@@ -906,7 +911,6 @@ export function readChatHistory(
       // leak the namespaced form to the client the dedup key (direction:id)
       // mismatches and the user's own message paints twice on visibility
       // resume. Strip the suffix here so history matches the echo.
-      const suffix = `:${groupId}`;
       for (const r of rows) {
         const parsed = parseInboundContent(
           r.content,
@@ -916,7 +920,7 @@ export function readChatHistory(
           session.id,
         );
         if (parsed != null) {
-          const id = r.id.endsWith(suffix) ? r.id.slice(0, -suffix.length) : r.id;
+          const id = publicInboundMessageId(r.id, groupId);
           // HA replays the full transcript on every turn (see buildTurn);
           // show only the user's actual query in the UI.
           const text = target.channelType === HA_CHANNEL_TYPE ? extractDisplayQuery(parsed.text) : parsed.text;
@@ -1068,8 +1072,7 @@ export function readChatHistory(
             // Inbound ids are de-namespaced for the client (the `:<groupId>`
             // suffix is stripped above); match that so reactions on the
             // user's own messages find their target bubble.
-            const suffix = `:${groupId}`;
-            const target = c.messageId.endsWith(suffix) ? c.messageId.slice(0, -suffix.length) : c.messageId;
+            const target = publicInboundMessageId(c.messageId, groupId);
             const arr = reactionsByTarget.get(target) ?? [];
             arr.push({ emoji: shortcodeToEmoji(c.emoji), ts: r.timestamp });
             reactionsByTarget.set(target, arr);
@@ -2863,8 +2866,7 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
           if (op.operation === 'reaction' && op.messageId && op.emoji) {
             // De-namespace the target id to match the client's bubble id
             // (inbound echoes and socket snapshots strip the `:<groupId>` suffix).
-            const suffix = `:${ctx.groupId}`;
-            const targetId = op.messageId.endsWith(suffix) ? op.messageId.slice(0, -suffix.length) : op.messageId;
+            const targetId = publicInboundMessageId(op.messageId, ctx.groupId);
             sendFrame({
               kind: 'reaction',
               targetId,
@@ -2960,7 +2962,14 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
           url: encodedAttachmentUrl(ctx.groupId, ctx.threadId, `inbox/${id}:${ctx.groupId}/${f.filename}`),
           contentType: mimeFromFilename(f.filename),
         }));
-        sendFrame({ kind: 'inbound', id, text, author, files: enriched, timestamp: new Date().toISOString() });
+        sendFrame({
+          kind: 'inbound',
+          id: publicInboundMessageId(id, ctx.groupId),
+          text,
+          author,
+          files: enriched,
+          timestamp: new Date().toISOString(),
+        });
       } catch (err) {
         log.warn('web chat ws echo failed', { err });
       }

@@ -6,11 +6,6 @@ export function isFinalResponse(direction: Direction, deliveryOrigin: DeliveryOr
   return direction === 'out' && deliveryOrigin !== 'send_message' && deliveryOrigin !== 'send_file';
 }
 
-export function isWebEchoForClientMessage(serverMessageId: string, clientMessageId: string): boolean {
-  const webMessageId = `web-${clientMessageId}`;
-  return (
-    serverMessageId === clientMessageId ||
-    serverMessageId === webMessageId ||
-    serverMessageId.startsWith(`${webMessageId}:`)
-  );
+export function publicWebMessageId(clientMessageId: string): string {
+  return `web-${clientMessageId}`;
 }

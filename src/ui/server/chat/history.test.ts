@@ -6,6 +6,7 @@ import {
   inboundAttachmentSecurityHeaders,
   matchChatPath,
   parseOutboundContent,
+  publicInboundMessageId,
 } from './chat.js';
 
 describe('chat socket bootstrap', () => {
@@ -27,6 +28,15 @@ describe('chat socket bootstrap', () => {
 
   it('does not expose a REST history route', () => {
     expect(matchChatPath('/api/groups/group-1/chat/thread-1/history')).toBeNull();
+  });
+
+  it('uses the same public inbound ID for live echoes and persisted history', () => {
+    const groupId = 'agent-group-456';
+    const liveEchoId = 'web-client-123';
+    const persistedId = `${liveEchoId}:${groupId}`;
+
+    expect(publicInboundMessageId(liveEchoId, groupId)).toBe(liveEchoId);
+    expect(publicInboundMessageId(persistedId, groupId)).toBe(liveEchoId);
   });
 });
 

@@ -55,7 +55,7 @@ import {
 } from './state';
 import { api, postJson } from './api';
 import { writeHash } from './hash';
-import { isFinalResponse, isWebEchoForClientMessage } from './chat-protocol';
+import { isFinalResponse, publicWebMessageId } from './chat-protocol';
 import { maybeNotify } from './notify';
 import { runReconnectImmediately, startReconnectCountdown } from './reconnect-countdown';
 import { playProgressTick, playCompletionChime } from './sound';
@@ -411,9 +411,7 @@ function replaceIncomingMessages(messages: ServerMessage[]): void {
   const echoedIds = messages.filter((m) => normDirection(m.direction) === 'in' && m.id).map((m) => m.id!);
   const tid = threadId.value;
   pendingWebSends.value = pendingWebSends.value.filter(
-    (pendingSend) =>
-      pendingSend.threadId !== tid ||
-      !echoedIds.some((id) => isWebEchoForClientMessage(id, pendingSend.clientMessageId)),
+    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.includes(pendingSend.messageId),
   );
 }
 
@@ -799,9 +797,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
     if (payload.kind === 'inbound') {
       refs.carryActivity = [];
       if (payload.id) {
-        pendingWebSends.value = pendingWebSends.value.filter(
-          (pendingSend) => !isWebEchoForClientMessage(payload.id!, pendingSend.clientMessageId),
-        );
+        pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== payload.id);
       }
       appendMsg(
         'in',
@@ -1004,6 +1000,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
   const gid = groupId.value;
   const tid = threadId.value;
   const clientMessageId = crypto.randomUUID();
+  const messageId = publicWebMessageId(clientMessageId);
   // New turn boundary — drop any trace stashed from the previous turn.
   refs.carryActivity = [];
   // Scroll to bottom immediately so user sees their message area
@@ -1011,7 +1008,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
   const isWeb = !channelType.value || channelType.value === 'web';
   if (isWeb && !chatReady.value) return false;
   if (isWeb) {
-    pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, clientMessageId });
+    pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, messageId });
   }
   const hasFiles = Array.isArray(files) && files.length > 0;
   if (!isWeb) {
@@ -1044,9 +1041,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
       });
     }
     if (!res.ok) {
-      pendingWebSends.value = pendingWebSends.value.filter(
-        (pendingSend) => pendingSend.clientMessageId !== clientMessageId,
-      );
+      pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     }
     if (generation !== refs.chatGeneration) return false;
     if (!res.ok) {
@@ -1069,9 +1064,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
     return true;
   } catch (err) {
     console.error('send failed', err);
-    pendingWebSends.value = pendingWebSends.value.filter(
-      (pendingSend) => pendingSend.clientMessageId !== clientMessageId,
-    );
+    pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     if (generation !== refs.chatGeneration) return false;
     const m = err instanceof Error ? err.message : 'network error';
     chatStatus.value = `send failed: ${m}`;

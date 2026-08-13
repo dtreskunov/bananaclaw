@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isFinalResponse, isWebEchoForClientMessage } from './chat-protocol';
+import { isFinalResponse, publicWebMessageId } from './chat-protocol';
 
 describe('isFinalResponse', () => {
   it('keeps tool-delivered messages inside the active turn', () => {
@@ -18,20 +18,8 @@ describe('isFinalResponse', () => {
   });
 });
 
-describe('isWebEchoForClientMessage', () => {
-  it('matches the web channel prefix added to client message IDs', () => {
-    expect(isWebEchoForClientMessage('web-client-123', 'client-123')).toBe(true);
-  });
-
-  it('matches persisted web IDs namespaced to an agent group', () => {
-    expect(isWebEchoForClientMessage('web-client-123:agent-group-456', 'client-123')).toBe(true);
-  });
-
-  it('also accepts an unchanged client message ID', () => {
-    expect(isWebEchoForClientMessage('client-123', 'client-123')).toBe(true);
-  });
-
-  it('rejects unrelated server messages', () => {
-    expect(isWebEchoForClientMessage('web-other', 'client-123')).toBe(false);
+describe('publicWebMessageId', () => {
+  it('derives the canonical browser-visible ID from the client correlation ID', () => {
+    expect(publicWebMessageId('client-123')).toBe('web-client-123');
   });
 });
