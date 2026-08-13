@@ -46,6 +46,18 @@ afterEach(() => {
   closeDb();
 });
 
+/**
+ * The barrel truncated at 016, i.e. the schema as it stood the moment before
+ * the instance column landed (`end` exclusive) or just after (`end` = +1).
+ *
+ * Must be a prefix slice, not `filter(m => m.name !== ...)`: migrations added
+ * after 016 are written against the post-016 schema — 029 inserts into
+ * messaging_groups naming `instance` — so lifting 016 out of the middle of
+ * the full barrel fails on whatever came later, not on 016 itself.
+ */
+const INSTANCE_INDEX = migrations.findIndex((m) => m.name === 'messaging-group-instance');
+const barrelThrough = (offset: 0 | 1): Migration[] => migrations.slice(0, INSTANCE_INDEX + offset);
+
 describe('migration 016 — fresh DB', () => {
   beforeEach(() => {
     const db = initTestDb();
@@ -92,10 +104,7 @@ describe('migration 016 — wired legacy DB upgrade (the FK recreate arm)', () =
   it('recreates messaging_groups under FK children without violations and backfills instance', () => {
     const db = initTestDb();
     // Bring the DB to the pre-016 schema.
-    runMigrations(
-      db,
-      migrations.filter((m) => m.name !== 'messaging-group-instance'),
-    );
+    runMigrations(db, barrelThrough(0));
     const preCols = db.prepare("PRAGMA table_info('messaging_groups')").all() as Array<{ name: string }>;
     expect(preCols.some((c) => c.name === 'instance')).toBe(false);
 
@@ -118,7 +127,7 @@ describe('migration 016 — wired legacy DB upgrade (the FK recreate arm)', () =
 
     // Upgrade: only 016 is pending now. Without disableForeignKeys this
     // throws 'FOREIGN KEY constraint failed' at DROP TABLE.
-    expect(() => runMigrations(db)).not.toThrow();
+    expect(() => runMigrations(db, barrelThrough(1))).not.toThrow();
 
     // Backfill: existing row got instance = channel_type.
     const row = db.prepare("SELECT instance FROM messaging_groups WHERE id = 'mg-1'").get() as { instance: string };
@@ -137,10 +146,7 @@ describe('migration 016 — wired legacy DB upgrade (the FK recreate arm)', () =
 
   it('tolerates pre-existing FK orphans: the migration still applies (no boot crash-loop)', () => {
     const db = initTestDb();
-    runMigrations(
-      db,
-      migrations.filter((m) => m.name !== 'messaging-group-instance'),
-    );
+    runMigrations(db, barrelThrough(0));
 
     // Seed the orphan class that demonstrably exists on live installs
     // (ensureUserDm tolerates it at runtime): a user_dms row whose
@@ -159,7 +165,7 @@ describe('migration 016 — wired legacy DB upgrade (the FK recreate arm)', () =
     // 016 did not create this violation — it must still apply (the runner
     // diffs post-up violations against a pre-up snapshot and only throws
     // on NEW ones; pre-existing ones are warned about and carried through).
-    expect(() => runMigrations(db)).not.toThrow();
+    expect(() => runMigrations(db, barrelThrough(1))).not.toThrow();
     const cols = db.prepare("PRAGMA table_info('messaging_groups')").all() as Array<{ name: string }>;
     expect(cols.some((c) => c.name === 'instance')).toBe(true);
 
