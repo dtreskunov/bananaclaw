@@ -12,7 +12,7 @@ import * as os from 'node:os';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb } from '../db/connection.js';
 import { getUndeliveredMessages } from '../db/messages-out.js';
-import { setCurrentInReplyTo, clearCurrentInReplyTo } from '../current-batch.js';
+import { setCurrentInReplyTo, clearCurrentInReplyTo, getDuplicateSendCount } from '../current-batch.js';
 import { sendMessage, sendFile } from './core.js';
 
 let tmpDir: string;
@@ -64,6 +64,34 @@ describe('send_message MCP tool — in_reply_to plumbing', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(out[0].in_reply_to).toBeNull();
+  });
+});
+
+describe('send_message MCP tool — runaway duplicate guard', () => {
+  it('refuses to re-send identical text to the same destination in one turn', async () => {
+    setCurrentInReplyTo('inbound-msg-1');
+
+    await sendMessage.handler({ to: 'peer', text: 'Connected — ready.' });
+    const second = await sendMessage.handler({ to: 'peer', text: 'Connected — ready.' });
+
+    expect(second.content[0].text).toContain('already sent');
+    expect(getUndeliveredMessages()).toHaveLength(1);
+    expect(getDuplicateSendCount()).toBe(1);
+  });
+
+  it('still allows the same text to a different destination', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('peer2', 'Peer 2', 'agent', NULL, NULL, 'ag-peer2')`,
+      )
+      .run();
+
+    await sendMessage.handler({ to: 'peer', text: 'Done.' });
+    await sendMessage.handler({ to: 'peer2', text: 'Done.' });
+
+    expect(getUndeliveredMessages()).toHaveLength(2);
+    expect(getDuplicateSendCount()).toBe(0);
   });
 });
 

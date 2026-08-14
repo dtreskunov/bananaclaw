@@ -5,7 +5,7 @@ import { writeTurnUsage } from './db/turn-usage.js';
 import { writeTurnActivity } from './db/turn-activity.js';
 import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, getActivityBuffer, getContinuation, getFailedTurn, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded } from './db/session-state.js';
-import { clearCurrentInReplyTo, setCurrentInReplyTo } from './current-batch.js';
+import { clearCurrentInReplyTo, getDuplicateSendCount, resetTurnSendTracking, setCurrentInReplyTo } from './current-batch.js';
 import {
   formatMessages,
   extractFileAttachments,
@@ -26,6 +26,21 @@ const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
 const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
 const MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS = 2;
+/**
+ * Abort the turn after this many refused duplicate `send_message` calls.
+ * Refusing the write already spares the user the flood; aborting also stops
+ * the token burn, since a model looping this way never emits a `stop` finish
+ * and OpenCode's prompt loop would otherwise step forever.
+ */
+const MAX_DUPLICATE_SENDS_PER_TURN = 3;
+/**
+ * Backstops for the same failure mode with a different tool. A model that has
+ * collapsed into repeating one step verbatim keeps finishing as `tool-calls`,
+ * so nothing in the provider loop ever terminates the turn. Both bounds sit
+ * far above healthy agentic work (observed good turns peak around 70 steps).
+ */
+const MAX_IDENTICAL_TOOL_STREAK = 8;
+const MAX_TOOL_CALLS_PER_TURN = 250;
 type SuggestedAction = 'continue' | 'retry' | 'report';
 
 /**
@@ -1099,12 +1114,36 @@ async function processQuery(
   }, 2000);
   liveHandle.unref?.();
 
+  resetTurnSendTracking();
+  const countedToolCallIds = new Set<string>();
+  let lastToolSignature: string | null = null;
+  let identicalToolStreak = 0;
+
   try {
     for await (const event of query.events) {
       touchHeartbeat();
       handleEvent(event, routing);
 
       if (event.type === 'progress' && event.step.kind === 'tool') {
+        if (!countedToolCallIds.has(event.step.id)) {
+          countedToolCallIds.add(event.step.id);
+          const signature = `${event.step.tool}\u0000${event.step.detail ?? ''}`;
+          identicalToolStreak = signature === lastToolSignature ? identicalToolStreak + 1 : 1;
+          lastToolSignature = signature;
+        }
+        const runawayReason =
+          getDuplicateSendCount() >= MAX_DUPLICATE_SENDS_PER_TURN
+            ? `${getDuplicateSendCount()} duplicate send_message calls`
+            : identicalToolStreak >= MAX_IDENTICAL_TOOL_STREAK
+              ? `${identicalToolStreak} identical consecutive "${event.step.tool}" calls`
+              : countedToolCallIds.size > MAX_TOOL_CALLS_PER_TURN
+                ? `${countedToolCallIds.size} tool calls`
+                : null;
+        if (runawayReason && !endedForCommand) {
+          log(`Runaway turn: ${runawayReason} — aborting stream`);
+          endedForCommand = true;
+          query.abort();
+        }
         const isSubstantiveTool = event.step.tool !== 'nanoclaw_send_message' &&
           !event.step.tool.endsWith('__send_message');
         const priorCall = executedToolCalls.get(event.step.id);

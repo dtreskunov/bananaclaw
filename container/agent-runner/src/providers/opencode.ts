@@ -726,6 +726,11 @@ export class OpenCodeProvider implements AgentProvider {
     let waiting: (() => void) | null = null;
     let ended = false;
     let aborted = false;
+    // Set while a turn is streaming. abort() calls it so the pending
+    // `stream.next()` race settles immediately — killing the OpenCode process
+    // alone does not reliably wake that await, which left an aborted turn
+    // hanging until the 5-minute idle timeout.
+    let rejectActiveTurn: ((err: Error) => void) | undefined;
 
     const systemInstructions = input.systemContext?.instructions;
     pending.push({
@@ -825,6 +830,7 @@ export class OpenCodeProvider implements AgentProvider {
         let eventTimedOut = false;
         let timeoutReject: ((err: Error) => void) | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => { timeoutReject = reject; });
+        rejectActiveTurn = timeoutReject;
         const timeoutCheck = setInterval(() => {
           if (eventTimedOut) return;
           if (Date.now() - lastEventAt > IDLE_TIMEOUT_MS) {
@@ -842,7 +848,11 @@ export class OpenCodeProvider implements AgentProvider {
           turn: while (true) {
             if (aborted) return;
 
-            const { value: ev, done } = await Promise.race([stream.next(), timeoutPromise]);
+            const { value: ev, done } = await Promise.race([stream.next(), timeoutPromise]).catch((err) => {
+              if (aborted) return { value: undefined, done: true as const };
+              throw err;
+            });
+            if (aborted) return;
             if (done) {
               throw new Error('OpenCode SSE stream ended unexpectedly');
             }
@@ -954,6 +964,7 @@ export class OpenCodeProvider implements AgentProvider {
           }
         } finally {
           clearInterval(timeoutCheck);
+          rejectActiveTurn = undefined;
         }
 
         let resultText = '';
@@ -1093,6 +1104,7 @@ export class OpenCodeProvider implements AgentProvider {
       abort: () => {
         aborted = true;
         this.activeSessionId = undefined;
+        rejectActiveTurn?.(new Error('OpenCode query aborted'));
         kick();
         destroySharedRuntime();
       },
