@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ensureBodyForAttachments,
+  isResendSelfSender,
   prepareInboundEmailBody,
   parseTokenizedReplyAddress,
   tokenizedReplyAddress,
@@ -17,6 +18,22 @@ describe('tokenizedReplyAddress', () => {
       alias: 'agent@example.com',
       token: 'abc_123',
     });
+  });
+});
+
+describe('isResendSelfSender', () => {
+  it('matches the active alias in bare and display-address forms', () => {
+    expect(isResendSelfSender('agent@example.com', 'agent@example.com')).toBe(true);
+    expect(isResendSelfSender('Agent <AGENT@example.com>', 'agent@example.com')).toBe(true);
+  });
+
+  it('matches tokenized sender addresses derived from the active alias', () => {
+    expect(isResendSelfSender('Agent <agent+r-AbC_123@example.com>', 'agent@example.com')).toBe(true);
+  });
+
+  it('does not match an external sender or another bot alias', () => {
+    expect(isResendSelfSender('person@example.net', 'agent@example.com')).toBe(false);
+    expect(isResendSelfSender('other@example.com', 'agent@example.com')).toBe(false);
   });
 });
 

@@ -73,6 +73,12 @@ export function parseTokenizedReplyAddress(address: string): { alias: string; to
   return { alias: `${match[1]}@${match[3]}`, token: match[2] };
 }
 
+export function isResendSelfSender(sender: string, alias: string): boolean {
+  const senderAddress = parseEmailAddress(sender);
+  const canonicalSender = parseTokenizedReplyAddress(senderAddress)?.alias || senderAddress;
+  return canonicalSender === parseEmailAddress(alias);
+}
+
 interface ResendEmailEventData {
   created_at: string;
   email_id: string;
@@ -401,6 +407,15 @@ registerChannelAdapter('resend', {
       const senderAddress = parseEmailAddress(email.from);
       const tokenizedRecipient = email.to?.map(parseTokenizedReplyAddress).find(Boolean) || null;
       const alias = tokenizedRecipient?.alias || (email.to?.[0] ? parseEmailAddress(email.to[0]) : FROM);
+      if (isResendSelfSender(senderAddress, alias)) {
+        log.warn('Resend dropped self-sent inbound email', {
+          emailId: email.id,
+          from: senderAddress,
+          alias,
+          subject: email.subject,
+        });
+        return new Response(null, { status: 200 });
+      }
       const headers = headersOf(email);
       const inReplyTo = headers['In-Reply-To'] || headers['in-reply-to'] || undefined;
       const references = headers.References || headers.references || undefined;
