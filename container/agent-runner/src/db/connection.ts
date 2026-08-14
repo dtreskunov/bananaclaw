@@ -330,6 +330,15 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       updated_at         TEXT NOT NULL,
       PRIMARY KEY (channel_type, platform_id, thread_id)
     );
+    CREATE TABLE fork_origin (
+      id                  INTEGER PRIMARY KEY CHECK (id = 1),
+      parent_session_id   TEXT NOT NULL,
+      parent_continuation TEXT,
+      provider            TEXT,
+      anchor_ref          TEXT,
+      digest              TEXT NOT NULL,
+      created_at          TEXT NOT NULL
+    );
   `);
 
   _outbound = new Database(':memory:');

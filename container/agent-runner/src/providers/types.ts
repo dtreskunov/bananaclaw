@@ -48,6 +48,33 @@ export interface AgentProvider {
    * before it ever replies. Providers without an on-disk transcript omit this.
    */
   maybeRotateContinuation?(continuation: string, cwd: string): string | null;
+
+  /**
+   * Optional native thread fork. Branch the provider's own session at a
+   * given turn and return a continuation for the copy, leaving the
+   * original untouched.
+   *
+   * Implemented only by providers whose backend can split a session
+   * server-side. Everything else omits it and the runner falls back to
+   * replaying a plain-text digest of the inherited history — correct, but
+   * without the parent's tool results, cache state or reasoning trace.
+   *
+   * Return null (rather than throwing) to decline a fork the provider
+   * could not honor; the caller degrades to the digest either way, but a
+   * null says "not possible" instead of "something broke".
+   */
+  forkContinuation?(input: ForkContinuationInput): Promise<string | null>;
+}
+
+export interface ForkContinuationInput {
+  /** The parent session's continuation token, as issued by this provider. */
+  continuation: string;
+  /**
+   * Provider-private handle for the turn to branch at — everything up to
+   * and including it carries over. Captured when the parent turn ran.
+   */
+  anchorRef: string;
+  cwd: string;
 }
 
 /** One prompt/result round-trip, as reported to `onExchangeComplete`. */

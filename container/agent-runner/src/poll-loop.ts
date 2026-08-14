@@ -4,7 +4,8 @@ import { writeMessageOut } from './db/messages-out.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import { writeTurnActivity } from './db/turn-activity.js';
 import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
-import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, getActivityBuffer, getContinuation, getFailedTurn, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded } from './db/session-state.js';
+import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded } from './db/session-state.js';
+import { getForkOrigin, type ForkOriginRow } from './db/fork-origin.js';
 import { clearCurrentInReplyTo, getDuplicateSendCount, resetTurnSendTracking, setCurrentInReplyTo } from './current-batch.js';
 import {
   formatMessages,
@@ -146,6 +147,13 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   if (continuation) {
     log(`Resuming agent session ${continuation}`);
   }
+
+  // If this session is a fork, adopt the parent's context before the first
+  // turn. Runs before any polling so the branch is never asked to answer a
+  // message while still believing it has no history.
+  const forkAdoption = await adoptForkOrigin(config, continuation);
+  if (forkAdoption.continuation) continuation = forkAdoption.continuation;
+  let pendingForkDigest = forkAdoption.digest;
 
   // Clear leftover 'processing' acks from a previous crashed container.
   // This lets the new container re-process those messages.
@@ -321,6 +329,18 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       log(`Replaying failed turn from ${new Date(failed.recorded_at).toISOString()}`);
     }
 
+    // Inherited history from a fork, injected exactly once — on the first
+    // real turn rather than at startup, because a cold container may boot,
+    // find nothing to do and idle out before anyone speaks. Deferring to
+    // the first prompt means the digest lands in the same turn that needs
+    // it, whatever the container lifecycle did in between.
+    if (pendingForkDigest) {
+      prompt = pendingForkDigest + '\n\n' + prompt;
+      pendingForkDigest = undefined;
+      markForkOriginAbsorbed('digest');
+      log('Injected forked-thread history digest into the first turn');
+    }
+
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
     // Process the query while concurrently polling for new messages
@@ -482,6 +502,93 @@ async function transcribeAudioFiles(
     prompt = prefix + '\n\n' + prompt;
   }
   return { prompt, files: nonAudio };
+}
+
+/**
+ * Adopt a forked session's inherited context, once per session.
+ *
+ * Two tiers, in preference order:
+ *
+ *  - **native** — ask the provider to fork its own server-side session at
+ *    the branch point. The agent wakes with the parent's real context
+ *    window: full tool history, cache state, the lot. Only possible when
+ *    the branch was cut from a session run by *this* provider, that
+ *    session had a continuation, and we captured a provider-private
+ *    handle for the anchor turn.
+ *  - **digest** — hand the agent a plain-text rendering of the inherited
+ *    exchange as leading context on its first turn. Lossy but universal;
+ *    the only option for providers with no server-side session to fork
+ *    (Claude among them, today).
+ *
+ * A native fork that throws or declines degrades to the digest rather than
+ * failing the session: a branch that opens with imperfect memory is a far
+ * better outcome than one that refuses to start.
+ */
+async function adoptForkOrigin(
+  config: PollLoopConfig,
+  continuation: string | undefined,
+): Promise<{ continuation?: string; digest?: string }> {
+  // A continuation already on file means this container has run turns of
+  // its own; the branch point is ancient history.
+  if (continuation) return {};
+  if (isForkOriginAbsorbed()) return {};
+
+  const origin = getForkOrigin();
+  if (!origin) return {};
+
+  const sameProvider =
+    origin.provider != null && origin.provider.toLowerCase() === config.providerName.toLowerCase();
+
+  if (sameProvider && origin.parent_continuation && origin.anchor_ref && config.provider.forkContinuation) {
+    try {
+      const forked = await config.provider.forkContinuation({
+        continuation: origin.parent_continuation,
+        anchorRef: origin.anchor_ref,
+        cwd: config.cwd,
+      });
+      if (forked) {
+        setContinuation(config.providerName, forked);
+        markForkOriginAbsorbed('native');
+        log(`Adopted forked session natively from ${origin.parent_session_id} (${forked})`);
+        return { continuation: forked };
+      }
+      log('Provider declined the native fork; falling back to a history digest');
+    } catch (err) {
+      log(`Native fork failed (${err instanceof Error ? err.message : String(err)}); falling back to a history digest`);
+    }
+  } else if (origin.provider && !sameProvider) {
+    log(`Fork origin was written by ${origin.provider}, running as ${config.providerName}; using a history digest`);
+  }
+
+  if (!origin.digest) return {};
+  return { digest: renderForkDigest(origin) };
+}
+
+/**
+ * Wrap the inherited transcript in an XML block, the same shape the
+ * formatter uses for real messages.
+ *
+ * The framing matters as much as the content: the agent is about to read
+ * an exchange it has no memory of, and the user on the other end believes
+ * that conversation happened. Saying so explicitly is what stops the agent
+ * from either disowning the history ("I don't recall saying that") or
+ * re-answering the last question it can see.
+ */
+function renderForkDigest(origin: ForkOriginRow): string {
+  return [
+    '<forked_thread_history>',
+    'This conversation is a branch of an earlier one. The exchange below already',
+    'happened and is visible to the user in this thread, but it is not in your',
+    'context window — you are reading it now for the first time. Treat it as your',
+    'own prior conversation: do not re-answer the final message, do not greet the',
+    'user as if they are new, and do not mention this notice.',
+    '',
+    'Files in your workspace and your group memory are shared with the original',
+    'thread and reflect any work done there. Scheduled tasks did not come across.',
+    '',
+    origin.digest,
+    '</forked_thread_history>',
+  ].join('\n');
 }
 
 /**

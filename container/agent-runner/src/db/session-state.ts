@@ -78,6 +78,25 @@ export function clearContinuation(providerName: string): void {
   deleteValue(continuationKey(providerName));
 }
 
+const FORK_ORIGIN_KEY = 'fork_origin_absorbed';
+
+/**
+ * Whether this session has already absorbed its `fork_origin` row.
+ *
+ * The row lives in inbound.db, which the container may only read, so
+ * "already handled" has to be recorded on the outbound side. Without this
+ * flag every container restart would re-inject the inherited-history digest
+ * — the agent would be told its backstory again on top of a session that
+ * already contains it.
+ */
+export function isForkOriginAbsorbed(): boolean {
+  return getValue(FORK_ORIGIN_KEY) !== undefined;
+}
+
+export function markForkOriginAbsorbed(tier: 'native' | 'digest'): void {
+  setValue(FORK_ORIGIN_KEY, tier);
+}
+
 const FAILED_TURN_KEY = 'failed_turn';
 
 export interface FailedTurnRecord {
