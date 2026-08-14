@@ -260,6 +260,24 @@ CREATE TABLE IF NOT EXISTS thread_titles (
   updated_at         TEXT NOT NULL,
   PRIMARY KEY (channel_type, platform_id, thread_id)
 );
+
+-- Present only in sessions created by forking another thread. Single-row
+-- (id=1), written by the host before the session row exists, read once by the
+-- container on its first poll to seed the agent's memory of the parent.
+--
+-- The digest column is always populated: it is the fallback whenever a native
+-- provider fork isn't possible (no forkContinuation, no anchor, provider
+-- changed since the fork, or the fork call failed), so every degradation path
+-- still yields a working thread.
+CREATE TABLE IF NOT EXISTS fork_origin (
+  id                  INTEGER PRIMARY KEY CHECK (id = 1),
+  parent_session_id   TEXT NOT NULL,
+  parent_continuation TEXT,
+  provider            TEXT NOT NULL,
+  anchor_ref          TEXT,
+  digest              TEXT NOT NULL,
+  created_at          TEXT NOT NULL
+);
 `;
 
 /** Container-owned: outbound messages + processing acknowledgments. */
