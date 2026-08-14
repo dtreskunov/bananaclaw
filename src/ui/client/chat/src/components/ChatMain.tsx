@@ -445,12 +445,20 @@ function canFork(t: Thread | undefined): boolean {
   return ct === 'web' || (t.sessionMode === 'per-thread' && !!t.messagingGroupId);
 }
 
+/**
+ * Whether the branch action is offered on this message. Drives both the button
+ * and the gutter the bubble has to reserve for it, so they can't disagree.
+ * A message still streaming has no id yet, so there is nothing to anchor to.
+ */
+function canForkMessage(m: ChatMessage): boolean {
+  return m.direction === 'out' && !!m.id && canFork(activeThread());
+}
+
 function ForkButton({ m }: { m: ChatMessage }) {
   const [busy, setBusy] = useState(false);
   const t = activeThread();
-  // A message still streaming has no id yet, so there is nothing to anchor to.
-  if (!m.id || !canFork(t)) return null;
-  const anchorId = m.id;
+  if (!canForkMessage(m)) return null;
+  const anchorId = m.id!;
   const onFork = async (): Promise<void> => {
     if (busy) return;
     const ok = await requestConfirm({
@@ -714,7 +722,7 @@ function Message({ m, allowContinue = false }: { m: ChatMessage; allowContinue?:
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
         {m.usage && m.direction === 'out' ? <UsageMeta u={m.usage} /> : null}
-        {m.direction === 'out' ? <ForkButton m={m} /> : null}
+        <ForkButton m={m} />
       </div> : null}
     </div>
   );
