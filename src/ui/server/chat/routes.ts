@@ -980,7 +980,7 @@ function formatDuration(seconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
 
-function handleZip(ctx: Ctx, userId: string, groupId: string, paths: string[]): void {
+async function handleZip(ctx: Ctx, userId: string, groupId: string, paths: string[]): Promise<void> {
   const group = resolveGroupAccess(userId, groupId);
   if (!group) return json(ctx, 403, { error: 'forbidden' });
   if (paths.length === 0) return json(ctx, 400, { error: 'no_paths' });
@@ -1024,45 +1024,32 @@ function handleZip(ctx: Ctx, userId: string, groupId: string, paths: string[]): 
     'X-Content-Type-Options': 'nosniff',
   });
 
-  // Dynamic import to keep startup lean and so an absent archiver
-  // dependency degrades gracefully (returns 500 rather than crashing
-  // module load — though we install it as a regular dep so this should
-  // never fire in practice).
-  void (async () => {
-    let archiverMod;
+  // @types/archiver v7 still describes the removed default factory; v8
+  // exposes format-specific classes instead.
+  const { ZipArchive } = (await import('archiver')) as unknown as {
+    ZipArchive: new (options: { zlib: { level: number } }) => import('archiver').Archiver;
+  };
+  const archive = new ZipArchive({ zlib: { level: 6 } });
+  archive.on('warning', (err: NodeJS.ErrnoException) => {
+    // ENOENT in here is "we lost a race with rm" — log but don't fail.
+    if (err.code === 'ENOENT') log.warn('zip archive missing entry', { err });
+    else log.error('zip archive warning', { err });
+  });
+  archive.on('error', (err: Error) => {
+    log.error('zip archive error', { err });
     try {
-      archiverMod = (await import('archiver')).default;
-    } catch (err) {
-      log.error('archiver dynamic import failed', { err });
-      try {
-        ctx.res.end();
-      } catch {
-        /* ignore */
-      }
-      return;
+      ctx.res.destroy(err);
+    } catch {
+      /* ignore */
     }
-    const archive = archiverMod('zip', { zlib: { level: 6 } });
-    archive.on('warning', (err: NodeJS.ErrnoException) => {
-      // ENOENT in here is "we lost a race with rm" — log but don't fail.
-      if (err.code === 'ENOENT') log.warn('zip archive missing entry', { err });
-      else log.error('zip archive warning', { err });
-    });
-    archive.on('error', (err: Error) => {
-      log.error('zip archive error', { err });
-      try {
-        ctx.res.destroy(err);
-      } catch {
-        /* ignore */
-      }
-    });
-    archive.pipe(ctx.res);
-    for (const { rel, abs, isDir } of resolved) {
-      const inZipBase = path.basename(rel);
-      if (isDir) archive.directory(abs, inZipBase);
-      else archive.file(abs, { name: inZipBase });
-    }
-    await archive.finalize();
-  })();
+  });
+  archive.pipe(ctx.res);
+  for (const { rel, abs, isDir } of resolved) {
+    const inZipBase = path.basename(rel);
+    if (isDir) archive.directory(abs, inZipBase);
+    else archive.file(abs, { name: inZipBase });
+  }
+  await archive.finalize();
 }
 
 // User-initiated "magic link" share. Mints an unbound (recipient_user_id
