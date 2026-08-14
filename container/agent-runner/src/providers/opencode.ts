@@ -4,7 +4,7 @@ import fs from 'fs';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
-import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions } from './types.js';
+import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ForkContinuationInput, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions } from './types.js';
 import { pickActivityDetail } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { parseAssistantOutput } from '../formatter.js';
@@ -672,6 +672,31 @@ export class OpenCodeProvider implements AgentProvider {
     return STALE_SESSION_RE.test(msg);
   }
 
+  /**
+   * Branch the parent session server-side at `anchorRef` (an assistant
+   * message id captured when that turn ran) and return the copy's id.
+   *
+   * The parent session has to be present in *this* container's OpenCode data
+   * dir for the call to resolve — each nanoclaw session gets a private one,
+   * so the host snapshots the parent's DB into the fork before the container
+   * starts. When that snapshot was skipped the server answers 404 and we
+   * return null rather than throwing: the caller has a digest to fall back
+   * on, and a missing snapshot is an expected outcome, not a failure.
+   */
+  async forkContinuation(input: ForkContinuationInput): Promise<string | null> {
+    const { client } = await ensureSharedRuntime(this.options);
+    const res = await client.session.fork({
+      path: { id: input.continuation },
+      body: { messageID: input.anchorRef },
+    });
+    const forked = (res.data as { id?: string } | undefined)?.id;
+    if (!forked) {
+      log(`OpenCode declined to fork ${input.continuation} at ${input.anchorRef}`);
+      return null;
+    }
+    return forked;
+  }
+
   private async getModelLimits(
     client: OpencodeClient,
     providerID: string | undefined,
@@ -1053,6 +1078,12 @@ export class OpenCodeProvider implements AgentProvider {
           } catch (err) {
             log(`Failed to refresh final assistant usage: ${err instanceof Error ? err.message : String(err)}`);
           }
+        }
+        // The trailing assistant message is the branch point a fork cuts at:
+        // OpenCode's fork copies everything up to and including the given
+        // message id.
+        if (lastAssistantId) {
+          yield { type: 'checkpoint', ref: lastAssistantId };
         }
         if (lastAssistantUsage) {
           // Enrich with model limits so the host can render context/output

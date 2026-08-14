@@ -69,6 +69,18 @@ export interface ProviderHostCapabilities {
    * this get the default surfaces, which is today's behavior.
    */
   readonly providesAgentSurfaces?: boolean;
+
+  /**
+   * Optional. Copy whatever provider-private session state a native thread
+   * fork needs from the parent session's directory into the new one, and
+   * report whether the fork can go ahead natively.
+   *
+   * Only providers that keep server-side session state in a per-session
+   * directory need this. Omitting it means "nothing to carry across", which
+   * is the right answer both for providers with no such state and for ones
+   * whose state is already reachable from the fork.
+   */
+  readonly forkSessionState?: (parentSessionDir: string, newSessionDir: string) => boolean;
 }
 
 export type ProviderContainerConfigFn = (ctx: ProviderContainerContext) => ProviderContainerContribution;
@@ -103,6 +115,14 @@ export function getProviderContainerConfig(name: string): ProviderContainerConfi
 export function providerProvidesAgentSurfaces(name: string | null | undefined): boolean {
   if (!name) return false;
   return registry.get(name)?.capabilities.providesAgentSurfaces === true;
+}
+
+/** Per-provider fork state copier, or undefined when there's nothing to copy. */
+export function getProviderForkSessionState(
+  name: string | null | undefined,
+): ProviderHostCapabilities['forkSessionState'] {
+  if (!name) return undefined;
+  return registry.get(name)?.capabilities.forkSessionState;
 }
 
 export function listProviderContainerConfigNames(): string[] {

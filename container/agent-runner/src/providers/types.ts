@@ -321,6 +321,14 @@ export type ProviderEvent =
    */
   | { type: 'usage'; data: TurnUsage }
   /**
+   * Provider-private handle for the turn just finished, emitted just before
+   * the corresponding `result`. The poll-loop stashes it and writes it to
+   * `turn_checkpoints` in outbound.db once the result row is created, where
+   * a later fork can find it and cut the provider's session at this exact
+   * point. Providers with no server-side session to branch never emit it.
+   */
+  | { type: 'checkpoint'; ref: string }
+  /**
    * Liveness signal. Providers MUST yield this on every underlying SDK
    * event (tool call, thinking, partial message, anything) so the
    * poll-loop's idle timer stays honest during long tool runs.

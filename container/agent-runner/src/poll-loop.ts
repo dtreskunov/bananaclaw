@@ -2,6 +2,7 @@ import { findByName, getAllDestinations, type DestinationEntry } from './destina
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { writeTurnUsage } from './db/turn-usage.js';
+import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
 import { writeTurnActivity } from './db/turn-activity.js';
 import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded } from './db/session-state.js';
@@ -799,6 +800,9 @@ async function processQuery(
   // Captured from the provider's `usage` event; flushed at end of turn so
   // it can be linked to the last outbound row written this turn.
   let pendingUsage: import('./providers/types.js').TurnUsage | null = null;
+  // Captured from the provider's `checkpoint` event; flushed with the usage so
+  // it lands on the same outbound row.
+  let pendingCheckpoint: string | null = null;
   // Count of activity lines already persisted to turn_activity this batch.
   // Advanced after each result flush so multiple results in one query don't
   // re-persist earlier lines. Long-lived providers reuse this processQuery
@@ -1315,6 +1319,8 @@ async function processQuery(
           event.data.duration_ms = Date.now() - turnStartTime;
         }
         pendingUsage = event.data;
+      } else if (event.type === 'checkpoint') {
+        pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {
         resultSeen = true;
         const recoveryMode = malformedToolRecoveryMode;
@@ -1539,6 +1545,19 @@ async function processQuery(
             }
             pendingUsage = null;
           }
+          // Record where this turn sits in the provider's own session so a
+          // later fork of the thread can branch at exactly this message.
+          // Needs a real outbound row: the fork anchor is chosen by picking a
+          // message in the UI, and a turn with no bubble can't be picked.
+          const checkpointContinuation = queryContinuation ?? priorContinuation;
+          if (pendingCheckpoint && lastOutId && checkpointContinuation) {
+            try {
+              writeTurnCheckpoint(lastOutId, providerName, checkpointContinuation, pendingCheckpoint);
+            } catch (e) {
+              log(`Failed to write turn_checkpoints: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+          pendingCheckpoint = null;
           // Persist activity lines emitted since the last flush (avoids
           // overlap when one query yields multiple results). Linked to a
           // real outbound row only — scratchpad-only turns have no bubble

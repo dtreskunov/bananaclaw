@@ -148,6 +148,19 @@ export function getOutboundDb(): Database {
         PRIMARY KEY (message_out_id, ordinal)
       );
     `);
+    // turn_checkpoints: the provider-private handle for the turn behind each
+    // outbound row, with the continuation it was minted under. Read by the
+    // host when forking a thread to cut the provider's own session at the
+    // branch point. Forward-compat for older outbound.db files.
+    _outbound.exec(`
+      CREATE TABLE IF NOT EXISTS turn_checkpoints (
+        message_out_id    TEXT PRIMARY KEY,
+        provider          TEXT NOT NULL,
+        continuation      TEXT NOT NULL,
+        provider_turn_ref TEXT NOT NULL,
+        created_at        TEXT NOT NULL
+      );
+    `);
   }
   return _outbound;
 }
@@ -373,6 +386,13 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       tool_declared_timeout_ms INTEGER,
       tool_started_at          TEXT,
       updated_at               TEXT NOT NULL
+    );
+    CREATE TABLE turn_checkpoints (
+      message_out_id    TEXT PRIMARY KEY,
+      provider          TEXT NOT NULL,
+      continuation      TEXT NOT NULL,
+      provider_turn_ref TEXT NOT NULL,
+      created_at        TEXT NOT NULL
     );
     CREATE TABLE turn_activity (
       message_out_id TEXT NOT NULL,

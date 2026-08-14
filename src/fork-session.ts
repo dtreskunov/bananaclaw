@@ -22,6 +22,7 @@ import { createSession } from './db/sessions.js';
 import { createThreadFork } from './db/thread-forks.js';
 import { readEnvFile } from './env.js';
 import { log } from './log.js';
+import { getProviderForkSessionState } from './providers/provider-container-registry.js';
 import { extractInboundText, extractOutboundText } from './search-index.js';
 import {
   initSessionFolder,
@@ -312,6 +313,17 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
 
   const sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   initSessionFolder(agentGroupId, sessionId);
+
+  // A native fork happens inside the *fork's* provider process, against its
+  // own per-session state dir — so the parent's session has to be carried
+  // over first or there is nothing there to branch. Providers that decline
+  // (typically: too much state to duplicate) drop the branch to the digest.
+  if (parentContinuation && anchorRef) {
+    const carryState = getProviderForkSessionState(provider);
+    if (carryState && !carryState(sessionDir(agentGroupId, parentSession.id), sessionDir(agentGroupId, sessionId))) {
+      anchorRef = null;
+    }
+  }
 
   const fidelity: 'native' | 'transcript' = parentContinuation && anchorRef ? 'native' : 'transcript';
   const digest = buildDigest(digestParts, parentTitle);

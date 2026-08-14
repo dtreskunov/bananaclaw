@@ -30,6 +30,9 @@ import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrati
 import { createSession, getSession } from './db/sessions.js';
 import { getThreadFork } from './db/thread-forks.js';
 import { ForkError, forkThread } from './fork-session.js';
+// container-runner is mocked above, so the provider barrel it normally pulls
+// in never loads — import it directly for the registrations forking consults.
+import './providers/index.js';
 import { resolveProviderName } from './container-runner.js';
 import { readEnvFile } from './env.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath, sessionDir } from './session-manager.js';
@@ -407,6 +410,94 @@ describe('forkThread — mixed timestamp formats', () => {
       expect(outDb.prepare('SELECT COUNT(*) AS c FROM messages_out').get()).toEqual({ c: 0 });
     } finally {
       outDb.close();
+    }
+  });
+});
+
+/**
+ * The native tier is only reachable when three things line up: a continuation,
+ * a per-turn anchor, and the provider's own session state physically present
+ * in the fork. Miss any one of them and the branch has to fall back to the
+ * digest — silently, since a fork that refuses to open is the worse outcome.
+ */
+describe('forkThread — native fidelity', () => {
+  function seedOpencodeParent(): void {
+    vi.mocked(resolveProviderName).mockReturnValue('opencode');
+
+    const outDb = new Database(outboundDbPath(AG, PARENT_SESSION));
+    outDb
+      .prepare(`INSERT INTO session_state (key, value, updated_at) VALUES ('continuation:opencode', 'ses_1', @now)`)
+      .run({ now: ts(4) });
+    outDb.exec(`CREATE TABLE turn_checkpoints (
+      message_out_id    TEXT PRIMARY KEY,
+      provider          TEXT NOT NULL,
+      continuation      TEXT NOT NULL,
+      provider_turn_ref TEXT NOT NULL,
+      created_at        TEXT NOT NULL
+    )`);
+    outDb
+      .prepare(
+        `INSERT INTO turn_checkpoints (message_out_id, provider, continuation, provider_turn_ref, created_at)
+         VALUES ('a1', 'opencode', 'ses_1', 'msg_a1', @now)`,
+      )
+      .run({ now: ts(2) });
+    outDb.close();
+
+    const ocDir = path.join(sessionDir(AG, PARENT_SESSION), 'opencode-xdg', 'opencode');
+    fs.mkdirSync(ocDir, { recursive: true });
+    const ocDb = new Database(path.join(ocDir, 'opencode.db'));
+    ocDb.exec('CREATE TABLE message (id TEXT PRIMARY KEY)');
+    ocDb.prepare('INSERT INTO message (id) VALUES (?)').run('msg_a1');
+    ocDb.close();
+  }
+
+  afterEach(() => {
+    vi.mocked(resolveProviderName).mockReturnValue('claude');
+    delete process.env.OPENCODE_FORK_MAX_DB_BYTES;
+  });
+
+  it('carries the provider session state across so the branch has something to fork', () => {
+    seedOpencodeParent();
+
+    const result = fork('a1');
+
+    expect(result.fidelity).toBe('native');
+    const snapshot = path.join(sessionDir(AG, result.sessionId), 'opencode-xdg', 'opencode', 'opencode.db');
+    const db = new Database(snapshot, { readonly: true });
+    try {
+      expect(db.prepare('SELECT id FROM message').all()).toEqual([{ id: 'msg_a1' }]);
+    } finally {
+      db.close();
+    }
+
+    const inDb = new Database(inboundDbPath(AG, result.sessionId), { readonly: true });
+    try {
+      const row = inDb.prepare('SELECT anchor_ref FROM fork_origin').get() as { anchor_ref: string };
+      expect(row.anchor_ref).toBe('msg_a1');
+    } finally {
+      inDb.close();
+    }
+  });
+
+  it('drops to the digest when the provider state is too large to copy', () => {
+    seedOpencodeParent();
+    process.env.OPENCODE_FORK_MAX_DB_BYTES = '1';
+
+    const result = fork('a1');
+
+    expect(result.fidelity).toBe('transcript');
+    // The anchor is withheld too: leaving it in place would send the branch
+    // chasing a session that was never copied into its data dir.
+    const inDb = new Database(inboundDbPath(AG, result.sessionId), { readonly: true });
+    try {
+      const row = inDb.prepare('SELECT anchor_ref, digest FROM fork_origin').get() as {
+        anchor_ref: string | null;
+        digest: string;
+      };
+      expect(row.anchor_ref).toBeNull();
+      expect(row.digest).toContain('answer one');
+    } finally {
+      inDb.close();
     }
   });
 });
