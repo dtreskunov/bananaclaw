@@ -142,13 +142,25 @@ export async function loadThreads(_gid: string): Promise<void> {
   await runSync({ forceRefresh: true });
 }
 
-export async function deleteThread(tid: string): Promise<void> {
+export async function deleteThread(
+  thread: Pick<Thread, 'threadId' | 'channelType' | 'messagingGroupId'>,
+): Promise<void> {
   if (!groupId.value) return;
+  const tid = thread.threadId;
+  const params = new URLSearchParams();
+  if (thread.channelType && thread.channelType !== 'web' && thread.messagingGroupId) {
+    params.set('channel', thread.channelType);
+    params.set('mg', thread.messagingGroupId);
+  }
+  const query = params.toString();
   try {
-    const r = await fetch(`api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-    });
+    const r = await fetch(
+      `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ''}`,
+      {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      },
+    );
     if (!r.ok) {
       chatStatus.value = 'delete failed (HTTP ' + r.status + ')';
       return;

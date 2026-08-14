@@ -17656,10 +17656,17 @@ function requestScrollToBottom() {
 async function loadThreads(_gid) {
   await runSync({ forceRefresh: true });
 }
-async function deleteThread(tid) {
+async function deleteThread(thread) {
   if (!groupId.value) return;
+  const tid = thread.threadId;
+  const params = new URLSearchParams();
+  if (thread.channelType && thread.channelType !== "web" && thread.messagingGroupId) {
+    params.set("channel", thread.channelType);
+    params.set("mg", thread.messagingGroupId);
+  }
+  const query = params.toString();
   try {
-    const r4 = await fetch(`api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}`, {
+    const r4 = await fetch(`api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ""}`, {
       method: "DELETE",
       credentials: "same-origin"
     });
@@ -19752,7 +19759,7 @@ function ThreadRow({ t: t4 }) {
       danger: true
     });
     if (!ok) return;
-    await deleteThread(t4.threadId);
+    await deleteThread(t4);
   };
   return /* @__PURE__ */ u4("div", { class: "thread" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
@@ -19778,7 +19785,7 @@ function ThreadRow({ t: t4 }) {
       subTrailer,
       costStr
     ] }),
-    ct === "web" && isAdmin.value ? /* @__PURE__ */ u4("button", { type: "button", class: "del", title: "Delete thread", "aria-label": "Delete thread", onClick: onDel, children: "\xD7" }) : null
+    isAdmin.value && (ct === "web" || t4.sessionMode === "per-thread" && !!t4.messagingGroupId) ? /* @__PURE__ */ u4("button", { type: "button", class: "del", title: "Delete thread", "aria-label": "Delete thread", onClick: onDel, children: "\xD7" }) : null
   ] });
 }
 function DmRow({ t: t4 }) {

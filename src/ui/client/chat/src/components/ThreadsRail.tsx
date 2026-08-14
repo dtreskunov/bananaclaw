@@ -59,7 +59,7 @@ function ThreadRow({ t }: { t: Thread }) {
       danger: true,
     });
     if (!ok) return;
-    await deleteThread(t.threadId);
+    await deleteThread(t);
   };
   return (
     <div class={'thread' + (active ? ' active' : '')} data-id={t.threadId} onClick={onOpen}>
@@ -80,7 +80,7 @@ function ThreadRow({ t }: { t: Thread }) {
         ) : null}
       </div>
       <div class="meta"><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</div>
-      {ct === 'web' && isAdmin.value
+      {isAdmin.value && (ct === 'web' || (t.sessionMode === 'per-thread' && !!t.messagingGroupId))
         ? <button type="button" class="del" title="Delete thread" aria-label="Delete thread" onClick={onDel}>{'\u00d7'}</button>
         : null}
     </div>

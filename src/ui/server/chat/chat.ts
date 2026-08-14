@@ -567,7 +567,7 @@ export async function handleChatRequest(
       return true;
     }
     try {
-      const removed = deleteChatThread(m.groupId, m.threadId);
+      const removed = deleteChatThread(userId, m.groupId, m.threadId, taskOverride(req));
       writeJson(res, removed ? 200 : 404, { ok: removed });
     } catch (err) {
       log.warn('web chat thread delete failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
@@ -2658,11 +2658,15 @@ function readThreadStats(
  * file` until the host sweeper noticed — and even then the sweeper only
  * acts on heartbeat staleness, not on missing files).
  */
-function deleteChatThread(groupId: string, threadId: string): boolean {
-  const platformId = platformIdFor(groupId);
-  const mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformId);
-  if (!mg) return false;
-  const session = findSessionForAgent(groupId, mg.id, threadId);
+function deleteChatThread(
+  userId: string,
+  groupId: string,
+  threadId: string,
+  override: { channelType: string; messagingGroupId: string } | undefined,
+): boolean {
+  const target = resolveTargetMessagingGroup(userId, groupId, override, true);
+  if (!target) return false;
+  const session = findSessionForAgent(groupId, target.messagingGroupId, threadId);
   if (!session) return false;
   const dir = sessionDir(groupId, session.id);
   killContainer(session.id, 'thread-deleted');
