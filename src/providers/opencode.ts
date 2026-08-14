@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { readEnvFile } from '../env.js';
+import { repairOpencodeIdRollover } from './opencode-id-rollover.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 
 function mergeNoProxy(current: string | undefined, additions: string): string {
@@ -32,6 +33,9 @@ function mergeNoProxy(current: string | undefined, additions: string): string {
 registerProviderContainerConfig('opencode', (ctx) => {
   const opencodeDir = path.join(ctx.sessionDir, 'opencode-xdg');
   fs.mkdirSync(opencodeDir, { recursive: true });
+
+  // Safe here: the session's OpenCode server is not running yet.
+  repairOpencodeIdRollover(opencodeDir);
 
   // models.dev hosts the public provider/model catalog OpenCode fetches at
   // boot. Route it around the OneCLI proxy (which has no secret rule for it
