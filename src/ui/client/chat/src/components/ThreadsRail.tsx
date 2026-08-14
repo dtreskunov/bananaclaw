@@ -15,7 +15,7 @@ import {
   clearSearch,
   openTaskPanel,
 } from '../actions';
-import { requestConfirm } from './PromptModal';
+import { requestChoice, requestConfirm } from './PromptModal';
 import { tsKey } from '../utils';
 import { Pane } from './Pane';
 import { RelativeTime } from './RelativeTime';
@@ -52,6 +52,29 @@ function ThreadRow({ t }: { t: Thread }) {
   };
   const onDel = async (ev: JSX.TargetedMouseEvent<HTMLButtonElement>): Promise<void> => {
     ev.stopPropagation();
+    const branches = t.forkChildren?.length ?? 0;
+    if (branches > 0) {
+      // A branch shares no mutable state with this thread, so deleting only
+      // this one is safe and stays the default. Taking the branches too is a
+      // separate, explicitly-labelled choice.
+      const plural = branches === 1 ? 'branch' : 'branches';
+      const wasWere = branches === 1 ? 'was' : 'were';
+      const choice = await requestChoice({
+        title: 'Delete thread',
+        message:
+          `"${t.title}"\n\n` +
+          `${branches} ${plural} ${wasWere} started from this thread. They are independent copies — ` +
+          'they keep working whether or not this thread survives.',
+        options: [
+          { value: 'cancel', label: 'Cancel' },
+          { value: 'one', label: 'Delete just this thread', tone: 'danger' },
+          { value: 'all', label: `Delete this and ${branches} ${plural}`, tone: 'danger' },
+        ],
+      });
+      if (choice !== 'one' && choice !== 'all') return;
+      await deleteThread(t, choice === 'all');
+      return;
+    }
     const ok = await requestConfirm({
       title: 'Delete thread',
       message: `Delete this thread?\n\n"${t.title}"`,
@@ -61,11 +84,31 @@ function ThreadRow({ t }: { t: Thread }) {
     if (!ok) return;
     await deleteThread(t);
   };
+  const origin = t.forkedFrom;
+  const branchCount = t.forkChildren?.length ?? 0;
   return (
-    <div class={'thread' + (active ? ' active' : '')} data-id={t.threadId} onClick={onOpen}>
+    <div
+      class={'thread' + (active ? ' active' : '') + (origin ? ' branch' : '')}
+      data-id={t.threadId}
+      onClick={onOpen}
+    >
       <div class="title">
+        {origin
+          ? <span
+              class={'fork-pill' + (origin.deleted ? ' orphan' : '')}
+              title={origin.deleted
+                ? 'Branched from a thread that has since been deleted'
+                : `Branched from "${origin.title || 'another thread'}"`}
+            >{'\u2442'}</span>
+          : null}
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
         <span class="title-text">{t.title}</span>
+        {branchCount > 0
+          ? <span
+              class="fork-count"
+              title={`${branchCount} ${branchCount === 1 ? 'branch was' : 'branches were'} started from this thread`}
+            >{'\u2442'}{' '}{branchCount}</span>
+          : null}
         {head ? (
           <button
             type="button"

@@ -1183,6 +1183,37 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.45;
   filter: grayscale(1);
 }
+.threads-rail .thread .title .fork-pill {
+  font-size: var(--font-xs);
+  flex: none;
+  margin-right: 5px;
+  opacity: 0.75;
+  display: inline-block;
+  vertical-align: 0;
+}
+.threads-rail .thread .title .fork-pill.orphan {
+  opacity: 0.4;
+}
+.threads-rail .thread .title .fork-count {
+  font-size: var(--font-xs);
+  flex: none;
+  margin-left: 5px;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+.threads-rail .thread.branch {
+  padding-left: 16px;
+}
+.threads-rail .thread.branch::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--border, var(--muted));
+  opacity: 0.5;
+}
 .readonly-banner {
   padding: 10px 12px;
   border-top: 1px solid var(--border);
@@ -1658,6 +1689,7 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.55;
 }
 .chat-main .msg {
+  position: relative;
   padding: 6px 10px;
   border-radius: var(--radius-lg);
   max-width: 78%;
@@ -1752,6 +1784,49 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg.event.event-clickable:hover {
   border-color: var(--muted);
   color: var(--fg, inherit);
+}
+.chat-main .msg.event.fork-divider {
+  border-style: dashed;
+  gap: 6px;
+  opacity: 0.8;
+  align-items: center;
+}
+.chat-main .msg.event.fork-divider .fork-divider-glyph {
+  opacity: 0.8;
+}
+.chat-main .msg.event.fork-divider .fork-divider-text {
+  white-space: normal;
+}
+.chat-main .msg.event.fork-divider.event-clickable:hover {
+  opacity: 1;
+}
+.chat-main .msg-fork-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 3px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border, var(--muted));
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-xs, var(--font-2xs));
+  line-height: 1.2;
+  cursor: pointer;
+}
+.chat-main .msg-fork-btn:hover {
+  color: var(--surface-fg);
+  border-color: var(--border-strong);
+}
+.chat-main .msg-fork-btn:focus-visible {
+  color: var(--surface-fg);
+  border-color: var(--border-strong);
+}
+.chat-main .msg-fork-btn[disabled] {
+  cursor: default;
+  opacity: 0.5;
 }
 .chat-main .events-group.open {
   align-self: stretch;
@@ -1873,7 +1948,6 @@ nav.tab-bar-strip.group-strip {
   font-size: var(--font-2xs);
   color: var(--muted);
   margin-top: 4px;
-  opacity: 0.7;
   display: flex;
   gap: 8px;
   align-items: center;

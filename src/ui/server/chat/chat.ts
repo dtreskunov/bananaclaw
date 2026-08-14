@@ -1819,8 +1819,11 @@ export interface ThreadSummary {
     /** Parent no longer exists — the chip must not offer navigation. */
     deleted: boolean;
   };
-  /** How many threads were forked directly out of this one. */
-  forkChildCount?: number;
+  /**
+   * Branches taken out of this thread, oldest first. Only branches the viewer
+   * can actually open are listed — the log renders each one as a link.
+   */
+  forkChildren?: { threadId: string; messageId: string; title: string }[];
 }
 
 export function buildViewerSearchConversations(threads: ThreadSummary[]): SearchConversationScope[] {
@@ -2254,7 +2257,9 @@ function collectThreadsForContexts(
     seen.add(t.threadId);
     deduped.push(t);
   }
-  stampForkLineage(agentGroupId, deduped);
+  if (stampForkLineage(agentGroupId, deduped)) {
+    deduped.sort((a, b) => Date.parse(normTs(b.lastActivityAt)) - Date.parse(normTs(a.lastActivityAt)));
+  }
   return deduped;
 }
 
@@ -2265,14 +2270,28 @@ function collectThreadsForContexts(
  * the threads in this listing: a viewer may legitimately be unable to see the
  * parent, and rendering that as "forked from a deleted thread" would be a
  * lie. Only a genuinely absent session counts as deleted.
+ *
+ * A branch also floors its activity at the moment it was created. Its copied
+ * messages carry the parent's original timestamps, so a branch cut from an
+ * old thread would otherwise be filed under that old date and land far down
+ * the rail — right next to an identically titled parent. Returns true when a
+ * floor was applied, telling the caller to re-sort.
  */
-function stampForkLineage(agentGroupId: string, threads: ThreadSummary[]): void {
+function stampForkLineage(agentGroupId: string, threads: ThreadSummary[]): boolean {
   const forks = getThreadForksForAgentGroup(agentGroupId);
-  if (forks.length === 0) return;
+  if (forks.length === 0) return false;
 
   const byThread = new Map(forks.map((f) => [f.thread_id, f]));
-  const childCounts = new Map<string, number>();
-  for (const f of forks) childCounts.set(f.parent_thread_id, (childCounts.get(f.parent_thread_id) ?? 0) + 1);
+  const titles = new Map(threads.map((t) => [t.threadId, t.title]));
+  const childrenByParent = new Map<string, { threadId: string; messageId: string; title: string }[]>();
+  for (const f of [...forks].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+    // A branch the viewer can't see would render as a link that 404s.
+    const title = titles.get(f.thread_id);
+    if (title === undefined) continue;
+    const list = childrenByParent.get(f.parent_thread_id) ?? [];
+    list.push({ threadId: f.thread_id, messageId: f.parent_message_id, title });
+    childrenByParent.set(f.parent_thread_id, list);
+  }
 
   const liveParents = new Set<string>();
   const parentIds = [...new Set(forks.map((f) => f.parent_thread_id))];
@@ -2287,20 +2306,28 @@ function stampForkLineage(agentGroupId: string, threads: ThreadSummary[]): void 
     for (const r of rows) liveParents.add(r.thread_id);
   }
 
+  let resorted = false;
   for (const t of threads) {
     const fork = byThread.get(t.threadId);
     if (fork) {
       t.forkedFrom = {
         threadId: fork.parent_thread_id,
         messageId: fork.parent_message_id,
-        title: fork.parent_title,
+        // The stored title is a snapshot from fork time; prefer the live one,
+        // which is what the rail and the parent's own link show.
+        title: titles.get(fork.parent_thread_id) ?? fork.parent_title,
         fidelity: fork.fidelity,
         deleted: !liveParents.has(fork.parent_thread_id),
       };
+      if (Date.parse(normTs(fork.created_at)) > Date.parse(normTs(t.lastActivityAt))) {
+        t.lastActivityAt = fork.created_at;
+        resorted = true;
+      }
     }
-    const children = childCounts.get(t.threadId);
-    if (children) t.forkChildCount = children;
+    const children = childrenByParent.get(t.threadId);
+    if (children) t.forkChildren = children;
   }
+  return resorted;
 }
 
 function hasSharedSession(agentGroupId: string, mgId: string): boolean {

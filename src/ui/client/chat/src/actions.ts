@@ -144,6 +144,7 @@ export async function loadThreads(_gid: string): Promise<void> {
 
 export async function deleteThread(
   thread: Pick<Thread, 'threadId' | 'channelType' | 'messagingGroupId'>,
+  cascade = false,
 ): Promise<void> {
   if (!groupId.value) return;
   const tid = thread.threadId;
@@ -152,6 +153,7 @@ export async function deleteThread(
     params.set('channel', thread.channelType);
     params.set('mg', thread.messagingGroupId);
   }
+  if (cascade) params.set('cascade', '1');
   const query = params.toString();
   try {
     const r = await fetch(
@@ -171,12 +173,88 @@ export async function deleteThread(
     chatStatus.value = 'delete failed: ' + m;
     return;
   }
-  threads.value = threads.value.filter((x) => x.threadId !== tid);
-  if (threadId.value === tid) {
+  // A cascade took descendants the client can't enumerate locally, so drop
+  // anything whose lineage leads back to the deleted thread too.
+  const gone = new Set<string>([tid]);
+  if (cascade) {
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const t of threads.value) {
+        if (!gone.has(t.threadId) && t.forkedFrom && gone.has(t.forkedFrom.threadId)) {
+          gone.add(t.threadId);
+          changed = true;
+        }
+      }
+    }
+  }
+  // Removing a branch frees its parent of one child, so the parent's branch
+  // badge and in-log link have to come down with it — otherwise the UI
+  // advertises branches that are no longer there until the next full reload.
+  threads.value = threads.value
+    .filter((x) => !gone.has(x.threadId))
+    .map((x) => {
+      let next = x;
+      if (x.forkedFrom && gone.has(x.forkedFrom.threadId)) {
+        next = { ...next, forkedFrom: { ...x.forkedFrom, deleted: true } };
+      }
+      if (x.forkChildren?.some((c) => gone.has(c.threadId))) {
+        next = { ...next, forkChildren: x.forkChildren.filter((c) => !gone.has(c.threadId)) };
+      }
+      return next;
+    });
+  if (threadId.value && gone.has(threadId.value)) {
     const latest = threads.value.length > 0 ? threads.value[0]! : null;
     if (latest) openChat(groupId.value, latest.threadId, threadCtxOf(latest)).catch(console.error);
     else clearChat();
   }
+}
+
+/**
+ * Branch the thread at `atMessageId` and switch to the new branch.
+ *
+ * The branch is a copy: it inherits the conversation up to that message and
+ * nothing after, and the original is left exactly as it was.
+ */
+export async function forkThreadAt(
+  thread: Pick<Thread, 'threadId' | 'channelType' | 'messagingGroupId'>,
+  atMessageId: string,
+): Promise<boolean> {
+  if (!groupId.value) return false;
+  const params = new URLSearchParams();
+  if (thread.channelType && thread.channelType !== 'web' && thread.messagingGroupId) {
+    params.set('channel', thread.channelType);
+    params.set('mg', thread.messagingGroupId);
+  }
+  const query = params.toString();
+  const gid = groupId.value;
+  let created: { threadId: string } | null = null;
+  try {
+    const r = await fetch(
+      `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/fork${query ? `?${query}` : ''}`,
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ atMessageId }),
+      },
+    );
+    if (!r.ok) {
+      chatStatus.value = 'fork failed (HTTP ' + r.status + ')';
+      return false;
+    }
+    created = (await r.json()) as { threadId: string };
+  } catch (err) {
+    console.error('fork failed', err);
+    const m = err instanceof Error ? err.message : 'network error';
+    chatStatus.value = 'fork failed: ' + m;
+    return false;
+  }
+  // Refresh before opening so the rail already knows the branch exists and
+  // can render its lineage instead of flashing an unexplained new row.
+  await loadThreads(gid);
+  const branch = threads.value.find((x) => x.threadId === created!.threadId) ?? null;
+  await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
+  return true;
 }
 
 function threadCtxOf(t: Thread | null | undefined): ThreadCtx | null {

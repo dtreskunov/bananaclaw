@@ -104,8 +104,9 @@ async function listThreads(userId = USER_ID): Promise<Record<string, ThreadJson>
 
 interface ThreadJson {
   threadId: string;
+  title: string;
   forkedFrom?: { threadId: string; messageId: string; title: string | null; deleted: boolean; fidelity: string };
-  forkChildCount?: number;
+  forkChildren?: { threadId: string; messageId: string; title: string }[];
 }
 
 function seedMessagingGroup(id: string, channelType: string, platformId: string, sessionMode: string): void {
@@ -293,7 +294,7 @@ describe('fork lineage in the threads list', () => {
     seedThread();
   });
 
-  it('reports the origin on the branch and a child count on the parent', async () => {
+  it('reports the origin on the branch and the branch on the parent', async () => {
     const { json } = await postFork({ atMessageId: 'a1' });
     const branchId = json.threadId as string;
 
@@ -301,11 +302,13 @@ describe('fork lineage in the threads list', () => {
     expect(threads[branchId].forkedFrom).toEqual({
       threadId: THREAD,
       messageId: 'a1',
-      title: null,
+      title: threads[THREAD].title,
       fidelity: 'transcript',
       deleted: false,
     });
-    expect(threads[THREAD].forkChildCount).toBe(1);
+    expect(threads[THREAD].forkChildren).toEqual([
+      { threadId: branchId, messageId: 'a1', title: threads[branchId].title },
+    ]);
     expect(threads[THREAD].forkedFrom).toBeUndefined();
   });
 

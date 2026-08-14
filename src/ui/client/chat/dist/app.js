@@ -17656,7 +17656,7 @@ function requestScrollToBottom() {
 async function loadThreads(_gid) {
   await runSync({ forceRefresh: true });
 }
-async function deleteThread(thread) {
+async function deleteThread(thread, cascade = false) {
   if (!groupId.value) return;
   const tid = thread.threadId;
   const params = new URLSearchParams();
@@ -17664,12 +17664,16 @@ async function deleteThread(thread) {
     params.set("channel", thread.channelType);
     params.set("mg", thread.messagingGroupId);
   }
+  if (cascade) params.set("cascade", "1");
   const query = params.toString();
   try {
-    const r4 = await fetch(`api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ""}`, {
-      method: "DELETE",
-      credentials: "same-origin"
-    });
+    const r4 = await fetch(
+      `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ""}`,
+      {
+        method: "DELETE",
+        credentials: "same-origin"
+      }
+    );
     if (!r4.ok) {
       chatStatus.value = "delete failed (HTTP " + r4.status + ")";
       return;
@@ -17680,12 +17684,69 @@ async function deleteThread(thread) {
     chatStatus.value = "delete failed: " + m6;
     return;
   }
-  threads.value = threads.value.filter((x6) => x6.threadId !== tid);
-  if (threadId.value === tid) {
+  const gone = /* @__PURE__ */ new Set([tid]);
+  if (cascade) {
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const t4 of threads.value) {
+        if (!gone.has(t4.threadId) && t4.forkedFrom && gone.has(t4.forkedFrom.threadId)) {
+          gone.add(t4.threadId);
+          changed = true;
+        }
+      }
+    }
+  }
+  threads.value = threads.value.filter((x6) => !gone.has(x6.threadId)).map((x6) => {
+    let next = x6;
+    if (x6.forkedFrom && gone.has(x6.forkedFrom.threadId)) {
+      next = { ...next, forkedFrom: { ...x6.forkedFrom, deleted: true } };
+    }
+    if (x6.forkChildren?.some((c4) => gone.has(c4.threadId))) {
+      next = { ...next, forkChildren: x6.forkChildren.filter((c4) => !gone.has(c4.threadId)) };
+    }
+    return next;
+  });
+  if (threadId.value && gone.has(threadId.value)) {
     const latest = threads.value.length > 0 ? threads.value[0] : null;
     if (latest) openChat(groupId.value, latest.threadId, threadCtxOf(latest)).catch(console.error);
     else clearChat();
   }
+}
+async function forkThreadAt(thread, atMessageId) {
+  if (!groupId.value) return false;
+  const params = new URLSearchParams();
+  if (thread.channelType && thread.channelType !== "web" && thread.messagingGroupId) {
+    params.set("channel", thread.channelType);
+    params.set("mg", thread.messagingGroupId);
+  }
+  const query = params.toString();
+  const gid = groupId.value;
+  let created = null;
+  try {
+    const r4 = await fetch(
+      `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/fork${query ? `?${query}` : ""}`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atMessageId })
+      }
+    );
+    if (!r4.ok) {
+      chatStatus.value = "fork failed (HTTP " + r4.status + ")";
+      return false;
+    }
+    created = await r4.json();
+  } catch (err) {
+    console.error("fork failed", err);
+    const m6 = err instanceof Error ? err.message : "network error";
+    chatStatus.value = "fork failed: " + m6;
+    return false;
+  }
+  await loadThreads(gid);
+  const branch = threads.value.find((x6) => x6.threadId === created.threadId) ?? null;
+  await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
+  return true;
 }
 function threadCtxOf(t4) {
   if (!t4 || !t4.channelType || t4.channelType === "web") return null;
@@ -19750,6 +19811,25 @@ function ThreadRow({ t: t4 }) {
   };
   const onDel = async (ev) => {
     ev.stopPropagation();
+    const branches = t4.forkChildren?.length ?? 0;
+    if (branches > 0) {
+      const plural = branches === 1 ? "branch" : "branches";
+      const wasWere = branches === 1 ? "was" : "were";
+      const choice = await requestChoice({
+        title: "Delete thread",
+        message: `"${t4.title}"
+
+${branches} ${plural} ${wasWere} started from this thread. They are independent copies \u2014 they keep working whether or not this thread survives.`,
+        options: [
+          { value: "cancel", label: "Cancel" },
+          { value: "one", label: "Delete just this thread", tone: "danger" },
+          { value: "all", label: `Delete this and ${branches} ${plural}`, tone: "danger" }
+        ]
+      });
+      if (choice !== "one" && choice !== "all") return;
+      await deleteThread(t4, choice === "all");
+      return;
+    }
     const ok = await requestConfirm({
       title: "Delete thread",
       message: `Delete this thread?
@@ -19761,32 +19841,62 @@ function ThreadRow({ t: t4 }) {
     if (!ok) return;
     await deleteThread(t4);
   };
-  return /* @__PURE__ */ u4("div", { class: "thread" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
-    /* @__PURE__ */ u4("div", { class: "title", children: [
-      ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
-      /* @__PURE__ */ u4("span", { class: "title-text", children: t4.title }),
-      head ? /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "task-badge" + (lt.every((x6) => x6.paused) ? " paused" : ""),
-          title: liveTaskTitle,
-          "aria-label": "Scheduled tasks",
-          onClick: (ev) => {
-            ev.stopPropagation();
-            if (groupId.value) openTaskPanel(groupId.value, t4.threadId);
-          },
-          children: "\u23F0"
-        }
-      ) : null
-    ] }),
-    /* @__PURE__ */ u4("div", { class: "meta", children: [
-      /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
-      subTrailer,
-      costStr
-    ] }),
-    isAdmin.value && (ct === "web" || t4.sessionMode === "per-thread" && !!t4.messagingGroupId) ? /* @__PURE__ */ u4("button", { type: "button", class: "del", title: "Delete thread", "aria-label": "Delete thread", onClick: onDel, children: "\xD7" }) : null
-  ] });
+  const origin = t4.forkedFrom;
+  const branchCount = t4.forkChildren?.length ?? 0;
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: "thread" + (active ? " active" : "") + (origin ? " branch" : ""),
+      "data-id": t4.threadId,
+      onClick: onOpen,
+      children: [
+        /* @__PURE__ */ u4("div", { class: "title", children: [
+          origin ? /* @__PURE__ */ u4(
+            "span",
+            {
+              class: "fork-pill" + (origin.deleted ? " orphan" : ""),
+              title: origin.deleted ? "Branched from a thread that has since been deleted" : `Branched from "${origin.title || "another thread"}"`,
+              children: "\u2442"
+            }
+          ) : null,
+          ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
+          /* @__PURE__ */ u4("span", { class: "title-text", children: t4.title }),
+          branchCount > 0 ? /* @__PURE__ */ u4(
+            "span",
+            {
+              class: "fork-count",
+              title: `${branchCount} ${branchCount === 1 ? "branch was" : "branches were"} started from this thread`,
+              children: [
+                "\u2442",
+                " ",
+                branchCount
+              ]
+            }
+          ) : null,
+          head ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "task-badge" + (lt.every((x6) => x6.paused) ? " paused" : ""),
+              title: liveTaskTitle,
+              "aria-label": "Scheduled tasks",
+              onClick: (ev) => {
+                ev.stopPropagation();
+                if (groupId.value) openTaskPanel(groupId.value, t4.threadId);
+              },
+              children: "\u23F0"
+            }
+          ) : null
+        ] }),
+        /* @__PURE__ */ u4("div", { class: "meta", children: [
+          /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
+          subTrailer,
+          costStr
+        ] }),
+        isAdmin.value && (ct === "web" || t4.sessionMode === "per-thread" && !!t4.messagingGroupId) ? /* @__PURE__ */ u4("button", { type: "button", class: "del", title: "Delete thread", "aria-label": "Delete thread", onClick: onDel, children: "\xD7" }) : null
+      ]
+    }
+  );
 }
 function DmRow({ t: t4 }) {
   const ct = t4.channelType || "web";
@@ -20947,6 +21057,104 @@ function UsageMeta({ u: u5 }) {
 function AgentActionLabel({ label, title }) {
   return /* @__PURE__ */ u4("span", { class: "delivery-origin", title, children: label });
 }
+function activeThread() {
+  return threads.value.find((x6) => x6.threadId === threadId.value);
+}
+function canFork(t4) {
+  if (!t4 || t4.kind === "dm" || t4.threadId.startsWith("__dm:")) return false;
+  const ct = t4.channelType || "web";
+  return ct === "web" || t4.sessionMode === "per-thread" && !!t4.messagingGroupId;
+}
+function canForkMessage(m6) {
+  return m6.direction === "out" && !!m6.id && canFork(activeThread());
+}
+function ForkButton({ m: m6 }) {
+  const [busy, setBusy] = h2(false);
+  const t4 = activeThread();
+  if (!canForkMessage(m6)) return null;
+  const anchorId = m6.id;
+  const onFork = async () => {
+    if (busy) return;
+    const ok = await requestConfirm({
+      title: "Branch from here",
+      message: "Start a new thread that continues from this message.\n\nThe conversation up to here is copied into the branch. Anything after it stays behind, and this thread is left untouched.\n\nWorkspace files and the agent\u2019s memory are shared, not copied \u2014 work done in one branch is visible from the other. Scheduled tasks stay with this thread.",
+      okLabel: "Branch"
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await forkThreadAt(t4, anchorId);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg-fork-btn",
+      title: "Branch a new thread from this message",
+      "aria-label": "Branch a new thread from this message",
+      disabled: busy,
+      onClick: onFork,
+      children: "\u2442"
+    }
+  );
+}
+function InheritedDivider({ origin }) {
+  const fidelityNote = origin.fidelity === "native" ? "Copied at the branch point. The agent kept its full context from the original." : "Copied at the branch point. The agent was given a text summary of it rather than its original context.";
+  const suffix = origin.fidelity === "native" ? "" : " \xB7 replayed as a transcript";
+  if (origin.deleted) {
+    return /* @__PURE__ */ u4("div", { class: "msg event fork-divider", title: `${fidelityNote} That thread has since been deleted.`, children: [
+      /* @__PURE__ */ u4("span", { class: "fork-divider-glyph", "aria-hidden": "true", children: "\u2442" }),
+      /* @__PURE__ */ u4("span", { class: "fork-divider-text", children: [
+        "Inherited from a deleted thread",
+        suffix
+      ] })
+    ] });
+  }
+  const name = origin.title || "the original thread";
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg event fork-divider event-clickable",
+      title: `${fidelityNote} Open "${name}" at the branch point.`,
+      onClick: () => openThreadAt(origin.threadId, origin.messageId),
+      children: [
+        /* @__PURE__ */ u4("span", { class: "fork-divider-glyph", "aria-hidden": "true", children: "\u2442" }),
+        /* @__PURE__ */ u4("span", { class: "fork-divider-text", children: [
+          "Inherited from ",
+          name,
+          suffix
+        ] })
+      ]
+    }
+  );
+}
+function BranchDivider({ child }) {
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg event fork-divider event-clickable",
+      title: `Open "${child.title}", branched from here.`,
+      onClick: () => openThreadAt(child.threadId, child.messageId),
+      children: [
+        /* @__PURE__ */ u4("span", { class: "fork-divider-glyph", "aria-hidden": "true", children: "\u2442" }),
+        /* @__PURE__ */ u4("span", { class: "fork-divider-text", children: [
+          "Branched into ",
+          child.title
+        ] })
+      ]
+    }
+  );
+}
+function openThreadAt(targetThreadId, messageId) {
+  if (!groupId.value) return;
+  highlightMessageId.value = messageId;
+  openChat(groupId.value, targetThreadId, null).catch(console.error);
+}
 function Message({ m: m6, allowContinue = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
@@ -21097,7 +21305,8 @@ function Message({ m: m6, allowContinue = false }) {
     m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
       m6.deliveryOrigin === "send_message" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-      m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null
+      m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null,
+      /* @__PURE__ */ u4(ForkButton, { m: m6 })
     ] }) : null
   ] });
 }
@@ -21138,6 +21347,13 @@ function groupKey(group) {
   if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
   return `single:${messageKey(group.m)}`;
+}
+function groupContains(group, messageId) {
+  if (group.kind === "thoughts") {
+    return group.answer.id === messageId || group.thoughts.some((t4) => t4.id === messageId);
+  }
+  if (group.kind === "events") return group.events.some((e4) => e4.id === messageId);
+  return group.m.id === messageId;
 }
 function groupMessages(list) {
   const out = [];
@@ -21477,6 +21693,15 @@ function MessageLog() {
   });
   const list = timeline;
   const groups2 = groupMessages(list);
+  const thread = activeThread();
+  const forkOrigin = thread?.forkedFrom;
+  const inheritedUntil = forkOrigin && list.some((msg) => msg.id === forkOrigin.messageId) ? forkOrigin.messageId : null;
+  const branchesAt = /* @__PURE__ */ new Map();
+  for (const child of thread?.forkChildren ?? []) {
+    const at = branchesAt.get(child.messageId) ?? [];
+    at.push(child);
+    branchesAt.set(child.messageId, at);
+  }
   let latestConversationalMessage;
   for (let index = list.length - 1; index >= 0; index--) {
     const message = list[index];
@@ -21487,22 +21712,33 @@ function MessageLog() {
   }
   return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
     /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
-      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => g8.kind === "thoughts" ? /* @__PURE__ */ u4(
-        ThoughtGroup,
-        {
-          thoughts: g8.thoughts,
-          answer: g8.answer,
-          allowContinue: g8.answer === latestConversationalMessage
-        },
-        `${threadId.value}:${groupKey(g8)}`
-      ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, `${threadId.value}:${groupKey(g8)}`) : /* @__PURE__ */ u4(
-        Message,
-        {
-          m: g8.m,
-          allowContinue: g8.m === latestConversationalMessage
-        },
-        `${threadId.value}:${groupKey(g8)}`
-      )),
+      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
+        const key = `${threadId.value}:${groupKey(g8)}`;
+        const body = g8.kind === "thoughts" ? /* @__PURE__ */ u4(
+          ThoughtGroup,
+          {
+            thoughts: g8.thoughts,
+            answer: g8.answer,
+            allowContinue: g8.answer === latestConversationalMessage
+          },
+          key
+        ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
+          Message,
+          {
+            m: g8.m,
+            allowContinue: g8.m === latestConversationalMessage
+          },
+          key
+        );
+        const inherited = inheritedUntil !== null && groupContains(g8, inheritedUntil);
+        const branches = [...branchesAt].filter(([id]) => groupContains(g8, id)).flatMap(([, c4]) => c4);
+        if (!inherited && branches.length === 0) return body;
+        return /* @__PURE__ */ u4(k, { children: [
+          body,
+          inherited ? /* @__PURE__ */ u4(InheritedDivider, { origin: forkOrigin }, `${key}:fork`) : null,
+          branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
+        ] });
+      }),
       typing ? /* @__PURE__ */ u4(TypingIndicator, { traceExpanded, onToggleTrace: () => setTraceExpanded((v5) => !v5) }) : null,
       /* @__PURE__ */ u4(TaskIndicator, {})
     ] }),

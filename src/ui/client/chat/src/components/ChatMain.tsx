@@ -17,8 +17,9 @@ import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNo
 import {
   sendChat, addPendingFiles, removePending, clearPending,
   navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
-  openChat, openTaskPanel, reconnectChatNow,
+  openChat, openTaskPanel, reconnectChatNow, forkThreadAt,
 } from '../actions';
+import { requestConfirm } from './PromptModal';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
 import { mergeQuestionTimeline } from '../question-timeline';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
@@ -28,7 +29,7 @@ import { RelativeTime } from './RelativeTime';
 import { MobileDialog } from './MobileDialog';
 import { ZoomableImage } from './ZoomableImage';
 import './ZoomableImage.css';
-import type { ActivityLine, ChatMessage, DisplayCard, PendingQuestionDto, TurnUsage } from '../types';
+import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
 
 const activeRecordingTarget = signal<string | null>(null);
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
@@ -427,6 +428,116 @@ function AgentActionLabel({ label, title }: { label: string; title: string }) {
   return <span class="delivery-origin" title={title}>{label}</span>;
 }
 
+/** The thread currently open in the log, as the rail knows it. */
+function activeThread(): Thread | undefined {
+  return threads.value.find((x) => x.threadId === threadId.value);
+}
+
+/**
+ * Whether this thread can be branched. Shared and agent-shared sessions hold
+ * many threads in one session and DM rooms have no thread to cut, so the
+ * server rejects both — mirror that here rather than offering an action that
+ * always fails.
+ */
+function canFork(t: Thread | undefined): boolean {
+  if (!t || t.kind === 'dm' || t.threadId.startsWith('__dm:')) return false;
+  const ct = t.channelType || 'web';
+  return ct === 'web' || (t.sessionMode === 'per-thread' && !!t.messagingGroupId);
+}
+
+function ForkButton({ m }: { m: ChatMessage }) {
+  const [busy, setBusy] = useState(false);
+  const t = activeThread();
+  // A message still streaming has no id yet, so there is nothing to anchor to.
+  if (!m.id || !canFork(t)) return null;
+  const anchorId = m.id;
+  const onFork = async (): Promise<void> => {
+    if (busy) return;
+    const ok = await requestConfirm({
+      title: 'Branch from here',
+      message:
+        'Start a new thread that continues from this message.\n\n' +
+        'The conversation up to here is copied into the branch. Anything after ' +
+        'it stays behind, and this thread is left untouched.\n\n' +
+        'Workspace files and the agent\u2019s memory are shared, not copied \u2014 work ' +
+        'done in one branch is visible from the other. Scheduled tasks stay with ' +
+        'this thread.',
+      okLabel: 'Branch',
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await forkThreadAt(t!, anchorId);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      class="msg-fork-btn"
+      title="Branch a new thread from this message"
+      aria-label="Branch a new thread from this message"
+      disabled={busy}
+      onClick={onFork}
+    >{'\u2442'}</button>
+  );
+}
+
+/**
+ * Divider closing the region a branch inherited from its parent. Everything
+ * above it was copied in at fork time — the user saw it in the other thread,
+ * and (on the transcript tier) the agent only ever read a summary of it.
+ */
+function InheritedDivider({ origin }: { origin: ForkOrigin }) {
+  const fidelityNote = origin.fidelity === 'native'
+    ? 'Copied at the branch point. The agent kept its full context from the original.'
+    : 'Copied at the branch point. The agent was given a text summary of it rather than its original context.';
+  const suffix = origin.fidelity === 'native' ? '' : ' \u00b7 replayed as a transcript';
+  if (origin.deleted) {
+    return (
+      <div class="msg event fork-divider" title={`${fidelityNote} That thread has since been deleted.`}>
+        <span class="fork-divider-glyph" aria-hidden="true">{'\u2442'}</span>
+        <span class="fork-divider-text">Inherited from a deleted thread{suffix}</span>
+      </div>
+    );
+  }
+  const name = origin.title || 'the original thread';
+  return (
+    <button
+      type="button"
+      class="msg event fork-divider event-clickable"
+      title={`${fidelityNote} Open "${name}" at the branch point.`}
+      onClick={() => openThreadAt(origin.threadId, origin.messageId)}
+    >
+      <span class="fork-divider-glyph" aria-hidden="true">{'\u2442'}</span>
+      <span class="fork-divider-text">Inherited from {name}{suffix}</span>
+    </button>
+  );
+}
+
+/** Divider marking a branch that was taken out of this thread at this message. */
+function BranchDivider({ child }: { child: ForkChild }) {
+  return (
+    <button
+      type="button"
+      class="msg event fork-divider event-clickable"
+      title={`Open "${child.title}", branched from here.`}
+      onClick={() => openThreadAt(child.threadId, child.messageId)}
+    >
+      <span class="fork-divider-glyph" aria-hidden="true">{'\u2442'}</span>
+      <span class="fork-divider-text">Branched into {child.title}</span>
+    </button>
+  );
+}
+
+/** Opens another thread in this group scrolled to, and flashing, one message. */
+function openThreadAt(targetThreadId: string, messageId: string): void {
+  if (!groupId.value) return;
+  highlightMessageId.value = messageId;
+  openChat(groupId.value, targetThreadId, null).catch(console.error);
+}
+
 function Message({ m, allowContinue = false }: { m: ChatMessage; allowContinue?: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
@@ -603,6 +714,7 @@ function Message({ m, allowContinue = false }: { m: ChatMessage; allowContinue?:
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
         {m.usage && m.direction === 'out' ? <UsageMeta u={m.usage} /> : null}
+        {m.direction === 'out' ? <ForkButton m={m} /> : null}
       </div> : null}
     </div>
   );
@@ -660,6 +772,14 @@ function groupKey(group: MsgGroup): string {
   if (group.kind === 'thoughts') return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === 'events') return `events:${messageKey(group.events[0]!)}`;
   return `single:${messageKey(group.m)}`;
+}
+
+function groupContains(group: MsgGroup, messageId: string): boolean {
+  if (group.kind === 'thoughts') {
+    return group.answer.id === messageId || group.thoughts.some((t) => t.id === messageId);
+  }
+  if (group.kind === 'events') return group.events.some((e) => e.id === messageId);
+  return group.m.id === messageId;
 }
 
 function groupMessages(list: ChatMessage[]): MsgGroup[] {
@@ -1056,6 +1176,20 @@ function MessageLog() {
   });
   const list = timeline;
   const groups = groupMessages(list);
+  // The branch point, if this thread is a fork and the anchor is still in
+  // view. Messages up to it were inherited; the divider closes that region.
+  const thread = activeThread();
+  const forkOrigin = thread?.forkedFrom;
+  const inheritedUntil = forkOrigin && list.some((msg) => msg.id === forkOrigin.messageId)
+    ? forkOrigin.messageId
+    : null;
+  // Branches taken out of this thread, keyed by the message each was cut at.
+  const branchesAt = new Map<string, ForkChild[]>();
+  for (const child of thread?.forkChildren ?? []) {
+    const at = branchesAt.get(child.messageId) ?? [];
+    at.push(child);
+    branchesAt.set(child.messageId, at);
+  }
   let latestConversationalMessage: ChatMessage | undefined;
   for (let index = list.length - 1; index >= 0; index--) {
     const message = list[index]!;
@@ -1073,20 +1207,33 @@ function MessageLog() {
             ? <div class="empty">Pick or start a chat.</div>
             : list.length === 0
               ? <div class="empty">No messages yet.</div>
-              : groups.map((g) => g.kind === 'thoughts'
-                  ? <ThoughtGroup
-                      key={`${threadId.value}:${groupKey(g)}`}
-                      thoughts={g.thoughts}
-                      answer={g.answer}
-                      allowContinue={g.answer === latestConversationalMessage}
-                    />
-                  : g.kind === 'events'
-                    ? <EventsGroup key={`${threadId.value}:${groupKey(g)}`} events={g.events} />
-                    : <Message
-                        key={`${threadId.value}:${groupKey(g)}`}
-                        m={g.m}
-                        allowContinue={g.m === latestConversationalMessage}
-                      />)}
+              : groups.map((g) => {
+                  const key = `${threadId.value}:${groupKey(g)}`;
+                  const body = g.kind === 'thoughts'
+                    ? <ThoughtGroup
+                        key={key}
+                        thoughts={g.thoughts}
+                        answer={g.answer}
+                        allowContinue={g.answer === latestConversationalMessage}
+                      />
+                    : g.kind === 'events'
+                      ? <EventsGroup key={key} events={g.events} />
+                      : <Message
+                          key={key}
+                          m={g.m}
+                          allowContinue={g.m === latestConversationalMessage}
+                        />;
+                  const inherited = inheritedUntil !== null && groupContains(g, inheritedUntil);
+                  const branches = [...branchesAt].filter(([id]) => groupContains(g, id)).flatMap(([, c]) => c);
+                  if (!inherited && branches.length === 0) return body;
+                  return (
+                    <>
+                      {body}
+                      {inherited ? <InheritedDivider key={`${key}:fork`} origin={forkOrigin!} /> : null}
+                      {branches.map((c) => <BranchDivider key={`${key}:branch:${c.threadId}`} child={c} />)}
+                    </>
+                  );
+                })}
         {typing
           ? <TypingIndicator traceExpanded={traceExpanded} onToggleTrace={() => setTraceExpanded((v) => !v)} />
           : null}

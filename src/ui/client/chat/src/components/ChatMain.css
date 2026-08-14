@@ -107,6 +107,37 @@
   text-align: left;
 }
 .chat-main .msg.event.event-clickable:hover { border-color: var(--muted); color: var(--fg, inherit); }
+/* Marks a fork boundary: where a branch's inherited region ends, or where a
+   branch was taken out of this thread. Clickable unless the other side is gone. */
+.chat-main .msg.event.fork-divider {
+  border-style: dashed;
+  gap: 6px;
+  opacity: 0.8;
+  align-items: center;
+}
+.chat-main .msg.event.fork-divider .fork-divider-glyph { opacity: 0.8; }
+.chat-main .msg.event.fork-divider .fork-divider-text { white-space: normal; }
+.chat-main .msg.event.fork-divider.event-clickable:hover { opacity: 1; }
+/* Branch action: quiet until the message is hovered or it takes focus. */
+.chat-main .msg .msg-fork-btn {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.chat-main .msg:hover .msg-fork-btn,
+.chat-main .msg .msg-fork-btn:focus-visible { opacity: 0.75; }
+.chat-main .msg .msg-fork-btn:hover { opacity: 1; }
+.chat-main .msg .msg-fork-btn[disabled] { cursor: default; opacity: 0.4; }
+/* Touch devices have no hover, so the action has to stay visible. */
+@media (hover: none) {
+  .chat-main .msg .msg-fork-btn { opacity: 0.75; }
+}
 .chat-main .events-group.open {
   align-self: stretch;
   display: flex;

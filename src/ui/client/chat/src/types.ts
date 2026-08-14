@@ -50,6 +50,28 @@ export interface Thread {
   totalTokens?: number;
   turnCount?: number;
   liveTasks?: LiveTaskDto[];
+  /** Set when this thread was branched off another one. */
+  forkedFrom?: ForkOrigin;
+  /** Branches taken out of this thread, oldest first. */
+  forkChildren?: ForkChild[];
+}
+
+export interface ForkChild {
+  threadId: string;
+  /** The message in *this* thread the branch was cut at. */
+  messageId: string;
+  title: string;
+}
+
+export interface ForkOrigin {
+  threadId: string;
+  /** The message the branch was cut at; everything up to it was inherited. */
+  messageId: string;
+  title: string | null;
+  /** 'native' kept the agent's real context; 'transcript' replayed a digest. */
+  fidelity: 'native' | 'transcript';
+  /** The parent is gone, so the origin is a label rather than a link. */
+  deleted: boolean;
 }
 
 /** One live (pending/paused) scheduled task keeping a thread active. */
