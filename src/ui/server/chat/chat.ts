@@ -32,14 +32,10 @@ import { openInboundDb, openOutboundDb, sessionDir, writeSessionMessage } from '
 import { killContainer } from '../../../container-runner.js';
 import { cancelTask, pauseTask, resumeTask, updateTask, type TaskUpdate } from '../../../modules/scheduling/db.js';
 import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
+import { ForkError, forkThread, type ForkThreadResult } from '../../../fork-session.js';
 import { TIMEZONE } from '../../../config.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
-import {
-  deleteSessionFromIndex,
-  searchMessages,
-  type SearchConversationScope,
-  type SearchResultRow,
-} from '../../../search-index.js';
+import { deleteSessionFromIndex, searchMessages, type SearchConversationScope } from '../../../search-index.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { getIdentitiesForUser } from '../../../modules/permissions/db/identities.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
@@ -165,6 +161,7 @@ export function matchChatPath(
   | { kind: 'task-action'; groupId: string; threadId: string; seriesId: string; action: 'pause' | 'resume' | 'cancel' }
   | { kind: 'task-update'; groupId: string; threadId: string; seriesId: string }
   | { kind: 'delete'; groupId: string; threadId: string }
+  | { kind: 'fork'; groupId: string; threadId: string }
   | { kind: 'voice-transcribe'; groupId: string; threadId: string }
   | { kind: 'attachment'; groupId: string; threadId: string; attachmentPath: string }
   | null {
@@ -191,6 +188,8 @@ export function matchChatPath(
     };
   const send = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/send$/);
   if (send) return { kind: 'send', groupId: decodeURIComponent(send[1]), threadId: decodeURIComponent(send[2]) };
+  const fork = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/fork$/);
+  if (fork) return { kind: 'fork', groupId: decodeURIComponent(fork[1]), threadId: decodeURIComponent(fork[2]) };
   const tasksList = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks$/);
   if (tasksList)
     return { kind: 'tasks', groupId: decodeURIComponent(tasksList[1]), threadId: decodeURIComponent(tasksList[2]) };
@@ -577,6 +576,43 @@ export async function handleChatRequest(
     } catch (err) {
       log.warn('web chat thread delete failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
       writeJson(res, 500, { error: 'delete_failed' });
+    }
+    return true;
+  }
+
+  if (m.kind === 'fork') {
+    if (req.method !== 'POST') {
+      writeJson(res, 405, { error: 'method_not_allowed' });
+      return true;
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      writeJson(res, 400, { error: 'invalid_body', detail: (err as Error).message });
+      return true;
+    }
+    const atMessageId = (body as { atMessageId?: unknown })?.atMessageId;
+    if (typeof atMessageId !== 'string' || !atMessageId) {
+      writeJson(res, 400, { error: 'at_message_id_required' });
+      return true;
+    }
+    try {
+      const result = forkChatThread(userId, m.groupId, m.threadId, atMessageId, taskOverride(req));
+      writeJson(res, 200, {
+        threadId: result.threadId,
+        sessionId: result.sessionId,
+        fidelity: result.fidelity,
+        copied: { in: result.copiedIn, out: result.copiedOut },
+      });
+    } catch (err) {
+      if (err instanceof ForkError) {
+        const status = err.message === 'thread_not_found' || err.message === 'anchor_not_found' ? 404 : 400;
+        writeJson(res, status, { error: err.message });
+        return true;
+      }
+      log.error('web chat thread fork failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
+      writeJson(res, 500, { error: 'fork_failed' });
     }
     return true;
   }
@@ -2650,6 +2686,59 @@ function readThreadStats(
     /* outbound db missing */
   }
   return { title, count, maxTs, totalCost, totalTokens, turnCount, ...(liveTasks ? { liveTasks } : {}) };
+}
+
+/**
+ * Branch a chat thread at `atMessageId` into a new thread in the same
+ * messaging group. Authorized like history reads — anyone who can read a
+ * thread may branch it, since a fork produces a private copy and mutates
+ * nothing the original participants can see.
+ */
+function forkChatThread(
+  userId: string,
+  groupId: string,
+  threadId: string,
+  atMessageId: string,
+  override: { channelType: string; messagingGroupId: string } | undefined,
+): ForkThreadResult {
+  const target = resolveTargetMessagingGroup(userId, groupId, override, isElevated(userId));
+  if (!target) throw new ForkError('thread_not_found');
+  // Shared and agent-shared sessions hold many threads in one session; a fork
+  // needs a session of its own, which would silently add a second session to
+  // a messaging group whose whole point is having one.
+  if (target.sessionMode !== 'per-thread') throw new ForkError('unsupported_session_mode');
+  // Threadless DM rooms have no thread to cut.
+  if (threadId.startsWith('__dm:')) throw new ForkError('unsupported_session_mode');
+
+  const session = findSessionForAgent(groupId, target.messagingGroupId, threadId);
+  if (!session) throw new ForkError('thread_not_found');
+
+  let parentTitle: string | null = null;
+  try {
+    const inDb = openInboundDb(groupId, session.id);
+    try {
+      parentTitle = readPublishedThreadTitle(inDb, {
+        channelType: target.channelType,
+        platformId: null,
+        threadId,
+      });
+    } finally {
+      inDb.close();
+    }
+  } catch {
+    /* title is cosmetic */
+  }
+
+  return forkThread({
+    agentGroupId: groupId,
+    messagingGroupId: target.messagingGroupId,
+    channelType: target.channelType,
+    parentSession: session,
+    parentThreadId: threadId,
+    anchorMessageId: atMessageId,
+    newThreadId: crypto.randomUUID(),
+    parentTitle,
+  });
 }
 
 /**

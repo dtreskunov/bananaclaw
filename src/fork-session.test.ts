@@ -85,13 +85,27 @@ function seedParent(): void {
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, thread_id, content)
        VALUES (@id, @seq, @kind, @timestamp, 'pending', 1, 'chan-1', 'discord', @thread_id, @content)`,
     )
-    .run({ id: 'task-1', seq: 6, kind: 'task', timestamp: ts(1), thread_id: PARENT_THREAD, content: '{"text":"cron"}' });
+    .run({
+      id: 'task-1',
+      seq: 6,
+      kind: 'task',
+      timestamp: ts(1),
+      thread_id: PARENT_THREAD,
+      content: '{"text":"cron"}',
+    });
   inDb
     .prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, thread_id, content)
        VALUES (@id, @seq, @kind, @timestamp, 'processed', 1, 'chan-1', 'discord', @thread_id, @content)`,
     )
-    .run({ id: 'other', seq: 8, kind: 'chat', timestamp: ts(1), thread_id: 'thread-other', content: '{"text":"nope"}' });
+    .run({
+      id: 'other',
+      seq: 8,
+      kind: 'chat',
+      timestamp: ts(1),
+      thread_id: 'thread-other',
+      content: '{"text":"nope"}',
+    });
   inDb
     .prepare(
       `INSERT INTO thread_titles (channel_type, platform_id, thread_id, title, source, request_message_id, published, updated_at)
@@ -265,7 +279,9 @@ describe('forkThread', () => {
     const result = fork('a1');
     const inDb = new Database(inboundDbPath(AG, result.sessionId), { readonly: true });
     try {
-      const row = inDb.prepare('SELECT title, source, published FROM thread_titles WHERE thread_id = ?').get(NEW_THREAD);
+      const row = inDb
+        .prepare('SELECT title, source, published FROM thread_titles WHERE thread_id = ?')
+        .get(NEW_THREAD);
       expect(row).toEqual({ title: 'Parent topic', source: 'fork', published: 1 });
     } finally {
       inDb.close();
