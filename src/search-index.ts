@@ -159,6 +159,51 @@ export function deleteSessionFromIndex(sessionId: string): number {
   }
 }
 
+/**
+ * Normalize a timestamp to "YYYY-MM-DD HH:MM:SS" so mixed ISO/space formats
+ * sort correctly (T > space in ASCII breaks ordering within the same day).
+ * Every timestamp written to or compared against the index goes through here.
+ */
+function normalizeIndexTimestamp(ts: string): string {
+  return ts
+    .replace('T', ' ')
+    .replace(/\.\d+Z$/, '')
+    .replace(/Z$/, '');
+}
+
+/**
+ * Hand a session's older messages over to a forked branch that also holds them.
+ *
+ * A fork copies its parent's messages verbatim, ids included, and `indexMessage`
+ * is keyed on that id — so the copies never get rows of their own and the
+ * parent's rows are the only index entry for text both threads display.
+ * Deleting the parent outright would therefore make messages that are still on
+ * screen in the branch unsearchable. Re-pointing the rows at or before the cut
+ * keeps them findable, at their surviving location.
+ *
+ * Called before `deleteSessionFromIndex`, which then clears whatever was left
+ * behind the cut.
+ */
+export function reassignIndexedMessages(
+  fromSessionId: string,
+  toSessionId: string,
+  toThreadId: string | null,
+  throughTimestamp: string,
+): number {
+  if (!db) return 0;
+  try {
+    return getSearchDb()
+      .prepare(
+        `UPDATE message_index SET session_id = ?, thread_id = ?
+          WHERE session_id = ? AND timestamp <= ?`,
+      )
+      .run(toSessionId, toThreadId, fromSessionId, normalizeIndexTimestamp(throughTimestamp)).changes;
+  } catch (err) {
+    log.warn('Search index: failed to reassign session messages', { fromSessionId, toSessionId, err });
+    return 0;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Indexing
 // ---------------------------------------------------------------------------
@@ -178,10 +223,7 @@ export function indexMessage(msg: IndexableMessage): void {
 
   // Normalize timestamp to "YYYY-MM-DD HH:MM:SS" so mixed ISO/space formats
   // sort correctly (T > space in ASCII breaks ordering within the same day).
-  const ts = msg.timestamp
-    .replace('T', ' ')
-    .replace(/\.\d+Z$/, '')
-    .replace(/Z$/, '');
+  const ts = normalizeIndexTimestamp(msg.timestamp);
 
   try {
     getSearchDb()

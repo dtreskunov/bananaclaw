@@ -62,6 +62,11 @@ export function getThreadForks(agentGroupId: string, messagingGroupId: string): 
     .all(agentGroupId, messagingGroupId) as ThreadFork[];
 }
 
+/** All lineage rows for an agent group, across every messaging group. */
+export function getThreadForksForAgentGroup(agentGroupId: string): ThreadFork[] {
+  return getDb().prepare('SELECT * FROM thread_forks WHERE agent_group_id = ?').all(agentGroupId) as ThreadFork[];
+}
+
 /**
  * Drop a thread's own lineage row. Rows naming it as *parent* are deliberately
  * left behind so surviving forks can still render their (now dead) origin.

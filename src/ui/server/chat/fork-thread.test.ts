@@ -28,6 +28,7 @@ vi.mock('../../../container-runner.js', () => ({
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
 import { getThreadFork } from '../../../db/thread-forks.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
+import { closeSearchDb, indexMessage, initSearchDb } from '../../../search-index.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath } from '../../../session-manager.js';
 import { handleChatRequest } from './chat.js';
 
@@ -79,6 +80,34 @@ async function postFork(
   return { status: captured.status(), json: JSON.parse(captured.body() || '{}') };
 }
 
+async function call(
+  method: string,
+  pathname: string,
+  opts: { query?: string; userId?: string } = {},
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  const req = Readable.from([]) as unknown as http.IncomingMessage;
+  req.method = method;
+  req.url = pathname + (opts.query ?? '');
+  req.headers = {};
+  const captured = makeRes();
+  expect(await handleChatRequest(req, captured.res, pathname, opts.userId ?? USER_ID)).toBe(true);
+  await captured.done;
+  return { status: captured.status(), json: JSON.parse(captured.body() || '{}') };
+}
+
+async function listThreads(userId = USER_ID): Promise<Record<string, ThreadJson>> {
+  const { json } = await call('GET', `/api/groups/${GROUP_ID}/chat/threads`, { userId });
+  const byId: Record<string, ThreadJson> = {};
+  for (const t of json.threads as ThreadJson[]) byId[t.threadId] = t;
+  return byId;
+}
+
+interface ThreadJson {
+  threadId: string;
+  forkedFrom?: { threadId: string; messageId: string; title: string | null; deleted: boolean; fidelity: string };
+  forkChildCount?: number;
+}
+
 function seedMessagingGroup(id: string, channelType: string, platformId: string, sessionMode: string): void {
   getDb()
     .prepare(
@@ -122,7 +151,43 @@ function seedThread(): void {
        VALUES ('a1', 1, 'u1', '2026-01-01T00:02:00.000Z', 'chat', ?, 'web', ?, '{"text":"hi back"}')`,
     )
     .run(WEB_PLATFORM_ID, THREAD);
+  outDb
+    .prepare(
+      `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, kind, platform_id, channel_type, thread_id, content)
+       VALUES ('a2', 3, 'u1', '2026-01-01T00:03:00.000Z', 'chat', ?, 'web', ?, '{"text":"and more"}')`,
+    )
+    .run(WEB_PLATFORM_ID, THREAD);
   outDb.close();
+}
+
+/** The parent's messages as the host would have indexed them. */
+const INDEXED = [
+  { id: 'u1', direction: 'in' as const, timestamp: '2026-01-01T00:01:00.000Z', text: 'hello' },
+  { id: 'a1', direction: 'out' as const, timestamp: '2026-01-01T00:02:00.000Z', text: 'hi back' },
+  { id: 'a2', direction: 'out' as const, timestamp: '2026-01-01T00:03:00.000Z', text: 'and more' },
+].map((m) => ({
+  ...m,
+  sessionId: SESSION,
+  agentGroupId: GROUP_ID,
+  messagingGroupId: WEB_MG,
+  channelType: 'web',
+  threadId: THREAD,
+}));
+
+function findSession(threadId: string): string {
+  const row = getDb().prepare(`SELECT id FROM sessions WHERE thread_id = ?`).get(threadId) as { id: string };
+  return row.id;
+}
+
+function indexedAt(messageId: string): { session_id: string; thread_id: string } | undefined {
+  const search = new Database(path.join(TEST_DATA_DIR, 'search.db'), { readonly: true });
+  try {
+    return search.prepare(`SELECT session_id, thread_id FROM message_index WHERE id = ?`).get(messageId) as
+      | { session_id: string; thread_id: string }
+      | undefined;
+  } finally {
+    search.close();
+  }
 }
 
 beforeEach(() => {
@@ -219,5 +284,113 @@ describe('POST chat thread fork', () => {
     expect(await handleChatRequest(req, captured.res, pathname, USER_ID)).toBe(true);
     await captured.done;
     expect(captured.status()).toBe(405);
+  });
+});
+
+describe('fork lineage in the threads list', () => {
+  beforeEach(() => {
+    seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
+    seedThread();
+  });
+
+  it('reports the origin on the branch and a child count on the parent', async () => {
+    const { json } = await postFork({ atMessageId: 'a1' });
+    const branchId = json.threadId as string;
+
+    const threads = await listThreads();
+    expect(threads[branchId].forkedFrom).toEqual({
+      threadId: THREAD,
+      messageId: 'a1',
+      title: null,
+      fidelity: 'transcript',
+      deleted: false,
+    });
+    expect(threads[THREAD].forkChildCount).toBe(1);
+    expect(threads[THREAD].forkedFrom).toBeUndefined();
+  });
+
+  it('marks the origin deleted once the parent is gone, and keeps the branch', async () => {
+    const { json } = await postFork({ atMessageId: 'a1' });
+    const branchId = json.threadId as string;
+
+    const del = await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, { userId: ADMIN_ID });
+    expect(del.status).toBe(200);
+    expect(del.json.removed).toBe(1);
+
+    const threads = await listThreads(ADMIN_ID);
+    expect(threads[THREAD]).toBeUndefined();
+    expect(threads[branchId].forkedFrom?.deleted).toBe(true);
+  });
+
+  it('cascade delete takes the branches with it', async () => {
+    const first = await postFork({ atMessageId: 'a1' });
+    const branchId = first.json.threadId as string;
+    const second = await postFork({ atMessageId: 'a1' }, { threadId: branchId });
+    const grandchildId = second.json.threadId as string;
+
+    const del = await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, {
+      query: '?cascade=1',
+      userId: ADMIN_ID,
+    });
+    expect(del.status).toBe(200);
+    expect(del.json.removed).toBe(3);
+
+    const threads = await listThreads(ADMIN_ID);
+    expect(threads[THREAD]).toBeUndefined();
+    expect(threads[branchId]).toBeUndefined();
+    expect(threads[grandchildId]).toBeUndefined();
+  });
+});
+
+describe('search index handoff on delete', () => {
+  beforeEach(() => {
+    seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
+    seedThread();
+    initSearchDb();
+    for (const m of INDEXED) indexMessage(m);
+  });
+
+  afterEach(() => {
+    closeSearchDb();
+  });
+
+  it('hands messages the branch still shows over to the branch', async () => {
+    const { json } = await postFork({ atMessageId: 'a1' });
+    const branchId = json.threadId as string;
+    const branchSession = findSession(branchId);
+
+    const del = await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, { userId: ADMIN_ID });
+    expect(del.status).toBe(200);
+
+    // u1/a1 are on screen in the branch, so they stay searchable there.
+    expect(indexedAt('u1')).toEqual({ session_id: branchSession, thread_id: branchId });
+    expect(indexedAt('a1')).toEqual({ session_id: branchSession, thread_id: branchId });
+    // a2 came after the cut and exists nowhere now.
+    expect(indexedAt('a2')).toBeUndefined();
+  });
+
+  it('hands them to the branch that cut deepest', async () => {
+    const shallow = await postFork({ atMessageId: 'u1' });
+    const deep = await postFork({ atMessageId: 'a1' });
+    const deepId = deep.json.threadId as string;
+    const deepSession = findSession(deepId);
+
+    await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, { userId: ADMIN_ID });
+
+    // The shallow branch holds u1 too, but the deep one holds a superset and
+    // the index has only one slot per message.
+    expect(indexedAt('u1')).toEqual({ session_id: deepSession, thread_id: deepId });
+    expect(indexedAt('a1')).toEqual({ session_id: deepSession, thread_id: deepId });
+    expect(shallow.json.threadId).not.toBe(deepId);
+  });
+
+  it('purges outright when the cascade takes every branch too', async () => {
+    await postFork({ atMessageId: 'a1' });
+
+    await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, { query: '?cascade=1', userId: ADMIN_ID });
+
+    expect(indexedAt('u1')).toBeUndefined();
+    expect(indexedAt('a1')).toBeUndefined();
+    expect(indexedAt('a2')).toBeUndefined();
   });
 });

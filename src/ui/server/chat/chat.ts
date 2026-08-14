@@ -33,9 +33,20 @@ import { killContainer } from '../../../container-runner.js';
 import { cancelTask, pauseTask, resumeTask, updateTask, type TaskUpdate } from '../../../modules/scheduling/db.js';
 import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
 import { ForkError, forkThread, type ForkThreadResult } from '../../../fork-session.js';
+import {
+  deleteThreadFork,
+  getThreadForkChildren,
+  getThreadForkDescendants,
+  getThreadForksForAgentGroup,
+} from '../../../db/thread-forks.js';
 import { TIMEZONE } from '../../../config.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
-import { deleteSessionFromIndex, searchMessages, type SearchConversationScope } from '../../../search-index.js';
+import {
+  deleteSessionFromIndex,
+  reassignIndexedMessages,
+  searchMessages,
+  type SearchConversationScope,
+} from '../../../search-index.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { getIdentitiesForUser } from '../../../modules/permissions/db/identities.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
@@ -571,8 +582,9 @@ export async function handleChatRequest(
       return true;
     }
     try {
-      const removed = deleteChatThread(userId, m.groupId, m.threadId, taskOverride(req));
-      writeJson(res, removed ? 200 : 404, { ok: removed });
+      const cascade = new URLSearchParams((req.url || '').split('?')[1] || '').get('cascade') === '1';
+      const removed = deleteChatThread(userId, m.groupId, m.threadId, taskOverride(req), cascade);
+      writeJson(res, removed > 0 ? 200 : 404, { ok: removed > 0, removed });
     } catch (err) {
       log.warn('web chat thread delete failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
       writeJson(res, 500, { error: 'delete_failed' });
@@ -1798,6 +1810,17 @@ export interface ThreadSummary {
    * auto-active thread reads differently from a conversational one.
    */
   liveTasks?: LiveTaskDto[];
+  /** Set when this thread was forked out of another one. */
+  forkedFrom?: {
+    threadId: string;
+    messageId: string;
+    title: string | null;
+    fidelity: 'native' | 'transcript';
+    /** Parent no longer exists — the chip must not offer navigation. */
+    deleted: boolean;
+  };
+  /** How many threads were forked directly out of this one. */
+  forkChildCount?: number;
 }
 
 export function buildViewerSearchConversations(threads: ThreadSummary[]): SearchConversationScope[] {
@@ -2231,7 +2254,53 @@ function collectThreadsForContexts(
     seen.add(t.threadId);
     deduped.push(t);
   }
+  stampForkLineage(agentGroupId, deduped);
   return deduped;
+}
+
+/**
+ * Annotate threads with their fork lineage.
+ *
+ * Parent liveness is checked against the sessions table rather than against
+ * the threads in this listing: a viewer may legitimately be unable to see the
+ * parent, and rendering that as "forked from a deleted thread" would be a
+ * lie. Only a genuinely absent session counts as deleted.
+ */
+function stampForkLineage(agentGroupId: string, threads: ThreadSummary[]): void {
+  const forks = getThreadForksForAgentGroup(agentGroupId);
+  if (forks.length === 0) return;
+
+  const byThread = new Map(forks.map((f) => [f.thread_id, f]));
+  const childCounts = new Map<string, number>();
+  for (const f of forks) childCounts.set(f.parent_thread_id, (childCounts.get(f.parent_thread_id) ?? 0) + 1);
+
+  const liveParents = new Set<string>();
+  const parentIds = [...new Set(forks.map((f) => f.parent_thread_id))];
+  for (let i = 0; i < parentIds.length; i += 500) {
+    const chunk = parentIds.slice(i, i + 500);
+    const rows = getDb()
+      .prepare(
+        `SELECT thread_id FROM sessions
+          WHERE agent_group_id = ? AND thread_id IN (${chunk.map(() => '?').join(',')})`,
+      )
+      .all(agentGroupId, ...chunk) as { thread_id: string }[];
+    for (const r of rows) liveParents.add(r.thread_id);
+  }
+
+  for (const t of threads) {
+    const fork = byThread.get(t.threadId);
+    if (fork) {
+      t.forkedFrom = {
+        threadId: fork.parent_thread_id,
+        messageId: fork.parent_message_id,
+        title: fork.parent_title,
+        fidelity: fork.fidelity,
+        deleted: !liveParents.has(fork.parent_thread_id),
+      };
+    }
+    const children = childCounts.get(t.threadId);
+    if (children) t.forkChildCount = children;
+  }
 }
 
 function hasSharedSession(agentGroupId: string, mgId: string): boolean {
@@ -2743,33 +2812,81 @@ function forkChatThread(
 
 /**
  * Delete a chat thread: drop its session row, its search-index rows, and its
- * on-disk session directory. Returns true if a row was deleted.
+ * on-disk session directory. Returns the number of threads removed.
  *
  * Kills the running container first so the agent-runner doesn't poll a
  * nuked inbound.db forever (which used to spam `unable to open database
  * file` until the host sweeper noticed — and even then the sweeper only
  * acts on heartbeat staleness, not on missing files).
+ *
+ * A fork shares no mutable state with its parent, so deleting either side
+ * alone is safe. Without `cascade` the branches survive and render as
+ * orphans; with it, the whole subtree goes.
  */
 function deleteChatThread(
   userId: string,
   groupId: string,
   threadId: string,
   override: { channelType: string; messagingGroupId: string } | undefined,
-): boolean {
+  cascade = false,
+): number {
   const target = resolveTargetMessagingGroup(userId, groupId, override, true);
-  if (!target) return false;
+  if (!target) return 0;
   const session = findSessionForAgent(groupId, target.messagingGroupId, threadId);
-  if (!session) return false;
-  const dir = sessionDir(groupId, session.id);
-  killContainer(session.id, 'thread-deleted');
-  deleteSession(session.id);
-  deleteSessionFromIndex(session.id);
-  try {
-    fs.rmSync(dir, { recursive: true, force: true });
-  } catch (err) {
-    log.warn('failed to rm session dir', { dir, err });
+  if (!session) return 0;
+
+  const targets = [threadId];
+  if (cascade) {
+    for (const d of getThreadForkDescendants(groupId, target.messagingGroupId, threadId)) targets.push(d.thread_id);
   }
-  return true;
+
+  let removed = 0;
+  const doomed = new Set(targets);
+  for (const id of targets) {
+    const s = id === threadId ? session : findSessionForAgent(groupId, target.messagingGroupId, id);
+    // Only the thread's own lineage row goes. Rows naming it as parent stay,
+    // so a surviving branch can still say where it came from.
+    deleteThreadFork(groupId, target.messagingGroupId, id);
+    if (!s) continue;
+    const dir = sessionDir(groupId, s.id);
+    killContainer(s.id, 'thread-deleted');
+    deleteSession(s.id);
+    handoffIndexedMessages(groupId, target.messagingGroupId, id, s.id, doomed);
+    deleteSessionFromIndex(s.id);
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+      log.warn('failed to rm session dir', { dir, err });
+    }
+    removed++;
+  }
+  return removed;
+}
+
+/**
+ * Move a dying thread's still-live messages to a branch before the purge.
+ *
+ * Every surviving branch holds the parent's messages up to its own cut, so the
+ * branch that cut deepest covers a superset of what the others do — and since
+ * the index is keyed by message id there is only one destination to give.
+ */
+function handoffIndexedMessages(
+  agentGroupId: string,
+  messagingGroupId: string,
+  threadId: string,
+  sessionId: string,
+  doomed: Set<string>,
+): void {
+  let heir: { sessionId: string; threadId: string; ts: string } | null = null;
+  for (const child of getThreadForkChildren(agentGroupId, messagingGroupId, threadId)) {
+    if (doomed.has(child.thread_id)) continue;
+    if (heir && child.parent_message_ts <= heir.ts) continue;
+    const childSession = findSessionForAgent(agentGroupId, messagingGroupId, child.thread_id);
+    if (!childSession) continue;
+    heir = { sessionId: childSession.id, threadId: child.thread_id, ts: child.parent_message_ts };
+  }
+  if (!heir) return;
+  reassignIndexedMessages(sessionId, heir.sessionId, heir.threadId, heir.ts);
 }
 
 // ── WebSocket upgrade ──
