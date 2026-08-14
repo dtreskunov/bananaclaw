@@ -34,7 +34,12 @@ import { cancelTask, pauseTask, resumeTask, updateTask, type TaskUpdate } from '
 import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
 import { TIMEZONE } from '../../../config.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
-import { searchMessages, type SearchConversationScope, type SearchResultRow } from '../../../search-index.js';
+import {
+  deleteSessionFromIndex,
+  searchMessages,
+  type SearchConversationScope,
+  type SearchResultRow,
+} from '../../../search-index.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { getIdentitiesForUser } from '../../../modules/permissions/db/identities.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
@@ -2648,10 +2653,8 @@ function readThreadStats(
 }
 
 /**
- * Delete a chat thread — drops the sessions row and removes the on-disk
-/**
- * Delete a chat thread: drop its session row + remove its on-disk
- * session directory. Returns true if a row was deleted.
+ * Delete a chat thread: drop its session row, its search-index rows, and its
+ * on-disk session directory. Returns true if a row was deleted.
  *
  * Kills the running container first so the agent-runner doesn't poll a
  * nuked inbound.db forever (which used to spam `unable to open database
@@ -2671,6 +2674,7 @@ function deleteChatThread(
   const dir = sessionDir(groupId, session.id);
   killContainer(session.id, 'thread-deleted');
   deleteSession(session.id);
+  deleteSessionFromIndex(session.id);
   try {
     fs.rmSync(dir, { recursive: true, force: true });
   } catch (err) {

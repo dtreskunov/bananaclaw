@@ -144,6 +144,21 @@ export function clearSearchIndex(): void {
   getSearchDb().exec('DELETE FROM message_index');
 }
 
+/**
+ * Drop every indexed message for a session. Called when a thread is deleted —
+ * without it the rows outlive the session and search returns hits that
+ * navigate to a thread that no longer exists.
+ */
+export function deleteSessionFromIndex(sessionId: string): number {
+  if (!db) return 0;
+  try {
+    return getSearchDb().prepare('DELETE FROM message_index WHERE session_id = ?').run(sessionId).changes;
+  } catch (err) {
+    log.warn('Search index: failed to delete session', { sessionId, err });
+    return 0;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Indexing
 // ---------------------------------------------------------------------------
