@@ -1229,6 +1229,7 @@ async function processQuery(
   const countedToolCallIds = new Set<string>();
   let lastToolSignature: string | null = null;
   let identicalToolStreak = 0;
+  let runawayAbortReason: string | null = null;
 
   try {
     for await (const event of query.events) {
@@ -1236,7 +1237,12 @@ async function processQuery(
       handleEvent(event, routing);
 
       if (event.type === 'progress' && event.step.kind === 'tool') {
-        if (!countedToolCallIds.has(event.step.id)) {
+        // A call's arguments aren't resolved yet on its `pending` event, so
+        // counting there would give every call to the same tool an identical
+        // signature — eight ordinary consecutive bash calls would trip the
+        // streak guard. Wait for the first event that carries the detail.
+        const detailKnown = event.step.detail !== undefined || event.step.status !== 'pending';
+        if (detailKnown && !countedToolCallIds.has(event.step.id)) {
           countedToolCallIds.add(event.step.id);
           const signature = `${event.step.tool}\u0000${event.step.detail ?? ''}`;
           identicalToolStreak = signature === lastToolSignature ? identicalToolStreak + 1 : 1;
@@ -1252,6 +1258,7 @@ async function processQuery(
                 : null;
         if (runawayReason && !endedForCommand) {
           log(`Runaway turn: ${runawayReason} — aborting stream`);
+          runawayAbortReason = runawayReason;
           endedForCommand = true;
           query.abort();
         }
@@ -1675,6 +1682,17 @@ async function processQuery(
   //     We deliberately do not nudge this path.
   if (!sentAny && silenceConfirmed && !lastProviderError) {
     log('Turn confirmed intentional silence after nudge — delivering nothing');
+  } else if (!sentAny && runawayAbortReason) {
+    // The runaway guard aborts the stream, so no `result` event ever arrives
+    // and none of the branches below fire. Without this the turn ends in total
+    // silence and the thread just looks stuck.
+    log(`Turn aborted as runaway (${runawayAbortReason}) — notifying user`);
+    writeTurnNotice(
+      routing,
+      `⚠️ The agent got stuck in a loop (${runawayAbortReason}) and the turn was stopped before it could reply. Retry, or switch to a stronger model if it keeps happening.`,
+      'runaway-abort notice',
+      'retry',
+    );
   } else if (!sentAny && malformedToolRecoveryExhausted && !lastProviderError) {
     log('Malformed tool-call recovery exhausted — surfacing specific error');
     writeTurnNotice(
