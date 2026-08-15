@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isFinalResponse, publicWebMessageId } from './chat-protocol';
+import { isFinalResponse, publicWebMessageId, showsMidTurnLabel } from './chat-protocol';
 
 describe('isFinalResponse', () => {
   it('keeps tool-delivered messages inside the active turn', () => {
@@ -15,6 +15,26 @@ describe('isFinalResponse', () => {
 
   it('never treats internal messages as completion', () => {
     expect(isFinalResponse('internal', 'response')).toBe(false);
+  });
+});
+
+describe('showsMidTurnLabel', () => {
+  it('captions an update while the turn is still running', () => {
+    expect(showsMidTurnLabel('send_message', true, true)).toBe(true);
+  });
+
+  it('captions an update that something else followed', () => {
+    expect(showsMidTurnLabel('send_message', false, false)).toBe(true);
+  });
+
+  it('drops the caption once the turn settles with nothing after it', () => {
+    expect(showsMidTurnLabel('send_message', true, false)).toBe(false);
+  });
+
+  it('never captions other delivery origins', () => {
+    expect(showsMidTurnLabel('send_file', false, true)).toBe(false);
+    expect(showsMidTurnLabel('response', false, true)).toBe(false);
+    expect(showsMidTurnLabel(undefined, false, true)).toBe(false);
   });
 });
 

@@ -22,6 +22,7 @@ import {
 import { requestConfirm } from './PromptModal';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
 import { mergeQuestionTimeline } from '../question-timeline';
+import { showsMidTurnLabel } from '../chat-protocol';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
@@ -546,7 +547,10 @@ function openThreadAt(targetThreadId: string, messageId: string): void {
   openChat(groupId.value, targetThreadId, null).catch(console.error);
 }
 
-function Message({ m, allowContinue = false }: { m: ChatMessage; allowContinue?: boolean }) {
+function Message(
+  { m, allowContinue = false, isLatest = false }:
+  { m: ChatMessage; allowContinue?: boolean; isLatest?: boolean },
+) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
@@ -716,7 +720,7 @@ function Message({ m, allowContinue = false }: { m: ChatMessage; allowContinue?:
         : null}
       {m.ts ? <div class="meta">
         <RelativeTime ts={m.ts} />
-        {m.deliveryOrigin === 'send_message'
+        {showsMidTurnLabel(m.deliveryOrigin, isLatest, isTyping.value)
           ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
@@ -867,10 +871,12 @@ function ThoughtGroup({
   thoughts,
   answer,
   allowContinue,
+  isLatest,
 }: {
   thoughts: ChatMessage[];
   answer: ChatMessage;
   allowContinue: boolean;
+  isLatest: boolean;
 }) {
   const [showThoughts, setShowThoughts] = useState(false);
   const n = thoughts.length;
@@ -880,7 +886,7 @@ function ThoughtGroup({
     <div class={'thought-group' + (showThoughts ? ' showing-thoughts' : ' showing-answer')}>
       {showThoughts
         ? thoughts.map((t) => <Message key={messageKey(t)} m={t} />)
-        : <Message m={answer} allowContinue={allowContinue} />}
+        : <Message m={answer} allowContinue={allowContinue} isLatest={isLatest} />}
       <button
         type="button"
         class="thoughts-toggle"
@@ -1223,6 +1229,7 @@ function MessageLog() {
                         thoughts={g.thoughts}
                         answer={g.answer}
                         allowContinue={g.answer === latestConversationalMessage}
+                        isLatest={g.answer === latestConversationalMessage}
                       />
                     : g.kind === 'events'
                       ? <EventsGroup key={key} events={g.events} />
@@ -1230,6 +1237,7 @@ function MessageLog() {
                           key={key}
                           m={g.m}
                           allowContinue={g.m === latestConversationalMessage}
+                          isLatest={g.m === latestConversationalMessage}
                         />;
                   const inherited = inheritedUntil !== null && groupContains(g, inheritedUntil);
                   const branches = [...branchesAt].filter(([id]) => groupContains(g, id)).flatMap(([, c]) => c);

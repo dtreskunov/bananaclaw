@@ -17221,6 +17221,10 @@ async function applyHash(router2) {
 function isFinalResponse(direction, deliveryOrigin) {
   return direction === "out" && deliveryOrigin !== "send_message" && deliveryOrigin !== "send_file";
 }
+function showsMidTurnLabel(deliveryOrigin, isLatest, turnActive) {
+  if (deliveryOrigin !== "send_message") return false;
+  return turnActive || !isLatest;
+}
 function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
@@ -21155,7 +21159,7 @@ function openThreadAt(targetThreadId, messageId) {
   highlightMessageId.value = messageId;
   openChat(groupId.value, targetThreadId, null).catch(console.error);
 }
-function Message({ m: m6, allowContinue = false }) {
+function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
   const [continueState, setContinueState] = h2("idle");
@@ -21304,7 +21308,7 @@ function Message({ m: m6, allowContinue = false }) {
     m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
     m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-      m6.deliveryOrigin === "send_message" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
+      showsMidTurnLabel(m6.deliveryOrigin, isLatest, isTyping.value) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
       m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null,
       /* @__PURE__ */ u4(ForkButton, { m: m6 })
     ] }) : null
@@ -21420,14 +21424,15 @@ function EventsGroup({ events }) {
 function ThoughtGroup({
   thoughts,
   answer,
-  allowContinue
+  allowContinue,
+  isLatest
 }) {
   const [showThoughts, setShowThoughts] = h2(false);
   const n3 = thoughts.length;
   const label = showThoughts ? "answer" : n3 > 1 ? `thoughts (${n3})` : "thoughts";
   const title = showThoughts ? "Show final answer" : "Show agent thoughts leading to this answer";
   return /* @__PURE__ */ u4("div", { class: "thought-group" + (showThoughts ? " showing-thoughts" : " showing-answer"), children: [
-    showThoughts ? thoughts.map((t4) => /* @__PURE__ */ u4(Message, { m: t4 }, messageKey(t4))) : /* @__PURE__ */ u4(Message, { m: answer, allowContinue }),
+    showThoughts ? thoughts.map((t4) => /* @__PURE__ */ u4(Message, { m: t4 }, messageKey(t4))) : /* @__PURE__ */ u4(Message, { m: answer, allowContinue, isLatest }),
     /* @__PURE__ */ u4(
       "button",
       {
@@ -21719,14 +21724,16 @@ function MessageLog() {
           {
             thoughts: g8.thoughts,
             answer: g8.answer,
-            allowContinue: g8.answer === latestConversationalMessage
+            allowContinue: g8.answer === latestConversationalMessage,
+            isLatest: g8.answer === latestConversationalMessage
           },
           key
         ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
           Message,
           {
             m: g8.m,
-            allowContinue: g8.m === latestConversationalMessage
+            allowContinue: g8.m === latestConversationalMessage,
+            isLatest: g8.m === latestConversationalMessage
           },
           key
         );

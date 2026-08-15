@@ -1754,6 +1754,95 @@ describe('poll loop - future-work announcements', () => {
  * turns like a long-lived provider (OpenCode) — the loop or the test drives
  * completion.
  */
+/**
+ * Streams assistant-message steps with no tool calls — the shape of a model
+ * that keeps re-answering instead of finishing. `toolEvery` interleaves a tool
+ * call every Nth step, which should keep the streak guard quiet.
+ */
+class TextLoopProvider {
+  readonly supportsNativeSlashCommands = false;
+  steps = 0;
+  aborts = 0;
+
+  constructor(
+    private readonly maxSteps = 40,
+    private readonly toolEvery = 0,
+  ) {}
+
+  isSessionInvalid(): boolean {
+    return false;
+  }
+
+  query() {
+    const owner = this;
+    let aborted = false;
+    return {
+      push: () => true,
+      end: () => {},
+      abort: () => {
+        aborted = true;
+        owner.aborts++;
+      },
+      events: (async function* () {
+        yield { type: 'init' as const, continuation: 'loop-session' };
+        while (!aborted && owner.steps < owner.maxSteps) {
+          owner.steps++;
+          if (owner.toolEvery && owner.steps % owner.toolEvery === 0) {
+            yield {
+              type: 'progress' as const,
+              step: {
+                kind: 'tool' as const, id: `tool-${owner.steps}`, tool: 'bash',
+                status: 'completed' as const, detail: `echo ${owner.steps}`,
+              },
+            };
+          }
+          yield { type: 'assistant_message' as const };
+          await sleep(1);
+        }
+        if (!aborted) {
+          yield { type: 'result' as const, text: '<message to="discord-test">done</message>' };
+        }
+      })(),
+    };
+  }
+}
+
+describe('poll loop — text-only runaway', () => {
+  it('aborts a turn that keeps replying without ever calling a tool', async () => {
+    insertMessage('m-loop', { sender: 'Alice', text: 'do the thing' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new TextLoopProvider();
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 3000);
+    controller.abort();
+
+    expect(provider.aborts).toBe(1);
+    expect(provider.steps).toBe(6);
+    expect(JSON.parse(getUndeliveredMessages()[0]!.content).text)
+      .toContain('6 replies in a row with no tool call');
+
+    await loopPromise.catch(() => {});
+  });
+
+  it('lets the turn run when tool calls keep breaking the streak', async () => {
+    insertMessage('m-work', { sender: 'Alice', text: 'do the thing' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new TextLoopProvider(20, 2);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 3000);
+    controller.abort();
+
+    expect(provider.aborts).toBe(0);
+    expect(JSON.parse(getUndeliveredMessages()[0]!.content).text).toBe('done');
+
+    await loopPromise.catch(() => {});
+  });
+});
+
 class ScriptedProvider {
   readonly supportsNativeSlashCommands = false;
   ended = false;

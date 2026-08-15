@@ -315,6 +315,14 @@ export type ProviderEvent =
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
   | { type: 'progress'; step: ActivityStep }
   /**
+   * One assistant message finished within the current turn. Emitted purely so
+   * the runner can bound degenerate loops: a model that keeps emitting text
+   * steps without ever calling a tool is invisible to the tool-based runaway
+   * guards, and the provider's prompt loop will step forever. Providers with
+   * no per-step message boundary omit it.
+   */
+  | { type: 'assistant_message' }
+  /**
    * Per-turn usage data emitted just before the corresponding `result`
    * event. The poll-loop stashes this and writes it to `turn_usage` in
    * outbound.db once the result row is created.

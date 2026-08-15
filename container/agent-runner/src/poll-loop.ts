@@ -43,6 +43,14 @@ const MAX_DUPLICATE_SENDS_PER_TURN = 3;
  */
 const MAX_IDENTICAL_TOOL_STREAK = 8;
 const MAX_TOOL_CALLS_PER_TURN = 250;
+/**
+ * Backstop for the same failure mode expressed as text alone. A model can
+ * collapse into re-emitting its final answer over and over — each step a
+ * clean `stop`, no tool call anywhere — which both bounds above are blind to,
+ * so the turn runs until someone notices. Healthy turns close after at most
+ * one consecutive text-only step (the reply itself).
+ */
+const MAX_CONSECUTIVE_TEXT_STEPS = 6;
 type SuggestedAction = 'continue' | 'retry' | 'report';
 
 /**
@@ -1229,6 +1237,7 @@ async function processQuery(
   const countedToolCallIds = new Set<string>();
   let lastToolSignature: string | null = null;
   let identicalToolStreak = 0;
+  let consecutiveTextSteps = 0;
   let runawayAbortReason: string | null = null;
 
   try {
@@ -1244,6 +1253,7 @@ async function processQuery(
         const detailKnown = event.step.detail !== undefined || event.step.status !== 'pending';
         if (detailKnown && !countedToolCallIds.has(event.step.id)) {
           countedToolCallIds.add(event.step.id);
+          consecutiveTextSteps = 0;
           const signature = `${event.step.tool}\u0000${event.step.detail ?? ''}`;
           identicalToolStreak = signature === lastToolSignature ? identicalToolStreak + 1 : 1;
           lastToolSignature = signature;
@@ -1280,6 +1290,17 @@ async function processQuery(
               : {}),
             status: event.step.status === 'pending' ? priorCall!.status : event.step.status,
           });
+        }
+      }
+
+      if (event.type === 'assistant_message') {
+        consecutiveTextSteps++;
+        if (consecutiveTextSteps >= MAX_CONSECUTIVE_TEXT_STEPS && !endedForCommand) {
+          const reason = `${consecutiveTextSteps} replies in a row with no tool call`;
+          log(`Runaway turn: ${reason} — aborting stream`);
+          runawayAbortReason = reason;
+          endedForCommand = true;
+          query.abort();
         }
       }
 
