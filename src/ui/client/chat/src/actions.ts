@@ -57,7 +57,7 @@ import { api, postJson } from './api';
 import { writeHash } from './hash';
 import { isFinalResponse, publicWebMessageId } from './chat-protocol';
 import { maybeNotify } from './notify';
-import { runReconnectImmediately, startReconnectCountdown } from './reconnect-countdown';
+import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
 import type {
@@ -377,6 +377,10 @@ export function clearChat(): void {
     refs.reconnectCancel();
     refs.reconnectCancel = null;
   }
+  if (refs.wsConnectCancel) {
+    refs.wsConnectCancel();
+    refs.wsConnectCancel = null;
+  }
   if (refs.wsPingTimer) {
     clearInterval(refs.wsPingTimer);
     refs.wsPingTimer = null;
@@ -642,6 +646,10 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     refs.reconnectCancel();
     refs.reconnectCancel = null;
   }
+  if (refs.wsConnectCancel) {
+    refs.wsConnectCancel();
+    refs.wsConnectCancel = null;
+  }
   if (refs.wsPingTimer) {
     clearInterval(refs.wsPingTimer);
     refs.wsPingTimer = null;
@@ -782,6 +790,8 @@ interface ChatSocketContext {
   generation: number;
 }
 
+const WS_CONNECT_TIMEOUT_MS = 10000;
+
 function connectChatWs(ctx: ChatSocketContext): void {
   const { gid, tid, mg, generation } = ctx;
   if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
@@ -790,8 +800,23 @@ function connectChatWs(ctx: ChatSocketContext): void {
   if (mg) wsUrl += `?mg=${encodeURIComponent(mg)}`;
   const ws = new WebSocket(wsUrl);
   refs.ws = ws;
+  refs.wsConnectCancel = startConnectionTimeout(WS_CONNECT_TIMEOUT_MS, () => {
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    refs.wsConnectCancel = null;
+    chatReady.value = false;
+    chatStatus.value = 'connection timed out';
+    try {
+      ws.close();
+    } catch {
+      // onclose schedules the reconnect when the browser aborts the handshake
+    }
+  });
   ws.onopen = () => {
     if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    if (refs.wsConnectCancel) {
+      refs.wsConnectCancel();
+      refs.wsConnectCancel = null;
+    }
     chatStatus.value = 'syncing\u2026';
     // App-level keepalive: any frame keeps an intermediary's idle timer
     // from closing the socket. Server also sends ws pings, but the
@@ -810,6 +835,10 @@ function connectChatWs(ctx: ChatSocketContext): void {
   ws.onclose = () => {
     if (refs.ws !== ws || generation !== refs.chatGeneration) return;
     refs.ws = null;
+    if (refs.wsConnectCancel) {
+      refs.wsConnectCancel();
+      refs.wsConnectCancel = null;
+    }
     chatReady.value = false;
     if (refs.wsPingTimer) {
       clearInterval(refs.wsPingTimer);

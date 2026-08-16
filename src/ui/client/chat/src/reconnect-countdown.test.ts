@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runReconnectImmediately, startReconnectCountdown } from './reconnect-countdown';
+import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 
 describe('startReconnectCountdown', () => {
   afterEach(() => {
@@ -65,5 +65,34 @@ describe('runReconnectImmediately', () => {
 
     expect(runReconnectImmediately(null, reconnect)).toBe(false);
     expect(reconnect).not.toHaveBeenCalled();
+  });
+});
+
+describe('startConnectionTimeout', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('elapses when a connection attempt stalls', () => {
+    vi.useFakeTimers();
+    const onElapsed = vi.fn();
+
+    startConnectionTimeout(10000, onElapsed);
+    vi.advanceTimersByTime(9999);
+    expect(onElapsed).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(onElapsed).toHaveBeenCalledOnce();
+  });
+
+  it('does not elapse after cancellation', () => {
+    vi.useFakeTimers();
+    const onElapsed = vi.fn();
+    const cancel = startConnectionTimeout(10000, onElapsed);
+
+    cancel();
+    vi.advanceTimersByTime(10000);
+
+    expect(onElapsed).not.toHaveBeenCalled();
   });
 });

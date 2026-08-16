@@ -135,6 +135,7 @@ export interface Refs {
   reconnectCancel: (() => void) | null;
   reconnectAttempt: number;
   syncTimer: ReturnType<typeof setInterval> | null;
+  wsConnectCancel: (() => void) | null;
   wsPingTimer: ReturnType<typeof setInterval> | null;
   seenIds: Set<string>;
   suppressHashCount: number;
@@ -157,6 +158,7 @@ export const refs: Refs = {
   reconnectCancel: null,
   reconnectAttempt: 0,
   syncTimer: null,
+  wsConnectCancel: null,
   wsPingTimer: null,
   seenIds: new Set<string>(),
   suppressHashCount: 0,

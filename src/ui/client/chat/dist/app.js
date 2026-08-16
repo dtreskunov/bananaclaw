@@ -15597,6 +15597,7 @@ var refs = {
   reconnectCancel: null,
   reconnectAttempt: 0,
   syncTimer: null,
+  wsConnectCancel: null,
   wsPingTimer: null,
   seenIds: /* @__PURE__ */ new Set(),
   suppressHashCount: 0,
@@ -17551,6 +17552,18 @@ function runReconnectImmediately(cancelCountdown, reconnect) {
   reconnect();
   return true;
 }
+function startConnectionTimeout(delayMs, onElapsed) {
+  let active = true;
+  const timer = setTimeout(() => {
+    if (!active) return;
+    active = false;
+    onElapsed();
+  }, delayMs);
+  return () => {
+    active = false;
+    clearTimeout(timer);
+  };
+}
 
 // src/sound.ts
 var ctx = null;
@@ -17860,6 +17873,10 @@ function clearChat() {
     refs.reconnectCancel();
     refs.reconnectCancel = null;
   }
+  if (refs.wsConnectCancel) {
+    refs.wsConnectCancel();
+    refs.wsConnectCancel = null;
+  }
   if (refs.wsPingTimer) {
     clearInterval(refs.wsPingTimer);
     refs.wsPingTimer = null;
@@ -18043,6 +18060,10 @@ async function openChat(gid, resumeTid, opts) {
     refs.reconnectCancel();
     refs.reconnectCancel = null;
   }
+  if (refs.wsConnectCancel) {
+    refs.wsConnectCancel();
+    refs.wsConnectCancel = null;
+  }
   if (refs.wsPingTimer) {
     clearInterval(refs.wsPingTimer);
     refs.wsPingTimer = null;
@@ -18163,6 +18184,7 @@ async function openChat(gid, resumeTid, opts) {
   focusComposerSoon({ mobile: true });
   refs.newChatInFlight = false;
 }
+var WS_CONNECT_TIMEOUT_MS = 1e4;
 function connectChatWs(ctx2) {
   const { gid, tid, mg, generation } = ctx2;
   if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
@@ -18171,8 +18193,22 @@ function connectChatWs(ctx2) {
   if (mg) wsUrl += `?mg=${encodeURIComponent(mg)}`;
   const ws = new WebSocket(wsUrl);
   refs.ws = ws;
+  refs.wsConnectCancel = startConnectionTimeout(WS_CONNECT_TIMEOUT_MS, () => {
+    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    refs.wsConnectCancel = null;
+    chatReady.value = false;
+    chatStatus.value = "connection timed out";
+    try {
+      ws.close();
+    } catch {
+    }
+  });
   ws.onopen = () => {
     if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    if (refs.wsConnectCancel) {
+      refs.wsConnectCancel();
+      refs.wsConnectCancel = null;
+    }
     chatStatus.value = "syncing\u2026";
     if (refs.wsPingTimer) clearInterval(refs.wsPingTimer);
     refs.wsPingTimer = setInterval(() => {
@@ -18187,6 +18223,10 @@ function connectChatWs(ctx2) {
   ws.onclose = () => {
     if (refs.ws !== ws || generation !== refs.chatGeneration) return;
     refs.ws = null;
+    if (refs.wsConnectCancel) {
+      refs.wsConnectCancel();
+      refs.wsConnectCancel = null;
+    }
     chatReady.value = false;
     if (refs.wsPingTimer) {
       clearInterval(refs.wsPingTimer);

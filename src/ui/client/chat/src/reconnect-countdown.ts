@@ -32,3 +32,17 @@ export function runReconnectImmediately(cancelCountdown: (() => void) | null, re
   reconnect();
   return true;
 }
+
+export function startConnectionTimeout(delayMs: number, onElapsed: () => void): () => void {
+  let active = true;
+  const timer = setTimeout(() => {
+    if (!active) return;
+    active = false;
+    onElapsed();
+  }, delayMs);
+
+  return () => {
+    active = false;
+    clearTimeout(timer);
+  };
+}
