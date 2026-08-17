@@ -830,8 +830,7 @@ function groupMessages(list: ChatMessage[]): MsgGroup[] {
   return out;
 }
 
-/** Collapsed run of consecutive task-run events. Shows a single summary pill
- *  ("Scheduled task ran N×") that expands to reveal each individual run. */
+/** Collapsed run of consecutive task-run events. */
 function EventsGroup({ events }: { events: ChatMessage[] }) {
   const [open, setOpen] = useState(false);
   const n = events.length;
@@ -843,12 +842,13 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
     events.map((e) => e.event?.taskId || e.event?.summary || '').filter(Boolean),
   ).size;
   const multi = taskCount > 1;
+  const failed = events.filter((event) => event.event?.status === 'failed' || event.event?.status === 'timed_out').length;
   if (open) {
     return (
       <div class="events-group open">
         <button type="button" class="events-collapse" onClick={() => setOpen(false)} title="Collapse runs">
           <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
-          <span>{n}{' scheduled runs'}{multi ? ` \u00b7 ${taskCount} tasks` : ''}{' \u00b7 hide'}</span>
+          <span>{n}{' task attempts'}{failed ? ` \u00b7 ${failed} failed` : ''}{multi ? ` \u00b7 ${taskCount} tasks` : ''}{' \u00b7 hide'}</span>
         </button>
         {events.map((e) => <Message key={e.id} m={e} />)}
       </div>
@@ -859,8 +859,8 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
       <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
       <span class="event-text">
         {multi
-          ? `${taskCount} scheduled tasks ran ${n}\u00d7`
-          : `Scheduled task ran ${n}\u00d7`}
+          ? `${taskCount} tasks attempted ${n}\u00d7${failed ? ` \u00b7 ${failed} failed` : ''}`
+          : `Task attempted ${n}\u00d7${failed ? ` \u00b7 ${failed} failed` : ''}`}
       </span>
       <span class="event-meta">last&nbsp;<RelativeTime ts={last.ts} /></span>
     </button>

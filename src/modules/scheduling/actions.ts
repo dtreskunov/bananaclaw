@@ -24,6 +24,7 @@ export async function handleScheduleTask(
   const taskId = content.taskId as string;
   const prompt = content.prompt as string;
   const script = content.script as string | null;
+  const scriptTimeoutMs = typeof content.scriptTimeoutMs === 'number' ? content.scriptTimeoutMs : undefined;
   const processAfter = content.processAfter as string;
   const recurrence = (content.recurrence as string) || null;
 
@@ -34,7 +35,7 @@ export async function handleScheduleTask(
     platformId: (content.platformId as string) ?? null,
     channelType: (content.channelType as string) ?? null,
     threadId: (content.threadId as string) ?? null,
-    content: JSON.stringify({ prompt, script }),
+    content: JSON.stringify({ prompt, script, ...(scriptTimeoutMs ? { scriptTimeoutMs } : {}) }),
   });
   log.info('Scheduled task created', { taskId, processAfter, recurrence });
 }
@@ -83,6 +84,9 @@ export async function handleUpdateTask(
   }
   if (content.script === null || typeof content.script === 'string') {
     update.script = content.script as string | null;
+  }
+  if (typeof content.scriptTimeoutMs === 'number') {
+    update.scriptTimeoutMs = content.scriptTimeoutMs;
   }
   const touched = updateTask(inDb, taskId, update);
   log.info('Task updated', { taskId, touched, fields: Object.keys(update) });

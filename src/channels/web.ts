@@ -46,6 +46,10 @@ export interface WebTaskRunEvent {
   recurrence: string | null;
   /** series_id grouping recurring occurrences (null for legacy one-offs). */
   seriesId: string | null;
+  status: TaskRunNotice['status'];
+  triggerSource: TaskRunNotice['triggerSource'];
+  error: string | null;
+  autoPaused: boolean;
 }
 
 /** A live subscriber — typically a WebSocket connection. */
@@ -120,6 +124,10 @@ function handleTaskRunNotice(notice: TaskRunNotice): void {
     content: notice.content,
     recurrence: notice.recurrence,
     seriesId: notice.seriesId,
+    status: notice.status,
+    triggerSource: notice.triggerSource,
+    error: notice.error,
+    autoPaused: notice.autoPaused,
   });
 }
 

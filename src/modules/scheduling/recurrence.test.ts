@@ -10,19 +10,25 @@ import fs from 'fs';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { ensureSchema, openInboundDb } from '../../db/session-db.js';
+import { ensureSchema, openInboundDb, openOutboundDbRw } from '../../db/session-db.js';
 import { insertTask } from './db.js';
 import { handleRecurrence } from './recurrence.js';
 import type { Session } from '../../types.js';
 
 const TEST_DIR = '/tmp/nanoclaw-recurrence-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
+const OUT_DB_PATH = path.join(TEST_DIR, 'outbound.db');
 
 function freshDb() {
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
   fs.mkdirSync(TEST_DIR, { recursive: true });
   ensureSchema(DB_PATH, 'inbound');
   return openInboundDb(DB_PATH);
+}
+
+function freshOutboundDb() {
+  ensureSchema(OUT_DB_PATH, 'outbound');
+  return openOutboundDbRw(OUT_DB_PATH);
 }
 
 function fakeSession(): Session {
@@ -94,5 +100,70 @@ describe('handleRecurrence', () => {
 
     const count = (db.prepare(`SELECT COUNT(*) AS c FROM messages_in`).get() as { c: number }).c;
     expect(count).toBe(1);
+  });
+
+  it('pauses the next occurrence after three consecutive scheduled failures', async () => {
+    const db = freshDb();
+    const outDb = freshOutboundDb();
+    insertTask(db, {
+      id: 'task-1',
+      processAfter: '2020-01-01T00:00:00.000Z',
+      recurrence: '0 9 * * *',
+      platformId: null,
+      channelType: null,
+      threadId: null,
+      content: JSON.stringify({ prompt: 'daily digest' }),
+    });
+    db.prepare("UPDATE messages_in SET status = 'completed' WHERE id = 'task-1'").run();
+    const insertAttempt = outDb.prepare(
+      `INSERT INTO task_attempts
+        (task_message_id, series_id, trigger_source, status, started_at)
+       VALUES (?, 'task-1', 'scheduled', 'failed', ?)`,
+    );
+    insertAttempt.run('attempt-1', '2026-08-16T10:00:00Z');
+    insertAttempt.run('attempt-2', '2026-08-16T11:00:00Z');
+    insertAttempt.run('attempt-3', '2026-08-16T12:00:00Z');
+
+    await handleRecurrence(db, fakeSession(), outDb);
+
+    const follow = db.prepare("SELECT status, content FROM messages_in WHERE id != 'task-1'").get() as {
+      status: string;
+      content: string;
+    };
+    const completed = db.prepare("SELECT content FROM messages_in WHERE id = 'task-1'").get() as { content: string };
+    expect(follow.status).toBe('paused');
+    expect(JSON.parse(follow.content)).toMatchObject({ consecutiveFailures: 3, autoPaused: true });
+    expect(JSON.parse(completed.content)).toMatchObject({ consecutiveFailures: 3, autoPaused: true });
+    outDb.close();
+    db.close();
+  });
+
+  it('clears a carried failure count after a successful attempt', async () => {
+    const db = freshDb();
+    const outDb = freshOutboundDb();
+    insertTask(db, {
+      id: 'task-1',
+      processAfter: '2020-01-01T00:00:00.000Z',
+      recurrence: '0 9 * * *',
+      platformId: null,
+      channelType: null,
+      threadId: null,
+      content: JSON.stringify({ prompt: 'daily digest', consecutiveFailures: 2 }),
+    });
+    db.prepare("UPDATE messages_in SET status = 'completed' WHERE id = 'task-1'").run();
+    outDb
+      .prepare(
+        `INSERT INTO task_attempts
+        (task_message_id, series_id, trigger_source, status, started_at)
+       VALUES ('attempt-ok', 'task-1', 'scheduled', 'completed', '2026-08-16T12:00:00Z')`,
+      )
+      .run();
+
+    await handleRecurrence(db, fakeSession(), outDb);
+
+    const follow = db.prepare("SELECT content FROM messages_in WHERE id != 'task-1'").get() as { content: string };
+    expect(JSON.parse(follow.content)).toMatchObject({ consecutiveFailures: 0, autoPaused: false });
+    outDb.close();
+    db.close();
   });
 });

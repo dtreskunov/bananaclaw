@@ -93,6 +93,23 @@ export interface TaskDetailDto {
   prompt: string;
   hasScript: boolean;
   script: string;
+  scriptTimeoutMs: number;
+  consecutiveFailures: number;
+  attempts: TaskAttemptDto[];
+}
+
+export interface TaskAttemptDto {
+  taskMessageId: string;
+  triggerSource: 'scheduled' | 'manual';
+  status: 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed';
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  exitCode: number | null;
+  signal: string | null;
+  error: string | null;
+  wakeAgent: boolean | null;
+  providerInvoked: boolean;
 }
 
 /** Open-request for the task panel: which thread's tasks to manage. */
@@ -184,6 +201,10 @@ export interface TimelineEvent {
   taskId?: string;
   summary: string;
   recurrence?: string | null;
+  status?: TaskAttemptDto['status'];
+  triggerSource?: 'scheduled' | 'manual';
+  error?: string | null;
+  autoPaused?: boolean;
 }
 
 /** One step of a turn's activity trace: emit-time timestamp (epoch ms as a
@@ -372,4 +393,8 @@ export interface WsPayload {
   summary?: string;
   taskId?: string;
   recurrence?: string | null;
+  status?: TaskAttemptDto['status'];
+  triggerSource?: 'scheduled' | 'manual';
+  error?: string | null;
+  autoPaused?: boolean;
 }

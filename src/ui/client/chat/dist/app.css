@@ -4023,6 +4023,13 @@ body.private-web-page,
 }
 
 /* src/components/TaskPanel.css */
+.task-panel > .settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.task-panel > .settings-row {
+  flex: 0 0 auto;
+}
 .task-panel .task-card {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -4103,6 +4110,16 @@ body.private-web-page,
   line-height: 1.35;
   word-break: break-word;
 }
+.task-panel .task-failure-banner {
+  border-left: 3px solid #b7791f;
+  padding: 7px 10px;
+  background: rgba(183, 121, 31, 0.1);
+  color: var(--fg, inherit);
+  font-size: var(--font-xs, 12px);
+}
+.task-panel .task-failure-banner.paused {
+  border-left-color: var(--danger, #c0392b);
+}
 .task-panel .task-sec {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -4182,6 +4199,62 @@ body.private-web-page,
 }
 .task-panel .task-cron-preview {
   font-size: var(--font-xs, 12px);
+}
+.task-panel .task-timeout-field {
+  display: grid;
+  grid-template-columns: auto minmax(72px, 110px) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-xs, 12px);
+  color: var(--muted);
+}
+.task-panel .task-timeout-field input {
+  min-width: 0;
+}
+.task-panel .task-script-timeout {
+  margin-top: 8px;
+  font-size: var(--font-xs, 12px);
+}
+.task-panel .task-attempts {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+.task-panel .task-attempt {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  min-width: 0;
+}
+.task-panel .task-attempt:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.task-panel .task-attempt-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: var(--font-xs, 12px);
+}
+.task-panel .task-attempt-main time {
+  margin-left: auto;
+}
+.task-panel .task-attempt-status {
+  color: var(--fg, inherit);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.task-panel .task-attempt-status.failed,
+.task-panel .task-attempt-status.timed_out,
+.task-panel .task-attempt-error {
+  color: var(--danger, #c0392b);
+}
+.task-panel .task-attempt-error {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--font-2xs, 10px);
+  overflow-wrap: anywhere;
 }
 .task-panel .task-actions {
   display: flex;

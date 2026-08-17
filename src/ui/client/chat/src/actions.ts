@@ -1097,10 +1097,21 @@ function connectChatWs(ctx: ChatSocketContext): void {
         if (!refs.seenIds.has(key)) {
           refs.seenIds.add(key);
           const summary = payload.summary || 'Scheduled task';
+          const status = payload.status || 'completed';
+          const triggerSource = payload.triggerSource === 'manual' ? 'manual' : 'scheduled';
+          const subject = triggerSource === 'manual' ? 'Manual task' : 'Scheduled task';
+          const verb =
+            status === 'timed_out'
+              ? 'timed out'
+              : status === 'failed'
+                ? 'failed'
+                : status === 'skipped'
+                  ? 'skipped'
+                  : 'completed';
           chatMessages.value = chatMessages.value.concat({
             id,
             direction: 'event',
-            text: `Scheduled task ran: ${summary}`,
+            text: `${subject} ${verb}${payload.autoPaused ? ' and was auto-paused' : ''}: ${summary}`,
             files: null,
             ts: payload.timestamp || new Date().toISOString(),
             event: {
@@ -1108,6 +1119,10 @@ function connectChatWs(ctx: ChatSocketContext): void {
               summary,
               ...(payload.taskId ? { taskId: payload.taskId } : {}),
               ...(payload.recurrence ? { recurrence: payload.recurrence } : {}),
+              status,
+              triggerSource,
+              ...(payload.error ? { error: payload.error } : {}),
+              ...(payload.autoPaused ? { autoPaused: true } : {}),
             },
           });
         }

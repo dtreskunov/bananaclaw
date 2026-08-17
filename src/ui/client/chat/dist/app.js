@@ -18448,17 +18448,25 @@ function connectChatWs(ctx2) {
         if (!refs.seenIds.has(key)) {
           refs.seenIds.add(key);
           const summary = payload.summary || "Scheduled task";
+          const status = payload.status || "completed";
+          const triggerSource = payload.triggerSource === "manual" ? "manual" : "scheduled";
+          const subject = triggerSource === "manual" ? "Manual task" : "Scheduled task";
+          const verb = status === "timed_out" ? "timed out" : status === "failed" ? "failed" : status === "skipped" ? "skipped" : "completed";
           chatMessages.value = chatMessages.value.concat({
             id,
             direction: "event",
-            text: `Scheduled task ran: ${summary}`,
+            text: `${subject} ${verb}${payload.autoPaused ? " and was auto-paused" : ""}: ${summary}`,
             files: null,
             ts: payload.timestamp || (/* @__PURE__ */ new Date()).toISOString(),
             event: {
               kind: "task-run",
               summary,
               ...payload.taskId ? { taskId: payload.taskId } : {},
-              ...payload.recurrence ? { recurrence: payload.recurrence } : {}
+              ...payload.recurrence ? { recurrence: payload.recurrence } : {},
+              status,
+              triggerSource,
+              ...payload.error ? { error: payload.error } : {},
+              ...payload.autoPaused ? { autoPaused: true } : {}
             }
           });
         }
@@ -21438,13 +21446,15 @@ function EventsGroup({ events }) {
     events.map((e4) => e4.event?.taskId || e4.event?.summary || "").filter(Boolean)
   ).size;
   const multi = taskCount > 1;
+  const failed = events.filter((event) => event.event?.status === "failed" || event.event?.status === "timed_out").length;
   if (open) {
     return /* @__PURE__ */ u4("div", { class: "events-group open", children: [
       /* @__PURE__ */ u4("button", { type: "button", class: "events-collapse", onClick: () => setOpen(false), title: "Collapse runs", children: [
         /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
         /* @__PURE__ */ u4("span", { children: [
           n3,
-          " scheduled runs",
+          " task attempts",
+          failed ? ` \xB7 ${failed} failed` : "",
           multi ? ` \xB7 ${taskCount} tasks` : "",
           " \xB7 hide"
         ] })
@@ -21454,7 +21464,7 @@ function EventsGroup({ events }) {
   }
   return /* @__PURE__ */ u4("button", { type: "button", class: "msg event events-summary", onClick: () => setOpen(true), title: "Show individual runs", children: [
     /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
-    /* @__PURE__ */ u4("span", { class: "event-text", children: multi ? `${taskCount} scheduled tasks ran ${n3}\xD7` : `Scheduled task ran ${n3}\xD7` }),
+    /* @__PURE__ */ u4("span", { class: "event-text", children: multi ? `${taskCount} tasks attempted ${n3}\xD7${failed ? ` \xB7 ${failed} failed` : ""}` : `Task attempted ${n3}\xD7${failed ? ` \xB7 ${failed} failed` : ""}` }),
     /* @__PURE__ */ u4("span", { class: "event-meta", children: [
       "last\xA0",
       /* @__PURE__ */ u4(RelativeTime, { ts: last.ts })
@@ -24888,6 +24898,13 @@ function toDatetimeLocal(iso) {
   const pad = (n3) => String(n3).padStart(2, "0");
   return `${d5.getFullYear()}-${pad(d5.getMonth() + 1)}-${pad(d5.getDate())}T${pad(d5.getHours())}:${pad(d5.getMinutes())}`;
 }
+function fmtDuration(ms) {
+  if (ms === null) return "";
+  if (ms < 1e3) return `${ms}ms`;
+  const seconds = Math.round(ms / 1e3);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
 function TaskCard({ task, onOpen }) {
   return /* @__PURE__ */ u4("div", { class: "task-card" + (task.status === "paused" ? " paused" : ""), "data-series-id": task.seriesId, children: [
     /* @__PURE__ */ u4("button", { type: "button", class: "task-card-summary", onClick: onOpen, title: "Open task", children: task.summary || "(no prompt)" }),
@@ -24912,6 +24929,7 @@ function TaskSingle({
   const [draft, setDraft] = h2("");
   const [schedKind, setSchedKind] = h2("cron");
   const [dtDraft, setDtDraft] = h2("");
+  const [timeoutDraft, setTimeoutDraft] = h2(String(Math.round(task.scriptTimeoutMs / 1e3)));
   const [infoOpen, setInfoOpen] = h2(false);
   const [busy, setBusy] = h2(false);
   const [err, setErr] = h2(null);
@@ -24939,12 +24957,20 @@ function TaskSingle({
           body.recurrence = draft.trim() ? draft.trim() : null;
         }
       } else if (section === "prompt") body.prompt = draft;
-      else body.script = draft;
+      else {
+        const timeoutSeconds = Number(timeoutDraft);
+        if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 900) {
+          setErr("Script timeout must be between 1 and 900 seconds.");
+          return;
+        }
+        body.script = draft;
+        body.scriptTimeoutMs = Math.round(timeoutSeconds * 1e3);
+      }
       const r4 = await patchJson(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`), body);
       if (!r4.ok) {
         const e4 = r4.data.error;
         setErr(
-          e4 === "invalid_recurrence" ? "Invalid cron expression." : e4 === "invalid_process_after" ? "Invalid date/time." : e4 || `HTTP ${r4.status}`
+          e4 === "invalid_recurrence" ? "Invalid cron expression." : e4 === "invalid_process_after" ? "Invalid date/time." : e4 === "invalid_script_timeout" ? "Script timeout must be between 1 and 900 seconds." : e4 || `HTTP ${r4.status}`
         );
         return;
       }
@@ -24977,17 +25003,14 @@ function TaskSingle({
     setBusy(true);
     setErr(null);
     try {
-      const r4 = await patchJson(
-        taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`),
-        { processAfter: (/* @__PURE__ */ new Date()).toISOString() }
-      );
+      const r4 = await postJson(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}/run`));
       if (!r4.ok) {
         setErr(r4.data.error || `HTTP ${r4.status}`);
         showToast("Run now failed", "err");
         return;
       }
       onTasks(r4.data.tasks || []);
-      showToast("Queued to run shortly", "ok");
+      showToast("Manual run queued", "ok");
     } finally {
       setBusy(false);
     }
@@ -25005,6 +25028,12 @@ function TaskSingle({
     ] }),
     err ? /* @__PURE__ */ u4("div", { class: "settings-status err", children: err }) : null,
     /* @__PURE__ */ u4("div", { class: "task-single-summary", children: task.summary || "(no prompt)" }),
+    task.consecutiveFailures > 0 ? /* @__PURE__ */ u4("div", { class: "task-failure-banner" + (task.status === "paused" ? " paused" : ""), children: [
+      task.consecutiveFailures,
+      " consecutive scheduled failure",
+      task.consecutiveFailures === 1 ? "" : "s",
+      task.status === "paused" ? " \xB7 task auto-paused" : ""
+    ] }) : null,
     /* @__PURE__ */ u4("div", { class: "task-sec", children: [
       /* @__PURE__ */ u4("div", { class: "task-sec-head", children: [
         /* @__PURE__ */ u4("span", { class: "task-sec-title", children: "Schedule" }),
@@ -25119,14 +25148,57 @@ function TaskSingle({
             onInput: (e4) => setDraft(e4.currentTarget.value)
           }
         ),
+        /* @__PURE__ */ u4("label", { class: "task-timeout-field", children: [
+          /* @__PURE__ */ u4("span", { children: "Timeout" }),
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "number",
+              min: "1",
+              max: "900",
+              step: "1",
+              value: timeoutDraft,
+              onInput: (e4) => setTimeoutDraft(e4.currentTarget.value)
+            }
+          ),
+          /* @__PURE__ */ u4("span", { children: "seconds" })
+        ] }),
         /* @__PURE__ */ u4("div", { class: "task-actions", children: [
           /* @__PURE__ */ u4("button", { type: "button", onClick: save, disabled: busy, children: busy ? "Saving\u2026" : "Save" }),
           /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setSection(null), disabled: busy, children: "Cancel" })
         ] })
       ] }) : /* @__PURE__ */ u4("div", { class: "task-sec-view", children: [
         task.script ? hi ? /* @__PURE__ */ u4("pre", { class: "hljs", "data-lang": hi.language, children: /* @__PURE__ */ u4("code", { dangerouslySetInnerHTML: { __html: hi.html } }) }) : /* @__PURE__ */ u4("pre", { class: "hljs", children: /* @__PURE__ */ u4("code", { children: task.script }) }) : /* @__PURE__ */ u4("div", { class: "muted", children: "No script." }),
-        /* @__PURE__ */ u4("button", { type: "button", class: "task-sec-edit", disabled: lockOther("script"), onClick: () => begin("script", task.script), children: "Edit" })
+        /* @__PURE__ */ u4("div", { class: "task-script-timeout muted", children: [
+          "Timeout ",
+          fmtDuration(task.scriptTimeoutMs)
+        ] }),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "task-sec-edit",
+            disabled: lockOther("script"),
+            onClick: () => {
+              setTimeoutDraft(String(Math.round(task.scriptTimeoutMs / 1e3)));
+              begin("script", task.script);
+            },
+            children: "Edit"
+          }
+        )
       ] })
+    ] }),
+    /* @__PURE__ */ u4("details", { class: "task-sec task-collapsible", children: [
+      /* @__PURE__ */ u4("summary", { class: "task-sec-title", children: "Recent attempts" }),
+      /* @__PURE__ */ u4("div", { class: "task-attempts", children: task.attempts.length === 0 ? /* @__PURE__ */ u4("div", { class: "muted", children: "No attempts recorded." }) : task.attempts.map((attempt) => /* @__PURE__ */ u4("div", { class: "task-attempt", children: [
+        /* @__PURE__ */ u4("div", { class: "task-attempt-main", children: [
+          /* @__PURE__ */ u4("span", { class: "task-attempt-status " + attempt.status, children: attempt.status.replace("_", " ") }),
+          /* @__PURE__ */ u4("span", { children: attempt.triggerSource }),
+          attempt.durationMs !== null ? /* @__PURE__ */ u4("span", { children: fmtDuration(attempt.durationMs) }) : null,
+          /* @__PURE__ */ u4("time", { title: new Date(attempt.startedAt).toLocaleString(), children: new Date(attempt.startedAt).toLocaleString() })
+        ] }),
+        attempt.error ? /* @__PURE__ */ u4("div", { class: "task-attempt-error", children: attempt.error }) : null
+      ] }, attempt.taskMessageId)) })
     ] }),
     /* @__PURE__ */ u4("div", { class: "task-single-actions", children: [
       /* @__PURE__ */ u4("div", { class: "task-run-now", children: [

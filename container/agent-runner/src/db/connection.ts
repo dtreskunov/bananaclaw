@@ -133,6 +133,29 @@ export function getOutboundDb(): Database {
         updated_at               TEXT NOT NULL
       );
     `);
+    // task_attempts: durable execution outcome for each task occurrence.
+    // The container is the sole writer; the host reads it for recurrence
+    // policy and the task UI. Created lazily for existing sessions.
+    _outbound.exec(`
+      CREATE TABLE IF NOT EXISTS task_attempts (
+        task_message_id  TEXT PRIMARY KEY,
+        series_id        TEXT NOT NULL,
+        trigger_source   TEXT NOT NULL,
+        status           TEXT NOT NULL,
+        started_at       TEXT NOT NULL,
+        completed_at     TEXT,
+        duration_ms      INTEGER,
+        exit_code        INTEGER,
+        signal           TEXT,
+        stdout           TEXT,
+        stderr           TEXT,
+        error             TEXT,
+        wake_agent       INTEGER,
+        provider_invoked INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_attempts_series_started
+        ON task_attempts(series_id, started_at DESC);
+    `);
     // turn_activity: the ordered progress trace for a turn (one row per
     // step), persisted at turn end so the web UI can show the full activity
     // trace on historical messages, not just live. Linked to the turn's last
@@ -418,6 +441,24 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       max_output_tokens   INTEGER,
       timestamp           TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE task_attempts (
+      task_message_id  TEXT PRIMARY KEY,
+      series_id        TEXT NOT NULL,
+      trigger_source   TEXT NOT NULL,
+      status           TEXT NOT NULL,
+      started_at       TEXT NOT NULL,
+      completed_at     TEXT,
+      duration_ms      INTEGER,
+      exit_code        INTEGER,
+      signal           TEXT,
+      stdout           TEXT,
+      stderr           TEXT,
+      error             TEXT,
+      wake_agent       INTEGER,
+      provider_invoked INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_task_attempts_series_started
+      ON task_attempts(series_id, started_at DESC);
   `);
 
   return { inbound: _inbound, outbound: _outbound };

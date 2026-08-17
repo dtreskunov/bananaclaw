@@ -25,6 +25,14 @@ export interface TaskRunNotice {
   recurrence: string | null;
   /** series_id grouping recurring occurrences (null for legacy one-offs). */
   seriesId: string | null;
+  /** Durable execution outcome; legacy rows without an attempt default to completed. */
+  status: 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed';
+  /** Whether this occurrence came from cron/one-shot scheduling or Run now. */
+  triggerSource: 'scheduled' | 'manual';
+  /** Captured execution error for failed/timed-out attempts. */
+  error: string | null;
+  /** The recurrence policy paused the series after this attempt. */
+  autoPaused: boolean;
 }
 
 type TaskRunListener = (notice: TaskRunNotice) => void;

@@ -14,6 +14,12 @@ import type Database from 'better-sqlite3';
 
 import { nextEvenSeq } from '../../db/session-db.js';
 
+export const DEFAULT_TASK_SCRIPT_TIMEOUT_MS = 10 * 60_000;
+export const MIN_TASK_SCRIPT_TIMEOUT_MS = 1_000;
+export const MAX_TASK_SCRIPT_TIMEOUT_MS = 15 * 60_000;
+
+const SCHEDULED_OCCURRENCE_SQL = "COALESCE(json_extract(content, '$.triggerSource'), 'scheduled') != 'manual'";
+
 export function insertTask(
   db: Database.Database,
   task: {
@@ -37,19 +43,25 @@ export function insertTask(
 
 export function cancelTask(db: Database.Database, taskId: string): void {
   db.prepare(
-    "UPDATE messages_in SET status = 'completed', recurrence = NULL WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status IN ('pending', 'paused')",
+    `UPDATE messages_in SET status = 'completed', recurrence = NULL
+      WHERE (id = ? OR series_id = ?) AND kind = 'task'
+        AND status IN ('pending', 'paused') AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
 }
 
 export function pauseTask(db: Database.Database, taskId: string): void {
   db.prepare(
-    "UPDATE messages_in SET status = 'paused' WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status = 'pending'",
+    `UPDATE messages_in SET status = 'paused'
+      WHERE (id = ? OR series_id = ?) AND kind = 'task'
+        AND status = 'pending' AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
 }
 
 export function resumeTask(db: Database.Database, taskId: string): void {
   db.prepare(
-    "UPDATE messages_in SET status = 'pending' WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status = 'paused'",
+    `UPDATE messages_in SET status = 'pending'
+      WHERE (id = ? OR series_id = ?) AND kind = 'task'
+        AND status = 'paused' AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
 }
 
@@ -58,6 +70,7 @@ export interface TaskUpdate {
   script?: string | null;
   recurrence?: string | null;
   processAfter?: string;
+  scriptTimeoutMs?: number;
 }
 
 // Merges content JSON in-place so callers can update prompt/script without
@@ -67,7 +80,9 @@ export interface TaskUpdate {
 export function updateTask(db: Database.Database, taskId: string, update: TaskUpdate): number {
   const rows = db
     .prepare(
-      "SELECT id, content FROM messages_in WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status IN ('pending', 'paused')",
+      `SELECT id, content FROM messages_in
+        WHERE (id = ? OR series_id = ?) AND kind = 'task'
+          AND status IN ('pending', 'paused') AND ${SCHEDULED_OCCURRENCE_SQL}`,
     )
     .all(taskId, taskId) as Array<{ id: string; content: string }>;
 
@@ -75,7 +90,8 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
 
   const setProcessAfter = update.processAfter !== undefined;
   const setRecurrence = update.recurrence !== undefined;
-  const mergeContent = update.prompt !== undefined || update.script !== undefined;
+  const mergeContent =
+    update.prompt !== undefined || update.script !== undefined || update.scriptTimeoutMs !== undefined;
 
   const tx = db.transaction(() => {
     for (const row of rows) {
@@ -84,6 +100,7 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
         const parsed = JSON.parse(row.content) as Record<string, unknown>;
         if (update.prompt !== undefined) parsed.prompt = update.prompt;
         if (update.script !== undefined) parsed.script = update.script;
+        if (update.scriptTimeoutMs !== undefined) parsed.scriptTimeoutMs = update.scriptTimeoutMs;
         content = JSON.stringify(parsed);
       }
 
@@ -105,6 +122,50 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
   });
   tx();
   return rows.length;
+}
+
+/** Queue a distinct non-recurring occurrence without consuming the live
+ * scheduled row. Returns the occurrence id, or null when the series is paused
+ * or missing. */
+export function runTaskNow(db: Database.Database, taskId: string, processAfter: string): string | null {
+  const row = db
+    .prepare(
+      `SELECT series_id, platform_id, channel_type, thread_id, content
+         FROM messages_in
+        WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status = 'pending'
+          AND ${SCHEDULED_OCCURRENCE_SQL}
+        ORDER BY seq DESC LIMIT 1`,
+    )
+    .get(taskId, taskId) as
+    | {
+        series_id: string;
+        platform_id: string | null;
+        channel_type: string | null;
+        thread_id: string | null;
+        content: string;
+      }
+    | undefined;
+  if (!row) return null;
+
+  const parsed = JSON.parse(row.content) as Record<string, unknown>;
+  parsed.triggerSource = 'manual';
+  const id = `task-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(
+    `INSERT INTO messages_in
+      (id, seq, timestamp, status, tries, process_after, recurrence, kind,
+       platform_id, channel_type, thread_id, content, series_id)
+     VALUES (?, ?, datetime('now'), 'pending', 0, ?, NULL, 'task', ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    nextEvenSeq(db),
+    processAfter,
+    row.platform_id,
+    row.channel_type,
+    row.thread_id,
+    JSON.stringify(parsed),
+    row.series_id,
+  );
+  return id;
 }
 
 export interface RecurringMessage {

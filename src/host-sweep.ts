@@ -163,7 +163,11 @@ async function sweep(): Promise<void> {
  * transitioned to completed. Channel adapters subscribe via `onTaskRun` and
  * decide whether/how to surface the firing; this stays channel-agnostic.
  */
-function emitTaskRuns(inDb: Database.Database, completedIds: string[]): void {
+function emitTaskRuns(
+  inDb: Database.Database,
+  outDb: Database.Database | null,
+  completedIds: string[],
+): void {
   try {
     const placeholders = completedIds.map(() => '?').join(',');
     const rows = inDb
@@ -184,6 +188,22 @@ function emitTaskRuns(inDb: Database.Database, completedIds: string[]): void {
       thread_id: string | null;
     }>;
     for (const r of rows) {
+      let attempt: { status: string; trigger_source: string; error: string | null } | undefined;
+      try {
+        attempt = outDb
+          ? outDb.prepare(
+              `SELECT status, trigger_source, error FROM task_attempts WHERE task_message_id = ?`,
+            ).get(r.id) as typeof attempt
+          : undefined;
+      } catch {
+        attempt = undefined;
+      }
+      let autoPaused = false;
+      try {
+        autoPaused = JSON.parse(r.content)?.autoPaused === true;
+      } catch {
+        /* malformed legacy task content */
+      }
       publishTaskRun({
         channelType: r.channel_type,
         platformId: r.platform_id,
@@ -196,6 +216,10 @@ function emitTaskRuns(inDb: Database.Database, completedIds: string[]): void {
         content: r.content,
         recurrence: r.recurrence,
         seriesId: r.series_id,
+        status: (attempt?.status as 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed') ?? 'completed',
+        triggerSource: attempt?.trigger_source === 'manual' ? 'manual' : 'scheduled',
+        error: attempt?.error ?? null,
+        autoPaused,
       });
     }
   } catch (err) {
@@ -224,18 +248,10 @@ async function sweepSession(session: Session): Promise<void> {
   }
 
   try {
+    let justCompleted: string[] = [];
     // 1. Sync processing_ack → messages_in status
     if (outDb) {
-      const justCompleted = syncProcessingAcks(inDb, outDb);
-      // Push a live "scheduled task ran" event for any web task row that just
-      // transitioned to completed, so an open chat tab drops the timeline
-      // bubble (and refreshes its next-run pill) without a reload. History
-      // backfills the same bubble on load, so a missed push (no live tab) is
-      // harmless. `syncProcessingAcks` returns only genuine transitions, so
-      // this fires exactly once per firing.
-      if (justCompleted.length > 0) {
-        emitTaskRuns(inDb, justCompleted);
-      }
+      justCompleted = syncProcessingAcks(inDb, outDb);
     }
 
     // 2. Wake a container if work is due and nothing is running. Ordered
@@ -276,8 +292,14 @@ async function sweepSession(session: Session): Promise<void> {
     // 5. Recurrence fanout for completed recurring tasks.
     // MODULE-HOOK:scheduling-recurrence:start
     const { handleRecurrence } = await import('./modules/scheduling/recurrence.js');
-    await handleRecurrence(inDb, session);
+    await handleRecurrence(inDb, session, outDb);
     // MODULE-HOOK:scheduling-recurrence:end
+
+    // Publish after recurrence handling so the notice includes policy results
+    // such as an automatic pause. History backfills the same event on reload.
+    if (justCompleted.length > 0) {
+      emitTaskRuns(inDb, outDb, justCompleted);
+    }
   } finally {
     inDb.close();
     outDb?.close();

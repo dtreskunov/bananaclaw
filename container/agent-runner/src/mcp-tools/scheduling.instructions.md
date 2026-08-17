@@ -11,8 +11,29 @@ Frequent recurring scheduled tasks — more than a few times a day — consume A
 1. Provide a bash `script` alongside the `prompt` when scheduling
 2. When the task fires, the script runs first
 3. Script returns: `{ "wakeAgent": true/false, "data": {...} }`
-4. If `wakeAgent: false` — nothing happens, task waits for next run
+4. If `wakeAgent: false` — the occurrence is recorded as skipped and the task waits for its next run
 5. If `wakeAgent: true` — claude receives the script's data + prompt and handles
+
+The final non-empty line on stdout must be the JSON object above, and the
+script must exit with status 0. A nonzero exit, malformed/missing JSON, or an
+expired timeout fails the occurrence without invoking the provider. Earlier
+stdout and stderr are retained as diagnostic output.
+
+`scriptTimeoutMs` is optional and defaults to 600000 milliseconds. It accepts
+values from 1000 through 900000. On timeout or output overflow, NanoClaw
+terminates the script's entire process group so child processes cannot continue
+mutating data after the occurrence has failed.
+
+Every execution is stored as a distinct attempt with its trigger source,
+script outcome, provider invocation, duration, and terminal status. Clicking
+Run now creates a manual occurrence and does not move or replace the pending
+scheduled occurrence. Manual attempts therefore do not alter recurrence
+cadence or count toward the recurrence failure policy.
+
+A recurring task is automatically paused after three consecutive failed or
+timed-out scheduled attempts. A completed or intentionally skipped scheduled
+attempt resets that count. Inspect recent attempts and repair the task before
+resuming it.
 
 ### Always test your script first
 

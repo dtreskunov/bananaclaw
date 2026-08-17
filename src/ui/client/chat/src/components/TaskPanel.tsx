@@ -18,6 +18,7 @@ import type { TaskDetailDto } from '../types';
 
 interface TasksResponse {
   tasks: TaskDetailDto[];
+  occurrenceId?: string;
   timezone?: string;
   error?: string;
 }
@@ -78,6 +79,14 @@ function toDatetimeLocal(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function fmtDuration(ms: number | null): string {
+  if (ms === null) return '';
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 /** Compact, view-only task card for list mode. Clicking the summary opens
  *  the focused single-task view. */
 function TaskCard({ task, onOpen }: { task: TaskDetailDto; onOpen: () => void }): JSX.Element {
@@ -123,6 +132,7 @@ function TaskSingle({
   const [draft, setDraft] = useState('');
   const [schedKind, setSchedKind] = useState<'once' | 'cron'>('cron');
   const [dtDraft, setDtDraft] = useState('');
+  const [timeoutDraft, setTimeoutDraft] = useState(String(Math.round(task.scriptTimeoutMs / 1000)));
   const [infoOpen, setInfoOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -152,7 +162,15 @@ function TaskSingle({
           body.recurrence = draft.trim() ? draft.trim() : null;
         }
       } else if (section === 'prompt') body.prompt = draft;
-      else body.script = draft;
+      else {
+        const timeoutSeconds = Number(timeoutDraft);
+        if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 900) {
+          setErr('Script timeout must be between 1 and 900 seconds.');
+          return;
+        }
+        body.script = draft;
+        body.scriptTimeoutMs = Math.round(timeoutSeconds * 1000);
+      }
       const r = await patchJson<TasksResponse>(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`), body);
       if (!r.ok) {
         const e = r.data.error;
@@ -161,6 +179,8 @@ function TaskSingle({
             ? 'Invalid cron expression.'
             : e === 'invalid_process_after'
               ? 'Invalid date/time.'
+              : e === 'invalid_script_timeout'
+                ? 'Script timeout must be between 1 and 900 seconds.'
               : e || `HTTP ${r.status}`,
         );
         return;
@@ -192,25 +212,20 @@ function TaskSingle({
     }
   }
 
-  // Nudge the next run to "now" by rewriting process_after. Not truly instant:
-  // the host sweep polls for due tasks roughly once a minute (see the info
-  // popover). For a recurring series this fires one extra run; the normal
-  // cadence resumes because the next occurrence is recomputed from the cron.
+  // Create a distinct manual occurrence. The existing scheduled occurrence
+  // remains untouched, preserving both cadence and audit identity.
   async function runNow(): Promise<void> {
     setBusy(true);
     setErr(null);
     try {
-      const r = await patchJson<TasksResponse>(
-        taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}`),
-        { processAfter: new Date().toISOString() },
-      );
+      const r = await postJson<TasksResponse>(taskUrl(gid, tid, `/${encodeURIComponent(task.seriesId)}/run`));
       if (!r.ok) {
         setErr(r.data.error || `HTTP ${r.status}`);
         showToast('Run now failed', 'err');
         return;
       }
       onTasks(r.data.tasks || []);
-      showToast('Queued to run shortly', 'ok');
+      showToast('Manual run queued', 'ok');
     } finally {
       setBusy(false);
     }
@@ -230,6 +245,13 @@ function TaskSingle({
       {err ? <div class="settings-status err">{err}</div> : null}
 
       <div class="task-single-summary">{task.summary || '(no prompt)'}</div>
+
+      {task.consecutiveFailures > 0 ? (
+        <div class={'task-failure-banner' + (task.status === 'paused' ? ' paused' : '')}>
+          {task.consecutiveFailures} consecutive scheduled failure{task.consecutiveFailures === 1 ? '' : 's'}
+          {task.status === 'paused' ? ' · task auto-paused' : ''}
+        </div>
+      ) : null}
 
       {/* Schedule — always visible */}
       <div class="task-sec">
@@ -350,6 +372,18 @@ function TaskSingle({
               value={draft}
               onInput={(e: JSX.TargetedEvent<HTMLTextAreaElement>) => setDraft(e.currentTarget.value)}
             />
+            <label class="task-timeout-field">
+              <span>Timeout</span>
+              <input
+                type="number"
+                min="1"
+                max="900"
+                step="1"
+                value={timeoutDraft}
+                onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setTimeoutDraft(e.currentTarget.value)}
+              />
+              <span>seconds</span>
+            </label>
             <div class="task-actions">
               <button type="button" onClick={save} disabled={busy}>{busy ? 'Saving\u2026' : 'Save'}</button>
               <button type="button" class="ghost" onClick={() => setSection(null)} disabled={busy}>Cancel</button>
@@ -370,11 +404,37 @@ function TaskSingle({
             ) : (
               <div class="muted">No script.</div>
             )}
-            <button type="button" class="task-sec-edit" disabled={lockOther('script')} onClick={() => begin('script', task.script)}>
+            <div class="task-script-timeout muted">Timeout {fmtDuration(task.scriptTimeoutMs)}</div>
+            <button
+              type="button"
+              class="task-sec-edit"
+              disabled={lockOther('script')}
+              onClick={() => {
+                setTimeoutDraft(String(Math.round(task.scriptTimeoutMs / 1000)));
+                begin('script', task.script);
+              }}
+            >
               Edit
             </button>
           </div>
         )}
+      </details>
+
+      <details class="task-sec task-collapsible">
+        <summary class="task-sec-title">Recent attempts</summary>
+        <div class="task-attempts">
+          {task.attempts.length === 0 ? <div class="muted">No attempts recorded.</div> : task.attempts.map((attempt) => (
+            <div class="task-attempt" key={attempt.taskMessageId}>
+              <div class="task-attempt-main">
+                <span class={'task-attempt-status ' + attempt.status}>{attempt.status.replace('_', ' ')}</span>
+                <span>{attempt.triggerSource}</span>
+                {attempt.durationMs !== null ? <span>{fmtDuration(attempt.durationMs)}</span> : null}
+                <time title={new Date(attempt.startedAt).toLocaleString()}>{new Date(attempt.startedAt).toLocaleString()}</time>
+              </div>
+              {attempt.error ? <div class="task-attempt-error">{attempt.error}</div> : null}
+            </div>
+          ))}
+        </div>
       </details>
 
       {/* Lifecycle actions */}

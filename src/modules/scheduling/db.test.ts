@@ -17,6 +17,7 @@ import {
   resumeTask,
   updateTask,
   getCompletedRecurring,
+  runTaskNow,
   type RecurringMessage,
 } from './db.js';
 
@@ -156,6 +157,17 @@ describe('updateTask', () => {
     expect(parsed.extra).toBe('keep me');
   });
 
+  it('updates the script timeout in content JSON', () => {
+    const db = freshDb();
+    insertBasicTask(db, 'task-timeout', null);
+
+    updateTask(db, 'task-timeout', { scriptTimeoutMs: 120_000 });
+
+    const row = db.prepare("SELECT content FROM messages_in WHERE id = 'task-timeout'").get() as { content: string };
+    expect(JSON.parse(row.content).scriptTimeoutMs).toBe(120_000);
+    db.close();
+  });
+
   it('updates recurrence and process_after when supplied', () => {
     const db = freshDb();
     insertTask(db, {
@@ -251,6 +263,37 @@ describe('updateTask', () => {
 
     const touched = updateTask(db, 'task-1', { prompt: 'new' });
     expect(touched).toBe(0);
+  });
+});
+
+describe('runTaskNow', () => {
+  it('creates a distinct manual occurrence and preserves the scheduled row', () => {
+    const db = freshDb();
+    insertBasicTask(db, 'task-series', '0 6 * * *');
+
+    const manualId = runTaskNow(db, 'task-series', '2026-08-16T20:00:00Z');
+
+    expect(manualId).toMatch(/^task-run-/);
+    const scheduled = db
+      .prepare("SELECT status, recurrence, content FROM messages_in WHERE id = 'task-series'")
+      .get() as {
+      status: string;
+      recurrence: string;
+      content: string;
+    };
+    expect(scheduled.status).toBe('pending');
+    expect(scheduled.recurrence).toBe('0 6 * * *');
+    expect(JSON.parse(scheduled.content).triggerSource).toBeUndefined();
+
+    const manual = db.prepare('SELECT series_id, recurrence, content FROM messages_in WHERE id = ?').get(manualId) as {
+      series_id: string;
+      recurrence: string | null;
+      content: string;
+    };
+    expect(manual.series_id).toBe('task-series');
+    expect(manual.recurrence).toBeNull();
+    expect(JSON.parse(manual.content).triggerSource).toBe('manual');
+    db.close();
   });
 });
 

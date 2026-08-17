@@ -30,7 +30,17 @@ import {
 import { deleteSession, findSessionByAgentGroup, findSessionForAgent } from '../../../db/sessions.js';
 import { openInboundDb, openOutboundDb, sessionDir, writeSessionMessage } from '../../../session-manager.js';
 import { killContainer } from '../../../container-runner.js';
-import { cancelTask, pauseTask, resumeTask, updateTask, type TaskUpdate } from '../../../modules/scheduling/db.js';
+import {
+  cancelTask,
+  pauseTask,
+  resumeTask,
+  runTaskNow,
+  updateTask,
+  DEFAULT_TASK_SCRIPT_TIMEOUT_MS,
+  MAX_TASK_SCRIPT_TIMEOUT_MS,
+  MIN_TASK_SCRIPT_TIMEOUT_MS,
+  type TaskUpdate,
+} from '../../../modules/scheduling/db.js';
 import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
 import { ForkError, forkThread, type ForkThreadResult } from '../../../fork-session.js';
 import {
@@ -169,7 +179,13 @@ export function matchChatPath(
   | { kind: 'threads'; groupId: string }
   | { kind: 'search'; groupId: string }
   | { kind: 'tasks'; groupId: string; threadId: string }
-  | { kind: 'task-action'; groupId: string; threadId: string; seriesId: string; action: 'pause' | 'resume' | 'cancel' }
+  | {
+      kind: 'task-action';
+      groupId: string;
+      threadId: string;
+      seriesId: string;
+      action: 'pause' | 'resume' | 'cancel' | 'run';
+    }
   | { kind: 'task-update'; groupId: string; threadId: string; seriesId: string }
   | { kind: 'delete'; groupId: string; threadId: string }
   | { kind: 'fork'; groupId: string; threadId: string }
@@ -204,14 +220,16 @@ export function matchChatPath(
   const tasksList = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks$/);
   if (tasksList)
     return { kind: 'tasks', groupId: decodeURIComponent(tasksList[1]), threadId: decodeURIComponent(tasksList[2]) };
-  const taskAction = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks\/([^/]+)\/(pause|resume|cancel)$/);
+  const taskAction = pathname.match(
+    /^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks\/([^/]+)\/(pause|resume|cancel|run)$/,
+  );
   if (taskAction)
     return {
       kind: 'task-action',
       groupId: decodeURIComponent(taskAction[1]),
       threadId: decodeURIComponent(taskAction[2]),
       seriesId: decodeURIComponent(taskAction[3]),
-      action: taskAction[4] as 'pause' | 'resume' | 'cancel',
+      action: taskAction[4] as 'pause' | 'resume' | 'cancel' | 'run',
     };
   const taskUpdate = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks\/([^/]+)$/);
   if (taskUpdate)
@@ -664,16 +682,33 @@ export async function handleChatRequest(
       try {
         const exists = inDb
           .prepare(
-            "SELECT 1 FROM messages_in WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status IN ('pending', 'paused') LIMIT 1",
+            `SELECT 1 FROM messages_in
+              WHERE (id = ? OR series_id = ?) AND kind = 'task'
+                AND status IN ('pending', 'paused')
+                AND COALESCE(json_extract(content, '$.triggerSource'), 'scheduled') != 'manual'
+              LIMIT 1`,
           )
           .get(m.seriesId, m.seriesId);
         if (!exists) {
           writeJson(res, 404, { error: 'task_not_found' });
           return true;
         }
+        let occurrenceId: string | null = null;
         if (m.action === 'pause') pauseTask(inDb, m.seriesId);
         else if (m.action === 'resume') resumeTask(inDb, m.seriesId);
-        else cancelTask(inDb, m.seriesId);
+        else if (m.action === 'cancel') cancelTask(inDb, m.seriesId);
+        else {
+          occurrenceId = runTaskNow(inDb, m.seriesId, new Date().toISOString());
+          if (!occurrenceId) {
+            writeJson(res, 409, { error: 'task_not_runnable' });
+            return true;
+          }
+        }
+        if (occurrenceId) {
+          const tasks = readLiveTaskDetails(m.groupId, r.sessionId, r.channelType, m.threadId, r.isDm);
+          writeJson(res, 200, { ok: true, occurrenceId, tasks });
+          return true;
+        }
       } finally {
         inDb.close();
       }
@@ -733,6 +768,17 @@ export async function handleChatRequest(
         return true;
       }
       update.recurrence = typeof cron === 'string' && !cron.trim() ? null : cron;
+    }
+    if (typeof b.scriptTimeoutMs === 'number') {
+      if (
+        !Number.isFinite(b.scriptTimeoutMs) ||
+        b.scriptTimeoutMs < MIN_TASK_SCRIPT_TIMEOUT_MS ||
+        b.scriptTimeoutMs > MAX_TASK_SCRIPT_TIMEOUT_MS
+      ) {
+        writeJson(res, 400, { error: 'invalid_script_timeout' });
+        return true;
+      }
+      update.scriptTimeoutMs = Math.round(b.scriptTimeoutMs);
     }
     if (Object.keys(update).length === 0) {
       writeJson(res, 400, { error: 'no_fields' });
@@ -804,7 +850,16 @@ export interface HistoryMessage {
   activity?: { ts: string; text: string }[];
   /** Non-chat timeline event (e.g. a scheduled task firing). Present only
    *  when `direction === 'event'`; drives distinct rendering client-side. */
-  event?: { kind: 'task-run'; taskId?: string; summary: string; recurrence?: string | null };
+  event?: {
+    kind: 'task-run';
+    taskId?: string;
+    summary: string;
+    recurrence?: string | null;
+    status?: TaskAttemptDto['status'];
+    triggerSource?: 'scheduled' | 'manual';
+    error?: string | null;
+    autoPaused?: boolean;
+  };
   /** Emoji reactions the agent added to this message, resolved to unicode
    *  and in the order they were emitted. Folded in from `operation:'reaction'`
    *  outbound rows targeting this message id. */
@@ -1205,6 +1260,37 @@ export function readChatHistory(
           }[]);
       for (const r of taskRows) {
         const summary = summarizeTaskPrompt(r.content);
+        let attempt:
+          | {
+              status: TaskAttemptDto['status'];
+              trigger_source: string;
+              error: string | null;
+            }
+          | undefined;
+        try {
+          const outDb = openOutboundDb(groupId, session.id);
+          try {
+            attempt = outDb
+              .prepare(`SELECT status, trigger_source, error FROM task_attempts WHERE task_message_id = ?`)
+              .get(r.id) as typeof attempt;
+          } finally {
+            outDb.close();
+          }
+        } catch {
+          attempt = undefined;
+        }
+        const status = attempt?.status ?? 'completed';
+        const triggerSource = attempt?.trigger_source === 'manual' ? 'manual' : 'scheduled';
+        const subject = triggerSource === 'manual' ? 'Manual task' : 'Scheduled task';
+        const verb =
+          status === 'timed_out'
+            ? 'timed out'
+            : status === 'failed'
+              ? 'failed'
+              : status === 'skipped'
+                ? 'skipped'
+                : 'completed';
+        const autoPaused = taskWasAutoPaused(r.content);
         // Place the firing at the time it was actually due to run
         // (`process_after`), not the row's creation `timestamp`. A recurring
         // occurrence is cloned right after the *previous* run, so its
@@ -1216,12 +1302,16 @@ export function readChatHistory(
           direction: 'event',
           id: r.id,
           timestamp: r.process_after ?? r.timestamp,
-          text: `Scheduled task ran: ${summary}`,
+          text: `${subject} ${verb}${autoPaused ? ' and was auto-paused' : ''}: ${summary}`,
           event: {
             kind: 'task-run',
             ...(r.series_id ? { taskId: r.series_id } : {}),
             summary,
             ...(r.recurrence ? { recurrence: r.recurrence } : {}),
+            status,
+            triggerSource,
+            ...(attempt?.error ? { error: attempt.error } : {}),
+            ...(autoPaused ? { autoPaused: true } : {}),
           },
         });
       }
@@ -1476,6 +1566,14 @@ function summarizeTaskPrompt(content: string): string {
       .map((l) => l.trim())
       .find((l) => l.length > 0) || 'Scheduled task';
   return firstLine.length > 80 ? firstLine.slice(0, 77) + '\u2026' : firstLine;
+}
+
+function taskWasAutoPaused(content: string): boolean {
+  try {
+    return JSON.parse(content)?.autoPaused === true;
+  } catch {
+    return false;
+  }
 }
 
 function encodedAttachmentUrl(groupId: string, threadId: string, localPath: string): string {
@@ -1876,18 +1974,95 @@ export interface TaskDetailDto {
   hasScript: boolean;
   /** Full script text (empty string when the task has no script). */
   script: string;
+  /** Bounded wall-clock timeout for the pre-task script. */
+  scriptTimeoutMs: number;
+  /** Consecutive scheduled failures carried into the live occurrence. */
+  consecutiveFailures: number;
+  /** Recent execution attempts, newest first. */
+  attempts: TaskAttemptDto[];
+}
+
+export interface TaskAttemptDto {
+  taskMessageId: string;
+  triggerSource: 'scheduled' | 'manual';
+  status: 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed';
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  exitCode: number | null;
+  signal: string | null;
+  error: string | null;
+  wakeAgent: boolean | null;
+  providerInvoked: boolean;
 }
 
 /** Parse a task row's content JSON into its prompt + script text. */
-function parseTaskContent(content: string): { prompt: string; script: string } {
+function parseTaskContent(content: string): {
+  prompt: string;
+  script: string;
+  scriptTimeoutMs: number;
+  consecutiveFailures: number;
+} {
   try {
-    const o = JSON.parse(content) as { prompt?: unknown; script?: unknown };
+    const o = JSON.parse(content) as Record<string, unknown>;
     return {
       prompt: typeof o?.prompt === 'string' ? o.prompt : '',
       script: typeof o?.script === 'string' ? o.script : '',
+      scriptTimeoutMs: typeof o?.scriptTimeoutMs === 'number' ? o.scriptTimeoutMs : DEFAULT_TASK_SCRIPT_TIMEOUT_MS,
+      consecutiveFailures: typeof o?.consecutiveFailures === 'number' ? o.consecutiveFailures : 0,
     };
   } catch {
-    return { prompt: '', script: '' };
+    return {
+      prompt: '',
+      script: '',
+      scriptTimeoutMs: DEFAULT_TASK_SCRIPT_TIMEOUT_MS,
+      consecutiveFailures: 0,
+    };
+  }
+}
+
+function readTaskAttempts(groupId: string, sessionId: string, seriesId: string): TaskAttemptDto[] {
+  try {
+    const outDb = openOutboundDb(groupId, sessionId);
+    try {
+      const rows = outDb
+        .prepare(
+          `SELECT task_message_id, trigger_source, status, started_at, completed_at,
+                  duration_ms, exit_code, signal, error, wake_agent, provider_invoked
+             FROM task_attempts WHERE series_id = ?
+             ORDER BY started_at DESC LIMIT 10`,
+        )
+        .all(seriesId) as Array<{
+        task_message_id: string;
+        trigger_source: string;
+        status: TaskAttemptDto['status'];
+        started_at: string;
+        completed_at: string | null;
+        duration_ms: number | null;
+        exit_code: number | null;
+        signal: string | null;
+        error: string | null;
+        wake_agent: number | null;
+        provider_invoked: number;
+      }>;
+      return rows.map((row) => ({
+        taskMessageId: row.task_message_id,
+        triggerSource: row.trigger_source === 'manual' ? 'manual' : 'scheduled',
+        status: row.status,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        durationMs: row.duration_ms,
+        exitCode: row.exit_code,
+        signal: row.signal,
+        error: row.error,
+        wakeAgent: row.wake_agent === null ? null : row.wake_agent === 1,
+        providerInvoked: row.provider_invoked === 1,
+      }));
+    } finally {
+      outDb.close();
+    }
+  } catch {
+    return [];
   }
 }
 
@@ -1949,6 +2124,7 @@ function readLiveTaskDetails(
                 `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
                    FROM messages_in
                   WHERE kind = 'task' AND status IN ('pending', 'paused')
+                    AND COALESCE(json_extract(content, '$.triggerSource'), 'scheduled') != 'manual'
                     AND channel_type = ? AND thread_id IS NULL
                   GROUP BY series_id
                   ORDER BY (process_after IS NULL) ASC, process_after ASC`,
@@ -1959,6 +2135,7 @@ function readLiveTaskDetails(
                 `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
                    FROM messages_in
                   WHERE kind = 'task' AND status IN ('pending', 'paused')
+                    AND COALESCE(json_extract(content, '$.triggerSource'), 'scheduled') != 'manual'
                     AND channel_type = ? AND thread_id = ?
                   GROUP BY series_id
                   ORDER BY (process_after IS NULL) ASC, process_after ASC`,
@@ -1972,7 +2149,7 @@ function readLiveTaskDetails(
         content: string;
       }[];
       for (const r of rows) {
-        const { prompt, script } = parseTaskContent(r.content);
+        const { prompt, script, scriptTimeoutMs, consecutiveFailures } = parseTaskContent(r.content);
         out.push({
           seriesId: r.id,
           status: r.status === 'paused' ? 'paused' : 'pending',
@@ -1982,6 +2159,9 @@ function readLiveTaskDetails(
           prompt,
           hasScript: script.length > 0,
           script,
+          scriptTimeoutMs,
+          consecutiveFailures,
+          attempts: readTaskAttempts(groupId, sessionId, r.id),
         });
       }
     } finally {
@@ -2720,6 +2900,7 @@ function readThreadStats(
             `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
                FROM messages_in
               WHERE kind = 'task' AND status IN ('pending', 'paused')
+                AND COALESCE(json_extract(content, '$.triggerSource'), 'scheduled') != 'manual'
                 AND channel_type = ? AND thread_id = ?
               GROUP BY series_id
               ORDER BY (process_after IS NULL) ASC, process_after ASC`,
@@ -3238,6 +3419,10 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
           summary,
           ...(event.seriesId ? { taskId: event.seriesId } : {}),
           ...(event.recurrence ? { recurrence: event.recurrence } : {}),
+          status: event.status,
+          triggerSource: event.triggerSource,
+          ...(event.error ? { error: event.error } : {}),
+          ...(event.autoPaused ? { autoPaused: true } : {}),
         });
       } catch (err) {
         log.warn('web chat ws task-run send failed', { err });

@@ -325,4 +325,26 @@ CREATE TABLE IF NOT EXISTS container_state (
   tool_started_at          TEXT,
   updated_at               TEXT NOT NULL
 );
+
+-- Durable outcome for each scheduled-task occurrence. The task message ID is
+-- unique per scheduled or manual firing; series_id ties recurring attempts
+-- back to the stable task handle shown to users.
+CREATE TABLE IF NOT EXISTS task_attempts (
+  task_message_id  TEXT PRIMARY KEY,
+  series_id        TEXT NOT NULL,
+  trigger_source   TEXT NOT NULL,
+  status           TEXT NOT NULL,
+  started_at       TEXT NOT NULL,
+  completed_at     TEXT,
+  duration_ms      INTEGER,
+  exit_code        INTEGER,
+  signal           TEXT,
+  stdout           TEXT,
+  stderr           TEXT,
+  error             TEXT,
+  wake_agent       INTEGER,
+  provider_invoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_task_attempts_series_started
+  ON task_attempts(series_id, started_at DESC);
 `;

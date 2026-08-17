@@ -4,6 +4,7 @@ import { writeMessageOut } from './db/messages-out.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
 import { writeTurnActivity } from './db/turn-activity.js';
+import { completeTaskAttempts, markTaskAttemptsProviderInvoked } from './db/task-attempts.js';
 import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded } from './db/session-state.js';
 import { getForkOrigin, type ForkOriginRow } from './db/fork-origin.js';
@@ -383,6 +384,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const rawFiles = extractFileAttachments(keep);
     const { prompt: resolvedPrompt, files } = await transcribeAudioFiles(rawFiles, prompt);
     prompt = resolvedPrompt;
+    const taskAttemptIds = keep.filter((message) => message.kind === 'task').map((message) => message.id);
+    markTaskAttemptsProviderInvoked(taskAttemptIds);
+    let taskProviderFailed = false;
     try {
       while (true) {
         const query = config.provider.query({
@@ -410,6 +414,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             setContinuation(config.providerName, continuation);
           }
           if (result.unsurfacedError) {
+            taskProviderFailed = true;
             const errorRouting = result.unsurfacedError.routing;
             const tag = result.unsurfacedError.classification
               ? ` [${result.unsurfacedError.classification}]`
@@ -447,6 +452,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           // conversation state; the user's next turn should resume the
           // rolled-back `continuation` we already have.
           try {
+            taskProviderFailed = true;
             setFailedTurn({ prompt: promptTracker.latest, error: errMsg, recorded_at: Date.now() });
           } catch (e) {
             log(`Failed to persist failed-turn record: ${e instanceof Error ? e.message : String(e)}`);
@@ -473,6 +479,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     // Ensure completed even if processQuery ended without a result event
     // (e.g. stream closed unexpectedly).
+    completeTaskAttempts(taskAttemptIds, taskProviderFailed);
     markCompleted(processingIds);
     log(`Completed ${ids.length} message(s)`);
   }
