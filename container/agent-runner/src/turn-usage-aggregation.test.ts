@@ -3,8 +3,30 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { sumFxUsageFacts, readFxUsageSince } from './providers/fx';
+import { sumFxUsageFacts, readFxUsageSince, fxLimitsFromCatalog } from './providers/fx';
 import { sumOpenCodeUsage } from './providers/opencode';
+
+describe('fxLimitsFromCatalog', () => {
+  it('maps the gateway fields onto the usage columns', () => {
+    const limits = fxLimitsFromCatalog([{ id: 'zai/glm-5.2', context_window: 1000000, max_tokens: 128000 }]);
+    expect(limits.get('zai/glm-5.2')).toEqual({ context_window: 1000000, max_output_tokens: 128000 });
+  });
+
+  // 47 of the gateway's 226 models report max_tokens === context_window, which
+  // is the absence of an output cap rather than a 1M-token one.
+  it('drops an output cap equal to the context window', () => {
+    const limits = fxLimitsFromCatalog([{ id: 'minimax/minimax-m3', context_window: 1000000, max_tokens: 1000000 }]);
+    expect(limits.get('minimax/minimax-m3')).toEqual({ context_window: 1000000, max_output_tokens: undefined });
+  });
+
+  it('skips entries with no id or no usable numbers', () => {
+    const limits = fxLimitsFromCatalog([
+      { context_window: 100 },
+      { id: 'a/b', context_window: 0, max_tokens: 0 },
+    ]);
+    expect(limits.size).toBe(0);
+  });
+});
 
 describe('sumOpenCodeUsage', () => {
   // The bug this replaced: only the final assistant message was recorded, so a

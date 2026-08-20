@@ -193,6 +193,82 @@ export function sumFxUsageFacts(facts: FxUsageFact[]): TurnUsage | null {
   return usage;
 }
 
+/**
+ * Model limits for the context/output budget bars.
+ *
+ * fx reports no limits over ACP, so they come from the gateway's own catalog —
+ * the same endpoint fx resolves its model list from, so anything fx can run is
+ * described here.
+ */
+const FX_CATALOG_PATH = '/coding-agent/v1/models';
+const FX_CATALOG_TIMEOUT_MS = 10_000;
+
+interface FxCatalogModel {
+  id?: string;
+  context_window?: number;
+  max_tokens?: number;
+}
+
+export interface FxModelLimits {
+  context_window?: number;
+  max_output_tokens?: number;
+}
+
+export function fxLimitsFromCatalog(models: FxCatalogModel[]): Map<string, FxModelLimits> {
+  const out = new Map<string, FxModelLimits>();
+  for (const m of models) {
+    if (!m.id) continue;
+    const context = m.context_window && m.context_window > 0 ? m.context_window : undefined;
+    // The gateway reports max_tokens === context_window for models it has no
+    // separate output cap for; that is not a cap, and rendering it as one gives
+    // a budget bar that can never move.
+    const output = m.max_tokens && m.max_tokens > 0 && (!context || m.max_tokens < context) ? m.max_tokens : undefined;
+    if (context === undefined && output === undefined) continue;
+    out.set(m.id, { context_window: context, max_output_tokens: output });
+  }
+  return out;
+}
+
+let catalogLimits: Map<string, FxModelLimits> | null = null;
+let catalogInflight: Promise<Map<string, FxModelLimits> | null> | null = null;
+
+/** Goes through the shim so the request takes the same proxy hop as fx's own. */
+function fxCatalogUrl(): string | null {
+  const base = ensureGatewayShim()?.baseUrl ?? process.env.FX_GATEWAY_BASE_URL;
+  return base ? `${base.replace(/\/+$/, '')}${FX_CATALOG_PATH}` : null;
+}
+
+async function loadFxModelLimits(): Promise<Map<string, FxModelLimits> | null> {
+  if (catalogLimits) return catalogLimits;
+  if (catalogInflight) return catalogInflight;
+  catalogInflight = (async () => {
+    const url = fxCatalogUrl();
+    if (!url) return null;
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(FX_CATALOG_TIMEOUT_MS) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { data?: FxCatalogModel[] };
+      catalogLimits = fxLimitsFromCatalog(json.data ?? []);
+      return catalogLimits;
+    } catch (err) {
+      log(`could not read model catalog: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    } finally {
+      catalogInflight = null;
+    }
+  })();
+  return catalogInflight;
+}
+
+/** Best-effort: usage is still worth recording without limits. */
+async function attachFxModelLimits(usage: TurnUsage): Promise<void> {
+  if (!usage.model) return;
+  const limits = (await loadFxModelLimits())?.get(usage.model);
+  if (!limits) return;
+  if (limits.context_window !== undefined) usage.context_window = limits.context_window;
+  if (limits.max_output_tokens !== undefined) usage.max_output_tokens = limits.max_output_tokens;
+}
+
 /** Sum every generation fx logged after `offset`. Exported for tests. */
 export function readFxUsageSince(offset: number): TurnUsage | null {
   let raw: string;
@@ -597,7 +673,10 @@ export class FxProvider implements AgentProvider {
         // Emitted before the outcome branches: a refused or errored turn still
         // burned tokens, and dropping them silently under-reports spend.
         const usage = readFxUsageSince(usageOffset);
-        if (usage) yield { type: 'usage', data: usage };
+        if (usage) {
+          await attachFxModelLimits(usage);
+          yield { type: 'usage', data: usage };
+        }
 
         const outcome = settled as { stopReason?: StopReason; error?: Error } | null;
         if (outcome?.error) {
