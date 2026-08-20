@@ -2,7 +2,31 @@ import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { resolveProviderName } from './container-runner.js';
+import { packageDockerfile, resolveProviderName } from './container-runner.js';
+
+describe('packageDockerfile', () => {
+  const none = { apt: [], npm: [], pip: [] };
+
+  it('quotes version constraints so they are not read as redirects', () => {
+    const out = packageDockerfile('base', { ...none, pip: ['minimax-mcp', 'mcp<2'] });
+    expect(out).toContain(`pip install --no-cache-dir 'minimax-mcp' 'mcp<2'`);
+    expect(out).not.toMatch(/mcp<2(?!')/);
+  });
+
+  it('quotes npm specs in both the build allowlist and the install', () => {
+    const out = packageDockerfile('base', { ...none, npm: ['@stripe/link-cli@0.13.1'] });
+    expect(out).toContain(`echo 'only-built-dependencies[]=@stripe/link-cli@0.13.1' >> /root/.npmrc`);
+    expect(out).toContain(`pnpm install -g '@stripe/link-cli@0.13.1'`);
+  });
+
+  it('escapes a quote inside a spec rather than closing the string', () => {
+    expect(packageDockerfile('base', { ...none, apt: [`a'b`] })).toContain(`'a'\\''b'`);
+  });
+
+  it('emits no install step for an empty list', () => {
+    expect(packageDockerfile('base', none)).toBe('FROM base\nUSER root\nUSER node\n');
+  });
+});
 
 describe('resolveProviderName', () => {
   it('prefers session over container config', () => {

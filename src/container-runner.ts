@@ -943,6 +943,39 @@ async function buildContainerArgs(
 }
 
 /** Build a per-agent-group Docker image with custom packages. */
+/** Package specs reach here from `ncl` and self-mod, and a version constraint
+ * like `mcp<2` is a shell redirect unless quoted. */
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+export function packageDockerfile(
+  from: string,
+  packages: { apt: string[]; npm: string[]; pip: string[] },
+): string {
+  let dockerfile = `FROM ${from}\nUSER root\n`;
+  if (packages.apt.length > 0) {
+    const specs = packages.apt.map(shellQuote).join(' ');
+    dockerfile += `RUN apt-get update && apt-get install -y ${specs} && rm -rf /var/lib/apt/lists/*\n`;
+  }
+  if (packages.pip.length > 0) {
+    // Install into the shared venv at /opt/agent-venv (set up in the base image)
+    // so console scripts land on PATH and we avoid PEP 668 system-install errors.
+    dockerfile += `RUN /opt/agent-venv/bin/pip install --no-cache-dir ${packages.pip.map(shellQuote).join(' ')}\n`;
+  }
+  if (packages.npm.length > 0) {
+    // pnpm skips build scripts unless packages are allowlisted. Append each
+    // to /root/.npmrc (base image sets it up for agent-browser) so packages
+    // with postinstall — e.g. playwright, puppeteer, native addons — don't
+    // install silently broken.
+    const allowlist = packages.npm
+      .map((p) => `echo ${shellQuote(`only-built-dependencies[]=${p}`)} >> /root/.npmrc`)
+      .join(' && ');
+    dockerfile += `RUN ${allowlist} && pnpm install -g ${packages.npm.map(shellQuote).join(' ')}\n`;
+  }
+  return dockerfile + 'USER node\n';
+}
+
 export async function buildAgentGroupImage(agentGroupId: string): Promise<void> {
   const agentGroup = getAgentGroup(agentGroupId);
   if (!agentGroup) throw new Error('Agent group not found');
@@ -956,24 +989,11 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
     throw new Error('No packages to install. Use install_packages first.');
   }
 
-  let dockerfile = `FROM ${CONTAINER_IMAGE}\nUSER root\n`;
-  if (aptPackages.length > 0) {
-    dockerfile += `RUN apt-get update && apt-get install -y ${aptPackages.join(' ')} && rm -rf /var/lib/apt/lists/*\n`;
-  }
-  if (pipPackages.length > 0) {
-    // Install into the shared venv at /opt/agent-venv (set up in the base image)
-    // so console scripts land on PATH and we avoid PEP 668 system-install errors.
-    dockerfile += `RUN /opt/agent-venv/bin/pip install --no-cache-dir ${pipPackages.join(' ')}\n`;
-  }
-  if (npmPackages.length > 0) {
-    // pnpm skips build scripts unless packages are allowlisted. Append each
-    // to /root/.npmrc (base image sets it up for agent-browser) so packages
-    // with postinstall — e.g. playwright, puppeteer, native addons — don't
-    // install silently broken.
-    const allowlist = npmPackages.map((p) => `echo 'only-built-dependencies[]=${p}' >> /root/.npmrc`).join(' && ');
-    dockerfile += `RUN ${allowlist} && pnpm install -g ${npmPackages.join(' ')}\n`;
-  }
-  dockerfile += 'USER node\n';
+  const dockerfile = packageDockerfile(CONTAINER_IMAGE, {
+    apt: aptPackages,
+    npm: npmPackages,
+    pip: pipPackages,
+  });
 
   const imageTag = `${CONTAINER_IMAGE_BASE}:${agentGroupId}`;
 

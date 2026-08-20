@@ -274,7 +274,8 @@ registerResource({
       access: 'approval',
       description:
         'Add an MCP server to a group. Requires `ncl groups restart` to take effect. ' +
-        'Use --id <group-id> --name <server-name> --command <cmd> [--args <json-array>] [--env <json-object>].',
+        'Use --id <group-id> --name <server-name> --command <cmd> [--args <json-array>] [--env <json-object>] ' +
+        '[--instructions <text>].',
       handler: async (args) => {
         const id = args.id as string;
         if (!id) throw new Error('--id is required');
@@ -287,10 +288,17 @@ registerResource({
         if (!row) throw new Error(`No container config for group: ${id}`);
 
         const servers = JSON.parse(row.mcp_servers) as Record<string, McpServerConfig>;
+        // Re-adding an existing server is how a command gets changed, so keep
+        // the fields these flags don't cover (instructions, timeout). A remote
+        // entry has no stdio shape worth keeping.
+        const previous = servers[name];
+        const keep = previous && !('url' in previous) ? previous : undefined;
         servers[name] = {
+          ...keep,
           command,
-          args: args.args ? (JSON.parse(args.args as string) as string[]) : [],
-          env: args.env ? (JSON.parse(args.env as string) as Record<string, string>) : {},
+          args: args.args ? (JSON.parse(args.args as string) as string[]) : (keep?.args ?? []),
+          env: args.env ? (JSON.parse(args.env as string) as Record<string, string>) : (keep?.env ?? {}),
+          ...(args.instructions ? { instructions: args.instructions as string } : {}),
         };
         updateContainerConfigJson(id, 'mcp_servers', servers);
 
