@@ -110,12 +110,41 @@ describe('sumFxUsageFacts', () => {
 
   // fx's input_tokens is already cache-inclusive, so occupancy must not add
   // the cache reads back on top of it.
-  it('reports context occupancy from the last generation only', () => {
+  it('reports context occupancy from the biggest generation only', () => {
     const total = sumFxUsageFacts([
       { input_tokens: 11682, output_tokens: 341, cache_read_tokens: 112 },
       { input_tokens: 11827, output_tokens: 149, cache_read_tokens: 11681 },
     ]);
     expect(total!.context_tokens).toBe(11827 + 149);
+  });
+
+  // fx bills a subagent's round trips through the parent's usage runtime, so
+  // they land in the same window unmarked. Their conversation is separate and
+  // much smaller, and must not be mistaken for this session's occupancy.
+  it('ignores a smaller trailing generation from a subagent', () => {
+    const total = sumFxUsageFacts([
+      { input_tokens: 11682, output_tokens: 341, cache_read_tokens: 112 },
+      { input_tokens: 11827, output_tokens: 149, cache_read_tokens: 11681 },
+      { input_tokens: 2400, output_tokens: 80, cache_read_tokens: 0 },
+    ]);
+    expect(total!.context_tokens).toBe(11827 + 149);
+    expect(total!.output_tokens).toBe(341 + 149 + 80);
+  });
+
+  // After a compaction the peak no longer exists; only the final round trip
+  // describes what the next turn inherits.
+  it('falls back to the last generation when the turn compacted', () => {
+    const facts = [
+      { input_tokens: 31682, output_tokens: 341, cache_read_tokens: 112 },
+      { input_tokens: 9400, output_tokens: 149, cache_read_tokens: 0 },
+    ];
+    expect(sumFxUsageFacts(facts, { compacted: true })!.context_tokens).toBe(9400 + 149);
+    expect(sumFxUsageFacts(facts)!.context_tokens).toBe(31682 + 341);
+  });
+
+  it('counts cache writes as part of the resident prompt', () => {
+    const total = sumFxUsageFacts([{ input_tokens: 900, cache_write_tokens: 400, output_tokens: 20 }]);
+    expect(total!.context_tokens).toBe(900 + 400 + 20);
   });
 
   it('returns null with no generations', () => {

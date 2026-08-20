@@ -71,8 +71,11 @@ function isCommitPosition(value: unknown): value is FxCommitPosition {
  * The watermark filename carries the log generation, and fx resolves it from
  * the log's *first* event rather than by scanning the directory — generations
  * are random 128-bit ids, so there is no "latest" to pick.
+ *
+ * Compaction rewrites the log under a fresh generation, so a change in this
+ * value across a turn is also how a caller detects that fx compacted.
  */
-function readLogGeneration(sessionDir: string): string | null {
+export function readFxLogGeneration(sessionDir: string): string | null {
   let fd: number | undefined;
   try {
     fd = fs.openSync(path.join(sessionDir, EVENTS_FILE), 'r');
@@ -112,7 +115,7 @@ function encodeWatermark(p: FxCommitPosition): string {
  * form we would be willing to write back later.
  */
 export function readFxCommitPosition(sessionDir: string): FxCommitPosition | null {
-  const generation = readLogGeneration(sessionDir);
+  const generation = readFxLogGeneration(sessionDir);
   if (!generation) return null;
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(watermarkPath(sessionDir, generation), 'utf8'));

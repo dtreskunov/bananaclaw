@@ -27,6 +27,7 @@ import { createModelCatalog, type RawLimits } from './model-catalog.js';
 import {
   fxSessionDir,
   readFxCommitPosition,
+  readFxLogGeneration,
   rewindFxCommitPosition,
   type FxCommitPosition,
 } from './fx-session-store.js';
@@ -180,7 +181,10 @@ interface FxUsageFact {
   total_cost?: number;
 }
 
-export function sumFxUsageFacts(facts: FxUsageFact[]): TurnUsage | null {
+export function sumFxUsageFacts(
+  facts: FxUsageFact[],
+  opts: { compacted?: boolean } = {},
+): TurnUsage | null {
   if (facts.length === 0) return null;
   const usage: TurnUsage = {
     cost_usd: 0,
@@ -203,10 +207,19 @@ export function sumFxUsageFacts(facts: FxUsageFact[]): TurnUsage | null {
     usage.reasoning_tokens = (usage.reasoning_tokens ?? 0) + (f.reasoning_tokens ?? 0);
     if (f.model) usage.model = f.model;
   }
-  // Context occupancy is the last round trip alone, not the sum.
-  const last = facts[facts.length - 1];
-  const resident =
-    (last.input_tokens ?? 0) + (last.cache_write_tokens ?? 0) + (last.output_tokens ?? 0);
+  // Context occupancy is one round trip, not the sum. Within a turn the prompt
+  // only grows, so the biggest round trip is the main agent's last one --
+  // taking the max rather than the final fact keeps a subagent's small separate
+  // conversation from being read as this session's occupancy, since fx bills
+  // subagents through the parent's usage runtime with nothing to tell them
+  // apart (src/core/subagent/agent_adapter.zig). A compacted turn is the
+  // exception: its peak no longer exists, so only the last round trip
+  // describes what the next turn inherits.
+  const promptOf = (f: FxUsageFact) => (f.input_tokens ?? 0) + (f.cache_write_tokens ?? 0);
+  const pick = opts.compacted
+    ? facts[facts.length - 1]
+    : facts.reduce((best, f) => (promptOf(f) > promptOf(best) ? f : best), facts[0]);
+  const resident = promptOf(pick) + (pick.output_tokens ?? 0);
   if (resident > 0) usage.context_tokens = resident;
   return usage;
 }
@@ -261,7 +274,10 @@ export function resetFxModelCatalog(): void {
 }
 
 /** Sum every generation fx logged after `offset`. Exported for tests. */
-export function readFxUsageSince(offset: number): TurnUsage | null {
+export function readFxUsageSince(
+  offset: number,
+  opts: { compacted?: boolean } = {},
+): TurnUsage | null {
   let raw: string;
   try {
     const fd = fs.openSync(fxUsageLogPath(), 'r');
@@ -291,7 +307,7 @@ export function readFxUsageSince(offset: number): TurnUsage | null {
       // Half-written trailing line — drop it rather than lose the whole turn.
     }
   }
-  return sumFxUsageFacts(facts);
+  return sumFxUsageFacts(facts, opts);
 }
 
 /**
@@ -706,6 +722,8 @@ export class FxProvider implements AgentProvider {
         let text = '';
         let settled: { stopReason?: StopReason; error?: Error } | null = null;
         const usageOffset = fxUsageOffset();
+        const sessionDir = fxSessionDir(fxStateRoot(), sessionId);
+        const generationBefore = readFxLogGeneration(sessionDir);
         const promptDone = rt
           .request('session/prompt', {
             sessionId,
@@ -743,7 +761,9 @@ export class FxProvider implements AgentProvider {
 
         // Emitted before the outcome branches: a refused or errored turn still
         // burned tokens, and dropping them silently under-reports spend.
-        const usage = readFxUsageSince(usageOffset);
+        const compacted =
+          generationBefore !== null && readFxLogGeneration(sessionDir) !== generationBefore;
+        const usage = readFxUsageSince(usageOffset, { compacted });
         if (usage) yield { type: 'usage', data: usage };
 
         const outcome = settled as { stopReason?: StopReason; error?: Error } | null;
