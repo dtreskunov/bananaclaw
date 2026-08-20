@@ -14,6 +14,7 @@ import {
   updateContainerConfigJson,
 } from '../../db/container-configs.js';
 import type { ContainerConfigRow } from '../../types.js';
+import { VALID_AGENT_PROVIDERS } from '../../ui/server/chat/agent-providers.js';
 import { registerResource } from '../crud.js';
 
 /** Deserialize JSON columns for display. */
@@ -223,14 +224,13 @@ registerResource({
           >
         > = {};
         if (args.provider !== undefined) {
-          // Keep in sync with REQUIRED_PROVIDER_MODULES + OPTIONAL_PROVIDER_MODULES
-          // in container/agent-runner/src/providers/index.ts. Bad provider names
-          // cause silent container-exit-code-1 loops (see follow-up to denis@bot incident).
-          const validProviders = ['claude', 'mock', 'opencode'];
+          // Discovered from container/agent-runner/src/providers/index.ts, the same
+          // source the admin UI uses. Bad provider names cause silent
+          // container-exit-code-1 loops (see follow-up to denis@bot incident).
           const p = args.provider as string;
-          if (!validProviders.includes(p)) {
+          if (!VALID_AGENT_PROVIDERS.includes(p)) {
             throw new Error(
-              `--provider must be one of: ${validProviders.join(', ')} (got: ${p}). For OpenRouter/etc., use provider=opencode with model=<route>/<model>.`,
+              `--provider must be one of: ${VALID_AGENT_PROVIDERS.join(', ')} (got: ${p}). For OpenRouter/etc., use provider=opencode with model=<route>/<model>.`,
             );
           }
           updates.provider = p;
