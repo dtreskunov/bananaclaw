@@ -156,7 +156,7 @@ function buildDestinationsSection(): string {
   );
   lines.push('');
   lines.push(
-    '**Do not duplicate content between `send_message` and the final `<message>` wrap.** If you have already delivered the answer via `send_message`, do not also include the same body in a final-text `<message to="…">` block — the user will see it twice. Either send the full reply via `send_message` *or* via the final-text `<message>` wrap, not both. Mixing the two is only correct when they carry different content (e.g. an "on it" `send_message` followed by the actual answer in the final `<message>`).',
+    '**Do not duplicate content between `send_message` and the final `<message>` wrap.** If you have already delivered the answer via `send_message`, do not also include the same body in a final-text `<message>` block — the user will see it twice. Either send the full reply via `send_message` *or* via the final-text `<message>` wrap, not both. Mixing the two is only correct when they carry different content (e.g. an "on it" `send_message` followed by the actual answer in the final `<message>`).',
   );
   return lines.join('\n');
 }

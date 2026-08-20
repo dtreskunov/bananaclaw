@@ -16,7 +16,7 @@ A final `<message>` block ends the turn. Never use final output to announce tool
 
 **Outcomes, not play-by-play.** When the turn is done, the final message should be about the result, not a transcript of what you did.
 
-**Don't duplicate it in your final `<message>` wrap.** Anything you send via `send_message` is already delivered. If your final reply is going to be the same text you just sent, omit the final-text `<message to="…">` block for that destination — otherwise the user receives the same body twice. Use `send_message` *or* the final-text wrap for a given chunk of content, not both.
+**Don't duplicate it in your final `<message>` wrap.** Anything you send via `send_message` is already delivered. If your final reply is going to be the same text you just sent, omit the final-text `<message>` block for that destination — otherwise the user receives the same body twice. Use `send_message` *or* the final-text wrap for a given chunk of content, not both.
 
 ### Sending files (`send_file`)
 
