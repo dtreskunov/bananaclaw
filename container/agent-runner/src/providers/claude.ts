@@ -254,6 +254,26 @@ export function formatClaudeToolUse(id: string, name: string, input: Record<stri
   return { kind: 'tool', id, tool: name, status: 'running', ...(detail ? { detail } : {}) };
 }
 
+export interface ClaudeMessageUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+/** Context resident for ONE assistant message: its whole prompt (uncached,
+ *  cache reads and cache writes alike) plus its reply. The result event's
+ *  totals cover every round trip and cannot be read against the window. */
+export function claudeContextTokens(u: ClaudeMessageUsage | undefined): number | undefined {
+  if (!u) return undefined;
+  const resident =
+    (u.input_tokens ?? 0) +
+    (u.cache_read_input_tokens ?? 0) +
+    (u.cache_creation_input_tokens ?? 0) +
+    (u.output_tokens ?? 0);
+  return resident > 0 ? resident : undefined;
+}
+
 /**
  * Read a Claude transcript .jsonl, render a markdown summary, and drop it into
  * the agent's `conversations/` folder so context survives a compaction or a
@@ -524,6 +544,9 @@ export class ClaudeProvider implements AgentProvider {
       let prevOutput = 0;
       let prevCacheRead = 0;
       let prevCacheWrite = 0;
+      // The result event's totals are cumulative across every round trip; only
+      // an individual assistant message reports one request's own context.
+      let lastContextTokens: number | undefined;
       for await (const message of sdkResult) {
         if (aborted) return;
         messageCount++;
@@ -534,6 +557,10 @@ export class ClaudeProvider implements AgentProvider {
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };
         } else if (message.type === 'assistant') {
+          const resident = claudeContextTokens((message as {
+            message?: { usage?: ClaudeMessageUsage };
+          }).message?.usage);
+          if (resident !== undefined) lastContextTokens = resident;
           // Surface identified tool calls. Private thinking is intentionally
           // omitted from user-visible activity.
           const blocks = (message as { message?: { content?: unknown } }).message?.content;
@@ -592,6 +619,7 @@ export class ClaudeProvider implements AgentProvider {
                 model,
                 context_window: contextWindow,
                 max_output_tokens: maxOutputTokens,
+                context_tokens: lastContextTokens,
               },
             };
             prevCost = curCost;

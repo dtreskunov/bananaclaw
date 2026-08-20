@@ -223,6 +223,11 @@ export function sumOpenCodeUsage(
     total.reasoning_tokens = (total.reasoning_tokens ?? 0) + (u.reasoning_tokens ?? 0);
     if (u.model) total.model = u.model;
   }
+  // Context occupancy is the last round trip alone, not the sum.
+  const last = present[present.length - 1];
+  const resident =
+    last.input_tokens + last.cache_read_tokens + last.cache_write_tokens + last.output_tokens;
+  if (resident > 0) total.context_tokens = resident;
   return total;
 }
 

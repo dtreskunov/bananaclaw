@@ -1364,6 +1364,8 @@ async function processQuery(
               cache_read_tokens: pendingUsage.cache_read_tokens + event.data.cache_read_tokens,
               cache_write_tokens: pendingUsage.cache_write_tokens + event.data.cache_write_tokens,
               reasoning_tokens: (pendingUsage.reasoning_tokens ?? 0) + (event.data.reasoning_tokens ?? 0),
+              // Occupancy, not a total: the newest attempt that reported one wins.
+              context_tokens: event.data.context_tokens ?? pendingUsage.context_tokens,
             }
           : event.data;
       } else if (event.type === 'checkpoint') {

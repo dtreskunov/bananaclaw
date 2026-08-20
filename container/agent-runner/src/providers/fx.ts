@@ -192,6 +192,11 @@ export function sumFxUsageFacts(facts: FxUsageFact[]): TurnUsage | null {
     usage.reasoning_tokens = (usage.reasoning_tokens ?? 0) + (f.reasoning_tokens ?? 0);
     if (f.model) usage.model = f.model;
   }
+  // Context occupancy is the last round trip alone, not the sum.
+  const last = facts[facts.length - 1];
+  const resident =
+    (last.input_tokens ?? 0) + (last.cache_write_tokens ?? 0) + (last.output_tokens ?? 0);
+  if (resident > 0) usage.context_tokens = resident;
   return usage;
 }
 

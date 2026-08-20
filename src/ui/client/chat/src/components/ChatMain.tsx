@@ -405,19 +405,33 @@ function mediaKind(filename: string, contentType?: string | null): 'audio' | 'vi
   return null;
 }
 
+function fmtPct(used: number, limit: number): string {
+  const pct = (used / limit) * 100;
+  if (pct > 0 && pct < 1) return '<1%';
+  return Math.min(100, Math.round(pct)) + '%';
+}
+
 function UsageMeta({ u }: { u: TurnUsage }) {
   const [expanded, setExpanded] = useState(false);
   const cost = fmtCost(u.cost_usd);
   const model = u.model ? shortModel(u.model) : '';
   const dur = u.duration_ms ? fmtDur(u.duration_ms) : '';
-  const short = [cost, dur, model].filter(Boolean).join(' \u00b7 ');
+  // Context fill, not tokens billed: the counts below sum every round trip of
+  // the turn, so only `context_tokens` can be read against the window.
+  const ctx = u.context_tokens && u.context_window
+    ? `${fmtPct(u.context_tokens, u.context_window)} ctx`
+    : '';
+  const short = [cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
   const tokens = `${fmtTok(u.input_tokens)}\u2192${fmtTok(u.output_tokens)}`;
   const cache = [
     u.cache_read_tokens > 0 ? `cache read ${fmtTok(u.cache_read_tokens)}` : '',
     u.cache_write_tokens > 0 ? `cache write ${fmtTok(u.cache_write_tokens)}` : '',
     u.reasoning_tokens ? `reasoning ${fmtTok(u.reasoning_tokens)}` : '',
   ].filter(Boolean).join(' \u00b7 ');
-  const detail = [tokens, cache].filter(Boolean).join(' \u00b7 ');
+  const ctxDetail = u.context_tokens
+    ? `context ${fmtTok(u.context_tokens)}${u.context_window ? ` / ${fmtTok(u.context_window)}` : ''}`
+    : '';
+  const detail = [tokens, cache, ctxDetail].filter(Boolean).join(' \u00b7 ');
   return (
     <span class="usage" onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }} title="Click for details">
       {short}{expanded && detail ? ` \u00b7 ${detail}` : ''}

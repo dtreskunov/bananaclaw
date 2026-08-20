@@ -146,6 +146,9 @@ export interface TurnUsage {
   model: string;
   context_window?: number;
   max_output_tokens?: number;
+  /** Tokens resident in the context at turn end — the only token figure
+   *  comparable to `context_window`. The counts above are billing sums. */
+  context_tokens?: number;
   duration_ms?: number;
 }
 

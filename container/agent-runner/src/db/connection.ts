@@ -118,9 +118,20 @@ export function getOutboundDb(): Database {
         model               TEXT,
         context_window      INTEGER,
         max_output_tokens   INTEGER,
+        context_tokens      INTEGER,
         timestamp           TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
+    // Columns added after the table shipped. `CREATE TABLE IF NOT EXISTS` is a
+    // no-op on an outbound.db that predates them, so the insert would fail.
+    {
+      const usageCols = new Set(
+        (_outbound.prepare("PRAGMA table_info('turn_usage')").all() as Array<{ name: string }>).map((c) => c.name),
+      );
+      for (const col of ['context_window', 'max_output_tokens', 'context_tokens']) {
+        if (!usageCols.has(col)) _outbound.exec(`ALTER TABLE turn_usage ADD COLUMN ${col} INTEGER`);
+      }
+    }
     // container_state: tracks the current tool in flight (if any) so the host
     // sweep can widen its stuck tolerance when Bash is running with a user-
     // declared long timeout. Forward-compat for older outbound.db files.
@@ -439,6 +450,7 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       model               TEXT,
       context_window      INTEGER,
       max_output_tokens   INTEGER,
+      context_tokens      INTEGER,
       timestamp           TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE task_attempts (

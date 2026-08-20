@@ -14,11 +14,11 @@ export function writeTurnUsage(id: string, messageOutId: string, data: TurnUsage
          (id, message_out_id, cost_usd, input_tokens, output_tokens,
           cache_read_tokens, cache_write_tokens, reasoning_tokens,
           num_turns, duration_ms, duration_api_ms,
-          model, context_window, max_output_tokens, timestamp)
+          model, context_window, max_output_tokens, context_tokens, timestamp)
        VALUES ($id, $message_out_id, $cost_usd, $input_tokens, $output_tokens,
           $cache_read_tokens, $cache_write_tokens, $reasoning_tokens,
           $num_turns, $duration_ms, $duration_api_ms,
-          $model, $context_window, $max_output_tokens, datetime('now'))`,
+          $model, $context_window, $max_output_tokens, $context_tokens, datetime('now'))`,
     )
     .run({
       $id: id,
@@ -35,5 +35,6 @@ export function writeTurnUsage(id: string, messageOutId: string, data: TurnUsage
       $model: data.model,
       $context_window: data.context_window ?? null,
       $max_output_tokens: data.max_output_tokens ?? null,
+      $context_tokens: data.context_tokens ?? null,
     });
 }

@@ -234,6 +234,14 @@ export interface TurnUsage {
   model: string;
   context_window?: number;
   max_output_tokens?: number;
+  /**
+   * Tokens resident in the model's context at the end of the turn: the final
+   * round trip's prompt plus its reply. The token counts above are per-turn
+   * billing sums over every round trip, so on a multi-step turn they run
+   * several times the conversation's actual size — this is the only figure
+   * comparable to `context_window`.
+   */
+  context_tokens?: number;
 }
 
 /**

@@ -75,6 +75,17 @@ describe('sumOpenCodeUsage', () => {
     expect(sumOpenCodeUsage([])).toBeNull();
     expect(sumOpenCodeUsage([undefined, undefined])).toBeNull();
   });
+
+  // Every round trip resends the conversation, so the summed counts run far
+  // past the window. Occupancy is the last round trip on its own.
+  it('reports context occupancy from the last round trip, not the sum', () => {
+    const total = sumOpenCodeUsage([
+      { cost_usd: 0, input_tokens: 18626, output_tokens: 60, cache_read_tokens: 1920, cache_write_tokens: 0, model: 'm' },
+      { cost_usd: 0, input_tokens: 23, output_tokens: 15, cache_read_tokens: 20608, cache_write_tokens: 0, model: 'm' },
+    ]);
+    expect(total!.context_tokens).toBe(23 + 20608 + 15);
+    expect(total!.input_tokens + total!.cache_read_tokens).toBeGreaterThan(total!.context_tokens!);
+  });
 });
 
 describe('sumFxUsageFacts', () => {
@@ -95,6 +106,16 @@ describe('sumFxUsageFacts', () => {
   it('never reports negative input when cache reads exceed the input count', () => {
     const total = sumFxUsageFacts([{ input_tokens: 10, cache_read_tokens: 99 }]);
     expect(total!.input_tokens).toBe(0);
+  });
+
+  // fx's input_tokens is already cache-inclusive, so occupancy must not add
+  // the cache reads back on top of it.
+  it('reports context occupancy from the last generation only', () => {
+    const total = sumFxUsageFacts([
+      { input_tokens: 11682, output_tokens: 341, cache_read_tokens: 112 },
+      { input_tokens: 11827, output_tokens: 149, cache_read_tokens: 11681 },
+    ]);
+    expect(total!.context_tokens).toBe(11827 + 149);
   });
 
   it('returns null with no generations', () => {

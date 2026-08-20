@@ -171,9 +171,7 @@ export function createBufferedFrameSender(sendEncoded: (frame: string) => void):
  * Match `/api/groups/<groupId>/chat/...` (after the mount prefix has been
  * stripped). Returns null if not a chat path.
  */
-export function matchChatPath(
-  pathname: string,
-):
+export function matchChatPath(pathname: string):
   | { kind: 'start'; groupId: string }
   | { kind: 'send'; groupId: string; threadId: string }
   | { kind: 'threads'; groupId: string }
@@ -823,6 +821,10 @@ export interface TurnUsageDto {
   model: string;
   context_window?: number;
   max_output_tokens?: number;
+  /** Tokens resident in the context at turn end. Unlike the token counts,
+   *  which are billing sums over every round trip, this is comparable to
+   *  `context_window`. */
+  context_tokens?: number;
   duration_ms?: number;
 }
 
@@ -888,7 +890,7 @@ export function readTurnUsageForOutbound(
         .prepare(
           `SELECT cost_usd, input_tokens, output_tokens,
                   cache_read_tokens, cache_write_tokens, reasoning_tokens,
-                  model, context_window, max_output_tokens, duration_ms
+                  model, context_window, max_output_tokens, context_tokens, duration_ms
              FROM turn_usage WHERE message_out_id = ?`,
         )
         .get(messageOutId) as
@@ -902,6 +904,7 @@ export function readTurnUsageForOutbound(
             model: string;
             context_window: number | null;
             max_output_tokens: number | null;
+            context_tokens: number | null;
             duration_ms: number | null;
           }
         | undefined;
@@ -916,6 +919,7 @@ export function readTurnUsageForOutbound(
         model: row.model,
         ...(row.context_window != null ? { context_window: row.context_window } : {}),
         ...(row.max_output_tokens != null ? { max_output_tokens: row.max_output_tokens } : {}),
+        ...(row.context_tokens != null ? { context_tokens: row.context_tokens } : {}),
         ...(row.duration_ms != null ? { duration_ms: row.duration_ms } : {}),
       };
     } finally {
@@ -1073,7 +1077,7 @@ export function readChatHistory(
             .prepare(
               `SELECT message_out_id, cost_usd, input_tokens, output_tokens,
                       cache_read_tokens, cache_write_tokens, reasoning_tokens,
-                      model, context_window, max_output_tokens, duration_ms
+                      model, context_window, max_output_tokens, context_tokens, duration_ms
                FROM turn_usage WHERE message_out_id IN (${outIds.map(() => '?').join(',')})`,
             )
             .all(...outIds) as Array<{
@@ -1087,6 +1091,7 @@ export function readChatHistory(
             model: string;
             context_window: number | null;
             max_output_tokens: number | null;
+            context_tokens: number | null;
             duration_ms: number | null;
           }>;
           for (const u of usageRows) {
@@ -1100,6 +1105,7 @@ export function readChatHistory(
               model: u.model,
               ...(u.context_window != null ? { context_window: u.context_window } : {}),
               ...(u.max_output_tokens != null ? { max_output_tokens: u.max_output_tokens } : {}),
+              ...(u.context_tokens != null ? { context_tokens: u.context_tokens } : {}),
               ...(u.duration_ms != null ? { duration_ms: u.duration_ms } : {}),
             });
           }
