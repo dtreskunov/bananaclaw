@@ -1,6 +1,40 @@
 import { describe, expect, it } from 'bun:test';
-import { forwardToUpstream, startFxMcpShims } from './fx-mcp-shim.js';
+import { forwardToUpstream, normalizeErrorId, startFxMcpShims } from './fx-mcp-shim.js';
 import { mcpServersToFxConfig } from './mcp-to-fx.js';
+
+describe('normalizeErrorId', () => {
+  // fx only tolerates a non-matching id on a discovery error when it is null;
+  // Tavily sends a string, which aborts the server before fx's own legacy
+  // fallback can run.
+  it('rewrites an unusable string error id to null', () => {
+    const body = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'server-error',
+      error: { code: -32600, message: 'Missing mcp-session-id header.' },
+    });
+    expect(JSON.parse(normalizeErrorId(body))).toEqual({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32600, message: 'Missing mcp-session-id header.' },
+    });
+  });
+
+  it('leaves conforming error responses untouched', () => {
+    // A numeric id may legitimately match the request fx sent.
+    const numeric = '{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"x"}}';
+    expect(normalizeErrorId(numeric)).toBe(numeric);
+    const nullId = '{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"x"}}';
+    expect(normalizeErrorId(nullId)).toBe(nullId);
+  });
+
+  it('leaves results, non-JSON-RPC and unparseable bodies untouched', () => {
+    const result = '{"jsonrpc":"2.0","id":"x","result":{}}';
+    expect(normalizeErrorId(result)).toBe(result);
+    const plain = '{"error":"upstream exploded"}';
+    expect(normalizeErrorId(plain)).toBe(plain);
+    expect(normalizeErrorId('<html>502</html>')).toBe('<html>502</html>');
+  });
+});
 
 describe('startFxMcpShims', () => {
   it('gives each remote server a loopback URL that keeps the upstream path', () => {

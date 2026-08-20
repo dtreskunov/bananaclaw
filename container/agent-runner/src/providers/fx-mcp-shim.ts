@@ -50,6 +50,42 @@ export function jsonRpcMethod(body: ArrayBuffer | undefined): string {
 }
 
 /**
+ * Rewrites an out-of-spec JSON-RPC error `id` to `null` so fx can classify it.
+ *
+ * fx opens discovery with its own `server/discover` method. A server that
+ * doesn't know it answers 4xx, and fx v0.4.5 handles that: it inspects the
+ * error body and falls back to the legacy `initialize` transport. But the body
+ * only reaches that classifier if `validateFinalResponse` accepts it, and that
+ * accepts a non-matching id only when it is exactly `null` (`allow_null_error_id`).
+ *
+ * JSON-RPC 2.0 says a response whose request id could not be determined MUST
+ * use `null`, so fx's rule is correct. Tavily instead answers its
+ * "Missing mcp-session-id header" 400 with the string `"server-error"`, which
+ * is neither a match nor `null` — fx raises MismatchedResponseId before the
+ * fallback can run, and the whole server fails to start.
+ *
+ * Normalizing that one field is enough to let fx's own fallback engage. Kept
+ * deliberately narrow: error-only 4xx/5xx bodies whose id is already unusable,
+ * so nothing a conforming server sends is ever altered.
+ */
+export function normalizeErrorId(detail: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return detail;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return detail;
+  const body = parsed as Record<string, unknown>;
+  if (body.jsonrpc !== '2.0') return detail;
+  if (!('error' in body) || 'result' in body) return detail;
+  // A numeric id may still match the request fx sent; only rewrite ids that
+  // fx could not accept under any circumstances.
+  if (body.id === null || typeof body.id === 'number') return detail;
+  return JSON.stringify({ ...body, id: null });
+}
+
+/**
  * Re-issues one request at `origin`, keeping the path, query, method and body.
  * Split out from the listener so it can be exercised without a remote host.
  */
@@ -81,7 +117,7 @@ export async function forwardToUpstream(
         `[fx-mcp-shim] ${name} ${req.method} ${incoming.pathname} → ${response.status} ` +
           `(${jsonRpcMethod(body)}): ${scrubCredentials(detail).slice(0, 300)}`,
       );
-      return new Response(detail, {
+      return new Response(normalizeErrorId(detail), {
         status: response.status,
         statusText: response.statusText,
         headers: forwardableResponseHeaders(response.headers),

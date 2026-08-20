@@ -9,7 +9,7 @@ NanoClaw runs agents in a long-lived **poll loop** inside the container. The bac
 
 [fx](https://github.com/vercel-labs/fx) is a coding agent written in Zig, shipped as a single statically-linked binary (~12 MB). It speaks **ACP** (Agent Client Protocol) — newline-delimited JSON-RPC over stdin/stdout — and reaches models through Vercel AI Gateway.
 
-> **fx is experimental.** Upstream self-describes v0.0.3 as experimental and its stability policy is at <https://fx.sh/docs/stability>. Expect protocol churn across releases; the pinned version and checksums exist so a bump is always a deliberate act.
+> **fx is experimental.** Upstream self-describes as experimental and its stability policy is at <https://fx.sh/docs/stability>. Expect protocol churn across releases; the pinned commit and checksums exist so a bump is always a deliberate act.
 
 ## How this provider differs from the others
 
@@ -33,7 +33,7 @@ If all of the following are already present, skip to **Configuration**:
 - `container/agent-runner/src/providers/mcp-to-fx.ts`
 - `import './fx.js';` line in `src/providers/index.ts`
 - `import './fx.js';` line in `container/agent-runner/src/providers/index.ts`
-- `ARG INSTALL_FX` + `ARG FX_VERSION` in `container/Dockerfile`
+- `ARG INSTALL_FX` + `ARG FX_VERSION` / `ARG FX_COMMIT` in `container/Dockerfile`
 
 Missing pieces — continue below. All steps are idempotent; re-running is safe.
 
@@ -83,35 +83,75 @@ const OPTIONAL_PROVIDER_MODULES = ['./opencode.js', './fx.js'];
 
 ### 4. Add the fx binary to the container Dockerfile
 
-fx is a static binary, not an npm package — it does **not** belong in `container/cli-tools.json` (that file is npm-only) and must not be installed with `bun install -g`. Add a standalone `RUN` block to `container/Dockerfile`, before the agent-runner deps block:
+fx is a static binary, not an npm package — it does **not** belong in `container/cli-tools.json` (that file is npm-only) and must not be installed with `bun install -g`.
+
+fx's GitHub releases lag its git tags badly (releases stopped at v0.0.4 while tags were at v0.4.5), and the newer tags carry the MCP fixes that matter. So fx is **built from source** in throw-away stages; only the ~12 MB binary is copied into the final image. Add these stages above the main `FROM node:22-slim`:
 
 ```dockerfile
 ARG INSTALL_FX=false
-ARG FX_VERSION=v0.0.3
-ARG FX_SHA256_X86_64=23d32e60233b24581b9ce1965b65bab6a46d5693a24add7817854aef3adf5bfb
-ARG FX_SHA256_AARCH64=867eb2d669693ae0b5e3453a571230ba3b67465626d566cbca83ae8432b1e03a
-RUN if [ "$INSTALL_FX" = "true" ]; then \
-      set -eu; \
-      arch="$(uname -m)"; \
-      case "$arch" in \
-        x86_64) fxarch=x86_64; fxsha="$FX_SHA256_X86_64" ;; \
-        aarch64|arm64) fxarch=aarch64; fxsha="$FX_SHA256_AARCH64" ;; \
-        *) echo "unsupported arch for fx: $arch" >&2; exit 1 ;; \
-      esac; \
-      curl -fsSL -o /tmp/fx.tar.gz \
-        "https://releases.fx.sh/${FX_VERSION}/fx-linux-${fxarch}.tar.gz"; \
-      echo "${fxsha}  /tmp/fx.tar.gz" | sha256sum -c -; \
-      tar -xzf /tmp/fx.tar.gz -C /tmp; \
-      install -m 0755 /tmp/fx /usr/local/bin/fx; \
-      rm -rf /tmp/fx /tmp/fx.tar.gz; \
-      fx --version; \
-    fi
+ARG FX_VERSION=v0.4.5
+ARG FX_COMMIT=14f00f6be246789496f987317cc5af28b81aad16
+ARG ZIG_VERSION=0.16.0
+ARG ZIG_SHA256_X86_64=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+ARG ZIG_SHA256_AARCH64=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17
+
+FROM node:22-slim AS fx-build-false
+RUN mkdir -p /fx-out
+
+FROM node:22-slim AS fx-build-true
+ARG FX_VERSION
+ARG FX_COMMIT
+ARG ZIG_VERSION
+ARG ZIG_SHA256_X86_64
+ARG ZIG_SHA256_AARCH64
+RUN --mount=type=cache,target=/root/.cache/zig,sharing=locked \
+    set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl git xz-utils; \
+    rm -rf /var/lib/apt/lists/*; \
+    case "$(uname -m)" in \
+      x86_64) zigarch=x86_64; zigsha="$ZIG_SHA256_X86_64" ;; \
+      aarch64|arm64) zigarch=aarch64; zigsha="$ZIG_SHA256_AARCH64" ;; \
+      *) echo "unsupported arch for fx: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/zig.tar.xz \
+      "https://ziglang.org/download/${ZIG_VERSION}/zig-${zigarch}-linux-${ZIG_VERSION}.tar.xz"; \
+    echo "${zigsha}  /tmp/zig.tar.xz" | sha256sum -c -; \
+    mkdir -p /opt/zig; \
+    tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1; \
+    mkdir -p /tmp/fx-src; cd /tmp/fx-src; \
+    git init -q .; \
+    git remote add origin https://github.com/vercel-labs/fx; \
+    git fetch -q --depth 1 origin "$FX_COMMIT"; \
+    git checkout -q FETCH_HEAD; \
+    /opt/zig/zig build -Doptimize=ReleaseSafe -Dtarget="${zigarch}-linux"; \
+    mkdir -p /fx-out; \
+    install -m 0755 zig-out/bin/fx /fx-out/fx; \
+    /fx-out/fx --version
+
+FROM fx-build-${INSTALL_FX} AS fx-artifacts
+```
+
+Then, in the final image where the old download block sat:
+
+```dockerfile
+ARG INSTALL_FX=false
+COPY --from=fx-artifacts /fx-out/ /usr/local/bin/
+RUN if [ "$INSTALL_FX" = "true" ]; then fx --version; fi
 ```
 
 `INSTALL_FX` defaults to `false` so installs that don't use fx keep a lean image.
 
-> **Why checksums, not just a version tag.** `releases.fx.sh/<version>/...` is a mutable path — the tag alone is not a supply-chain guarantee. Both per-arch digests must be updated together when bumping `FX_VERSION`; get them with
-> `curl -fsSL https://releases.fx.sh/<version>/fx-linux-x86_64.tar.gz | sha256sum`.
+> **Why `FROM fx-build-${INSTALL_FX}` instead of a shell `if`.** Stage selection happens in the build graph, so with fx off the toolchain is never downloaded and the Zig compile never runs — `fx-build-false` is just `mkdir /fx-out`. A shell guard inside one `RUN` would still pull the toolchain layer.
+>
+> **Why a commit hash, not just a tag.** A tag can be repointed at a different commit; the hash cannot. `FX_VERSION` is only the human-readable label for `FX_COMMIT`, and fetching by hash turns a moved tag into a hard error instead of a silent substitution. Get the pin with
+> `git ls-remote --tags --refs https://github.com/vercel-labs/fx`.
+>
+> **Why the Zig tarball is pinned by digest.** There is no official Zig image — the usual community one (`euantorano/zig`) stopped tagging releases at 0.10.1 in 2023, and `alpine:edge`'s `zig` package is on a rolling branch that cannot be pinned. The official tarball plus its published `shasum` (from <https://ziglang.org/download/index.json>) is the only pinnable source. The required Zig version is `minimum_zig_version` in fx's `build.zig.zon`.
+>
+> **Why `-Dtarget` rather than a native build.** A native build bakes in the build host's CPU features, which then fault with SIGILL on older hardware running the same image. fx's own release workflow passes an explicit target too.
+>
+> fx vendors no dependencies (`.dependencies = .{}`), so the build needs no network access beyond the source fetch itself.
 
 Then wire the flag through `container/build.sh` alongside the existing `INSTALL_CJK_FONTS` handling:
 
