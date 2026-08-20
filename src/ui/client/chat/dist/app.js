@@ -27643,7 +27643,8 @@ var TAB_ITEMS = [
 ];
 var PROVIDER_INFO = {
   claude: "Claude \u2014 Anthropic models via the official SDK. Uses your OneCLI-injected Anthropic API key.",
-  opencode: "OpenCode \u2014 multi-provider gateway. The upstream (OpenRouter, MiniMax, DeepSeek, Anthropic, \u2026) is not chosen here: it comes from whichever model you pick, since every models.dev id names its own gateway."
+  opencode: "OpenCode \u2014 multi-provider gateway. The upstream (OpenRouter, MiniMax, DeepSeek, Anthropic, \u2026) is not chosen here: it comes from whichever model you pick, since every models.dev id names its own gateway.",
+  fx: 'fx \u2014 experimental Zig agent (vercel-labs/fx) run as an ACP subprocess. Models come from Vercel AI Gateway, so ids are "<upstream>/<model>" and billing goes through your gateway key.'
 };
 function formatAge(iso) {
   if (!iso) return null;

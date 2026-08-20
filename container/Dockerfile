@@ -79,6 +79,36 @@ RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}" && \
     install -m 0755 /root/.bun/bin/bun /usr/local/bin/bun && \
     rm -rf /root/.bun
 
+# ---- fx CLI (optional agent provider) ---------------------------------------
+# Only installed when INSTALL_FX=true so the default image stays lean. fx is a
+# statically linked Zig binary (~12 MB unpacked) with no glibc dependency, so
+# it is dropped straight into /usr/local/bin rather than going through pnpm.
+# It is NOT in cli-tools.json — that file is npm-only.
+#
+# FX_SHA256_* pin the artifacts: releases.fx.sh serves a mutable path, so a
+# version tag alone is not a supply-chain guarantee. Both must be updated when
+# FX_VERSION is bumped (checksums differ per architecture).
+ARG INSTALL_FX=false
+ARG FX_VERSION=v0.0.3
+ARG FX_SHA256_X86_64=23d32e60233b24581b9ce1965b65bab6a46d5693a24add7817854aef3adf5bfb
+ARG FX_SHA256_AARCH64=867eb2d669693ae0b5e3453a571230ba3b67465626d566cbca83ae8432b1e03a
+RUN if [ "$INSTALL_FX" = "true" ]; then \
+      set -eu; \
+      arch="$(uname -m)"; \
+      case "$arch" in \
+        x86_64) fxarch=x86_64; fxsha="$FX_SHA256_X86_64" ;; \
+        aarch64|arm64) fxarch=aarch64; fxsha="$FX_SHA256_AARCH64" ;; \
+        *) echo "unsupported arch for fx: $arch" >&2; exit 1 ;; \
+      esac; \
+      curl -fsSL -o /tmp/fx.tar.gz \
+        "https://releases.fx.sh/${FX_VERSION}/fx-linux-${fxarch}.tar.gz"; \
+      echo "${fxsha}  /tmp/fx.tar.gz" | sha256sum -c -; \
+      tar -xzf /tmp/fx.tar.gz -C /tmp; \
+      install -m 0755 /tmp/fx /usr/local/bin/fx; \
+      rm -rf /tmp/fx /tmp/fx.tar.gz; \
+      fx --version; \
+    fi
+
 # ---- agent-runner deps -------------------------------------------------------
 # Deps are cached independently of CLI versions. Source is NOT baked in —
 # it's provided by the shared RO mount at runtime.

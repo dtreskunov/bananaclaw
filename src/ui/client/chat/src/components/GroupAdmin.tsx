@@ -121,6 +121,7 @@ const PROVIDER_INFO: Record<string, string> = {
   claude: 'Claude — Anthropic models via the official SDK. Uses your OneCLI-injected Anthropic API key.',
   opencode:
     'OpenCode — multi-provider gateway. The upstream (OpenRouter, MiniMax, DeepSeek, Anthropic, …) is not chosen here: it comes from whichever model you pick, since every models.dev id names its own gateway.',
+  fx: 'fx — experimental Zig agent (vercel-labs/fx) run as an ACP subprocess. Models come from Vercel AI Gateway, so ids are "<upstream>/<model>" and billing goes through your gateway key.',
 };
 
 function formatAge(iso: string | null): string | null {

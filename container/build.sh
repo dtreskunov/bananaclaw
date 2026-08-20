@@ -1,10 +1,11 @@
 #!/bin/bash
 # Build the NanoClaw agent container image.
 #
-# Reads one optional build flag from ../.env:
+# Reads optional build flags from ../.env:
 #   INSTALL_CJK_FONTS=true   — add Chinese/Japanese/Korean fonts (~200MB)
+#   INSTALL_FX=true          — add the fx CLI agent provider (~12MB)
 # setup/container.ts reads the same file, so both build paths stay in sync.
-# Callers can also override by exporting INSTALL_CJK_FONTS directly.
+# Callers can also override by exporting either variable directly.
 
 set -e
 
@@ -25,11 +26,18 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 if [ -z "${INSTALL_CJK_FONTS:-}" ] && [ -f "../.env" ]; then
     INSTALL_CJK_FONTS="$(grep '^INSTALL_CJK_FONTS=' ../.env | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]')"
 fi
+if [ -z "${INSTALL_FX:-}" ] && [ -f "../.env" ]; then
+    INSTALL_FX="$(grep '^INSTALL_FX=' ../.env | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]')"
+fi
 
 BUILD_ARGS=()
 if [ "${INSTALL_CJK_FONTS:-false}" = "true" ]; then
     echo "CJK fonts: enabled (adds ~200MB)"
     BUILD_ARGS+=(--build-arg INSTALL_CJK_FONTS=true)
+fi
+if [ "${INSTALL_FX:-false}" = "true" ]; then
+    echo "fx provider: enabled (adds ~12MB)"
+    BUILD_ARGS+=(--build-arg INSTALL_FX=true)
 fi
 
 echo "Building NanoClaw agent container image..."

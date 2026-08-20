@@ -9,7 +9,7 @@
 import { recordSkippedProvider } from './provider-registry.js';
 
 const REQUIRED_PROVIDER_MODULES = ['./claude.js', './mock.js'] as const;
-const OPTIONAL_PROVIDER_MODULES = ['./opencode.js'] as const;
+const OPTIONAL_PROVIDER_MODULES = ['./opencode.js', './fx.js'] as const;
 
 for (const mod of REQUIRED_PROVIDER_MODULES) {
   await import(mod);

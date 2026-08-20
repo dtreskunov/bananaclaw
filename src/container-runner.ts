@@ -712,9 +712,14 @@ function resolveEnv(name: string): string | undefined {
 }
 
 /**
- * Sync skill symlinks in .claude-shared/skills/ to match the container.json
- * selection. Each symlink points to a container path (/app/skills/<name>)
- * so it's dangling on the host but valid inside the container.
+ * Sync skills in .claude-shared/skills/ to match the container.json selection.
+ *
+ * By default each entry is a symlink to a container path (/app/skills/<name>),
+ * dangling on the host but valid inside the container. fx's skill discovery
+ * refuses to follow symlinked candidates — it reports every one as "SKILL.md is
+ * unreadable or not a regular file" and loads no skills at all — so for fx we
+ * copy the real directories out of container/skills/ instead. The copy is
+ * refreshed on every spawn so upstream skill edits still propagate.
  */
 function syncSkillSymlinks(claudeDir: string, containerConfig: import('./container-config.js').ContainerConfig): void {
   const skillsDir = path.join(claudeDir, 'skills');
@@ -733,8 +738,10 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
     return isTruthyEnv(resolveEnv(required));
   });
   const desiredSet = new Set(desired);
+  const materialize = containerConfig.provider === 'fx';
 
-  // Remove symlinks not in the desired set
+  // Remove entries not in the desired set. Under fx also drop symlinks, so a
+  // provider switch converts them to copies.
   for (const entry of fs.readdirSync(skillsDir)) {
     const entryPath = path.join(skillsDir, entry);
     let isSymlink = false;
@@ -743,14 +750,30 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
     } catch {
       continue;
     }
-    if (isSymlink && !desiredSet.has(entry)) {
-      fs.unlinkSync(entryPath);
+    // This dir is the agent's ~/.claude/skills, so a real directory here may be
+    // a user-installed skill. Only touch what this function created: symlinks,
+    // and (under fx) copies that shadow a container/skills entry.
+    const ours = isSymlink || (materialize && fs.existsSync(path.join(sharedSkillsDir, entry)));
+    if (!ours) continue;
+    if (!desiredSet.has(entry) || (materialize && isSymlink)) {
+      fs.rmSync(entryPath, { recursive: true, force: true });
     }
   }
 
-  // Create symlinks for desired skills (container path targets)
+  // Create desired skills: real copies for fx, container-path symlinks otherwise.
   for (const skill of desired) {
     const linkPath = path.join(skillsDir, skill);
+    const source = path.join(sharedSkillsDir, skill);
+    if (materialize && fs.existsSync(source)) {
+      // Refresh unconditionally — skills are small text files and this keeps
+      // the copy from drifting behind container/skills/. `dereference` matters:
+      // a skill dir may itself be a symlink into a checkout outside the repo,
+      // and copying it as a symlink would reproduce a host path the container
+      // cannot resolve.
+      fs.rmSync(linkPath, { recursive: true, force: true });
+      fs.cpSync(source, linkPath, { recursive: true, dereference: true });
+      continue;
+    }
     let exists = false;
     try {
       fs.lstatSync(linkPath);
