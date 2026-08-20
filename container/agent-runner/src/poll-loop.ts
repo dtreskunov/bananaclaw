@@ -1350,7 +1350,20 @@ async function processQuery(
         if (!event.data.duration_ms) {
           event.data.duration_ms = Date.now() - turnStartTime;
         }
-        pendingUsage = event.data;
+        // Accumulated, not replaced: a turn that retried, or that errored and
+        // was re-prompted, emits one event per attempt and every attempt was
+        // billed. Non-additive fields take the latest attempt's value.
+        pendingUsage = pendingUsage
+          ? {
+              ...event.data,
+              cost_usd: pendingUsage.cost_usd + event.data.cost_usd,
+              input_tokens: pendingUsage.input_tokens + event.data.input_tokens,
+              output_tokens: pendingUsage.output_tokens + event.data.output_tokens,
+              cache_read_tokens: pendingUsage.cache_read_tokens + event.data.cache_read_tokens,
+              cache_write_tokens: pendingUsage.cache_write_tokens + event.data.cache_write_tokens,
+              reasoning_tokens: (pendingUsage.reasoning_tokens ?? 0) + (event.data.reasoning_tokens ?? 0),
+            }
+          : event.data;
       } else if (event.type === 'checkpoint') {
         pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {

@@ -14,6 +14,9 @@
  * provider uses.
  */
 import { spawn, type ChildProcess } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { startFxGatewayShim, type FxGatewayShim } from './fx-gateway-shim.js';
 
@@ -29,6 +32,7 @@ import type {
   ProviderOptions,
   QueryInput,
   QueryPushOptions,
+  TurnUsage,
 } from './types.js';
 
 function log(msg: string): void {
@@ -132,6 +136,96 @@ interface SessionUpdate {
 }
 
 const STALE_SESSION_RE = /session not found|unknown session|no such session|failed to load session/i;
+
+/**
+ * fx has no ACP event carrying token counts, so its own append-only ledger at
+ * ~/.fx/usage.jsonl is the only source. Reading it by byte offset scopes a
+ * read to a single turn without re-counting earlier ones.
+ */
+function fxUsageLogPath(): string {
+  // HOME, not os.homedir(): the state mount is keyed off the container's HOME,
+  // and Bun's os.homedir() ignores the env var.
+  return path.join(process.env.HOME || os.homedir(), '.fx', 'usage.jsonl');
+}
+
+function fxUsageOffset(): number {
+  try {
+    return fs.statSync(fxUsageLogPath()).size;
+  } catch {
+    return 0;
+  }
+}
+
+/** One `generation` fact — a single model round trip. */
+interface FxUsageFact {
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  reasoning_tokens?: number;
+  total_cost?: number;
+}
+
+export function sumFxUsageFacts(facts: FxUsageFact[]): TurnUsage | null {
+  if (facts.length === 0) return null;
+  const usage: TurnUsage = {
+    cost_usd: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
+    model: '',
+  };
+  for (const f of facts) {
+    usage.cost_usd += f.total_cost ?? 0;
+    // fx's input_tokens already includes cache_read_tokens; the DB column is
+    // the uncached remainder so the UI's "input + cache read" reads right.
+    const cacheRead = f.cache_read_tokens ?? 0;
+    usage.input_tokens += Math.max(0, (f.input_tokens ?? 0) - cacheRead);
+    usage.output_tokens += f.output_tokens ?? 0;
+    usage.cache_read_tokens += cacheRead;
+    usage.cache_write_tokens += f.cache_write_tokens ?? 0;
+    usage.reasoning_tokens = (usage.reasoning_tokens ?? 0) + (f.reasoning_tokens ?? 0);
+    if (f.model) usage.model = f.model;
+  }
+  return usage;
+}
+
+/** Sum every generation fx logged after `offset`. Exported for tests. */
+export function readFxUsageSince(offset: number): TurnUsage | null {
+  let raw: string;
+  try {
+    const fd = fs.openSync(fxUsageLogPath(), 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      if (size <= offset) return null;
+      const buf = Buffer.alloc(size - offset);
+      fs.readSync(fd, buf, 0, buf.length, offset);
+      raw = buf.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (err) {
+    // No log yet is the normal state until fx bills its first generation.
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      log(`could not read usage log: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return null;
+  }
+  const facts: FxUsageFact[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { kind?: string; fact?: FxUsageFact };
+      if (entry.kind === 'generation' && entry.fact) facts.push(entry.fact);
+    } catch {
+      // Half-written trailing line — drop it rather than lose the whole turn.
+    }
+  }
+  return sumFxUsageFacts(facts);
+}
 
 /**
  * fx derives a session's permission mode from its mode id, and only `code` and
@@ -464,6 +558,7 @@ export class FxProvider implements AgentProvider {
 
         let text = '';
         let settled: { stopReason?: StopReason; error?: Error } | null = null;
+        const usageOffset = fxUsageOffset();
         const promptDone = rt
           .request('session/prompt', {
             sessionId,
@@ -498,6 +593,11 @@ export class FxProvider implements AgentProvider {
         await promptDone;
         rt.setUpdateSink(null);
         cancelActive = null;
+
+        // Emitted before the outcome branches: a refused or errored turn still
+        // burned tokens, and dropping them silently under-reports spend.
+        const usage = readFxUsageSince(usageOffset);
+        if (usage) yield { type: 'usage', data: usage };
 
         const outcome = settled as { stopReason?: StopReason; error?: Error } | null;
         if (outcome?.error) {

@@ -195,6 +195,37 @@ export function isEventForSession(eventSessionId: string | undefined, activeSess
 }
 
 /**
+ * A turn is one prompt but many assistant messages — every tool-calling step
+ * bills separately. Recording only the final one drops the (usually largest)
+ * tool-calling steps, so the sum is what reaches the DB. Exported for tests.
+ */
+export function sumOpenCodeUsage(
+  perMessage: Array<import('./types.js').TurnUsage | undefined>,
+): import('./types.js').TurnUsage | null {
+  const present = perMessage.filter((u): u is import('./types.js').TurnUsage => !!u);
+  if (present.length === 0) return null;
+  const total: import('./types.js').TurnUsage = {
+    cost_usd: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
+    model: '',
+  };
+  for (const u of present) {
+    total.cost_usd += u.cost_usd;
+    total.input_tokens += u.input_tokens;
+    total.output_tokens += u.output_tokens;
+    total.cache_read_tokens += u.cache_read_tokens;
+    total.cache_write_tokens += u.cache_write_tokens;
+    total.reasoning_tokens = (total.reasoning_tokens ?? 0) + (u.reasoning_tokens ?? 0);
+    if (u.model) total.model = u.model;
+  }
+  return total;
+}
+
+/**
  * Map an OpenCode `finish` reason to a human-readable message used when the
  * turn ended with no user-visible text. Exported for tests.
  */
@@ -845,7 +876,10 @@ export class OpenCodeProvider implements AgentProvider {
         const textPartsByMessageId = new Map<string, Map<string, OpenCodePart>>();
         const roleByMessageId = new Map<string, string>();
         const finishByMessageId = new Map<string, string>();
-        let lastAssistantUsage: import('./types.js').TurnUsage | null = null;
+        // Keyed by message id because OpenCode re-emits a growing snapshot for
+        // the same message as it streams; the turn total is the sum of the
+        // final snapshot of each assistant message, not just the last one.
+        const usageByMessageId = new Map<string, import('./types.js').TurnUsage>();
         // Captured separately so the limits-lookup at yield-time has the
         // provider id (TurnUsage itself doesn't carry it).
         let lastAssistantProviderID: string | undefined;
@@ -911,7 +945,7 @@ export class OpenCodeProvider implements AgentProvider {
                   }
                   // Capture usage from the last assistant message.
                   if (info.role === 'assistant' && (typeof info.cost === 'number' || info.tokens)) {
-                    lastAssistantUsage = {
+                    usageByMessageId.set(info.id, {
                       cost_usd: info.cost ?? 0,
                       input_tokens: info.tokens?.input ?? 0,
                       output_tokens: info.tokens?.output ?? 0,
@@ -919,7 +953,7 @@ export class OpenCodeProvider implements AgentProvider {
                       cache_write_tokens: info.tokens?.cache?.write ?? 0,
                       reasoning_tokens: info.tokens?.reasoning,
                       model: info.modelID ?? '',
-                    };
+                    });
                     lastAssistantProviderID = info.providerID;
                     lastAssistantModelID = info.modelID;
                   }
@@ -1071,7 +1105,7 @@ export class OpenCodeProvider implements AgentProvider {
               modelID?: string;
             } | undefined;
             if (info && (typeof info.cost === 'number' || info.tokens)) {
-              lastAssistantUsage = {
+              usageByMessageId.set(lastAssistantId, {
                 cost_usd: info.cost ?? 0,
                 input_tokens: info.tokens?.input ?? 0,
                 output_tokens: info.tokens?.output ?? 0,
@@ -1079,7 +1113,7 @@ export class OpenCodeProvider implements AgentProvider {
                 cache_write_tokens: info.tokens?.cache?.write ?? 0,
                 reasoning_tokens: info.tokens?.reasoning,
                 model: info.modelID ?? '',
-              };
+              });
               if (info.providerID) lastAssistantProviderID = info.providerID;
               if (info.modelID) lastAssistantModelID = info.modelID;
             }
@@ -1093,15 +1127,15 @@ export class OpenCodeProvider implements AgentProvider {
         if (lastAssistantId) {
           yield { type: 'checkpoint', ref: lastAssistantId };
         }
-        if (lastAssistantUsage) {
+        const turnUsage = sumOpenCodeUsage(assistantMessageIds.map((id) => usageByMessageId.get(id)));
+        if (turnUsage) {
           // Enrich with model limits so the host can render context/output
           // budget bars and warn before the agent runs into a hard cap.
           // Best-effort: missing limits stay undefined.
           const limits = await self.getModelLimits(client, lastAssistantProviderID, lastAssistantModelID);
-          if (limits.context_window !== undefined) lastAssistantUsage.context_window = limits.context_window;
-          if (limits.max_output_tokens !== undefined) lastAssistantUsage.max_output_tokens = limits.max_output_tokens;
-          yield { type: 'usage', data: lastAssistantUsage };
-          lastAssistantUsage = null;
+          if (limits.context_window !== undefined) turnUsage.context_window = limits.context_window;
+          if (limits.max_output_tokens !== undefined) turnUsage.max_output_tokens = limits.max_output_tokens;
+          yield { type: 'usage', data: turnUsage };
         }
         // Empty text + non-stop finish = silent drop. Convert to an error so
         // the poll-loop's unsurfacedError path tells the user what happened
