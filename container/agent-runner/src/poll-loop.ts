@@ -21,7 +21,6 @@ import {
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import { isAudioMime, transcribeAudio } from './transcribe.js';
-import { appendThreadTitleRequest } from './thread-title-request.js';
 import { getConfig } from './config.js';
 import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderExchange } from './providers/types.js';
 
@@ -112,9 +111,8 @@ export interface PollLoopConfig {
    */
   providerName: string;
   cwd: string;
-  systemContext?: {
-    instructions?: string;
-  };
+  /** Called per query: parts of it go stale mid-container (e.g. "this thread has no title yet"). */
+  systemContext?: () => { instructions?: string };
   /**
    * Optional stop signal. In production the loop runs until the container
    * dies; tests pass a signal so an abandoned loop actually exits instead of
@@ -322,7 +320,6 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
     let prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
-    prompt = appendThreadTitleRequest(prompt, keep);
 
     // Replay any prior failed turn. The continuation rollback in
     // processQuery restores the agent to a session that completed before
@@ -394,7 +391,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           continuation: isTaskOnly ? undefined : continuation,
           cwd: config.cwd,
           files: files.length > 0 ? files : undefined,
-          systemContext: config.systemContext,
+          systemContext: config.systemContext?.(),
         });
         activeQuery = query;
         try {
@@ -735,7 +732,7 @@ async function tryAcknowledgeFailure(
       prompt: ackPrompt,
       continuation: undefined,
       cwd: config.cwd,
-      systemContext: config.systemContext,
+      systemContext: config.systemContext?.(),
     });
     await processQuery(query, routing, [], config.providerName, undefined, false);
     return { delivered: true };
@@ -1003,7 +1000,7 @@ async function processQuery(
         if (done) return;
 
         const keptIds = keep.map((m) => m.id);
-        let prompt = appendThreadTitleRequest(formatMessages(keep), keep);
+        let prompt = formatMessages(keep);
         const rawFollowUpFiles = extractFileAttachments(keep);
         const { prompt: resolvedFollowUp, files: followUpFiles } = await transcribeAudioFiles(rawFollowUpFiles, prompt);
         prompt = resolvedFollowUp;

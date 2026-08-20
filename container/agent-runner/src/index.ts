@@ -35,6 +35,7 @@ import './providers/index.js';
 import { createProvider, type ProviderName } from './providers/factory.js';
 import type { McpServerConfig } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
+import { threadTitleInstruction } from './thread-title-request.js';
 
 function log(msg: string): void {
   console.error(`[agent-runner] ${msg}`);
@@ -51,14 +52,6 @@ async function main(): Promise<void> {
   const providerName = config.provider.toLowerCase() as ProviderName;
 
   log(`Starting v2 agent-runner (provider: ${providerName})`);
-
-  // Runtime-generated system-prompt addendum: agent identity (name) plus
-  // the live destinations map. Everything else (capabilities, per-module
-  // instructions, per-channel formatting) is loaded by Claude Code from
-  // /workspace/agent/CLAUDE.md — the composed entry imports the shared
-  // base (/app/CLAUDE.md) and each enabled module's fragment. Per-group
-  // memory lives in /workspace/agent/CLAUDE.local.md (auto-loaded).
-  const instructions = buildSystemPromptAddendum(config.assistantName || undefined);
 
   // Discover additional directories mounted at /workspace/extra/*
   const additionalDirectories: string[] = [];
@@ -114,11 +107,26 @@ async function main(): Promise<void> {
   // and keeps its native memory untouched.
   if (provider.usesMemoryScaffold) ensureMemoryScaffold();
 
+  // Runtime-generated system-prompt addendum: agent identity (name) plus
+  // the live destinations map. Everything else (capabilities, per-module
+  // instructions, per-channel formatting) is loaded by Claude Code from
+  // /workspace/agent/CLAUDE.md — the composed entry imports the shared
+  // base (/app/CLAUDE.md) and each enabled module's fragment. Per-group
+  // memory lives in /workspace/agent/CLAUDE.local.md (auto-loaded).
+  const instructions = (): string =>
+    [
+      buildSystemPromptAddendum(config.assistantName || undefined),
+      provider.mcpToolGuidance,
+      threadTitleInstruction(),
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join('\n\n');
+
   await runPollLoop({
     provider,
     providerName,
     cwd: CWD,
-    systemContext: { instructions },
+    systemContext: () => ({ instructions: instructions() }),
   });
 }
 

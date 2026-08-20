@@ -15,6 +15,13 @@ export interface AgentProvider {
   readonly usesMemoryScaffold?: boolean;
 
   /**
+   * Optional. Prepended to the system instructions when the provider's harness
+   * does not advertise MCP tools directly, so the model is told how to reach
+   * them. Providers that expose MCP tools in the plain tool list omit this.
+   */
+  readonly mcpToolGuidance?: string;
+
+  /**
    * Optional. Called by the poll-loop after each completed exchange (a
    * result, a wrapping retry, or an error). Providers whose harness keeps no
    * on-disk transcript implement this to persist exchanges themselves (e.g.

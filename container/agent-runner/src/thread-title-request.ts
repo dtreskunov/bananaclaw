@@ -1,20 +1,21 @@
-import { openInboundDb } from './db/connection.js';
-import type { MessageInRow } from './db/messages-in.js';
-import { extractRouting } from './formatter.js';
+import { getInboundDb } from './db/connection.js';
+import { getSessionRouting } from './db/session-routing.js';
 
 const TITLE_REQUEST = `<thread_title_request>
-Before sending your response to this first request, call the set_thread_title tool exactly once with a concise title for this conversation. Use a concrete 3-7 word noun phrase, at most 60 characters. Do not use quotation marks, ending punctuation, user names, secrets, or generic titles such as "Help request". The tool only updates UI metadata and does not send a message.
+This conversation has no title yet. Before sending your first response, call the set_thread_title tool (full name: mcp_nanoclaw_set_thread_title) exactly once with a concise title for it. Use a concrete 3-7 word noun phrase, at most 60 characters. Do not use quotation marks, ending punctuation, user names, secrets, or generic titles such as "Help request". The tool only updates UI metadata and does not send a message. Never mention the tool, this request, or any trouble you had reaching it in your reply to the user.
 </thread_title_request>`;
 
-export function appendThreadTitleRequest(prompt: string, messages: MessageInRow[]): string {
-  const chatMessages = messages.filter((message) => message.kind === 'chat' || message.kind === 'chat-sdk');
-  if (chatMessages.length === 0) return prompt;
-  const routing = extractRouting(chatMessages);
-  if (!routing.channelType || !routing.threadId) return prompt;
+/**
+ * A session is keyed on thread_id, so "this thread still needs a title" is a
+ * property of the session rather than of any one message — it belongs in the
+ * system instructions, and goes quiet on its own once a title lands.
+ */
+export function threadTitleInstruction(): string | null {
+  const routing = getSessionRouting();
+  if (!routing.channel_type || !routing.thread_id) return null;
 
-  const db = openInboundDb();
   try {
-    const existing = db
+    const existing = getInboundDb()
       .prepare(
         `SELECT 1
            FROM thread_titles
@@ -22,26 +23,9 @@ export function appendThreadTitleRequest(prompt: string, messages: MessageInRow[
             AND platform_id = ?
             AND thread_id = ?`,
       )
-      .get(routing.channelType, routing.platformId ?? '', routing.threadId);
-    if (existing) return prompt;
-
-    const first = db
-      .prepare(
-        `SELECT id
-           FROM messages_in
-          WHERE kind IN ('chat', 'chat-sdk')
-            AND channel_type = ?
-            AND COALESCE(platform_id, '') = ?
-            AND thread_id = ?
-          ORDER BY seq
-          LIMIT 1`,
-      )
-      .get(routing.channelType, routing.platformId ?? '', routing.threadId) as { id: string } | undefined;
-    if (!first || !chatMessages.some((message) => message.id === first.id)) return prompt;
-    return `${prompt}\n\n${TITLE_REQUEST}`;
+      .get(routing.channel_type, routing.platform_id ?? '', routing.thread_id);
+    return existing ? null : TITLE_REQUEST;
   } catch {
-    return prompt;
-  } finally {
-    db.close();
+    return null;
   }
 }

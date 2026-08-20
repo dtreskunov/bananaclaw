@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { clearCurrentInReplyTo, setCurrentInReplyTo } from './current-batch.js';
 import { closeSessionDb, getInboundDb, getOutboundDb, initTestSessionDb } from './db/connection.js';
-import { getPendingMessages, markProcessing } from './db/messages-in.js';
+import { markProcessing } from './db/messages-in.js';
 import { setThreadTitle } from './mcp-tools/thread-titles.js';
-import { appendThreadTitleRequest } from './thread-title-request.js';
+import { threadTitleInstruction } from './thread-title-request.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -31,14 +31,13 @@ function insertChat(id: string, seq: number, text: string): void {
 }
 
 describe('thread title request', () => {
-  it('prompts only with the first chat message while no title exists', () => {
-    insertChat('in-1', 2, 'Help me debug OAuth');
-    const first = getPendingMessages();
-    expect(appendThreadTitleRequest('prompt', first)).toContain('<thread_title_request>');
+  it('asks for a title while the thread has none', () => {
+    expect(threadTitleInstruction()).toContain('<thread_title_request>');
+  });
 
-    insertChat('in-2', 4, 'More details');
-    const second = getPendingMessages().filter((message) => message.id === 'in-2');
-    expect(appendThreadTitleRequest('prompt', second)).toBe('prompt');
+  it('stays silent when the session has no thread to title', () => {
+    getInboundDb().prepare('UPDATE session_routing SET thread_id = NULL WHERE id = 1').run();
+    expect(threadTitleInstruction()).toBeNull();
   });
 
   it('suppresses the prompt when title metadata already exists', () => {
@@ -50,7 +49,7 @@ describe('thread title request', () => {
          VALUES ('web', 'group-1', 'thread-1', 'OAuth token refresh failure', 'in-1', datetime('now'))`,
       )
       .run();
-    expect(appendThreadTitleRequest('prompt', getPendingMessages())).toBe('prompt');
+    expect(threadTitleInstruction()).toBeNull();
   });
 
   it('writes a routed system action instead of a visible message', async () => {
