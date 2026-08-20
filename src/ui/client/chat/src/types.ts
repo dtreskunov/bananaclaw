@@ -323,7 +323,7 @@ export interface PendingQuestionDto {
 
 export interface RouterApi {
   selectGroup: (gid: string) => Promise<void>;
-  loadThreads: (gid: string) => Promise<void>;
+  loadThreads: (gid: string) => Promise<boolean>;
   openChat: (gid: string, tid: string | null, opts: ThreadCtx | null) => Promise<void>;
   clearChat: () => void;
   loadTree: (p: string) => Promise<void>;

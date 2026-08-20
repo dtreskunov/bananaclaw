@@ -11,6 +11,7 @@ import {
   isMobile,
   paneOpen,
   threadId,
+  threads,
   treePath,
 } from './state';
 import type { RouterApi } from './types';
@@ -29,6 +30,7 @@ afterEach(() => {
   groupId.value = null;
   groups.value = [];
   threadId.value = null;
+  threads.value = [];
   treePath.value = '';
   filePath.value = null;
   fileSearchOpen.value = false;
@@ -110,5 +112,28 @@ describe('file search hash state', () => {
     expect(router.restoreFileSearch).toHaveBeenCalledWith(true, 'docs', 'release notes');
     expect(router.loadTree).toHaveBeenCalledWith('docs');
     expect(location.hash).toContain('/d/docs/');
+  });
+
+  it('opens the group\u2019s newest thread when the routed thread belongs elsewhere', async () => {
+    groups.value = [{ id: 'agent' }] as typeof groups.value;
+    location.hash = '#g/agent/t/foreign-thread';
+    const router: RouterApi = {
+      selectGroup: vi.fn(),
+      loadThreads: vi.fn().mockImplementation(() => {
+        threads.value = [{ threadId: 'mine', channelType: 'web' }] as typeof threads.value;
+        return Promise.resolve(true);
+      }),
+      openChat: vi.fn().mockResolvedValue(undefined),
+      clearChat: vi.fn(),
+      loadTree: vi.fn(),
+      selectFile: vi.fn(),
+      restoreFileSearch: vi.fn().mockResolvedValue(undefined),
+      notFound: vi.fn(),
+    };
+
+    await applyHash(router);
+
+    expect(router.openChat).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(router.openChat).mock.calls[0]!.slice(0, 2)).toEqual(['agent', 'mine']);
   });
 });

@@ -138,8 +138,9 @@ export function requestScrollToBottom(): void {
 // Threads are part of the unified /api/sync response and live in the
 // `threads` signal. Callers that just want a fresh snapshot before
 // rendering can await this; everything else gets updated by the ticker.
-export async function loadThreads(_gid: string): Promise<void> {
-  await runSync({ forceRefresh: true });
+/** Resolves false when the list could not be refreshed, so callers don't trust stale entries. */
+export async function loadThreads(_gid: string): Promise<boolean> {
+  return runSync({ forceRefresh: true });
 }
 
 export async function deleteThread(
@@ -418,9 +419,10 @@ interface SyncResponse {
   threadMessages?: ServerMessage[];
 }
 
+/** Returns whether `threads` now holds a fresh server list for the current group. */
 export async function runSync(
   options: { replaceThreadMessages?: boolean; forceRefresh?: boolean } = {},
-): Promise<void> {
+): Promise<boolean> {
   const requestId = ++refs.syncRequestId;
   const gid = groupId.value;
   const tid = threadId.value;
@@ -442,9 +444,9 @@ export async function runSync(
       options.forceRefresh ? { cache: 'no-store' } : undefined,
     );
   } catch {
-    return;
+    return false;
   }
-  if (requestId !== refs.syncRequestId) return;
+  if (requestId !== refs.syncRequestId) return false;
   if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
   if (gid && groupId.value === gid && tid === threadId.value && Array.isArray(res.questions)) {
     const serverIds = new Set(res.questions.map((question) => question.questionId));
@@ -455,7 +457,9 @@ export async function runSync(
     });
     pendingQuestions.value = liveQuestions.length > 0 ? [...res.questions, ...liveQuestions] : res.questions;
   }
+  let threadsApplied = false;
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
+    threadsApplied = true;
     // Preserve any client-only "(new thread)" entries — they have no
     // server session yet (no inbound message has been sent), so they
     // won't appear in res.threads. Without this, sync would silently
@@ -484,6 +488,7 @@ export async function runSync(
     if (options.replaceThreadMessages) replaceIncomingMessages(res.threadMessages);
     else mergeIncomingMessages(res.threadMessages);
   }
+  return threadsApplied;
 }
 
 function toChatMessage(m: ServerMessage): ChatMessage {
@@ -1232,18 +1237,24 @@ export async function selectGroup(gid: string): Promise<void> {
   });
   clearSearch();
   clearFileSearch();
-  await loadThreads(gid);
+  const threadsFresh = await loadThreads(gid);
   // Threads list refresh now happens via the unified sync ticker
   // (startSyncPoll), which picks up groupId.value automatically.
   await loadTree('');
-  const latest = threads.value.length > 0 ? threads.value[0]! : null;
+  // A refresh that failed (server restart, offline) leaves `threads` describing
+  // the *previous* group. Opening its newest entry pins a foreign thread onto
+  // this group, and the server rejects that socket for good while the client
+  // retries forever — so wait for a real list instead.
+  const latest = threadsFresh && threads.value.length > 0 ? threads.value[0]! : null;
   if (latest) {
     openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error('chat open failed', err));
-  } else {
+  } else if (threadsFresh) {
     // Brand-new group with no threads — auto-start one so the user lands
     // in an immediately usable state instead of staring at a disabled
     // composer ("Reconnecting…") and wondering what to click.
     openChat(gid, null, null).catch((err) => console.error('auto-start chat failed', err));
+  } else {
+    chatStatus.value = 'could not load threads';
   }
 }
 

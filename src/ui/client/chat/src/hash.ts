@@ -141,11 +141,19 @@ export async function applyHash(router: RouterApi): Promise<void> {
   });
   const searchRoot = parsed.fileSearchRoot ?? routedParent;
   const restoredSearch = router.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
-  if (groupChanged) await router.loadThreads(parsed.groupId);
+  const threadsFresh = groupChanged ? await router.loadThreads(parsed.groupId) : true;
 
-  if (parsed.threadId) {
-    router.openChat(parsed.groupId, parsed.threadId, null).catch((err) => console.error('chat open failed', err));
-  } else if (groupChanged) {
+  // A thread id that isn't in this group's list (stale link, or a group switch
+  // that raced a failed refresh) can't be opened here — its socket is rejected
+  // for good — so fall back to the group's newest thread and rewrite the hash.
+  const routedThread =
+    parsed.threadId && (!threadsFresh || threads.value.some((t) => t.threadId === parsed.threadId))
+      ? parsed.threadId
+      : null;
+
+  if (routedThread) {
+    router.openChat(parsed.groupId, routedThread, null).catch((err) => console.error('chat open failed', err));
+  } else if (groupChanged || parsed.threadId) {
     const latest = threads.value.length > 0 ? threads.value[0]! : null;
     if (latest)
       router

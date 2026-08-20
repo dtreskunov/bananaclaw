@@ -17198,10 +17198,11 @@ async function applyHash(router2) {
   });
   const searchRoot = parsed.fileSearchRoot ?? routedParent;
   const restoredSearch = router2.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
-  if (groupChanged) await router2.loadThreads(parsed.groupId);
-  if (parsed.threadId) {
-    router2.openChat(parsed.groupId, parsed.threadId, null).catch((err) => console.error("chat open failed", err));
-  } else if (groupChanged) {
+  const threadsFresh = groupChanged ? await router2.loadThreads(parsed.groupId) : true;
+  const routedThread = parsed.threadId && (!threadsFresh || threads.value.some((t4) => t4.threadId === parsed.threadId)) ? parsed.threadId : null;
+  if (routedThread) {
+    router2.openChat(parsed.groupId, routedThread, null).catch((err) => console.error("chat open failed", err));
+  } else if (groupChanged || parsed.threadId) {
     const latest = threads.value.length > 0 ? threads.value[0] : null;
     if (latest)
       router2.openChat(parsed.groupId, latest.threadId, threadCtx(latest)).catch((err) => console.error("chat open failed", err));
@@ -17671,7 +17672,7 @@ function requestScrollToBottom() {
   scrollToBottomTick.value++;
 }
 async function loadThreads(_gid) {
-  await runSync({ forceRefresh: true });
+  return runSync({ forceRefresh: true });
 }
 async function deleteThread(thread, cascade = false) {
   if (!groupId.value) return;
@@ -17914,9 +17915,9 @@ async function runSync(options = {}) {
       options.forceRefresh ? { cache: "no-store" } : void 0
     );
   } catch {
-    return;
+    return false;
   }
-  if (requestId !== refs.syncRequestId) return;
+  if (requestId !== refs.syncRequestId) return false;
   if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
   if (gid && groupId.value === gid && tid === threadId.value && Array.isArray(res.questions)) {
     const serverIds = new Set(res.questions.map((question) => question.questionId));
@@ -17927,7 +17928,9 @@ async function runSync(options = {}) {
     });
     pendingQuestions.value = liveQuestions.length > 0 ? [...res.questions, ...liveQuestions] : res.questions;
   }
+  let threadsApplied = false;
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
+    threadsApplied = true;
     const serverIds = new Set(res.threads.map((t4) => t4.threadId));
     const ephemeral = threads.value.filter(
       (t4) => !serverIds.has(t4.threadId) && (t4.channelType || "web") === "web" && t4.title === "(new thread)" && !t4.messageCount
@@ -17938,6 +17941,7 @@ async function runSync(options = {}) {
     if (options.replaceThreadMessages) replaceIncomingMessages(res.threadMessages);
     else mergeIncomingMessages(res.threadMessages);
   }
+  return threadsApplied;
 }
 function toChatMessage(m6) {
   return {
@@ -18556,13 +18560,15 @@ async function selectGroup(gid) {
   });
   clearSearch();
   clearFileSearch();
-  await loadThreads(gid);
+  const threadsFresh = await loadThreads(gid);
   await loadTree("");
-  const latest = threads.value.length > 0 ? threads.value[0] : null;
+  const latest = threadsFresh && threads.value.length > 0 ? threads.value[0] : null;
   if (latest) {
     openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error("chat open failed", err));
-  } else {
+  } else if (threadsFresh) {
     openChat(gid, null, null).catch((err) => console.error("auto-start chat failed", err));
+  } else {
+    chatStatus.value = "could not load threads";
   }
 }
 var fileSearchGeneration = 0;
