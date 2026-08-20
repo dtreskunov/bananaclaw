@@ -513,6 +513,28 @@ export function sessionOpenRequest(
     : { method: 'session/new', params: { cwd: input.cwd, mcpServers } };
 }
 
+/**
+ * The MCP server named by a session-open failure, if the failure names one.
+ *
+ * fx treats every configured server as required: one that cannot initialize
+ * rejects `session/new` outright, and the user gets no reply at all. A
+ * third-party server that is down, still downloading, or speaking a dialect fx
+ * won't accept should cost the agent that server's tools for the turn, not the
+ * conversation.
+ */
+export function unstartableMcpServer(err: unknown): string | undefined {
+  const message = err instanceof Error ? err.message : String(err);
+  return /MCP server '([^']+)' failed to start/.exec(message)?.[1];
+}
+
+export function withoutMcpServers(
+  servers: ProviderOptions['mcpServers'],
+  dropped: ReadonlySet<string>,
+): ProviderOptions['mcpServers'] {
+  if (dropped.size === 0 || !servers) return servers;
+  return Object.fromEntries(Object.entries(servers).filter(([name]) => !dropped.has(name)));
+}
+
 const MCP_TOOL_GUIDANCE = `<mcp_tools>
 Your tool list does not include MCP tools directly — every one of them sits behind mcp_search_tools and mcp_select_tool. So when an instruction tells you to call a nanoclaw tool such as set_thread_title or send_message, that tool exists even though you cannot see it in your tool list.
 
@@ -548,18 +570,30 @@ export class FxProvider implements AgentProvider {
     return fxModelCatalog.limitsFor(usage.model);
   }
 
-  private async openSession(rt: FxRuntime, input: QueryInput): Promise<string> {
+  private async openSession(rt: FxRuntime, input: QueryInput): Promise<{ sessionId: string; dropped: string[] }> {
     const shims = ensureMcpShims(this.options.mcpServers);
-    const { method, params } = sessionOpenRequest(
-      input,
-      mcpServersToFxConfig(this.options.mcpServers, undefined, shims.urlFor),
-    );
-    const opened = await rt.request(method, params);
-    // A loaded session comes back in fx's default `ask` mode, so config is
-    // reapplied on both paths.
-    const sessionId = (opened.sessionId as string) ?? input.continuation!;
-    await this.applyConfig(rt, sessionId);
-    return sessionId;
+    // Re-tried from scratch every turn rather than remembered, so a server that
+    // was merely slow to install or briefly down comes back on its own.
+    const dropped = new Set<string>();
+    for (;;) {
+      const { method, params } = sessionOpenRequest(
+        input,
+        mcpServersToFxConfig(withoutMcpServers(this.options.mcpServers, dropped), undefined, shims.urlFor),
+      );
+      try {
+        const opened = await rt.request(method, params);
+        // A loaded session comes back in fx's default `ask` mode, so config is
+        // reapplied on both paths.
+        const sessionId = (opened.sessionId as string) ?? input.continuation!;
+        await this.applyConfig(rt, sessionId);
+        return { sessionId, dropped: [...dropped] };
+      } catch (err) {
+        const name = unstartableMcpServer(err);
+        if (!name || dropped.has(name)) throw err;
+        dropped.add(name);
+        log(`MCP server ${name} failed to start; opening the session without it`);
+      }
+    }
   }
 
   private async applyConfig(rt: FxRuntime, sessionId: string): Promise<void> {
@@ -602,8 +636,19 @@ export class FxProvider implements AgentProvider {
         const turn = pending.shift()!;
 
         if (!sessionId) {
-          sessionId = await self.openSession(rt, input);
+          const opened = await self.openSession(rt, input);
+          sessionId = opened.sessionId;
           yield { type: 'init', continuation: sessionId };
+          if (opened.dropped.length > 0) {
+            yield {
+              type: 'progress',
+              step: {
+                kind: 'internal',
+                id: `mcp-unavailable-${Date.now()}`,
+                text: `MCP servers unavailable this turn: ${opened.dropped.join(', ')}`,
+              },
+            };
+          }
         }
 
         // Drain updates through a queue so the generator can yield them in

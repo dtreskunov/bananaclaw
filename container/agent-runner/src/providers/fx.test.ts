@@ -8,6 +8,8 @@ import {
   mapToolStatus,
   refusalMessage,
   sessionOpenRequest,
+  unstartableMcpServer,
+  withoutMcpServers,
 } from './fx.js';
 
 describe('mcpServersToFxConfig', () => {
@@ -70,6 +72,22 @@ describe('mcpServersToFxConfig', () => {
 
   test('resolveCommandPath leaves an absolute command untouched', () => {
     expect(resolveCommandPath('/bin/sh')).toBe('/bin/sh');
+  });
+});
+
+describe('degrading past an MCP server that will not start', () => {
+  test('names the server fx refused to start', () => {
+    expect(unstartableMcpServer(new Error("Required MCP server 'MiniMax' failed to start: McpInitFailed"))).toBe(
+      'MiniMax',
+    );
+    expect(unstartableMcpServer(new Error('session/new: connection closed'))).toBeUndefined();
+  });
+
+  test('drops only the named server from the config', () => {
+    const servers = { a: { command: '/bin/a' }, b: { command: '/bin/b' } };
+    expect(withoutMcpServers(servers, new Set(['b']))).toEqual({ a: { command: '/bin/a' } });
+    expect(withoutMcpServers(servers, new Set())).toBe(servers);
+    expect(withoutMcpServers(undefined, new Set(['b']))).toBeUndefined();
   });
 });
 
