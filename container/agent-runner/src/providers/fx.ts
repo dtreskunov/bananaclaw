@@ -518,8 +518,8 @@ export function sessionOpenRequest(
  *
  * fx treats every configured server as required: one that cannot initialize
  * rejects `session/new` outright, and the user gets no reply at all. A
- * third-party server that is down, still downloading, or speaking a dialect fx
- * won't accept should cost the agent that server's tools for the turn, not the
+ * third-party server that is down, mid-install, or speaking a dialect fx won't
+ * accept should cost the agent that server's tools for the turn, not the
  * conversation.
  */
 export function unstartableMcpServer(err: unknown): string | undefined {
@@ -572,8 +572,8 @@ export class FxProvider implements AgentProvider {
 
   private async openSession(rt: FxRuntime, input: QueryInput): Promise<{ sessionId: string; dropped: string[] }> {
     const shims = ensureMcpShims(this.options.mcpServers);
-    // Re-tried from scratch every turn rather than remembered, so a server that
-    // was merely slow to install or briefly down comes back on its own.
+    // Re-tried from scratch every turn rather than remembered: most of these
+    // failures are one-off, and fx gives no reason to distinguish them.
     const dropped = new Set<string>();
     for (;;) {
       const { method, params } = sessionOpenRequest(
