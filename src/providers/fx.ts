@@ -22,6 +22,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { readEnvFile } from '../env.js';
+import { cloneFxSessionState } from './fx-fork-snapshot.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 
 const FX_ENV_KEYS = [
@@ -49,38 +50,42 @@ function mergeNoProxy(current: string | undefined, additions: string): string {
   return [...parts].join(',');
 }
 
-registerProviderContainerConfig('fx', (ctx) => {
-  const stateDir = path.join(ctx.sessionDir, 'fx-state');
-  fs.mkdirSync(stateDir, { recursive: true });
+registerProviderContainerConfig(
+  'fx',
+  (ctx) => {
+    const stateDir = path.join(ctx.sessionDir, 'fx-state');
+    fs.mkdirSync(stateDir, { recursive: true });
 
-  const noProxyAdditions = '127.0.0.1,localhost';
-  const env: Record<string, string> = {
-    // fx self-updates by default; in a pinned image that would swap the binary
-    // out from under the build and break reproducibility.
-    FX_AUTO_UPGRADE: '0',
-    NO_PROXY: mergeNoProxy(ctx.hostEnv.NO_PROXY, noProxyAdditions),
-    no_proxy: mergeNoProxy(ctx.hostEnv.no_proxy, noProxyAdditions),
-  };
+    const noProxyAdditions = '127.0.0.1,localhost';
+    const env: Record<string, string> = {
+      // fx self-updates by default; in a pinned image that would swap the binary
+      // out from under the build and break reproducibility.
+      FX_AUTO_UPGRADE: '0',
+      NO_PROXY: mergeNoProxy(ctx.hostEnv.NO_PROXY, noProxyAdditions),
+      no_proxy: mergeNoProxy(ctx.hostEnv.no_proxy, noProxyAdditions),
+    };
 
-  for (const key of FX_ENV_KEYS) {
-    const value = ctx.hostEnv[key];
-    if (value) env[key] = value;
-  }
+    for (const key of FX_ENV_KEYS) {
+      const value = ctx.hostEnv[key];
+      if (value) env[key] = value;
+    }
 
-  // The service unit doesn't load .env, so process.env may be missing these
-  // even when they're configured.
-  const fromFile = readEnvFile([...FX_ENV_KEYS]);
-  for (const [key, value] of Object.entries(fromFile)) {
-    if (value && env[key] === undefined) env[key] = value;
-  }
+    // The service unit doesn't load .env, so process.env may be missing these
+    // even when they're configured.
+    const fromFile = readEnvFile([...FX_ENV_KEYS]);
+    for (const [key, value] of Object.entries(fromFile)) {
+      if (value && env[key] === undefined) env[key] = value;
+    }
 
-  // Per-group model override from container config wins over the fleet default.
-  if (ctx.containerConfig.model) {
-    env.FX_MODEL = ctx.containerConfig.model;
-  }
+    // Per-group model override from container config wins over the fleet default.
+    if (ctx.containerConfig.model) {
+      env.FX_MODEL = ctx.containerConfig.model;
+    }
 
-  return {
-    mounts: [{ hostPath: stateDir, containerPath: FX_HOME_STATE_PATH, readonly: false }],
-    env,
-  };
-});
+    return {
+      mounts: [{ hostPath: stateDir, containerPath: FX_HOME_STATE_PATH, readonly: false }],
+      env,
+    };
+  },
+  { forkSessionState: cloneFxSessionState },
+);

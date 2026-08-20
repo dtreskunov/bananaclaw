@@ -24,11 +24,18 @@ import { registerProvider } from './provider-registry.js';
 import { mcpServersToFxConfig } from './mcp-to-fx.js';
 import { startFxMcpShims, type FxMcpShims } from './fx-mcp-shim.js';
 import { createModelCatalog, type RawLimits } from './model-catalog.js';
+import {
+  fxSessionDir,
+  readFxCommitPosition,
+  rewindFxCommitPosition,
+  type FxCommitPosition,
+} from './fx-session-store.js';
 import type {
   ActivityStep,
   AgentProvider,
   AgentQuery,
   FileAttachment,
+  ForkContinuationInput,
   ModelLimits,
   ProviderEvent,
   ProviderOptions,
@@ -144,10 +151,14 @@ const STALE_SESSION_RE = /session not found|unknown session|no such session|fail
  * ~/.fx/usage.jsonl is the only source. Reading it by byte offset scopes a
  * read to a single turn without re-counting earlier ones.
  */
-function fxUsageLogPath(): string {
+function fxStateRoot(): string {
   // HOME, not os.homedir(): the state mount is keyed off the container's HOME,
   // and Bun's os.homedir() ignores the env var.
-  return path.join(process.env.HOME || os.homedir(), '.fx', 'usage.jsonl');
+  return path.join(process.env.HOME || os.homedir(), '.fx');
+}
+
+function fxUsageLogPath(): string {
+  return path.join(fxStateRoot(), 'usage.jsonl');
 }
 
 function fxUsageOffset(): number {
@@ -570,6 +581,36 @@ export class FxProvider implements AgentProvider {
     return fxModelCatalog.limitsFor(usage.model);
   }
 
+  /**
+   * Branch the parent session at `anchorRef` — the commit watermark captured
+   * when that turn finished.
+   *
+   * fx has no server-side fork, so this works on the files instead: the host
+   * has already copied the parent's whole state directory into this session's
+   * ~/.fx mount, and all that remains is to wind the copy's watermark back.
+   * fx truncates the event log to it and replays from there when we load the
+   * session on the first turn — which is why this must run before the runtime
+   * is started, as it does (the fork is adopted before the first query).
+   *
+   * The parent's session id is reused rather than minted fresh: the copy is
+   * private to this container, so there is nothing to collide with, and fx
+   * validates that the id inside the session matches the one it is asked for.
+   */
+  forkContinuation(input: ForkContinuationInput): Promise<string | null> {
+    let position: FxCommitPosition;
+    try {
+      position = JSON.parse(input.anchorRef) as FxCommitPosition;
+    } catch {
+      return Promise.resolve(null);
+    }
+    const dir = fxSessionDir(fxStateRoot(), input.continuation);
+    if (!rewindFxCommitPosition(dir, position)) {
+      log(`could not rewind ${input.continuation} to seq ${position.through_seq}`);
+      return Promise.resolve(null);
+    }
+    return Promise.resolve(input.continuation);
+  }
+
   private async openSession(rt: FxRuntime, input: QueryInput): Promise<{ sessionId: string; dropped: string[] }> {
     const shims = ensureMcpShims(this.options.mcpServers);
     // Re-tried from scratch every turn rather than remembered: most of these
@@ -720,6 +761,10 @@ export class FxProvider implements AgentProvider {
           };
           continue;
         }
+        // The watermark has advanced past this turn's commit by now, so it is
+        // a branch point a later fork can rewind the session back to.
+        const checkpoint = readFxCommitPosition(fxSessionDir(fxStateRoot(), sessionId));
+        if (checkpoint) yield { type: 'checkpoint', ref: JSON.stringify(checkpoint) };
         yield { type: 'result', text: text.trim() ? text : null };
       }
     }
