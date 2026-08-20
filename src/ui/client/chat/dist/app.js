@@ -28074,7 +28074,12 @@ function SettingsTab({ gid, section, onClose, onActions }) {
             placeholder: data.defaults.provider ? `default: ${data.defaults.provider}` : "pick a provider",
             disabled: busy,
             freeform: false,
-            onChange: (v5) => update("provider", v5)
+            onChange: (v5) => {
+              if (v5 === draft.provider) return;
+              setDraft(
+                (d5) => d5 ? { ...d5, provider: v5, model: null, small_model: null, upstream_provider: null } : d5
+              );
+            }
           }
         ),
         data.providesAgentSurfaces ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "This provider composes its own instructions and discovers skills its own way, so the Skills selection and Assistant name don't apply while it's active." }) : null

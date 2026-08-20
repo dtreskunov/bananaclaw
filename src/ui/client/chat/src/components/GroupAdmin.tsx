@@ -529,7 +529,14 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
               placeholder={data.defaults.provider ? `default: ${data.defaults.provider}` : 'pick a provider'}
               disabled={busy}
               freeform={false}
-              onChange={(v) => update('provider', v)}
+              onChange={(v) => {
+                if (v === draft.provider) return;
+                // Model ids are provider-specific, so carrying the old pick over
+                // would save an id the new provider can't resolve.
+                setDraft((d) =>
+                  d ? { ...d, provider: v, model: null, small_model: null, upstream_provider: null } : d,
+                );
+              }}
             />
             {data.providesAgentSurfaces ? (
               <p class="group-admin-help">
