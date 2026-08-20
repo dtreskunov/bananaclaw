@@ -15,7 +15,7 @@ import zlib from 'zlib';
 import { URL } from 'url';
 
 import { CONTAINER_IMAGE } from '../../../config.js';
-import { readEnvFile } from '../../../env.js';
+import { readEnvFile, resolveDefaultModel } from '../../../env.js';
 import { buildAgentGroupImage, isContainerRunning, runMcpProbeContainer } from '../../../container-runner.js';
 import { restartAgentGroupContainers } from '../../../container-restart.js';
 import { getDb } from '../../../db/connection.js';
@@ -254,7 +254,8 @@ interface SettingsResponse {
   /** Resolved defaults for nullable config fields (shown as placeholders). */
   defaults: {
     provider: string | null;
-    model: string | null;
+    /** Default model per provider — model ids don't carry across providers. */
+    models: Record<string, string | null>;
     image_tag: string | null;
     transcription_model: string | null;
   };
@@ -325,9 +326,14 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
   }
 
   // Resolve effective defaults for fields the UI shows as placeholders.
-  const envDefaults = readEnvFile(['DEFAULT_PROVIDER', 'DEFAULT_MODEL', 'DEFAULT_TRANSCRIPTION_MODEL']);
-  const defaultProvider = envDefaults.DEFAULT_PROVIDER || 'claude';
-  const defaultModel = envDefaults.DEFAULT_MODEL || null;
+  const envDefaults = readEnvFile(['DEFAULT_PROVIDER', 'DEFAULT_TRANSCRIPTION_MODEL']);
+  const defaultProviderName = envDefaults.DEFAULT_PROVIDER || 'claude';
+  // Every provider the picker can land on, so the Model placeholder can track
+  // the drafted provider without another round trip.
+  const defaultModels: Record<string, string | null> = {};
+  for (const p of new Set([...SELECTABLE_PROVIDERS, defaultProviderName, ...(cfg.provider ? [cfg.provider] : [])])) {
+    defaultModels[p] = bareIdForResponse(p, resolveDefaultModel(p) ?? null);
+  }
   const defaultTranscriptionModel = envDefaults.DEFAULT_TRANSCRIPTION_MODEL || null;
   const defaultImage = CONTAINER_IMAGE || null;
   const emailConfig = getAgentEmailConfig();
@@ -361,8 +367,8 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     skills: parseSkills(cfg.skills),
     availableSkills: listAvailableSkills(),
     defaults: {
-      provider: defaultProvider,
-      model: defaultModel ? bareIdForResponse(defaultProvider, defaultModel) : null,
+      provider: defaultProviderName,
+      models: defaultModels,
       image_tag: defaultImage,
       transcription_model: defaultTranscriptionModel,
     },
@@ -388,7 +394,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     selectedModelDetail,
     selectedImageDetail,
     actorIsElevated: isOwner(actorUserId) || isGlobalAdmin(actorUserId),
-    providesAgentSurfaces: providerProvidesAgentSurfaces(cfg.provider ?? defaultProvider),
+    providesAgentSurfaces: providerProvidesAgentSurfaces(cfg.provider ?? defaultProviderName),
   };
   writeJson(res, 200, body);
 }
@@ -569,9 +575,9 @@ async function handlePatchSettings(
     const bareModel = bareIdForResponse(effectiveProvider, updates.model ?? null);
     if (effectiveProvider === 'opencode') {
       if (!bareModel) {
-        // Model cleared — the group falls back to DEFAULT_MODEL, whose
-        // upstream is the fleet-wide OPENCODE_PROVIDER. Clearing the override
-        // keeps those two consistent.
+        // Model cleared — the group falls back to the provider's default model,
+        // whose upstream is the fleet-wide OPENCODE_PROVIDER. Clearing the
+        // override keeps those two consistent.
         updates.upstream_provider = null;
       } else {
         const resolved = await resolveUpstreamForWireId(bareModel);
@@ -604,10 +610,11 @@ async function handlePatchSettings(
 
   if ('transcription_model' in updates || 'provider' in updates || 'model' in updates) {
     const existing = getContainerConfig(gid);
-    const envDefaults = readEnvFile(['DEFAULT_PROVIDER', 'DEFAULT_MODEL', 'DEFAULT_TRANSCRIPTION_MODEL']);
+    const envDefaults = readEnvFile(['DEFAULT_PROVIDER', 'DEFAULT_TRANSCRIPTION_MODEL']);
     const effectiveProvider = updates.provider ?? existing?.provider ?? envDefaults.DEFAULT_PROVIDER ?? 'claude';
-    // DEFAULT_MODEL in .env is the DB wire value — use as-is.
-    const effectiveModel = 'model' in updates ? updates.model : (existing?.model ?? envDefaults.DEFAULT_MODEL ?? null);
+    // The default model in .env is the DB wire value — use as-is.
+    const effectiveModel =
+      'model' in updates ? updates.model : (existing?.model ?? resolveDefaultModel(effectiveProvider) ?? null);
     // Fall back to DEFAULT_TRANSCRIPTION_MODEL so clearing the per-group
     // override re-enables voice (mirrors voice-mode.ts:deriveVoiceModeForConfig
     // and the env fallback already used by streamTranscribe).

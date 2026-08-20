@@ -27831,6 +27831,8 @@ function SettingsTab({ gid, section, onClose, onActions }) {
   }, [gid]);
   const provider = draft?.provider ?? null;
   if (!data || !draft) return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
+  const effectiveProvider = provider ?? data.defaults.provider;
+  const defaultModel = effectiveProvider ? data.defaults.models[effectiveProvider] ?? null : null;
   function update(k4, v5) {
     setDraft((d5) => d5 ? { ...d5, [k4]: v5 } : d5);
   }
@@ -28088,8 +28090,8 @@ function SettingsTab({ gid, section, onClose, onActions }) {
         ModelPickerDialog,
         {
           value: draft.model,
-          provider: provider ?? data.defaults.provider,
-          placeholder: data.defaults.model ? `default: ${data.defaults.model}` : "pick or type a model id",
+          provider: effectiveProvider,
+          placeholder: defaultModel ? `default: ${defaultModel}` : "pick or type a model id",
           disabled: busy,
           apiBasePath: apiPath(gid, ""),
           outputModality: "text",
@@ -28100,7 +28102,7 @@ function SettingsTab({ gid, section, onClose, onActions }) {
         ModelPickerDialog,
         {
           value: draft.small_model,
-          provider: provider ?? data.defaults.provider,
+          provider: effectiveProvider,
           upstream: draft.upstream_provider,
           placeholder: "same as main model",
           disabled: busy,

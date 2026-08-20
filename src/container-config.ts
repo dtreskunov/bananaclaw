@@ -14,7 +14,7 @@ import path from 'path';
 import { GROUPS_DIR, PAGES_BASE_DOMAIN } from './config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { getAgentGroup } from './db/agent-groups.js';
-import { readEnvFile } from './env.js';
+import { readEnvFile, resolveDefaultModel } from './env.js';
 import type { AgentGroup, ContainerConfigRow } from './types.js';
 
 export interface McpStdioServerConfig {
@@ -123,12 +123,13 @@ function parseModelParams(raw: string | null | undefined): Record<string, unknow
 
 /**
  * Build a `ContainerConfig` from a DB row + agent group identity. Per-row
- * NULLs fall back to env defaults (`DEFAULT_PROVIDER` / `DEFAULT_MODEL` /
- * `DEFAULT_EFFORT`) so an operator can set a fleet-wide preference once
+ * NULLs fall back to env defaults (`DEFAULT_PROVIDER` / `DEFAULT_MODEL[_<PROVIDER>]`
+ * / `DEFAULT_EFFORT`) so an operator can set a fleet-wide preference once
  * in `.env` instead of running `ncl groups config update` after every
  * onboarding. Row values always win.
  */
 export function configFromDb(row: ContainerConfigRow, group: AgentGroup): ContainerConfig {
+  const provider = row.provider ?? envFallback('DEFAULT_PROVIDER');
   return {
     mcpServers: JSON.parse(row.mcp_servers) as Record<string, McpServerConfig>,
     packages: {
@@ -139,13 +140,13 @@ export function configFromDb(row: ContainerConfigRow, group: AgentGroup): Contai
     imageTag: row.image_tag ?? undefined,
     additionalMounts: JSON.parse(row.additional_mounts) as AdditionalMountConfig[],
     skills: JSON.parse(row.skills) as string[] | 'all',
-    provider: row.provider ?? envFallback('DEFAULT_PROVIDER'),
+    provider,
     upstreamProvider: row.upstream_provider ?? undefined,
     groupName: group.name,
     assistantName: row.assistant_name ?? group.name,
     agentGroupId: group.id,
     maxMessagesPerPrompt: row.max_messages_per_prompt ?? undefined,
-    model: row.model ?? envFallback('DEFAULT_MODEL'),
+    model: row.model ?? resolveDefaultModel(provider),
     smallModel: row.small_model ?? undefined,
     effort: row.effort ?? envFallback('DEFAULT_EFFORT'),
     voiceMode: row.voice_mode,

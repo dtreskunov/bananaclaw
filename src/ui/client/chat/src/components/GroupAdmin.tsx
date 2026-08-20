@@ -76,7 +76,7 @@ interface SettingsResponse {
   availableSkills: AvailableSkillDto[];
   defaults: {
     provider: string | null;
-    model: string | null;
+    models: Record<string, string | null>;
     image_tag: string | null;
     transcription_model: string | null;
   };
@@ -309,6 +309,9 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
 
   const provider = draft?.provider ?? null;
   if (!data || !draft) return <p class="muted">Loading…</p>;
+
+  const effectiveProvider = provider ?? data.defaults.provider;
+  const defaultModel = effectiveProvider ? (data.defaults.models[effectiveProvider] ?? null) : null;
 
   function update<K extends keyof SettingsResponse['config']>(k: K, v: SettingsResponse['config'][K]): void {
     setDraft((d) => (d ? { ...d, [k]: v } : d));
@@ -548,8 +551,8 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
           <Field label="Model">
             <ModelPickerDialog
               value={draft.model}
-              provider={provider ?? data.defaults.provider}
-              placeholder={data.defaults.model ? `default: ${data.defaults.model}` : 'pick or type a model id'}
+              provider={effectiveProvider}
+              placeholder={defaultModel ? `default: ${defaultModel}` : 'pick or type a model id'}
               disabled={busy}
               apiBasePath={apiPath(gid, '')}
               outputModality="text"
@@ -559,7 +562,7 @@ function SettingsTab({ gid, section, onClose, onActions }: { gid: string; sectio
           <Field label="Small model" info="Lighter model for background tasks like compaction and summaries (cost optimization). Restricted to the same upstream as the main model — OpenCode only enables one gateway per session.">
             <ModelPickerDialog
               value={draft.small_model}
-              provider={provider ?? data.defaults.provider}
+              provider={effectiveProvider}
               upstream={draft.upstream_provider}
               placeholder="same as main model"
               disabled={busy}

@@ -40,3 +40,34 @@ export function readEnvFile(keys: string[]): Record<string, string> {
 
   return result;
 }
+
+/** Resolve one var from the process environment first, then `.env`. */
+function envValue(name: string): string | undefined {
+  if (process.env[name] !== undefined) return process.env[name];
+  return readEnvFile([name])[name];
+}
+
+/** Fleet-wide default agent provider. */
+export function defaultProvider(): string {
+  return envValue('DEFAULT_PROVIDER') || 'claude';
+}
+
+/** Env var carrying the fleet default model for `provider`. */
+export function defaultModelEnvKey(provider: string): string {
+  return `DEFAULT_MODEL_${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+}
+
+/**
+ * Fleet default model for `provider`, or undefined when none applies.
+ *
+ * Model ids are provider-specific — `minimax/MiniMax-M3` is meaningless to
+ * claude — so `DEFAULT_MODEL_<PROVIDER>` wins, and the unsuffixed
+ * `DEFAULT_MODEL` is treated as the default for `DEFAULT_PROVIDER` only.
+ * Letting it apply fleet-wide just moves the failure to container start.
+ */
+export function resolveDefaultModel(provider: string | null | undefined): string | undefined {
+  const name = provider || defaultProvider();
+  const scoped = envValue(defaultModelEnvKey(name));
+  if (scoped) return scoped;
+  return name === defaultProvider() ? envValue('DEFAULT_MODEL') || undefined : undefined;
+}
