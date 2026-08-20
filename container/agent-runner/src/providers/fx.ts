@@ -23,12 +23,13 @@ import { startFxGatewayShim, type FxGatewayShim } from './fx-gateway-shim.js';
 import { registerProvider } from './provider-registry.js';
 import { mcpServersToFxConfig } from './mcp-to-fx.js';
 import { startFxMcpShims, type FxMcpShims } from './fx-mcp-shim.js';
-import { createModelCatalog, type ModelLimits, type RawLimits } from './model-catalog.js';
+import { createModelCatalog, type RawLimits } from './model-catalog.js';
 import type {
   ActivityStep,
   AgentProvider,
   AgentQuery,
   FileAttachment,
+  ModelLimits,
   ProviderEvent,
   ProviderOptions,
   QueryInput,

@@ -1,4 +1,8 @@
-import type { ModelLimits } from './model-catalog.js';
+/** A model's token budgets. Absent means "not known", never "unlimited". */
+export interface ModelLimits {
+  context_window?: number;
+  max_output_tokens?: number;
+}
 
 export interface AgentProvider {
   /**

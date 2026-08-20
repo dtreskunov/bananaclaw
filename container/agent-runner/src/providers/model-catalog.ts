@@ -12,15 +12,12 @@
  * Claude needs none of this: its SDK reports limits with the usage itself.
  */
 
+import type { ModelLimits } from './types.js';
+
 /** What a catalog reports, before interpretation. Zero means "not stated". */
 export interface RawLimits {
   context: number;
   output: number;
-}
-
-export interface ModelLimits {
-  context_window?: number;
-  max_output_tokens?: number;
 }
 
 /**

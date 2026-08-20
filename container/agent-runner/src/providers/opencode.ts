@@ -4,10 +4,10 @@ import fs from 'fs';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
-import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ForkContinuationInput, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions } from './types.js';
+import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ForkContinuationInput, ModelLimits, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions } from './types.js';
 import { pickActivityDetail } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
-import { createModelCatalog, type ModelLimits, type RawLimits } from './model-catalog.js';
+import { createModelCatalog, type RawLimits } from './model-catalog.js';
 import { parseAssistantOutput } from '../formatter.js';
 
 function log(msg: string): void {
