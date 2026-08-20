@@ -4,7 +4,31 @@ import os from 'os';
 import path from 'path';
 
 import { sumFxUsageFacts, readFxUsageSince, fxLimitsFromCatalog } from './providers/fx';
-import { sumOpenCodeUsage } from './providers/opencode';
+import { sumOpenCodeUsage, lookupModelLimits } from './providers/opencode';
+
+describe('lookupModelLimits', () => {
+  const catalog = new Map([
+    ['minimax/MiniMax-M3', { context: 1_000_000, output: 128_000 }],
+    ['openrouter/minimax/minimax-m3', { context: 1_048_576, output: 512_000 }],
+  ]);
+
+  it('prefers an exact match', () => {
+    expect(lookupModelLimits(catalog, 'minimax/MiniMax-M3')).toEqual({ context: 1_000_000, output: 128_000 });
+  });
+
+  // OpenRouter accepts the mixed-case id, so a group pinned that way runs but
+  // used to record no limits at all.
+  it('falls back to a case-insensitive match', () => {
+    expect(lookupModelLimits(catalog, 'openrouter/minimax/MiniMax-M3')).toEqual({
+      context: 1_048_576,
+      output: 512_000,
+    });
+  });
+
+  it('returns undefined for a model the catalog does not know', () => {
+    expect(lookupModelLimits(catalog, 'openrouter/acme/nope')).toBeUndefined();
+  });
+});
 
 describe('fxLimitsFromCatalog', () => {
   it('maps the gateway fields onto the usage columns', () => {

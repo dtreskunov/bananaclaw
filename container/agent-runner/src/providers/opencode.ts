@@ -226,6 +226,25 @@ export function sumOpenCodeUsage(
 }
 
 /**
+ * OpenRouter resolves model ids case-insensitively, so a group can be pinned
+ * to `openrouter/minimax/MiniMax-M3` and run fine while the catalog only lists
+ * `openrouter/minimax/minimax-m3`. An exact-match lookup silently loses the
+ * limits for those turns. Exported for tests.
+ */
+export function lookupModelLimits(
+  catalog: Map<string, { context: number; output: number }>,
+  key: string,
+): { context: number; output: number } | undefined {
+  const exact = catalog.get(key);
+  if (exact) return exact;
+  const wanted = key.toLowerCase();
+  for (const [k, v] of catalog) {
+    if (k.toLowerCase() === wanted) return v;
+  }
+  return undefined;
+}
+
+/**
  * Map an OpenCode `finish` reason to a human-readable message used when the
  * turn ended with no user-visible text. Exported for tests.
  */
@@ -693,6 +712,7 @@ export class OpenCodeProvider implements AgentProvider {
   // once via client.config.providers() and reused for every subsequent turn
   // — model metadata doesn't change inside a container's lifetime.
   private modelLimitsPromise: Promise<Map<string, { context: number; output: number }>> | null = null;
+  private readonly warnedMissingLimits = new Set<string>();
 
   constructor(options: ProviderOptions = {}) {
     this.options = options;
@@ -759,8 +779,15 @@ export class OpenCodeProvider implements AgentProvider {
       })();
     }
     const map = await this.modelLimitsPromise;
-    const hit = map.get(`${providerID}/${modelID}`);
-    if (!hit) return {};
+    const key = `${providerID}/${modelID}`;
+    const hit = lookupModelLimits(map, key);
+    if (!hit) {
+      if (map.size > 0 && !this.warnedMissingLimits.has(key)) {
+        this.warnedMissingLimits.add(key);
+        log(`No catalog limits for ${key}; context/output budgets will be blank`);
+      }
+      return {};
+    }
     return {
       context_window: hit.context > 0 ? hit.context : undefined,
       max_output_tokens: hit.output > 0 ? hit.output : undefined,
