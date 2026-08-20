@@ -45,10 +45,27 @@ export function resolveCommandPath(command: string, pathEnv = process.env.PATH ?
   return command;
 }
 
+/**
+ * fx hands a stdio server exactly the env it is given and nothing more, so a
+ * config that declares only its own API keys leaves the child with no PATH or
+ * HOME. That breaks any launcher that shells out or resolves an interpreter —
+ * uvx's generated scripts call `realpath`, `dirname` and `python` by name.
+ * Declared values win, so a server can still pin its own PATH.
+ */
+export function processBaseEnv(env = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of ['PATH', 'HOME']) {
+    const value = env[key];
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
 export function mcpServersToFxConfig(
   servers: Record<string, McpServerConfig> | undefined,
   resolve: (command: string) => string = resolveCommandPath,
   urlFor: (name: string) => string | undefined = () => undefined,
+  baseEnv: Record<string, string> = processBaseEnv(),
 ): FxMcpServer[] {
   const out: FxMcpServer[] = [];
   for (const [name, config] of Object.entries(servers ?? {})) {
@@ -65,7 +82,7 @@ export function mcpServersToFxConfig(
       name,
       command: resolve(config.command),
       args: config.args ?? [],
-      env: toNameValue(config.env),
+      env: toNameValue({ ...baseEnv, ...config.env }),
     });
   }
   return out;

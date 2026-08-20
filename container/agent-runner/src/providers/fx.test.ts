@@ -14,13 +14,30 @@ describe('mcpServersToFxConfig', () => {
   const resolve = (c: string) => (c.startsWith('/') ? c : `/usr/bin/${c}`);
 
   test('fills the args and env arrays fx requires even when absent', () => {
-    const out = mcpServersToFxConfig({ tools: { command: '/opt/tools/serve' } }, resolve);
+    const out = mcpServersToFxConfig({ tools: { command: '/opt/tools/serve' } }, resolve, undefined, {});
     expect(out).toEqual([{ name: 'tools', command: '/opt/tools/serve', args: [], env: [] }]);
   });
 
   test('resolves a bare command to an absolute path', () => {
-    const out = mcpServersToFxConfig({ t: { command: 'bun', args: ['x.ts'] } }, resolve);
+    const out = mcpServersToFxConfig({ t: { command: 'bun', args: ['x.ts'] } }, resolve, undefined, {});
     expect(out[0]).toMatchObject({ command: '/usr/bin/bun', args: ['x.ts'] });
+  });
+
+  // fx passes this env verbatim and adds nothing, so a server declaring only
+  // its API key would run with no PATH and fail to find its own interpreter.
+  test('carries PATH and HOME through, letting declared values win', () => {
+    const out = mcpServersToFxConfig(
+      { a: { command: '/bin/a' }, b: { command: '/bin/b', env: { PATH: '/only' } } },
+      resolve,
+      undefined,
+      { PATH: '/base/bin', HOME: '/home/agent' },
+    );
+    expect(out[0]).toMatchObject({
+      env: [{ name: 'PATH', value: '/base/bin' }, { name: 'HOME', value: '/home/agent' }],
+    });
+    expect(out[1]).toMatchObject({
+      env: [{ name: 'PATH', value: '/only' }, { name: 'HOME', value: '/home/agent' }],
+    });
   });
 
   test('converts env and headers objects into name/value arrays', () => {
@@ -30,6 +47,8 @@ describe('mcpServersToFxConfig', () => {
         remote: { type: 'http', url: 'https://example.test/mcp', headers: { Authorization: 'Bearer x' } },
       },
       resolve,
+      undefined,
+      {},
     );
     expect(out[0]).toMatchObject({ env: [{ name: 'TOKEN', value: 'a' }] });
     expect(out[1]).toEqual({
@@ -41,12 +60,12 @@ describe('mcpServersToFxConfig', () => {
   });
 
   test('preserves the sse transport', () => {
-    const out = mcpServersToFxConfig({ r: { type: 'sse', url: 'https://e.test/x' } }, resolve);
+    const out = mcpServersToFxConfig({ r: { type: 'sse', url: 'https://e.test/x' } }, resolve, undefined, {});
     expect(out[0]).toMatchObject({ type: 'sse' });
   });
 
   test('returns an empty array when no servers are configured', () => {
-    expect(mcpServersToFxConfig(undefined, resolve)).toEqual([]);
+    expect(mcpServersToFxConfig(undefined, resolve, undefined, {})).toEqual([]);
   });
 
   test('resolveCommandPath leaves an absolute command untouched', () => {
