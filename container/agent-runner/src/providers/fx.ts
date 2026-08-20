@@ -23,6 +23,7 @@ import { startFxGatewayShim, type FxGatewayShim } from './fx-gateway-shim.js';
 import { registerProvider } from './provider-registry.js';
 import { mcpServersToFxConfig } from './mcp-to-fx.js';
 import { startFxMcpShims, type FxMcpShims } from './fx-mcp-shim.js';
+import { createModelCatalog, type ModelLimits, type RawLimits } from './model-catalog.js';
 import type {
   ActivityStep,
   AgentProvider,
@@ -209,28 +210,18 @@ interface FxCatalogModel {
   max_tokens?: number;
 }
 
-export interface FxModelLimits {
-  context_window?: number;
-  max_output_tokens?: number;
-}
-
-export function fxLimitsFromCatalog(models: FxCatalogModel[]): Map<string, FxModelLimits> {
-  const out = new Map<string, FxModelLimits>();
+/** Exported for tests. Interpretation of the numbers is the catalog's job. */
+export function fxLimitsFromCatalog(models: FxCatalogModel[]): Map<string, RawLimits> {
+  const out = new Map<string, RawLimits>();
   for (const m of models) {
     if (!m.id) continue;
-    const context = m.context_window && m.context_window > 0 ? m.context_window : undefined;
-    // The gateway reports max_tokens === context_window for models it has no
-    // separate output cap for; that is not a cap, and rendering it as one gives
-    // a budget bar that can never move.
-    const output = m.max_tokens && m.max_tokens > 0 && (!context || m.max_tokens < context) ? m.max_tokens : undefined;
-    if (context === undefined && output === undefined) continue;
-    out.set(m.id, { context_window: context, max_output_tokens: output });
+    const context = m.context_window ?? 0;
+    const output = m.max_tokens ?? 0;
+    if (context <= 0 && output <= 0) continue;
+    out.set(m.id, { context, output });
   }
   return out;
 }
-
-let catalogLimits: Map<string, FxModelLimits> | null = null;
-let catalogInflight: Promise<Map<string, FxModelLimits> | null> | null = null;
 
 /** Goes through the shim so the request takes the same proxy hop as fx's own. */
 function fxCatalogUrl(): string | null {
@@ -238,35 +229,18 @@ function fxCatalogUrl(): string | null {
   return base ? `${base.replace(/\/+$/, '')}${FX_CATALOG_PATH}` : null;
 }
 
-async function loadFxModelLimits(): Promise<Map<string, FxModelLimits> | null> {
-  if (catalogLimits) return catalogLimits;
-  if (catalogInflight) return catalogInflight;
-  catalogInflight = (async () => {
-    const url = fxCatalogUrl();
-    if (!url) return null;
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(FX_CATALOG_TIMEOUT_MS) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as { data?: FxCatalogModel[] };
-      catalogLimits = fxLimitsFromCatalog(json.data ?? []);
-      return catalogLimits;
-    } catch (err) {
-      log(`could not read model catalog: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
-    } finally {
-      catalogInflight = null;
-    }
-  })();
-  return catalogInflight;
-}
+const fxModelCatalog = createModelCatalog('fx', async () => {
+  const url = fxCatalogUrl();
+  if (!url) return new Map<string, RawLimits>();
+  const res = await fetch(url, { signal: AbortSignal.timeout(FX_CATALOG_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = (await res.json()) as { data?: FxCatalogModel[] };
+  return fxLimitsFromCatalog(json.data ?? []);
+});
 
-/** Best-effort: usage is still worth recording without limits. */
-async function attachFxModelLimits(usage: TurnUsage): Promise<void> {
-  if (!usage.model) return;
-  const limits = (await loadFxModelLimits())?.get(usage.model);
-  if (!limits) return;
-  if (limits.context_window !== undefined) usage.context_window = limits.context_window;
-  if (limits.max_output_tokens !== undefined) usage.max_output_tokens = limits.max_output_tokens;
+/** Test seam: drop the memoized catalog. */
+export function resetFxModelCatalog(): void {
+  fxModelCatalog.reset();
 }
 
 /** Sum every generation fx logged after `offset`. Exported for tests. */
@@ -563,6 +537,11 @@ export class FxProvider implements AgentProvider {
     return STALE_SESSION_RE.test(msg);
   }
 
+  /** fx logs the gateway's own model id, so it keys the catalog directly. */
+  modelLimits(usage: TurnUsage): Promise<ModelLimits> {
+    return fxModelCatalog.limitsFor(usage.model);
+  }
+
   private async openSession(rt: FxRuntime, input: QueryInput): Promise<string> {
     const shims = ensureMcpShims(this.options.mcpServers);
     const { method, params } = sessionOpenRequest(
@@ -673,10 +652,7 @@ export class FxProvider implements AgentProvider {
         // Emitted before the outcome branches: a refused or errored turn still
         // burned tokens, and dropping them silently under-reports spend.
         const usage = readFxUsageSince(usageOffset);
-        if (usage) {
-          await attachFxModelLimits(usage);
-          yield { type: 'usage', data: usage };
-        }
+        if (usage) yield { type: 'usage', data: usage };
 
         const outcome = settled as { stopReason?: StopReason; error?: Error } | null;
         if (outcome?.error) {

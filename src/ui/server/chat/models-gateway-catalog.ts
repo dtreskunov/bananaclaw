@@ -21,6 +21,7 @@
  * (verified: HTTP 200 with no credentials).
  */
 import { log } from '../../../log.js';
+import { normalizeLimits } from '../../../model-limits.js';
 
 const DEFAULT_GATEWAY_BASE = 'https://ai-gateway.vercel.sh';
 const CATALOG_PATH = '/coding-agent/v1/models';
@@ -134,9 +135,10 @@ function formatTooltip(m: GatewayModel, id: string, upstreamLabel: string): stri
   const lines: string[] = [];
   lines.push(m.name || id);
   lines.push(`Upstream: ${upstreamLabel} (via Vercel AI Gateway)`);
-  if (m.context_window) {
-    const out = m.max_tokens ? ` · output up to ${m.max_tokens.toLocaleString()}` : '';
-    lines.push(`Context: ${m.context_window.toLocaleString()} tokens${out}`);
+  const limits = normalizeLimits({ context: m.context_window, output: m.max_tokens });
+  if (limits.context_window) {
+    const out = limits.max_output_tokens ? ` · output up to ${limits.max_output_tokens.toLocaleString()}` : '';
+    lines.push(`Context: ${limits.context_window.toLocaleString()} tokens${out}`);
   }
   const inCost = perTokenToPMtok(m.pricing?.input);
   const outCost = perTokenToPMtok(m.pricing?.output);

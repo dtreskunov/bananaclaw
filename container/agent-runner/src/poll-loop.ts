@@ -400,6 +400,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             routing,
             processingIds,
             config.providerName,
+            config.provider,
             isTaskOnly ? undefined : continuation,
             !isTaskOnly,
             promptTracker,
@@ -734,7 +735,7 @@ async function tryAcknowledgeFailure(
       cwd: config.cwd,
       systemContext: config.systemContext?.(),
     });
-    await processQuery(query, routing, [], config.providerName, undefined, false);
+    await processQuery(query, routing, [], config.providerName, config.provider, undefined, false);
     return { delivered: true };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -760,6 +761,7 @@ async function processQuery(
   routing: RoutingContext,
   initialBatchIds: string[],
   providerName: string,
+  provider: AgentProvider,
   priorContinuation: string | undefined,
   persistContinuation = true,
   promptTracker?: { latest: string; routing: RoutingContext },
@@ -1579,6 +1581,21 @@ async function processQuery(
             .prepare('SELECT id FROM messages_out WHERE seq > ? ORDER BY seq DESC LIMIT 1')
             .get(outboundMaxAtTurnStart) as { id: string } | undefined)?.id ?? '';
           if (pendingUsage) {
+            // Providers that resolve limits from a remote catalog fill them in
+            // here rather than mid-turn, so enrichment is uniform and a slow
+            // catalog can never stall the reply. Gaps only: a provider whose
+            // SDK already reported limits keeps its own numbers.
+            try {
+              const limits = await provider.modelLimits?.(pendingUsage);
+              if (pendingUsage.context_window === undefined && limits?.context_window !== undefined) {
+                pendingUsage.context_window = limits.context_window;
+              }
+              if (pendingUsage.max_output_tokens === undefined && limits?.max_output_tokens !== undefined) {
+                pendingUsage.max_output_tokens = limits.max_output_tokens;
+              }
+            } catch (e) {
+              log(`Failed to resolve model limits: ${e instanceof Error ? e.message : String(e)}`);
+            }
             try {
               writeTurnUsage(
                 `tu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

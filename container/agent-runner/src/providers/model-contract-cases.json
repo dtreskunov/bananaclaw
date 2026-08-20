@@ -1,0 +1,25 @@
+{
+  "_": "Shared fixture: the host (src/) and the container agent-runner are separate package trees and cannot import each other, so the rules they both implement are asserted against this one file from both sides. Keep it dependency-free JSON.",
+
+  "limits": {
+    "_": "How a catalog's raw (context, output) pair becomes recorded limits. An output cap at or above the whole context window is the absence of a cap — 47 of the Vercel gateway's 226 models and 1309 of models.dev's 6652 report it that way, and storing it renders a budget bar that can never move.",
+    "cases": [
+      { "why": "a real cap below the window", "context": 1000000, "output": 128000, "context_window": 1000000, "max_output_tokens": 128000 },
+      { "why": "cap equal to the window is no cap", "context": 1000000, "output": 1000000, "context_window": 1000000 },
+      { "why": "cap above the window is no cap", "context": 256000, "output": 512000, "context_window": 256000 },
+      { "why": "window only", "context": 200000, "output": 0, "context_window": 200000 },
+      { "why": "cap only", "context": 0, "output": 8192, "max_output_tokens": 8192 },
+      { "why": "nothing stated", "context": 0, "output": 0 }
+    ]
+  },
+
+  "wire": {
+    "_": "container_configs.model under the opencode provider is always stored fully qualified as <upstream>/<model-id>, with upstream_provider naming that same upstream. The host joins (src/model-wire.ts), the container peels the prefix back off (providers/opencode.ts).",
+    "cases": [
+      { "why": "plain id under a direct upstream", "upstream": "minimax", "modelId": "MiniMax-M3", "stored": "minimax/MiniMax-M3" },
+      { "why": "id that itself contains a slash", "upstream": "openrouter", "modelId": "minimax/minimax-m3", "stored": "openrouter/minimax/minimax-m3" },
+      { "why": "id starting with its own upstream's name", "upstream": "openrouter", "modelId": "openrouter/auto", "stored": "openrouter/openrouter/auto" },
+      { "why": "no upstream configured", "upstream": "", "modelId": "minimax/minimax-m3", "stored": "minimax/minimax-m3" }
+    ]
+  }
+}

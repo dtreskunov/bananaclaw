@@ -1,3 +1,5 @@
+import type { ModelLimits } from './model-catalog.js';
+
 export interface AgentProvider {
   /**
    * True if the provider's underlying SDK handles slash commands natively and
@@ -31,6 +33,15 @@ export interface AgentProvider {
    * implementation lives with the provider, never in the runner.
    */
   onExchangeComplete?(exchange: ProviderExchange): void;
+
+  /**
+   * Optional. Resolve the model's context/output limits for a just-recorded
+   * turn. Called by the poll-loop where usage is persisted, so enrichment is
+   * uniform and a provider only has to declare where its catalog lives.
+   * Providers whose SDK reports limits alongside usage (Claude) omit this.
+   * Best-effort: the loop only fills gaps and swallows anything thrown.
+   */
+  modelLimits?(usage: TurnUsage): Promise<ModelLimits>;
 
   /** Start a new query. Returns a handle for streaming input and output. */
   query(input: QueryInput): AgentQuery;

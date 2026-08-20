@@ -39,9 +39,10 @@
 export function joinWireModel(upstream: string | null | undefined, modelId: string): string {
   const u = (upstream ?? '').trim();
   if (!u) return modelId;
-  const prefix = `${u}/`;
-  // Idempotent: an already-qualified value must not gain a second prefix.
-  // Plain string comparison, not a regex — `upstream` comes from config and
-  // could otherwise contain regex metacharacters.
-  return modelId.startsWith(prefix) ? modelId : prefix + modelId;
+  // Unconditional: an id that already starts with its own upstream's name
+  // (`openrouter/auto`) is exactly the case this format exists to disambiguate,
+  // so skipping the prefix there would reintroduce the ambiguity. Callers pass
+  // a bare model id, never an already-qualified value — the catalog builder in
+  // ui/server/chat/models-dev-catalog.ts concatenates the same way.
+  return `${u}/${modelId}`;
 }

@@ -4,43 +4,37 @@ import os from 'os';
 import path from 'path';
 
 import { sumFxUsageFacts, readFxUsageSince, fxLimitsFromCatalog } from './providers/fx';
-import { sumOpenCodeUsage, lookupModelLimits } from './providers/opencode';
+import { sumOpenCodeUsage } from './providers/opencode';
+import { lookupLimits } from './providers/model-catalog';
 
-describe('lookupModelLimits', () => {
+describe('lookupLimits', () => {
   const catalog = new Map([
     ['minimax/MiniMax-M3', { context: 1_000_000, output: 128_000 }],
     ['openrouter/minimax/minimax-m3', { context: 1_048_576, output: 512_000 }],
   ]);
 
   it('prefers an exact match', () => {
-    expect(lookupModelLimits(catalog, 'minimax/MiniMax-M3')).toEqual({ context: 1_000_000, output: 128_000 });
+    expect(lookupLimits(catalog, 'minimax/MiniMax-M3')).toEqual({ context: 1_000_000, output: 128_000 });
   });
 
   // OpenRouter accepts the mixed-case id, so a group pinned that way runs but
   // used to record no limits at all.
   it('falls back to a case-insensitive match', () => {
-    expect(lookupModelLimits(catalog, 'openrouter/minimax/MiniMax-M3')).toEqual({
+    expect(lookupLimits(catalog, 'openrouter/minimax/MiniMax-M3')).toEqual({
       context: 1_048_576,
       output: 512_000,
     });
   });
 
   it('returns undefined for a model the catalog does not know', () => {
-    expect(lookupModelLimits(catalog, 'openrouter/acme/nope')).toBeUndefined();
+    expect(lookupLimits(catalog, 'openrouter/acme/nope')).toBeUndefined();
   });
 });
 
 describe('fxLimitsFromCatalog', () => {
-  it('maps the gateway fields onto the usage columns', () => {
+  it('maps the gateway fields onto raw limits', () => {
     const limits = fxLimitsFromCatalog([{ id: 'zai/glm-5.2', context_window: 1000000, max_tokens: 128000 }]);
-    expect(limits.get('zai/glm-5.2')).toEqual({ context_window: 1000000, max_output_tokens: 128000 });
-  });
-
-  // 47 of the gateway's 226 models report max_tokens === context_window, which
-  // is the absence of an output cap rather than a 1M-token one.
-  it('drops an output cap equal to the context window', () => {
-    const limits = fxLimitsFromCatalog([{ id: 'minimax/minimax-m3', context_window: 1000000, max_tokens: 1000000 }]);
-    expect(limits.get('minimax/minimax-m3')).toEqual({ context_window: 1000000, max_output_tokens: undefined });
+    expect(limits.get('zai/glm-5.2')).toEqual({ context: 1000000, output: 128000 });
   });
 
   it('skips entries with no id or no usable numbers', () => {

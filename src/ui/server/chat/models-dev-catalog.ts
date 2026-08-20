@@ -26,6 +26,7 @@
  * (src/providers/opencode.ts).
  */
 import { log } from '../../../log.js';
+import { normalizeLimits } from '../../../model-limits.js';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -119,9 +120,10 @@ function formatTooltip(m: ModelsDevModel, p: ModelsDevProvider, providerId: stri
   const lines: string[] = [];
   lines.push(m.name || m.id || '');
   lines.push(`Upstream: ${p.name || providerId}${p.api ? ` (${p.api})` : ''}`);
-  if (m.limit?.context) {
-    const out = m.limit.output ? ` · output up to ${m.limit.output.toLocaleString()}` : '';
-    lines.push(`Context: ${m.limit.context.toLocaleString()} tokens${out}`);
+  const limits = normalizeLimits(m.limit);
+  if (limits.context_window) {
+    const out = limits.max_output_tokens ? ` · output up to ${limits.max_output_tokens.toLocaleString()}` : '';
+    lines.push(`Context: ${limits.context_window.toLocaleString()} tokens${out}`);
   }
   if (m.cost?.input != null && m.cost?.output != null) {
     lines.push(`Cost: $${m.cost.input} in · $${m.cost.output} out (per Mtok)`);

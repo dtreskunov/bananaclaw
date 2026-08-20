@@ -7,6 +7,7 @@ import { registerProvider } from './provider-registry.js';
 import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ForkContinuationInput, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions } from './types.js';
 import { pickActivityDetail } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
+import { createModelCatalog, type ModelLimits, type RawLimits } from './model-catalog.js';
 import { parseAssistantOutput } from '../formatter.js';
 
 function log(msg: string): void {
@@ -226,22 +227,32 @@ export function sumOpenCodeUsage(
 }
 
 /**
- * OpenRouter resolves model ids case-insensitively, so a group can be pinned
- * to `openrouter/minimax/MiniMax-M3` and run fine while the catalog only lists
- * `openrouter/minimax/minimax-m3`. An exact-match lookup silently loses the
- * limits for those turns. Exported for tests.
+ * models.dev, fetched through the running OpenCode server so the catalog is
+ * exactly the one it booted against. Model metadata can't change inside a
+ * container's lifetime, so one load serves every turn.
  */
-export function lookupModelLimits(
-  catalog: Map<string, { context: number; output: number }>,
-  key: string,
-): { context: number; output: number } | undefined {
-  const exact = catalog.get(key);
-  if (exact) return exact;
-  const wanted = key.toLowerCase();
-  for (const [k, v] of catalog) {
-    if (k.toLowerCase() === wanted) return v;
+const openCodeModelCatalog = createModelCatalog('opencode', async () => {
+  const client = sharedRuntime?.client;
+  if (!client) return new Map<string, RawLimits>();
+  const res = await client.config.providers();
+  const providers = (res.data?.providers ?? []) as Array<{
+    id: string;
+    models?: Record<string, { limit?: { context?: number; output?: number } }>;
+  }>;
+  const out = new Map<string, RawLimits>();
+  for (const p of providers) {
+    for (const [mid, model] of Object.entries(p.models ?? {})) {
+      const context = model?.limit?.context ?? 0;
+      const output = model?.limit?.output ?? 0;
+      if (context > 0 || output > 0) out.set(`${p.id}/${mid}`, { context, output });
+    }
   }
-  return undefined;
+  return out;
+});
+
+/** Test seam: drop the memoized catalog. */
+export function resetOpenCodeModelCatalog(): void {
+  openCodeModelCatalog.reset();
 }
 
 /**
@@ -528,8 +539,10 @@ export function generateSkillsIndex(skillsDir = SKILLS_DIR, outPath = SKILLS_IND
  *
  * Values missing the prefix (hand-edited rows, or configs written before
  * normalization) are passed through unchanged.
+ *
+ * Exported for the shared round-trip test against model-contract-cases.json.
  */
-function stripUpstreamPrefix(value: string, provider: string): string {
+export function stripUpstreamPrefix(value: string, provider: string): string {
   const prefix = `${provider}/`;
   return value.startsWith(prefix) ? value.slice(prefix.length) : value;
 }
@@ -708,11 +721,9 @@ export class OpenCodeProvider implements AgentProvider {
 
   private readonly options: ProviderOptions;
   private activeSessionId: string | undefined;
-  // Lazy memoized Map<"providerID/modelID", { context, output }>. Populated
-  // once via client.config.providers() and reused for every subsequent turn
-  // — model metadata doesn't change inside a container's lifetime.
-  private modelLimitsPromise: Promise<Map<string, { context: number; output: number }>> | null = null;
-  private readonly warnedMissingLimits = new Set<string>();
+  // The (provider, model) pair of the turn's last assistant message, kept so
+  // the catalog can be keyed after the query generator has finished.
+  private lastAssistantModel: { providerID?: string; modelID?: string } = {};
 
   constructor(options: ProviderOptions = {}) {
     this.options = options;
@@ -748,50 +759,15 @@ export class OpenCodeProvider implements AgentProvider {
     return forked;
   }
 
-  private async getModelLimits(
-    client: OpencodeClient,
-    providerID: string | undefined,
-    modelID: string | undefined,
-  ): Promise<{ context_window?: number; max_output_tokens?: number }> {
-    if (!providerID || !modelID) return {};
-    if (!this.modelLimitsPromise) {
-      this.modelLimitsPromise = (async () => {
-        const out = new Map<string, { context: number; output: number }>();
-        try {
-          const res = await client.config.providers();
-          const providers = (res.data?.providers ?? []) as Array<{
-            id: string;
-            models?: Record<string, { limit?: { context?: number; output?: number } }>;
-          }>;
-          for (const p of providers) {
-            for (const [mid, model] of Object.entries(p.models ?? {})) {
-              const ctx = model?.limit?.context;
-              const outTok = model?.limit?.output;
-              if (ctx || outTok) {
-                out.set(`${p.id}/${mid}`, { context: ctx ?? 0, output: outTok ?? 0 });
-              }
-            }
-          }
-        } catch (err) {
-          log(`Failed to fetch model limits: ${err instanceof Error ? err.message : String(err)}`);
-        }
-        return out;
-      })();
-    }
-    const map = await this.modelLimitsPromise;
-    const key = `${providerID}/${modelID}`;
-    const hit = lookupModelLimits(map, key);
-    if (!hit) {
-      if (map.size > 0 && !this.warnedMissingLimits.has(key)) {
-        this.warnedMissingLimits.add(key);
-        log(`No catalog limits for ${key}; context/output budgets will be blank`);
-      }
-      return {};
-    }
-    return {
-      context_window: hit.context > 0 ? hit.context : undefined,
-      max_output_tokens: hit.output > 0 ? hit.output : undefined,
-    };
+  /**
+   * OpenCode addresses a model as a (provider, model-id) pair, so the catalog
+   * key is rebuilt from the last assistant message rather than from
+   * `usage.model`, which carries only the model half.
+   */
+  modelLimits(): Promise<ModelLimits> {
+    const { providerID, modelID } = this.lastAssistantModel;
+    if (!providerID || !modelID) return Promise.resolve({});
+    return openCodeModelCatalog.limitsFor(`${providerID}/${modelID}`);
   }
 
   query(input: QueryInput): AgentQuery {
@@ -1156,12 +1132,10 @@ export class OpenCodeProvider implements AgentProvider {
         }
         const turnUsage = sumOpenCodeUsage(assistantMessageIds.map((id) => usageByMessageId.get(id)));
         if (turnUsage) {
-          // Enrich with model limits so the host can render context/output
-          // budget bars and warn before the agent runs into a hard cap.
-          // Best-effort: missing limits stay undefined.
-          const limits = await self.getModelLimits(client, lastAssistantProviderID, lastAssistantModelID);
-          if (limits.context_window !== undefined) turnUsage.context_window = limits.context_window;
-          if (limits.max_output_tokens !== undefined) turnUsage.max_output_tokens = limits.max_output_tokens;
+          self.lastAssistantModel = {
+            providerID: lastAssistantProviderID,
+            modelID: lastAssistantModelID,
+          };
           yield { type: 'usage', data: turnUsage };
         }
         // Empty text + non-stop finish = silent drop. Convert to an error so
