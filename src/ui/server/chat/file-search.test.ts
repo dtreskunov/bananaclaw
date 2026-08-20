@@ -65,6 +65,13 @@ describe('searchFilesByName', () => {
     write('docs/.private/secret.txt');
     write('docs/node_modules/package.txt');
     write('docs/container.json');
+    // Results sort newest-first and only fall back to path order on an exact
+    // mtime tie. Left to real write times these four sometimes land in the
+    // same millisecond and sometimes don't, so pin them to assert visibility
+    // rules rather than whichever order the clock happened to produce.
+    for (const p of ['docs/public.txt', 'docs/.private', 'docs/.private/secret.txt', 'docs/container.json']) {
+      setMtime(p, '2026-01-01T00:00:00.000Z');
+    }
 
     const member = await searchFilesByName(ROOT, 'docs', '.', false);
     const admin = await searchFilesByName(ROOT, 'docs', '.', true);
