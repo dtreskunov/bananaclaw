@@ -19,6 +19,7 @@ import { startFxGatewayShim, type FxGatewayShim } from './fx-gateway-shim.js';
 
 import { registerProvider } from './provider-registry.js';
 import { mcpServersToFxConfig } from './mcp-to-fx.js';
+import { startFxMcpShims, type FxMcpShims } from './fx-mcp-shim.js';
 import type {
   ActivityStep,
   AgentProvider,
@@ -73,6 +74,18 @@ function ensureGatewayShim(): FxGatewayShim | null {
   if (process.env.FX_GATEWAY_BASE_URL || process.env.FX_GATEWAY_CHAT_URL) return null;
   if (!gatewayShim) gatewayShim = startFxGatewayShim();
   return gatewayShim;
+}
+
+let mcpShims: FxMcpShims | null = null;
+
+/**
+ * Remote MCP servers need the same credential-injection hop as the gateway.
+ * Started once per process: the server list comes from the container config and
+ * does not change while the runner is alive.
+ */
+function ensureMcpShims(servers: ProviderOptions['mcpServers']): FxMcpShims {
+  if (!mcpShims) mcpShims = startFxMcpShims(servers);
+  return mcpShims;
 }
 
 /** fx reports these when a turn ends; anything else is treated as an error. */
@@ -286,6 +299,8 @@ export function destroySharedFxRuntime(): void {
   void rt?.then((r) => r.kill()).catch(() => {});
   gatewayShim?.stop();
   gatewayShim = null;
+  mcpShims?.stop();
+  mcpShims = null;
 }
 
 /** Map an ACP tool status onto the ActivityStep status vocabulary. */
@@ -379,7 +394,11 @@ export class FxProvider implements AgentProvider {
   }
 
   private async openSession(rt: FxRuntime, input: QueryInput): Promise<string> {
-    const { method, params } = sessionOpenRequest(input, mcpServersToFxConfig(this.options.mcpServers));
+    const shims = ensureMcpShims(this.options.mcpServers);
+    const { method, params } = sessionOpenRequest(
+      input,
+      mcpServersToFxConfig(this.options.mcpServers, undefined, shims.urlFor),
+    );
     const opened = await rt.request(method, params);
     // A loaded session comes back in fx's default `ask` mode, so config is
     // reapplied on both paths.

@@ -96,7 +96,7 @@ export function upstreamUrlFor(requestUrl: string, base_: string = upstreamBase(
   return `${base.origin}${prefix}${incoming.pathname}${incoming.search}`;
 }
 
-function proxyUrl(): string | undefined {
+export function proxyUrl(): string | undefined {
   return (
     process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || undefined
   );

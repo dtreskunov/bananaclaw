@@ -48,6 +48,7 @@ export function resolveCommandPath(command: string, pathEnv = process.env.PATH ?
 export function mcpServersToFxConfig(
   servers: Record<string, McpServerConfig> | undefined,
   resolve: (command: string) => string = resolveCommandPath,
+  urlFor: (name: string) => string | undefined = () => undefined,
 ): FxMcpServer[] {
   const out: FxMcpServer[] = [];
   for (const [name, config] of Object.entries(servers ?? {})) {
@@ -55,7 +56,7 @@ export function mcpServersToFxConfig(
       out.push({
         type: config.type === 'sse' ? 'sse' : 'http',
         name,
-        url: config.url,
+        url: urlFor(name) ?? config.url,
         headers: toNameValue(config.headers),
       });
       continue;
