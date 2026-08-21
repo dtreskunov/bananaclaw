@@ -278,6 +278,23 @@ describe('buildPromptBlocks', () => {
     expect(blocks).toHaveLength(1);
     expect(String((blocks[0] as { text: string }).text)).toContain('/workspace/agent/inbox/m1/a.jpg');
   });
+
+  // Nothing reaches fx as a native image, so its authorized-image catalog stays
+  // empty and it rejects any vision call made by id.
+  test('points image attachments at the vision tool by path, not by id', () => {
+    const text = String((buildPromptBlocks('look', [
+      { path: '/workspace/agent/inbox/m1/a.jpg', mime: 'image/jpeg', filename: 'a.jpg' },
+    ])[0] as { text: string }).text);
+    expect(text).toContain('`paths`');
+    expect(text).toContain('Do not use `image_ids`');
+  });
+
+  test('leaves non-image attachments without the vision nudge', () => {
+    const text = String((buildPromptBlocks('read', [
+      { path: '/workspace/agent/inbox/m1/a.pdf', mime: 'application/pdf', filename: 'a.pdf' },
+    ])[0] as { text: string }).text);
+    expect(text).not.toContain('vision');
+  });
 });
 
 describe('refusalMessage', () => {

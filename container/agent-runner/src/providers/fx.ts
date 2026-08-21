@@ -893,11 +893,22 @@ export class FxProvider implements AgentProvider {
  * fx advertises `promptCapabilities.image: false`, so attachments cannot be
  * sent as native content blocks. Reference them by path instead — the agent
  * has filesystem access to the same inbox directory.
+ *
+ * Images need the extra nudge. Because nothing ever arrives as a native image,
+ * fx's authorized-image catalog is always empty and its vision route keeps its
+ * `native_images` default, which makes it reject any `vision` call using
+ * `image_ids` with "Vision is unavailable for this request." `paths` is the
+ * only route that works here, and the model does not pick it unprompted.
  */
 export function buildPromptBlocks(text: string, files?: FileAttachment[]): Array<Record<string, unknown>> {
   if (!files?.length) return [{ type: 'text', text }];
   const manifest = files.map((f) => `- ${f.filename} (${f.mime}): ${f.path}`).join('\n');
-  return [{ type: 'text', text: `${text}\n\nAttached files (read them from disk):\n${manifest}` }];
+  const imageHint = files.some((f) => f.mime.startsWith('image/'))
+    ? '\nTo look at an image, call the vision tool with `paths` set to its path above. Do not use `image_ids` — these images are not attached to the request, so no ids exist for them.'
+    : '';
+  return [
+    { type: 'text', text: `${text}\n\nAttached files (read them from disk):\n${manifest}${imageHint}` },
+  ];
 }
 
 // fx has no system-prompt channel over ACP, so the harness block rides in the
