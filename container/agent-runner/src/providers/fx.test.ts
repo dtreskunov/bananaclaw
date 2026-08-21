@@ -175,7 +175,7 @@ describe('activityStepFromUpdate', () => {
     expect(running?.kind === 'tool' && running.detail).toBeUndefined();
   });
 
-  test('does not pass a tool result off as the invocation', () => {
+  test('does not pass an unrecognised tool result off as the invocation', () => {
     const step = activityStepFromUpdate({
       sessionUpdate: 'tool_call_update',
       toolCallId: 'tc-1',
@@ -185,32 +185,65 @@ describe('activityStepFromUpdate', () => {
     expect(step?.kind === 'tool' && step.detail).toBeUndefined();
   });
 
-  test('takes detail from a web progress label without repeating its verb', () => {
+  test('keeps the URL a fetch announced rather than the page it later returns', () => {
     const seen = new Map();
     activityStepFromUpdate(
       { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Fetching', kind: 'read', status: 'pending' },
       seen,
     );
-    const step = activityStepFromUpdate(
+    const text = (t: string) => [{ type: 'content', content: { type: 'text', text: t } }];
+    activityStepFromUpdate(
+      { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'in_progress', content: text('Fetching https://example.com/') },
+      seen,
+    );
+    // fx re-labels the same call "Converting" mid-flight, then returns page
+    // text that is untrusted and may restate a URL of its choosing.
+    activityStepFromUpdate(
+      { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'in_progress', content: text('Converting https://example.com/') },
+      seen,
+    );
+    const done = activityStepFromUpdate(
       {
         sessionUpdate: 'tool_call_update',
         toolCallId: 'tc-1',
-        status: 'in_progress',
-        content: [{ type: 'content', content: { type: 'text', text: 'Fetching https://example.com/a' } }],
+        status: 'completed',
+        content: text('Web fetch result.\n<url>https://evil.example/</url>\n<status>200</status>'),
       },
       seen,
     );
-    expect(step).toMatchObject({ title: 'Fetching', detail: 'https://example.com/a' });
+    expect(done).toMatchObject({ title: 'Fetching', detail: 'https://example.com/', status: 'completed' });
   });
 
-  test('reports the failure text of a failed call', () => {
+  test('names the file a read touched', () => {
+    const step = activityStepFromUpdate({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'tc-1',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: '<path>CLAUDE.md</path>\n<content>\n1 \thello\n' } }],
+    });
+    expect(step).toMatchObject({ detail: 'CLAUDE.md' });
+  });
+
+  test('names the pattern a grep searched for', () => {
+    const step = activityStepFromUpdate({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'tc-1',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: '[grep] 2 files with matches for fx\n - container.json\n' } }],
+    });
+    expect(step).toMatchObject({ detail: 'fx' });
+  });
+
+  test('leaves the failure text out of the step', () => {
     const step = activityStepFromUpdate({
       sessionUpdate: 'tool_call_update',
       toolCallId: 'tc-1',
       status: 'failed',
-      content: [{ type: 'content', content: { type: 'text', text: 'permission denied' } }],
+      command_result: { command: 'nope' },
+      content: [{ type: 'content', content: { type: 'text', text: '{"error":{"type":"tool_execution_failed"}}' } }],
     });
-    expect(step).toMatchObject({ status: 'error', error: 'permission denied' });
+    expect(step).toMatchObject({ status: 'error', detail: 'nope' });
+    expect(step?.kind === 'tool' && step.error).toBeUndefined();
   });
 
   test('reads a thought chunk from the single-block content shape', () => {

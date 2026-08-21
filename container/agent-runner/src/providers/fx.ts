@@ -527,27 +527,37 @@ interface FxToolCall {
 }
 
 /**
- * Text describing what a call was invoked with, or undefined when fx sends
- * nothing usable.
- *
- * fx's ACP surface never carries tool arguments: `describeToolTitle` keeps only
- * the action verb and drops the subject its own `formatPlainAction` builds, and
- * there is no `rawInput`. An invocation leaks through in exactly two places --
- * `command_result.command` on a shell call's terminal event, and the web
- * fetch/search progress labels streamed as `content`. Everything else on
- * `content` is tool *output* (streamed stdout mid-command, or the result prefix
- * on the terminal event), which must not appear where the user expects to read
- * back the arguments.
+ * Shapes fx puts the subject of a call into. fx never sends tool arguments --
+ * `writeToolCall` emits only id/title/kind/status and `describeToolTitle`
+ * reduces the call to its action verb -- so the subject has to be recovered
+ * from the structured text it streams on `content`. Each pattern below was
+ * read off the live ACP stream; anything unmatched yields nothing rather than
+ * putting raw tool output where the user expects to read back an argument.
  */
-function toolDetail(update: SessionUpdate, kind: string | undefined, title: string | undefined): string | undefined {
+const SUBJECT_PATTERNS = [
+  /^(?:Fetching|Converting) (\S+)$/m, // web fetch/convert progress label
+  /^<url>([^<\n]+)<\/url>$/m, // web fetch result header
+  /^<path>([^<\n]+)<\/path>/, // file read/write result header
+  /^\[grep\].* for (.+)$/m, // grep result header
+];
+
+/**
+ * What a call acted on, or undefined when this event reveals nothing new.
+ *
+ * Shell is handled separately from everything else: its argument is reported
+ * verbatim in `command_result`, and its `content` is stdout, which must never
+ * be mistaken for the invocation.
+ */
+function toolSubject(update: SessionUpdate, kind: string | undefined): string | undefined {
   if (update.command_result?.command) return update.command_result.command;
   if (kind === 'execute') return undefined;
-  if (mapToolStatus(update.status) === 'completed' || mapToolStatus(update.status) === 'error') return undefined;
-  const progress = toolContentText(update.content)?.trim();
-  if (!progress) return undefined;
-  // fx opens progress labels with the same verb it sent as the title
-  // ("Fetching <url>" under title "Fetching"); don't render the verb twice.
-  return title && progress.startsWith(`${title} `) ? progress.slice(title.length + 1) : progress;
+  const text = toolContentText(update.content);
+  if (!text) return undefined;
+  for (const pattern of SUBJECT_PATTERNS) {
+    const found = text.match(pattern)?.[1]?.trim();
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /**
@@ -573,10 +583,12 @@ export function activityStepFromUpdate(
       const title = update.title ?? prior?.title;
       const kind = update.kind ?? prior?.kind;
       const status = mapToolStatus(update.status);
-      const detail = toolDetail(update, kind, title) ?? prior?.detail;
+      // First answer wins. A call's subject cannot change, and the earliest
+      // source is the most trustworthy one: a fetch announces its URL before
+      // it has pulled any (untrusted) page text that could restate it.
+      const detail = prior?.detail ?? toolSubject(update, kind);
       seen?.set(id, { tool, kind, detail, title });
-      const error = status === 'error' ? toolContentText(update.content)?.trim() : undefined;
-      return { kind: 'tool', id, tool, status, detail, title, error };
+      return { kind: 'tool', id, tool, status, detail, title };
     }
     case 'agent_thought_chunk': {
       const text = chunkText(update.content);
