@@ -115,6 +115,29 @@ describe('startFxMcpShims', () => {
     );
     expect(res.status).toBe(502);
   });
+
+  it('asks upstream to close the connection so no pooled connection is reused', async () => {
+    let connection: string | null = null;
+    const upstream = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(req) {
+        connection = req.headers.get('connection');
+        return new Response('{"ok":true}');
+      },
+    });
+    try {
+      await forwardToUpstream(
+        'remote',
+        `http://127.0.0.1:${upstream.port}`,
+        new Request('http://127.0.0.1:1/mcp', { method: 'POST', body: '{}' }),
+        undefined,
+      );
+      expect(connection).toBe('close');
+    } finally {
+      upstream.stop(true);
+    }
+  });
 });
 
 describe('mcpServersToFxConfig with shims', () => {

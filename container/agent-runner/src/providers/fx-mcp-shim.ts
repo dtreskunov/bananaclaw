@@ -86,6 +86,26 @@ export function normalizeErrorId(detail: string): string {
 }
 
 /**
+ * Headers for one upstream re-issue.
+ *
+ * `connection: close` defeats Bun's connection pooling, which is load-bearing
+ * rather than tidiness: a proxied fetch that reuses a pooled connection can
+ * hand back a chunked response with a *zero-byte* body. Streamable-HTTP MCP
+ * answers `initialize` over SSE, so the empty body reached fx as a stream that
+ * closed without a response and it reported `MissingLegacyVersion` — a server
+ * that had in fact replied correctly would silently fail to start, on roughly
+ * two of three attempts. Reproducible with two proxied fetches to the same
+ * origin, with no shim listener and no fx involved; a fresh connection per
+ * request is always intact. MCP request volume is low enough that the extra
+ * handshake costs far less than a server disappearing at random.
+ */
+function upstreamHeaders(headers: Headers): Headers {
+  const forwardable = forwardableHeaders(headers);
+  forwardable.set('connection', 'close');
+  return forwardable;
+}
+
+/**
  * Re-issues one request at `origin`, keeping the path, query, method and body.
  * Split out from the listener so it can be exercised without a remote host.
  */
@@ -104,7 +124,7 @@ export async function forwardToUpstream(
     const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer();
     const response = await fetch(target, {
       method: req.method,
-      headers: forwardableHeaders(req.headers),
+      headers: upstreamHeaders(req.headers),
       ...(body && body.byteLength > 0 ? { body } : {}),
       ...(proxy ? { proxy } : {}),
     } as RequestInit);
