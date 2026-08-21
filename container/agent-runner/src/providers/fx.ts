@@ -724,7 +724,10 @@ export class FxProvider implements AgentProvider {
         const name = unstartableMcpServer(err);
         if (!name || dropped.has(name)) throw err;
         dropped.add(name);
-        log(`MCP server ${name} failed to start; opening the session without it`);
+        // fx's reason is the only clue to whether the server is down, mis-
+        // configured, or just speaking a dialect fx rejects — it never reaches
+        // the user, so it has to reach the log.
+        log(`MCP server ${name} failed to start; opening the session without it: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
