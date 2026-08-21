@@ -137,12 +137,34 @@ interface JsonRpcMessage {
 /** ACP `session/update` payload; only the fields we map are modelled. */
 interface SessionUpdate {
   sessionUpdate: string;
-  content?: { type?: string; text?: string };
+  // Polymorphic by update type: message and thought chunks send one text
+  // block, tool calls send an array of wrapped blocks.
+  content?: AcpTextBlock | Array<{ type?: string; content?: AcpTextBlock }>;
   toolCallId?: string;
   title?: string;
   kind?: string;
   status?: string;
-  rawInput?: Record<string, unknown>;
+  command_result?: { command?: string };
+}
+
+interface AcpTextBlock {
+  type?: string;
+  text?: string;
+}
+
+/** Text of a chunk update (`agent_message_chunk`, `agent_thought_chunk`). */
+function chunkText(content: SessionUpdate['content']): string | undefined {
+  if (!content || Array.isArray(content)) return undefined;
+  return typeof content.text === 'string' ? content.text : undefined;
+}
+
+/** Concatenated text of a tool call's streamed output blocks. */
+function toolContentText(content: SessionUpdate['content']): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((block) => (typeof block?.content?.text === 'string' ? block.content.text : ''))
+    .join('');
+  return text || undefined;
 }
 
 const STALE_SESSION_RE = /session not found|unknown session|no such session|failed to load session/i;
@@ -496,28 +518,47 @@ export function mapToolStatus(status: string | undefined): 'pending' | 'running'
   }
 }
 
+/** What a tool call announced on its opening event, kept for its updates. */
+interface FxToolCall {
+  tool: string;
+  detail?: string;
+  title?: string;
+}
+
 /**
  * Convert one ACP session update into a NanoClaw activity step. Returns null
  * for updates that carry no trace value (message chunks, session info).
+ *
+ * `seen` carries a call's identity across its events: ACP `tool_call_update`
+ * sends little more than an id and a status, so without it every event after
+ * the opening `tool_call` degrades to the literal name "tool" with no detail --
+ * which the poll-loop's runaway guard reads as one call repeating, aborting any
+ * turn that makes MAX_IDENTICAL_TOOL_STREAK tool calls.
  */
-export function activityStepFromUpdate(update: SessionUpdate): ActivityStep | null {
+export function activityStepFromUpdate(
+  update: SessionUpdate,
+  seen?: Map<string, FxToolCall>,
+): ActivityStep | null {
   switch (update.sessionUpdate) {
     case 'tool_call':
     case 'tool_call_update': {
       const id = update.toolCallId ?? 'tool';
-      return {
-        kind: 'tool',
-        id,
-        tool: update.title || update.kind || 'tool',
-        status: mapToolStatus(update.status),
-        detail: typeof update.content?.text === 'string' ? update.content.text : undefined,
-        title: update.title,
-      };
+      const prior = seen?.get(id);
+      const tool = update.title || update.kind || prior?.tool || 'tool';
+      // fx sends no rawInput, so what the call was invoked with only shows up
+      // in command_result on the terminal event. Prefer it over the streamed
+      // output, which is all there is to describe the call before then.
+      const detail = update.command_result?.command
+        ?? prior?.detail
+        ?? toolContentText(update.content);
+      const title = update.title ?? prior?.title;
+      seen?.set(id, { tool, detail, title });
+      return { kind: 'tool', id, tool, status: mapToolStatus(update.status), detail, title };
     }
-    case 'agent_thought_chunk':
-      return update.content?.text
-        ? { kind: 'internal', id: `thought-${Date.now()}`, text: update.content.text }
-        : null;
+    case 'agent_thought_chunk': {
+      const text = chunkText(update.content);
+      return text ? { kind: 'internal', id: `thought-${Date.now()}`, text } : null;
+    }
     default:
       return null;
   }
@@ -711,6 +752,7 @@ export class FxProvider implements AgentProvider {
         // Drain updates through a queue so the generator can yield them in
         // order while `session/prompt` is still in flight.
         const queue: SessionUpdate[] = [];
+        const seenToolCalls = new Map<string, FxToolCall>();
         let notify: (() => void) | null = null;
         rt.setUpdateSink((u) => {
           queue.push(u);
@@ -747,11 +789,14 @@ export class FxProvider implements AgentProvider {
           }
           const update = queue.shift()!;
           yield { type: 'activity' };
-          if (update?.sessionUpdate === 'agent_message_chunk' && update.content?.text) {
-            text += update.content.text;
+          const chunk = update?.sessionUpdate === 'agent_message_chunk'
+            ? chunkText(update.content)
+            : undefined;
+          if (chunk) {
+            text += chunk;
             continue;
           }
-          const step = activityStepFromUpdate(update);
+          const step = activityStepFromUpdate(update, seenToolCalls);
           if (step) yield { type: 'progress', step };
         }
 

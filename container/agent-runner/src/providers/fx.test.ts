@@ -115,6 +115,60 @@ describe('activityStepFromUpdate', () => {
     expect(activityStepFromUpdate({ sessionUpdate: 'agent_message_chunk', content: { text: 'hi' } })).toBeNull();
     expect(activityStepFromUpdate({ sessionUpdate: 'available_commands_update' })).toBeNull();
   });
+
+  test('takes detail from the command the call was invoked with', () => {
+    const step = activityStepFromUpdate({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'tc-1',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: 'exit_code=0\n' } }],
+      command_result: { command: 'pwd && uname -a' },
+    });
+    expect(step).toMatchObject({ detail: 'pwd && uname -a', status: 'completed' });
+  });
+
+  test('carries name and detail onto a tool_call_update that omits them', () => {
+    const seen = new Map();
+    activityStepFromUpdate(
+      { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Running', kind: 'execute', status: 'pending' },
+      seen,
+    );
+    const running = activityStepFromUpdate(
+      { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'in_progress' },
+      seen,
+    );
+    // Without the carry-over the name would fall back to the literal "tool",
+    // making every fx call look identical to the runaway-turn guard.
+    expect(running).toMatchObject({ tool: 'Running', title: 'Running', status: 'running' });
+  });
+
+  test('keeps distinct calls distinct once each reports its command', () => {
+    const seen = new Map();
+    const done = ['pwd', 'ls /tmp'].map((command, i) => {
+      const id = `tc-${i}`;
+      activityStepFromUpdate({ sessionUpdate: 'tool_call', toolCallId: id, title: 'Running', status: 'pending' }, seen);
+      return activityStepFromUpdate(
+        { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed', command_result: { command } },
+        seen,
+      );
+    });
+    expect(done).toMatchObject([{ detail: 'pwd' }, { detail: 'ls /tmp' }]);
+  });
+
+  test('falls back to streamed output while the command is still unknown', () => {
+    const step = activityStepFromUpdate({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'tc-1',
+      status: 'in_progress',
+      content: [{ type: 'content', content: { type: 'text', text: '/workspace/agent\n' } }],
+    });
+    expect(step).toMatchObject({ detail: '/workspace/agent\n' });
+  });
+
+  test('reads a thought chunk from the single-block content shape', () => {
+    const step = activityStepFromUpdate({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'hmm' } });
+    expect(step).toMatchObject({ kind: 'internal', text: 'hmm' });
+  });
 });
 
 describe('buildPrompt', () => {
