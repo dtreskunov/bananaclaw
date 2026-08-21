@@ -1,3 +1,4 @@
+import { getConfig } from './config.js';
 import { findByRouting } from './destinations.js';
 import type { MessageInRow } from './db/messages-in.js';
 import type { FileAttachment } from './providers/types.js';
@@ -212,10 +213,31 @@ function formatSingleChat(msg: MessageInRow): string {
 function originAttr(msg: MessageInRow): string {
   const fromDest = findByRouting(msg.channel_type, msg.platform_id);
   if (fromDest) return ` from="${escapeXml(fromDest.name)}"`;
+  if (isHostOrigin(msg)) return '';
   if (msg.channel_type || msg.platform_id) {
     return ` from="unknown:${escapeXml(msg.channel_type || '')}:${escapeXml(msg.platform_id || '')}"`;
   }
   return '';
+}
+
+/**
+ * Was this written by the host itself (approval notes, scheduler and restart
+ * wakes, self-mod notes) rather than forwarded from a peer agent?
+ *
+ * Those are stamped with the receiving agent's own group id, which is never in
+ * its own destination list. Labelling them `unknown:` reads to the agent as a
+ * spoofed sender — it has refused legitimate operator instructions on those
+ * grounds — and any reply it addresses back at that label is undeliverable.
+ * Emit no origin instead and let `sender="system"` carry it.
+ */
+function isHostOrigin(msg: MessageInRow): boolean {
+  if (msg.channel_type !== 'agent' || !msg.platform_id) return false;
+  try {
+    return msg.platform_id === getConfig().agentGroupId;
+  } catch {
+    // Config not loaded yet (e.g. test harness) — can't tell, so don't claim it.
+    return false;
+  }
 }
 
 function formatTaskMessage(msg: MessageInRow): string {

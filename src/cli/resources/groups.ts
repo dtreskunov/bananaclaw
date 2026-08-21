@@ -3,6 +3,7 @@ import { buildAgentGroupImage, killContainer, wakeContainer } from '../../contai
 import { restartAgentGroupContainers } from '../../container-restart.js';
 import { cascadeDeleteAgentGroup } from '../../db/cascade-delete-agent-group.js';
 import { getDb } from '../../db/connection.js';
+import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getSession } from '../../db/sessions.js';
 import { archiveAgentGroup } from '../../modules/archive/archive-group.js';
 import { restoreAgentGroup } from '../../modules/archive/restore-group.js';
@@ -159,13 +160,16 @@ registerResource({
         // From an agent: scope to the calling session only
         if (ctx.caller === 'agent') {
           if (message) {
+            // Route on the session's own channel — see container-restart.ts.
+            const s = getSession(ctx.sessionId);
+            const mg = s?.messaging_group_id ? getMessagingGroup(s.messaging_group_id) : undefined;
             writeSessionMessage(id, ctx.sessionId, {
               id: `restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               kind: 'chat',
               timestamp: new Date().toISOString(),
-              platformId: id,
-              channelType: 'agent',
-              threadId: null,
+              platformId: mg?.platform_id ?? id,
+              channelType: mg?.channel_type ?? 'agent',
+              threadId: mg ? (s?.thread_id ?? null) : null,
               content: JSON.stringify({ text: message, sender: 'system', senderId: 'system' }),
               onWake: 1,
             });

@@ -74,3 +74,8 @@ export function getConfig(): RunnerConfig {
   if (!_config) throw new Error('Config not loaded — call loadConfig() first');
   return _config;
 }
+
+/** Test-only: seed the config cache, or clear it by passing null. */
+export function setConfigForTest(overrides: Partial<RunnerConfig> | null): void {
+  _config = overrides ? { ...loadConfig(), ...overrides } : null;
+}

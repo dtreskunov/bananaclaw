@@ -129,10 +129,28 @@ describe('restartAgentGroupContainers', () => {
     expect(msg.onWake).toBe(1);
     expect(JSON.parse(msg.content).text).toBe('Resuming.');
 
+    // Routed on the session's own channel so the agent recognises the origin
+    // and its reply is deliverable.
+    expect(msg.channelType).toBe('web');
+    expect(msg.platformId).toBe('web-1');
+    expect(msg.threadId).toBe('thread-1');
+
     // Should pass an onExit callback to killContainer
     expect(mockKillContainer).toHaveBeenCalledTimes(1);
     const onExit = mockKillContainer.mock.calls[0][2];
     expect(typeof onExit).toBe('function');
+  });
+
+  it('falls back to agent-channel routing when the session has no messaging group', () => {
+    mockGetSessionsByAgentGroup.mockReturnValue([{ ...makeSession('s1', 'g1'), messaging_group_id: null }]);
+    mockIsContainerRunning.mockReturnValue(true);
+
+    restartAgentGroupContainers('g1', 'test', 'Resuming.');
+
+    const msg = mockWriteSessionMessage.mock.calls[0][2];
+    expect(msg.channelType).toBe('agent');
+    expect(msg.platformId).toBe('g1');
+    expect(msg.threadId).toBeNull();
   });
 
   it('onExit callback calls wakeContainer with refreshed session', () => {

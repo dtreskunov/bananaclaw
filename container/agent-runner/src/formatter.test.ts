@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
+import { setConfigForTest } from './config.js';
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
 import { formatMessages, parseAssistantOutput, stripInternalTags, stripThinkTags } from './formatter.js';
@@ -162,6 +163,46 @@ describe('XML escaping', () => {
     const result = formatMessages(getPendingMessages());
     expect(result).toContain('sender="A &amp; B &lt;Co&gt;"');
     expect(result).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+  });
+});
+
+describe('origin attribute', () => {
+  function insertRouted(id: string, channelType: string, platformId: string) {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, channel_type, platform_id, content)
+         VALUES (?, 'chat', ?, 'pending', ?, ?, ?)`,
+      )
+      .run(id, new Date().toISOString(), channelType, platformId, JSON.stringify({ sender: 'system', text: 'hi' }));
+  }
+
+  afterEach(() => {
+    setConfigForTest(null);
+  });
+
+  it('names the destination an inbound message came from', () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('peer', 'Peer', 'agent', NULL, NULL, 'ag-peer')`,
+      )
+      .run();
+    insertRouted('m1', 'agent', 'ag-peer');
+    expect(formatMessages(getPendingMessages())).toContain('from="peer"');
+  });
+
+  it('omits the origin for host-written messages instead of calling them unknown', () => {
+    setConfigForTest({ agentGroupId: 'ag-self' });
+    insertRouted('m1', 'agent', 'ag-self');
+    const result = formatMessages(getPendingMessages());
+    expect(result).not.toContain('unknown:');
+    expect(result).not.toContain('from=');
+  });
+
+  it('still flags an unresolvable peer as unknown', () => {
+    setConfigForTest({ agentGroupId: 'ag-self' });
+    insertRouted('m1', 'agent', 'ag-other');
+    expect(formatMessages(getPendingMessages())).toContain('from="unknown:agent:ag-other"');
   });
 });
 

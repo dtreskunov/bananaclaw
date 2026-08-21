@@ -28,13 +28,18 @@ export function restartAgentGroupContainers(agentGroupId: string, reason: string
 
   for (const session of sessions) {
     if (wakeMessage) {
+      // Stamp the session's own channel routing rather than the agent group's
+      // id. The latter is never one of the agent's destinations, so it renders
+      // as `from="unknown:agent:<self>"` — which the agent may treat as a
+      // spoofed sender, and any reply addressed back at it is undeliverable.
+      const mg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
       writeSessionMessage(agentGroupId, session.id, {
         id: `restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         kind: 'chat',
         timestamp: new Date().toISOString(),
-        platformId: agentGroupId,
-        channelType: 'agent',
-        threadId: null,
+        platformId: mg?.platform_id ?? agentGroupId,
+        channelType: mg?.channel_type ?? 'agent',
+        threadId: mg ? session.thread_id : null,
         content: JSON.stringify({
           text: wakeMessage,
           sender: 'system',
