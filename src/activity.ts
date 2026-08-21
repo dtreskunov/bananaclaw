@@ -106,7 +106,7 @@ export function activityLabel(step: ActivityStep): string {
           return `${finished ? 'Ran' : 'Running'} ${step.detail.replace(/\s+/g, ' ').trim()}`;
         }
         if (step.title) {
-          return step.title;
+          return step.detail ? `${step.title} ${step.detail.replace(/\s+/g, ' ').trim()}` : step.title;
         }
         const tool = cleanToolName(step.tool);
         return `${finished ? 'Used' : 'Using'} ${tool}`;

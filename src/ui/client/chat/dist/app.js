@@ -20917,7 +20917,10 @@ function stepHeadline(s5) {
         };
       }
       if (s5.title) {
-        return { action: s5.title };
+        return {
+          action: s5.title,
+          ...s5.detail ? { subject: singleLine(s5.detail), codeSubject: true } : {}
+        };
       }
       return {
         action: finished ? "Used" : "Using",

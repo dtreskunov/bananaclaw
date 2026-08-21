@@ -155,14 +155,62 @@ describe('activityStepFromUpdate', () => {
     expect(done).toMatchObject([{ detail: 'pwd' }, { detail: 'ls /tmp' }]);
   });
 
-  test('falls back to streamed output while the command is still unknown', () => {
+  test('does not pass streamed command output off as the command', () => {
+    const seen = new Map();
+    activityStepFromUpdate(
+      { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Running', kind: 'execute', status: 'pending' },
+      seen,
+    );
+    // fx streams a shell call's stdout on `content` well before it reports the
+    // command, so taking it would show output where the argument belongs.
+    const running = activityStepFromUpdate(
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-1',
+        status: 'in_progress',
+        content: [{ type: 'content', content: { type: 'text', text: '/workspace/agent\n' } }],
+      },
+      seen,
+    );
+    expect(running?.kind === 'tool' && running.detail).toBeUndefined();
+  });
+
+  test('does not pass a tool result off as the invocation', () => {
     const step = activityStepFromUpdate({
       sessionUpdate: 'tool_call_update',
       toolCallId: 'tc-1',
-      status: 'in_progress',
-      content: [{ type: 'content', content: { type: 'text', text: '/workspace/agent\n' } }],
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: '{"images":[{"image_id":1}]}' } }],
     });
-    expect(step).toMatchObject({ detail: '/workspace/agent\n' });
+    expect(step?.kind === 'tool' && step.detail).toBeUndefined();
+  });
+
+  test('takes detail from a web progress label without repeating its verb', () => {
+    const seen = new Map();
+    activityStepFromUpdate(
+      { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'Fetching', kind: 'read', status: 'pending' },
+      seen,
+    );
+    const step = activityStepFromUpdate(
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-1',
+        status: 'in_progress',
+        content: [{ type: 'content', content: { type: 'text', text: 'Fetching https://example.com/a' } }],
+      },
+      seen,
+    );
+    expect(step).toMatchObject({ title: 'Fetching', detail: 'https://example.com/a' });
+  });
+
+  test('reports the failure text of a failed call', () => {
+    const step = activityStepFromUpdate({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'tc-1',
+      status: 'failed',
+      content: [{ type: 'content', content: { type: 'text', text: 'permission denied' } }],
+    });
+    expect(step).toMatchObject({ status: 'error', error: 'permission denied' });
   });
 
   test('reads a thought chunk from the single-block content shape', () => {

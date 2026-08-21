@@ -521,8 +521,33 @@ export function mapToolStatus(status: string | undefined): 'pending' | 'running'
 /** What a tool call announced on its opening event, kept for its updates. */
 interface FxToolCall {
   tool: string;
+  kind?: string;
   detail?: string;
   title?: string;
+}
+
+/**
+ * Text describing what a call was invoked with, or undefined when fx sends
+ * nothing usable.
+ *
+ * fx's ACP surface never carries tool arguments: `describeToolTitle` keeps only
+ * the action verb and drops the subject its own `formatPlainAction` builds, and
+ * there is no `rawInput`. An invocation leaks through in exactly two places --
+ * `command_result.command` on a shell call's terminal event, and the web
+ * fetch/search progress labels streamed as `content`. Everything else on
+ * `content` is tool *output* (streamed stdout mid-command, or the result prefix
+ * on the terminal event), which must not appear where the user expects to read
+ * back the arguments.
+ */
+function toolDetail(update: SessionUpdate, kind: string | undefined, title: string | undefined): string | undefined {
+  if (update.command_result?.command) return update.command_result.command;
+  if (kind === 'execute') return undefined;
+  if (mapToolStatus(update.status) === 'completed' || mapToolStatus(update.status) === 'error') return undefined;
+  const progress = toolContentText(update.content)?.trim();
+  if (!progress) return undefined;
+  // fx opens progress labels with the same verb it sent as the title
+  // ("Fetching <url>" under title "Fetching"); don't render the verb twice.
+  return title && progress.startsWith(`${title} `) ? progress.slice(title.length + 1) : progress;
 }
 
 /**
@@ -545,15 +570,13 @@ export function activityStepFromUpdate(
       const id = update.toolCallId ?? 'tool';
       const prior = seen?.get(id);
       const tool = update.title || update.kind || prior?.tool || 'tool';
-      // fx sends no rawInput, so what the call was invoked with only shows up
-      // in command_result on the terminal event. Prefer it over the streamed
-      // output, which is all there is to describe the call before then.
-      const detail = update.command_result?.command
-        ?? prior?.detail
-        ?? toolContentText(update.content);
       const title = update.title ?? prior?.title;
-      seen?.set(id, { tool, detail, title });
-      return { kind: 'tool', id, tool, status: mapToolStatus(update.status), detail, title };
+      const kind = update.kind ?? prior?.kind;
+      const status = mapToolStatus(update.status);
+      const detail = toolDetail(update, kind, title) ?? prior?.detail;
+      seen?.set(id, { tool, kind, detail, title });
+      const error = status === 'error' ? toolContentText(update.content)?.trim() : undefined;
+      return { kind: 'tool', id, tool, status, detail, title, error };
     }
     case 'agent_thought_chunk': {
       const text = chunkText(update.content);
