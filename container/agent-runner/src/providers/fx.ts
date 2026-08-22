@@ -937,7 +937,14 @@ export class FxProvider implements AgentProvider {
         // terminal presentation of the reply, not as the markdown the model
         // wrote. Compaction rewrites the log, invalidating the offset.
         const source = compacted ? null : readCommittedAssistantText(sessionDir, eventLogOffset);
-        yield { type: 'result', text: source ?? (text.trim() ? text : null) };
+        const rendered = text.trim() ? text : null;
+        // fx skips the commit when the log tail is degraded, when the frame
+        // exceeds 8 MB, or when the session is not persisted. Those all fall
+        // back to markdown the client cannot render, so say so.
+        if (!source && rendered && !compacted) {
+          log('turn committed no assistant text; falling back to fx\u2019s rendered form');
+        }
+        yield { type: 'result', text: source ?? rendered };
       }
     }
 
