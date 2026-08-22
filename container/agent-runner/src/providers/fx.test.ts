@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { mcpServersToFxConfig, resolveCommandPath } from './mcp-to-fx.js';
 import {
   activityStepFromUpdate,
+  advertisesAssistantSource,
   buildPrompt,
   buildPromptBlocks,
   mapToolStatus,
@@ -332,5 +333,27 @@ describe('sessionOpenRequest', () => {
     const { method, params } = sessionOpenRequest({ cwd: '/workspace' }, mcpServers);
     expect(method).toBe('session/new');
     expect(params).toEqual({ cwd: '/workspace', mcpServers });
+  });
+});
+
+describe('advertisesAssistantSource', () => {
+  const meta = (formats: unknown) => ({ agentCapabilities: { _meta: { 'fx.assistantText': formats } } });
+
+  test('accepts an agent that lists the source format', () => {
+    expect(advertisesAssistantSource(meta(['rendered', 'source']))).toBe(true);
+  });
+
+  test('rejects an agent that only renders for a terminal', () => {
+    expect(advertisesAssistantSource(meta(['rendered']))).toBe(false);
+  });
+
+  test('rejects a release that predates the capability', () => {
+    expect(advertisesAssistantSource({ agentCapabilities: { loadSession: true } })).toBe(false);
+    expect(advertisesAssistantSource({})).toBe(false);
+  });
+
+  test('rejects a value that is not a list of formats', () => {
+    expect(advertisesAssistantSource(meta('source'))).toBe(false);
+    expect(advertisesAssistantSource(meta(null))).toBe(false);
   });
 });

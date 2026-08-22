@@ -419,6 +419,8 @@ class FxRuntime {
   /** Set while a turn is streaming; receives session/update payloads. */
   private updateSink: ((u: SessionUpdate) => void) | null = null;
   private exited = false;
+  /** True once fx confirms it streams the model's markdown, not its own rendering. */
+  streamsAssistantSource = false;
 
   constructor(env: Record<string, string | undefined>, cwd: string) {
     this.proc = spawn(FX_BIN, ['acp'], {
@@ -539,11 +541,31 @@ class FxRuntime {
 
 let sharedRuntime: Promise<FxRuntime> | null = null;
 
+/**
+ * fx renders assistant text for its own terminal before putting it on the
+ * wire, which mangles markdown for any client that renders it itself. Ask for
+ * the model's own text; fx advertises whether it can honour that.
+ */
+const ASSISTANT_TEXT_META_KEY = 'fx.assistantText';
+
+export function advertisesAssistantSource(initialized: Record<string, unknown>): boolean {
+  const capabilities = initialized.agentCapabilities as { _meta?: Record<string, unknown> } | undefined;
+  const formats = capabilities?._meta?.[ASSISTANT_TEXT_META_KEY];
+  return Array.isArray(formats) && formats.includes('source');
+}
+
 async function ensureRuntime(options: ProviderOptions, cwd: string): Promise<FxRuntime> {
   if (!sharedRuntime) {
     sharedRuntime = (async () => {
       const rt = new FxRuntime(options.env ?? {}, cwd);
-      await rt.request('initialize', { protocolVersion: 1, clientCapabilities: {} });
+      const initialized = await rt.request('initialize', {
+        protocolVersion: 1,
+        clientCapabilities: { _meta: { [ASSISTANT_TEXT_META_KEY]: 'source' } },
+      });
+      rt.streamsAssistantSource = advertisesAssistantSource(initialized);
+      if (!rt.streamsAssistantSource) {
+        log('fx does not advertise assistant source text; reading replies from its event log');
+      }
       return rt;
     })();
   }
@@ -936,12 +958,13 @@ export class FxProvider implements AgentProvider {
         // Prefer the log's unrendered text; the streamed chunks arrive as fx's
         // terminal presentation of the reply, not as the markdown the model
         // wrote. Compaction rewrites the log, invalidating the offset.
-        const source = compacted ? null : readCommittedAssistantText(sessionDir, eventLogOffset);
+        const readFromLog = !rt.streamsAssistantSource && !compacted;
+        const source = readFromLog ? readCommittedAssistantText(sessionDir, eventLogOffset) : null;
         const rendered = text.trim() ? text : null;
         // fx skips the commit when the log tail is degraded, when the frame
         // exceeds 8 MB, or when the session is not persisted. Those all fall
         // back to markdown the client cannot render, so say so.
-        if (!source && rendered && !compacted) {
+        if (!source && rendered && readFromLog) {
           log('turn committed no assistant text; falling back to fx\u2019s rendered form');
         }
         yield { type: 'result', text: source ?? rendered };
