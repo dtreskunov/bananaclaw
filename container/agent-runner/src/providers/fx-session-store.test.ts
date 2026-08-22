@@ -4,7 +4,9 @@ import os from 'os';
 import path from 'path';
 
 import {
+  fxEventLogSize,
   fxSessionDir,
+  readCommittedAssistantText,
   readFxCommitPosition,
   rewindFxCommitPosition,
   type FxCommitPosition,
@@ -161,5 +163,58 @@ describe('rewindFxCommitPosition', () => {
     const dir = makeSession();
     rewindFxCommitPosition(dir, turn2Position(dir));
     expect(fs.readdirSync(dir).filter((f) => f.includes('nanoclaw-tmp'))).toEqual([]);
+  });
+});
+
+describe('committed assistant text', () => {
+  function commitLine(seq: number, assistant: string): string {
+    return (
+      JSON.stringify({
+        schema_version: 1,
+        log_generation: GEN,
+        seq,
+        event_id: seq.toString(16).padStart(32, '0'),
+        timestamp_ms: 1787261026998 + seq,
+        kind: 'history_turn_committed',
+        payload: { turn: { kind: 'assistant', user: {}, assistant, execution: {} } },
+      }) + '\n'
+    );
+  }
+
+  function logDir(lines: string[]): { dir: string; size: number } {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-store-'));
+    const dir = fxSessionDir(root, SESSION_ID);
+    fs.mkdirSync(dir, { recursive: true });
+    const log = lines.join('');
+    fs.writeFileSync(path.join(dir, 'events.jsonl'), log);
+    return { dir, size: Buffer.byteLength(log) };
+  }
+
+  test('reads only the turns committed after the offset', () => {
+    const before = logDir([eventLine(1), commitLine(2, 'older reply')]);
+    fs.appendFileSync(path.join(before.dir, 'events.jsonl'), commitLine(3, '### Heading\n\n```zig\nx\n```'));
+    expect(readCommittedAssistantText(before.dir, before.size)).toBe('### Heading\n\n```zig\nx\n```');
+  });
+
+  test('joins several turns committed in the same window', () => {
+    const { dir } = logDir([eventLine(1), commitLine(2, 'first'), commitLine(3, 'second')]);
+    expect(readCommittedAssistantText(dir, 0)).toBe('first\n\nsecond');
+  });
+
+  test('returns null when the window holds no committed turn', () => {
+    const { dir, size } = logDir([eventLine(1)]);
+    expect(readCommittedAssistantText(dir, size)).toBeNull();
+  });
+
+  test('keeps earlier turns when the log ends mid-write', () => {
+    const { dir } = logDir([eventLine(1), commitLine(2, 'complete')]);
+    fs.appendFileSync(path.join(dir, 'events.jsonl'), '{"kind":"history_turn_com');
+    expect(readCommittedAssistantText(dir, 0)).toBe('complete');
+  });
+
+  test('reports the log size so a caller can bracket a turn', () => {
+    const { dir, size } = logDir([eventLine(1)]);
+    expect(fxEventLogSize(dir)).toBe(size);
+    expect(fxEventLogSize(path.join(dir, 'nope'))).toBe(0);
   });
 });

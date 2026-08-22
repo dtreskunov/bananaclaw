@@ -94,6 +94,59 @@ export function readFxLogGeneration(sessionDir: string): string | null {
   }
 }
 
+/** Current length of the append-only event log, or 0 if there is none yet. */
+export function fxEventLogSize(sessionDir: string): number {
+  try {
+    return fs.statSync(path.join(sessionDir, EVENTS_FILE)).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The raw model text of every turn committed after `offset`, or null if the
+ * log has none.
+ *
+ * fx's ACP layer forwards `assistant_rendered` and explicitly discards
+ * `assistant_source` (src/acp/prompt.zig, `pushText`). Rendered text is the
+ * TUI presentation of the reply: fenced code blocks become `│ `-gutter lines,
+ * `-` bullets become `•`, `###` headings lose their marker, quotes turn curly.
+ * Chat clients render markdown themselves, so what they get is mangled. The
+ * unrendered text is committed to the event log, which is where we read it.
+ */
+export function readCommittedAssistantText(sessionDir: string, offset: number): string | null {
+  let raw: string;
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(path.join(sessionDir, EVENTS_FILE), 'r');
+    const size = fs.fstatSync(fd).size;
+    if (size <= offset) return null;
+    const buf = Buffer.alloc(size - offset);
+    fs.readSync(fd, buf, 0, buf.length, offset);
+    raw = buf.toString('utf8');
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  const turns: string[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line) as {
+        kind?: unknown;
+        payload?: { turn?: { assistant?: unknown } };
+      };
+      if (event.kind !== 'history_turn_committed') continue;
+      const assistant = event.payload?.turn?.assistant;
+      if (typeof assistant === 'string' && assistant.trim()) turns.push(assistant);
+    } catch {
+      // A half-written trailing line is expected; earlier turns still stand.
+    }
+  }
+  return turns.length ? turns.join('\n\n') : null;
+}
+
 function watermarkPath(sessionDir: string, generation: string): string {
   return path.join(sessionDir, `commit.${generation}.json`);
 }

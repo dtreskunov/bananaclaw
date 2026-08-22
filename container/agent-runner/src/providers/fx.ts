@@ -25,7 +25,9 @@ import { mcpServersToFxConfig } from './mcp-to-fx.js';
 import { startFxMcpShims, type FxMcpShims } from './fx-mcp-shim.js';
 import { createModelCatalog, type RawLimits } from './model-catalog.js';
 import {
+  fxEventLogSize,
   fxSessionDir,
+  readCommittedAssistantText,
   readFxCommitPosition,
   readFxLogGeneration,
   rewindFxCommitPosition,
@@ -866,6 +868,7 @@ export class FxProvider implements AgentProvider {
         const usageOffset = fxUsageOffset();
         const sessionDir = fxSessionDir(fxStateRoot(), sessionId);
         const generationBefore = readFxLogGeneration(sessionDir);
+        const eventLogOffset = fxEventLogSize(sessionDir);
         const promptDone = rt
           .request('session/prompt', {
             sessionId,
@@ -930,7 +933,11 @@ export class FxProvider implements AgentProvider {
         // a branch point a later fork can rewind the session back to.
         const checkpoint = readFxCommitPosition(fxSessionDir(fxStateRoot(), sessionId));
         if (checkpoint) yield { type: 'checkpoint', ref: JSON.stringify(checkpoint) };
-        yield { type: 'result', text: text.trim() ? text : null };
+        // Prefer the log's unrendered text; the streamed chunks arrive as fx's
+        // terminal presentation of the reply, not as the markdown the model
+        // wrote. Compaction rewrites the log, invalidating the offset.
+        const source = compacted ? null : readCommittedAssistantText(sessionDir, eventLogOffset);
+        yield { type: 'result', text: source ?? (text.trim() ? text : null) };
       }
     }
 
