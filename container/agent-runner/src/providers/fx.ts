@@ -194,6 +194,7 @@ function fxUsageOffset(): number {
 
 /** One `generation` fact — a single model round trip. */
 interface FxUsageFact {
+  id?: string;
   model?: string;
   input_tokens?: number;
   output_tokens?: number;
@@ -295,17 +296,22 @@ export function resetFxModelCatalog(): void {
   fxModelCatalog.reset();
 }
 
-/** Sum every generation fx logged after `offset`. Exported for tests. */
-export function readFxUsageSince(
-  offset: number,
-  opts: { compacted?: boolean } = {},
-): TurnUsage | null {
+/** What the ledger says about one turn's slice of the log. */
+interface FxUsageWindow {
+  facts: FxUsageFact[];
+  /** Generations opened in this window that fx has not yet costed. */
+  unresolved: string[];
+}
+
+/** Parse the log slice after `offset`. Exported for tests. */
+export function readFxUsageWindow(offset: number): FxUsageWindow {
+  const empty: FxUsageWindow = { facts: [], unresolved: [] };
   let raw: string;
   try {
     const fd = fs.openSync(fxUsageLogPath(), 'r');
     try {
       const size = fs.fstatSync(fd).size;
-      if (size <= offset) return null;
+      if (size <= offset) return empty;
       const buf = Buffer.alloc(size - offset);
       fs.readSync(fd, buf, 0, buf.length, offset);
       raw = buf.toString('utf8');
@@ -317,19 +323,70 @@ export function readFxUsageSince(
     if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
       log(`could not read usage log: ${err instanceof Error ? err.message : String(err)}`);
     }
-    return null;
+    return empty;
   }
   const facts: FxUsageFact[] = [];
+  const pending = new Set<string>();
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     try {
-      const entry = JSON.parse(line) as { kind?: string; fact?: FxUsageFact };
-      if (entry.kind === 'generation' && entry.fact) facts.push(entry.fact);
+      const entry = JSON.parse(line) as { kind?: string; id?: string; fact?: FxUsageFact };
+      if (entry.kind === 'pending' && entry.id) pending.add(entry.id);
+      if (entry.kind === 'generation' && entry.fact) {
+        facts.push(entry.fact);
+        if (entry.fact.id) pending.delete(entry.fact.id);
+      }
     } catch {
       // Half-written trailing line — drop it rather than lose the whole turn.
     }
   }
-  return sumFxUsageFacts(facts, opts);
+  return { facts, unresolved: [...pending] };
+}
+
+/** Sum every generation fx logged after `offset`. Exported for tests. */
+export function readFxUsageSince(
+  offset: number,
+  opts: { compacted?: boolean } = {},
+): TurnUsage | null {
+  return sumFxUsageFacts(readFxUsageWindow(offset).facts, opts);
+}
+
+/**
+ * fx does not know a generation's usage when the turn ends. It records the id
+ * as `pending` and a background thread polls the gateway's /v1/generation,
+ * which answers 404 for the first several seconds; only then is the costed
+ * `generation` fact appended. Reading at turn end therefore saw an empty
+ * window and every turn lost its token, cost and context numbers.
+ *
+ * fx gives up after 30 one-second attempts, so waiting past that buys nothing.
+ */
+const FX_USAGE_SETTLE_TIMEOUT_MS = 45_000;
+/** How long a silent window may stay silent before it counts as "no usage". */
+const FX_USAGE_SETTLE_GRACE_MS = 3_000;
+const FX_USAGE_POLL_MS = 250;
+
+export async function readFxUsageSettled(
+  offset: number,
+  opts: { compacted?: boolean } = {},
+  timeoutMs: number = FX_USAGE_SETTLE_TIMEOUT_MS,
+  graceMs: number = FX_USAGE_SETTLE_GRACE_MS,
+): Promise<TurnUsage | null> {
+  const startedAt = Date.now();
+  for (;;) {
+    const window = readFxUsageWindow(offset);
+    if (window.unresolved.length === 0) {
+      // An empty window usually means the turn billed nothing, but it can also
+      // mean fx has not flushed its pending marker yet, so give it a moment.
+      const silent = window.facts.length === 0;
+      if (!silent || Date.now() - startedAt >= graceMs) {
+        return sumFxUsageFacts(window.facts, opts);
+      }
+    } else if (Date.now() - startedAt >= timeoutMs) {
+      log(`usage for ${window.unresolved.length} generation(s) never settled; reporting what fx published`);
+      return sumFxUsageFacts(window.facts, opts);
+    }
+    await new Promise((resolve) => setTimeout(resolve, FX_USAGE_POLL_MS));
+  }
 }
 
 /**
@@ -851,7 +908,7 @@ export class FxProvider implements AgentProvider {
         // burned tokens, and dropping them silently under-reports spend.
         const compacted =
           generationBefore !== null && readFxLogGeneration(sessionDir) !== generationBefore;
-        const usage = readFxUsageSince(usageOffset, { compacted });
+        const usage = await readFxUsageSettled(usageOffset, { compacted });
         if (usage) yield { type: 'usage', data: usage };
 
         const outcome = settled as { stopReason?: StopReason; error?: Error } | null;

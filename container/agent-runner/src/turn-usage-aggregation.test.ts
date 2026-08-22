@@ -3,7 +3,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { sumFxUsageFacts, readFxUsageSince, fxLimitsFromCatalog } from './providers/fx';
+import {
+  sumFxUsageFacts,
+  readFxUsageSince,
+  readFxUsageWindow,
+  readFxUsageSettled,
+  fxLimitsFromCatalog,
+} from './providers/fx';
 import { sumOpenCodeUsage } from './providers/opencode';
 import { lookupLimits } from './providers/model-catalog';
 
@@ -169,11 +175,11 @@ describe('fx usage log reading', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  function gen(cost: number): string {
+  function gen(cost: number, id?: string): string {
     return JSON.stringify({
       schema_version: 1,
       kind: 'generation',
-      fact: { model: 'm', input_tokens: 100, output_tokens: 10, cache_read_tokens: 0, cache_write_tokens: 0, total_cost: cost },
+      fact: { ...(id ? { id } : {}), model: 'm', input_tokens: 100, output_tokens: 10, cache_read_tokens: 0, cache_write_tokens: 0, total_cost: cost },
     }) + '\n';
   }
 
@@ -203,5 +209,42 @@ describe('fx usage log reading', () => {
     fs.writeFileSync(log, '');
     fs.appendFileSync(log, gen(0.25) + '{"kind":"generation","fact":{"tot');
     expect(readFxUsageSince(0)!.cost_usd).toBeCloseTo(0.25, 8);
+  });
+
+  function pending(id: string): string {
+    return JSON.stringify({ schema_version: 1, kind: 'pending', id, observed_at_ms: 1 }) + '\n';
+  }
+
+  it('reports a pending generation as unresolved until its fact lands', () => {
+    const log = path.join(home, '.fx', 'usage.jsonl');
+    fs.writeFileSync(log, pending('gen_a'));
+    expect(readFxUsageWindow(0).unresolved).toEqual(['gen_a']);
+    fs.appendFileSync(log, gen(0.25, 'gen_a'));
+    expect(readFxUsageWindow(0).unresolved).toEqual([]);
+  });
+
+  it('waits for fx to cost a pending generation before summing', async () => {
+    const log = path.join(home, '.fx', 'usage.jsonl');
+    fs.writeFileSync(log, pending('gen_a'));
+    const settled = readFxUsageSettled(0);
+    setTimeout(() => fs.appendFileSync(log, gen(0.25, 'gen_a')), 300);
+    const usage = await settled;
+    expect(usage!.cost_usd).toBeCloseTo(0.25, 8);
+  });
+
+  it('gives up on a generation fx never costs, keeping the rest', async () => {
+    const log = path.join(home, '.fx', 'usage.jsonl');
+    fs.writeFileSync(log, gen(0.25, 'gen_a') + pending('gen_b'));
+    const usage = await readFxUsageSettled(0, {}, 300);
+    expect(usage!.cost_usd).toBeCloseTo(0.25, 8);
+  });
+
+  it('waits out the grace period before calling a silent window empty', async () => {
+    const log = path.join(home, '.fx', 'usage.jsonl');
+    fs.writeFileSync(log, '');
+    const settled = readFxUsageSettled(0, {}, 5_000, 2_000);
+    setTimeout(() => fs.appendFileSync(log, pending('gen_a')), 200);
+    setTimeout(() => fs.appendFileSync(log, gen(0.25, 'gen_a')), 400);
+    expect((await settled)!.cost_usd).toBeCloseTo(0.25, 8);
   });
 });
