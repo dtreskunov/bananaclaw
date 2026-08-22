@@ -27,13 +27,12 @@ If all of the following are already present, skip to **Configuration**:
 
 - `src/providers/fx.ts`
 - `src/providers/fx-registration.test.ts`
-- `src/fx-dockerfile.test.ts`
 - `container/agent-runner/src/providers/fx.ts`
 - `container/agent-runner/src/providers/fx-gateway-shim.ts`
 - `container/agent-runner/src/providers/mcp-to-fx.ts`
 - `import './fx.js';` line in `src/providers/index.ts`
 - `import './fx.js';` line in `container/agent-runner/src/providers/index.ts`
-- `ARG INSTALL_FX` + `ARG FX_VERSION` / `ARG FX_COMMIT` in `container/Dockerfile`
+- `ARG INSTALL_FX` + `ARG FX_VERSION` / `ARG FX_SHA256_*` in `container/Dockerfile`
 
 Missing pieces — continue below. All steps are idempotent; re-running is safe.
 
@@ -85,48 +84,37 @@ const OPTIONAL_PROVIDER_MODULES = ['./opencode.js', './fx.js'];
 
 fx is a static binary, not an npm package — it does **not** belong in `container/cli-tools.json` (that file is npm-only) and must not be installed with `bun install -g`.
 
-fx's GitHub releases lag its git tags badly (releases stopped at v0.0.4 while tags were at v0.4.5), and the newer tags carry the MCP fixes that matter. So fx is **built from source** in throw-away stages; only the ~12 MB binary is copied into the final image. Add these stages above the main `FROM node:22-slim`:
+fx publishes statically linked release tarballs, so the binary is **fetched** in a throw-away stage rather than compiled; only the ~12 MB binary is copied into the final image. A tag can be repointed at a different commit, so the digest published beside the tarball is the real pin. Add these stages above the main `FROM node:22-slim`:
 
 ```dockerfile
 ARG INSTALL_FX=false
-ARG FX_VERSION=v0.4.5
-ARG FX_COMMIT=14f00f6be246789496f987317cc5af28b81aad16
-ARG ZIG_VERSION=0.16.0
-ARG ZIG_SHA256_X86_64=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
-ARG ZIG_SHA256_AARCH64=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17
+# fx renumbered downward at v0.0.1; v0.0.5 is newer than the v0.4.x tags.
+ARG FX_VERSION=v0.0.5
+ARG FX_SHA256_X86_64=d5639d173267774aa8228a474baf619a7076ac41a91023915007c865143429b1
+ARG FX_SHA256_AARCH64=8bbcde6a41256c4fac4e0a022291cf02740419e27afabde3b8f45e7a4e393edb
 
 FROM node:22-slim AS fx-build-false
 RUN mkdir -p /fx-out
 
 FROM node:22-slim AS fx-build-true
 ARG FX_VERSION
-ARG FX_COMMIT
-ARG ZIG_VERSION
-ARG ZIG_SHA256_X86_64
-ARG ZIG_SHA256_AARCH64
-RUN --mount=type=cache,target=/root/.cache/zig,sharing=locked \
-    set -eu; \
+ARG FX_SHA256_X86_64
+ARG FX_SHA256_AARCH64
+RUN set -eu; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl git xz-utils; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
     rm -rf /var/lib/apt/lists/*; \
     case "$(uname -m)" in \
-      x86_64) zigarch=x86_64; zigsha="$ZIG_SHA256_X86_64" ;; \
-      aarch64|arm64) zigarch=aarch64; zigsha="$ZIG_SHA256_AARCH64" ;; \
+      x86_64) fxarch=x86_64; fxsha="$FX_SHA256_X86_64" ;; \
+      aarch64|arm64) fxarch=aarch64; fxsha="$FX_SHA256_AARCH64" ;; \
       *) echo "unsupported arch for fx: $(uname -m)" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL -o /tmp/zig.tar.xz \
-      "https://ziglang.org/download/${ZIG_VERSION}/zig-${zigarch}-linux-${ZIG_VERSION}.tar.xz"; \
-    echo "${zigsha}  /tmp/zig.tar.xz" | sha256sum -c -; \
-    mkdir -p /opt/zig; \
-    tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1; \
-    mkdir -p /tmp/fx-src; cd /tmp/fx-src; \
-    git init -q .; \
-    git remote add origin https://github.com/vercel-labs/fx; \
-    git fetch -q --depth 1 origin "$FX_COMMIT"; \
-    git checkout -q FETCH_HEAD; \
-    /opt/zig/zig build -Doptimize=ReleaseSafe -Dtarget="${zigarch}-linux"; \
+    curl -fsSL -o /tmp/fx.tar.gz \
+      "https://github.com/vercel-labs/fx/releases/download/${FX_VERSION}/fx-linux-${fxarch}.tar.gz"; \
+    echo "${fxsha}  /tmp/fx.tar.gz" | sha256sum -c -; \
     mkdir -p /fx-out; \
-    install -m 0755 zig-out/bin/fx /fx-out/fx; \
+    tar -xzf /tmp/fx.tar.gz -C /fx-out fx; \
+    chmod 0755 /fx-out/fx; \
     /fx-out/fx --version
 
 FROM fx-build-${INSTALL_FX} AS fx-artifacts
@@ -142,7 +130,7 @@ RUN if [ "$INSTALL_FX" = "true" ]; then fx --version; fi
 
 `INSTALL_FX` defaults to `false` so installs that don't use fx keep a lean image.
 
-> **Why `FROM fx-build-${INSTALL_FX}` instead of a shell `if`.** Stage selection happens in the build graph, so with fx off the toolchain is never downloaded and the Zig compile never runs — `fx-build-false` is just `mkdir /fx-out`. A shell guard inside one `RUN` would still pull the toolchain layer.
+> **Why `FROM fx-build-${INSTALL_FX}` instead of a shell `if`.** Stage selection happens in the build graph, so with fx off nothing is downloaded at all — `fx-build-false` is just `mkdir /fx-out`. A shell guard inside one `RUN` would still pull the download layer.
 >
 > **Why a commit hash, not just a tag.** A tag can be repointed at a different commit; the hash cannot. `FX_VERSION` is only the human-readable label for `FX_COMMIT`, and fetching by hash turns a moved tag into a hard error instead of a silent substitution. Get the pin with
 > `git ls-remote --tags --refs https://github.com/vercel-labs/fx`.
@@ -165,15 +153,7 @@ if [ "${INSTALL_FX:-false}" = "true" ]; then
 fi
 ```
 
-### 5. Copy the Dockerfile install guard
-
-The fx binary is not importable or typed, so a structural test guards the Dockerfile install — including that the checksum verification is still there:
-
-```bash
-cp .claude/skills/add-fx/fx-dockerfile.test.ts src/fx-dockerfile.test.ts
-```
-
-### 6. Enable and build
+### 5. Enable and build
 
 ```bash
 grep -q '^INSTALL_FX=' .env && sed -i.bak 's/^INSTALL_FX=.*/INSTALL_FX=true/' .env && rm -f .env.bak || echo 'INSTALL_FX=true' >> .env
@@ -183,7 +163,6 @@ grep -q '^INSTALL_FX=' .env && sed -i.bak 's/^INSTALL_FX=.*/INSTALL_FX=true/' .e
 pnpm run build                                                  # host
 pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit  # container typecheck
 pnpm exec vitest run src/providers/fx-registration.test.ts      # host registration guard
-pnpm exec vitest run src/fx-dockerfile.test.ts                  # Dockerfile install guard
 cd container/agent-runner && bun test src/providers/ && cd -    # container tests + registration guard
 ./container/build.sh                                            # agent image
 ```
@@ -192,12 +171,11 @@ All must be clean before proceeding. Each guards a distinct integration point:
 
 - **`src/providers/fx-registration.test.ts`** (host, vitest) imports the real host barrel and asserts `fx` appears in `listProviderContainerConfigNames()`. Goes red if the `import './fx.js';` line in `src/providers/index.ts` is deleted or that barrel stops evaluating.
 - **`container/agent-runner/src/providers/fx-registration.test.ts`** (container, bun:test) imports the real container barrel and asserts `fx` appears in `listProviderNames()`. Goes red if `'./fx.js'` leaves `OPTIONAL_PROVIDER_MODULES`.
-- **`src/fx-dockerfile.test.ts`** parses the Dockerfile and asserts the version is pinned (rejecting `latest`), both per-arch SHA256 ARGs are present, and `sha256sum -c -` still runs. The binary is not importable, so this structural test plus the container build are its only guards.
 - **`pnpm run build`** type-checks the host provider against the container-config registry; the container typecheck does the same for the provider and shim.
 
 > **Build cache gotcha:** the container buildkit caches COPY steps aggressively. If you see "Unknown provider: fx" after a build, `docker builder prune -f && ./container/build.sh`.
 
-### 7. Propagate to existing per-group overlays
+### 6. Propagate to existing per-group overlays
 
 Each agent group has a live source overlay at `data/v2-sessions/<group-id>/agent-runner-src/providers/` that **overrides the image at runtime**. It is created when the group is first wired and never auto-updated by image rebuilds, so pre-existing groups need the new files copied in:
 

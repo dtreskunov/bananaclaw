@@ -25,7 +25,6 @@ This unregisters the provider from both `listProviderContainerConfigNames()` (ho
 ```bash
 rm -f src/providers/fx.ts \
       src/providers/fx-registration.test.ts \
-      src/fx-dockerfile.test.ts \
       container/agent-runner/src/providers/fx.ts \
       container/agent-runner/src/providers/fx-gateway-shim.ts \
       container/agent-runner/src/providers/fx-gateway-shim.test.ts \
