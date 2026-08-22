@@ -751,7 +751,12 @@ export class FxProvider implements AgentProvider {
     let aborted = false;
     let cancelActive: (() => void) | null = null;
 
-    pending.push({ text: buildPrompt(input.prompt, input.systemContext?.instructions), files: input.files });
+    // fx has no session-level system prompt, so instructions ride on each
+    // prompt — including pushed ones. A warm query spans every message of the
+    // session, so omitting them here left the agent without its destinations,
+    // MCP-tool guidance, or thread-title request from the second turn onward.
+    const systemInstructions = input.systemContext?.instructions;
+    pending.push({ text: buildPrompt(input.prompt, systemInstructions), files: input.files });
 
     const self = this;
 
@@ -874,7 +879,7 @@ export class FxProvider implements AgentProvider {
 
     return {
       push(message: string, files?: FileAttachment[], _options?: QueryPushOptions) {
-        pending.push({ text: message, files });
+        pending.push({ text: buildPrompt(message, systemInstructions), files });
         waiting?.();
         return true;
       },
