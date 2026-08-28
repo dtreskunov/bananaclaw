@@ -12,6 +12,7 @@ import { GroupAdminField as Field } from './GroupAdminField';
 // container/agent-runner/src/providers/{opencode,claude}.ts.
 const MODEL_PARAM_RECOGNIZED: Record<string, string[]> = {
   opencode: ['max_tokens', 'temperature', 'top_p', 'top_k', 'frequency_penalty', 'presence_penalty', 'seed', 'stop'],
+  native: ['max_tokens', 'temperature', 'top_p'],
   claude: ['max_tokens', 'thinking_budget_tokens'],
 };
 
@@ -26,7 +27,10 @@ interface ParamRow {
 }
 
 let _rowUid = 0;
-function nextRowUid(): number { _rowUid += 1; return _rowUid; }
+function nextRowUid(): number {
+  _rowUid += 1;
+  return _rowUid;
+}
 
 function paramsToRows(params: Record<string, unknown>): ParamRow[] {
   return Object.entries(params).map(([k, v]) => ({
@@ -41,7 +45,11 @@ function paramsToRows(params: Record<string, unknown>): ParamRow[] {
 function parseRowValue(raw: string): unknown {
   const trimmed = raw.trim();
   if (trimmed === '') return '';
-  try { return JSON.parse(trimmed); } catch { return raw; }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return raw;
+  }
 }
 
 function rowsToParams(rows: ParamRow[]): Record<string, unknown> {
@@ -82,7 +90,7 @@ export function ModelParamsEditor({
     lastEmittedRef.current = incoming;
   }, [value]);
 
-  const recognized = provider ? MODEL_PARAM_RECOGNIZED[provider] ?? [] : [];
+  const recognized = provider ? (MODEL_PARAM_RECOGNIZED[provider] ?? []) : [];
 
   function emit(next: ParamRow[]): void {
     const params = rowsToParams(next);
@@ -118,9 +126,18 @@ export function ModelParamsEditor({
   for (const r of rows) {
     const k = r.key.trim();
     if (k === '' && r.valueText.trim() === '') continue;
-    if (k === '') { issues.push('A row is missing a key.'); continue; }
-    if (!MODEL_PARAM_KEY_RE.test(k)) { issues.push(`Invalid key "${k}".`); continue; }
-    if (seenKeys.has(k)) { issues.push(`Duplicate key "${k}".`); continue; }
+    if (k === '') {
+      issues.push('A row is missing a key.');
+      continue;
+    }
+    if (!MODEL_PARAM_KEY_RE.test(k)) {
+      issues.push(`Invalid key "${k}".`);
+      continue;
+    }
+    if (seenKeys.has(k)) {
+      issues.push(`Duplicate key "${k}".`);
+      continue;
+    }
     seenKeys.add(k);
   }
 
@@ -160,7 +177,9 @@ export function ModelParamsEditor({
                     placeholder="value (JSON or string)"
                     value={r.valueText}
                     disabled={busy}
-                    onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => update(r.uid, { valueText: e.currentTarget.value })}
+                    onInput={(e: JSX.TargetedEvent<HTMLInputElement>) =>
+                      update(r.uid, { valueText: e.currentTarget.value })
+                    }
                   />
                   <button
                     type="button"
@@ -179,7 +198,9 @@ export function ModelParamsEditor({
 
         {/* Datalist shared by all key inputs so the browser autocompletes recognized keys. */}
         <datalist id={`ga-mp-keys-${gid}`}>
-          {recognized.map((k) => <option key={k} value={k} />)}
+          {recognized.map((k) => (
+            <option key={k} value={k} />
+          ))}
         </datalist>
 
         <div class="ga-mp-actions">
@@ -205,9 +226,7 @@ export function ModelParamsEditor({
           ) : null}
         </div>
 
-        {issues.length > 0 ? (
-          <p class="ga-confirm-warn">{issues[0]}</p>
-        ) : null}
+        {issues.length > 0 ? <p class="ga-confirm-warn">{issues[0]}</p> : null}
       </div>
     </Field>
   );

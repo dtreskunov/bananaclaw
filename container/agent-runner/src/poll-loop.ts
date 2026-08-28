@@ -1282,8 +1282,7 @@ async function processQuery(
           endedForCommand = true;
           query.abort();
         }
-        const isSubstantiveTool = event.step.tool !== 'nanoclaw_send_message' &&
-          !event.step.tool.endsWith('__send_message');
+        const isSubstantiveTool = !event.step.tool.endsWith('send_message');
         const priorCall = executedToolCalls.get(event.step.id);
         const reachedExecution = !event.step.rejectedBeforeExecution && (
           event.step.status === 'running' ||

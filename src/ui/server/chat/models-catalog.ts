@@ -39,7 +39,7 @@
  */
 import { log } from '../../../log.js';
 import { proxyFetch } from './onecli-proxy.js';
-import { listOpenCodeModels } from './models-dev-catalog.js';
+import { listNativeModels, listOpenCodeModels } from './models-dev-catalog.js';
 import { listFxModels } from './models-gateway-catalog.js';
 
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
@@ -212,6 +212,12 @@ export async function listModelsForProvider(
   // id rather than a single catalog-wide value.
   if (agentProvider === 'opencode') {
     const models = await listOpenCodeModels(filter);
+    if (!models) return { models: [], source: 'unavailable', upstream: null };
+    return { models, source: 'models.dev', upstream: filter?.upstream ?? null };
+  }
+
+  if (agentProvider === 'native') {
+    const models = await listNativeModels(filter);
     if (!models) return { models: [], source: 'unavailable', upstream: null };
     return { models, source: 'models.dev', upstream: filter?.upstream ?? null };
   }

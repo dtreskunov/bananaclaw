@@ -72,9 +72,21 @@ type CtxTier = '32k' | '128k' | '200k' | '1m';
 
 const COST_TIERS: { id: CostTier; label: string; test: (m: ModelSuggestion) => boolean }[] = [
   { id: 'free', label: 'Free', test: (m) => (m.inputCostPerMTok ?? 0) === 0 && (m.outputCostPerMTok ?? 0) === 0 },
-  { id: 'low', label: '< $1/Mtok', test: (m) => (m.outputCostPerMTok ?? Infinity) > 0 && (m.outputCostPerMTok ?? Infinity) < 1 },
-  { id: 'mid', label: '$1 – $5', test: (m) => (m.outputCostPerMTok ?? 0) >= 1 && (m.outputCostPerMTok ?? Infinity) <= 5 },
-  { id: 'high', label: '$5 – $20', test: (m) => (m.outputCostPerMTok ?? 0) > 5 && (m.outputCostPerMTok ?? Infinity) <= 20 },
+  {
+    id: 'low',
+    label: '< $1/Mtok',
+    test: (m) => (m.outputCostPerMTok ?? Infinity) > 0 && (m.outputCostPerMTok ?? Infinity) < 1,
+  },
+  {
+    id: 'mid',
+    label: '$1 – $5',
+    test: (m) => (m.outputCostPerMTok ?? 0) >= 1 && (m.outputCostPerMTok ?? Infinity) <= 5,
+  },
+  {
+    id: 'high',
+    label: '$5 – $20',
+    test: (m) => (m.outputCostPerMTok ?? 0) > 5 && (m.outputCostPerMTok ?? Infinity) <= 20,
+  },
   { id: 'premium', label: '> $20', test: (m) => (m.outputCostPerMTok ?? 0) > 20 },
 ];
 
@@ -85,7 +97,7 @@ const CTX_TIERS: { id: CtxTier; label: string; min: number }[] = [
   { id: '1m', label: '≥ 1M', min: 1_000_000 },
 ];
 
-const ALL_INPUT_MODALITIES = ['text', 'image', 'audio', 'video'];
+const ALL_INPUT_MODALITIES = ['text', 'image', 'pdf', 'audio', 'video'];
 const ALL_OUTPUT_MODALITIES = ['text', 'image'];
 
 /**
@@ -104,9 +116,10 @@ function formatDetailLine(m: ModelSuggestion): string {
   // is what actually decides price and context window.
   if (m.upstreamLabel) parts.push(m.upstreamLabel);
   if (m.contextWindow) {
-    const k = m.contextWindow >= 1_000_000
-      ? `${(m.contextWindow / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
-      : `${Math.round(m.contextWindow / 1024)}k`;
+    const k =
+      m.contextWindow >= 1_000_000
+        ? `${(m.contextWindow / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+        : `${Math.round(m.contextWindow / 1024)}k`;
     parts.push(`${k} ctx`);
   }
   if (m.inputCostPerMTok != null && m.outputCostPerMTok != null) {
@@ -196,7 +209,10 @@ export function ModelPickerDialog({
   // so the trigger can show the detail line for the current value.
   // Uses a module-level cache so multiple pickers with the same URL share one request.
   useEffect(() => {
-    if (!catalogUrl) { setModels([]); return; }
+    if (!catalogUrl) {
+      setModels([]);
+      return;
+    }
     let cancelled = false;
     fetchModels(catalogUrl).then((r) => {
       if (cancelled) return;
@@ -208,7 +224,9 @@ export function ModelPickerDialog({
         setSource('unavailable');
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [catalogUrl]);
 
   // When dialog opens, re-resolve from cache (instant if fresh) to show loading state.
@@ -227,7 +245,9 @@ export function ModelPickerDialog({
       }
       setLoading(false);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, catalogUrl]);
 
   // Focus search on open
@@ -244,23 +264,17 @@ export function ModelPickerDialog({
     // Text search
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      result = result.filter(
-        (m) => m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q),
-      );
+      result = result.filter((m) => m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q));
     }
 
     // Input modality filter
     if (selectedInputMods.size > 0) {
-      result = result.filter((m) =>
-        [...selectedInputMods].every((mod) => m.modalitiesIn?.includes(mod)),
-      );
+      result = result.filter((m) => [...selectedInputMods].every((mod) => m.modalitiesIn?.includes(mod)));
     }
 
     // Output modality filter
     if (selectedOutputMods.size > 0) {
-      result = result.filter((m) =>
-        [...selectedOutputMods].every((mod) => m.modalitiesOut?.includes(mod)),
-      );
+      result = result.filter((m) => [...selectedOutputMods].every((mod) => m.modalitiesOut?.includes(mod)));
     }
 
     // Cost tier filter (union — model matches if it fits ANY selected tier)
@@ -280,10 +294,13 @@ export function ModelPickerDialog({
     return result;
   }, [models, search, selectedInputMods, selectedOutputMods, selectedCostTiers, selectedCtxTier]);
 
-  const handleSelect = useCallback((id: string) => {
-    onChange(id);
-    setOpen(false);
-  }, [onChange]);
+  const handleSelect = useCallback(
+    (id: string) => {
+      onChange(id);
+      setOpen(false);
+    },
+    [onChange],
+  );
 
   const handleFreeformSubmit = useCallback(() => {
     const trimmed = freeformValue.trim();
@@ -301,7 +318,8 @@ export function ModelPickerDialog({
 
   const toggleSet = <T extends string>(set: Set<T>, val: T): Set<T> => {
     const next = new Set(set);
-    if (next.has(val)) next.delete(val); else next.add(val);
+    if (next.has(val)) next.delete(val);
+    else next.add(val);
     return next;
   };
 
@@ -322,7 +340,10 @@ export function ModelPickerDialog({
         type="button"
         class="mpd-trigger"
         disabled={disabled || !provider}
-        onClick={() => { setOpen(true); setSearch(''); }}
+        onClick={() => {
+          setOpen(true);
+          setSearch('');
+        }}
       >
         <span class="mpd-trigger-label">
           {value ? (
@@ -347,97 +368,98 @@ export function ModelPickerDialog({
           onKeyDown={(e) => handleKeyDown(e)}
           maxWidth="720px"
           className="mpd-dialog"
-          actions={value ? (
-            <button type="button" class="mpd-clear" title="Clear selection" onClick={handleClear}>
-              {'\u2715'} Clear
-            </button>
-          ) : null}
+          actions={
+            value ? (
+              <button type="button" class="mpd-clear" title="Clear selection" onClick={handleClear}>
+                {'\u2715'} Clear
+              </button>
+            ) : null
+          }
         >
-            <div class="mpd-content">
-              {/* Sidebar filters */}
-              <div class="mpd-sidebar">
-                <div class="mpd-filter-group">
-                  <div class="mpd-filter-group-title">Input</div>
-                  {ALL_INPUT_MODALITIES.map((mod) => (
-                    <div class="mpd-filter-option" key={mod}>
-                      <input
-                        type="checkbox"
-                        id={`mpd-in-${mod}`}
-                        checked={selectedInputMods.has(mod)}
-                        onChange={() => setSelectedInputMods(toggleSet(selectedInputMods, mod))}
-                      />
-                      <label for={`mpd-in-${mod}`}>{mod}</label>
-                    </div>
-                  ))}
-                </div>
-
-                <div class="mpd-filter-group">
-                  <div class="mpd-filter-group-title">Output</div>
-                  {ALL_OUTPUT_MODALITIES.map((mod) => (
-                    <div class="mpd-filter-option" key={mod}>
-                      <input
-                        type="checkbox"
-                        id={`mpd-out-${mod}`}
-                        checked={selectedOutputMods.has(mod)}
-                        onChange={() => setSelectedOutputMods(toggleSet(selectedOutputMods, mod))}
-                      />
-                      <label for={`mpd-out-${mod}`}>{mod}</label>
-                    </div>
-                  ))}
-                </div>
-
-                <div class="mpd-filter-group">
-                  <div class="mpd-filter-group-title">Cost (output)</div>
-                  {COST_TIERS.map((tier) => (
-                    <div class="mpd-filter-option" key={tier.id}>
-                      <input
-                        type="checkbox"
-                        id={`mpd-cost-${tier.id}`}
-                        checked={selectedCostTiers.has(tier.id)}
-                        onChange={() => setSelectedCostTiers(toggleSet(selectedCostTiers, tier.id))}
-                      />
-                      <label for={`mpd-cost-${tier.id}`}>{tier.label}</label>
-                    </div>
-                  ))}
-                </div>
-
-                <div class="mpd-filter-group">
-                  <div class="mpd-filter-group-title">Context window</div>
-                  {CTX_TIERS.map((tier) => (
-                    <div class="mpd-filter-option" key={tier.id}>
-                      <input
-                        type="checkbox"
-                        id={`mpd-ctx-${tier.id}`}
-                        checked={selectedCtxTier === tier.id}
-                        onChange={() => setSelectedCtxTier(selectedCtxTier === tier.id ? null : tier.id)}
-                      />
-                      <label for={`mpd-ctx-${tier.id}`}>{tier.label}</label>
-                    </div>
-                  ))}
-                </div>
+          <div class="mpd-content">
+            {/* Sidebar filters */}
+            <div class="mpd-sidebar">
+              <div class="mpd-filter-group">
+                <div class="mpd-filter-group-title">Input</div>
+                {ALL_INPUT_MODALITIES.map((mod) => (
+                  <div class="mpd-filter-option" key={mod}>
+                    <input
+                      type="checkbox"
+                      id={`mpd-in-${mod}`}
+                      checked={selectedInputMods.has(mod)}
+                      onChange={() => setSelectedInputMods(toggleSet(selectedInputMods, mod))}
+                    />
+                    <label for={`mpd-in-${mod}`}>{mod}</label>
+                  </div>
+                ))}
               </div>
 
-              {/* Main list */}
-              <div class="mpd-main">
-                <div class="mpd-search">
-                  <input
-                    ref={searchRef}
-                    type="text"
-                    placeholder="Search models…"
-                    value={search}
-                    onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
-                  />
-                </div>
+              <div class="mpd-filter-group">
+                <div class="mpd-filter-group-title">Output</div>
+                {ALL_OUTPUT_MODALITIES.map((mod) => (
+                  <div class="mpd-filter-option" key={mod}>
+                    <input
+                      type="checkbox"
+                      id={`mpd-out-${mod}`}
+                      checked={selectedOutputMods.has(mod)}
+                      onChange={() => setSelectedOutputMods(toggleSet(selectedOutputMods, mod))}
+                    />
+                    <label for={`mpd-out-${mod}`}>{mod}</label>
+                  </div>
+                ))}
+              </div>
 
-                <div class="mpd-list">
-                  {loading && <div class="mpd-empty">Loading…</div>}
-                  {!loading && source === 'unavailable' && (
-                    <div class="mpd-empty">Model catalog unavailable.</div>
-                  )}
-                  {!loading && source !== 'unavailable' && filtered.length === 0 && (
-                    <div class="mpd-empty">No models match filters.</div>
-                  )}
-                  {!loading && filtered.slice(0, MAX_RENDERED).map((m) => (
+              <div class="mpd-filter-group">
+                <div class="mpd-filter-group-title">Cost (output)</div>
+                {COST_TIERS.map((tier) => (
+                  <div class="mpd-filter-option" key={tier.id}>
+                    <input
+                      type="checkbox"
+                      id={`mpd-cost-${tier.id}`}
+                      checked={selectedCostTiers.has(tier.id)}
+                      onChange={() => setSelectedCostTiers(toggleSet(selectedCostTiers, tier.id))}
+                    />
+                    <label for={`mpd-cost-${tier.id}`}>{tier.label}</label>
+                  </div>
+                ))}
+              </div>
+
+              <div class="mpd-filter-group">
+                <div class="mpd-filter-group-title">Context window</div>
+                {CTX_TIERS.map((tier) => (
+                  <div class="mpd-filter-option" key={tier.id}>
+                    <input
+                      type="checkbox"
+                      id={`mpd-ctx-${tier.id}`}
+                      checked={selectedCtxTier === tier.id}
+                      onChange={() => setSelectedCtxTier(selectedCtxTier === tier.id ? null : tier.id)}
+                    />
+                    <label for={`mpd-ctx-${tier.id}`}>{tier.label}</label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Main list */}
+            <div class="mpd-main">
+              <div class="mpd-search">
+                <input
+                  ref={searchRef}
+                  type="text"
+                  placeholder="Search models…"
+                  value={search}
+                  onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
+                />
+              </div>
+
+              <div class="mpd-list">
+                {loading && <div class="mpd-empty">Loading…</div>}
+                {!loading && source === 'unavailable' && <div class="mpd-empty">Model catalog unavailable.</div>}
+                {!loading && source !== 'unavailable' && filtered.length === 0 && (
+                  <div class="mpd-empty">No models match filters.</div>
+                )}
+                {!loading &&
+                  filtered.slice(0, MAX_RENDERED).map((m) => (
                     <button
                       key={m.id}
                       type="button"
@@ -448,28 +470,30 @@ export function ModelPickerDialog({
                       <div class="mpd-item-detail">{formatDetailLine(m)}</div>
                     </button>
                   ))}
-                  {!loading && filtered.length > MAX_RENDERED && (
-                    <div class="mpd-empty">
-                      Showing {MAX_RENDERED} of {filtered.length} — search or filter to narrow down.
-                    </div>
-                  )}
-                </div>
+                {!loading && filtered.length > MAX_RENDERED && (
+                  <div class="mpd-empty">
+                    Showing {MAX_RENDERED} of {filtered.length} — search or filter to narrow down.
+                  </div>
+                )}
+              </div>
 
-                {/* Free-form entry */}
-                <div class="mpd-freeform">
-                  <input
-                    type="text"
-                    placeholder="Or type a custom model ID…"
-                    value={freeformValue}
-                    onInput={(e) => setFreeformValue((e.target as HTMLInputElement).value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleFreeformSubmit(); }}
-                  />
-                  <button type="button" disabled={!freeformValue.trim()} onClick={handleFreeformSubmit}>
-                    Use
-                  </button>
-                </div>
+              {/* Free-form entry */}
+              <div class="mpd-freeform">
+                <input
+                  type="text"
+                  placeholder="Or type a custom model ID…"
+                  value={freeformValue}
+                  onInput={(e) => setFreeformValue((e.target as HTMLInputElement).value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleFreeformSubmit();
+                  }}
+                />
+                <button type="button" disabled={!freeformValue.trim()} onClick={handleFreeformSubmit}>
+                  Use
+                </button>
               </div>
             </div>
+          </div>
         </MobileDialog>
       )}
     </>

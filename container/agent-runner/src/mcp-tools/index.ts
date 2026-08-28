@@ -1,18 +1,10 @@
 /**
- * MCP tools barrel — imports each tool module for its side-effect
- * `registerTools([...])` call, then starts the MCP server.
+ * MCP tools barrel — loads the shared registry, then starts the MCP server.
  *
  * Adding a new tool module: create the file, call `registerTools([...])`
  * at module scope, and append the import here. No central list.
  */
-import './core.js';
-import './scheduling.js';
-import './thread-titles.js';
-import './interactive.js';
-import './agents.js';
-import './agent-link.js';
-import './self-mod.js';
-import './web-ui.js';
+import './registry.js';
 import { startMcpServer } from './server.js';
 
 function log(msg: string): void {

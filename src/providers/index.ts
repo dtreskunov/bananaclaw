@@ -6,3 +6,4 @@
 // Skills add a new provider by appending one import line below.
 import './opencode.js';
 import './fx.js';
+import './native.js';

@@ -73,13 +73,14 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'mcp-tools', 'index.ts');
 
   // Build MCP servers config: nanoclaw built-in + any from container.json
-  const mcpServers: Record<string, McpServerConfig> = {
-    nanoclaw: {
+  const mcpServers: Record<string, McpServerConfig> = {};
+  if (providerName !== 'native') {
+    mcpServers.nanoclaw = {
       command: 'bun',
       args: ['run', mcpServerPath],
       env: {},
-    },
-  };
+    };
+  }
 
   for (const [name, serverConfig] of Object.entries(config.mcpServers) as Array<[string, McpServerConfig]>) {
     mcpServers[name] = serverConfig;
@@ -97,6 +98,7 @@ async function main(): Promise<void> {
     env: { ...process.env },
     additionalDirectories: additionalDirectories.length > 0 ? additionalDirectories : undefined,
     model: config.model,
+    smallModel: config.smallModel,
     effort: config.effort,
     modelParams: config.modelParams,
   });

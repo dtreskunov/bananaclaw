@@ -123,6 +123,8 @@ export interface ProviderOptions {
    * to the underlying SDK. If omitted, the SDK default is used.
    */
   model?: string;
+  /** Optional cheaper model for provider-owned background work. */
+  smallModel?: string;
   /**
    * Reasoning effort (`'low' | 'medium' | 'high' | 'xhigh' | 'max'`). Passed
    * through to the underlying SDK. If omitted, the SDK default is used.

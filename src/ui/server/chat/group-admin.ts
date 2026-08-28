@@ -562,7 +562,7 @@ async function handlePatchSettings(
   }
 
   // The picked catalog id is already the canonical stored value, so there is
-  // nothing to translate. What we do derive is the upstream: for opencode,
+  // nothing to translate. What we do derive is the upstream: for opencode and native,
   // a models.dev id like `minimax/MiniMax-M3` names its own gateway, so the
   // user never picks a provider separately and the two can't drift apart.
   // `upstream_provider` is deliberately NOT in SCALAR_FIELDS — the client
@@ -573,7 +573,7 @@ async function handlePatchSettings(
     const effectiveProvider = updates.provider ?? existing?.provider ?? null;
     updates.model = dbValueFromBareId(effectiveProvider, updates.model ?? null);
     const bareModel = bareIdForResponse(effectiveProvider, updates.model ?? null);
-    if (effectiveProvider === 'opencode') {
+    if (effectiveProvider === 'opencode' || effectiveProvider === 'native') {
       if (!bareModel) {
         // Model cleared — the group falls back to the provider's default model,
         // whose upstream is the fleet-wide OPENCODE_PROVIDER. Clearing the

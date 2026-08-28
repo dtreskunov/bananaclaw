@@ -44,12 +44,14 @@ interface ModelsDevModel {
   modalities?: { input?: string[]; output?: string[] };
   limit?: { context?: number; output?: number };
   cost?: { input?: number; output?: number };
+  provider?: { npm?: string; api?: string };
 }
 
 interface ModelsDevProvider {
   id?: string;
   name?: string;
   api?: string;
+  npm?: string;
   doc?: string;
   models?: Record<string, ModelsDevModel>;
 }
@@ -144,13 +146,48 @@ export interface ModelsDevFilter {
   upstream?: string;
 }
 
-/**
- * Every tool-calling model models.dev knows about, as canonical wire ids.
- *
- * Returns `null` when the catalog is unreachable so the caller can report
- * `source: 'unavailable'` rather than an empty (and misleading) list.
- */
-export async function listOpenCodeModels(filter?: ModelsDevFilter): Promise<ModelsDevSuggestion[] | null> {
+const NATIVE_CHAT_PACKAGES = new Set([
+  '@ai-sdk/openai-compatible',
+  '@ai-sdk/openai',
+  '@ai-sdk/cerebras',
+  '@ai-sdk/deepinfra',
+  '@ai-sdk/groq',
+  '@ai-sdk/mistral',
+  '@ai-sdk/togetherai',
+  '@ai-sdk/xai',
+  '@openrouter/ai-sdk-provider',
+  'ai-gateway-provider',
+]);
+const NATIVE_ANTHROPIC_PACKAGES = new Set(['@ai-sdk/anthropic']);
+
+export function isNativeCompatible(provider: ModelsDevProvider, model: ModelsDevModel): boolean {
+  const packageName = model.provider?.npm ?? provider.npm ?? '@ai-sdk/openai-compatible';
+  const api = model.provider?.api ?? provider.api;
+  const supportedPackage = NATIVE_CHAT_PACKAGES.has(packageName) || NATIVE_ANTHROPIC_PACKAGES.has(packageName);
+  return supportedPackage && typeof api === 'string' && api.length > 0 && !api.includes('${');
+}
+
+export function nativeInputModalities(
+  provider: ModelsDevProvider,
+  model: ModelsDevModel,
+  modalities: string[],
+): string[] {
+  const packageName = model.provider?.npm ?? provider.npm ?? '@ai-sdk/openai-compatible';
+  if (NATIVE_ANTHROPIC_PACKAGES.has(packageName)) {
+    return modalities.filter((modality) => modality === 'text' || modality === 'image' || modality === 'pdf');
+  }
+  return modalities.filter((modality) => ['text', 'image', 'audio', 'video', 'pdf'].includes(modality));
+}
+
+async function listModelsDevModels(
+  filter?: ModelsDevFilter,
+  accept: (provider: ModelsDevProvider, model: ModelsDevModel) => boolean = () => true,
+  projectInputModalities: (provider: ModelsDevProvider, model: ModelsDevModel, modalities: string[]) => string[] = (
+    _provider,
+    _model,
+    modalities,
+  ) => modalities,
+): Promise<ModelsDevSuggestion[] | null> {
   const catalog = await fetchModelsDev();
   if (!catalog) return null;
 
@@ -159,9 +196,9 @@ export async function listOpenCodeModels(filter?: ModelsDevFilter): Promise<Mode
     if (filter?.upstream && providerId !== filter.upstream) continue;
     const providerLabel = provider.name || providerId;
     for (const [modelId, model] of Object.entries(provider.models ?? {})) {
-      if (!model.tool_call) continue;
+      if (!model.tool_call || !accept(provider, model)) continue;
       const outMods = model.modalities?.output ?? [];
-      const inMods = model.modalities?.input ?? [];
+      const inMods = projectInputModalities(provider, model, model.modalities?.input ?? []);
       if (!outMods.includes('text')) continue;
       if (filter?.inputModality && !inMods.includes(filter.inputModality)) continue;
       if (filter?.outputModality && !outMods.includes(filter.outputModality)) continue;
@@ -183,9 +220,23 @@ export async function listOpenCodeModels(filter?: ModelsDevFilter): Promise<Mode
     }
   }
 
-  // Group visually by upstream, then by model name.
   out.sort((a, b) => a.upstreamLabel.localeCompare(b.upstreamLabel) || a.label.localeCompare(b.label));
   return out;
+}
+
+/**
+ * Every tool-calling model models.dev knows about, as canonical wire ids.
+ *
+ * Returns `null` when the catalog is unreachable so the caller can report
+ * `source: 'unavailable'` rather than an empty (and misleading) list.
+ */
+export async function listOpenCodeModels(filter?: ModelsDevFilter): Promise<ModelsDevSuggestion[] | null> {
+  return listModelsDevModels(filter);
+}
+
+/** Models callable by one of the native provider's in-process transports. */
+export async function listNativeModels(filter?: ModelsDevFilter): Promise<ModelsDevSuggestion[] | null> {
+  return listModelsDevModels(filter, isNativeCompatible, nativeInputModalities);
 }
 
 /**

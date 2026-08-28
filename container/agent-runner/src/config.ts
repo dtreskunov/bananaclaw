@@ -19,6 +19,7 @@ export interface RunnerConfig {
   maxMessagesPerPrompt: number;
   mcpServers: Record<string, McpServerConfig>;
   model?: string;
+  smallModel?: string;
   effort?: string;
   voiceMode: 'off' | 'transcribe' | 'audio';
   transcriptionModel?: string;
@@ -56,6 +57,7 @@ export function loadConfig(): RunnerConfig {
     maxMessagesPerPrompt: (raw.maxMessagesPerPrompt as number) || DEFAULT_MAX_MESSAGES,
     mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
     model: (raw.model as string) || undefined,
+    smallModel: (raw.smallModel as string) || undefined,
     effort: (raw.effort as string) || undefined,
     voiceMode: raw.voiceMode === 'transcribe' || raw.voiceMode === 'audio' ? raw.voiceMode : 'off',
     transcriptionModel: (raw.transcriptionModel as string) || undefined,
