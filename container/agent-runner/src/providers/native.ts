@@ -19,6 +19,7 @@ import type {
 import { pickActivityDetail } from './types.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
 import { loadNativeInstructions } from './native/instructions.js';
+import { NativeMcpManager } from './native/mcp-client.js';
 import { NativeStore } from './native/store.js';
 import { createNativeTools } from './native/tools.js';
 
@@ -163,81 +164,91 @@ export class NativeProvider implements AgentProvider {
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
+    const mcpManager = new NativeMcpManager(options.mcpServers, input.cwd);
 
     const events: AsyncIterable<ProviderEvent> = {
       async *[Symbol.asyncIterator]() {
-        let continuation = input.continuation;
-        if (continuation && !store.hasConversation(continuation)) {
-          throw new Error(`Native continuation ${continuation} not found`);
-        }
-        continuation ??= store.createConversation();
-        yield { type: 'init', continuation };
-
-        while (!abortController.signal.aborted) {
-          if (pending.length === 0) {
-            if (ended) break;
-            await new Promise<void>((resolve) => {
-              wake = resolve;
-            });
-            wake = null;
-            continue;
+        try {
+          let continuation = input.continuation;
+          if (continuation && !store.hasConversation(continuation)) {
+            throw new Error(`Native continuation ${continuation} not found`);
           }
+          continuation ??= store.createConversation();
+          yield { type: 'init', continuation };
 
-          const turn = pending.shift()!;
-          const startedAt = Date.now();
-          try {
-            const configuredModel = options.model ?? process.env.NATIVE_MODEL;
-            if (!configuredModel) throw new Error('native requires a canonical model setting');
-            const resolved = await resolveNativeModel(configuredModel);
-            const prior = portableHistory(store.messages(continuation));
-            const incoming = userMessage(turn.text, turn.files, resolved);
-            const tools = turn.toolsDisabled ? {} : createNativeTools(input.cwd, options.additionalDirectories);
-            const configuredMaxOutput =
-              typeof options.modelParams?.max_tokens === 'number'
-                ? Math.floor(options.modelParams.max_tokens)
-                : resolved.maxOutputTokens;
-            const result = streamText({
-              model: languageModel(resolved),
-              system: loadNativeInstructions(input.systemContext?.instructions),
-              messages: [...prior, incoming],
-              tools,
-              stopWhen: isStepCount(20),
-              maxRetries: 2,
-              abortSignal: abortController.signal,
-              ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
-              ...(typeof options.modelParams?.temperature === 'number'
-                ? { temperature: options.modelParams.temperature }
-                : {}),
-              ...(typeof options.modelParams?.top_p === 'number' ? { topP: options.modelParams.top_p } : {}),
-            });
-
-            for await (const rawPart of result.stream) {
-              yield { type: 'activity' };
-              const part = rawPart as unknown as Record<string, unknown>;
-              if (part.type === 'tool-call') yield { type: 'progress', step: toolStep(part, 'running') };
-              else if (part.type === 'tool-result') yield { type: 'progress', step: toolStep(part, 'completed') };
-              else if (part.type === 'tool-error') yield { type: 'progress', step: toolStep(part, 'error') };
-              else if (part.type === 'error') throw part.error;
-              else if (part.type === 'finish-step') yield { type: 'assistant_message' };
+          while (!abortController.signal.aborted) {
+            if (pending.length === 0) {
+              if (ended) break;
+              await new Promise<void>((resolve) => {
+                wake = resolve;
+              });
+              wake = null;
+              continue;
             }
 
-            const responseMessages = (await result.responseMessages) as ModelMessage[];
-            const checkpoint = store.append(continuation, [incoming, ...responseMessages]);
-            yield { type: 'usage', data: usageFor(resolved, await result.usage, Date.now() - startedAt) };
-            yield { type: 'checkpoint', ref: checkpoint };
-            yield {
-              type: 'result',
-              text: (await result.text).trim() || null,
-              finishReason: String(await result.finishReason),
-            };
-          } catch (error) {
-            if (abortController.signal.aborted) break;
-            yield {
-              type: 'error',
-              message: errorMessage(error),
-              retryable: /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
-            };
+            const turn = pending.shift()!;
+            const startedAt = Date.now();
+            try {
+              const configuredModel = options.model ?? process.env.NATIVE_MODEL;
+              if (!configuredModel) throw new Error('native requires a canonical model setting');
+              const resolved = await resolveNativeModel(configuredModel);
+              const prior = portableHistory(store.messages(continuation));
+              const incoming = userMessage(turn.text, turn.files, resolved);
+              const tools = turn.toolsDisabled
+                ? {}
+                : {
+                    ...createNativeTools(input.cwd, options.additionalDirectories),
+                    ...(await mcpManager.tools(abortController.signal)),
+                  };
+              const configuredMaxOutput =
+                typeof options.modelParams?.max_tokens === 'number'
+                  ? Math.floor(options.modelParams.max_tokens)
+                  : resolved.maxOutputTokens;
+              const result = streamText({
+                model: languageModel(resolved),
+                system: loadNativeInstructions(input.systemContext?.instructions),
+                messages: [...prior, incoming],
+                tools,
+                stopWhen: isStepCount(20),
+                maxRetries: 2,
+                abortSignal: abortController.signal,
+                ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
+                ...(typeof options.modelParams?.temperature === 'number'
+                  ? { temperature: options.modelParams.temperature }
+                  : {}),
+                ...(typeof options.modelParams?.top_p === 'number' ? { topP: options.modelParams.top_p } : {}),
+              });
+
+              for await (const rawPart of result.stream) {
+                yield { type: 'activity' };
+                const part = rawPart as unknown as Record<string, unknown>;
+                if (part.type === 'tool-call') yield { type: 'progress', step: toolStep(part, 'running') };
+                else if (part.type === 'tool-result') yield { type: 'progress', step: toolStep(part, 'completed') };
+                else if (part.type === 'tool-error') yield { type: 'progress', step: toolStep(part, 'error') };
+                else if (part.type === 'error') throw part.error;
+                else if (part.type === 'finish-step') yield { type: 'assistant_message' };
+              }
+
+              const responseMessages = (await result.responseMessages) as ModelMessage[];
+              const checkpoint = store.append(continuation, [incoming, ...responseMessages]);
+              yield { type: 'usage', data: usageFor(resolved, await result.usage, Date.now() - startedAt) };
+              yield { type: 'checkpoint', ref: checkpoint };
+              yield {
+                type: 'result',
+                text: (await result.text).trim() || null,
+                finishReason: String(await result.finishReason),
+              };
+            } catch (error) {
+              if (abortController.signal.aborted) break;
+              yield {
+                type: 'error',
+                message: errorMessage(error),
+                retryable: /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
+              };
+            }
           }
+        } finally {
+          await mcpManager.close();
         }
       },
     };
@@ -255,6 +266,7 @@ export class NativeProvider implements AgentProvider {
       },
       abort(): void {
         abortController.abort();
+        void mcpManager.close();
         wake?.();
       },
       events,

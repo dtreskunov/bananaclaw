@@ -14,6 +14,7 @@ let requestUrls: string[];
 let requestHeaders: Headers[];
 let toolMode: boolean;
 let anthropicToolMode: boolean;
+let externalMcpToolMode: boolean;
 
 async function collect(
   provider: NativeProvider,
@@ -34,6 +35,7 @@ beforeEach(() => {
   requestHeaders = [];
   toolMode = false;
   anthropicToolMode = false;
+  externalMcpToolMode = false;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -98,10 +100,12 @@ beforeEach(() => {
       }
       const requestBody = requests.at(-1)!;
       const messages = requestBody.messages as Array<{ role: string }>;
-      const shouldCallTool = toolMode && !messages.some((message) => message.role === 'tool');
+      const shouldCallTool = (toolMode || externalMcpToolMode) && !messages.some((message) => message.role === 'tool');
+      const toolName = externalMcpToolMode ? 'mcp__Fixture__echo_value' : 'mcp__nanoclaw__send_message';
+      const toolArguments = externalMcpToolMode ? '{"value":"from-model"}' : '{"text":"hello user"}';
       const body = shouldCallTool
         ? [
-            'data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"mcp__nanoclaw__send_message","arguments":"{\\"text\\":\\"hello user\\"}"}}]},"finish_reason":null}]}',
+            `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"${toolName}","arguments":${JSON.stringify(toolArguments)}}}]},"finish_reason":null}]}`,
             '',
             'data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}',
             '',
@@ -249,6 +253,27 @@ describe('NativeProvider', () => {
     };
     expect(JSON.parse(row.content).text).toBe('hello user');
     expect(requests).toHaveLength(2);
+  });
+
+  it('discovers and executes a configured external MCP tool', async () => {
+    externalMcpToolMode = true;
+    const fixture = path.join(import.meta.dir, 'native', 'test-fixtures', 'stdio-mcp.ts');
+    const bun = Bun.which('bun');
+    if (!bun) throw new Error('bun executable not found');
+    const provider = new NativeProvider({
+      model: 'local/test-model',
+      mcpServers: { Fixture: { command: bun, args: ['run', fixture] } },
+    });
+    const events = await collect(provider);
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'progress',
+        step: expect.objectContaining({ tool: 'mcp__Fixture__echo_value', status: 'completed' }),
+      }),
+    );
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]?.messages)).toContain('echo:from-model');
   });
 
   it('sends and resumes image attachments through OpenAI-compatible Chat', async () => {
