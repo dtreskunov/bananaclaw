@@ -6,6 +6,7 @@ import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../../db/connection.js';
 import { invokeRegisteredTool, listRegisteredTools } from '../../mcp-tools/registry.js';
+import type { NativeSkillRegistry } from './skills.js';
 
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_RESULTS = 200;
@@ -121,7 +122,11 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
   });
 }
 
-export function createNativeTools(cwd: string, additionalDirectories: string[] = []): ToolSet {
+export function createNativeTools(
+  cwd: string,
+  additionalDirectories: string[] = [],
+  skills?: NativeSkillRegistry,
+): ToolSet {
   const tools: ToolSet = {};
   for (const definition of listRegisteredTools()) {
     const name = `mcp__nanoclaw__${definition.tool.name}`;
@@ -271,6 +276,24 @@ export function createNativeTools(cwd: string, additionalDirectories: string[] =
       }
     },
   });
+
+  if (skills && skills.skills().length > 0) {
+    tools.load_skill = tool({
+      description: 'Load a selected skill or a text file referenced by that skill before following its workflow.',
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Skill slug or declared name from the available-skills index.' },
+          path: { type: 'string', description: 'Optional path inside the skill directory. Defaults to SKILL.md.' },
+        },
+        required: ['name'],
+      }),
+      execute: async (input) => {
+        const args = input as { name: string; path?: string };
+        return skills.load(args.name, args.path);
+      },
+    });
+  }
 
   return tools;
 }

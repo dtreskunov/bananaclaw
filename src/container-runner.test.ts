@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { packageDockerfile, resolveProviderName } from './container-runner.js';
+import { packageDockerfile, resolveProviderName, syncSkillSymlinks } from './container-runner.js';
 
 describe('packageDockerfile', () => {
   const none = { apt: [], npm: [], pip: [] };
@@ -63,6 +63,29 @@ describe('resolveProviderName', () => {
   it('falls through env empty/null to claude', () => {
     expect(resolveProviderName(null, null, '')).toBe('claude');
     expect(resolveProviderName(null, null, null)).toBe('claude');
+  });
+});
+
+describe('syncSkillSymlinks', () => {
+  it('converts selected fx copies back to symlinks and removes unselected shared copies', () => {
+    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+    const claudeDir = path.join(root, 'claude');
+    const shared = path.join(root, 'shared');
+    for (const name of ['selected', 'unselected']) {
+      fs.mkdirSync(path.join(shared, name), { recursive: true });
+      fs.writeFileSync(path.join(shared, name, 'SKILL.md'), `---\nname: ${name}\ndescription: test\n---\n`);
+      fs.mkdirSync(path.join(claudeDir, 'skills', name), { recursive: true });
+      fs.writeFileSync(path.join(claudeDir, 'skills', name, 'SKILL.md'), 'old fx copy');
+    }
+    fs.mkdirSync(path.join(claudeDir, 'skills', 'custom'), { recursive: true });
+
+    syncSkillSymlinks(claudeDir, { provider: 'native', skills: ['selected'] } as never, shared);
+
+    expect(fs.lstatSync(path.join(claudeDir, 'skills', 'selected')).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(path.join(claudeDir, 'skills', 'selected'))).toBe('/app/skills/selected');
+    expect(fs.existsSync(path.join(claudeDir, 'skills', 'unselected'))).toBe(false);
+    expect(fs.existsSync(path.join(claudeDir, 'skills', 'custom'))).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });
 

@@ -15,6 +15,7 @@ let requestHeaders: Headers[];
 let toolMode: boolean;
 let anthropicToolMode: boolean;
 let externalMcpToolMode: boolean;
+let skillToolMode: boolean;
 
 async function collect(
   provider: NativeProvider,
@@ -36,6 +37,7 @@ beforeEach(() => {
   toolMode = false;
   anthropicToolMode = false;
   externalMcpToolMode = false;
+  skillToolMode = false;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -100,9 +102,18 @@ beforeEach(() => {
       }
       const requestBody = requests.at(-1)!;
       const messages = requestBody.messages as Array<{ role: string }>;
-      const shouldCallTool = (toolMode || externalMcpToolMode) && !messages.some((message) => message.role === 'tool');
-      const toolName = externalMcpToolMode ? 'mcp__Fixture__echo_value' : 'mcp__nanoclaw__send_message';
-      const toolArguments = externalMcpToolMode ? '{"value":"from-model"}' : '{"text":"hello user"}';
+      const shouldCallTool =
+        (toolMode || externalMcpToolMode || skillToolMode) && !messages.some((message) => message.role === 'tool');
+      const toolName = skillToolMode
+        ? 'load_skill'
+        : externalMcpToolMode
+          ? 'mcp__Fixture__echo_value'
+          : 'mcp__nanoclaw__send_message';
+      const toolArguments = skillToolMode
+        ? '{"name":"local-guide"}'
+        : externalMcpToolMode
+          ? '{"value":"from-model"}'
+          : '{"text":"hello user"}';
       const body = shouldCallTool
         ? [
             `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"${toolName}","arguments":${JSON.stringify(toolArguments)}}}]},"finish_reason":null}]}`,
@@ -133,6 +144,8 @@ afterEach(() => {
   delete process.env.NATIVE_BASE_URL;
   delete process.env.NATIVE_PROTOCOL;
   delete process.env.NATIVE_STATE_PATH;
+  delete process.env.NATIVE_SHARED_SKILLS_ROOT;
+  delete process.env.NATIVE_LOCAL_SKILLS_ROOT;
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -274,6 +287,30 @@ describe('NativeProvider', () => {
     );
     expect(requests).toHaveLength(2);
     expect(JSON.stringify(requests[1]?.messages)).toContain('echo:from-model');
+  });
+
+  it('indexes and progressively loads a group-local skill through the model tool loop', async () => {
+    skillToolMode = true;
+    const shared = path.join(root, 'shared-skills');
+    const local = path.join(root, 'local-skills');
+    fs.mkdirSync(path.join(local, 'local-guide'), { recursive: true });
+    fs.writeFileSync(
+      path.join(local, 'local-guide', 'SKILL.md'),
+      '---\nname: local-guide\ndescription: Use the local workflow.\n---\n# Secret workflow\nReturn SKILL-LOADED.',
+    );
+    process.env.NATIVE_SHARED_SKILLS_ROOT = shared;
+    process.env.NATIVE_LOCAL_SKILLS_ROOT = local;
+
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }));
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'progress',
+        step: expect.objectContaining({ tool: 'load_skill', status: 'completed' }),
+      }),
+    );
+    expect(JSON.stringify(requests[0]?.messages)).toContain('**local-guide** (`local-guide`) — Use the local workflow.');
+    expect(JSON.stringify(requests[1]?.messages)).toContain('Return SKILL-LOADED.');
   });
 
   it('sends and resumes image attachments through OpenAI-compatible Chat', async () => {

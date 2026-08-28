@@ -20,6 +20,7 @@ import { pickActivityDetail } from './types.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
 import { loadNativeInstructions } from './native/instructions.js';
 import { NativeMcpManager } from './native/mcp-client.js';
+import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
 import { createNativeTools } from './native/tools.js';
 
@@ -165,6 +166,7 @@ export class NativeProvider implements AgentProvider {
     const options = this.options;
     const store = this.store;
     const mcpManager = new NativeMcpManager(options.mcpServers, input.cwd);
+    const skills = new NativeSkillRegistry();
 
     const events: AsyncIterable<ProviderEvent> = {
       async *[Symbol.asyncIterator]() {
@@ -197,7 +199,7 @@ export class NativeProvider implements AgentProvider {
               const tools = turn.toolsDisabled
                 ? {}
                 : {
-                    ...createNativeTools(input.cwd, options.additionalDirectories),
+                    ...createNativeTools(input.cwd, options.additionalDirectories, skills),
                     ...(await mcpManager.tools(abortController.signal)),
                   };
               const configuredMaxOutput =
@@ -206,7 +208,7 @@ export class NativeProvider implements AgentProvider {
                   : resolved.maxOutputTokens;
               const result = streamText({
                 model: languageModel(resolved),
-                system: loadNativeInstructions(input.systemContext?.instructions),
+                system: loadNativeInstructions(input.systemContext?.instructions, skills.instructions()),
                 messages: [...prior, incoming],
                 tools,
                 stopWhen: isStepCount(20),

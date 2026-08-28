@@ -9,7 +9,7 @@ function readIfPresent(filename: string): string | null {
   }
 }
 
-export function loadNativeInstructions(runtimeInstructions?: string): string {
+export function loadNativeInstructions(runtimeInstructions?: string, skillInstructions?: string | null): string {
   const parts: string[] = [];
   const shared = readIfPresent('/app/CLAUDE.md');
   if (shared) parts.push(shared);
@@ -29,6 +29,7 @@ export function loadNativeInstructions(runtimeInstructions?: string): string {
 
   const local = readIfPresent('/workspace/agent/CLAUDE.local.md');
   if (local) parts.push(local);
+  if (skillInstructions) parts.push(skillInstructions);
   if (runtimeInstructions?.trim()) parts.push(runtimeInstructions.trim());
   return parts.join('\n\n');
 }

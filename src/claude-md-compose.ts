@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { GROUPS_DIR } from './config.js';
+import { DATA_DIR, GROUPS_DIR } from './config.js';
 import type { McpServerConfig } from './container-config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { log } from './log.js';
@@ -34,6 +34,26 @@ const SHARED_MCP_TOOLS_CONTAINER_BASE = '/app/src/mcp-tools';
 const MCP_TOOLS_HOST_SUBPATH = path.join('container', 'agent-runner', 'src', 'mcp-tools');
 
 const COMPOSED_HEADER = '<!-- Composed at spawn — do not edit. Edit CLAUDE.local.md for per-group content. -->';
+
+export function selectedSkillFragmentNames(sharedSkillsDir: string, effectiveSkillsDir: string): string[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(sharedSkillsDir);
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((skillName) => {
+      if (!fs.existsSync(path.join(sharedSkillsDir, skillName, 'instructions.md'))) return false;
+      try {
+        fs.lstatSync(path.join(effectiveSkillsDir, skillName));
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .sort();
+}
 
 /**
  * Regenerate `groups/<folder>/CLAUDE.md` from the shared base, enabled skill
@@ -61,19 +81,14 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
     : {};
   const desired = new Map<string, { type: 'symlink' | 'inline'; content: string }>();
 
-  // Skill fragments — every skill that ships an `instructions.md`.
-  // TODO (shared-source refactor): respect `container.json` skill selection.
+  // Skill fragments — selected/available shared skills that ship `instructions.md`.
   const skillsHostDir = path.join(process.cwd(), 'container', 'skills');
-  if (fs.existsSync(skillsHostDir)) {
-    for (const skillName of fs.readdirSync(skillsHostDir)) {
-      const hostFragment = path.join(skillsHostDir, skillName, 'instructions.md');
-      if (fs.existsSync(hostFragment)) {
-        desired.set(`skill-${skillName}.md`, {
-          type: 'symlink',
-          content: `${SHARED_SKILLS_CONTAINER_BASE}/${skillName}/instructions.md`,
-        });
-      }
-    }
+  const effectiveSkillsDir = path.join(DATA_DIR, 'v2-sessions', group.id, '.claude-shared', 'skills');
+  for (const skillName of selectedSkillFragmentNames(skillsHostDir, effectiveSkillsDir)) {
+    desired.set(`skill-${skillName}.md`, {
+      type: 'symlink',
+      content: `${SHARED_SKILLS_CONTAINER_BASE}/${skillName}/instructions.md`,
+    });
   }
 
   // Built-in module fragments — every MCP tool source file that ships a

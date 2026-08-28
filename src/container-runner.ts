@@ -721,7 +721,11 @@ function resolveEnv(name: string): string | undefined {
  * copy the real directories out of container/skills/ instead. The copy is
  * refreshed on every spawn so upstream skill edits still propagate.
  */
-function syncSkillSymlinks(claudeDir: string, containerConfig: import('./container-config.js').ContainerConfig): void {
+export function syncSkillSymlinks(
+  claudeDir: string,
+  containerConfig: import('./container-config.js').ContainerConfig,
+  sharedSkillsDir = path.join(process.cwd(), 'container', 'skills'),
+): void {
   const skillsDir = path.join(claudeDir, 'skills');
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
@@ -731,7 +735,6 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
   // then skip skills whose `requires_env: FOO` frontmatter names an env var
   // that isn't truthy, so the agent doesn't surface commands the host won't
   // honor.
-  const sharedSkillsDir = path.join(process.cwd(), 'container', 'skills');
   const desired = selectedSkillNames(containerConfig).filter((s) => {
     const required = readRequiredEnv(path.join(sharedSkillsDir, s, 'SKILL.md'));
     if (!required) return true;
@@ -740,8 +743,8 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
   const desiredSet = new Set(desired);
   const materialize = containerConfig.provider === 'fx';
 
-  // Remove entries not in the desired set. Under fx also drop symlinks, so a
-  // provider switch converts them to copies.
+  // Keep this effective shared-skill surface selection-exact. Group-local and
+  // user-installed skills live under /workspace/agent/skills instead.
   for (const entry of fs.readdirSync(skillsDir)) {
     const entryPath = path.join(skillsDir, entry);
     let isSymlink = false;
@@ -750,12 +753,13 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
     } catch {
       continue;
     }
-    // This dir is the agent's ~/.claude/skills, so a real directory here may be
-    // a user-installed skill. Only touch what this function created: symlinks,
-    // and (under fx) copies that shadow a container/skills entry.
-    const ours = isSymlink || (materialize && fs.existsSync(path.join(sharedSkillsDir, entry)));
-    if (!ours) continue;
-    if (!desiredSet.has(entry) || (materialize && isSymlink)) {
+    const sharedSkill = fs.existsSync(path.join(sharedSkillsDir, entry));
+    if (
+      !desiredSet.has(entry) ||
+      !sharedSkill ||
+      (materialize && isSymlink) ||
+      (!materialize && !isSymlink)
+    ) {
       fs.rmSync(entryPath, { recursive: true, force: true });
     }
   }
