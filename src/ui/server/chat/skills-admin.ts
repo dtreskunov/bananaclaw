@@ -23,6 +23,7 @@ import {
   githubSourceOf,
   listCatalogs,
   normalizeRepoSource,
+  previewCatalog,
   readCatalog,
   refreshMarketplace,
   removeMarketplace,
@@ -211,6 +212,20 @@ export async function discoverSkills(query: string): Promise<SkillsAdminResult> 
         sources: [...bySource.values()],
       },
     };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Read a repo's skills without registering it as a catalog. Backs expanding a
+ * search result: the directory only returns names, so descriptions have to
+ * come from the repo itself.
+ */
+export function previewRepo(repo: string): SkillsAdminResult {
+  if (!repo) return { status: 400, body: { error: 'repo is required' } };
+  try {
+    return { status: 200, body: { catalog: previewCatalog({ repo }) } };
   } catch (err) {
     return fail(err);
   }

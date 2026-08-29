@@ -132,6 +132,22 @@ describe('plugin marketplaces', () => {
     expect(catalog!.plugins[0]!.skills.map((skill) => skill.slug)).toEqual(['alpha']);
   });
 
+  it('finds skills nested under dotted directories without descending into a skill', () => {
+    setSkillsStoreRoot(tempDir('nanoclaw-skill-store-'));
+    const repo = tempDir('nanoclaw-nested-repo-');
+    // openai/skills keeps everything under skills/.curated/<slug>/.
+    writeSkill(repo, 'skills/.curated/deep', 'name: deep\ndescription: Nested under a dot dir.');
+    // A skill's own subdirectory must not be picked up as another skill.
+    writeSkill(repo, 'skills/.curated/deep/references', 'name: references\ndescription: Not a skill of its own.');
+    git(['init', '-b', 'main'], repo);
+    git(['add', '-Af'], repo);
+    git(['commit', '-m', 'init'], repo);
+
+    addMarketplace({ repo, ref: 'main', id: 'nested' });
+    const [catalog] = listCatalogs();
+    expect(catalog!.plugins[0]!.skills.map((skill) => skill.slug)).toEqual(['deep']);
+  });
+
   it('rejects a duplicate id and forgets the cache on removal', () => {
     const store = tempDir('nanoclaw-skill-store-');
     setSkillsStoreRoot(store);

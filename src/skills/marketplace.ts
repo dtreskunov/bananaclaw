@@ -28,6 +28,9 @@ import {
 const GIT_TIMEOUT_MS = 120_000;
 const MAX_SKILL_MD_BYTES = 256 * 1024;
 const MARKETPLACE_MANIFEST = path.join('.claude-plugin', 'marketplace.json');
+const SCAN_MAX_DEPTH = 3;
+const SCAN_MAX_SKILLS = 500;
+const SCAN_SKIP = new Set(['.git', '.github', 'node_modules', 'dist', 'build', '.venv', 'venv']);
 
 export class MarketplaceError extends Error {}
 
@@ -197,24 +200,49 @@ function readSkillAt(dir: string, marketplaceId: string, plugin: string, repoRoo
   };
 }
 
-function scanSkillDirs(base: string, marketplaceId: string, plugin: string, repoRoot: string): CatalogSkill[] {
+/**
+ * Walk for skill folders. Recurses because real repos nest — openai/skills
+ * keeps everything under `skills/.curated/<slug>/`, so neither a flat scan nor
+ * skipping dotted directories finds anything there. A directory holding a
+ * SKILL.md is a skill and is never descended into, so a skill's own
+ * `scripts/` and `references/` can't masquerade as more skills.
+ */
+function scanSkillDirs(
+  base: string,
+  marketplaceId: string,
+  plugin: string,
+  repoRoot: string,
+  depth = SCAN_MAX_DEPTH,
+  seen = new Set<string>(),
+): CatalogSkill[] {
   let entries: string[];
   try {
     entries = fs.readdirSync(base);
   } catch {
     return [];
   }
+
   const out: CatalogSkill[] = [];
   for (const entry of entries.sort()) {
-    if (entry.startsWith('.')) continue;
+    if (SCAN_SKIP.has(entry)) continue;
     const dir = path.join(base, entry);
     try {
       if (!fs.statSync(dir).isDirectory()) continue;
     } catch {
       continue;
     }
+
     const skill = readSkillAt(dir, marketplaceId, plugin, repoRoot);
-    if (skill) out.push(skill);
+    if (skill) {
+      if (!seen.has(skill.slug)) {
+        seen.add(skill.slug);
+        out.push(skill);
+      }
+      continue;
+    }
+    if (depth > 1 && seen.size < SCAN_MAX_SKILLS) {
+      out.push(...scanSkillDirs(dir, marketplaceId, plugin, repoRoot, depth - 1, seen));
+    }
   }
   return out;
 }
@@ -304,8 +332,7 @@ export function readCatalog(record: MarketplaceRecord): MarketplaceCatalog {
   }
 
   // No manifest: treat it as a plain Agent Skills repo.
-  const scanned = scanSkillDirs(path.join(repoRoot, 'skills'), record.id, 'skills', repoRoot);
-  const skills = scanned.length > 0 ? scanned : scanSkillDirs(repoRoot, record.id, 'skills', repoRoot);
+  const skills = scanSkillDirs(repoRoot, record.id, 'skills', repoRoot);
   return {
     ...base,
     kind: 'skill-repo',
@@ -333,6 +360,78 @@ function readManifestIdentity(id: string): { label: string | null; description: 
 
 // ── public API ────────────────────────────────────────────────────────────
 
+/**
+ * Sync, retrying on the other conventional default branch. Callers rarely know
+ * whether a repo is on `main` or `master`, and a preview is one click.
+ */
+function syncWithDefaultBranchFallback(record: MarketplaceRecord): MarketplaceRecord {
+  try {
+    return { ...record, commit: syncMarketplaceCache(record) };
+  } catch (err) {
+    const alternate = record.ref === 'main' ? 'master' : record.ref === 'master' ? 'main' : null;
+    if (!alternate) throw err;
+    const retry = { ...record, ref: alternate };
+    return { ...retry, commit: syncMarketplaceCache(retry) };
+  }
+}
+
+/**
+ * Clone a repo and read its catalog without registering it.
+ *
+ * Search results carry only a name and a slug, so expanding one has to read
+ * the repo to get descriptions. The clone lands in the normal cache dir keyed
+ * by the same derived id, so adding the catalog afterwards reuses it.
+ */
+export function previewCatalog(input: { repo: string; ref?: string }): MarketplaceCatalog {
+  const repo = normalizeRepoSource(input.repo);
+  const id = deriveId(repo);
+  const existing = getMarketplaceRecord(id);
+  if (existing) return readCatalog(existing);
+
+  pruneUnreferencedCaches();
+  const draft: MarketplaceRecord = {
+    id,
+    repo,
+    ref: assertRef((input.ref ?? 'main').trim() || 'main'),
+    label: null,
+    description: null,
+    commit: null,
+    addedAt: new Date().toISOString(),
+    refreshedAt: null,
+  };
+  const synced = syncWithDefaultBranchFallback(draft);
+  return readCatalog({ ...synced, ...readManifestIdentity(id) });
+}
+
+/** Drop the oldest preview clones that no configured catalog is using. */
+function pruneUnreferencedCaches(keep = 8): void {
+  const cacheRoot = path.dirname(marketplaceCacheDir('x'));
+  const referenced = new Set(readMarketplaceRecords().map((record) => record.id));
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(cacheRoot);
+  } catch {
+    return;
+  }
+  const orphans = entries
+    .filter((id) => !referenced.has(id))
+    .map((id) => {
+      const dir = path.join(cacheRoot, id);
+      let mtime = 0;
+      try {
+        mtime = fs.statSync(dir).mtimeMs;
+      } catch {
+        /* racing removal */
+      }
+      return { dir, mtime };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+
+  for (const orphan of orphans.slice(keep)) {
+    fs.rmSync(orphan.dir, { recursive: true, force: true });
+  }
+}
+
 export function addMarketplace(input: { repo: string; ref?: string; id?: string }): MarketplaceRecord {
   const repo = normalizeRepoSource(input.repo);
   const ref = assertRef((input.ref ?? 'main').trim() || 'main');
@@ -351,18 +450,17 @@ export function addMarketplace(input: { repo: string; ref?: string; id?: string 
     refreshedAt: null,
   };
 
-  let commit: string;
+  let synced: MarketplaceRecord;
   try {
-    commit = syncMarketplaceCache(draft);
+    synced = syncWithDefaultBranchFallback(draft);
   } catch (err) {
     fs.rmSync(marketplaceCacheDir(id), { recursive: true, force: true });
     throw err;
   }
 
   const record: MarketplaceRecord = {
-    ...draft,
+    ...synced,
     ...readManifestIdentity(id),
-    commit,
     refreshedAt: new Date().toISOString(),
   };
   putMarketplaceRecord(record);

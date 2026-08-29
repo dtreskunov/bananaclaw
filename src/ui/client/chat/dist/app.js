@@ -25648,7 +25648,7 @@ function Combobox({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open, freeform, text]);
   const filterText = text.trim().toLowerCase();
-  const matches = filtering && filterText ? options.filter(
+  const matches2 = filtering && filterText ? options.filter(
     (o4) => o4.value.toLowerCase().includes(filterText) || o4.label.toLowerCase().includes(filterText)
   ) : options;
   function finishCommit(next) {
@@ -25672,14 +25672,14 @@ function Combobox({
     if (e4.key === "ArrowDown") {
       e4.preventDefault();
       setOpen(true);
-      setHighlight((h5) => Math.min(h5 + 1, matches.length - 1));
+      setHighlight((h5) => Math.min(h5 + 1, matches2.length - 1));
     } else if (e4.key === "ArrowUp") {
       e4.preventDefault();
       setHighlight((h5) => Math.max(h5 - 1, 0));
     } else if (e4.key === "Enter") {
-      if (open && highlight >= 0 && matches[highlight]) {
+      if (open && highlight >= 0 && matches2[highlight]) {
         e4.preventDefault();
-        commitOption(matches[highlight].value);
+        commitOption(matches2[highlight].value);
       } else if (freeform) {
         commitText(text);
       }
@@ -25728,7 +25728,7 @@ function Combobox({
         children: "\u25BE"
       }
     ),
-    open && matches.length > 0 ? /* @__PURE__ */ u4("ul", { class: "combobox-list", role: "listbox", children: matches.map((o4, i5) => /* @__PURE__ */ u4(
+    open && matches2.length > 0 ? /* @__PURE__ */ u4("ul", { class: "combobox-list", role: "listbox", children: matches2.map((o4, i5) => /* @__PURE__ */ u4(
       "li",
       {
         role: "option",
@@ -27670,15 +27670,117 @@ function InstallControl({
   ] });
 }
 
-// src/components/GroupAdminSkillCatalog.tsx
+// src/components/GroupAdminSkillDirectory.tsx
 var SKILLS_API2 = "/ui/chat/api/skills";
+function slugIsRedundant(name, slug) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") === slug.toLowerCase();
+}
 function formatInstalls(n3) {
   if (n3 === null) return null;
   if (n3 >= 1e3) return `${Math.round(n3 / 100) / 10}k installs`;
   return `${n3} installs`;
 }
+function SkillDirectoryResults({
+  discover,
+  installedSlugs,
+  busy,
+  onInstall
+}) {
+  const [expanded, setExpanded] = h2(/* @__PURE__ */ new Set());
+  const [previews, setPreviews] = h2({});
+  const sources = discover.sources.map((entry) => ({ ...entry, skills: entry.skills.filter((skill) => !installedSlugs.has(skill.slug)) })).filter((entry) => entry.skills.length > 0);
+  async function toggle(source) {
+    const open = expanded.has(source);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (open) next.delete(source);
+      else next.add(source);
+      return next;
+    });
+    if (open || previews[source]) return;
+    setPreviews((prev) => ({ ...prev, [source]: "loading" }));
+    const r4 = await call(
+      `${SKILLS_API2}/preview?repo=${encodeURIComponent(source)}`
+    );
+    if (!r4.ok) {
+      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+      setPreviews((prev) => ({ ...prev, [source]: "error" }));
+      return;
+    }
+    setPreviews((prev) => ({ ...prev, [source]: r4.data.catalog.plugins.flatMap((plugin) => plugin.skills) }));
+  }
+  if (sources.length === 0) {
+    return /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No further matches in the directory." });
+  }
+  return /* @__PURE__ */ u4("div", { class: "ga-discover-results", children: [
+    /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
+      discover.searchType === "semantic" ? "Semantic" : "Fuzzy",
+      " match \xB7",
+      " ",
+      discover.authenticated ? "skills.sh API" : "skills.sh (unauthenticated)",
+      " \xB7 install counts are popularity, not safety"
+    ] }),
+    /* @__PURE__ */ u4("ul", { class: "ga-discover-list", children: sources.map((entry) => {
+      const preview = previews[entry.source];
+      const open = expanded.has(entry.source);
+      const loaded = open && Array.isArray(preview);
+      const installsBySlug = new Map(entry.skills.map((skill) => [skill.slug, skill.installs]));
+      const rows = loaded ? preview.filter((skill) => !installedSlugs.has(skill.slug)) : entry.skills.map((skill) => ({
+        slug: skill.slug,
+        name: skill.name,
+        description: "",
+        license: null
+      }));
+      return /* @__PURE__ */ u4("li", { class: "ga-discover-source", children: [
+        /* @__PURE__ */ u4("button", { type: "button", class: "ga-catalog-toggle", onClick: () => toggle(entry.source), children: [
+          /* @__PURE__ */ u4("span", { class: "ga-catalog-caret", children: open ? "\u25BE" : "\u25B8" }),
+          /* @__PURE__ */ u4("span", { class: "ga-catalog-title", children: [
+            /* @__PURE__ */ u4("strong", { children: entry.source }),
+            entry.catalogId ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: "catalog added" }) : null,
+            /* @__PURE__ */ u4("span", { class: "ga-catalog-meta", children: loaded ? `${rows.length} skill${rows.length === 1 ? "" : "s"}` : `${entry.skills.length} match${entry.skills.length === 1 ? "" : "es"}` })
+          ] })
+        ] }),
+        preview === "loading" ? /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
+          "Reading ",
+          entry.source,
+          "\u2026"
+        ] }) : null,
+        preview === "error" ? /* @__PURE__ */ u4("p", { class: "ga-skills-unavailable", children: "Couldn\u2019t read this repository." }) : null,
+        /* @__PURE__ */ u4("ul", { class: "ga-skills-catalog", children: rows.map((skill) => {
+          const installs = formatInstalls(installsBySlug.get(skill.slug) ?? null);
+          return /* @__PURE__ */ u4("li", { class: "ga-skills-catalog-item", children: [
+            /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: [
+              /* @__PURE__ */ u4("span", { class: "ga-skills-title", children: [
+                /* @__PURE__ */ u4("strong", { children: skill.name }),
+                slugIsRedundant(skill.name, skill.slug) ? null : /* @__PURE__ */ u4("code", { children: skill.slug }),
+                skill.license ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: skill.license }) : null,
+                installs ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: installs }) : null
+              ] }),
+              skill.description ? /* @__PURE__ */ u4("span", { class: "ga-skills-description", children: skill.description }) : null
+            ] }),
+            /* @__PURE__ */ u4(
+              InstallControl,
+              {
+                source: entry.source,
+                slug: skill.slug,
+                installed: installedSlugs.has(skill.slug),
+                disabled: busy,
+                label: entry.catalogId ? "Install" : "Add & install",
+                onInstall: (ack) => onInstall(entry.source, skill.slug, ack)
+              }
+            )
+          ] }, skill.slug);
+        }) })
+      ] }, entry.source);
+    }) })
+  ] });
+}
+
+// src/components/GroupAdminSkillCatalog.tsx
+var SKILLS_API3 = "/ui/chat/api/skills";
 function SkillCatalogSection({
   installedSlugs,
+  reloadKey,
   onChanged
 }) {
   const [catalogs, setCatalogs] = h2(null);
@@ -27686,11 +27788,8 @@ function SkillCatalogSection({
   const [repo, setRepo] = h2("");
   const [ref, setRef] = h2("");
   const [expanded, setExpanded] = h2(/* @__PURE__ */ new Set());
-  const [query, setQuery] = h2("");
-  const [discover, setDiscover] = h2(null);
-  const [searching, setSearching] = h2(false);
   async function load() {
-    const r4 = await call(SKILLS_API2);
+    const r4 = await call(SKILLS_API3);
     if (!r4.ok) {
       showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
       setCatalogs([]);
@@ -27700,7 +27799,7 @@ function SkillCatalogSection({
   }
   y2(() => {
     load();
-  }, []);
+  }, [reloadKey]);
   async function mutate(url, method, body, okMessage) {
     setBusy(true);
     try {
@@ -27716,10 +27815,13 @@ function SkillCatalogSection({
       setBusy(false);
     }
   }
-  async function install(url, body, slug, acknowledgeRisk) {
+  async function install(body, slug, acknowledgeRisk) {
     setBusy(true);
     try {
-      const r4 = await call(url, "POST", { ...body, acknowledgeRisk });
+      const r4 = await call(`${SKILLS_API3}/install`, "POST", {
+        ...body,
+        acknowledgeRisk
+      });
       if (!r4.ok) {
         if (r4.status === 409 && r4.data?.error === "audit_blocked") {
           return { ok: false, audits: r4.data.audits ?? null };
@@ -27730,29 +27832,9 @@ function SkillCatalogSection({
       showToast(`Installed ${slug}.`, "ok");
       await load();
       onChanged();
-      if (query.trim().length >= 2) await runSearch(query);
       return { ok: true };
     } finally {
       setBusy(false);
-    }
-  }
-  async function runSearch(q5) {
-    const trimmed = q5.trim();
-    if (trimmed.length < 2) {
-      setDiscover(null);
-      return;
-    }
-    setSearching(true);
-    try {
-      const r4 = await call(`${SKILLS_API2}/discover?q=${encodeURIComponent(trimmed)}`);
-      if (!r4.ok) {
-        showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-        setDiscover(null);
-        return;
-      }
-      setDiscover(r4.data);
-    } finally {
-      setSearching(false);
     }
   }
   function toggle(id) {
@@ -27772,67 +27854,6 @@ function SkillCatalogSection({
       /* @__PURE__ */ u4("a", { href: "https://agentskills.io/specification", target: "_blank", rel: "noreferrer noopener", children: "Agent Skills" }),
       ". Installing makes a skill selectable by every group; it does not enable it anywhere. Nothing from a catalog runs at install time."
     ] }) }),
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Find a skill", info: "Searches the skills.sh directory. Installs still clone from GitHub.", children: /* @__PURE__ */ u4("div", { class: "ga-catalog-add", children: [
-      /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "search",
-          placeholder: "pdf, spreadsheets, react native\u2026",
-          value: query,
-          disabled: busy,
-          onInput: (event) => setQuery(event.currentTarget.value),
-          onKeyDown: (event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              runSearch(query);
-            }
-          }
-        }
-      ),
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy || searching || query.trim().length < 2, onClick: () => runSearch(query), children: searching ? "Searching\u2026" : "Search" })
-    ] }) }),
-    discover ? discover.sources.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      "No matches for \u201C",
-      discover.query,
-      "\u201D."
-    ] }) : /* @__PURE__ */ u4("div", { class: "ga-discover-results", children: [
-      /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
-        discover.searchType === "semantic" ? "Semantic" : "Fuzzy",
-        " match \xB7",
-        " ",
-        discover.authenticated ? "skills.sh API" : "skills.sh (unauthenticated)",
-        " \xB7 install counts are popularity, not safety"
-      ] }),
-      /* @__PURE__ */ u4("ul", { class: "ga-discover-list", children: discover.sources.map((entry) => /* @__PURE__ */ u4("li", { class: "ga-discover-source", children: [
-        /* @__PURE__ */ u4("p", { class: "ga-catalog-plugin-name", children: [
-          entry.source,
-          entry.catalogId ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: "catalog added" }) : null
-        ] }),
-        /* @__PURE__ */ u4("ul", { class: "ga-skills-catalog", children: entry.skills.map((skill) => /* @__PURE__ */ u4("li", { class: "ga-skills-catalog-item", children: [
-          /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: /* @__PURE__ */ u4("span", { class: "ga-skills-title", children: [
-            /* @__PURE__ */ u4("strong", { children: skill.name }),
-            /* @__PURE__ */ u4("code", { children: skill.slug }),
-            formatInstalls(skill.installs) ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: formatInstalls(skill.installs) }) : null
-          ] }) }),
-          /* @__PURE__ */ u4(
-            InstallControl,
-            {
-              source: entry.source,
-              slug: skill.slug,
-              installed: installedSlugs.has(skill.slug),
-              disabled: busy,
-              label: entry.catalogId ? "Install" : "Add & install",
-              onInstall: (ack) => install(
-                `${SKILLS_API2}/install-from-repo`,
-                { repo: entry.source, slug: skill.slug },
-                skill.slug,
-                ack
-              )
-            }
-          )
-        ] }, skill.id)) })
-      ] }, entry.source)) })
-    ] }) : null,
     /* @__PURE__ */ u4(GroupAdminField, { label: "Add a catalog", info: "owner/repo, or an https clone URL.", children: /* @__PURE__ */ u4("div", { class: "ga-catalog-add", children: [
       /* @__PURE__ */ u4(
         "input",
@@ -27861,7 +27882,7 @@ function SkillCatalogSection({
           type: "button",
           disabled: busy || repo.trim() === "",
           onClick: async () => {
-            await mutate(`${SKILLS_API2}/catalogs`, "POST", { repo: repo.trim(), ref: ref.trim() }, "Catalog added.");
+            await mutate(`${SKILLS_API3}/catalogs`, "POST", { repo: repo.trim(), ref: ref.trim() }, "Catalog added.");
             setRepo("");
             setRef("");
           },
@@ -27887,7 +27908,7 @@ function SkillCatalogSection({
                 type: "button",
                 disabled: busy,
                 onClick: () => mutate(
-                  `${SKILLS_API2}/catalogs/${encodeURIComponent(catalog.id)}/refresh`,
+                  `${SKILLS_API3}/catalogs/${encodeURIComponent(catalog.id)}/refresh`,
                   "POST",
                   {},
                   "Catalog refreshed."
@@ -27902,7 +27923,7 @@ function SkillCatalogSection({
                 class: "ga-catalog-remove",
                 disabled: busy,
                 onClick: () => mutate(
-                  `${SKILLS_API2}/catalogs/${encodeURIComponent(catalog.id)}`,
+                  `${SKILLS_API3}/catalogs/${encodeURIComponent(catalog.id)}`,
                   "DELETE",
                   void 0,
                   "Catalog removed."
@@ -27927,7 +27948,7 @@ function SkillCatalogSection({
             /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: [
               /* @__PURE__ */ u4("span", { class: "ga-skills-title", children: [
                 /* @__PURE__ */ u4("strong", { children: skill.name }),
-                /* @__PURE__ */ u4("code", { children: skill.slug }),
+                slugIsRedundant(skill.name, skill.slug) ? null : /* @__PURE__ */ u4("code", { children: skill.slug }),
                 skill.license ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: skill.license }) : null
               ] }),
               /* @__PURE__ */ u4("span", { class: "ga-skills-description", children: skill.description }),
@@ -27941,7 +27962,6 @@ function SkillCatalogSection({
                 installed: installedSlugs.has(skill.slug),
                 disabled: busy,
                 onInstall: (ack) => install(
-                  `${SKILLS_API2}/install`,
                   { marketplaceId: catalog.id, plugin: plugin.name, slug: skill.slug },
                   skill.slug,
                   ack
@@ -27955,7 +27975,7 @@ function SkillCatalogSection({
   ] });
 }
 async function uninstallSkill(slug) {
-  const r4 = await call(`${SKILLS_API2}/${encodeURIComponent(slug)}`, "DELETE");
+  const r4 = await call(`${SKILLS_API3}/${encodeURIComponent(slug)}`, "DELETE");
   if (!r4.ok) {
     showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
     return false;
@@ -27965,41 +27985,105 @@ async function uninstallSkill(slug) {
 }
 
 // src/components/GroupAdminSkills.tsx
+var SKILLS_API4 = "/ui/chat/api/skills";
+function matches(skill, query) {
+  const q5 = query.toLowerCase();
+  return skill.name.toLowerCase().includes(q5) || skill.slug.toLowerCase().includes(q5) || skill.description.toLowerCase().includes(q5);
+}
 function SkillsSection({
   value,
-  selectedSkills,
   availableSkills,
   busy,
   elevated,
   onChange,
   onCatalogChanged
 }) {
+  const [query, setQuery] = h2("");
+  const [discover, setDiscover] = h2(null);
+  const [searching, setSearching] = h2(false);
+  const [catalogReloads, setCatalogReloads] = h2(0);
   const isAll = value === "all";
-  const list = isAll ? [] : value;
+  const list = isAll ? availableSkills.filter((skill) => skill.available).map((skill) => skill.slug) : value;
   const installedSlugs = new Set(availableSkills.map((skill) => skill.slug));
   const missingSkills = list.filter((slug) => !installedSlugs.has(slug));
+  const shown = query.trim() === "" ? availableSkills : availableSkills.filter((skill) => matches(skill, query.trim()));
   function setSkill(slug, enabled) {
-    if (isAll) return;
-    onChange(enabled ? [...list, slug] : list.filter((item) => item !== slug));
+    onChange(enabled ? [...list.filter((item) => item !== slug), slug] : list.filter((item) => item !== slug));
+  }
+  async function runSearch(q5) {
+    const trimmed = q5.trim();
+    if (!elevated || trimmed.length < 2) {
+      setDiscover(null);
+      return;
+    }
+    setSearching(true);
+    try {
+      const r4 = await call(`${SKILLS_API4}/discover?q=${encodeURIComponent(trimmed)}`);
+      if (!r4.ok) {
+        showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+        setDiscover(null);
+        return;
+      }
+      setDiscover(r4.data);
+    } finally {
+      setSearching(false);
+    }
+  }
+  async function installFromRepo(repo, slug, acknowledgeRisk) {
+    const r4 = await call(`${SKILLS_API4}/install-from-repo`, "POST", {
+      repo,
+      slug,
+      acknowledgeRisk
+    });
+    if (!r4.ok) {
+      if (r4.status === 409 && r4.data?.error === "audit_blocked") return { ok: false, audits: r4.data.audits ?? null };
+      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+      return { ok: false };
+    }
+    showToast(`Installed ${slug}.`, "ok");
+    onCatalogChanged();
+    setCatalogReloads((n3) => n3 + 1);
+    await runSearch(query);
+    return { ok: true };
   }
   return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Every skill comes from a catalog \u2014 the built-in one ships with this install, the rest you add below. Restart required to take effect: skill mounts are computed at container spawn." }) }),
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Selection", children: /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-      /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "checkbox",
-          checked: isAll,
-          disabled: busy,
-          onChange: (event) => onChange(
-            event.currentTarget.checked ? "all" : selectedSkills ?? availableSkills.filter((skill) => skill.available).map((skill) => skill.slug)
-          )
-        }
-      ),
-      /* @__PURE__ */ u4("span", { children: "Enable all available skills" })
-    ] }) }),
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Available skills", children: availableSkills.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No skills found." }) : /* @__PURE__ */ u4("ul", { class: "ga-skills-catalog", children: availableSkills.map((skill) => {
-      const checked = isAll ? skill.available : list.includes(skill.slug);
+    /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Tick the skills this agent should have. Every skill comes from a catalog \u2014 the built-in one ships with this install, the rest you add below. Restart required to take effect: skill mounts are computed at container spawn." }) }),
+    /* @__PURE__ */ u4(
+      GroupAdminField,
+      {
+        label: "Search",
+        info: elevated ? "Filters the list below, and searches the skills.sh directory." : "Filters the list below.",
+        children: /* @__PURE__ */ u4("div", { class: "ga-catalog-add", children: [
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "search",
+              placeholder: elevated ? "pdf, spreadsheets, react native\u2026" : "Filter skills\u2026",
+              value: query,
+              disabled: busy,
+              onInput: (event) => setQuery(event.currentTarget.value),
+              onKeyDown: (event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  runSearch(query);
+                }
+              }
+            }
+          ),
+          elevated ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              disabled: busy || searching || query.trim().length < 2,
+              onClick: () => runSearch(query),
+              children: searching ? "Searching\u2026" : "Search directory"
+            }
+          ) : null
+        ] })
+      }
+    ),
+    shown.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: availableSkills.length === 0 ? "No skills found." : `Nothing installed matches \u201C${query.trim()}\u201D.` }) : /* @__PURE__ */ u4("ul", { class: "ga-skills-catalog", children: shown.map((skill) => {
+      const checked = list.includes(skill.slug);
       return /* @__PURE__ */ u4("li", { class: "ga-skills-catalog-item", children: [
         /* @__PURE__ */ u4("label", { class: "ga-skills-option", children: [
           /* @__PURE__ */ u4(
@@ -28007,14 +28091,14 @@ function SkillsSection({
             {
               type: "checkbox",
               checked,
-              disabled: busy || isAll || !skill.available && !checked,
+              disabled: busy || !skill.available && !checked,
               onChange: (event) => setSkill(skill.slug, event.currentTarget.checked)
             }
           ),
           /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: [
             /* @__PURE__ */ u4("span", { class: "ga-skills-title", children: [
               /* @__PURE__ */ u4("strong", { children: skill.name }),
-              skill.name !== skill.slug ? /* @__PURE__ */ u4("code", { children: skill.slug }) : null,
+              slugIsRedundant(skill.name, skill.slug) ? null : /* @__PURE__ */ u4("code", { children: skill.slug }),
               /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: skill.catalogLabel }),
               skill.updateAvailable ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge ga-skills-badge-update", children: "update" }) : null,
               skill.license ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: skill.license }) : null
@@ -28050,22 +28134,45 @@ function SkillsSection({
           }
         ) : null
       ] }, skill.slug);
-    }) }) }),
-    !isAll && missingSkills.length > 0 ? /* @__PURE__ */ u4(GroupAdminField, { label: "Missing skills", info: "These skills are configured for the group but are not installed on this host.", children: /* @__PURE__ */ u4("ul", { class: "ga-skills-chips", children: missingSkills.map((slug) => /* @__PURE__ */ u4("li", { class: "ga-skills-chip", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-skills-chip-label", children: slug }),
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "ga-skills-chip-remove",
-          "aria-label": `Remove ${slug}`,
-          disabled: busy,
-          onClick: () => setSkill(slug, false),
-          children: "\u2715"
-        }
-      )
-    ] }, slug)) }) }) : null,
-    elevated ? /* @__PURE__ */ u4(SkillCatalogSection, { installedSlugs, onChanged: onCatalogChanged }) : null
+    }) }),
+    discover ? /* @__PURE__ */ u4(
+      SkillDirectoryResults,
+      {
+        discover,
+        installedSlugs,
+        busy,
+        onInstall: installFromRepo
+      }
+    ) : null,
+    missingSkills.length > 0 ? /* @__PURE__ */ u4(
+      GroupAdminField,
+      {
+        label: "Missing skills",
+        info: "These skills are configured for the group but are not installed on this host.",
+        children: /* @__PURE__ */ u4("ul", { class: "ga-skills-chips", children: missingSkills.map((slug) => /* @__PURE__ */ u4("li", { class: "ga-skills-chip", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-skills-chip-label", children: slug }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "ga-skills-chip-remove",
+              "aria-label": `Remove ${slug}`,
+              disabled: busy,
+              onClick: () => setSkill(slug, false),
+              children: "\u2715"
+            }
+          )
+        ] }, slug)) })
+      }
+    ) : null,
+    elevated ? /* @__PURE__ */ u4(
+      SkillCatalogSection,
+      {
+        installedSlugs,
+        reloadKey: catalogReloads,
+        onChanged: onCatalogChanged
+      }
+    ) : null
   ] });
 }
 
@@ -28268,7 +28375,6 @@ function SettingsTab({
   });
   const [draftMcpServers, setDraftMcpServers] = h2({});
   const [draftSkills, setDraftSkills] = h2([]);
-  const [selectedSkills, setSelectedSkills] = h2(null);
   const [busy, setBusy] = h2(false);
   const [images, setImages] = h2(null);
   async function refresh() {
@@ -28295,7 +28401,6 @@ function SettingsTab({
       setDraftMcpServers({ ...r4.data.mcpServers ?? {} });
       const skills = r4.data.skills === "all" ? "all" : [...r4.data.skills ?? []];
       setDraftSkills(skills);
-      setSelectedSkills(skills === "all" ? null : skills);
     } finally {
       setBusy(false);
     }
@@ -28322,7 +28427,6 @@ function SettingsTab({
   }
   function updateSkills(skills) {
     setDraftSkills(skills);
-    if (skills !== "all") setSelectedSkills(skills);
   }
   async function runRestart(rebuild) {
     const r4 = await call(apiPath(gid, "/restart"), "POST", { rebuild });
@@ -28480,7 +28584,6 @@ function SettingsTab({
         setDraftMcpServers({ ...fresh.data.mcpServers ?? {} });
         const skills = fresh.data.skills === "all" ? "all" : [...fresh.data.skills ?? []];
         setDraftSkills(skills);
-        setSelectedSkills(skills === "all" ? null : skills);
         groups.value = groups.value.map((g8) => g8.id === gid ? { ...g8, name: fresh.data.name } : g8);
       }
       if (effectiveRebuild || effectiveRestart) {
@@ -28839,7 +28942,6 @@ function SettingsTab({
       SkillsSection,
       {
         value: draftSkills,
-        selectedSkills,
         availableSkills: data.availableSkills ?? [],
         elevated: data.actorIsElevated,
         busy,

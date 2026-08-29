@@ -320,7 +320,6 @@ function SettingsTab({
   });
   const [draftMcpServers, setDraftMcpServers] = useState<Record<string, McpServerConfigDto>>({});
   const [draftSkills, setDraftSkills] = useState<string[] | 'all'>([]);
-  const [selectedSkills, setSelectedSkills] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [images, setImages] = useState<ImagesResponse | null>(null);
 
@@ -348,7 +347,6 @@ function SettingsTab({
       setDraftMcpServers({ ...(r.data.mcpServers ?? {}) });
       const skills = r.data.skills === 'all' ? 'all' : [...(r.data.skills ?? [])];
       setDraftSkills(skills);
-      setSelectedSkills(skills === 'all' ? null : skills);
     } finally {
       setBusy(false);
     }
@@ -380,7 +378,6 @@ function SettingsTab({
 
   function updateSkills(skills: string[] | 'all'): void {
     setDraftSkills(skills);
-    if (skills !== 'all') setSelectedSkills(skills);
   }
 
   async function runRestart(rebuild: boolean): Promise<{ ok: boolean; restarted?: number }> {
@@ -551,7 +548,6 @@ function SettingsTab({
         setDraftMcpServers({ ...(fresh.data.mcpServers ?? {}) });
         const skills = fresh.data.skills === 'all' ? 'all' : [...(fresh.data.skills ?? [])];
         setDraftSkills(skills);
-        setSelectedSkills(skills === 'all' ? null : skills);
         groups.value = groups.value.map((g) => (g.id === gid ? { ...g, name: fresh.data.name } : g));
       }
       if (effectiveRebuild || effectiveRestart) {
@@ -934,7 +930,6 @@ function SettingsTab({
       {section === 'skills' ? (
         <SkillsSection
           value={draftSkills}
-          selectedSkills={selectedSkills}
           availableSkills={data.availableSkills ?? []}
           elevated={data.actorIsElevated}
           busy={busy}

@@ -56,6 +56,7 @@ import {
   getSkillsOverview,
   installFromRepo,
   installSkill,
+  previewRepo,
   readSkillsAdminBody,
   refreshCatalog,
   removeSkill,
@@ -326,6 +327,11 @@ on(
   'GET',
   '/api/skills/discover',
   skillsAdmin((_b, _u, _p, ctx) => discoverSkills(ctx.url.searchParams.get('q') ?? '')),
+);
+on(
+  'GET',
+  '/api/skills/preview',
+  skillsAdmin((_b, _u, _p, ctx) => previewRepo(ctx.url.searchParams.get('repo') ?? '')),
 );
 on(
   'GET',
