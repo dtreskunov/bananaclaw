@@ -9,7 +9,7 @@ import { getInboundDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
 import { TIMEZONE, parseZonedToUtc } from '../timezone.js';
-import { registerTools } from './server.js';
+import { registerTools } from './tool-registry.js';
 import type { McpToolDefinition } from './types.js';
 import {
   DEFAULT_SCRIPT_TIMEOUT_MS,

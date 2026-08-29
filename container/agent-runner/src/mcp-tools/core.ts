@@ -14,7 +14,7 @@ import { findByName, getAllDestinations } from '../destinations.js';
 import { stripThinkTags } from '../formatter.js';
 import { getMessageIdBySeq, getRoutingBySeq, writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
-import { registerTools } from './server.js';
+import { registerTools } from './tool-registry.js';
 import type { McpToolDefinition } from './types.js';
 
 function log(msg: string): void {

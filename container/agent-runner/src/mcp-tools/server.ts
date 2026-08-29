@@ -1,58 +1,30 @@
 /**
- * MCP server bootstrap + tool self-registration.
+ * MCP server bootstrap.
  *
- * Each tool module calls `registerTools([...])` at import time. The
- * barrel (`index.ts`) imports every tool module for side effects, then
- * calls `startMcpServer()` which uses whatever was registered.
+ * Tool self-registration lives in `tool-registry.ts` so in-process callers
+ * (the `native` provider) can dispatch tools without loading the MCP server
+ * SDK. This module is only reached by the stdio sidecar (`index.ts`).
  *
  * Default when only `core.ts` is imported: the core `send_message` /
  * `send_file` / `edit_message` / `add_reaction` tools are available.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type CallToolResult,
-} from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import type { McpToolDefinition } from './types.js';
+import { invokeRegisteredTool, listRegisteredTools } from './tool-registry.js';
+
+// Re-exported so tool modules added by skills can keep importing from here.
+export { invokeRegisteredTool, listRegisteredTools, registerTools } from './tool-registry.js';
 
 function log(msg: string): void {
   console.error(`[mcp-tools] ${msg}`);
 }
 
-const allTools: McpToolDefinition[] = [];
-const toolMap = new Map<string, McpToolDefinition>();
-
-export function registerTools(tools: McpToolDefinition[]): void {
-  for (const t of tools) {
-    if (toolMap.has(t.tool.name)) {
-      log(`Warning: tool "${t.tool.name}" already registered, skipping duplicate`);
-      continue;
-    }
-    allTools.push(t);
-    toolMap.set(t.tool.name, t);
-  }
-}
-
-export function listRegisteredTools(): McpToolDefinition[] {
-  return [...allTools];
-}
-
-export async function invokeRegisteredTool(
-  name: string,
-  args: Record<string, unknown> = {},
-): Promise<CallToolResult> {
-  const tool = toolMap.get(name);
-  if (!tool) {
-    return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
-  }
-  return tool.handler(args);
-}
-
 export async function startMcpServer(): Promise<void> {
   const server = new Server({ name: 'nanoclaw', version: '2.0.0' }, { capabilities: { tools: {} } });
+
+  const allTools = listRegisteredTools();
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: allTools.map((t) => t.tool),

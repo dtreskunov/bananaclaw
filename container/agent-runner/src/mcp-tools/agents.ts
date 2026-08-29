@@ -12,7 +12,7 @@
  * not here — the container is untrusted and cannot be relied on to gate itself.
  */
 import { writeMessageOut } from '../db/messages-out.js';
-import { registerTools } from './server.js';
+import { registerTools } from './tool-registry.js';
 import type { McpToolDefinition } from './types.js';
 
 function log(msg: string): void {

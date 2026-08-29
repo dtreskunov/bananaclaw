@@ -7,7 +7,7 @@
  */
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
-import { registerTools } from './server.js';
+import { registerTools } from './tool-registry.js';
 import type { McpToolDefinition } from './types.js';
 
 function ok(text: string) {

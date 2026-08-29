@@ -9,7 +9,7 @@
  * Admin-only. Non-admin containers never see this tool (see mcp-tools/index.ts).
  */
 import { writeMessageOut } from '../db/messages-out.js';
-import { registerTools } from './server.js';
+import { registerTools } from './tool-registry.js';
 import type { McpToolDefinition } from './types.js';
 
 function log(msg: string): void {

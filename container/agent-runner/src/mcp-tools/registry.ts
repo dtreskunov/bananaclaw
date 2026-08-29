@@ -7,4 +7,4 @@ import './agent-link.js';
 import './self-mod.js';
 import './web-ui.js';
 
-export { invokeRegisteredTool, listRegisteredTools } from './server.js';
+export { invokeRegisteredTool, listRegisteredTools } from './tool-registry.js';

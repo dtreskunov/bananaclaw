@@ -29,9 +29,9 @@ import { loadConfig } from './config.js';
 import { buildSystemPromptAddendum } from './destinations.js';
 import { maybeEnableKsm } from './ksm.js';
 import { ensureMemoryScaffold } from './memory-scaffold.js';
-// Providers barrel — each enabled provider self-registers on import.
-// Provider skills append imports to providers/index.ts.
-import './providers/index.js';
+// Providers barrel — the named provider self-registers when loaded.
+// Provider skills append module entries in providers/index.ts.
+import { loadProvider } from './providers/index.js';
 import { createProvider, type ProviderName } from './providers/factory.js';
 import type { McpServerConfig } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
@@ -50,6 +50,7 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
   const providerName = config.provider.toLowerCase() as ProviderName;
+  await loadProvider(providerName);
 
   log(`Starting v2 agent-runner (provider: ${providerName})`);
 

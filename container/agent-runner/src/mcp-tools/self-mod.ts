@@ -13,7 +13,7 @@
  * the host side (defense in depth).
  */
 import { writeMessageOut } from '../db/messages-out.js';
-import { registerTools } from './server.js';
+import { registerTools } from './tool-registry.js';
 import type { McpToolDefinition } from './types.js';
 
 function log(msg: string): void {

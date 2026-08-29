@@ -170,7 +170,7 @@ cd container/agent-runner && bun test src/providers/ && cd -    # container test
 All must be clean before proceeding. Each guards a distinct integration point:
 
 - **`src/providers/fx-registration.test.ts`** (host, vitest) imports the real host barrel and asserts `fx` appears in `listProviderContainerConfigNames()`. Goes red if the `import './fx.js';` line in `src/providers/index.ts` is deleted or that barrel stops evaluating.
-- **`container/agent-runner/src/providers/fx-registration.test.ts`** (container, bun:test) imports the real container barrel and asserts `fx` appears in `listProviderNames()`. Goes red if `'./fx.js'` leaves `OPTIONAL_PROVIDER_MODULES`.
+- **`container/agent-runner/src/providers/fx-registration.test.ts`** (container, bun:test) calls the real container barrel's `loadProvider('fx')` and asserts `fx` appears in `listProviderNames()`. Goes red if `'./fx.js'` leaves `OPTIONAL_PROVIDER_MODULES`.
 - **`pnpm run build`** type-checks the host provider against the container-config registry; the container typecheck does the same for the provider and shim.
 
 > **Build cache gotcha:** the container buildkit caches COPY steps aggressively. If you see "Unknown provider: fx" after a build, `docker builder prune -f && ./container/build.sh`.

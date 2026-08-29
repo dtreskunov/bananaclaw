@@ -2,7 +2,7 @@ import { getCurrentInReplyTo } from '../current-batch.js';
 import { openInboundDb, getOutboundDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting, type SessionRouting } from '../db/session-routing.js';
-import { registerTools } from './server.js';
+import { registerTools } from './tool-registry.js';
 import type { McpToolDefinition } from './types.js';
 
 function result(text: string, isError = false) {
