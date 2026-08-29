@@ -27994,10 +27994,12 @@ function matches(skill, query) {
 function SkillsSection({
   gid,
   value,
+  disabledSkills,
   availableSkills,
   busy,
   elevated,
   onChange,
+  onDisabledChange,
   onCatalogChanged
 }) {
   const [query, setQuery] = h2("");
@@ -28011,6 +28013,15 @@ function SkillsSection({
   const shown = query.trim() === "" ? availableSkills : availableSkills.filter((skill) => matches(skill, query.trim()));
   function setSkill(slug, enabled) {
     onChange(enabled ? [...list.filter((item) => item !== slug), slug] : list.filter((item) => item !== slug));
+  }
+  function setSkillEnabled(skill, enabled) {
+    if (!skill.alwaysOn) {
+      setSkill(skill.slug, enabled);
+      return;
+    }
+    onDisabledChange(
+      enabled ? disabledSkills.filter((item) => item !== skill.slug) : [...disabledSkills.filter((item) => item !== skill.slug), skill.slug]
+    );
   }
   async function runSearch(q5) {
     const trimmed = q5.trim();
@@ -28085,7 +28096,8 @@ function SkillsSection({
       }
     ),
     shown.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: availableSkills.length === 0 ? "No skills found." : `Nothing installed matches \u201C${query.trim()}\u201D.` }) : /* @__PURE__ */ u4("ul", { class: "ga-skills-catalog", children: shown.map((skill) => {
-      const checked = skill.alwaysOn || list.includes(skill.slug);
+      const denied = disabledSkills.includes(skill.slug);
+      const checked = skill.alwaysOn ? !denied : list.includes(skill.slug) && !denied;
       return /* @__PURE__ */ u4("li", { class: "ga-skills-catalog-item", children: [
         /* @__PURE__ */ u4("label", { class: "ga-skills-option", children: [
           /* @__PURE__ */ u4(
@@ -28093,8 +28105,8 @@ function SkillsSection({
             {
               type: "checkbox",
               checked,
-              disabled: busy || skill.alwaysOn || !skill.available && !checked,
-              onChange: (event) => setSkill(skill.slug, event.currentTarget.checked)
+              disabled: busy || !skill.available && !checked,
+              onChange: (event) => setSkillEnabled(skill, event.currentTarget.checked)
             }
           ),
           /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: [
@@ -28106,7 +28118,7 @@ function SkillsSection({
               skill.license ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: skill.license }) : null
             ] }),
             skill.description ? /* @__PURE__ */ u4("span", { class: "ga-skills-description", children: skill.description }) : null,
-            skill.alwaysOn ? /* @__PURE__ */ u4("span", { class: "ga-skills-source", children: "Lives in this agent\u2019s workspace \u2014 always active, and only for this group." }) : null,
+            skill.alwaysOn ? /* @__PURE__ */ u4("span", { class: "ga-skills-source", children: "Lives in this agent\u2019s workspace \u2014 on by default, and only for this group." }) : null,
             skill.source ? /* @__PURE__ */ u4("span", { class: "ga-skills-source", children: [
               skill.source.repo,
               " \xB7 ",
@@ -28379,6 +28391,7 @@ function SettingsTab({
   });
   const [draftMcpServers, setDraftMcpServers] = h2({});
   const [draftSkills, setDraftSkills] = h2([]);
+  const [draftDisabledSkills, setDraftDisabledSkills] = h2([]);
   const [busy, setBusy] = h2(false);
   const [images, setImages] = h2(null);
   async function refresh() {
@@ -28405,6 +28418,7 @@ function SettingsTab({
       setDraftMcpServers({ ...r4.data.mcpServers ?? {} });
       const skills = r4.data.skills === "all" ? "all" : [...r4.data.skills ?? []];
       setDraftSkills(skills);
+      setDraftDisabledSkills([...r4.data.disabledSkills ?? []]);
     } finally {
       setBusy(false);
     }
@@ -28458,6 +28472,7 @@ function SettingsTab({
     "model_params",
     "mcp_servers",
     "skills",
+    "disabled_skills",
     "packages_apt",
     "packages_npm",
     "packages_pip"
@@ -28484,6 +28499,9 @@ function SettingsTab({
     if (JSON.stringify(draftPackages.pip) !== JSON.stringify(dataPkg.pip)) out.add("packages_pip");
     if (JSON.stringify(draftMcpServers) !== JSON.stringify(data.mcpServers ?? {})) out.add("mcp_servers");
     if (JSON.stringify(draftSkills) !== JSON.stringify(data.skills ?? [])) out.add("skills");
+    if (JSON.stringify(draftDisabledSkills) !== JSON.stringify(data.disabledSkills ?? [])) {
+      out.add("disabled_skills");
+    }
     return out;
   }
   const pending2 = changedFields();
@@ -28520,6 +28538,7 @@ function SettingsTab({
         "model_params",
         "mcp_servers",
         "skills",
+        "disabled_skills",
         "packages_apt",
         "packages_npm",
         "packages_pip"
@@ -28570,6 +28589,15 @@ function SettingsTab({
           return;
         }
       }
+      if (pending2.has("disabled_skills")) {
+        const r4 = await call(apiPath(gid, "/disabled-skills"), "PATCH", {
+          disabledSkills: draftDisabledSkills
+        });
+        if (!r4.ok) {
+          showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+          return;
+        }
+      }
       const fresh = await call(apiPath(gid, "/settings"));
       if (fresh.ok) {
         setData(fresh.data);
@@ -28588,6 +28616,7 @@ function SettingsTab({
         setDraftMcpServers({ ...fresh.data.mcpServers ?? {} });
         const skills = fresh.data.skills === "all" ? "all" : [...fresh.data.skills ?? []];
         setDraftSkills(skills);
+        setDraftDisabledSkills([...fresh.data.disabledSkills ?? []]);
         groups.value = groups.value.map((g8) => g8.id === gid ? { ...g8, name: fresh.data.name } : g8);
       }
       if (effectiveRebuild || effectiveRestart) {
@@ -28947,10 +28976,12 @@ function SettingsTab({
       {
         gid,
         value: draftSkills,
+        disabledSkills: draftDisabledSkills,
         availableSkills: data.availableSkills ?? [],
         elevated: data.actorIsElevated,
         busy,
         onChange: updateSkills,
+        onDisabledChange: setDraftDisabledSkills,
         onCatalogChanged: refresh
       }
     ) : null,

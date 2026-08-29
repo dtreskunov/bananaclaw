@@ -40,6 +40,7 @@ export interface ContainerConfigRow {
   assistant_name: string | null;
   max_messages_per_prompt: number | null;
   skills: string; // JSON: '"all"' | '["skill1","skill2"]'
+  disabled_skills: string; // JSON: '["skill1"]' — deny-list, wins over `skills`
   mcp_servers: string; // JSON: Record<string, McpServerConfig>
   packages_apt: string; // JSON: string[]
   packages_npm: string; // JSON: string[]

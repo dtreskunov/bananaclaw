@@ -141,6 +141,33 @@ describe('syncSkillSymlinks', () => {
     expect(fs.existsSync(path.join(claudeDir, 'skills', 'unselected'))).toBe(false);
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  it('lets the deny-list switch off a workspace skill and a selected one', () => {
+    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+    const claudeDir = path.join(root, 'claude');
+    const builtin = path.join(root, 'builtin');
+    const workspace = path.join(root, 'workspace');
+    for (const [dir, name] of [
+      [builtin, 'kept'],
+      [builtin, 'denied'],
+      [workspace, 'homegrown'],
+    ] as const) {
+      fs.mkdirSync(path.join(dir, name), { recursive: true });
+      fs.writeFileSync(path.join(dir, name, 'SKILL.md'), `---\nname: ${name}\ndescription: test\n---\n`);
+    }
+
+    syncSkillSymlinks(
+      claudeDir,
+      { provider: 'native', skills: ['kept', 'denied'], disabledSkills: ['denied', 'homegrown'] } as never,
+      [
+        { origin: 'builtin', hostDir: builtin, containerDir: '/app/skills' },
+        { origin: 'workspace', hostDir: workspace, containerDir: '/workspace/agent/skills' },
+      ],
+    );
+
+    expect(fs.readdirSync(path.join(claudeDir, 'skills')).sort()).toEqual(['kept']);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
 
 describe('buildContainerArgs ordering invariant (structural)', () => {

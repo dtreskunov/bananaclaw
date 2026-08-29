@@ -43,7 +43,13 @@ function session(id: string, agentGroupId: string): Session {
 }
 
 function containerConfig(): ContainerConfig {
-  return { mcpServers: {}, packages: { apt: [], npm: [], pip: [] }, additionalMounts: [], skills: [] };
+  return {
+    mcpServers: {},
+    packages: { apt: [], npm: [], pip: [] },
+    additionalMounts: [],
+    skills: [],
+    disabledSkills: [],
+  };
 }
 
 beforeEach(() => {

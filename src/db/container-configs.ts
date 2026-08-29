@@ -16,6 +16,7 @@ const SCALAR_COLUMNS = new Set([
 ]);
 const JSON_COLUMNS = new Set([
   'skills',
+  'disabled_skills',
   'mcp_servers',
   'packages_apt',
   'packages_npm',
@@ -106,6 +107,7 @@ export function updateContainerConfigJson(
   agentGroupId: string,
   column:
     | 'skills'
+    | 'disabled_skills'
     | 'mcp_servers'
     | 'packages_apt'
     | 'packages_npm'

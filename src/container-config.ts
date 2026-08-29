@@ -49,6 +49,12 @@ export interface ContainerConfig {
   imageTag?: string;
   additionalMounts: AdditionalMountConfig[];
   skills: string[] | 'all';
+  /**
+   * Slugs to switch off regardless of `skills`. Deny always wins. Exists
+   * because workspace skills default to on — the agent authors them for
+   * itself mid-session — so an allow-list can't express "off" for them.
+   */
+  disabledSkills: string[];
   provider?: string;
   /**
    * Upstream gateway for the `opencode` provider (e.g. `openrouter`,
@@ -122,6 +128,20 @@ function parseModelParams(raw: string | null | undefined): Record<string, unknow
 }
 
 /**
+ * Parse a JSON string-array column. Tolerant like `parseModelParams` — a bad
+ * value must not take the whole config down.
+ */
+function parseStringArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Build a `ContainerConfig` from a DB row + agent group identity. Per-row
  * NULLs fall back to env defaults (`DEFAULT_PROVIDER` / `DEFAULT_MODEL[_<PROVIDER>]`
  * / `DEFAULT_EFFORT`) so an operator can set a fleet-wide preference once
@@ -140,6 +160,7 @@ export function configFromDb(row: ContainerConfigRow, group: AgentGroup): Contai
     imageTag: row.image_tag ?? undefined,
     additionalMounts: JSON.parse(row.additional_mounts) as AdditionalMountConfig[],
     skills: JSON.parse(row.skills) as string[] | 'all',
+    disabledSkills: parseStringArray(row.disabled_skills),
     provider,
     upstreamProvider: row.upstream_provider ?? undefined,
     groupName: group.name,

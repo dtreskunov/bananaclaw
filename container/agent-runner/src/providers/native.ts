@@ -1,15 +1,15 @@
 import fs from 'node:fs';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { isStepCount, streamText, type ModelMessage, type UserModelMessage } from 'ai';
+import { isStepCount, streamText, type ModelMessage, type ToolSet, type UserModelMessage } from 'ai';
 
 import { registerProvider } from './provider-registry.js';
+import { loadConfig } from '../config.js';
 import type {
   ActivityStep,
   AgentProvider,
   AgentQuery,
   FileAttachment,
   ForkContinuationInput,
+  McpServerConfig,
   ProviderEvent,
   ProviderOptions,
   QueryInput,
@@ -19,7 +19,6 @@ import type {
 import { pickActivityDetail } from './types.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
 import { loadNativeInstructions } from './native/instructions.js';
-import { NativeMcpManager } from './native/mcp-client.js';
 import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
 import { createNativeTools } from './native/tools.js';
@@ -115,20 +114,47 @@ function toolStep(part: Record<string, unknown>, status: 'running' | 'completed'
   };
 }
 
-function languageModel(model: NativeModel) {
+// Each protocol's ai-sdk package is imported on demand: a group speaks one of
+// them, and loading both costs ~6MB resident for nothing.
+async function languageModel(model: NativeModel) {
   if (model.protocol === 'anthropic-messages') {
+    const { createAnthropic } = await import('@ai-sdk/anthropic');
     return createAnthropic({
       name: model.providerId,
       baseURL: model.baseURL,
       apiKey: 'placeholder',
     }).messages(model.modelId);
   }
+  const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
   return createOpenAICompatible({
     name: model.providerId,
     baseURL: model.baseURL,
     apiKey: 'placeholder',
     includeUsage: true,
   }).chatModel(model.modelId);
+}
+
+/**
+ * Defers loading `native/mcp-client.js` until a turn actually needs external
+ * MCP tools. The MCP client SDK plus its four transports costs ~19MB resident
+ * and most native groups configure no external servers at all.
+ */
+function lazyMcpManager(servers: Record<string, McpServerConfig> | undefined, cwd: string) {
+  const configured = servers && Object.keys(servers).length > 0 ? servers : null;
+  let instance: import('./native/mcp-client.js').NativeMcpManager | null = null;
+  return {
+    async tools(signal: AbortSignal): Promise<ToolSet> {
+      if (!configured) return {};
+      if (!instance) {
+        const { NativeMcpManager } = await import('./native/mcp-client.js');
+        instance = new NativeMcpManager(configured, cwd);
+      }
+      return instance.tools(signal);
+    },
+    async close(): Promise<void> {
+      await instance?.close();
+    },
+  };
 }
 
 export function portableHistory(messages: ModelMessage[]): ModelMessage[] {
@@ -203,8 +229,8 @@ export class NativeProvider implements AgentProvider {
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
-    const mcpManager = new NativeMcpManager(options.mcpServers, input.cwd);
-    const skills = new NativeSkillRegistry();
+    const mcpManager = lazyMcpManager(options.mcpServers, input.cwd);
+    const skills = new NativeSkillRegistry(undefined, undefined, undefined, loadConfig().disabledSkills);
 
     const events: AsyncIterable<ProviderEvent> = {
       async *[Symbol.asyncIterator]() {
@@ -246,7 +272,7 @@ export class NativeProvider implements AgentProvider {
                   ? Math.floor(options.modelParams.max_tokens)
                   : resolved.maxOutputTokens;
               const result = streamText({
-                model: languageModel(resolved),
+                model: await languageModel(resolved),
                 system: loadNativeInstructions(
                   input.systemContext?.instructions,
                   skills.instructions(),

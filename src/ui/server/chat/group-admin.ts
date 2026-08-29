@@ -181,6 +181,7 @@ async function dispatch(
   if (rest === '/mcp-servers' && method === 'PATCH') return handlePatchMcpServers(req, res, actorUserId, gid);
   if (rest === '/mcp-servers/test' && method === 'POST') return handleTestMcpServer(req, res, actorUserId, gid);
   if (rest === '/skills' && method === 'PATCH') return handlePatchSkills(req, res, actorUserId, gid);
+  if (rest === '/disabled-skills' && method === 'PATCH') return handlePatchDisabledSkills(req, res, actorUserId, gid);
   if (rest === '/restart' && method === 'POST') return handleRestart(req, res, actorUserId, gid);
   if (rest === '/archive' && method === 'POST') return handleArchive(req, res, actorUserId, gid);
 
@@ -250,6 +251,8 @@ interface SettingsResponse {
   mcpServers: Record<string, McpServerConfig>;
   /** Container skill selection. `'all'` mounts every available container skill. */
   skills: string[] | 'all';
+  /** Slugs switched off regardless of `skills`. */
+  disabledSkills: string[];
   /** Skills currently installed under container/skills/. */
   availableSkills: AvailableSkill[];
   /** Resolved defaults for nullable config fields (shown as placeholders). */
@@ -366,6 +369,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     },
     mcpServers: parseMcpServers(cfg.mcp_servers),
     skills: parseSkills(cfg.skills),
+    disabledSkills: parseStringArray(cfg.disabled_skills),
     availableSkills: listAvailableSkills(groupSkillRoots(group.folder)),
     defaults: {
       provider: defaultProviderName,
@@ -1093,6 +1097,58 @@ async function handlePatchSkills(
     payload: { skills: cleaned } as Record<string, unknown>,
   });
   writeJson(res, 200, { skills: cleaned });
+}
+
+/**
+ * Body: `{ disabledSkills: string[] }`. A deny-list that wins over `skills`.
+ * Its reason to exist is workspace skills: the agent authors them for itself
+ * and they default to on, so "off" can't be expressed by omission.
+ *
+ * Slugs are not checked against what's installed — denying something that
+ * isn't there yet is exactly how you keep a skill off before it arrives.
+ */
+async function handlePatchDisabledSkills(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  actorUserId: string,
+  gid: string,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as { disabledSkills?: unknown };
+  if (!('disabledSkills' in body)) throw new BadRequest('disabledSkills is required');
+  const raw = body.disabledSkills;
+  if (!Array.isArray(raw)) throw new BadRequest('disabledSkills must be an array of slugs');
+  if (raw.length > MAX_SKILLS) throw new BadRequest(`too many skills (max ${MAX_SKILLS})`);
+
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') throw new BadRequest('disabledSkills entries must be strings');
+    const v = item.trim();
+    if (v === '') continue;
+    if (v.length > MAX_SKILL_SLUG_LEN) {
+      throw new BadRequest(`skill "${v.slice(0, 32)}…" exceeds ${MAX_SKILL_SLUG_LEN} chars`);
+    }
+    if (!SKILL_SLUG_RE.test(v)) {
+      throw new BadRequest(`skill "${v}" must be a slug: lowercase a-z, 0-9, hyphen`);
+    }
+    if (seen.has(v)) continue;
+    seen.add(v);
+    cleaned.push(v);
+  }
+
+  if (!getContainerConfig(gid)) {
+    writeJson(res, 500, { error: 'container_config_missing' });
+    return;
+  }
+  updateContainerConfigJson(gid, 'disabled_skills', cleaned);
+  recordAdminAction({
+    actorUserId,
+    action: 'group_disabled_skills_update',
+    targetKind: 'agent_group',
+    targetId: gid,
+    payload: { disabledSkills: cleaned } as Record<string, unknown>,
+  });
+  writeJson(res, 200, { disabledSkills: cleaned });
 }
 
 async function handleRestart(

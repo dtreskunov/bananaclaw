@@ -715,15 +715,17 @@ export function syncSkillSymlinks(
     fs.mkdirSync(skillsDir, { recursive: true });
   }
 
-  // Desired = the group's selection ∩ what's discoverable and available.
-  // Skills whose `metadata.requires_env` names an untruthy env var are
-  // dropped here so the agent never surfaces commands the host won't honor.
-  // Workspace skills bypass the selection: they are the agent's own, live in
-  // its writable workspace, and the native provider loads them regardless.
+  // Desired = the group's selection ∩ what's discoverable and available, minus
+  // anything explicitly disabled. Skills whose `metadata.requires_env` names an
+  // untruthy env var are dropped here so the agent never surfaces commands the
+  // host won't honor. Workspace skills bypass the selection — they are the
+  // agent's own and default to on — but the deny-list still switches them off.
   const selection = containerConfig.skills;
+  const disabled = new Set(containerConfig.disabledSkills ?? []);
   const desired = listSkills(roots).filter(
     (skill) =>
       skill.available &&
+      !disabled.has(skill.slug) &&
       (skill.origin === 'workspace' || selection === 'all' || selection.includes(skill.slug)),
   );
   const bySlug = new Map(desired.map((skill) => [skill.slug, skill]));
@@ -774,15 +776,20 @@ export function syncSkillSymlinks(
 /**
  * Resolve the group's skill selection to concrete names — `'all'` recomputes
  * from the skill roots so newly-added or newly-installed skills appear
- * automatically. Workspace skills are always included.
+ * automatically. Workspace skills are always included; the deny-list wins.
  */
 function selectedSkillNames(
   containerConfig: import('./container-config.js').ContainerConfig,
   groupFolder: string,
 ): string[] {
   const selection = containerConfig.skills;
+  const disabled = new Set(containerConfig.disabledSkills ?? []);
   return listSkills(groupSkillRoots(groupFolder))
-    .filter((skill) => skill.origin === 'workspace' || selection === 'all' || selection.includes(skill.slug))
+    .filter(
+      (skill) =>
+        !disabled.has(skill.slug) &&
+        (skill.origin === 'workspace' || selection === 'all' || selection.includes(skill.slug)),
+    )
     .map((skill) => skill.slug);
 }
 

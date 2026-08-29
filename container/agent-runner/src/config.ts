@@ -18,6 +18,8 @@ export interface RunnerConfig {
   agentGroupId: string;
   maxMessagesPerPrompt: number;
   mcpServers: Record<string, McpServerConfig>;
+  /** Slugs the host switched off. Only the live-scanned local root needs it. */
+  disabledSkills: string[];
   model?: string;
   smallModel?: string;
   effort?: string;
@@ -56,6 +58,9 @@ export function loadConfig(): RunnerConfig {
     agentGroupId: (raw.agentGroupId as string) || '',
     maxMessagesPerPrompt: (raw.maxMessagesPerPrompt as number) || DEFAULT_MAX_MESSAGES,
     mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
+    disabledSkills: Array.isArray(raw.disabledSkills)
+      ? (raw.disabledSkills as unknown[]).filter((item): item is string => typeof item === 'string')
+      : [],
     model: (raw.model as string) || undefined,
     smallModel: (raw.smallModel as string) || undefined,
     effort: (raw.effort as string) || undefined,

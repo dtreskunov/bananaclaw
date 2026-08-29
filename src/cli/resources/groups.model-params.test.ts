@@ -42,6 +42,7 @@ function seedGroup(id: string): void {
     assistant_name: null,
     max_messages_per_prompt: null,
     skills: '"all"',
+    disabled_skills: '[]',
     mcp_servers: '{}',
     packages_apt: '[]',
     packages_npm: '[]',

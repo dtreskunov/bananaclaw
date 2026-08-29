@@ -119,9 +119,20 @@ export class NativeSkillRegistry {
     sharedRoot = process.env.NATIVE_SHARED_SKILLS_ROOT ?? DEFAULT_SHARED_ROOT,
     localRoot = process.env.NATIVE_LOCAL_SKILLS_ROOT ?? DEFAULT_LOCAL_ROOT,
     env: Record<string, string | undefined> = process.env,
+    // The shared root is already selection-exact; the local root is scanned
+    // live (so a skill the agent just wrote works this turn), which is the one
+    // place the host's deny-list has to be applied here instead.
+    disabledSlugs: Iterable<string> = [],
   ) {
+    const disabled = new Set(disabledSlugs);
     for (const skill of discoverRoot(sharedRoot, 'shared', env)) this.skillsBySlug.set(skill.slug, skill);
-    for (const skill of discoverRoot(localRoot, 'local', env)) this.skillsBySlug.set(skill.slug, skill);
+    for (const skill of discoverRoot(localRoot, 'local', env)) {
+      if (disabled.has(skill.slug)) {
+        this.skillsBySlug.delete(skill.slug);
+        continue;
+      }
+      this.skillsBySlug.set(skill.slug, skill);
+    }
     for (const skill of this.skills()) {
       this.aliases.set(skill.slug.toLowerCase(), skill);
       const declaredName = skill.name.toLowerCase();

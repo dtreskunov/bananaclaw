@@ -68,6 +68,7 @@ interface SettingsResponse {
   packages: { apt: string[]; npm: string[]; pip: string[] };
   mcpServers: Record<string, McpServerConfigDto>;
   skills: string[] | 'all';
+  disabledSkills: string[];
   availableSkills: AvailableSkillDto[];
   defaults: {
     provider: string | null;
@@ -320,6 +321,7 @@ function SettingsTab({
   });
   const [draftMcpServers, setDraftMcpServers] = useState<Record<string, McpServerConfigDto>>({});
   const [draftSkills, setDraftSkills] = useState<string[] | 'all'>([]);
+  const [draftDisabledSkills, setDraftDisabledSkills] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [images, setImages] = useState<ImagesResponse | null>(null);
 
@@ -347,6 +349,7 @@ function SettingsTab({
       setDraftMcpServers({ ...(r.data.mcpServers ?? {}) });
       const skills = r.data.skills === 'all' ? 'all' : [...(r.data.skills ?? [])];
       setDraftSkills(skills);
+      setDraftDisabledSkills([...(r.data.disabledSkills ?? [])]);
     } finally {
       setBusy(false);
     }
@@ -408,6 +411,7 @@ function SettingsTab({
     'model_params',
     'mcp_servers',
     'skills',
+    'disabled_skills',
     'packages_apt',
     'packages_npm',
     'packages_pip',
@@ -435,6 +439,9 @@ function SettingsTab({
     if (JSON.stringify(draftPackages.pip) !== JSON.stringify(dataPkg.pip)) out.add('packages_pip');
     if (JSON.stringify(draftMcpServers) !== JSON.stringify(data.mcpServers ?? {})) out.add('mcp_servers');
     if (JSON.stringify(draftSkills) !== JSON.stringify(data.skills ?? [])) out.add('skills');
+    if (JSON.stringify(draftDisabledSkills) !== JSON.stringify(data.disabledSkills ?? [])) {
+      out.add('disabled_skills');
+    }
     return out;
   }
 
@@ -479,6 +486,7 @@ function SettingsTab({
         'model_params',
         'mcp_servers',
         'skills',
+        'disabled_skills',
         'packages_apt',
         'packages_npm',
         'packages_pip',
@@ -529,6 +537,15 @@ function SettingsTab({
           return;
         }
       }
+      if (pending.has('disabled_skills')) {
+        const r = await call(apiPath(gid, '/disabled-skills'), 'PATCH', {
+          disabledSkills: draftDisabledSkills,
+        });
+        if (!r.ok) {
+          showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
+          return;
+        }
+      }
 
       const fresh = await call<SettingsResponse>(apiPath(gid, '/settings'));
       if (fresh.ok) {
@@ -548,6 +565,7 @@ function SettingsTab({
         setDraftMcpServers({ ...(fresh.data.mcpServers ?? {}) });
         const skills = fresh.data.skills === 'all' ? 'all' : [...(fresh.data.skills ?? [])];
         setDraftSkills(skills);
+        setDraftDisabledSkills([...(fresh.data.disabledSkills ?? [])]);
         groups.value = groups.value.map((g) => (g.id === gid ? { ...g, name: fresh.data.name } : g));
       }
       if (effectiveRebuild || effectiveRestart) {
@@ -931,10 +949,12 @@ function SettingsTab({
         <SkillsSection
           gid={gid}
           value={draftSkills}
+          disabledSkills={draftDisabledSkills}
           availableSkills={data.availableSkills ?? []}
           elevated={data.actorIsElevated}
           busy={busy}
           onChange={updateSkills}
+          onDisabledChange={setDraftDisabledSkills}
           onCatalogChanged={refresh}
         />
       ) : null}

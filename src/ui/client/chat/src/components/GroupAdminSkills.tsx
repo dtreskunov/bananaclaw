@@ -32,6 +32,7 @@ export interface AvailableSkillDto {
   origin: 'builtin' | 'installed' | 'workspace';
   catalogId: string | null;
   catalogLabel: string;
+  /** Enabled by omission rather than by selection — toggled via the deny-list. */
   alwaysOn: boolean;
   license: string | null;
   warnings: string[];
@@ -53,18 +54,22 @@ function matches(skill: AvailableSkillDto, query: string): boolean {
 export function SkillsSection({
   gid,
   value,
+  disabledSkills,
   availableSkills,
   busy,
   elevated,
   onChange,
+  onDisabledChange,
   onCatalogChanged,
 }: {
   gid: string;
   value: string[] | 'all';
+  disabledSkills: string[];
   availableSkills: AvailableSkillDto[];
   busy: boolean;
   elevated: boolean;
   onChange: (next: string[] | 'all') => void;
+  onDisabledChange: (next: string[]) => void;
   onCatalogChanged: () => void;
 }): JSX.Element {
   const [query, setQuery] = useState('');
@@ -84,6 +89,22 @@ export function SkillsSection({
 
   function setSkill(slug: string, enabled: boolean): void {
     onChange(enabled ? [...list.filter((item) => item !== slug), slug] : list.filter((item) => item !== slug));
+  }
+
+  /**
+   * Always-on skills are enabled by omission, so the checkbox writes the
+   * deny-list rather than the selection. Both look the same to the operator.
+   */
+  function setSkillEnabled(skill: AvailableSkillDto, enabled: boolean): void {
+    if (!skill.alwaysOn) {
+      setSkill(skill.slug, enabled);
+      return;
+    }
+    onDisabledChange(
+      enabled
+        ? disabledSkills.filter((item) => item !== skill.slug)
+        : [...disabledSkills.filter((item) => item !== skill.slug), skill.slug],
+    );
   }
 
   async function runSearch(q: string): Promise<void> {
@@ -177,15 +198,16 @@ export function SkillsSection({
       ) : (
         <ul class="ga-skills-catalog">
           {shown.map((skill) => {
-            const checked = skill.alwaysOn || list.includes(skill.slug);
+            const denied = disabledSkills.includes(skill.slug);
+            const checked = skill.alwaysOn ? !denied : list.includes(skill.slug) && !denied;
             return (
               <li key={skill.slug} class="ga-skills-catalog-item">
                 <label class="ga-skills-option">
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={busy || skill.alwaysOn || (!skill.available && !checked)}
-                    onChange={(event) => setSkill(skill.slug, event.currentTarget.checked)}
+                    disabled={busy || (!skill.available && !checked)}
+                    onChange={(event) => setSkillEnabled(skill, event.currentTarget.checked)}
                   />
                   <span class="ga-skills-details">
                     <span class="ga-skills-title">
@@ -200,7 +222,7 @@ export function SkillsSection({
                     {skill.description ? <span class="ga-skills-description">{skill.description}</span> : null}
                     {skill.alwaysOn ? (
                       <span class="ga-skills-source">
-                        Lives in this agent&rsquo;s workspace — always active, and only for this group.
+                        Lives in this agent&rsquo;s workspace — on by default, and only for this group.
                       </span>
                     ) : null}
                     {skill.source ? (

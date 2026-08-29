@@ -91,6 +91,17 @@ describe('NativeSkillRegistry', () => {
     expect(new NativeSkillRegistry(shared, local, { FEATURE_ON: 'on' }).skills()[0]?.requiresEnv).toBe('FEATURE_ON');
   });
 
+  it('skips local skills the host disabled', () => {
+    writeSkill(shared, 'browser', 'Browse websites.');
+    writeSkill(local, 'homegrown', 'Written by the agent.');
+    writeSkill(local, 'retired', 'Superseded by something else.');
+
+    // The shared root is already selection-exact, so the deny-list only has to
+    // be re-applied to the live local scan.
+    const registry = new NativeSkillRegistry(shared, local, {}, ['retired']);
+    expect(registry.skills().map((skill) => skill.slug)).toEqual(['browser', 'homegrown']);
+  });
+
   it('requires a slug when two skills declare the same name', () => {
     writeSkill(shared, 'one', 'First skill.');
     writeSkill(shared, 'two', 'Second skill.');

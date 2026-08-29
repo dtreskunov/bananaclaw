@@ -33,6 +33,7 @@ import { migration032 } from './032-agent-email.js';
 import { migration033 } from './033-thread-forks.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
+import { moduleContainerConfigsDisabledSkills } from './module-container-configs-disabled-skills.js';
 import { moduleContainerConfigsPip } from './module-container-configs-pip.js';
 import { moduleContainerConfigsVoiceMode } from './module-container-configs-voice-mode.js';
 import { moduleContainerConfigsTranscriptionModel } from './module-container-configs-transcription-model.js';
@@ -96,6 +97,7 @@ export const migrations: Migration[] = [
   moduleContainerConfigsModelParams,
   moduleContainerConfigsSmallModel,
   moduleContainerConfigsUpstreamProvider,
+  moduleContainerConfigsDisabledSkills,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a
