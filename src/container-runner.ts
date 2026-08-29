@@ -27,8 +27,7 @@ import {
   memoryBudgetMb,
   snapshotRunning,
 } from './container-admission.js';
-import { getContainerConfig } from './db/container-configs.js';
-import { updateContainerConfigScalars, updateContainerConfigJson } from './db/container-configs.js';
+import { getContainerConfig, updateContainerConfigScalars } from './db/container-configs.js';
 import { readEnvFile } from './env.js';
 import {
   CONTAINER_RUNTIME_BIN,
