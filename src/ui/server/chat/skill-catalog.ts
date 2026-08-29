@@ -7,6 +7,7 @@
  */
 import { installedUpdateStatus } from '../../../skills/install.js';
 import { listSkills, type SkillOrigin, type SkillRoot } from '../../../skills/registry.js';
+import { readMarketplaceRecords } from '../../../skills/store.js';
 
 export interface SkillProvenance {
   marketplaceId: string | null;
@@ -25,6 +26,10 @@ export interface AvailableSkill {
   available: boolean;
   unavailableReason: string | null;
   origin: SkillOrigin;
+  /** Catalog this skill came from; built-ins use the reserved built-in id. */
+  catalogId: string | null;
+  /** Display name for that catalog. */
+  catalogLabel: string;
   license: string | null;
   /** Spec-conformance warnings — informational, the skill still works. */
   warnings: string[];
@@ -35,6 +40,7 @@ export interface AvailableSkill {
 
 export function listAvailableSkills(roots?: SkillRoot[]): AvailableSkill[] {
   const updates = installedUpdateStatus();
+  const catalogNames = new Map(readMarketplaceRecords().map((record) => [record.id, record.label ?? record.id]));
   return listSkills(roots).map((skill) => ({
     slug: skill.slug,
     name: skill.name,
@@ -42,6 +48,11 @@ export function listAvailableSkills(roots?: SkillRoot[]): AvailableSkill[] {
     available: skill.available,
     unavailableReason: skill.unavailableReason,
     origin: skill.origin,
+    catalogId: skill.catalogId,
+    catalogLabel:
+      skill.origin === 'builtin'
+        ? 'built-in'
+        : (catalogNames.get(skill.catalogId ?? '') ?? skill.catalogId ?? 'unknown'),
     license: skill.license,
     warnings: skill.warnings,
     source: skill.source

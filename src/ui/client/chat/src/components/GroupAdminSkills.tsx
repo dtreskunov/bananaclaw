@@ -21,6 +21,8 @@ export interface AvailableSkillDto {
   available: boolean;
   unavailableReason: string | null;
   origin: 'builtin' | 'installed';
+  catalogId: string | null;
+  catalogLabel: string;
   license: string | null;
   warnings: string[];
   source: SkillProvenanceDto | null;
@@ -58,8 +60,8 @@ export function SkillsSection({
     <>
       <div class="group-admin-toolbar">
         <p class="group-admin-help">
-          Built-in skills ship with the install; catalog skills are added below. Restart required to
-          take effect — skill mounts are computed at container spawn.
+          Every skill comes from a catalog — the built-in one ships with this install, the rest you add
+          below. Restart required to take effect: skill mounts are computed at container spawn.
         </p>
       </div>
 
@@ -100,7 +102,7 @@ export function SkillsSection({
                       <span class="ga-skills-title">
                         <strong>{skill.name}</strong>
                         {skill.name !== skill.slug ? <code>{skill.slug}</code> : null}
-                        {skill.origin === 'installed' ? <span class="ga-skills-badge">catalog</span> : null}
+                        <span class="ga-skills-badge">{skill.catalogLabel}</span>
                         {skill.updateAvailable ? (
                           <span class="ga-skills-badge ga-skills-badge-update">update</span>
                         ) : null}

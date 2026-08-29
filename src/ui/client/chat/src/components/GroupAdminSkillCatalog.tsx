@@ -41,16 +41,9 @@ export interface CatalogDto {
   description: string | null;
   commit: string | null;
   refreshedAt: string | null;
-  kind: 'plugin-marketplace' | 'skill-repo';
+  kind: 'plugin-marketplace' | 'skill-repo' | 'built-in';
   plugins: CatalogPluginDto[];
   error: string | null;
-}
-
-export interface SuggestedCatalogDto {
-  repo: string;
-  ref: string;
-  label: string;
-  description: string;
 }
 
 interface DiscoverSkillDto {
@@ -91,7 +84,6 @@ export function SkillCatalogSection({
   onChanged: () => void;
 }): JSX.Element {
   const [catalogs, setCatalogs] = useState<CatalogDto[] | null>(null);
-  const [suggestions, setSuggestions] = useState<SuggestedCatalogDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [repo, setRepo] = useState('');
   const [ref, setRef] = useState('');
@@ -101,14 +93,13 @@ export function SkillCatalogSection({
   const [searching, setSearching] = useState(false);
 
   async function load(): Promise<void> {
-    const r = await call<{ catalogs: CatalogDto[]; suggestions: SuggestedCatalogDto[] }>(SKILLS_API);
+    const r = await call<{ catalogs: CatalogDto[] }>(SKILLS_API);
     if (!r.ok) {
       showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
       setCatalogs([]);
       return;
     }
     setCatalogs(r.data.catalogs);
-    setSuggestions(r.data.suggestions ?? []);
   }
 
   useEffect(() => {
@@ -278,34 +269,6 @@ export function SkillCatalogSection({
         )
       ) : null}
 
-      {suggestions.length > 0 ? (
-        <Field label="Suggested catalogs">
-          <ul class="ga-suggested-list">
-            {suggestions.map((entry) => (
-              <li key={entry.repo} class="ga-suggested">
-                <span class="ga-skills-details">
-                  <span class="ga-skills-title">
-                    <strong>{entry.label}</strong>
-                    <code>{entry.repo}</code>
-                  </span>
-                  <span class="ga-skills-description">{entry.description}</span>
-                </span>
-                <button
-                  type="button"
-                  class="ga-catalog-install"
-                  disabled={busy}
-                  onClick={() =>
-                    mutate(`${SKILLS_API}/catalogs`, 'POST', { repo: entry.repo, ref: entry.ref }, 'Catalog added.')
-                  }
-                >
-                  Add
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Field>
-      ) : null}
-
       <Field label="Add a catalog" info="owner/repo, or an https clone URL.">
         <div class="ga-catalog-add">
           <input
@@ -339,109 +302,119 @@ export function SkillCatalogSection({
 
       {catalogs === null ? (
         <p class="group-admin-help">Loading catalogs…</p>
-      ) : catalogs.length === 0 ? (
-        <p class="group-admin-help">No catalogs configured yet.</p>
       ) : (
         <ul class="ga-catalog-list">
-          {catalogs.map((catalog) => (
-            <li key={catalog.id} class="ga-catalog">
-              <div class="ga-catalog-head">
-                <button type="button" class="ga-catalog-toggle" onClick={() => toggle(catalog.id)}>
-                  <span class="ga-catalog-caret">{expanded.has(catalog.id) ? '▾' : '▸'}</span>
-                  <span class="ga-catalog-title">
-                    <strong>{catalog.label ?? catalog.id}</strong>
-                    <code>{catalog.repo}</code>
-                  </span>
-                </button>
-                <span class="ga-catalog-actions">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      mutate(
-                        `${SKILLS_API}/catalogs/${encodeURIComponent(catalog.id)}/refresh`,
-                        'POST',
-                        {},
-                        'Catalog refreshed.',
-                      )
-                    }
-                  >
-                    Refresh
+          {catalogs.map((catalog) => {
+            const readOnly = catalog.kind === 'built-in';
+            return (
+              <li key={catalog.id} class="ga-catalog">
+                <div class="ga-catalog-head">
+                  <button type="button" class="ga-catalog-toggle" onClick={() => toggle(catalog.id)}>
+                    <span class="ga-catalog-caret">{expanded.has(catalog.id) ? '▾' : '▸'}</span>
+                    <span class="ga-catalog-title">
+                      <strong>{catalog.label ?? catalog.id}</strong>
+                      <code>{catalog.repo}</code>
+                    </span>
                   </button>
-                  <button
-                    type="button"
-                    class="ga-catalog-remove"
-                    disabled={busy}
-                    onClick={() =>
-                      mutate(
-                        `${SKILLS_API}/catalogs/${encodeURIComponent(catalog.id)}`,
-                        'DELETE',
-                        undefined,
-                        'Catalog removed.',
-                      )
-                    }
-                  >
-                    Remove
-                  </button>
-                </span>
-              </div>
+                  {readOnly ? null : (
+                    <span class="ga-catalog-actions">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          mutate(
+                            `${SKILLS_API}/catalogs/${encodeURIComponent(catalog.id)}/refresh`,
+                            'POST',
+                            {},
+                            'Catalog refreshed.',
+                          )
+                        }
+                      >
+                        Refresh
+                      </button>
+                      <button
+                        type="button"
+                        class="ga-catalog-remove"
+                        disabled={busy}
+                        onClick={() =>
+                          mutate(
+                            `${SKILLS_API}/catalogs/${encodeURIComponent(catalog.id)}`,
+                            'DELETE',
+                            undefined,
+                            'Catalog removed.',
+                          )
+                        }
+                      >
+                        Remove
+                      </button>
+                    </span>
+                  )}
+                </div>
 
-              <p class="ga-catalog-meta">
-                {catalog.kind === 'plugin-marketplace' ? 'Plugin marketplace' : 'Skills repo'} · {catalog.ref}
-                {catalog.commit ? ` · ${catalog.commit.slice(0, 7)}` : ''}
-              </p>
-              {catalog.description ? <p class="ga-catalog-meta">{catalog.description}</p> : null}
-              {catalog.error ? <p class="ga-skills-unavailable">{catalog.error}</p> : null}
+                <p class="ga-catalog-meta">
+                  {readOnly
+                    ? `Built in · ${catalog.plugins[0]?.skills.length ?? 0} skills`
+                    : `${catalog.kind === 'plugin-marketplace' ? 'Plugin marketplace' : 'Skills repo'} · ${catalog.ref}${
+                        catalog.commit ? ` · ${catalog.commit.slice(0, 7)}` : ''
+                      }`}
+                </p>
+                {catalog.description ? <p class="ga-catalog-meta">{catalog.description}</p> : null}
+                {catalog.error ? <p class="ga-skills-unavailable">{catalog.error}</p> : null}
 
-              {expanded.has(catalog.id)
-                ? catalog.plugins.map((plugin) => (
-                    <div key={plugin.name} class="ga-catalog-plugin">
-                      <p class="ga-catalog-plugin-name">
-                        {plugin.name}
-                        {plugin.description ? <span class="ga-catalog-meta"> — {plugin.description}</span> : null}
-                      </p>
-                      {plugin.unsupportedReason ? (
-                        <p class="ga-skills-unavailable">{plugin.unsupportedReason}</p>
-                      ) : (
-                        <ul class="ga-skills-catalog">
-                          {plugin.skills.map((skill) => (
-                            <li key={skill.slug} class="ga-skills-catalog-item">
-                              <span class="ga-skills-details">
-                                <span class="ga-skills-title">
-                                  <strong>{skill.name}</strong>
-                                  <code>{skill.slug}</code>
-                                  {skill.license ? <span class="ga-skills-license">{skill.license}</span> : null}
-                                </span>
-                                <span class="ga-skills-description">{skill.description}</span>
-                                {skill.warnings.map((warning) => (
-                                  <span key={warning} class="ga-skills-unavailable">
-                                    {warning}
+                {expanded.has(catalog.id)
+                  ? catalog.plugins.map((plugin) => (
+                      <div key={plugin.name} class="ga-catalog-plugin">
+                        {readOnly ? null : (
+                          <p class="ga-catalog-plugin-name">
+                            {plugin.name}
+                            {plugin.description ? <span class="ga-catalog-meta"> — {plugin.description}</span> : null}
+                          </p>
+                        )}
+                        {plugin.unsupportedReason ? (
+                          <p class="ga-skills-unavailable">{plugin.unsupportedReason}</p>
+                        ) : (
+                          <ul class="ga-skills-catalog">
+                            {plugin.skills.map((skill) => (
+                              <li key={skill.slug} class="ga-skills-catalog-item">
+                                <span class="ga-skills-details">
+                                  <span class="ga-skills-title">
+                                    <strong>{skill.name}</strong>
+                                    <code>{skill.slug}</code>
+                                    {skill.license ? <span class="ga-skills-license">{skill.license}</span> : null}
                                   </span>
-                                ))}
-                              </span>
-                              <InstallControl
-                                source={catalog.source}
-                                slug={skill.slug}
-                                installed={installedSlugs.has(skill.slug)}
-                                disabled={busy}
-                                onInstall={(ack) =>
-                                  install(
-                                    `${SKILLS_API}/install`,
-                                    { marketplaceId: catalog.id, plugin: plugin.name, slug: skill.slug },
-                                    skill.slug,
-                                    ack,
-                                  )
-                                }
-                              />
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))
-                : null}
-            </li>
-          ))}
+                                  <span class="ga-skills-description">{skill.description}</span>
+                                  {skill.warnings.map((warning) => (
+                                    <span key={warning} class="ga-skills-unavailable">
+                                      {warning}
+                                    </span>
+                                  ))}
+                                </span>
+                                {readOnly ? null : (
+                                  <InstallControl
+                                    source={catalog.source}
+                                    slug={skill.slug}
+                                    installed={installedSlugs.has(skill.slug)}
+                                    disabled={busy}
+                                    onInstall={(ack) =>
+                                      install(
+                                        `${SKILLS_API}/install`,
+                                        { marketplaceId: catalog.id, plugin: plugin.name, slug: skill.slug },
+                                        skill.slug,
+                                        ack,
+                                      )
+                                    }
+                                  />
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))
+                  : null}
+              </li>
+            );
+          })}
         </ul>
       )}
     </>

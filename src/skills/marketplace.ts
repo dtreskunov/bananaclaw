@@ -61,8 +61,8 @@ export interface MarketplaceCatalog {
   description: string | null;
   commit: string | null;
   refreshedAt: string | null;
-  /** Manifest-driven (a real plugin marketplace) vs. scanned layout. */
-  kind: 'plugin-marketplace' | 'skill-repo';
+  /** Manifest-driven, a scanned layout, or the read-only built-in set. */
+  kind: 'plugin-marketplace' | 'skill-repo' | 'built-in';
   plugins: CatalogPlugin[];
   error: string | null;
 }

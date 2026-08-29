@@ -191,8 +191,7 @@
 
 /* ── discovery + suggestions ──────────────────────────────────────── */
 
-.ga-discover-list,
-.ga-suggested-list {
+.ga-discover-list {
   list-style: none;
   margin: 8px 0 0;
   padding: 0;
@@ -214,17 +213,6 @@
 .ga-discover-results > .ga-catalog-meta { margin-top: 0; }
 
 .ga-discover-source { min-width: 0; }
-
-.ga-suggested {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.ga-suggested:last-child { border-bottom: 0; padding-bottom: 0; }
 
 /* ── audits ───────────────────────────────────────────────────────── */
 

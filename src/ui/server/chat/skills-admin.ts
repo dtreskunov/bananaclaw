@@ -27,8 +27,9 @@ import {
   refreshMarketplace,
   removeMarketplace,
   MarketplaceError,
+  type MarketplaceCatalog,
 } from '../../../skills/marketplace.js';
-import { SUGGESTED_CATALOGS } from '../../../skills/suggested.js';
+import { listSkills, BUILTIN_CATALOG_ID } from '../../../skills/registry.js';
 import { readMarketplaceRecords } from '../../../skills/store.js';
 import { recordAdminAction } from './audit.js';
 import { listAvailableSkills } from './skill-catalog.js';
@@ -50,18 +51,45 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/**
+ * The skills shipped with this install, shaped like any other catalog so the
+ * UI has one representation of "where a skill came from". Read-only: there is
+ * nothing to fetch, refresh or remove.
+ */
+function builtinCatalog(): MarketplaceCatalog {
+  const skills = listSkills()
+    .filter((skill) => skill.origin === 'builtin')
+    .map((skill) => ({
+      marketplaceId: BUILTIN_CATALOG_ID,
+      plugin: BUILTIN_CATALOG_ID,
+      slug: skill.slug,
+      name: skill.name,
+      description: skill.description,
+      license: skill.license,
+      path: `container/skills/${skill.slug}`,
+      warnings: skill.warnings,
+    }));
+
+  return {
+    id: BUILTIN_CATALOG_ID,
+    repo: 'container/skills',
+    source: null,
+    ref: '',
+    label: 'Built-in',
+    description: 'Ships with this install. Always available to select; nothing to add or refresh.',
+    commit: null,
+    refreshedAt: null,
+    kind: 'built-in',
+    plugins:
+      skills.length > 0 ? [{ name: BUILTIN_CATALOG_ID, description: null, skills, unsupportedReason: null }] : [],
+    error: null,
+  };
+}
+
 export function getSkillsOverview(): SkillsAdminResult {
-  const configured = new Set(readMarketplaceRecords().map((record) => record.repo));
-  const suggestions = SUGGESTED_CATALOGS.filter((entry) => {
-    try {
-      return !configured.has(normalizeRepoSource(entry.repo));
-    } catch {
-      return false;
-    }
-  });
   return {
     status: 200,
-    body: { skills: listAvailableSkills(), catalogs: listCatalogs(), suggestions },
+    body: { skills: listAvailableSkills(), catalogs: [builtinCatalog(), ...listCatalogs()] },
   };
 }
 

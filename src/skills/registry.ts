@@ -21,6 +21,13 @@ import { getInstalledRecord, installedSkillsDir, type InstalledSkillRecord } fro
 
 export type SkillOrigin = 'builtin' | 'installed';
 
+/**
+ * Reserved catalog id for the skills that ship with the install. Built-ins
+ * aren't fetched from anywhere, but presenting them as a catalog keeps one
+ * model in the UI: every skill comes from somewhere.
+ */
+export const BUILTIN_CATALOG_ID = 'built-in';
+
 export interface SkillRoot {
   origin: SkillOrigin;
   /** Directory on the host. */
@@ -35,6 +42,8 @@ export interface DiscoveredSkill {
   description: string;
   license: string | null;
   origin: SkillOrigin;
+  /** Catalog this came from; `BUILTIN_CATALOG_ID` for built-ins. */
+  catalogId: string | null;
   /** Absolute host path to the skill folder (symlinks not resolved). */
   hostPath: string;
   /** Absolute in-container path — what skill symlinks and fragments point at. */
@@ -159,11 +168,13 @@ export function listSkills(roots: SkillRoot[] = defaultSkillRoots()): Discovered
   return raw
     .map((skill) => {
       const available = skill.requiresEnv === null || isTruthyEnv(resolveEnv(skill.requiresEnv));
+      const source = skill.origin === 'installed' ? getInstalledRecord(skill.slug) : null;
       return {
         ...skill,
         available,
         unavailableReason: available ? null : `Requires ${skill.requiresEnv}`,
-        source: skill.origin === 'installed' ? getInstalledRecord(skill.slug) : null,
+        catalogId: skill.origin === 'builtin' ? BUILTIN_CATALOG_ID : (source?.marketplaceId ?? null),
+        source,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug));
