@@ -1,8 +1,22 @@
-import fs from 'fs';
-import path from 'path';
-import { load as parseYaml } from 'js-yaml';
+/**
+ * Skill catalog DTOs for the admin UI.
+ *
+ * Thin adapter over `src/skills/registry.ts` — discovery, symlink handling and
+ * env gating all live there so the UI and the spawn path can't disagree about
+ * which skills exist.
+ */
+import { installedUpdateStatus } from '../../../skills/install.js';
+import { listSkills, type SkillOrigin, type SkillRoot } from '../../../skills/registry.js';
 
-import { readEnvFile } from '../../../env.js';
+export interface SkillProvenance {
+  marketplaceId: string | null;
+  plugin: string | null;
+  repo: string;
+  ref: string;
+  commit: string;
+  path: string;
+  installedAt: string;
+}
 
 export interface AvailableSkill {
   slug: string;
@@ -10,75 +24,37 @@ export interface AvailableSkill {
   description: string;
   available: boolean;
   unavailableReason: string | null;
+  origin: SkillOrigin;
+  license: string | null;
+  /** Spec-conformance warnings — informational, the skill still works. */
+  warnings: string[];
+  source: SkillProvenance | null;
+  /** True when the catalog has a newer version; null when it can't be told. */
+  updateAvailable: boolean | null;
 }
 
-interface SkillFrontmatter {
-  name?: unknown;
-  description?: unknown;
-  requires_env?: unknown;
-}
-
-function readFrontmatter(skillFile: string): SkillFrontmatter {
-  let text: string;
-  try {
-    text = fs.readFileSync(skillFile, 'utf8');
-  } catch {
-    return {};
-  }
-
-  const lines = text.split('\n');
-  if (lines[0]?.trim() !== '---') return {};
-  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
-  if (end === -1) return {};
-
-  try {
-    const parsed = parseYaml(lines.slice(1, end).join('\n'));
-    return parsed && typeof parsed === 'object' ? (parsed as SkillFrontmatter) : {};
-  } catch {
-    return {};
-  }
-}
-
-function isTruthyEnv(value: string | undefined): boolean {
-  return value !== undefined && ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
-}
-
-export function listAvailableSkills(skillsDir = path.join(process.cwd(), 'container', 'skills')): AvailableSkill[] {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  const discovered = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      const slug = entry.name;
-      const skillFile = path.join(skillsDir, slug, 'SKILL.md');
-      if (!fs.existsSync(skillFile)) return null;
-      const frontmatter = readFrontmatter(skillFile);
-      const requiredEnv = typeof frontmatter.requires_env === 'string' ? frontmatter.requires_env.trim() : '';
-      return {
-        slug,
-        name: typeof frontmatter.name === 'string' && frontmatter.name.trim() ? frontmatter.name.trim() : slug,
-        description:
-          typeof frontmatter.description === 'string' ? frontmatter.description.replace(/\s+/g, ' ').trim() : '',
-        requiredEnv,
-      };
-    })
-    .filter((skill): skill is NonNullable<typeof skill> => skill !== null)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const envNames = [...new Set(discovered.map((skill) => skill.requiredEnv).filter(Boolean))];
-  const fileEnv = readEnvFile(envNames);
-
-  return discovered.map(({ requiredEnv, ...skill }) => {
-    const available = requiredEnv === '' || isTruthyEnv(process.env[requiredEnv] ?? fileEnv[requiredEnv]);
-    return {
-      ...skill,
-      available,
-      unavailableReason: available ? null : `Requires ${requiredEnv}`,
-    };
-  });
+export function listAvailableSkills(roots?: SkillRoot[]): AvailableSkill[] {
+  const updates = installedUpdateStatus();
+  return listSkills(roots).map((skill) => ({
+    slug: skill.slug,
+    name: skill.name,
+    description: skill.description,
+    available: skill.available,
+    unavailableReason: skill.unavailableReason,
+    origin: skill.origin,
+    license: skill.license,
+    warnings: skill.warnings,
+    source: skill.source
+      ? {
+          marketplaceId: skill.source.marketplaceId,
+          plugin: skill.source.plugin,
+          repo: skill.source.repo,
+          ref: skill.source.ref,
+          commit: skill.source.commit,
+          path: skill.source.path,
+          installedAt: skill.source.installedAt,
+        }
+      : null,
+    updateAvailable: skill.origin === 'installed' ? (updates[skill.slug] ?? null) : null,
+  }));
 }

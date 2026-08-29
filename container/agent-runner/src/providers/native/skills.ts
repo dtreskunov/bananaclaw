@@ -9,6 +9,7 @@ interface SkillFrontmatter {
   name?: unknown;
   description?: unknown;
   'allowed-tools'?: unknown;
+  metadata?: unknown;
   requires_env?: unknown;
 }
 
@@ -45,6 +46,21 @@ function isTruthy(value: string | undefined): boolean {
   return value !== undefined && ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
+/**
+ * `metadata.requires_env` per the Agent Skills spec, falling back to the
+ * pre-spec top-level key so older and third-party skills keep working.
+ */
+function requiredEnvOf(frontmatter: SkillFrontmatter): string | undefined {
+  const metadata =
+    frontmatter.metadata && typeof frontmatter.metadata === 'object' && !Array.isArray(frontmatter.metadata)
+      ? (frontmatter.metadata as Record<string, unknown>)
+      : {};
+  for (const candidate of [metadata.requires_env, frontmatter.requires_env]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return undefined;
+}
+
 function discoverRoot(
   root: string,
   source: NativeSkill['source'],
@@ -73,10 +89,7 @@ function discoverRoot(
     const description =
       typeof frontmatter.description === 'string' ? frontmatter.description.replace(/\s+/g, ' ').trim() : '';
     if (!description) continue;
-    const requiresEnv =
-      typeof frontmatter.requires_env === 'string' && frontmatter.requires_env.trim()
-        ? frontmatter.requires_env.trim()
-        : undefined;
+    const requiresEnv = requiredEnvOf(frontmatter);
     // Shared entries already passed the host's availability filter. Local
     // skills have no host selector, so enforce their requirement here.
     if (source === 'local' && requiresEnv && !isTruthy(env[requiresEnv])) continue;

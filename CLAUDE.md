@@ -73,6 +73,7 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/modules/permissions/user-dm.ts` | Cold-DM resolution + `user_dms` cache |
 | `src/group-init.ts` | Per-agent-group filesystem scaffold (CLAUDE.md, skills, agent-runner-src overlay) |
 | `src/db/container-configs.ts` | CRUD for `container_configs` table (per-group container runtime config) |
+| `src/skills/` | Skill registry: SKILL.md frontmatter (agentskills.io spec), two-root discovery, catalog install + provenance |
 | `src/backfill-container-configs.ts` | Migrates legacy `container.json` files into the DB on startup |
 | `src/container-restart.ts` | Kill + on-wake respawn for agent group containers |
 | `src/db/` | DB layer — agent_groups, messaging_groups, sessions, container_configs, user_roles, user_dms, pending_*, migrations |
@@ -192,6 +193,21 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 - **Utility skills** — ship code files alongside `SKILL.md` (e.g. a `scripts/` CLI or helper).
 - **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/init-onecli`, `/update-nanoclaw`).
 - **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `onecli-gateway`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`).
+
+### Container skills: roots, spec, catalogs
+
+Container skills come from two roots, both mounted read-only:
+
+| Root | Host | Container | Managed by |
+|------|------|-----------|------------|
+| built-in | `container/skills/` | `/app/skills` | the repo |
+| installed | `data/skills/installed/` | `/app/skills-installed` | skill catalogs (gitignored) |
+
+`src/skills/registry.ts` is the only place that enumerates them — the admin UI, the spawn-time symlink sync, and the CLAUDE.md composer all call `listSkills()`. Directory checks follow symlinks (`statSync`, not `Dirent.isDirectory()`), so a skill folder symlinked in from another checkout is visible everywhere.
+
+SKILL.md frontmatter follows the [Agent Skills spec](https://agentskills.io/specification): only `name`, `description`, `license`, `allowed-tools`, `metadata`, `compatibility` are spec keys. Env gating lives at `metadata.requires_env`; the pre-spec top-level `requires_env` still works but warns.
+
+A **catalog** is a git repo, either a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) or any repo of `SKILL.md` folders. Catalogs are cloned shallow to `data/skills/cache/<id>` and only read; installing is a validated file copy that records repo/ref/commit/path plus a tree digest in `data/skills/installed.json` (so "update available" is real, and every version is re-reviewable). Installs refuse symlinks in the source tree and refuse to shadow a built-in slug. Owner / global admin only, via `GET|POST /api/skills`, `POST /api/skills/catalogs[/:id/refresh]`, `DELETE /api/skills/catalogs/:id`, `DELETE /api/skills/:slug`.
 
 | Skill | When to Use |
 |-------|-------------|

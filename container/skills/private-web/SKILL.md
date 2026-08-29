@@ -1,6 +1,7 @@
 ---
 name: private-web
-requires_env: UI_ENABLED
+metadata:
+  requires_env: UI_ENABLED
 description: >-
   Build private interactive HTML applications in the agent workspace. Use for
   authenticated dashboards, interactive reports, planners, trackers, visual

@@ -42,6 +42,7 @@ import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
+import { defaultSkillRoots, listSkills, type SkillRoot } from './skills/registry.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
@@ -663,10 +664,11 @@ export function buildMounts(
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   mounts.push({ hostPath: agentRunnerSrc, containerPath: '/app/src', readonly: true });
 
-  // Shared skills — read-only, symlinks in .claude-shared/skills/ point here.
-  const skillsSrc = path.join(projectRoot, 'container', 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    mounts.push({ hostPath: skillsSrc, containerPath: '/app/skills', readonly: true });
+  // Skill roots — read-only. Symlinks in .claude-shared/skills/ point at the
+  // container paths declared by `defaultSkillRoots()`.
+  for (const root of defaultSkillRoots(projectRoot)) {
+    if (!fs.existsSync(root.hostDir)) continue;
+    mounts.push({ hostPath: root.hostDir, containerPath: root.containerDir, readonly: true });
   }
 
   // Additional mounts from container config
@@ -683,26 +685,6 @@ export function buildMounts(
   return mounts;
 }
 
-function readRequiredEnv(skillMdPath: string): string | null {
-  let text: string;
-  try {
-    text = fs.readFileSync(skillMdPath, 'utf8');
-  } catch {
-    return null;
-  }
-  if (!text.startsWith('---')) return null;
-  const end = text.indexOf('\n---', 3);
-  if (end === -1) return null;
-  const fm = text.slice(3, end);
-  const m = fm.match(/^requires_env:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/m);
-  return m ? m[1] : null;
-}
-
-function isTruthyEnv(v: string | undefined): boolean {
-  if (!v) return false;
-  return ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
-}
-
 // Resolve an env var via process.env first, then the .env file (which the
 // systemd unit doesn't load). Mirrors what isUiEnabled() etc. do.
 function resolveEnv(name: string): string | undefined {
@@ -714,33 +696,32 @@ function resolveEnv(name: string): string | undefined {
 /**
  * Sync skills in .claude-shared/skills/ to match the container.json selection.
  *
- * By default each entry is a symlink to a container path (/app/skills/<name>),
+ * By default each entry is a symlink to a container path (/app/skills/<name>
+ * for built-ins, /app/skills-installed/<name> for marketplace installs),
  * dangling on the host but valid inside the container. fx's skill discovery
  * refuses to follow symlinked candidates — it reports every one as "SKILL.md is
  * unreadable or not a regular file" and loads no skills at all — so for fx we
- * copy the real directories out of container/skills/ instead. The copy is
- * refreshed on every spawn so upstream skill edits still propagate.
+ * copy the real directories out instead. The copy is refreshed on every spawn
+ * so upstream skill edits still propagate.
  */
 export function syncSkillSymlinks(
   claudeDir: string,
   containerConfig: import('./container-config.js').ContainerConfig,
-  sharedSkillsDir = path.join(process.cwd(), 'container', 'skills'),
+  roots: SkillRoot[] = defaultSkillRoots(),
 ): void {
   const skillsDir = path.join(claudeDir, 'skills');
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
   }
 
-  // Determine desired skill set (recomputes from the shared dir for 'all'),
-  // then skip skills whose `requires_env: FOO` frontmatter names an env var
-  // that isn't truthy, so the agent doesn't surface commands the host won't
-  // honor.
-  const desired = selectedSkillNames(containerConfig).filter((s) => {
-    const required = readRequiredEnv(path.join(sharedSkillsDir, s, 'SKILL.md'));
-    if (!required) return true;
-    return isTruthyEnv(resolveEnv(required));
-  });
-  const desiredSet = new Set(desired);
+  // Desired = the group's selection ∩ what's discoverable and available.
+  // Skills whose `metadata.requires_env` names an untruthy env var are
+  // dropped here so the agent never surfaces commands the host won't honor.
+  const selection = containerConfig.skills;
+  const desired = listSkills(roots).filter(
+    (skill) => skill.available && (selection === 'all' || selection.includes(skill.slug)),
+  );
+  const bySlug = new Map(desired.map((skill) => [skill.slug, skill]));
   const materialize = containerConfig.provider === 'fx';
 
   // Keep this effective shared-skill surface selection-exact. Group-local and
@@ -753,60 +734,48 @@ export function syncSkillSymlinks(
     } catch {
       continue;
     }
-    const sharedSkill = fs.existsSync(path.join(sharedSkillsDir, entry));
-    if (
-      !desiredSet.has(entry) ||
-      !sharedSkill ||
-      (materialize && isSymlink) ||
-      (!materialize && !isSymlink)
-    ) {
+    if (!bySlug.has(entry) || (materialize && isSymlink) || (!materialize && !isSymlink)) {
       fs.rmSync(entryPath, { recursive: true, force: true });
     }
   }
 
   // Create desired skills: real copies for fx, container-path symlinks otherwise.
   for (const skill of desired) {
-    const linkPath = path.join(skillsDir, skill);
-    const source = path.join(sharedSkillsDir, skill);
-    if (materialize && fs.existsSync(source)) {
+    const linkPath = path.join(skillsDir, skill.slug);
+    if (materialize) {
       // Refresh unconditionally — skills are small text files and this keeps
-      // the copy from drifting behind container/skills/. `dereference` matters:
-      // a skill dir may itself be a symlink into a checkout outside the repo,
+      // the copy from drifting behind the source. `dereference` matters: a
+      // skill dir may itself be a symlink into a checkout outside the repo,
       // and copying it as a symlink would reproduce a host path the container
       // cannot resolve.
       fs.rmSync(linkPath, { recursive: true, force: true });
-      fs.cpSync(source, linkPath, { recursive: true, dereference: true });
+      fs.cpSync(skill.hostPath, linkPath, { recursive: true, dereference: true });
       continue;
     }
-    let exists = false;
+    let currentTarget: string | null = null;
     try {
-      fs.lstatSync(linkPath);
-      exists = true;
+      currentTarget = fs.readlinkSync(linkPath);
     } catch {
       /* missing */
     }
-    if (!exists) {
-      fs.symlinkSync(`/app/skills/${skill}`, linkPath);
+    // Repoint when a slug moves between the built-in and installed roots.
+    if (currentTarget !== skill.containerPath) {
+      fs.rmSync(linkPath, { recursive: true, force: true });
+      fs.symlinkSync(skill.containerPath, linkPath);
     }
   }
 }
 
 /**
  * Resolve the group's skill selection to concrete names — `'all'` recomputes
- * from `container/skills/` so newly-added upstream skills appear automatically.
+ * from the skill roots so newly-added or newly-installed skills appear
+ * automatically.
  */
 function selectedSkillNames(containerConfig: import('./container-config.js').ContainerConfig): string[] {
-  if (containerConfig.skills !== 'all') return containerConfig.skills;
-  const sharedSkillsDir = path.join(process.cwd(), 'container', 'skills');
-  return fs.existsSync(sharedSkillsDir)
-    ? fs.readdirSync(sharedSkillsDir).filter((e) => {
-        try {
-          return fs.statSync(path.join(sharedSkillsDir, e)).isDirectory();
-        } catch {
-          return false;
-        }
-      })
-    : [];
+  const selection = containerConfig.skills;
+  return listSkills()
+    .filter((skill) => selection === 'all' || selection.includes(skill.slug))
+    .map((skill) => skill.slug);
 }
 
 async function buildContainerArgs(

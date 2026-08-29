@@ -442,8 +442,24 @@ function wrapPromptWithContext(text: string, systemInstructions?: string): strin
   return out;
 }
 
+// The host keeps `/home/node/.claude/skills` selection-exact (one symlink per
+// skill the group enabled, pointing into /app/skills or /app/skills-installed).
+// Index that rather than a raw mount, or every group sees every skill.
+const EFFECTIVE_SKILLS_DIR = '/home/node/.claude/skills';
 const SKILLS_DIR = '/app/skills';
 const SKILLS_INDEX_PATH = '/tmp/nanoclaw-skills-index.md';
+
+/** First candidate dir that actually holds entries; falls back to the mount. */
+export function resolveSkillsDir(candidates = [EFFECTIVE_SKILLS_DIR, SKILLS_DIR]): string {
+  for (const dir of candidates) {
+    try {
+      if (fs.readdirSync(dir).some((entry) => !entry.startsWith('.'))) return dir;
+    } catch {
+      continue;
+    }
+  }
+  return candidates[candidates.length - 1]!;
+}
 
 /**
  * Parse the `name` and `description` from a SKILL.md YAML frontmatter block.
@@ -482,13 +498,13 @@ export function parseSkillFrontmatter(md: string): { name?: string; description?
 
 /**
  * Emulate Claude's Skills progressive disclosure for OpenCode. Scans the
- * mounted `/app/skills` tree, builds a compact index (name + description +
+ * group's effective skill set, builds a compact index (name + description +
  * absolute SKILL.md path), writes it to a container-local file, and returns
  * that path so it can be added to OpenCode's `instructions`. Only the
  * descriptions are always-loaded; the agent reads a skill's body on demand
  * with its file tools. Returns null when no skills are mounted.
  */
-export function generateSkillsIndex(skillsDir = SKILLS_DIR, outPath = SKILLS_INDEX_PATH): string | null {
+export function generateSkillsIndex(skillsDir = resolveSkillsDir(), outPath = SKILLS_INDEX_PATH): string | null {
   let entries: string[];
   try {
     entries = fs.readdirSync(skillsDir);
@@ -498,10 +514,14 @@ export function generateSkillsIndex(skillsDir = SKILLS_DIR, outPath = SKILLS_IND
 
   const skills: { name: string; description: string; path: string }[] = [];
   for (const dir of entries.sort()) {
-    const skillFile = `${skillsDir}/${dir}/SKILL.md`;
+    if (dir.startsWith('.')) continue;
+    // Entries are usually symlinks into a read-only mount; resolve so the
+    // path in the index is the one the agent's file tools will see.
+    let skillFile = `${skillsDir}/${dir}/SKILL.md`;
     let md: string;
     try {
       md = fs.readFileSync(skillFile, 'utf8');
+      skillFile = fs.realpathSync(skillFile);
     } catch {
       continue;
     }

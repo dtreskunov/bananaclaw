@@ -1,6 +1,7 @@
 ---
 name: web-ui
-requires_env: UI_ENABLED
+metadata:
+  requires_env: UI_ENABLED
 description: >-
   Web UI access: how the user opens a browser to see their files, and how
   to send them a single-file download link instead of attaching bytes

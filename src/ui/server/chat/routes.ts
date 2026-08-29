@@ -48,6 +48,16 @@ import {
 } from './chat.js';
 import type { ThreadSummary, HistoryMessage } from './chat.js';
 import { handleGroupAdminRequest } from './group-admin.js';
+import {
+  addCatalog,
+  deleteCatalog,
+  getSkillsOverview,
+  installSkill,
+  readSkillsAdminBody,
+  refreshCatalog,
+  removeSkill,
+  type SkillsAdminResult,
+} from './skills-admin.js';
 import { handleWriteRequest } from './write.js';
 
 export { handleChatUpgrade };
@@ -282,6 +292,52 @@ on(
   'GET',
   '/api/push/notification',
   authed((ctx, userId) => handlePushNotification(ctx, userId)),
+);
+// ── skills (install-wide: catalogs + installed skills) ───────────────
+const skillsAdmin = (
+  fn: (body: Record<string, unknown>, userId: string, params: Record<string, string>) => SkillsAdminResult,
+): RouteHandler =>
+  authed(async (ctx, userId, params) => {
+    if (!isOwner(userId) && !isGlobalAdmin(userId)) return json(ctx, 403, { error: 'forbidden' });
+    let body: Record<string, unknown>;
+    try {
+      body = ctx.req.method === 'GET' || ctx.req.method === 'DELETE' ? {} : await readSkillsAdminBody(ctx.req);
+    } catch {
+      return json(ctx, 400, { error: 'invalid_json' });
+    }
+    const result = fn(body, userId, params);
+    return json(ctx, result.status, result.body);
+  });
+
+on(
+  'GET',
+  '/api/skills',
+  skillsAdmin(() => getSkillsOverview()),
+);
+on(
+  'POST',
+  '/api/skills/install',
+  skillsAdmin((body, userId) => installSkill(body, userId)),
+);
+on(
+  'POST',
+  '/api/skills/catalogs',
+  skillsAdmin((body, userId) => addCatalog(body, userId)),
+);
+on(
+  'POST',
+  '/api/skills/catalogs/:id/refresh',
+  skillsAdmin((_b, userId, p) => refreshCatalog(p.id!, userId)),
+);
+on(
+  'DELETE',
+  '/api/skills/catalogs/:id',
+  skillsAdmin((_b, userId, p) => deleteCatalog(p.id!, userId)),
+);
+on(
+  'DELETE',
+  '/api/skills/:slug',
+  skillsAdmin((_b, userId, p) => removeSkill(p.slug!, userId)),
 );
 // Service worker — must be served from the app scope so it can control /ui/chat/.
 on('GET', '/sw.js', (ctx) => serveServiceWorker(ctx));

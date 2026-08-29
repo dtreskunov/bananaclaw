@@ -79,12 +79,42 @@ describe('syncSkillSymlinks', () => {
     }
     fs.mkdirSync(path.join(claudeDir, 'skills', 'custom'), { recursive: true });
 
-    syncSkillSymlinks(claudeDir, { provider: 'native', skills: ['selected'] } as never, shared);
+    syncSkillSymlinks(claudeDir, { provider: 'native', skills: ['selected'] } as never, [
+      { origin: 'builtin', hostDir: shared, containerDir: '/app/skills' },
+    ]);
 
     expect(fs.lstatSync(path.join(claudeDir, 'skills', 'selected')).isSymbolicLink()).toBe(true);
     expect(fs.readlinkSync(path.join(claudeDir, 'skills', 'selected'))).toBe('/app/skills/selected');
     expect(fs.existsSync(path.join(claudeDir, 'skills', 'unselected'))).toBe(false);
     expect(fs.existsSync(path.join(claudeDir, 'skills', 'custom'))).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('links a symlinked skill folder and repoints a slug that moved roots', () => {
+    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+    const claudeDir = path.join(root, 'claude');
+    const builtin = path.join(root, 'builtin');
+    const installed = path.join(root, 'installed');
+    const external = path.join(root, 'external', 'linked');
+
+    // A skill folder that is itself a symlink into a checkout outside the repo.
+    fs.mkdirSync(external, { recursive: true });
+    fs.writeFileSync(path.join(external, 'SKILL.md'), '---\nname: linked\ndescription: test\n---\n');
+    fs.mkdirSync(builtin, { recursive: true });
+    fs.symlinkSync(external, path.join(builtin, 'linked'));
+
+    fs.mkdirSync(path.join(installed, 'moved'), { recursive: true });
+    fs.writeFileSync(path.join(installed, 'moved', 'SKILL.md'), '---\nname: moved\ndescription: test\n---\n');
+    fs.mkdirSync(path.join(claudeDir, 'skills'), { recursive: true });
+    fs.symlinkSync('/app/skills/moved', path.join(claudeDir, 'skills', 'moved'));
+
+    syncSkillSymlinks(claudeDir, { provider: 'native', skills: 'all' } as never, [
+      { origin: 'builtin', hostDir: builtin, containerDir: '/app/skills' },
+      { origin: 'installed', hostDir: installed, containerDir: '/app/skills-installed' },
+    ]);
+
+    expect(fs.readlinkSync(path.join(claudeDir, 'skills', 'linked'))).toBe('/app/skills/linked');
+    expect(fs.readlinkSync(path.join(claudeDir, 'skills', 'moved'))).toBe('/app/skills-installed/moved');
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseSkillFrontmatter, generateSkillsIndex } from './opencode.js';
+import { parseSkillFrontmatter, generateSkillsIndex, resolveSkillsDir } from './opencode.js';
 
 describe('parseSkillFrontmatter', () => {
   it('parses plain scalar name and description', () => {
@@ -81,5 +81,40 @@ describe('generateSkillsIndex', () => {
     makeSkill(root, 'alpha', '---\nname: alpha\n---\n');
     expect(generateSkillsIndex(root, path.join(os.tmpdir(), 'unused.md'))).toBeNull();
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('indexes symlinked selections and reports the resolved path', () => {
+    const mount = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-mount-'));
+    const effective = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-effective-'));
+    const out = path.join(os.tmpdir(), `skills-index-${Date.now()}.md`);
+    makeSkill(mount, 'alpha', '---\nname: alpha\ndescription: The alpha skill.\n---\n');
+    makeSkill(mount, 'beta', '---\nname: beta\ndescription: The beta skill.\n---\n');
+    // Only alpha is selected for this group.
+    fs.symlinkSync(path.join(mount, 'alpha'), path.join(effective, 'alpha'));
+
+    expect(generateSkillsIndex(effective, out)).toBe(out);
+    const body = fs.readFileSync(out, 'utf8');
+    expect(body).toContain(`Read: \`${fs.realpathSync(path.join(mount, 'alpha', 'SKILL.md'))}\``);
+    expect(body).not.toContain('beta');
+
+    fs.rmSync(mount, { recursive: true, force: true });
+    fs.rmSync(effective, { recursive: true, force: true });
+    fs.rmSync(out, { force: true });
+  });
+});
+
+describe('resolveSkillsDir', () => {
+  it('prefers the first candidate that has entries', () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-none-'));
+    const populated = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-some-'));
+    fs.mkdirSync(path.join(populated, 'alpha'));
+
+    expect(resolveSkillsDir([empty, populated])).toBe(populated);
+    expect(resolveSkillsDir(['/no/such/dir', populated])).toBe(populated);
+    // Nothing anywhere: fall back to the last candidate rather than crashing.
+    expect(resolveSkillsDir(['/no/such/dir', empty])).toBe(empty);
+
+    fs.rmSync(empty, { recursive: true, force: true });
+    fs.rmSync(populated, { recursive: true, force: true });
   });
 });

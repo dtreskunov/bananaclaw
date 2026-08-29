@@ -2,6 +2,17 @@ import './GroupAdminSkills.css';
 import type { JSX } from 'preact';
 
 import { GroupAdminField as Field } from './GroupAdminField';
+import { SkillCatalogSection, uninstallSkill } from './GroupAdminSkillCatalog';
+
+export interface SkillProvenanceDto {
+  marketplaceId: string | null;
+  plugin: string | null;
+  repo: string;
+  ref: string;
+  commit: string;
+  path: string;
+  installedAt: string;
+}
 
 export interface AvailableSkillDto {
   slug: string;
@@ -9,6 +20,11 @@ export interface AvailableSkillDto {
   description: string;
   available: boolean;
   unavailableReason: string | null;
+  origin: 'builtin' | 'installed';
+  license: string | null;
+  warnings: string[];
+  source: SkillProvenanceDto | null;
+  updateAvailable: boolean | null;
 }
 
 export function SkillsSection({
@@ -16,13 +32,17 @@ export function SkillsSection({
   selectedSkills,
   availableSkills,
   busy,
+  elevated,
   onChange,
+  onCatalogChanged,
 }: {
   value: string[] | 'all';
   selectedSkills: string[] | null;
   availableSkills: AvailableSkillDto[];
   busy: boolean;
+  elevated: boolean;
   onChange: (next: string[] | 'all') => void;
+  onCatalogChanged: () => void;
 }): JSX.Element {
   const isAll = value === 'all';
   const list = isAll ? [] : value;
@@ -38,8 +58,8 @@ export function SkillsSection({
     <>
       <div class="group-admin-toolbar">
         <p class="group-admin-help">
-          Installed skills are read from <code>container/skills/</code>. Restart required to take
-          effect — skill mounts are computed at container spawn.
+          Built-in skills ship with the install; catalog skills are added below. Restart required to
+          take effect — skill mounts are computed at container spawn.
         </p>
       </div>
 
@@ -60,9 +80,9 @@ export function SkillsSection({
         </label>
       </Field>
 
-      <Field label="Installed skills">
+      <Field label="Available skills">
         {availableSkills.length === 0 ? (
-          <p class="group-admin-help">No installed skills found.</p>
+          <p class="group-admin-help">No skills found.</p>
         ) : (
           <ul class="ga-skills-catalog">
             {availableSkills.map((skill) => {
@@ -80,13 +100,44 @@ export function SkillsSection({
                       <span class="ga-skills-title">
                         <strong>{skill.name}</strong>
                         {skill.name !== skill.slug ? <code>{skill.slug}</code> : null}
+                        {skill.origin === 'installed' ? <span class="ga-skills-badge">catalog</span> : null}
+                        {skill.updateAvailable ? (
+                          <span class="ga-skills-badge ga-skills-badge-update">update</span>
+                        ) : null}
+                        {skill.license ? <span class="ga-skills-license">{skill.license}</span> : null}
                       </span>
                       {skill.description ? <span class="ga-skills-description">{skill.description}</span> : null}
+                      {skill.source ? (
+                        <span class="ga-skills-source">
+                          {skill.source.repo} · {skill.source.ref} · {skill.source.commit.slice(0, 7)} ·{' '}
+                          {skill.source.path}
+                        </span>
+                      ) : null}
                       {skill.unavailableReason ? (
                         <span class="ga-skills-unavailable">{skill.unavailableReason}</span>
                       ) : null}
+                      {skill.warnings.map((warning) => (
+                        <span key={warning} class="ga-skills-unavailable">
+                          {warning}
+                        </span>
+                      ))}
                     </span>
                   </label>
+                  {elevated && skill.origin === 'installed' ? (
+                    <button
+                      type="button"
+                      class="ga-catalog-remove"
+                      disabled={busy}
+                      onClick={async () => {
+                        if (await uninstallSkill(skill.slug)) {
+                          setSkill(skill.slug, false);
+                          onCatalogChanged();
+                        }
+                      }}
+                    >
+                      Uninstall
+                    </button>
+                  ) : null}
                 </li>
               );
             })}
@@ -114,6 +165,8 @@ export function SkillsSection({
           </ul>
         </Field>
       ) : null}
+
+      {elevated ? <SkillCatalogSection installedSlugs={installedSlugs} onChanged={onCatalogChanged} /> : null}
     </>
   );
 }

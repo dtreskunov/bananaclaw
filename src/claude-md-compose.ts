@@ -21,12 +21,12 @@ import { DATA_DIR, GROUPS_DIR } from './config.js';
 import type { McpServerConfig } from './container-config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { log } from './log.js';
+import { listSkills, type SkillRoot } from './skills/registry.js';
 import type { AgentGroup } from './types.js';
 
 // Symlink targets are container paths — dangling on host (hence the readlink
 // dance instead of existsSync), valid inside the container via RO mounts.
 const SHARED_CLAUDE_MD_CONTAINER_PATH = '/app/CLAUDE.md';
-const SHARED_SKILLS_CONTAINER_BASE = '/app/skills';
 const SHARED_MCP_TOOLS_CONTAINER_BASE = '/app/src/mcp-tools';
 
 // Host-side source paths used to discover fragment sources at compose time.
@@ -35,24 +35,30 @@ const MCP_TOOLS_HOST_SUBPATH = path.join('container', 'agent-runner', 'src', 'mc
 
 const COMPOSED_HEADER = '<!-- Composed at spawn — do not edit. Edit CLAUDE.local.md for per-group content. -->';
 
-export function selectedSkillFragmentNames(sharedSkillsDir: string, effectiveSkillsDir: string): string[] {
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(sharedSkillsDir);
-  } catch {
-    return [];
-  }
-  return entries
-    .filter((skillName) => {
-      if (!fs.existsSync(path.join(sharedSkillsDir, skillName, 'instructions.md'))) return false;
+export interface SkillFragment {
+  slug: string;
+  /** In-container path to the skill folder — root depends on its origin. */
+  containerPath: string;
+}
+
+/**
+ * Skills that ship an `instructions.md` fragment *and* are part of this
+ * group's effective selection (i.e. present in `.claude-shared/skills/`,
+ * which `syncSkillSymlinks` keeps selection-exact).
+ */
+export function selectedSkillFragments(effectiveSkillsDir: string, roots?: SkillRoot[]): SkillFragment[] {
+  return listSkills(roots)
+    .filter((skill) => {
+      if (!skill.hasInstructions) return false;
       try {
-        fs.lstatSync(path.join(effectiveSkillsDir, skillName));
+        fs.lstatSync(path.join(effectiveSkillsDir, skill.slug));
         return true;
       } catch {
         return false;
       }
     })
-    .sort();
+    .map((skill) => ({ slug: skill.slug, containerPath: skill.containerPath }))
+    .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
 /**
@@ -81,13 +87,12 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
     : {};
   const desired = new Map<string, { type: 'symlink' | 'inline'; content: string }>();
 
-  // Skill fragments — selected/available shared skills that ship `instructions.md`.
-  const skillsHostDir = path.join(process.cwd(), 'container', 'skills');
+  // Skill fragments — selected/available skills that ship `instructions.md`.
   const effectiveSkillsDir = path.join(DATA_DIR, 'v2-sessions', group.id, '.claude-shared', 'skills');
-  for (const skillName of selectedSkillFragmentNames(skillsHostDir, effectiveSkillsDir)) {
-    desired.set(`skill-${skillName}.md`, {
+  for (const fragment of selectedSkillFragments(effectiveSkillsDir)) {
+    desired.set(`skill-${fragment.slug}.md`, {
       type: 'symlink',
-      content: `${SHARED_SKILLS_CONTAINER_BASE}/${skillName}/instructions.md`,
+      content: `${fragment.containerPath}/instructions.md`,
     });
   }
 

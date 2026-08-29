@@ -936,8 +936,10 @@ function SettingsTab({
           value={draftSkills}
           selectedSkills={selectedSkills}
           availableSkills={data.availableSkills ?? []}
+          elevated={data.actorIsElevated}
           busy={busy}
           onChange={updateSkills}
+          onCatalogChanged={refresh}
         />
       ) : null}
 

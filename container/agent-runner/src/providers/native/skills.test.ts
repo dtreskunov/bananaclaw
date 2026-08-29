@@ -80,6 +80,17 @@ describe('NativeSkillRegistry', () => {
     expect(new NativeSkillRegistry(shared, local, { FEATURE_ON: 'true' }).skills()).toHaveLength(1);
   });
 
+  it('reads requires_env from spec-compliant metadata', () => {
+    const dir = path.join(local, 'gated');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(
+      path.join(dir, 'SKILL.md'),
+      '---\nname: gated\ndescription: Gated skill.\nmetadata:\n  requires_env: FEATURE_ON\n---\n# Gated',
+    );
+    expect(new NativeSkillRegistry(shared, local, {}).skills()).toEqual([]);
+    expect(new NativeSkillRegistry(shared, local, { FEATURE_ON: 'on' }).skills()[0]?.requiresEnv).toBe('FEATURE_ON');
+  });
+
   it('requires a slug when two skills declare the same name', () => {
     writeSkill(shared, 'one', 'First skill.');
     writeSkill(shared, 'two', 'Second skill.');
