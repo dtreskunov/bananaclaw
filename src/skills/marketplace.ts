@@ -54,6 +54,8 @@ export interface CatalogPlugin {
 export interface MarketplaceCatalog {
   id: string;
   repo: string;
+  /** GitHub `owner/repo`, used to look this catalog's skills up in the directory. */
+  source: string | null;
   ref: string;
   label: string | null;
   description: string | null;
@@ -63,6 +65,12 @@ export interface MarketplaceCatalog {
   kind: 'plugin-marketplace' | 'skill-repo';
   plugins: CatalogPlugin[];
   error: string | null;
+}
+
+/** `https://github.com/owner/repo.git` → `owner/repo`; null for other sources. */
+export function githubSourceOf(repo: string): string | null {
+  const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(repo);
+  return m ? `${m[1]}/${m[2]}` : null;
 }
 
 // ── source validation ─────────────────────────────────────────────────────
@@ -266,6 +274,7 @@ export function readCatalog(record: MarketplaceRecord): MarketplaceCatalog {
   const base: Omit<MarketplaceCatalog, 'kind' | 'plugins' | 'error'> = {
     id: record.id,
     repo: record.repo,
+    source: githubSourceOf(record.repo),
     ref: record.ref,
     label: record.label,
     description: record.description,

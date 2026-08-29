@@ -51,7 +51,10 @@ import { handleGroupAdminRequest } from './group-admin.js';
 import {
   addCatalog,
   deleteCatalog,
+  discoverSkills,
+  getSkillAudits,
   getSkillsOverview,
+  installFromRepo,
   installSkill,
   readSkillsAdminBody,
   refreshCatalog,
@@ -295,7 +298,12 @@ on(
 );
 // ── skills (install-wide: catalogs + installed skills) ───────────────
 const skillsAdmin = (
-  fn: (body: Record<string, unknown>, userId: string, params: Record<string, string>) => SkillsAdminResult,
+  fn: (
+    body: Record<string, unknown>,
+    userId: string,
+    params: Record<string, string>,
+    ctx: Ctx,
+  ) => SkillsAdminResult | Promise<SkillsAdminResult>,
 ): RouteHandler =>
   authed(async (ctx, userId, params) => {
     if (!isOwner(userId) && !isGlobalAdmin(userId)) return json(ctx, 403, { error: 'forbidden' });
@@ -305,7 +313,7 @@ const skillsAdmin = (
     } catch {
       return json(ctx, 400, { error: 'invalid_json' });
     }
-    const result = fn(body, userId, params);
+    const result = await fn(body, userId, params, ctx);
     return json(ctx, result.status, result.body);
   });
 
@@ -315,9 +323,26 @@ on(
   skillsAdmin(() => getSkillsOverview()),
 );
 on(
+  'GET',
+  '/api/skills/discover',
+  skillsAdmin((_b, _u, _p, ctx) => discoverSkills(ctx.url.searchParams.get('q') ?? '')),
+);
+on(
+  'GET',
+  '/api/skills/audits',
+  skillsAdmin((_b, _u, _p, ctx) =>
+    getSkillAudits(ctx.url.searchParams.get('source') ?? '', ctx.url.searchParams.get('slug') ?? ''),
+  ),
+);
+on(
   'POST',
   '/api/skills/install',
   skillsAdmin((body, userId) => installSkill(body, userId)),
+);
+on(
+  'POST',
+  '/api/skills/install-from-repo',
+  skillsAdmin((body, userId) => installFromRepo(body, userId)),
 );
 on(
   'POST',

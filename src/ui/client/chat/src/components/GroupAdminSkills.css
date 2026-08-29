@@ -9,6 +9,7 @@
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -175,10 +176,148 @@
   margin: 0;
   font-size: 13px;
   font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ga-catalog-install { flex-shrink: 0; align-self: center; }
 .ga-catalog-remove { flex-shrink: 0; }
+
+/* ── discovery + suggestions ──────────────────────────────────────── */
+
+.ga-discover-list,
+.ga-suggested-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.ga-discover-source { min-width: 0; }
+
+.ga-suggested {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ga-suggested:last-child { border-bottom: 0; padding-bottom: 0; }
+
+/* ── audits ───────────────────────────────────────────────────────── */
+
+.ga-install-control {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  align-self: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* An open audit panel is a block of prose — give it the whole row rather than
+   letting it stretch the flex line past the viewport. */
+.ga-install-control:has(.ga-audit-wrap) {
+  flex: 1 1 100%;
+  justify-items: stretch;
+}
+
+.ga-install-buttons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ga-audit-toggle {
+  background: transparent;
+  border: 0;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.ga-install-anyway {
+  border-color: var(--warning, #d99835);
+  color: var(--warning, #d99835);
+}
+
+.ga-audit-wrap {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+}
+
+.ga-audit-blocked {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--warning, #d99835);
+}
+
+.ga-audit-unknown {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ga-audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.ga-audit-entry {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ga-audit-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.ga-audit-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--chip-bg, rgba(127, 127, 127, 0.15));
+}
+
+.ga-audit-pass { color: var(--ok, #3fa66a); }
+.ga-audit-warn,
+.ga-audit-fail {
+  background: var(--warning, #d99835);
+  color: #1a1a1a;
+}
+
+.ga-audit-summary,
+.ga-audit-categories {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.ga-audit-categories { opacity: 0.8; }
 
 .ga-skills-chips {
   list-style: none;
