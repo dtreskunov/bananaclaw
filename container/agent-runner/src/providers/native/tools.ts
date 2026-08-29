@@ -7,6 +7,7 @@ import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../../db/connection.js';
 import { invokeRegisteredTool, listRegisteredTools } from '../../mcp-tools/registry.js';
 import type { NativeSkillRegistry } from './skills.js';
+import { NativeTodoState, type NativeTodo } from './todos.js';
 
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_RESULTS = 200;
@@ -126,6 +127,7 @@ export function createNativeTools(
   cwd: string,
   additionalDirectories: string[] = [],
   skills?: NativeSkillRegistry,
+  todoState?: NativeTodoState,
 ): ToolSet {
   const tools: ToolSet = {};
   for (const definition of listRegisteredTools()) {
@@ -276,6 +278,40 @@ export function createNativeTools(
       }
     },
   });
+
+  if (todoState) {
+    tools.todo_update = tool({
+      description: 'Create or update the compact checklist for this turn. Send the complete current list.',
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 8,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                content: { type: 'string' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+              },
+              required: ['id', 'content', 'status'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['todos'],
+        additionalProperties: false,
+      }),
+      execute: async (input) => todoState.update((input as { todos: NativeTodo[] }).todos),
+    });
+    tools.todo_read = tool({
+      description: 'Read the current in-turn checklist when its state is no longer visible in recent tool results.',
+      inputSchema: jsonSchema({ type: 'object', properties: {}, additionalProperties: false }),
+      execute: async () => todoState.snapshot(),
+    });
+  }
 
   if (skills && skills.skills().length > 0) {
     tools.load_skill = tool({

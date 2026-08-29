@@ -16,6 +16,7 @@ let toolMode: boolean;
 let anthropicToolMode: boolean;
 let externalMcpToolMode: boolean;
 let skillToolMode: boolean;
+let todoToolMode: boolean;
 
 async function collect(
   provider: NativeProvider,
@@ -38,6 +39,7 @@ beforeEach(() => {
   anthropicToolMode = false;
   externalMcpToolMode = false;
   skillToolMode = false;
+  todoToolMode = false;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -102,18 +104,28 @@ beforeEach(() => {
       }
       const requestBody = requests.at(-1)!;
       const messages = requestBody.messages as Array<{ role: string }>;
-      const shouldCallTool =
-        (toolMode || externalMcpToolMode || skillToolMode) && !messages.some((message) => message.role === 'tool');
-      const toolName = skillToolMode
-        ? 'load_skill'
-        : externalMcpToolMode
-          ? 'mcp__Fixture__echo_value'
-          : 'mcp__nanoclaw__send_message';
-      const toolArguments = skillToolMode
-        ? '{"name":"local-guide"}'
-        : externalMcpToolMode
-          ? '{"value":"from-model"}'
-          : '{"text":"hello user"}';
+      const toolResultCount = messages.filter((message) => message.role === 'tool').length;
+      const shouldCallTool = todoToolMode
+        ? toolResultCount < 2
+        : (toolMode || externalMcpToolMode || skillToolMode) && toolResultCount === 0;
+      const toolName = todoToolMode
+        ? toolResultCount === 0
+          ? 'todo_update'
+          : 'todo_read'
+        : skillToolMode
+          ? 'load_skill'
+          : externalMcpToolMode
+            ? 'mcp__Fixture__echo_value'
+            : 'mcp__nanoclaw__send_message';
+      const toolArguments = todoToolMode
+        ? toolResultCount === 0
+          ? '{"todos":[{"id":"inspect","content":"turn-one-secret","status":"in_progress"}]}'
+          : '{}'
+        : skillToolMode
+          ? '{"name":"local-guide"}'
+          : externalMcpToolMode
+            ? '{"value":"from-model"}'
+            : '{"text":"hello user"}';
       const body = shouldCallTool
         ? [
             `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"${toolName}","arguments":${JSON.stringify(toolArguments)}}}]},"finish_reason":null}]}`,
@@ -198,6 +210,7 @@ describe('NativeProvider', () => {
           content: [
             { type: 'reasoning', text: 'private' },
             { type: 'text', text: 'visible' },
+            { type: 'text', text: '<internal>todo_update worked; continue.</internal>' },
             { type: 'tool-call', toolCallId: 'call-1', toolName: 'read_file', input: { path: 'x' } },
           ],
         },
@@ -311,6 +324,61 @@ describe('NativeProvider', () => {
     );
     expect(JSON.stringify(requests[0]?.messages)).toContain('**local-guide** (`local-guide`) — Use the local workflow.');
     expect(JSON.stringify(requests[1]?.messages)).toContain('Return SKILL-LOADED.');
+  });
+
+  it('keeps todo state across model steps but out of the next turn', async () => {
+    todoToolMode = true;
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const first = await collect(provider);
+    const continuation = (first.find((event) => event.type === 'init') as { continuation: string }).continuation;
+
+    expect(first).toContainEqual(
+      expect.objectContaining({
+        type: 'progress',
+        step: expect.objectContaining({ tool: 'todo_update', status: 'completed' }),
+      }),
+    );
+    expect(first).toContainEqual(
+      expect.objectContaining({
+        type: 'progress',
+        step: expect.objectContaining({ tool: 'todo_read', status: 'completed' }),
+      }),
+    );
+    expect(JSON.stringify(requests[2]?.messages)).toContain('turn-one-secret');
+
+    todoToolMode = false;
+    await collect(new NativeProvider({ model: 'local/test-model' }), continuation);
+    expect(JSON.stringify(requests[3]?.messages)).not.toContain('turn-one-secret');
+    expect((requests[3]?.tools as Array<{ function?: { name?: string } }>).some((item) => item.function?.name === 'todo_update')).toBe(true);
+  });
+
+  it('does not advertise todos when tools are disabled for a pushed turn', async () => {
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'hello', cwd: root });
+    expect(query.push('without tools', undefined, { tools: 'disabled' })).toBe(true);
+    query.end();
+    for await (const _event of query.events) {
+      // Drain both queued turns.
+    }
+
+    expect(JSON.stringify(requests[0]?.tools)).toContain('todo_update');
+    expect(JSON.stringify(requests[0]?.messages)).toContain('## In-turn todos');
+    expect(requests[1]?.tools).toBeUndefined();
+    expect(JSON.stringify(requests[1]?.messages)).not.toContain('## In-turn todos');
+  });
+
+  it('requires todo initialization for explicitly multi-step work', async () => {
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'Perform this in three steps: inspect, edit, and test.', cwd: root });
+    query.end();
+    for await (const _event of query.events) {
+      // Drain the turn.
+    }
+
+    expect(requests[0]?.tool_choice).toEqual({ type: 'function', function: { name: 'todo_update' } });
+    const toolNames = (requests[0]?.tools as Array<{ function: { name: string } }>).map((item) => item.function.name);
+    expect(toolNames).toEqual(['todo_update']);
+    expect(JSON.stringify(requests[0]?.messages)).toContain('planning-only step');
   });
 
   it('sends and resumes image attachments through OpenAI-compatible Chat', async () => {

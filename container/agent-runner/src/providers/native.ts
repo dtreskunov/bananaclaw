@@ -23,6 +23,7 @@ import { NativeMcpManager } from './native/mcp-client.js';
 import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
 import { createNativeTools } from './native/tools.js';
+import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
 
 function log(message: string): void {
   console.error(`[native-provider] ${message}`);
@@ -131,11 +132,48 @@ function languageModel(model: NativeModel) {
 }
 
 export function portableHistory(messages: ModelMessage[]): ModelMessage[] {
-  return messages.flatMap((message) => {
-    if (message.role !== 'assistant' || !Array.isArray(message.content)) return [message];
-    const content = message.content.filter((part) => part.type !== 'reasoning' && part.type !== 'reasoning-file');
-    return content.length > 0 ? [{ ...message, content }] : [];
-  });
+  const ephemeralToolCallIds = new Set<string>();
+  for (const message of messages) {
+    if (message.role === 'assistant' && Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if ('toolName' in part && typeof part.toolName === 'string' && part.toolName.startsWith('todo_')) {
+          ephemeralToolCallIds.add(part.toolCallId);
+        }
+      }
+    } else if (message.role === 'tool') {
+      for (const part of message.content) {
+        if ('toolName' in part && typeof part.toolName === 'string' && part.toolName.startsWith('todo_')) {
+          ephemeralToolCallIds.add(part.toolCallId);
+        }
+        if (
+          part.type === 'tool-result' &&
+          part.output.type === 'error-text' &&
+          part.output.value.includes("Available tools: todo_update")
+        ) {
+          ephemeralToolCallIds.add(part.toolCallId);
+        }
+      }
+    }
+  }
+  const output: ModelMessage[] = [];
+  for (const message of messages) {
+    if (message.role === 'assistant' && Array.isArray(message.content)) {
+      const content = message.content.filter((part) => {
+        if (part.type === 'reasoning' || part.type === 'reasoning-file') return false;
+        if (part.type === 'text' && /\btodo_(?:update|read)\b/.test(part.text)) return false;
+        return !('toolCallId' in part && ephemeralToolCallIds.has(part.toolCallId));
+      });
+      if (content.length > 0) output.push({ ...message, content });
+    } else if (message.role === 'tool') {
+      const content = message.content.filter(
+        (part) => !('toolCallId' in part && ephemeralToolCallIds.has(part.toolCallId)),
+      );
+      if (content.length > 0) output.push({ ...message, content });
+    } else {
+      output.push(message);
+    }
+  }
+  return output;
 }
 
 export class NativeProvider implements AgentProvider {
@@ -191,6 +229,7 @@ export class NativeProvider implements AgentProvider {
             const turn = pending.shift()!;
             const startedAt = Date.now();
             try {
+              const todoState = new NativeTodoState();
               const configuredModel = options.model ?? process.env.NATIVE_MODEL;
               if (!configuredModel) throw new Error('native requires a canonical model setting');
               const resolved = await resolveNativeModel(configuredModel);
@@ -199,7 +238,7 @@ export class NativeProvider implements AgentProvider {
               const tools = turn.toolsDisabled
                 ? {}
                 : {
-                    ...createNativeTools(input.cwd, options.additionalDirectories, skills),
+                    ...createNativeTools(input.cwd, options.additionalDirectories, skills, todoState),
                     ...(await mcpManager.tools(abortController.signal)),
                   };
               const configuredMaxOutput =
@@ -208,10 +247,28 @@ export class NativeProvider implements AgentProvider {
                   : resolved.maxOutputTokens;
               const result = streamText({
                 model: languageModel(resolved),
-                system: loadNativeInstructions(input.systemContext?.instructions, skills.instructions()),
+                system: loadNativeInstructions(
+                  input.systemContext?.instructions,
+                  skills.instructions(),
+                  turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
+                ),
                 messages: [...prior, incoming],
                 tools,
                 stopWhen: isStepCount(20),
+                ...(!turn.toolsDisabled && shouldRequireTodos(turn.text)
+                  ? {
+                      prepareStep: ({ stepNumber, instructions }) =>
+                        stepNumber === 0
+                          ? {
+                              activeTools: ['todo_update'] as const,
+                              toolChoice: { type: 'tool' as const, toolName: 'todo_update' as const },
+                              instructions: `${String(
+                                instructions ?? '',
+                              )}\n\nThis is a planning-only step. Call todo_update exactly once and do not call any other tool.`,
+                            }
+                          : undefined,
+                    }
+                  : {}),
                 maxRetries: 2,
                 abortSignal: abortController.signal,
                 ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
@@ -232,7 +289,7 @@ export class NativeProvider implements AgentProvider {
               }
 
               const responseMessages = (await result.responseMessages) as ModelMessage[];
-              const checkpoint = store.append(continuation, [incoming, ...responseMessages]);
+              const checkpoint = store.append(continuation, [incoming, ...portableHistory(responseMessages)]);
               yield { type: 'usage', data: usageFor(resolved, await result.usage, Date.now() - startedAt) };
               yield { type: 'checkpoint', ref: checkpoint };
               yield {
