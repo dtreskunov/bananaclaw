@@ -23,7 +23,8 @@ import { materializeContainerJson } from './container-config.js';
 import type { McpServerConfig } from './container-config.js';
 import {
   decideAdmission,
-  maxConcurrentContainers,
+  estimateAgentGroupMb,
+  memoryBudgetMb,
   snapshotRunning,
 } from './container-admission.js';
 import { getContainerConfig } from './db/container-configs.js';
@@ -136,25 +137,31 @@ export function wakeContainer(session: Session): Promise<boolean> {
 const MAX_EVICT_ROUNDS = 4;
 
 /**
- * Admission gate in front of `spawnContainer`. Caps concurrent containers at
- * the memory-derived limit (see container-admission.ts): evicts an idle
- * container to make room when possible, or defers the spawn (returns false) —
- * the inbound message stays pending and host-sweep re-wakes it on its next
- * tick. A cap of 0 (memory unreadable) means always spawn.
+ * Admission gate in front of `spawnContainer`. Spends a memory budget rather
+ * than a container count (see container-admission.ts): each container is
+ * charged a worst-case estimate derived from its agent group's config, so a
+ * single-process `native` group and a three-process `claude` group are priced
+ * differently. Evicts an idle container to make room when possible, or defers
+ * the spawn (returns false) — the inbound message stays pending and host-sweep
+ * re-wakes it on its next tick. A budget of 0 (memory unreadable) means always
+ * spawn.
  */
 async function admitThenSpawn(session: Session): Promise<boolean> {
-  const cap = maxConcurrentContainers();
-  if (cap > 0) {
+  const budgetMb = memoryBudgetMb();
+  if (budgetMb > 0) {
+    const candidateMb = estimateAgentGroupMb(session.agent_group_id);
     for (let round = 0; round <= MAX_EVICT_ROUNDS; round++) {
       const decision = decideAdmission({
-        maxContainers: cap,
+        budgetMb,
+        candidateMb,
         running: snapshotRunning(activeContainers.keys(), session.id),
       });
       if (decision.action === 'admit') break;
       if (decision.action === 'evict') {
-        log.info('Admission evicting idle container to free a slot', {
+        log.info('Admission evicting idle container to free memory', {
           evicting: decision.sessionId,
           forSession: session.id,
+          candidateMb,
         });
         await evictContainer(decision.sessionId);
         continue;
