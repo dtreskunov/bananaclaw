@@ -16,10 +16,11 @@ import fs from 'fs';
 import path from 'path';
 
 import { readEnvFile } from '../env.js';
+import { GROUPS_DIR } from '../config.js';
 import { parseSkillFrontmatter, validateSkillFrontmatter } from './frontmatter.js';
 import { getInstalledRecord, installedSkillsDir, type InstalledSkillRecord } from './store.js';
 
-export type SkillOrigin = 'builtin' | 'installed';
+export type SkillOrigin = 'builtin' | 'installed' | 'workspace';
 
 /**
  * Reserved catalog id for the skills that ship with the install. Built-ins
@@ -27,6 +28,15 @@ export type SkillOrigin = 'builtin' | 'installed';
  * model in the UI: every skill comes from somewhere.
  */
 export const BUILTIN_CATALOG_ID = 'built-in';
+
+/** Reserved catalog id for skills the agent wrote in its own workspace. */
+export const WORKSPACE_CATALOG_ID = 'workspace';
+
+// Higher wins when a slug exists in more than one root. Workspace beats
+// everything because it is the agent's own copy and is what the native
+// provider already resolves to; the installer separately refuses to shadow a
+// built-in, so that ordering only matters for hand-dropped folders.
+const ORIGIN_PRIORITY: Record<SkillOrigin, number> = { workspace: 3, builtin: 2, installed: 1 };
 
 export interface SkillRoot {
   origin: SkillOrigin;
@@ -64,6 +74,22 @@ export function defaultSkillRoots(projectRoot = process.cwd()): SkillRoot[] {
   return [
     { origin: 'builtin', hostDir: path.join(projectRoot, 'container', 'skills'), containerDir: '/app/skills' },
     { origin: 'installed', hostDir: installedSkillsDir(), containerDir: '/app/skills-installed' },
+  ];
+}
+
+/**
+ * Host-wide roots plus the group's own workspace skills. `groups/<folder>/skills`
+ * is mounted RW at `/workspace/agent/skills`, so this is where an agent's
+ * self-authored skills live — they belong to one group and nothing else.
+ */
+export function groupSkillRoots(groupFolder: string, projectRoot = process.cwd()): SkillRoot[] {
+  return [
+    ...defaultSkillRoots(projectRoot),
+    {
+      origin: 'workspace',
+      hostDir: path.join(GROUPS_DIR, groupFolder, 'skills'),
+      containerDir: '/workspace/agent/skills',
+    },
   ];
 }
 
@@ -148,16 +174,15 @@ function readRoot(root: SkillRoot): RawSkill[] {
 }
 
 /**
- * All discoverable skills, sorted by display name. Built-ins win when a slug
- * exists in both roots — the installer refuses to shadow a built-in, so this
- * only matters if someone drops a folder in by hand.
+ * All discoverable skills, sorted by display name. When a slug exists in more
+ * than one root, `ORIGIN_PRIORITY` decides which copy wins.
  */
 export function listSkills(roots: SkillRoot[] = defaultSkillRoots()): DiscoveredSkill[] {
   const bySlug = new Map<string, RawSkill>();
   for (const root of roots) {
     for (const skill of readRoot(root)) {
       const existing = bySlug.get(skill.slug);
-      if (existing && existing.origin === 'builtin') continue;
+      if (existing && ORIGIN_PRIORITY[existing.origin] >= ORIGIN_PRIORITY[skill.origin]) continue;
       bySlug.set(skill.slug, skill);
     }
   }
@@ -173,7 +198,12 @@ export function listSkills(roots: SkillRoot[] = defaultSkillRoots()): Discovered
         ...skill,
         available,
         unavailableReason: available ? null : `Requires ${skill.requiresEnv}`,
-        catalogId: skill.origin === 'builtin' ? BUILTIN_CATALOG_ID : (source?.marketplaceId ?? null),
+        catalogId:
+          skill.origin === 'builtin'
+            ? BUILTIN_CATALOG_ID
+            : skill.origin === 'workspace'
+              ? WORKSPACE_CATALOG_ID
+              : (source?.marketplaceId ?? null),
         source,
       };
     })

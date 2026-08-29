@@ -929,6 +929,7 @@ function SettingsTab({
 
       {section === 'skills' ? (
         <SkillsSection
+          gid={gid}
           value={draftSkills}
           availableSkills={data.availableSkills ?? []}
           elevated={data.actorIsElevated}

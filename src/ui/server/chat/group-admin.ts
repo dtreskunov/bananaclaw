@@ -75,6 +75,7 @@ import { listImages } from './image-catalog.js';
 import { bareIdForResponse, dbValueFromBareId, getModelDetails, listModelsForProvider } from './models-catalog.js';
 import { resolveUpstreamForWireId } from './models-dev-catalog.js';
 import { listAvailableSkills, type AvailableSkill } from './skill-catalog.js';
+import { groupSkillRoots } from '../../../skills/registry.js';
 import { deriveVoiceMode } from './voice-mode.js';
 import { allocateSiteSlug, isValidSlug, pagesBaseDomain, pagesEnabled, siteFqdn, siteUrl } from '../pages/site.js';
 
@@ -365,7 +366,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     },
     mcpServers: parseMcpServers(cfg.mcp_servers),
     skills: parseSkills(cfg.skills),
-    availableSkills: listAvailableSkills(),
+    availableSkills: listAvailableSkills(groupSkillRoots(group.folder)),
     defaults: {
       provider: defaultProviderName,
       models: defaultModels,

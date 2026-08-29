@@ -64,8 +64,8 @@ export interface MarketplaceCatalog {
   description: string | null;
   commit: string | null;
   refreshedAt: string | null;
-  /** Manifest-driven, a scanned layout, or the read-only built-in set. */
-  kind: 'plugin-marketplace' | 'skill-repo' | 'built-in';
+  /** Manifest-driven, a scanned layout, or one of the read-only local sets. */
+  kind: 'plugin-marketplace' | 'skill-repo' | 'built-in' | 'workspace';
   plugins: CatalogPlugin[];
   error: string | null;
 }

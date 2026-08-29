@@ -30,8 +30,9 @@ import {
   MarketplaceError,
   type MarketplaceCatalog,
 } from '../../../skills/marketplace.js';
-import { listSkills, BUILTIN_CATALOG_ID } from '../../../skills/registry.js';
+import { listSkills, groupSkillRoots, BUILTIN_CATALOG_ID, WORKSPACE_CATALOG_ID } from '../../../skills/registry.js';
 import { readMarketplaceRecords } from '../../../skills/store.js';
+import { getAgentGroup } from '../../../db/agent-groups.js';
 import { recordAdminAction } from './audit.js';
 import { listAvailableSkills } from './skill-catalog.js';
 
@@ -87,10 +88,52 @@ function builtinCatalog(): MarketplaceCatalog {
   };
 }
 
-export function getSkillsOverview(): SkillsAdminResult {
+/**
+ * Skills the agent wrote in its own workspace (`groups/<folder>/skills`).
+ * Group-scoped, always active, and not installable or removable from here —
+ * the agent owns this directory.
+ */
+function workspaceCatalog(gid: string): MarketplaceCatalog | null {
+  const group = getAgentGroup(gid);
+  if (!group) return null;
+
+  const skills = listSkills(groupSkillRoots(group.folder))
+    .filter((skill) => skill.origin === 'workspace')
+    .map((skill) => ({
+      marketplaceId: WORKSPACE_CATALOG_ID,
+      plugin: WORKSPACE_CATALOG_ID,
+      slug: skill.slug,
+      name: skill.name,
+      description: skill.description,
+      license: skill.license,
+      path: `groups/${group.folder}/skills/${skill.slug}`,
+      warnings: skill.warnings,
+    }));
+  if (skills.length === 0) return null;
+
+  return {
+    id: WORKSPACE_CATALOG_ID,
+    repo: `groups/${group.folder}/skills`,
+    source: null,
+    ref: '',
+    label: 'Workspace',
+    description: 'Written by this agent in its own workspace. Always active, and only for this group.',
+    commit: null,
+    refreshedAt: null,
+    kind: 'workspace',
+    plugins: [{ name: WORKSPACE_CATALOG_ID, description: null, skills, unsupportedReason: null }],
+    error: null,
+  };
+}
+
+export function getSkillsOverview(gid?: string): SkillsAdminResult {
+  const workspace = gid ? workspaceCatalog(gid) : null;
   return {
     status: 200,
-    body: { skills: listAvailableSkills(), catalogs: [builtinCatalog(), ...listCatalogs()] },
+    body: {
+      skills: listAvailableSkills(),
+      catalogs: [builtinCatalog(), ...(workspace ? [workspace] : []), ...listCatalogs()],
+    },
   };
 }
 

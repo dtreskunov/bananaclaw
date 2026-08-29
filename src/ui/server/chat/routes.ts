@@ -321,7 +321,7 @@ const skillsAdmin = (
 on(
   'GET',
   '/api/skills',
-  skillsAdmin(() => getSkillsOverview()),
+  skillsAdmin((_b, _u, _p, ctx) => getSkillsOverview(ctx.url.searchParams.get('gid') ?? undefined)),
 );
 on(
   'GET',

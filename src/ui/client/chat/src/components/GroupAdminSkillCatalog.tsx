@@ -40,7 +40,7 @@ export interface CatalogDto {
   description: string | null;
   commit: string | null;
   refreshedAt: string | null;
-  kind: 'plugin-marketplace' | 'skill-repo' | 'built-in';
+  kind: 'plugin-marketplace' | 'skill-repo' | 'built-in' | 'workspace';
   plugins: CatalogPluginDto[];
   error: string | null;
 }
@@ -48,10 +48,12 @@ export interface CatalogDto {
 const SKILLS_API = '/ui/chat/api/skills';
 
 export function SkillCatalogSection({
+  gid,
   installedSlugs,
   reloadKey,
   onChanged,
 }: {
+  gid: string;
   installedSlugs: Set<string>;
   /** Bump to re-read catalogs after an install elsewhere added one. */
   reloadKey: number;
@@ -64,7 +66,7 @@ export function SkillCatalogSection({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   async function load(): Promise<void> {
-    const r = await call<{ catalogs: CatalogDto[] }>(SKILLS_API);
+    const r = await call<{ catalogs: CatalogDto[] }>(`${SKILLS_API}?gid=${encodeURIComponent(gid)}`);
     if (!r.ok) {
       showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
       setCatalogs([]);
@@ -75,7 +77,7 @@ export function SkillCatalogSection({
 
   useEffect(() => {
     load();
-  }, [reloadKey]);
+  }, [gid, reloadKey]);
 
   async function mutate(url: string, method: string, body: unknown, okMessage: string): Promise<void> {
     setBusy(true);
@@ -180,7 +182,7 @@ export function SkillCatalogSection({
       ) : (
         <ul class="ga-catalog-list">
           {catalogs.map((catalog) => {
-            const readOnly = catalog.kind === 'built-in';
+            const readOnly = catalog.kind === 'built-in' || catalog.kind === 'workspace';
             return (
               <li key={catalog.id} class="ga-catalog">
                 <div class="ga-catalog-head">
@@ -228,7 +230,9 @@ export function SkillCatalogSection({
 
                 <p class="ga-catalog-meta">
                   {readOnly
-                    ? `Built in · ${catalog.plugins[0]?.skills.length ?? 0} skills`
+                    ? `${catalog.kind === 'workspace' ? 'Agent workspace' : 'Built in'} · ${
+                        catalog.plugins[0]?.skills.length ?? 0
+                      } skill${(catalog.plugins[0]?.skills.length ?? 0) === 1 ? '' : 's'}`
                     : `${catalog.kind === 'plugin-marketplace' ? 'Plugin marketplace' : 'Skills repo'} · ${catalog.ref}${
                         catalog.commit ? ` · ${catalog.commit.slice(0, 7)}` : ''
                       }`}

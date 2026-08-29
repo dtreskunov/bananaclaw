@@ -42,7 +42,7 @@ import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
-import { defaultSkillRoots, listSkills, type SkillRoot } from './skills/registry.js';
+import { defaultSkillRoots, groupSkillRoots, listSkills, type SkillRoot } from './skills/registry.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
@@ -576,7 +576,7 @@ function resolveProviderContribution(
         sessionDir: sessionDir(agentGroup.id, session.id),
         agentGroupId: agentGroup.id,
         groupDir: path.resolve(GROUPS_DIR, agentGroup.folder),
-        selectedSkills: selectedSkillNames(containerConfig),
+        selectedSkills: selectedSkillNames(containerConfig, agentGroup.folder),
         hostEnv: process.env,
         containerConfig,
       })
@@ -601,7 +601,7 @@ export function buildMounts(
   const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
   if (defaultSurfaces) {
     // Sync skill symlinks based on container.json selection before mounting.
-    syncSkillSymlinks(claudeDir, containerConfig);
+    syncSkillSymlinks(claudeDir, containerConfig, groupSkillRoots(agentGroup.folder));
 
     // Compose CLAUDE.md fresh every spawn from the shared base, enabled skill
     // fragments, and MCP server instructions. See `claude-md-compose.ts`.
@@ -664,8 +664,9 @@ export function buildMounts(
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   mounts.push({ hostPath: agentRunnerSrc, containerPath: '/app/src', readonly: true });
 
-  // Skill roots — read-only. Symlinks in .claude-shared/skills/ point at the
-  // container paths declared by `defaultSkillRoots()`.
+  // Host-wide skill roots — read-only. The group's own workspace root is not
+  // listed here: it lives inside the RW /workspace/agent mount, because the
+  // agent writes its self-authored skills there.
   for (const root of defaultSkillRoots(projectRoot)) {
     if (!fs.existsSync(root.hostDir)) continue;
     mounts.push({ hostPath: root.hostDir, containerPath: root.containerDir, readonly: true });
@@ -707,7 +708,7 @@ function resolveEnv(name: string): string | undefined {
 export function syncSkillSymlinks(
   claudeDir: string,
   containerConfig: import('./container-config.js').ContainerConfig,
-  roots: SkillRoot[] = defaultSkillRoots(),
+  roots: SkillRoot[],
 ): void {
   const skillsDir = path.join(claudeDir, 'skills');
   if (!fs.existsSync(skillsDir)) {
@@ -717,9 +718,13 @@ export function syncSkillSymlinks(
   // Desired = the group's selection ∩ what's discoverable and available.
   // Skills whose `metadata.requires_env` names an untruthy env var are
   // dropped here so the agent never surfaces commands the host won't honor.
+  // Workspace skills bypass the selection: they are the agent's own, live in
+  // its writable workspace, and the native provider loads them regardless.
   const selection = containerConfig.skills;
   const desired = listSkills(roots).filter(
-    (skill) => skill.available && (selection === 'all' || selection.includes(skill.slug)),
+    (skill) =>
+      skill.available &&
+      (skill.origin === 'workspace' || selection === 'all' || selection.includes(skill.slug)),
   );
   const bySlug = new Map(desired.map((skill) => [skill.slug, skill]));
   const materialize = containerConfig.provider === 'fx';
@@ -769,12 +774,15 @@ export function syncSkillSymlinks(
 /**
  * Resolve the group's skill selection to concrete names — `'all'` recomputes
  * from the skill roots so newly-added or newly-installed skills appear
- * automatically.
+ * automatically. Workspace skills are always included.
  */
-function selectedSkillNames(containerConfig: import('./container-config.js').ContainerConfig): string[] {
+function selectedSkillNames(
+  containerConfig: import('./container-config.js').ContainerConfig,
+  groupFolder: string,
+): string[] {
   const selection = containerConfig.skills;
-  return listSkills()
-    .filter((skill) => selection === 'all' || selection.includes(skill.slug))
+  return listSkills(groupSkillRoots(groupFolder))
+    .filter((skill) => skill.origin === 'workspace' || selection === 'all' || selection.includes(skill.slug))
     .map((skill) => skill.slug);
 }
 

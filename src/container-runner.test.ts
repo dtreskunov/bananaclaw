@@ -90,8 +90,7 @@ describe('syncSkillSymlinks', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('links a symlinked skill folder and repoints a slug that moved roots', () => {
-    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+  it('links a symlinked skill folder and repoints a slug that moved roots', () => {    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
     const claudeDir = path.join(root, 'claude');
     const builtin = path.join(root, 'builtin');
     const installed = path.join(root, 'installed');
@@ -115,6 +114,31 @@ describe('syncSkillSymlinks', () => {
 
     expect(fs.readlinkSync(path.join(claudeDir, 'skills', 'linked'))).toBe('/app/skills/linked');
     expect(fs.readlinkSync(path.join(claudeDir, 'skills', 'moved'))).toBe('/app/skills-installed/moved');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('keeps workspace skills linked even when the selection excludes them', () => {
+    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+    const claudeDir = path.join(root, 'claude');
+    const builtin = path.join(root, 'builtin');
+    const workspace = path.join(root, 'workspace');
+    for (const [dir, name] of [
+      [builtin, 'unselected'],
+      [workspace, 'homegrown'],
+    ] as const) {
+      fs.mkdirSync(path.join(dir, name), { recursive: true });
+      fs.writeFileSync(path.join(dir, name, 'SKILL.md'), `---\nname: ${name}\ndescription: test\n---\n`);
+    }
+
+    // The agent owns its workspace dir, so an explicit selection can't turn
+    // those off — the native provider loads them regardless.
+    syncSkillSymlinks(claudeDir, { provider: 'native', skills: [] } as never, [
+      { origin: 'builtin', hostDir: builtin, containerDir: '/app/skills' },
+      { origin: 'workspace', hostDir: workspace, containerDir: '/workspace/agent/skills' },
+    ]);
+
+    expect(fs.readlinkSync(path.join(claudeDir, 'skills', 'homegrown'))).toBe('/workspace/agent/skills/homegrown');
+    expect(fs.existsSync(path.join(claudeDir, 'skills', 'unselected'))).toBe(false);
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

@@ -21,7 +21,7 @@ import { DATA_DIR, GROUPS_DIR } from './config.js';
 import type { McpServerConfig } from './container-config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { log } from './log.js';
-import { listSkills, type SkillRoot } from './skills/registry.js';
+import { listSkills, groupSkillRoots, type SkillRoot } from './skills/registry.js';
 import type { AgentGroup } from './types.js';
 
 // Symlink targets are container paths — dangling on host (hence the readlink
@@ -89,7 +89,7 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
 
   // Skill fragments — selected/available skills that ship `instructions.md`.
   const effectiveSkillsDir = path.join(DATA_DIR, 'v2-sessions', group.id, '.claude-shared', 'skills');
-  for (const fragment of selectedSkillFragments(effectiveSkillsDir)) {
+  for (const fragment of selectedSkillFragments(effectiveSkillsDir, groupSkillRoots(group.folder))) {
     desired.set(`skill-${fragment.slug}.md`, {
       type: 'symlink',
       content: `${fragment.containerPath}/instructions.md`,

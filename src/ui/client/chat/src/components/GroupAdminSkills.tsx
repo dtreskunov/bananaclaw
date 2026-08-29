@@ -29,9 +29,10 @@ export interface AvailableSkillDto {
   description: string;
   available: boolean;
   unavailableReason: string | null;
-  origin: 'builtin' | 'installed';
+  origin: 'builtin' | 'installed' | 'workspace';
   catalogId: string | null;
   catalogLabel: string;
+  alwaysOn: boolean;
   license: string | null;
   warnings: string[];
   source: SkillProvenanceDto | null;
@@ -50,6 +51,7 @@ function matches(skill: AvailableSkillDto, query: string): boolean {
 }
 
 export function SkillsSection({
+  gid,
   value,
   availableSkills,
   busy,
@@ -57,6 +59,7 @@ export function SkillsSection({
   onChange,
   onCatalogChanged,
 }: {
+  gid: string;
   value: string[] | 'all';
   availableSkills: AvailableSkillDto[];
   busy: boolean;
@@ -174,14 +177,14 @@ export function SkillsSection({
       ) : (
         <ul class="ga-skills-catalog">
           {shown.map((skill) => {
-            const checked = list.includes(skill.slug);
+            const checked = skill.alwaysOn || list.includes(skill.slug);
             return (
               <li key={skill.slug} class="ga-skills-catalog-item">
                 <label class="ga-skills-option">
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={busy || (!skill.available && !checked)}
+                    disabled={busy || skill.alwaysOn || (!skill.available && !checked)}
                     onChange={(event) => setSkill(skill.slug, event.currentTarget.checked)}
                   />
                   <span class="ga-skills-details">
@@ -195,6 +198,11 @@ export function SkillsSection({
                       {skill.license ? <span class="ga-skills-license">{skill.license}</span> : null}
                     </span>
                     {skill.description ? <span class="ga-skills-description">{skill.description}</span> : null}
+                    {skill.alwaysOn ? (
+                      <span class="ga-skills-source">
+                        Lives in this agent&rsquo;s workspace — always active, and only for this group.
+                      </span>
+                    ) : null}
                     {skill.source ? (
                       <span class="ga-skills-source">
                         {skill.source.repo} · {skill.source.ref} · {skill.source.commit.slice(0, 7)} ·{' '}
@@ -267,6 +275,7 @@ export function SkillsSection({
 
       {elevated ? (
         <SkillCatalogSection
+          gid={gid}
           installedSlugs={installedSlugs}
           reloadKey={catalogReloads}
           onChanged={onCatalogChanged}

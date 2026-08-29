@@ -95,8 +95,6 @@ describe('listSkills', () => {
   });
 
   it('merges both roots and lets built-ins win a slug collision', () => {
-    const store = tempDir();
-    setSkillsStoreRoot(store);
     const builtin = tempDir();
     const installed = tempDir();
     writeSkill(builtin, 'shared', 'name: shared\ndescription: From the repo.');
@@ -113,5 +111,30 @@ describe('listSkills', () => {
     ]);
     expect(skills.find((skill) => skill.slug === 'shared')!.description).toBe('From the repo.');
     expect(skills.find((skill) => skill.slug === 'extra')!.containerPath).toBe('/app/skills-installed/extra');
+  });
+
+  it('discovers the group workspace root and lets it override a built-in', () => {
+    const builtin = tempDir();
+    const workspace = tempDir();
+    writeSkill(builtin, 'shared', 'name: shared\ndescription: From the repo.');
+    writeSkill(builtin, 'only-builtin', 'name: only-builtin\ndescription: Repo only.');
+    writeSkill(workspace, 'shared', 'name: shared\ndescription: The agent own copy.');
+    writeSkill(workspace, 'homegrown', 'name: homegrown\ndescription: Written by the agent.');
+
+    const skills = listSkills([
+      builtinRoot(builtin),
+      { origin: 'workspace', hostDir: workspace, containerDir: '/workspace/agent/skills' },
+    ]);
+    expect(skills.map((skill) => [skill.slug, skill.origin])).toEqual([
+      ['homegrown', 'workspace'],
+      ['only-builtin', 'builtin'],
+      ['shared', 'workspace'],
+    ]);
+
+    const homegrown = skills.find((skill) => skill.slug === 'homegrown')!;
+    expect(homegrown.catalogId).toBe('workspace');
+    expect(homegrown.containerPath).toBe('/workspace/agent/skills/homegrown');
+    // The agent's copy wins, matching how the native provider already resolves it.
+    expect(skills.find((skill) => skill.slug === 'shared')!.description).toBe('The agent own copy.');
   });
 });

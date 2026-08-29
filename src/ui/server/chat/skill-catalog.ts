@@ -30,6 +30,8 @@ export interface AvailableSkill {
   catalogId: string | null;
   /** Display name for that catalog. */
   catalogLabel: string;
+  /** Selection doesn't apply — the agent's own workspace skills always load. */
+  alwaysOn: boolean;
   license: string | null;
   /** Spec-conformance warnings — informational, the skill still works. */
   warnings: string[];
@@ -52,7 +54,10 @@ export function listAvailableSkills(roots?: SkillRoot[]): AvailableSkill[] {
     catalogLabel:
       skill.origin === 'builtin'
         ? 'built-in'
-        : (catalogNames.get(skill.catalogId ?? '') ?? skill.catalogId ?? 'unknown'),
+        : skill.origin === 'workspace'
+          ? 'workspace'
+          : (catalogNames.get(skill.catalogId ?? '') ?? skill.catalogId ?? 'unknown'),
+    alwaysOn: skill.origin === 'workspace',
     license: skill.license,
     warnings: skill.warnings,
     source: skill.source
