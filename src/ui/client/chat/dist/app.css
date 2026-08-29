@@ -5658,6 +5658,8 @@ body.private-web-page,
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 .ga-catalog-add input {
   flex: 1 1 180px;
@@ -5752,6 +5754,18 @@ body.private-web-page,
   padding: 0;
   display: grid;
   gap: 10px;
+}
+.ga-discover-results {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ga-discover-results > .ga-catalog-meta {
+  margin-top: 0;
 }
 .ga-discover-source {
   min-width: 0;

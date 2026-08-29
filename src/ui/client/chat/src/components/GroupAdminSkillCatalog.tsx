@@ -220,61 +220,63 @@ export function SkillCatalogSection({
             {searching ? 'Searching…' : 'Search'}
           </button>
         </div>
-
-        {discover ? (
-          discover.sources.length === 0 ? (
-            <p class="group-admin-help">No matches.</p>
-          ) : (
-            <>
-              <p class="ga-catalog-meta">
-                {discover.searchType === 'semantic' ? 'Semantic' : 'Fuzzy'} match ·{' '}
-                {discover.authenticated ? 'skills.sh API' : 'skills.sh (unauthenticated)'} · install counts are
-                popularity, not safety
-              </p>
-              <ul class="ga-discover-list">
-                {discover.sources.map((entry) => (
-                  <li key={entry.source} class="ga-discover-source">
-                    <p class="ga-catalog-plugin-name">
-                      {entry.source}
-                      {entry.catalogId ? <span class="ga-skills-badge">catalog added</span> : null}
-                    </p>
-                    <ul class="ga-skills-catalog">
-                      {entry.skills.map((skill) => (
-                        <li key={skill.id} class="ga-skills-catalog-item">
-                          <span class="ga-skills-details">
-                            <span class="ga-skills-title">
-                              <strong>{skill.name}</strong>
-                              <code>{skill.slug}</code>
-                              {formatInstalls(skill.installs) ? (
-                                <span class="ga-skills-license">{formatInstalls(skill.installs)}</span>
-                              ) : null}
-                            </span>
-                          </span>
-                          <InstallControl
-                            source={entry.source}
-                            slug={skill.slug}
-                            installed={installedSlugs.has(skill.slug)}
-                            disabled={busy}
-                            label={entry.catalogId ? 'Install' : 'Add & install'}
-                            onInstall={(ack) =>
-                              install(
-                                `${SKILLS_API}/install-from-repo`,
-                                { repo: entry.source, slug: skill.slug },
-                                skill.slug,
-                                ack,
-                              )
-                            }
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )
-        ) : null}
       </Field>
+
+      {/* Outside the field row: `.group-admin-control` lays its children out in a
+          row, which squeezed the result list into a column beside the input. */}
+      {discover ? (
+        discover.sources.length === 0 ? (
+          <p class="group-admin-help">No matches for “{discover.query}”.</p>
+        ) : (
+          <div class="ga-discover-results">
+            <p class="ga-catalog-meta">
+              {discover.searchType === 'semantic' ? 'Semantic' : 'Fuzzy'} match ·{' '}
+              {discover.authenticated ? 'skills.sh API' : 'skills.sh (unauthenticated)'} · install counts are
+              popularity, not safety
+            </p>
+            <ul class="ga-discover-list">
+              {discover.sources.map((entry) => (
+                <li key={entry.source} class="ga-discover-source">
+                  <p class="ga-catalog-plugin-name">
+                    {entry.source}
+                    {entry.catalogId ? <span class="ga-skills-badge">catalog added</span> : null}
+                  </p>
+                  <ul class="ga-skills-catalog">
+                    {entry.skills.map((skill) => (
+                      <li key={skill.id} class="ga-skills-catalog-item">
+                        <span class="ga-skills-details">
+                          <span class="ga-skills-title">
+                            <strong>{skill.name}</strong>
+                            <code>{skill.slug}</code>
+                            {formatInstalls(skill.installs) ? (
+                              <span class="ga-skills-license">{formatInstalls(skill.installs)}</span>
+                            ) : null}
+                          </span>
+                        </span>
+                        <InstallControl
+                          source={entry.source}
+                          slug={skill.slug}
+                          installed={installedSlugs.has(skill.slug)}
+                          disabled={busy}
+                          label={entry.catalogId ? 'Install' : 'Add & install'}
+                          onInstall={(ack) =>
+                            install(
+                              `${SKILLS_API}/install-from-repo`,
+                              { repo: entry.source, slug: skill.slug },
+                              skill.slug,
+                              ack,
+                            )
+                          }
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      ) : null}
 
       {suggestions.length > 0 ? (
         <Field label="Suggested catalogs">

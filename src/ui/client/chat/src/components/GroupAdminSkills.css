@@ -94,6 +94,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
 .ga-catalog-add input {
@@ -197,6 +199,19 @@
   display: grid;
   gap: 10px;
 }
+
+/* Results scroll within themselves so the search box above stays on screen. */
+.ga-discover-results {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ga-discover-results > .ga-catalog-meta { margin-top: 0; }
 
 .ga-discover-source { min-width: 0; }
 

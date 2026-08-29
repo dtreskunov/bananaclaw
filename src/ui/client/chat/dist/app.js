@@ -27774,65 +27774,67 @@ function SkillCatalogSection({
       /* @__PURE__ */ u4("a", { href: "https://agentskills.io/specification", target: "_blank", rel: "noreferrer noopener", children: "Agent Skills" }),
       ". Installing makes a skill selectable by every group; it does not enable it anywhere. Nothing from a catalog runs at install time."
     ] }) }),
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Find a skill", info: "Searches the skills.sh directory. Installs still clone from GitHub.", children: [
-      /* @__PURE__ */ u4("div", { class: "ga-catalog-add", children: [
-        /* @__PURE__ */ u4(
-          "input",
-          {
-            type: "search",
-            placeholder: "pdf, spreadsheets, react native\u2026",
-            value: query,
-            disabled: busy,
-            onInput: (event) => setQuery(event.currentTarget.value),
-            onKeyDown: (event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                runSearch(query);
-              }
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Find a skill", info: "Searches the skills.sh directory. Installs still clone from GitHub.", children: /* @__PURE__ */ u4("div", { class: "ga-catalog-add", children: [
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "search",
+          placeholder: "pdf, spreadsheets, react native\u2026",
+          value: query,
+          disabled: busy,
+          onInput: (event) => setQuery(event.currentTarget.value),
+          onKeyDown: (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              runSearch(query);
             }
           }
-        ),
-        /* @__PURE__ */ u4("button", { type: "button", disabled: busy || searching || query.trim().length < 2, onClick: () => runSearch(query), children: searching ? "Searching\u2026" : "Search" })
+        }
+      ),
+      /* @__PURE__ */ u4("button", { type: "button", disabled: busy || searching || query.trim().length < 2, onClick: () => runSearch(query), children: searching ? "Searching\u2026" : "Search" })
+    ] }) }),
+    discover ? discover.sources.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+      "No matches for \u201C",
+      discover.query,
+      "\u201D."
+    ] }) : /* @__PURE__ */ u4("div", { class: "ga-discover-results", children: [
+      /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
+        discover.searchType === "semantic" ? "Semantic" : "Fuzzy",
+        " match \xB7",
+        " ",
+        discover.authenticated ? "skills.sh API" : "skills.sh (unauthenticated)",
+        " \xB7 install counts are popularity, not safety"
       ] }),
-      discover ? discover.sources.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No matches." }) : /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
-          discover.searchType === "semantic" ? "Semantic" : "Fuzzy",
-          " match \xB7",
-          " ",
-          discover.authenticated ? "skills.sh API" : "skills.sh (unauthenticated)",
-          " \xB7 install counts are popularity, not safety"
+      /* @__PURE__ */ u4("ul", { class: "ga-discover-list", children: discover.sources.map((entry) => /* @__PURE__ */ u4("li", { class: "ga-discover-source", children: [
+        /* @__PURE__ */ u4("p", { class: "ga-catalog-plugin-name", children: [
+          entry.source,
+          entry.catalogId ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: "catalog added" }) : null
         ] }),
-        /* @__PURE__ */ u4("ul", { class: "ga-discover-list", children: discover.sources.map((entry) => /* @__PURE__ */ u4("li", { class: "ga-discover-source", children: [
-          /* @__PURE__ */ u4("p", { class: "ga-catalog-plugin-name", children: [
-            entry.source,
-            entry.catalogId ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: "catalog added" }) : null
-          ] }),
-          /* @__PURE__ */ u4("ul", { class: "ga-skills-catalog", children: entry.skills.map((skill) => /* @__PURE__ */ u4("li", { class: "ga-skills-catalog-item", children: [
-            /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: /* @__PURE__ */ u4("span", { class: "ga-skills-title", children: [
-              /* @__PURE__ */ u4("strong", { children: skill.name }),
-              /* @__PURE__ */ u4("code", { children: skill.slug }),
-              formatInstalls(skill.installs) ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: formatInstalls(skill.installs) }) : null
-            ] }) }),
-            /* @__PURE__ */ u4(
-              InstallControl,
-              {
-                source: entry.source,
-                slug: skill.slug,
-                installed: installedSlugs.has(skill.slug),
-                disabled: busy,
-                label: entry.catalogId ? "Install" : "Add & install",
-                onInstall: (ack) => install(
-                  `${SKILLS_API2}/install-from-repo`,
-                  { repo: entry.source, slug: skill.slug },
-                  skill.slug,
-                  ack
-                )
-              }
-            )
-          ] }, skill.id)) })
-        ] }, entry.source)) })
-      ] }) : null
-    ] }),
+        /* @__PURE__ */ u4("ul", { class: "ga-skills-catalog", children: entry.skills.map((skill) => /* @__PURE__ */ u4("li", { class: "ga-skills-catalog-item", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: /* @__PURE__ */ u4("span", { class: "ga-skills-title", children: [
+            /* @__PURE__ */ u4("strong", { children: skill.name }),
+            /* @__PURE__ */ u4("code", { children: skill.slug }),
+            formatInstalls(skill.installs) ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: formatInstalls(skill.installs) }) : null
+          ] }) }),
+          /* @__PURE__ */ u4(
+            InstallControl,
+            {
+              source: entry.source,
+              slug: skill.slug,
+              installed: installedSlugs.has(skill.slug),
+              disabled: busy,
+              label: entry.catalogId ? "Install" : "Add & install",
+              onInstall: (ack) => install(
+                `${SKILLS_API2}/install-from-repo`,
+                { repo: entry.source, slug: skill.slug },
+                skill.slug,
+                ack
+              )
+            }
+          )
+        ] }, skill.id)) })
+      ] }, entry.source)) })
+    ] }) : null,
     suggestions.length > 0 ? /* @__PURE__ */ u4(GroupAdminField, { label: "Suggested catalogs", children: /* @__PURE__ */ u4("ul", { class: "ga-suggested-list", children: suggestions.map((entry) => /* @__PURE__ */ u4("li", { class: "ga-suggested", children: [
       /* @__PURE__ */ u4("span", { class: "ga-skills-details", children: [
         /* @__PURE__ */ u4("span", { class: "ga-skills-title", children: [
