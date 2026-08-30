@@ -3,20 +3,22 @@
  *
  * Thin adapter over `src/skills/registry.ts` — discovery, symlink handling and
  * env gating all live there so the UI and the spawn path can't disagree about
- * which skills exist.
+ * which skills exist. Provenance for installed skills comes from git rather
+ * than a side table, so it always describes the files actually on disk.
  */
-import { installedUpdateStatus } from '../../../skills/install.js';
 import { listSkills, type SkillOrigin, type SkillRoot } from '../../../skills/registry.js';
 import { readMarketplaceRecords } from '../../../skills/store.js';
 
 export interface SkillProvenance {
-  marketplaceId: string | null;
-  plugin: string | null;
-  repo: string;
-  ref: string;
-  commit: string;
-  path: string;
-  installedAt: string;
+  /** `origin` remote of the catalog checkout this skill was vendored from. */
+  repo: string | null;
+  commit: string | null;
+  /** Path of the skill within that repo. */
+  sourcePath: string | null;
+  /** Agent has uncommitted edits to the vendored files. */
+  modified: boolean;
+  /** Commits the agent made on top of what was fetched. */
+  localCommits: number;
 }
 
 export interface AvailableSkill {
@@ -30,18 +32,15 @@ export interface AvailableSkill {
   catalogId: string | null;
   /** Display name for that catalog. */
   catalogLabel: string;
-  /** Selection doesn't apply — the agent's own workspace skills always load. */
+  /** Enabled by omission rather than by selection — toggled via the deny-list. */
   alwaysOn: boolean;
   license: string | null;
   /** Spec-conformance warnings — informational, the skill still works. */
   warnings: string[];
   source: SkillProvenance | null;
-  /** True when the catalog has a newer version; null when it can't be told. */
-  updateAvailable: boolean | null;
 }
 
 export function listAvailableSkills(roots?: SkillRoot[]): AvailableSkill[] {
-  const updates = installedUpdateStatus();
   const catalogNames = new Map(readMarketplaceRecords().map((record) => [record.id, record.label ?? record.id]));
   return listSkills(roots).map((skill) => ({
     slug: skill.slug,
@@ -57,20 +56,18 @@ export function listAvailableSkills(roots?: SkillRoot[]): AvailableSkill[] {
         : skill.origin === 'workspace'
           ? 'workspace'
           : (catalogNames.get(skill.catalogId ?? '') ?? skill.catalogId ?? 'unknown'),
-    alwaysOn: skill.origin === 'workspace',
+    // Everything in the group's own root is on unless explicitly denied.
+    alwaysOn: skill.origin !== 'builtin',
     license: skill.license,
     warnings: skill.warnings,
-    source: skill.source
+    source: skill.git
       ? {
-          marketplaceId: skill.source.marketplaceId,
-          plugin: skill.source.plugin,
-          repo: skill.source.repo,
-          ref: skill.source.ref,
-          commit: skill.source.commit,
-          path: skill.source.path,
-          installedAt: skill.source.installedAt,
+          repo: skill.git.remote,
+          commit: skill.git.commit,
+          sourcePath: skill.git.sourcePath,
+          modified: skill.git.modified,
+          localCommits: skill.git.localCommits,
         }
       : null,
-    updateAvailable: skill.origin === 'installed' ? (updates[skill.slug] ?? null) : null,
   }));
 }

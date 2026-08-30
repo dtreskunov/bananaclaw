@@ -4,17 +4,20 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { installCatalogSkill, installedUpdateStatus, uninstallSkill, SkillInstallError } from './install.js';
+import { installCatalogSkill, uninstallSkill, SkillInstallError } from './install.js';
 import {
   addMarketplace,
   listCatalogs,
   MarketplaceError,
   normalizeRepoSource,
-  refreshMarketplace,
   removeMarketplace,
 } from './marketplace.js';
 import { listSkills } from './registry.js';
-import { getInstalledRecord, installedSkillsDir, setSkillsStoreRoot } from './store.js';
+import { setSkillsStoreRoot } from './store.js';
+import { GROUPS_DIR } from '../config.js';
+
+/** Scratch group the vendored-install tests install into. */
+const GROUP_FOLDER = '.test-skill-install';
 
 const tempDirs: string[] = [];
 
@@ -72,6 +75,7 @@ function makeMarketplaceRepo(): string {
 
 afterEach(() => {
   setSkillsStoreRoot(null);
+  fs.rmSync(path.join(GROUPS_DIR, GROUP_FOLDER), { recursive: true, force: true });
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -170,39 +174,82 @@ describe('installing from a catalog', () => {
     return { store, repo };
   }
 
-  it('copies the skill in and records provenance', () => {
+  /** Skill root of the group installs are vendored into. */
+  function skillsRoot(): string {
+    return path.join(GROUPS_DIR, GROUP_FOLDER, 'skills');
+  }
+
+  it('vendors the skill as a symlink into a sparse catalog checkout', () => {
     setup();
     const record = installCatalogSkill({
+      groupFolder: GROUP_FOLDER,
       marketplaceId: 'test-catalog',
       plugin: 'document-skills',
       slug: 'pdf',
-      actorUserId: 'web:someone',
     });
 
-    expect(fs.existsSync(path.join(installedSkillsDir(), 'pdf', 'SKILL.md'))).toBe(true);
-    expect(record).toMatchObject({
-      slug: 'pdf',
+    const link = path.join(skillsRoot(), 'pdf');
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    // Relative, so it resolves the same on the host and at /workspace/agent.
+    expect(fs.readlinkSync(link)).toBe(path.join('.catalogs', 'test-catalog', 'skills', 'pdf'));
+    expect(fs.existsSync(path.join(link, 'SKILL.md'))).toBe(true);
+    expect(record).toMatchObject({ slug: 'pdf', catalogId: 'test-catalog', sourcePath: 'skills/pdf' });
+    expect(record.commit).toMatch(/^[0-9a-f]{40}$/);
+
+    // Only the requested path is checked out, not the whole catalog.
+    const checkout = path.join(skillsRoot(), '.catalogs', 'test-catalog', 'skills');
+    expect(fs.readdirSync(checkout)).toEqual(['pdf']);
+  });
+
+  it('reads provenance back out of git, and marks agent edits as modified', () => {
+    setup();
+    installCatalogSkill({
+      groupFolder: GROUP_FOLDER,
       marketplaceId: 'test-catalog',
       plugin: 'document-skills',
-      path: 'skills/pdf',
-      license: 'Proprietary',
-      installedBy: 'web:someone',
+      slug: 'pdf',
     });
-    expect(record.digest).toMatch(/^[0-9a-f]{64}$/);
-    expect(getInstalledRecord('pdf')!.commit).toMatch(/^[0-9a-f]{40}$/);
 
-    // The installed root feeds discovery like any other skill.
     const discovered = listSkills([
-      { origin: 'installed', hostDir: installedSkillsDir(), containerDir: '/app/skills-installed' },
+      { origin: 'workspace', hostDir: skillsRoot(), containerDir: '/workspace/agent/skills' },
     ]);
-    expect(discovered.map((skill) => skill.slug)).toEqual(['pdf']);
-    expect(discovered[0]!.source!.repo).toBeTruthy();
+    expect(discovered.map((skill) => [skill.slug, skill.origin])).toEqual([['pdf', 'installed']]);
+    expect(discovered[0]!.git).toMatchObject({ sourcePath: 'skills/pdf', modified: false, localCommits: 0 });
+    expect(discovered[0]!.git!.remote).toBeTruthy();
+    expect(discovered[0]!.catalogId).toBe('test-catalog');
+
+    fs.appendFileSync(path.join(skillsRoot(), 'pdf', 'SKILL.md'), '\nAgent edit.\n');
+    const afterEdit = listSkills([
+      { origin: 'workspace', hostDir: skillsRoot(), containerDir: '/workspace/agent/skills' },
+    ]);
+    expect(afterEdit[0]!.git!.modified).toBe(true);
+  });
+
+  it('shares one checkout between skills from the same catalog', () => {
+    setup();
+    for (const [plugin, slug] of [
+      ['document-skills', 'pdf'],
+      ['design-skills', 'canvas-design'],
+    ] as const) {
+      installCatalogSkill({ groupFolder: GROUP_FOLDER, marketplaceId: 'test-catalog', plugin, slug });
+    }
+
+    expect(fs.readdirSync(path.join(skillsRoot(), '.catalogs'))).toEqual(['test-catalog']);
+    expect(fs.readdirSync(path.join(skillsRoot(), '.catalogs', 'test-catalog', 'skills')).sort()).toEqual([
+      'canvas-design',
+      'pdf',
+    ]);
   });
 
   it('refuses a skill the plugin does not list', () => {
     setup();
     expect(() =>
-      installCatalogSkill({ marketplaceId: 'test-catalog', plugin: 'document-skills', slug: 'orphan' }),
+      installCatalogSkill({
+        groupFolder: GROUP_FOLDER,
+        marketplaceId: 'test-catalog',
+        plugin: 'document-skills',
+        slug: 'orphan',
+      }),
     ).toThrow(SkillInstallError);
   });
 
@@ -210,37 +257,45 @@ describe('installing from a catalog', () => {
     setup();
     const builtinSlug = listSkills().find((skill) => skill.origin === 'builtin')?.slug;
     expect(builtinSlug).toBeTruthy();
-    // Re-point the catalog entry at a name that collides with the repo's own skills.
     expect(() =>
-      installCatalogSkill({ marketplaceId: 'test-catalog', plugin: 'document-skills', slug: builtinSlug! }),
+      installCatalogSkill({
+        groupFolder: GROUP_FOLDER,
+        marketplaceId: 'test-catalog',
+        plugin: 'document-skills',
+        slug: builtinSlug!,
+      }),
     ).toThrow(SkillInstallError);
   });
 
-  it('refuses a source tree containing a symlink', () => {
-    const { repo } = setup();
-    fs.symlinkSync('/etc/passwd', path.join(repo, 'skills', 'pdf', 'secrets'));
-    git(['add', '-A'], repo);
-    git(['commit', '-m', 'add symlink'], repo);
-    refreshMarketplace('test-catalog');
-
+  it("refuses to overwrite the agent's own skill of the same name", () => {
+    setup();
+    writeSkill(skillsRoot(), 'pdf', 'name: pdf\ndescription: The agent wrote this.');
     expect(() =>
-      installCatalogSkill({ marketplaceId: 'test-catalog', plugin: 'document-skills', slug: 'pdf' }),
-    ).toThrow(/symlink/);
+      installCatalogSkill({
+        groupFolder: GROUP_FOLDER,
+        marketplaceId: 'test-catalog',
+        plugin: 'document-skills',
+        slug: 'pdf',
+      }),
+    ).toThrow(/already exists/);
   });
 
-  it('flags an upstream change as an available update, and uninstall clears it', () => {
-    const { repo } = setup();
-    installCatalogSkill({ marketplaceId: 'test-catalog', plugin: 'document-skills', slug: 'pdf' });
-    expect(installedUpdateStatus()).toEqual({ pdf: false });
+  it('uninstall drops the link but keeps the shared checkout, and guards local edits', () => {
+    setup();
+    installCatalogSkill({
+      groupFolder: GROUP_FOLDER,
+      marketplaceId: 'test-catalog',
+      plugin: 'document-skills',
+      slug: 'pdf',
+    });
 
-    fs.appendFileSync(path.join(repo, 'skills', 'pdf', 'SKILL.md'), '\nNew guidance.\n');
-    git(['commit', '-am', 'update pdf'], repo);
-    refreshMarketplace('test-catalog');
-    expect(installedUpdateStatus()).toEqual({ pdf: true });
+    fs.appendFileSync(path.join(skillsRoot(), 'pdf', 'SKILL.md'), '\nAgent edit.\n');
+    expect(() => uninstallSkill(GROUP_FOLDER, 'pdf')).toThrow(/uncommitted/);
 
-    uninstallSkill('pdf');
-    expect(installedUpdateStatus()).toEqual({});
-    expect(fs.existsSync(path.join(installedSkillsDir(), 'pdf'))).toBe(false);
-    expect(() => uninstallSkill('pdf')).toThrow(SkillInstallError);
+    uninstallSkill(GROUP_FOLDER, 'pdf', true);
+    expect(fs.existsSync(path.join(skillsRoot(), 'pdf'))).toBe(false);
+    // The checkout stays — other skills may still be pointing into it.
+    expect(fs.existsSync(path.join(skillsRoot(), '.catalogs', 'test-catalog'))).toBe(true);
+    expect(() => uninstallSkill(GROUP_FOLDER, 'pdf')).toThrow(SkillInstallError);
   });
 });

@@ -1,39 +1,21 @@
 /**
- * On-disk store for marketplace-installed skills.
+ * On-disk store for skill catalogs.
  *
- * Layout under `data/skills/` (gitignored, so installs never dirty the repo
- * or collide on upgrade):
+ * Layout under `data/skills/` (gitignored, so it never dirties the repo or
+ * collides on upgrade):
  *
- *   installed/<slug>/       the skill itself, mounted RO at /app/skills-installed
- *   installed.json          provenance: where each slug came from + tree digest
  *   marketplaces.json       configured catalog sources
- *   cache/<marketplace-id>/ shallow git clone used to browse and install
+ *   cache/<marketplace-id>/ shallow git clone used to browse
  *
- * Provenance is what makes "re-review every version" enforceable — without a
- * recorded repo/ref/commit/digest an installed skill is an anonymous folder.
+ * Installed skills are not stored here. They are vendored per agent group as
+ * sparse checkouts under `groups/<folder>/skills/.catalogs/`, so their
+ * provenance is whatever git records rather than a side table that can drift
+ * out of sync with the files.
  */
 import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR } from '../config.js';
-
-export interface InstalledSkillRecord {
-  slug: string;
-  /** Marketplace this came from, or null for a direct repo install. */
-  marketplaceId: string | null;
-  /** Plugin bundle within the marketplace, when the manifest declared one. */
-  plugin: string | null;
-  repo: string;
-  ref: string;
-  commit: string;
-  /** Source path within the repo (e.g. `skills/pdf`). */
-  path: string;
-  license: string | null;
-  /** sha256 over the installed tree — changes when the upstream files change. */
-  digest: string;
-  installedAt: string;
-  installedBy: string | null;
-}
 
 export interface MarketplaceRecord {
   id: string;
@@ -59,10 +41,6 @@ export function setSkillsStoreRoot(dir: string | null): void {
   storeRoot = dir;
 }
 
-export function installedSkillsDir(): string {
-  return path.join(skillsStoreRoot(), 'installed');
-}
-
 export function marketplaceCacheDir(id: string): string {
   return path.join(skillsStoreRoot(), 'cache', id);
 }
@@ -81,29 +59,6 @@ function writeJsonFile(file: string, value: unknown): void {
   const tmp = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
   fs.renameSync(tmp, file);
-}
-
-// ── installed-skill provenance ────────────────────────────────────────────
-
-export function readInstalledRecords(): Record<string, InstalledSkillRecord> {
-  return readJsonFile<Record<string, InstalledSkillRecord>>(path.join(skillsStoreRoot(), 'installed.json'), {});
-}
-
-export function getInstalledRecord(slug: string): InstalledSkillRecord | null {
-  return readInstalledRecords()[slug] ?? null;
-}
-
-export function putInstalledRecord(record: InstalledSkillRecord): void {
-  const all = readInstalledRecords();
-  all[record.slug] = record;
-  writeJsonFile(path.join(skillsStoreRoot(), 'installed.json'), all);
-}
-
-export function deleteInstalledRecord(slug: string): void {
-  const all = readInstalledRecords();
-  if (!(slug in all)) return;
-  delete all[slug];
-  writeJsonFile(path.join(skillsStoreRoot(), 'installed.json'), all);
 }
 
 // ── marketplace sources ───────────────────────────────────────────────────

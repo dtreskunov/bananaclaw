@@ -3,7 +3,13 @@
  *
  * Two roots feed the agent:
  *   - built-in   `container/skills/`        → mounted RO at /app/skills
- *   - installed  `data/skills/installed/`   → mounted RO at /app/skills-installed
+ *   - workspace  `groups/<folder>/skills/` → mounted RW at /workspace/agent/skills
+ *
+ * The workspace root holds both kinds of per-group skill. A skill the agent
+ * wrote is a real directory; a skill installed from a catalog is a symlink
+ * into a sparse clone of that catalog under `.catalogs/<id>`. That is the only
+ * thing distinguishing them, and it means provenance is whatever git already
+ * knows — nothing custom is written into the repo.
  *
  * Everything host-side that needs to know about skills (the admin UI catalog,
  * the spawn-time selection + symlink sync, the CLAUDE.md composer) goes
@@ -18,7 +24,7 @@ import path from 'path';
 import { readEnvFile } from '../env.js';
 import { GROUPS_DIR } from '../config.js';
 import { parseSkillFrontmatter, validateSkillFrontmatter } from './frontmatter.js';
-import { getInstalledRecord, installedSkillsDir, type InstalledSkillRecord } from './store.js';
+import { readSkillGit, type SkillGitInfo } from './skill-git.js';
 
 export type SkillOrigin = 'builtin' | 'installed' | 'workspace';
 
@@ -32,11 +38,13 @@ export const BUILTIN_CATALOG_ID = 'built-in';
 /** Reserved catalog id for skills the agent wrote in its own workspace. */
 export const WORKSPACE_CATALOG_ID = 'workspace';
 
-// Higher wins when a slug exists in more than one root. Workspace beats
-// everything because it is the agent's own copy and is what the native
-// provider already resolves to; the installer separately refuses to shadow a
-// built-in, so that ordering only matters for hand-dropped folders.
-const ORIGIN_PRIORITY: Record<SkillOrigin, number> = { workspace: 3, builtin: 2, installed: 1 };
+/** Holds the sparse catalog clones inside a group's skill root. */
+export const CATALOGS_DIRNAME = '.catalogs';
+
+// Higher wins when a slug exists in more than one root. The group's own root
+// beats the built-ins, matching how the native provider already resolves a
+// local skill over a shared one.
+const ORIGIN_PRIORITY: Record<SkillOrigin, number> = { workspace: 3, installed: 3, builtin: 1 };
 
 export interface SkillRoot {
   origin: SkillOrigin;
@@ -66,21 +74,18 @@ export interface DiscoveredSkill {
   hasInstructions: boolean;
   /** Spec-conformance warnings from `validateSkillFrontmatter`. */
   warnings: string[];
-  /** Provenance for marketplace-installed skills; null for built-ins. */
-  source: InstalledSkillRecord | null;
+  /** Git provenance for catalog-installed skills; null for the rest. */
+  git: SkillGitInfo | null;
 }
 
 export function defaultSkillRoots(projectRoot = process.cwd()): SkillRoot[] {
-  return [
-    { origin: 'builtin', hostDir: path.join(projectRoot, 'container', 'skills'), containerDir: '/app/skills' },
-    { origin: 'installed', hostDir: installedSkillsDir(), containerDir: '/app/skills-installed' },
-  ];
+  return [{ origin: 'builtin', hostDir: path.join(projectRoot, 'container', 'skills'), containerDir: '/app/skills' }];
 }
 
 /**
- * Host-wide roots plus the group's own workspace skills. `groups/<folder>/skills`
- * is mounted RW at `/workspace/agent/skills`, so this is where an agent's
- * self-authored skills live — they belong to one group and nothing else.
+ * Built-ins plus the group's own skill root. `groups/<folder>/skills` is
+ * mounted RW at `/workspace/agent/skills` and holds both the agent's authored
+ * skills and the ones installed from catalogs.
  */
 export function groupSkillRoots(groupFolder: string, projectRoot = process.cwd()): SkillRoot[] {
   return [
@@ -93,6 +98,11 @@ export function groupSkillRoots(groupFolder: string, projectRoot = process.cwd()
   ];
 }
 
+/** Where a group's sparse catalog clones live. */
+export function groupCatalogsDir(groupFolder: string): string {
+  return path.join(GROUPS_DIR, groupFolder, 'skills', CATALOGS_DIRNAME);
+}
+
 /**
  * True when `p` is (or points at) a directory. `statSync` follows symlinks —
  * `Dirent.isDirectory()` does not, which is exactly the bug this replaces.
@@ -100,6 +110,14 @@ export function groupSkillRoots(groupFolder: string, projectRoot = process.cwd()
 function isDirLike(p: string): boolean {
   try {
     return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isSymlink(p: string): boolean {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
   } catch {
     return false;
   }
@@ -130,6 +148,7 @@ interface RawSkill {
   requiresEnv: string | null;
   hasInstructions: boolean;
   warnings: string[];
+  git: SkillGitInfo | null;
 }
 
 function readRoot(root: SkillRoot): RawSkill[] {
@@ -157,9 +176,18 @@ function readRoot(root: SkillRoot): RawSkill[] {
     const { errors, warnings } = validateSkillFrontmatter(frontmatter, slug);
     if (!frontmatter || errors.length > 0) continue;
 
+    // In the group root a symlink means "vendored from a catalog" — it points
+    // into `.catalogs/<id>`. A real directory is the agent's own work.
+    let git: SkillGitInfo | null = null;
+    let origin = root.origin;
+    if (root.origin === 'workspace' && isSymlink(hostPath)) {
+      git = readSkillGit(fs.realpathSync(hostPath));
+      if (git?.remote) origin = 'installed';
+    }
+
     skills.push({
       slug,
-      origin: root.origin,
+      origin,
       hostPath,
       containerPath: `${root.containerDir}/${slug}`,
       name: frontmatter.name ?? slug,
@@ -168,6 +196,7 @@ function readRoot(root: SkillRoot): RawSkill[] {
       requiresEnv: frontmatter.requiresEnv,
       hasInstructions: fs.existsSync(path.join(hostPath, 'instructions.md')),
       warnings,
+      git,
     });
   }
   return skills;
@@ -193,7 +222,6 @@ export function listSkills(roots: SkillRoot[] = defaultSkillRoots()): Discovered
   return raw
     .map((skill) => {
       const available = skill.requiresEnv === null || isTruthyEnv(resolveEnv(skill.requiresEnv));
-      const source = skill.origin === 'installed' ? getInstalledRecord(skill.slug) : null;
       return {
         ...skill,
         available,
@@ -201,13 +229,17 @@ export function listSkills(roots: SkillRoot[] = defaultSkillRoots()): Discovered
         catalogId:
           skill.origin === 'builtin'
             ? BUILTIN_CATALOG_ID
-            : skill.origin === 'workspace'
-              ? WORKSPACE_CATALOG_ID
-              : (source?.marketplaceId ?? null),
-        source,
+            : skill.origin === 'installed'
+              ? catalogIdOf(skill.git)
+              : WORKSPACE_CATALOG_ID,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug));
+}
+
+/** The clone lives at `.catalogs/<id>`, so its directory name is the id. */
+function catalogIdOf(git: SkillGitInfo | null): string | null {
+  return git ? path.basename(git.repoDir) : null;
 }
 
 export function getSkillBySlug(slug: string, roots?: SkillRoot[]): DiscoveredSkill | null {

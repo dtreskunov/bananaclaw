@@ -1,106 +1,110 @@
 /**
- * Installing skills from a catalog into `data/skills/installed/`.
+ * Installing a catalog skill into an agent group's workspace.
  *
- * The copy is deliberately dumb: walk the source tree, refuse anything
- * surprising, write files. No scripts run at install time — a skill only ever
- * executes after an operator selects it for a group and the agent chooses to
- * use it. What we do record is provenance (repo/ref/commit/path) and a digest
- * of the installed tree, so an upstream change is visible instead of silent.
+ * A skill is vendored as a sparse checkout: the catalog is cloned once per
+ * group into `<group>/skills/.catalogs/<id>` with only the paths that group
+ * actually uses, and each installed skill is a symlink from
+ * `<group>/skills/<slug>` into that clone. Adding a second skill from the same
+ * catalog costs one more sparse path and one more symlink, not another clone.
+ *
+ * Nothing custom is written into the repo — `git remote`, `git rev-parse` and
+ * `git sparse-checkout list` already record everything we need, so provenance
+ * travels with the directory and can't drift out of sync with the files.
  */
-import crypto from 'crypto';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { parseSkillFrontmatter, validateSkillFrontmatter, SKILL_NAME_RE, MAX_SKILL_NAME_LEN } from './frontmatter.js';
 import { findCatalogSkill, MarketplaceError, resolveWithin } from './marketplace.js';
-import { defaultSkillRoots, listSkills } from './registry.js';
-import {
-  deleteInstalledRecord,
-  getInstalledRecord,
-  getMarketplaceRecord,
-  installedSkillsDir,
-  marketplaceCacheDir,
-  putInstalledRecord,
-  readInstalledRecords,
-  type InstalledSkillRecord,
-} from './store.js';
+import { defaultSkillRoots, groupCatalogsDir, listSkills, CATALOGS_DIRNAME } from './registry.js';
+import { getMarketplaceRecord } from './store.js';
 
 export class SkillInstallError extends Error {}
 
-const MAX_TREE_BYTES = 32 * 1024 * 1024;
-const MAX_TREE_FILES = 2000;
+const GIT_TIMEOUT_MS = 120_000;
 
-interface WalkedFile {
-  /** Path relative to the tree root, using forward slashes. */
-  rel: string;
-  abs: string;
-  size: number;
-  mode: number;
+function git(args: string[], cwd?: string): string {
+  return execFileSync('git', args, {
+    cwd,
+    timeout: GIT_TIMEOUT_MS,
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/true', GCM_INTERACTIVE: 'never' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
 }
 
-/**
- * Enumerate a skill tree, rejecting symlinks and non-regular files. A symlink
- * inside an installed skill would resolve against the container's filesystem
- * and could point straight out of the read-only mount.
- */
-function walkTree(root: string): WalkedFile[] {
-  const files: WalkedFile[] = [];
-  let bytes = 0;
-
-  const visit = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const abs = path.join(dir, entry.name);
-      const rel = path.relative(root, abs).split(path.sep).join('/');
-      if (entry.isSymbolicLink()) {
-        throw new SkillInstallError(`refusing to install: "${rel}" is a symlink`);
-      }
-      if (entry.isDirectory()) {
-        if (entry.name === '.git') continue;
-        visit(abs);
-        continue;
-      }
-      if (!entry.isFile()) {
-        throw new SkillInstallError(`refusing to install: "${rel}" is not a regular file`);
-      }
-      const stat = fs.statSync(abs);
-      bytes += stat.size;
-      files.push({ rel, abs, size: stat.size, mode: stat.mode });
-      if (files.length > MAX_TREE_FILES) {
-        throw new SkillInstallError(`skill has more than ${MAX_TREE_FILES} files`);
-      }
-      if (bytes > MAX_TREE_BYTES) {
-        throw new SkillInstallError(`skill exceeds ${Math.round(MAX_TREE_BYTES / 1024 / 1024)}MB`);
-      }
-    }
-  };
-
-  visit(root);
-  return files;
-}
-
-/** sha256 over the tree's relative paths and contents — order-independent. */
-export function skillTreeDigest(root: string): string {
-  const hash = crypto.createHash('sha256');
-  for (const file of walkTree(root)) {
-    hash.update(file.rel);
-    hash.update('\0');
-    hash.update(fs.readFileSync(file.abs));
-    hash.update('\0');
-  }
-  return hash.digest('hex');
-}
-
-function assertInstallableSlug(slug: string): void {
+function assertInstallableSlug(slug: string, groupFolder: string): void {
   if (!SKILL_NAME_RE.test(slug) || slug.length > MAX_SKILL_NAME_LEN) {
     throw new SkillInstallError(`"${slug}" is not a valid skill name`);
   }
-  const clash = listSkills(defaultSkillRoots()).find((skill) => skill.slug === slug && skill.origin === 'builtin');
-  if (clash) {
+  const builtin = listSkills(defaultSkillRoots()).find((skill) => skill.slug === slug);
+  if (builtin) {
     throw new SkillInstallError(`"${slug}" is a built-in skill and cannot be replaced`);
+  }
+  // One namespace per group: an authored skill and an installed one can't
+  // share a slug, so refuse rather than clobbering the agent's own work.
+  const target = path.join(path.dirname(groupCatalogsDir(groupFolder)), slug);
+  if (fs.existsSync(target) || isBrokenLink(target)) {
+    throw new SkillInstallError(`"${slug}" already exists in this agent's skills`);
   }
 }
 
-function assertValidSkillSource(dir: string, slug: string): { license: string | null } {
+function isBrokenLink(p: string): boolean {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clone the catalog into the group (sparse, blob-filtered) if it isn't there
+ * yet, then make sure `sourcePath` is one of the checked-out paths.
+ */
+function ensureCatalogCheckout(
+  groupFolder: string,
+  catalogId: string,
+  repo: string,
+  ref: string,
+  sourcePath: string,
+): string {
+  const repoDir = path.join(groupCatalogsDir(groupFolder), catalogId);
+
+  try {
+    if (!fs.existsSync(path.join(repoDir, '.git'))) {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+      fs.mkdirSync(path.dirname(repoDir), { recursive: true });
+      git([
+        'clone',
+        '--filter=blob:none',
+        '--no-checkout',
+        '--depth',
+        '1',
+        '--single-branch',
+        '--branch',
+        ref,
+        '--',
+        repo,
+        repoDir,
+      ]);
+      git(['sparse-checkout', 'init', '--cone'], repoDir);
+      git(['sparse-checkout', 'set', sourcePath], repoDir);
+    } else {
+      git(['sparse-checkout', 'add', sourcePath], repoDir);
+    }
+    git(['checkout'], repoDir);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message.split('\n')[0] : String(err);
+    throw new SkillInstallError(`git checkout failed: ${detail}`);
+  }
+
+  return repoDir;
+}
+
+function assertValidSkillSource(dir: string, slug: string): void {
   let markdown: string;
   try {
     markdown = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
@@ -112,104 +116,80 @@ function assertValidSkillSource(dir: string, slug: string): { license: string | 
   if (!frontmatter || errors.length > 0) {
     throw new SkillInstallError(`invalid SKILL.md: ${errors.join('; ') || 'unparseable frontmatter'}`);
   }
-  return { license: frontmatter.license };
-}
-
-/** Copy into a temp sibling then rename, so a failure never leaves a half-skill. */
-function copyTreeAtomic(source: string, target: string): void {
-  const files = walkTree(source);
-  const staging = `${target}.tmp-${process.pid}-${Date.now().toString(36)}`;
-  fs.rmSync(staging, { recursive: true, force: true });
-
-  try {
-    for (const file of files) {
-      const dest = path.join(staging, file.rel);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.copyFileSync(file.abs, dest);
-      // Preserve only the executable bit; never setuid/setgid/sticky.
-      fs.chmodSync(dest, file.mode & 0o111 ? 0o755 : 0o644);
-    }
-    fs.rmSync(target, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.renameSync(staging, target);
-  } finally {
-    fs.rmSync(staging, { recursive: true, force: true });
-  }
 }
 
 export interface InstallRequest {
+  groupFolder: string;
   marketplaceId: string;
   plugin: string;
   slug: string;
-  actorUserId?: string | null;
 }
 
-export function installCatalogSkill(request: InstallRequest): InstalledSkillRecord {
+export interface InstalledSkill {
+  slug: string;
+  catalogId: string;
+  repo: string;
+  ref: string;
+  commit: string;
+  sourcePath: string;
+}
+
+export function installCatalogSkill(request: InstallRequest): InstalledSkill {
   const record = getMarketplaceRecord(request.marketplaceId);
   if (!record) throw new MarketplaceError(`unknown catalog "${request.marketplaceId}"`);
 
   const entry = findCatalogSkill(request.marketplaceId, request.plugin, request.slug);
   if (!entry) throw new SkillInstallError(`"${request.slug}" is not in ${request.marketplaceId}/${request.plugin}`);
 
-  assertInstallableSlug(entry.slug);
+  assertInstallableSlug(entry.slug, request.groupFolder);
 
-  const sourceDir = resolveWithin(marketplaceCacheDir(record.id), entry.path);
-  if (!sourceDir || !fs.existsSync(sourceDir)) {
-    throw new SkillInstallError('source path is no longer present — refresh the catalog');
+  const repoDir = ensureCatalogCheckout(request.groupFolder, record.id, record.repo, record.ref, entry.path);
+  const contentDir = resolveWithin(repoDir, entry.path);
+  if (!contentDir || !fs.existsSync(contentDir)) {
+    throw new SkillInstallError(`"${entry.path}" is missing from ${record.repo}`);
   }
-  const { license } = assertValidSkillSource(sourceDir, entry.slug);
+  assertValidSkillSource(contentDir, entry.slug);
 
-  const target = path.join(installedSkillsDir(), entry.slug);
-  copyTreeAtomic(sourceDir, target);
+  // Relative so the link resolves identically on the host and at
+  // /workspace/agent/skills inside the container.
+  const skillsRoot = path.dirname(groupCatalogsDir(request.groupFolder));
+  const linkPath = path.join(skillsRoot, entry.slug);
+  fs.symlinkSync(path.join(CATALOGS_DIRNAME, record.id, entry.path), linkPath);
 
-  const installed: InstalledSkillRecord = {
+  return {
     slug: entry.slug,
-    marketplaceId: record.id,
-    plugin: entry.plugin,
+    catalogId: record.id,
     repo: record.repo,
     ref: record.ref,
-    commit: record.commit ?? 'unknown',
-    path: entry.path,
-    license,
-    digest: skillTreeDigest(target),
-    installedAt: new Date().toISOString(),
-    installedBy: request.actorUserId ?? null,
+    commit: git(['rev-parse', 'HEAD'], repoDir),
+    sourcePath: entry.path,
   };
-  putInstalledRecord(installed);
-  return installed;
-}
-
-export function uninstallSkill(slug: string): void {
-  const record = getInstalledRecord(slug);
-  const target = path.join(installedSkillsDir(), slug);
-  if (!record && !fs.existsSync(target)) {
-    throw new SkillInstallError(`"${slug}" is not an installed skill`);
-  }
-  fs.rmSync(target, { recursive: true, force: true });
-  deleteInstalledRecord(slug);
 }
 
 /**
- * Compare each installed skill's digest against its source in the catalog
- * cache. `null` means we can't tell (catalog removed, or never refreshed).
+ * Remove an installed skill. Only the symlink goes; the catalog checkout stays
+ * for the other skills sharing it. Refuses when the agent has uncommitted work
+ * in the skill unless forced, so an uninstall can't silently discard it.
  */
-export function installedUpdateStatus(): Record<string, boolean | null> {
-  const out: Record<string, boolean | null> = {};
-  for (const [slug, record] of Object.entries(readInstalledRecords())) {
-    if (!record.marketplaceId || !getMarketplaceRecord(record.marketplaceId)) {
-      out[slug] = null;
-      continue;
-    }
-    const sourceDir = resolveWithin(marketplaceCacheDir(record.marketplaceId), record.path);
-    if (!sourceDir || !fs.existsSync(sourceDir)) {
-      out[slug] = null;
-      continue;
-    }
-    try {
-      out[slug] = skillTreeDigest(sourceDir) !== record.digest;
-    } catch {
-      out[slug] = null;
+export function uninstallSkill(groupFolder: string, slug: string, force = false): void {
+  const skillsRoot = path.dirname(groupCatalogsDir(groupFolder));
+  const linkPath = path.join(skillsRoot, slug);
+  if (!isBrokenLink(linkPath)) throw new SkillInstallError(`"${slug}" is not installed for this agent`);
+  if (!fs.lstatSync(linkPath).isSymbolicLink()) {
+    throw new SkillInstallError(`"${slug}" is an authored skill — delete it from the workspace instead`);
+  }
+
+  if (!force) {
+    const resolved = fs.realpathSync(linkPath);
+    const dirty = execFileSync('git', ['status', '--porcelain', '--', '.'], {
+      cwd: resolved,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (dirty !== '') {
+      throw new SkillInstallError(`"${slug}" has uncommitted local changes — pass force to remove it anyway`);
     }
   }
-  return out;
+
+  fs.rmSync(linkPath, { force: true });
 }

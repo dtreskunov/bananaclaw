@@ -127,14 +127,22 @@ function workspaceCatalog(gid: string): MarketplaceCatalog | null {
 }
 
 export function getSkillsOverview(gid?: string): SkillsAdminResult {
+  const group = gid ? getAgentGroup(gid) : null;
   const workspace = gid ? workspaceCatalog(gid) : null;
   return {
     status: 200,
     body: {
-      skills: listAvailableSkills(),
+      skills: listAvailableSkills(group ? groupSkillRoots(group.folder) : undefined),
       catalogs: [builtinCatalog(), ...(workspace ? [workspace] : []), ...listCatalogs()],
     },
   };
+}
+
+/** Resolve the group folder installs are vendored into, or throw a 400. */
+function groupFolderOf(gid: string): string {
+  const group = getAgentGroup(gid);
+  if (!group) throw new SkillInstallError(`unknown agent group "${gid}"`);
+  return group.folder;
 }
 
 export function addCatalog(body: Record<string, unknown>, actorUserId: string): SkillsAdminResult {
@@ -182,12 +190,13 @@ export function deleteCatalog(id: string, actorUserId: string): SkillsAdminResul
 }
 
 export async function installSkill(body: Record<string, unknown>, actorUserId: string): Promise<SkillsAdminResult> {
+  const gid = str(body.gid);
   const marketplaceId = str(body.marketplaceId);
   const plugin = str(body.plugin);
   const slug = str(body.slug);
   const acknowledgeRisk = body.acknowledgeRisk === true;
-  if (!marketplaceId || !plugin || !slug) {
-    return { status: 400, body: { error: 'marketplaceId, plugin and slug are required' } };
+  if (!gid || !marketplaceId || !plugin || !slug) {
+    return { status: 400, body: { error: 'gid, marketplaceId, plugin and slug are required' } };
   }
   try {
     // Audits are keyed by the directory's `owner/repo`, which is the catalog's
@@ -202,17 +211,18 @@ export async function installSkill(body: Record<string, unknown>, actorUserId: s
       };
     }
 
-    const record = installCatalogSkill({ marketplaceId, plugin, slug, actorUserId });
+    const record = installCatalogSkill({ groupFolder: groupFolderOf(gid), marketplaceId, plugin, slug });
     recordAdminAction({
       actorUserId,
       action: 'skill_install',
       targetKind: 'skill',
       targetId: slug,
       payload: {
+        agentGroupId: gid,
         repo: record.repo,
         ref: record.ref,
         commit: record.commit,
-        path: record.path,
+        path: record.sourcePath,
         auditAcknowledged: acknowledgeRisk && audits !== null && auditIsBlocking(audits),
       },
     });
@@ -297,10 +307,11 @@ export async function getSkillAudits(source: string, slug: string): Promise<Skil
  * Enforced here rather than only in the UI so the API can't be walked past.
  */
 export async function installFromRepo(body: Record<string, unknown>, actorUserId: string): Promise<SkillsAdminResult> {
+  const gid = str(body.gid);
   const repo = str(body.repo);
   const slug = str(body.slug);
   const acknowledgeRisk = body.acknowledgeRisk === true;
-  if (!repo || !slug) return { status: 400, body: { error: 'repo and slug are required' } };
+  if (!gid || !repo || !slug) return { status: 400, body: { error: 'gid, repo and slug are required' } };
 
   let audits: AuditEntry[] | null = null;
   try {
@@ -331,10 +342,10 @@ export async function installFromRepo(body: Record<string, unknown>, actorUserId
     }
 
     const installed = installCatalogSkill({
+      groupFolder: groupFolderOf(gid),
       marketplaceId: record.id,
       plugin: plugin.name,
       slug,
-      actorUserId,
     });
     recordAdminAction({
       actorUserId,
@@ -342,10 +353,11 @@ export async function installFromRepo(body: Record<string, unknown>, actorUserId
       targetKind: 'skill',
       targetId: slug,
       payload: {
+        agentGroupId: gid,
         repo: installed.repo,
         ref: installed.ref,
         commit: installed.commit,
-        path: installed.path,
+        path: installed.sourcePath,
         via: 'discover',
         auditAcknowledged: acknowledgeRisk && audits !== null && auditIsBlocking(audits),
       },
@@ -356,10 +368,17 @@ export async function installFromRepo(body: Record<string, unknown>, actorUserId
   }
 }
 
-export function removeSkill(slug: string, actorUserId: string): SkillsAdminResult {
+export function removeSkill(gid: string, slug: string, actorUserId: string, force = false): SkillsAdminResult {
+  if (!gid) return { status: 400, body: { error: 'gid is required' } };
   try {
-    uninstallSkill(slug);
-    recordAdminAction({ actorUserId, action: 'skill_uninstall', targetKind: 'skill', targetId: slug });
+    uninstallSkill(groupFolderOf(gid), slug, force);
+    recordAdminAction({
+      actorUserId,
+      action: 'skill_uninstall',
+      targetKind: 'skill',
+      targetId: slug,
+      payload: { agentGroupId: gid, force },
+    });
     return { status: 200, body: { ok: true } };
   } catch (err) {
     return fail(err);

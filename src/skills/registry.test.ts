@@ -94,23 +94,23 @@ describe('listSkills', () => {
     expect(listSkills([builtinRoot(root)]).map((skill) => skill.slug)).toEqual(['fine']);
   });
 
-  it('merges both roots and lets built-ins win a slug collision', () => {
+  it("merges both roots and lets the group's own copy win a slug collision", () => {
     const builtin = tempDir();
-    const installed = tempDir();
+    const workspace = tempDir();
     writeSkill(builtin, 'shared', 'name: shared\ndescription: From the repo.');
-    writeSkill(installed, 'shared', 'name: shared\ndescription: From the catalog.');
-    writeSkill(installed, 'extra', 'name: extra\ndescription: Only installed.');
+    writeSkill(workspace, 'shared', 'name: shared\ndescription: The agent own copy.');
+    writeSkill(workspace, 'extra', 'name: extra\ndescription: Only in the group.');
 
     const skills = listSkills([
       builtinRoot(builtin),
-      { origin: 'installed', hostDir: installed, containerDir: '/app/skills-installed' },
+      { origin: 'workspace', hostDir: workspace, containerDir: '/workspace/agent/skills' },
     ]);
     expect(skills.map((skill) => [skill.slug, skill.origin])).toEqual([
-      ['extra', 'installed'],
-      ['shared', 'builtin'],
+      ['extra', 'workspace'],
+      ['shared', 'workspace'],
     ]);
-    expect(skills.find((skill) => skill.slug === 'shared')!.description).toBe('From the repo.');
-    expect(skills.find((skill) => skill.slug === 'extra')!.containerPath).toBe('/app/skills-installed/extra');
+    expect(skills.find((skill) => skill.slug === 'shared')!.description).toBe('The agent own copy.');
+    expect(skills.find((skill) => skill.slug === 'extra')!.containerPath).toBe('/workspace/agent/skills/extra');
   });
 
   it('discovers the group workspace root and lets it override a built-in', () => {

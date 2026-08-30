@@ -368,7 +368,9 @@ on(
 on(
   'DELETE',
   '/api/skills/:slug',
-  skillsAdmin((_b, userId, p) => removeSkill(p.slug!, userId)),
+  skillsAdmin((_b, userId, p, ctx) =>
+    removeSkill(ctx.url.searchParams.get('gid') ?? '', p.slug!, userId, ctx.url.searchParams.get('force') === '1'),
+  ),
 );
 // Service worker — must be served from the app scope so it can control /ui/chat/.
 on('GET', '/sw.js', (ctx) => serveServiceWorker(ctx));

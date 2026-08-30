@@ -14,13 +14,11 @@ import type { AuditDto } from './GroupAdminSkillInstall';
 import { showToast } from './Toast';
 
 export interface SkillProvenanceDto {
-  marketplaceId: string | null;
-  plugin: string | null;
-  repo: string;
-  ref: string;
-  commit: string;
-  path: string;
-  installedAt: string;
+  repo: string | null;
+  commit: string | null;
+  sourcePath: string | null;
+  modified: boolean;
+  localCommits: number;
 }
 
 export interface AvailableSkillDto {
@@ -37,7 +35,6 @@ export interface AvailableSkillDto {
   license: string | null;
   warnings: string[];
   source: SkillProvenanceDto | null;
-  updateAvailable: boolean | null;
 }
 
 const SKILLS_API = '/ui/chat/api/skills';
@@ -133,6 +130,7 @@ export function SkillsSection({
     acknowledgeRisk: boolean,
   ): Promise<{ ok: boolean; audits?: AuditDto[] | null }> {
     const r = await call<{ audits?: AuditDto[]; error?: string }>(`${SKILLS_API}/install-from-repo`, 'POST', {
+      gid,
       repo,
       slug,
       acknowledgeRisk,
@@ -214,21 +212,24 @@ export function SkillsSection({
                       <strong>{skill.name}</strong>
                       {slugIsRedundant(skill.name, skill.slug) ? null : <code>{skill.slug}</code>}
                       <span class="ga-skills-badge">{skill.catalogLabel}</span>
-                      {skill.updateAvailable ? (
-                        <span class="ga-skills-badge ga-skills-badge-update">update</span>
+                      {skill.source?.modified || (skill.source?.localCommits ?? 0) > 0 ? (
+                        <span class="ga-skills-badge ga-skills-badge-update">edited</span>
                       ) : null}
                       {skill.license ? <span class="ga-skills-license">{skill.license}</span> : null}
                     </span>
                     {skill.description ? <span class="ga-skills-description">{skill.description}</span> : null}
-                    {skill.alwaysOn ? (
+                    {skill.origin === 'workspace' ? (
                       <span class="ga-skills-source">
-                        Lives in this agent&rsquo;s workspace — on by default, and only for this group.
+                        Written by this agent, in its own workspace &mdash; on by default, and only for this
+                        group.
                       </span>
                     ) : null}
-                    {skill.source ? (
+                    {skill.source?.repo ? (
                       <span class="ga-skills-source">
-                        {skill.source.repo} · {skill.source.ref} · {skill.source.commit.slice(0, 7)} ·{' '}
-                        {skill.source.path}
+                        {skill.source.repo}
+                        {skill.source.commit ? ` · ${skill.source.commit.slice(0, 7)}` : ''}
+                        {skill.source.sourcePath ? ` · ${skill.source.sourcePath}` : ''}
+                        {skill.source.modified ? ' · edited locally' : ''}
                       </span>
                     ) : null}
                     {skill.unavailableReason ? (
@@ -247,7 +248,7 @@ export function SkillsSection({
                     class="ga-catalog-remove"
                     disabled={busy}
                     onClick={async () => {
-                      if (await uninstallSkill(skill.slug)) {
+                      if (await uninstallSkill(gid, skill.slug)) {
                         setSkill(skill.slug, false);
                         onCatalogChanged();
                       }

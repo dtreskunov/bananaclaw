@@ -104,6 +104,7 @@ export function SkillCatalogSection({
     setBusy(true);
     try {
       const r = await call<{ audits?: AuditDto[]; error?: string }>(`${SKILLS_API}/install`, 'POST', {
+        gid,
         ...body,
         acknowledgeRisk,
       });
@@ -299,9 +300,12 @@ export function SkillCatalogSection({
   );
 }
 
-/** Uninstall an installed skill. Exposed so the selection list can offer it. */
-export async function uninstallSkill(slug: string): Promise<boolean> {
-  const r = await call<unknown>(`${SKILLS_API}/${encodeURIComponent(slug)}`, 'DELETE');
+/** Uninstall a skill from this group. Exposed so the selection list can offer it. */
+export async function uninstallSkill(gid: string, slug: string): Promise<boolean> {
+  const r = await call<unknown>(
+    `${SKILLS_API}/${encodeURIComponent(slug)}?gid=${encodeURIComponent(gid)}`,
+    'DELETE',
+  );
   if (!r.ok) {
     showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
     return false;

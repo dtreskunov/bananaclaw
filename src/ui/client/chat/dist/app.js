@@ -27820,6 +27820,7 @@ function SkillCatalogSection({
     setBusy(true);
     try {
       const r4 = await call(`${SKILLS_API3}/install`, "POST", {
+        gid,
         ...body,
         acknowledgeRisk
       });
@@ -27975,8 +27976,11 @@ function SkillCatalogSection({
     }) })
   ] });
 }
-async function uninstallSkill(slug) {
-  const r4 = await call(`${SKILLS_API3}/${encodeURIComponent(slug)}`, "DELETE");
+async function uninstallSkill(gid, slug) {
+  const r4 = await call(
+    `${SKILLS_API3}/${encodeURIComponent(slug)}?gid=${encodeURIComponent(gid)}`,
+    "DELETE"
+  );
   if (!r4.ok) {
     showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
     return false;
@@ -28044,6 +28048,7 @@ function SkillsSection({
   }
   async function installFromRepo(repo, slug, acknowledgeRisk) {
     const r4 = await call(`${SKILLS_API4}/install-from-repo`, "POST", {
+      gid,
       repo,
       slug,
       acknowledgeRisk
@@ -28114,20 +28119,16 @@ function SkillsSection({
               /* @__PURE__ */ u4("strong", { children: skill.name }),
               slugIsRedundant(skill.name, skill.slug) ? null : /* @__PURE__ */ u4("code", { children: skill.slug }),
               /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: skill.catalogLabel }),
-              skill.updateAvailable ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge ga-skills-badge-update", children: "update" }) : null,
+              skill.source?.modified || (skill.source?.localCommits ?? 0) > 0 ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge ga-skills-badge-update", children: "edited" }) : null,
               skill.license ? /* @__PURE__ */ u4("span", { class: "ga-skills-license", children: skill.license }) : null
             ] }),
             skill.description ? /* @__PURE__ */ u4("span", { class: "ga-skills-description", children: skill.description }) : null,
-            skill.alwaysOn ? /* @__PURE__ */ u4("span", { class: "ga-skills-source", children: "Lives in this agent\u2019s workspace \u2014 on by default, and only for this group." }) : null,
-            skill.source ? /* @__PURE__ */ u4("span", { class: "ga-skills-source", children: [
+            skill.origin === "workspace" ? /* @__PURE__ */ u4("span", { class: "ga-skills-source", children: "Written by this agent, in its own workspace \u2014 on by default, and only for this group." }) : null,
+            skill.source?.repo ? /* @__PURE__ */ u4("span", { class: "ga-skills-source", children: [
               skill.source.repo,
-              " \xB7 ",
-              skill.source.ref,
-              " \xB7 ",
-              skill.source.commit.slice(0, 7),
-              " \xB7",
-              " ",
-              skill.source.path
+              skill.source.commit ? ` \xB7 ${skill.source.commit.slice(0, 7)}` : "",
+              skill.source.sourcePath ? ` \xB7 ${skill.source.sourcePath}` : "",
+              skill.source.modified ? " \xB7 edited locally" : ""
             ] }) : null,
             skill.unavailableReason ? /* @__PURE__ */ u4("span", { class: "ga-skills-unavailable", children: skill.unavailableReason }) : null,
             skill.warnings.map((warning) => /* @__PURE__ */ u4("span", { class: "ga-skills-unavailable", children: warning }, warning))
@@ -28140,7 +28141,7 @@ function SkillsSection({
             class: "ga-catalog-remove",
             disabled: busy,
             onClick: async () => {
-              if (await uninstallSkill(skill.slug)) {
+              if (await uninstallSkill(gid, skill.slug)) {
                 setSkill(skill.slug, false);
                 onCatalogChanged();
               }

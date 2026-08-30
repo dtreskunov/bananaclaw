@@ -721,18 +721,19 @@ export function syncSkillSymlinks(
     fs.mkdirSync(skillsDir, { recursive: true });
   }
 
-  // Desired = the group's selection ∩ what's discoverable and available, minus
-  // anything explicitly disabled. Skills whose `metadata.requires_env` names an
-  // untruthy env var are dropped here so the agent never surfaces commands the
-  // host won't honor. Workspace skills bypass the selection — they are the
-  // agent's own and default to on — but the deny-list still switches them off.
+  // Desired = what's discoverable and available, minus anything explicitly
+  // disabled. Skills whose `metadata.requires_env` names an untruthy env var
+  // are dropped here so the agent never surfaces commands the host won't
+  // honor. Only built-ins consult the allow-list: everything in the group's
+  // own skill root — authored or vendored from a catalog — is on by default,
+  // and the deny-list is the off switch.
   const selection = containerConfig.skills;
   const disabled = new Set(containerConfig.disabledSkills ?? []);
   const desired = listSkills(roots).filter(
     (skill) =>
       skill.available &&
       !disabled.has(skill.slug) &&
-      (skill.origin === 'workspace' || selection === 'all' || selection.includes(skill.slug)),
+      (skill.origin !== 'builtin' || selection === 'all' || selection.includes(skill.slug)),
   );
   const bySlug = new Map(desired.map((skill) => [skill.slug, skill]));
   const materialize = containerConfig.provider === 'fx';
@@ -780,9 +781,9 @@ export function syncSkillSymlinks(
 }
 
 /**
- * Resolve the group's skill selection to concrete names — `'all'` recomputes
- * from the skill roots so newly-added or newly-installed skills appear
- * automatically. Workspace skills are always included; the deny-list wins.
+ * Resolve the group's skills to concrete names — `'all'` recomputes from the
+ * roots so newly-added built-ins appear automatically. Everything in the
+ * group's own root is included; the deny-list wins.
  */
 function selectedSkillNames(
   containerConfig: import('./container-config.js').ContainerConfig,
@@ -794,7 +795,7 @@ function selectedSkillNames(
     .filter(
       (skill) =>
         !disabled.has(skill.slug) &&
-        (skill.origin === 'workspace' || selection === 'all' || selection.includes(skill.slug)),
+        (skill.origin !== 'builtin' || selection === 'all' || selection.includes(skill.slug)),
     )
     .map((skill) => skill.slug);
 }
