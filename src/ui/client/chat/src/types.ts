@@ -369,6 +369,8 @@ export interface WsPayload {
   startedAt?: number;
   /** Effective configured model for the current turn. */
   model?: string;
+  /** Latest cumulative usage snapshot for the in-flight turn. */
+  usage?: TurnUsage;
   /** Complete host-reduced activity snapshot for the current turn. */
   items?: ActivityLine[] | null;
   text?: string;
@@ -386,7 +388,6 @@ export interface WsPayload {
   timestamp?: string;
   id?: string;
   messageKind?: 'internal' | 'final' | string;
-  usage?: TurnUsage;
   question?: {
     questionId: string;
     title: string;

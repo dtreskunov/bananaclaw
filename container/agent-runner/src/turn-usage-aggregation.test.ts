@@ -66,6 +66,7 @@ describe('sumOpenCodeUsage', () => {
     expect(total!.output_tokens).toBe(75);
     expect(total!.cache_read_tokens).toBe(22528);
     expect(total!.model).toBe('MiniMax-M3');
+    expect(total!.num_turns).toBe(2);
   });
 
   it('skips messages with no usage snapshot', () => {

@@ -361,6 +361,12 @@ export type ProviderEvent =
    */
   | { type: 'usage'; data: TurnUsage }
   /**
+   * Latest cumulative usage for an in-flight turn. Unlike `usage`, snapshots
+   * replace one another and are only for live presentation; they are never
+   * added to final billing totals.
+   */
+  | { type: 'usage_progress'; data: TurnUsage }
+  /**
    * Provider-private handle for the turn just finished, emitted just before
    * the corresponding `result`. The poll-loop stashes it and writes it to
    * `turn_checkpoints` in outbound.db once the result row is created, where

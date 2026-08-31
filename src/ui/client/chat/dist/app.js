@@ -15551,6 +15551,7 @@ var pendingWebSends = y3([]);
 var typingHint = y3("");
 var typingStartedAt = y3(null);
 var typingModel = y3("");
+var typingUsage = y3(null);
 var activityLog = y3([]);
 var pending = y3([]);
 var searchQuery = y3("");
@@ -17861,6 +17862,7 @@ function clearChat() {
     typingHint.value = "";
     typingStartedAt.value = null;
     typingModel.value = "";
+    typingUsage.value = null;
     activityLog.value = [];
   });
   if (refs.ws) {
@@ -18100,6 +18102,7 @@ async function openChat(gid, resumeTid, opts) {
     typingHint.value = "";
     typingStartedAt.value = null;
     typingModel.value = "";
+    typingUsage.value = null;
     activityLog.value = [];
     if (resumeTid) {
       threadId.value = resumeTid;
@@ -18240,6 +18243,7 @@ function connectChatWs(ctx2) {
     typingHint.value = "";
     typingStartedAt.value = null;
     typingModel.value = "";
+    typingUsage.value = null;
     activityLog.value = [];
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
@@ -18287,11 +18291,13 @@ function connectChatWs(ctx2) {
       return;
     }
     if (payload.kind === "typing") {
+      const priorStartedAt = typingStartedAt.value;
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || "";
       if (!payload.on) {
         typingStartedAt.value = null;
         typingModel.value = "";
+        typingUsage.value = null;
         if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
         activityLog.value = [];
       } else if (payload.items !== null && payload.items !== void 0) {
@@ -18301,9 +18307,11 @@ function connectChatWs(ctx2) {
       }
       if (payload.on) {
         if (typeof payload.startedAt === "number" && Number.isFinite(payload.startedAt)) {
+          if (priorStartedAt !== null && priorStartedAt !== payload.startedAt) typingUsage.value = null;
           typingStartedAt.value = payload.startedAt;
         }
         if (typeof payload.model === "string") typingModel.value = payload.model;
+        if (payload.usage) typingUsage.value = payload.usage;
       }
       return;
     }
@@ -18358,6 +18366,7 @@ function connectChatWs(ctx2) {
           typingHint.value = "";
           typingStartedAt.value = null;
           typingModel.value = "";
+          typingUsage.value = null;
           activityLog.value = [];
         } else {
           const c5 = payload.content || {};
@@ -18408,6 +18417,7 @@ function connectChatWs(ctx2) {
       if (dir === "out") maybeNotify(text, payload.files || []);
       if (finalResponse) {
         activityLog.value = [];
+        typingUsage.value = null;
         refs.carryActivity = [];
         playCompletionChime();
       }
@@ -21103,14 +21113,15 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ u: u5 }) {
+function UsageMeta({ u: u5, live = false }) {
   const [expanded, setExpanded] = h2(false);
   const cost = fmtCost(u5.cost_usd);
   const model = u5.model ? shortModel(u5.model) : "";
   const dur = u5.duration_ms ? fmtDur(u5.duration_ms) : "";
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
   const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
-  const short = [cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
+  const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
+  const short = live ? [`${cost} est.`, `${fmtTok(u5.input_tokens)} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : [cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
   const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
@@ -21147,11 +21158,11 @@ function UsageMeta({ u: u5 }) {
           /* @__PURE__ */ u4("strong", { title: u5.model, children: model })
         ] }) : null,
         contextDetail ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Context at end" }),
+          /* @__PURE__ */ u4("span", { children: live ? "Context after latest call" : "Context at end" }),
           /* @__PURE__ */ u4("strong", { children: contextDetail })
         ] }) : null,
         /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Turn processing" }),
+          /* @__PURE__ */ u4("span", { children: live ? "Processing so far" : "Turn processing" }),
           /* @__PURE__ */ u4("strong", { children: [
             fmtTok(u5.input_tokens),
             " input ",
@@ -21162,7 +21173,7 @@ function UsageMeta({ u: u5 }) {
           ] })
         ] }),
         u5.num_turns ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Model calls" }),
+          /* @__PURE__ */ u4("span", { children: live ? "Model calls so far" : "Model calls" }),
           /* @__PURE__ */ u4("strong", { children: u5.num_turns })
         ] }) : null,
         u5.cache_read_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
@@ -21658,7 +21669,9 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
     return () => window.clearInterval(timer);
   }, [startedAt]);
   const model = typingModel.value ? shortModel(typingModel.value) : "";
-  const metadata = [fmtDur(Math.max(0, now - startedAt)), model].filter(Boolean).join(" \xB7 ");
+  const elapsed = Math.max(0, now - startedAt);
+  const metadata = [fmtDur(elapsed), model].filter(Boolean).join(" \xB7 ");
+  const usage = typingUsage.value ? { ...typingUsage.value, duration_ms: elapsed } : null;
   const liveHeadline = latestActivityHeadline(activityLog.value);
   const [openLatestOnExpand, setOpenLatestOnExpand] = h2(false);
   const toggleFromPreview = () => {
@@ -21698,7 +21711,8 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
         openLatest: openLatestOnExpand
       }
     ),
-    /* @__PURE__ */ u4("div", { class: "typing-meta", children: metadata })
+    /* @__PURE__ */ u4("div", { class: "typing-meta", children: metadata }),
+    usage ? /* @__PURE__ */ u4("div", { class: "typing-usage", children: /* @__PURE__ */ u4(UsageMeta, { u: usage, live: true }) }) : null
   ] });
 }
 function MessageLog() {

@@ -16,7 +16,13 @@ vi.mock('./config.js', async () => {
   return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-write-outbound' };
 });
 
-import { initSessionFolder, outboundDbPath, writeOutboundDirect } from './session-manager.js';
+import {
+  initSessionFolder,
+  outboundDbPath,
+  readSessionUsageProgress,
+  usageProgressPath,
+  writeOutboundDirect,
+} from './session-manager.js';
 
 const TEST_DIR = '/tmp/nanoclaw-test-write-outbound';
 const AG = 'ag-test';
@@ -96,5 +102,30 @@ describe('writeOutboundDirect', () => {
     const rows = readMessagesOut();
     expect(rows.map((r) => r.id)).toEqual(['denial-1', 'denial-2']);
     expect(rows.map((r) => r.seq)).toEqual([2, 4]);
+  });
+});
+
+describe('readSessionUsageProgress', () => {
+  it('returns a fresh valid snapshot and rejects stale or malformed data', () => {
+    initSessionFolder(AG, SESS);
+    const progressPath = usageProgressPath(AG, SESS);
+    const usage = {
+      cost_usd: 0.25,
+      input_tokens: 1200,
+      output_tokens: 30,
+      cache_read_tokens: 1000,
+      cache_write_tokens: 0,
+      num_turns: 2,
+      model: 'minimax/MiniMax-M3',
+      context_tokens: 1230,
+      context_window: 1_048_576,
+    };
+    fs.writeFileSync(progressPath, JSON.stringify(usage));
+
+    expect(readSessionUsageProgress(AG, SESS)).toEqual(usage);
+    expect(readSessionUsageProgress(AG, SESS, fs.statSync(progressPath).mtimeMs + 1)).toBeNull();
+
+    fs.writeFileSync(progressPath, '{"input_tokens":"bad"}');
+    expect(readSessionUsageProgress(AG, SESS)).toBeNull();
   });
 });

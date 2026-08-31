@@ -113,6 +113,21 @@ function usageFor(
   };
 }
 
+function addUsage(total: Record<string, number>, raw: unknown): Record<string, number> {
+  const usage = (raw ?? {}) as {
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedInputTokens?: number;
+    reasoningTokens?: number;
+  };
+  return {
+    inputTokens: (total.inputTokens ?? 0) + (usage.inputTokens ?? 0),
+    outputTokens: (total.outputTokens ?? 0) + (usage.outputTokens ?? 0),
+    cachedInputTokens: (total.cachedInputTokens ?? 0) + (usage.cachedInputTokens ?? 0),
+    reasoningTokens: (total.reasoningTokens ?? 0) + (usage.reasoningTokens ?? 0),
+  };
+}
+
 function toolStep(part: Record<string, unknown>, status: 'running' | 'completed' | 'error'): ActivityStep {
   const input = part.input && typeof part.input === 'object' ? (part.input as Record<string, unknown>) : undefined;
   return {
@@ -315,6 +330,8 @@ export class NativeProvider implements AgentProvider {
                 ...(typeof options.modelParams?.top_p === 'number' ? { topP: options.modelParams.top_p } : {}),
               });
 
+              let liveUsage: Record<string, number> = {};
+              let completedSteps = 0;
               for await (const rawPart of result.stream) {
                 yield { type: 'activity' };
                 const part = rawPart as unknown as Record<string, unknown>;
@@ -322,7 +339,15 @@ export class NativeProvider implements AgentProvider {
                 else if (part.type === 'tool-result') yield { type: 'progress', step: toolStep(part, 'completed') };
                 else if (part.type === 'tool-error') yield { type: 'progress', step: toolStep(part, 'error') };
                 else if (part.type === 'error') throw part.error;
-                else if (part.type === 'finish-step') yield { type: 'assistant_message' };
+                else if (part.type === 'finish-step') {
+                  completedSteps += 1;
+                  liveUsage = addUsage(liveUsage, part.usage);
+                  yield {
+                    type: 'usage_progress',
+                    data: usageFor(resolved, liveUsage, part.usage, Date.now() - startedAt, completedSteps),
+                  };
+                  yield { type: 'assistant_message' };
+                }
               }
 
               const responseMessages = (await result.responseMessages) as ModelMessage[];

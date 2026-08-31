@@ -2000,11 +2000,11 @@ nav.tab-bar-strip.group-strip {
   text-align: right;
   justify-content: flex-end;
 }
-.chat-main .msg .usage-wrap {
+.chat-main .usage-wrap {
   position: relative;
   display: inline-flex;
 }
-.chat-main .msg .usage {
+.chat-main .usage {
   appearance: none;
   padding: 0;
   border: 0;
@@ -2016,20 +2016,20 @@ nav.tab-bar-strip.group-strip {
   line-height: inherit;
   text-align: inherit;
 }
-.chat-main .msg .usage:hover {
+.chat-main .usage:hover {
   opacity: 1;
   color: var(--fg);
 }
-.chat-main .msg .usage:focus-visible {
+.chat-main .usage:focus-visible {
   outline: 2px solid var(--accent-strong);
   outline-offset: 2px;
 }
-.chat-main .msg .usage-backdrop {
+.chat-main .usage-backdrop {
   position: fixed;
   inset: 0;
   z-index: 20;
 }
-.chat-main .msg .usage-popover {
+.chat-main .usage-popover {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
@@ -2048,16 +2048,16 @@ nav.tab-bar-strip.group-strip {
   text-align: left;
   white-space: normal;
 }
-.chat-main .msg .usage-row {
+.chat-main .usage-row {
   display: grid;
   grid-template-columns: minmax(92px, 1fr) auto;
   gap: 16px;
   align-items: baseline;
 }
-.chat-main .msg .usage-row > span {
+.chat-main .usage-row > span {
   color: var(--muted);
 }
-.chat-main .msg .usage-row > strong {
+.chat-main .usage-row > strong {
   min-width: 0;
   font-weight: 600;
   text-align: right;
@@ -2136,6 +2136,10 @@ nav.tab-bar-strip.group-strip {
   background: var(--wash);
   border-radius: var(--radius-lg);
   max-width: 78%;
+}
+.chat-main .typing-usage {
+  color: var(--muted);
+  font-size: var(--font-2xs);
 }
 .chat-main .typing .typing-summary {
   display: flex;

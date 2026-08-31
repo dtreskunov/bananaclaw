@@ -16,6 +16,7 @@ import type {
   ChannelMetaEntry,
   SearchResult,
   ActivityLine,
+  TurnUsage,
   TaskPanelRequest,
 } from './types';
 
@@ -74,6 +75,7 @@ export const pendingWebSends: Signal<Array<{ threadId: string; messageId: string
 export const typingHint: Signal<string> = signal('');
 export const typingStartedAt: Signal<number | null> = signal<number | null>(null);
 export const typingModel: Signal<string> = signal('');
+export const typingUsage: Signal<TurnUsage | null> = signal<TurnUsage | null>(null);
 // Ordered activity-trace lines (tool calls / progress steps) for the
 // in-flight turn. Accumulated from WS typing frames; cleared when the
 // turn ends or the response arrives.

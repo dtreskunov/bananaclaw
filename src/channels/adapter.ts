@@ -13,12 +13,28 @@ export interface ActivityLine {
   text: string;
 }
 
+export interface UsageSnapshot {
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens?: number;
+  num_turns?: number;
+  duration_ms?: number;
+  model: string;
+  context_window?: number;
+  max_output_tokens?: number;
+  context_tokens?: number;
+}
+
 /** Stable metadata for one in-flight turn. Web clients use `startedAt` to
  * resume elapsed timing after a WebSocket reconnect; other channels may
  * ignore it. `model` is the effective configured model for the agent group. */
 export interface TypingMetadata {
   startedAt: number;
   model?: string;
+  usage?: UsageSnapshot;
 }
 
 /** Passed to the adapter at setup time. */

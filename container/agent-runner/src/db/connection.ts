@@ -25,12 +25,14 @@ const DEFAULT_OUTBOUND_PATH = '/workspace/outbound.db';
 const DEFAULT_HEARTBEAT_PATH = '/workspace/.heartbeat';
 const DEFAULT_TURN_ENDED_PATH = '/workspace/.turn-ended';
 const DEFAULT_ACTIVITY_PATH = '/workspace/.activity';
+const DEFAULT_USAGE_PROGRESS_PATH = '/workspace/.usage-progress';
 
 let _inbound: Database | null = null;
 let _outbound: Database | null = null;
 let _heartbeatPath: string = DEFAULT_HEARTBEAT_PATH;
 let _turnEndedPath: string = DEFAULT_TURN_ENDED_PATH;
 let _activityPath: string = DEFAULT_ACTIVITY_PATH;
+let _usageProgressPath: string = DEFAULT_USAGE_PROGRESS_PATH;
 let _testMode = false;
 
 /**
@@ -282,6 +284,22 @@ export function appendActivityFile(line: string): void {
 export function clearActivityFile(): void {
   try {
     fs.unlinkSync(_activityPath);
+  } catch {
+    // Already gone or parent dir missing — fine.
+  }
+}
+
+export function writeUsageProgressFile(content: string): void {
+  try {
+    fs.writeFileSync(_usageProgressPath, content);
+  } catch {
+    // Best-effort — same as activity and heartbeat signaling.
+  }
+}
+
+export function clearUsageProgressFile(): void {
+  try {
+    fs.unlinkSync(_usageProgressPath);
   } catch {
     // Already gone or parent dir missing — fine.
   }

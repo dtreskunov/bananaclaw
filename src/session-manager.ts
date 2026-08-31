@@ -17,7 +17,7 @@ import path from 'path';
 import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
 import { activityHint, reduceActivityLines } from './activity.js';
-import type { ActivityLine, OutboundFile } from './channels/adapter.js';
+import type { ActivityLine, OutboundFile, UsageSnapshot } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
@@ -78,6 +78,11 @@ export function turnEndedPath(agentGroupId: string, sessionId: string): string {
 /** Path to the container activity file (append-only progress trace). */
 export function activityPath(agentGroupId: string, sessionId: string): string {
   return path.join(sessionDir(agentGroupId, sessionId), '.activity');
+}
+
+/** Path to the container's latest in-flight usage snapshot. */
+export function usageProgressPath(agentGroupId: string, sessionId: string): string {
+  return path.join(sessionDir(agentGroupId, sessionId), '.usage-progress');
 }
 
 /**
@@ -532,6 +537,30 @@ export function readSessionActivity(agentGroupId: string, sessionId: string, sin
     return reduceActivityLines(content.split('\n').filter((l) => l.length > 0).map(parseActivityLine));
   } catch {
     return [];
+  }
+}
+
+/** Read the latest in-flight usage snapshot written by the container. */
+export function readSessionUsageProgress(
+  agentGroupId: string,
+  sessionId: string,
+  sinceMs?: number,
+): UsageSnapshot | null {
+  try {
+    const p = usageProgressPath(agentGroupId, sessionId);
+    if (sinceMs !== undefined && fs.statSync(p).mtimeMs < sinceMs) return null;
+    const value = JSON.parse(fs.readFileSync(p, 'utf8')) as Partial<UsageSnapshot>;
+    if (
+      !Number.isFinite(value.cost_usd) ||
+      !Number.isFinite(value.input_tokens) ||
+      !Number.isFinite(value.output_tokens) ||
+      !Number.isFinite(value.cache_read_tokens) ||
+      !Number.isFinite(value.cache_write_tokens) ||
+      typeof value.model !== 'string'
+    ) return null;
+    return value as UsageSnapshot;
+  } catch {
+    return null;
   }
 }
 

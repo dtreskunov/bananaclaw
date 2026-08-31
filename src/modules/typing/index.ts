@@ -33,6 +33,7 @@ import {
   isSessionProcessing,
   readSessionActivity,
   readSessionProgress,
+  readSessionUsageProgress,
   readSessionTurnEndedAt,
   type ActivityLine,
 } from '../../session-manager.js';
@@ -116,8 +117,13 @@ async function triggerTyping(
   const hash = JSON.stringify(snapshot);
   const items = activitySnapshotHashes.get(sessionId) === hash ? undefined : snapshot;
   activitySnapshotHashes.set(sessionId, hash);
+  const usage = readSessionUsageProgress(agentGroupId, sessionId, startedAt);
   try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, hint, instance, items, { startedAt, model });
+    await adapter?.setTyping?.(channelType, platformId, threadId, hint, instance, items, {
+      startedAt,
+      model,
+      ...(usage ? { usage } : {}),
+    });
   } catch {
     // Typing is best-effort — don't let it fail delivery or routing.
   }

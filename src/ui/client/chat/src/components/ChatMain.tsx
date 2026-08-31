@@ -5,7 +5,7 @@ import { signal } from '@preact/signals';
 import type { JSX } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
-  chatMessages, chatStatus, chatLoading, chatReady, isTyping, typingHint, typingStartedAt, typingModel, activityLog, threadId, channelType, canSend, pending,
+  chatMessages, chatStatus, chatLoading, chatReady, isTyping, typingHint, typingStartedAt, typingModel, typingUsage, activityLog, threadId, channelType, canSend, pending,
   threads, groupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions, respondingQuestionIds,
   highlightMessageId, searchQuery, voiceMode, isMobile, scrollToBottomTick,
@@ -421,7 +421,7 @@ function fmtContextLimit(tokens: number): string {
   return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
 }
 
-function UsageMeta({ u }: { u: TurnUsage }) {
+function UsageMeta({ u, live = false }: { u: TurnUsage; live?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const cost = fmtCost(u.cost_usd);
   const model = u.model ? shortModel(u.model) : '';
@@ -434,7 +434,10 @@ function UsageMeta({ u }: { u: TurnUsage }) {
   const ctx = contextTokens && u.context_window
     ? `Context ${fmtPct(contextTokens, u.context_window)}`
     : '';
-  const short = [cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
+  const calls = u.num_turns ? `${u.num_turns} call${u.num_turns === 1 ? '' : 's'}` : '';
+  const short = live
+    ? [`${cost} est.`, `${fmtTok(u.input_tokens)} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
+    : [cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
   const contextDetail = contextTokens
     ? `${fmtTok(contextTokens)}${u.context_window
       ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})`
@@ -460,9 +463,9 @@ function UsageMeta({ u }: { u: TurnUsage }) {
             <span class="usage-row"><span>Estimated cost</span><strong>{cost}</strong></span>
             {dur ? <span class="usage-row"><span>Elapsed</span><strong>{dur}</strong></span> : null}
             {model ? <span class="usage-row"><span>Model</span><strong title={u.model}>{model}</strong></span> : null}
-            {contextDetail ? <span class="usage-row"><span>Context at end</span><strong>{contextDetail}</strong></span> : null}
-            <span class="usage-row"><span>Turn processing</span><strong>{fmtTok(u.input_tokens)} input {'\u00b7'} {fmtTok(u.output_tokens)} output</strong></span>
-            {u.num_turns ? <span class="usage-row"><span>Model calls</span><strong>{u.num_turns}</strong></span> : null}
+            {contextDetail ? <span class="usage-row"><span>{live ? 'Context after latest call' : 'Context at end'}</span><strong>{contextDetail}</strong></span> : null}
+            <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{fmtTok(u.input_tokens)} input {'\u00b7'} {fmtTok(u.output_tokens)} output</strong></span>
+            {u.num_turns ? <span class="usage-row"><span>{live ? 'Model calls so far' : 'Model calls'}</span><strong>{u.num_turns}</strong></span> : null}
             {u.cache_read_tokens > 0 ? <span class="usage-row"><span>Cache read</span><strong>{fmtTok(u.cache_read_tokens)}</strong></span> : null}
             {u.cache_write_tokens > 0 ? <span class="usage-row"><span>Cache write</span><strong>{fmtTok(u.cache_write_tokens)}</strong></span> : null}
             {u.reasoning_tokens ? <span class="usage-row"><span>Reasoning</span><strong>{fmtTok(u.reasoning_tokens)}</strong></span> : null}
@@ -1046,7 +1049,9 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
     return () => window.clearInterval(timer);
   }, [startedAt]);
   const model = typingModel.value ? shortModel(typingModel.value) : '';
-  const metadata = [fmtDur(Math.max(0, now - startedAt)), model].filter(Boolean).join(' \u00b7 ');
+  const elapsed = Math.max(0, now - startedAt);
+  const metadata = [fmtDur(elapsed), model].filter(Boolean).join(' \u00b7 ');
+  const usage = typingUsage.value ? { ...typingUsage.value, duration_ms: elapsed } : null;
   const liveHeadline = latestActivityHeadline(activityLog.value);
   const [openLatestOnExpand, setOpenLatestOnExpand] = useState(false);
   const toggleFromPreview = () => {
@@ -1085,6 +1090,7 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
         openLatest={openLatestOnExpand}
       />
       <div class="typing-meta">{metadata}</div>
+      {usage ? <div class="typing-usage"><UsageMeta u={usage} live /></div> : null}
     </div>
   );
 }

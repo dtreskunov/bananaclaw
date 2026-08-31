@@ -8,6 +8,7 @@
  * fires through the wrong bot.
  */
 import fs from 'fs';
+import path from 'path';
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 
@@ -20,6 +21,7 @@ vi.mock('../../db/agent-groups.js', () => ({ getAgentGroup: () => ({ id: 'ag-1' 
 vi.mock('../../db/container-configs.js', () => ({ getContainerConfig: () => ({ agent_group_id: 'ag-1' }) }));
 
 import { setTypingAdapter, startTypingRefresh, stopTypingRefresh } from './index.js';
+import { usageProgressPath } from '../../session-manager.js';
 import type { TypingMetadata } from '../../channels/adapter.js';
 
 type Call = {
@@ -140,6 +142,37 @@ describe('startTypingRefresh — instance forwarding', () => {
         metadata: { startedAt: expect.any(Number), model: 'openrouter/minimax/minimax-m3' },
       });
     }
+  });
+
+  it('forwards a fresh in-flight usage snapshot', async () => {
+    const calls = captureAdapter();
+    startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-tester');
+    await vi.advanceTimersByTimeAsync(0);
+    calls.length = 0;
+
+    const progressPath = usageProgressPath('ag-1', 'sess-1');
+    fs.mkdirSync(path.dirname(progressPath), { recursive: true });
+    fs.writeFileSync(
+      progressPath,
+      JSON.stringify({
+        cost_usd: 0.25,
+        input_tokens: 1200,
+        output_tokens: 30,
+        cache_read_tokens: 1000,
+        cache_write_tokens: 0,
+        num_turns: 2,
+        model: 'minimax/MiniMax-M3',
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(4_500);
+    expect(calls.at(-1)?.metadata?.usage).toEqual(
+      expect.objectContaining({
+        input_tokens: 1200,
+        output_tokens: 30,
+        num_turns: 2,
+      }),
+    );
   });
 });
 

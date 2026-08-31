@@ -140,8 +140,8 @@ export function clearFailedTurn(): void {
   deleteValue(FAILED_TURN_KEY);
 }
 
-import { appendActivityFile, clearActivityFile, writeTurnEndedFile, clearTurnEndedFile } from './connection.js';
-import type { ActivityStep } from '../providers/types.js';
+import { appendActivityFile, clearActivityFile, writeTurnEndedFile, clearTurnEndedFile, writeUsageProgressFile, clearUsageProgressFile } from './connection.js';
+import type { ActivityStep, TurnUsage } from '../providers/types.js';
 
 /** One step of a turn's activity trace: an emit-time timestamp (epoch ms as
  *  a string) plus a JSON-encoded {@link ActivityStep} in `text`. Older rows
@@ -221,6 +221,14 @@ export function clearActivity(): void {
   _lastActivity = '';
   _activityBuffer = [];
   clearActivityFile();
+}
+
+export function writeUsageProgress(usage: TurnUsage): void {
+  writeUsageProgressFile(JSON.stringify(usage));
+}
+
+export function clearUsageProgress(): void {
+  clearUsageProgressFile();
 }
 
 /** Mark that the SDK turn just ended (result/error event). The host

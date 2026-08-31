@@ -6,7 +6,7 @@ import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
 import { writeTurnActivity } from './db/turn-activity.js';
 import { completeTaskAttempts, markTaskAttemptsProviderInvoked } from './db/task-attempts.js';
 import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
-import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded } from './db/session-state.js';
+import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, clearUsageProgress, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded, writeUsageProgress } from './db/session-state.js';
 import { getForkOrigin, type ForkOriginRow } from './db/fork-origin.js';
 import { clearCurrentInReplyTo, getDuplicateSendCount, resetTurnSendTracking, setCurrentInReplyTo } from './current-batch.js';
 import {
@@ -809,6 +809,7 @@ async function processQuery(
   // Start each batch with a fresh activity trace so the web UI shows the
   // work for this wake, not a stale trace from the previous turn.
   try { clearActivity(); } catch { /* best-effort */ }
+  try { clearUsageProgress(); } catch { /* best-effort */ }
   let lastProviderError: { message: string; classification?: string } | null = null;
   let sentAny = false;
   // Captured from the provider's `usage` event; flushed at end of turn so
@@ -825,6 +826,7 @@ async function processQuery(
   let activityFlushedCount = 0;
   const resetActivityForNextTurn = () => {
     try { clearActivity(); } catch { /* best-effort */ }
+    try { clearUsageProgress(); } catch { /* best-effort */ }
     activityFlushedCount = 0;
   };
 
@@ -1372,6 +1374,8 @@ async function processQuery(
               context_tokens: event.data.context_tokens ?? pendingUsage.context_tokens,
             }
           : event.data;
+      } else if (event.type === 'usage_progress') {
+        try { writeUsageProgress(event.data); } catch { /* best-effort */ }
       } else if (event.type === 'checkpoint') {
         pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {

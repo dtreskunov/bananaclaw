@@ -279,6 +279,14 @@ describe('NativeProvider', () => {
     };
     expect(JSON.parse(row.content).text).toBe('hello user');
     expect(requests).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'usage_progress')).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ input_tokens: 11, output_tokens: 2, context_tokens: 13, num_turns: 1 }),
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({ input_tokens: 15, output_tokens: 5, context_tokens: 7, num_turns: 2 }),
+      }),
+    ]);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'usage',

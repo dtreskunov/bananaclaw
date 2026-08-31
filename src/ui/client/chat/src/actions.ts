@@ -17,6 +17,7 @@ import {
   typingHint,
   typingStartedAt,
   typingModel,
+  typingUsage,
   activityLog,
   refs,
   treePath,
@@ -364,6 +365,7 @@ export function clearChat(): void {
     typingHint.value = '';
     typingStartedAt.value = null;
     typingModel.value = '';
+    typingUsage.value = null;
     activityLog.value = [];
   });
   if (refs.ws) {
@@ -689,6 +691,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     typingHint.value = '';
     typingStartedAt.value = null;
     typingModel.value = '';
+    typingUsage.value = null;
     activityLog.value = [];
     if (resumeTid) {
       threadId.value = resumeTid;
@@ -853,6 +856,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
     typingHint.value = '';
     typingStartedAt.value = null;
     typingModel.value = '';
+    typingUsage.value = null;
     activityLog.value = [];
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
@@ -900,11 +904,13 @@ function connectChatWs(ctx: ChatSocketContext): void {
       return;
     }
     if (payload.kind === 'typing') {
+      const priorStartedAt = typingStartedAt.value;
       isTyping.value = !!payload.on;
       typingHint.value = payload.hint || '';
       if (!payload.on) {
         typingStartedAt.value = null;
         typingModel.value = '';
+        typingUsage.value = null;
         // Turn ended. This frame can arrive before the outbound response, so
         // stash the live trace and let the 'out' handler attach it to the
         // bubble; then clear the live log so the typing block unmounts clean.
@@ -917,9 +923,11 @@ function connectChatWs(ctx: ChatSocketContext): void {
       }
       if (payload.on) {
         if (typeof payload.startedAt === 'number' && Number.isFinite(payload.startedAt)) {
+          if (priorStartedAt !== null && priorStartedAt !== payload.startedAt) typingUsage.value = null;
           typingStartedAt.value = payload.startedAt;
         }
         if (typeof payload.model === 'string') typingModel.value = payload.model;
+        if (payload.usage) typingUsage.value = payload.usage;
       }
       return;
     }
@@ -978,6 +986,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
           typingHint.value = '';
           typingStartedAt.value = null;
           typingModel.value = '';
+          typingUsage.value = null;
           activityLog.value = [];
         } else {
           // Display cards keep fallbackText for notifications/degradation while
@@ -1055,6 +1064,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
         // onto the message bubble above; clear the live log and carry buffer
         // so it doesn't linger under the new bubble or leak into next turn.
         activityLog.value = [];
+        typingUsage.value = null;
         refs.carryActivity = [];
         playCompletionChime();
       }

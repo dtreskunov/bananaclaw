@@ -223,6 +223,7 @@ export function sumOpenCodeUsage(
     total.reasoning_tokens = (total.reasoning_tokens ?? 0) + (u.reasoning_tokens ?? 0);
     if (u.model) total.model = u.model;
   }
+  total.num_turns = present.length;
   // Context occupancy is the last round trip alone, not the sum.
   const last = present[present.length - 1];
   const resident =
@@ -961,15 +962,11 @@ export class OpenCodeProvider implements AgentProvider {
                 } | undefined;
                 if (!isEventForSession(info?.sessionID, sessionId)) break;
                 if (info?.id && info?.role) {
+                  let firstFinish = false;
                   roleByMessageId.set(info.id, info.role);
                   if (info.finish) {
-                    const firstFinish = !finishByMessageId.has(info.id);
+                    firstFinish = !finishByMessageId.has(info.id);
                     finishByMessageId.set(info.id, info.finish);
-                    // One step of the prompt loop just closed. The runner
-                    // counts these to bound text-only runaways.
-                    if (firstFinish && info.role === 'assistant') {
-                      yield { type: 'assistant_message' };
-                    }
                   }
                   // Capture usage from the last assistant message.
                   if (info.role === 'assistant' && (typeof info.cost === 'number' || info.tokens)) {
@@ -984,6 +981,17 @@ export class OpenCodeProvider implements AgentProvider {
                     });
                     lastAssistantProviderID = info.providerID;
                     lastAssistantModelID = info.modelID;
+                  }
+                  if (firstFinish && info.role === 'assistant') {
+                    const usage = sumOpenCodeUsage(
+                      [...roleByMessageId]
+                        .filter(([, role]) => role === 'assistant')
+                        .map(([id]) => usageByMessageId.get(id)),
+                    );
+                    if (usage) yield { type: 'usage_progress', data: usage };
+                    // One step of the prompt loop just closed. The runner
+                    // counts these to bound text-only runaways.
+                    yield { type: 'assistant_message' };
                   }
                 }
                 break;
