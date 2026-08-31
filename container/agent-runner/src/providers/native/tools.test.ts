@@ -25,15 +25,27 @@ afterEach(() => {
 });
 
 describe('native coding tools', () => {
+  it('advertises the shared Claude/OpenCode tool names', () => {
+    expect(Object.keys(createNativeTools(root)).filter((name) => !name.startsWith('mcp__'))).toEqual([
+      'read',
+      'write',
+      'edit',
+      'patch',
+      'glob',
+      'grep',
+      'bash',
+    ]);
+  });
+
   it('writes new nested files, reads them, and performs exact edits', async () => {
-    await execute('write_file', { path: 'nested/note.txt', content: 'alpha beta' });
-    expect(await execute('read_file', { path: 'nested/note.txt' })).toBe('alpha beta');
-    await execute('edit_file', { path: 'nested/note.txt', oldText: 'beta', newText: 'gamma' });
+    await execute('write', { path: 'nested/note.txt', content: 'alpha beta' });
+    expect(await execute('read', { path: 'nested/note.txt' })).toBe('alpha beta');
+    await execute('edit', { path: 'nested/note.txt', oldText: 'beta', newText: 'gamma' });
     expect(fs.readFileSync(path.join(root, 'nested/note.txt'), 'utf8')).toBe('alpha gamma');
   });
 
   it('blocks writes outside the persistent workspace', async () => {
-    expect(execute('write_file', { path: '../escape.txt', content: 'no' })).rejects.toThrow(/restricted|outside/);
+    expect(execute('write', { path: '../escape.txt', content: 'no' })).rejects.toThrow(/restricted|outside/);
   });
 
   it('searches and globs without external binaries', async () => {
@@ -45,7 +57,7 @@ describe('native coding tools', () => {
 
   it('applies a checked unified diff', async () => {
     fs.writeFileSync(path.join(root, 'note.txt'), 'old\n');
-    await execute('apply_patch', {
+    await execute('patch', {
       patch: [
         'diff --git a/note.txt b/note.txt',
         '--- a/note.txt',
@@ -60,6 +72,6 @@ describe('native coding tools', () => {
   });
 
   it('runs shell commands in the workspace', async () => {
-    expect(String(await execute('shell', { command: 'pwd' }))).toContain(root);
+    expect(String(await execute('bash', { command: 'pwd' }))).toContain(root);
   });
 });

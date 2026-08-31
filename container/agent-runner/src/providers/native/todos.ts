@@ -85,7 +85,7 @@ export function shouldRequireTodos(prompt: string): boolean {
 export const NATIVE_TODO_INSTRUCTIONS = [
   '## In-turn todos',
   '',
-  'For work with three or more distinct steps, call `todo_update` before implementation.',
+  'For work with three or more distinct steps, call `todowrite` before implementation.',
   'Keep 3-8 concise items, exactly one `in_progress` while work remains, and update',
   'the list as steps finish. Before answering, complete every item or explain blockers.',
   'Skip todos for simple answers or one-step actions. Todos are ephemeral to this turn;',

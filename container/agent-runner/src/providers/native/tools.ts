@@ -139,7 +139,7 @@ export function createNativeTools(
     });
   }
 
-  tools.read_file = tool({
+  tools.read = tool({
     description: 'Read a UTF-8 text file from a mounted workspace root.',
     inputSchema: jsonSchema({ type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }),
     execute: async (input) => {
@@ -150,7 +150,7 @@ export function createNativeTools(
     },
   });
 
-  tools.write_file = tool({
+  tools.write = tool({
     description: 'Write a UTF-8 text file under the persistent workspace.',
     inputSchema: jsonSchema({
       type: 'object',
@@ -166,7 +166,7 @@ export function createNativeTools(
     },
   });
 
-  tools.edit_file = tool({
+  tools.edit = tool({
     description: 'Replace one exact string in a UTF-8 file. Fails unless the old string occurs exactly once.',
     inputSchema: jsonSchema({
       type: 'object',
@@ -186,7 +186,7 @@ export function createNativeTools(
     },
   });
 
-  tools.apply_patch = tool({
+  tools.patch = tool({
     description: 'Apply a unified diff to files under the persistent workspace.',
     inputSchema: jsonSchema({
       type: 'object',
@@ -257,7 +257,7 @@ export function createNativeTools(
     },
   });
 
-  tools.shell = tool({
+  tools.bash = tool({
     description: 'Run a shell command inside the isolated agent container.',
     inputSchema: jsonSchema({
       type: 'object',
@@ -270,7 +270,7 @@ export function createNativeTools(
     execute: async (input, options) => {
       const args = input as { command: string; timeoutMs?: number };
       const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 30_000, 1000), MAX_SHELL_TIMEOUT_MS);
-      setContainerToolInFlight('shell', timeoutMs);
+      setContainerToolInFlight('bash', timeoutMs);
       try {
         return (await runShell(args.command, cwd, timeoutMs, options.abortSignal)).text;
       } finally {
@@ -280,7 +280,7 @@ export function createNativeTools(
   });
 
   if (todoState) {
-    tools.todo_update = tool({
+    tools.todowrite = tool({
       description: 'Create or update the compact checklist for this turn. Send the complete current list.',
       inputSchema: jsonSchema({
         type: 'object',
@@ -306,7 +306,7 @@ export function createNativeTools(
       }),
       execute: async (input) => todoState.update((input as { todos: NativeTodo[] }).todos),
     });
-    tools.todo_read = tool({
+    tools.todoread = tool({
       description: 'Read the current in-turn checklist when its state is no longer visible in recent tool results.',
       inputSchema: jsonSchema({ type: 'object', properties: {}, additionalProperties: false }),
       execute: async () => todoState.snapshot(),
@@ -314,7 +314,7 @@ export function createNativeTools(
   }
 
   if (skills && skills.skills().length > 0) {
-    tools.load_skill = tool({
+    tools.skill = tool({
       description: 'Load a selected skill or a text file referenced by that skill before following its workflow.',
       inputSchema: jsonSchema({
         type: 'object',

@@ -35,7 +35,7 @@ describe('NativeSkillRegistry', () => {
     const registry = new NativeSkillRegistry(shared, local);
 
     expect(registry.skills().map((skill) => skill.slug)).toEqual(['browser', 'custom']);
-    expect(registry.instructions()).toContain('call `load_skill` before acting');
+    expect(registry.instructions()).toContain('call `skill` before acting');
     expect(registry.instructions()).toContain('**custom** (`custom`)');
   });
 

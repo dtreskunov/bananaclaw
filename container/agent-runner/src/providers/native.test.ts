@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
-import { NativeProvider, portableHistory, userMessage } from './native.js';
+import { formatNativeToolStep, NativeProvider, portableHistory, userMessage } from './native.js';
 import type { ProviderEvent } from './types.js';
 
 let root: string;
@@ -110,10 +110,10 @@ beforeEach(() => {
         : (toolMode || externalMcpToolMode || skillToolMode) && toolResultCount === 0;
       const toolName = todoToolMode
         ? toolResultCount === 0
-          ? 'todo_update'
-          : 'todo_read'
+          ? 'todowrite'
+          : 'todoread'
         : skillToolMode
-          ? 'load_skill'
+          ? 'skill'
           : externalMcpToolMode
             ? 'mcp__Fixture__echo_value'
             : 'mcp__nanoclaw__send_message';
@@ -162,6 +162,29 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it('formats canonical native tool activity with safe resource details', () => {
+    expect(formatNativeToolStep(
+      { toolCallId: 'read-1', toolName: 'read', input: { path: 'src/index.ts' } },
+      'running',
+    )).toMatchObject({ tool: 'read', status: 'running', detail: 'src/index.ts' });
+    expect(formatNativeToolStep(
+      {
+        toolCallId: 'patch-1',
+        toolName: 'patch',
+        input: { patch: '--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1 +1 @@\n-old\n+new\n' },
+      },
+      'completed',
+    )).toMatchObject({ tool: 'patch', title: 'Applied patch to', detail: 'src/index.ts' });
+    expect(formatNativeToolStep(
+      { toolCallId: 'skill-1', toolName: 'skill', input: { name: 'deploy', path: 'references/checklist.md' } },
+      'completed',
+    )).toMatchObject({ tool: 'skill', title: 'Loaded skill', detail: 'deploy/references/checklist.md' });
+    expect(formatNativeToolStep(
+      { toolCallId: 'mcp-1', toolName: 'mcp__example__lookup', input: { name: 'private-value' } },
+      'completed',
+    )).not.toHaveProperty('detail');
+  });
+
   it('stores supported image attachments as replayable base64 message parts', () => {
     const imagePath = path.join(root, 'pixel.png');
     fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -210,8 +233,8 @@ describe('NativeProvider', () => {
           content: [
             { type: 'reasoning', text: 'private' },
             { type: 'text', text: 'visible' },
-            { type: 'text', text: '<internal>todo_update worked; continue.</internal>' },
-            { type: 'tool-call', toolCallId: 'call-1', toolName: 'read_file', input: { path: 'x' } },
+            { type: 'text', text: '<internal>todowrite worked; continue.</internal>' },
+            { type: 'tool-call', toolCallId: 'call-1', toolName: 'read', input: { path: 'x' } },
           ],
         },
         {
@@ -220,7 +243,7 @@ describe('NativeProvider', () => {
             {
               type: 'tool-result',
               toolCallId: 'call-1',
-              toolName: 'read_file',
+              toolName: 'read',
               output: { type: 'text', value: 'result' },
             },
           ],
@@ -231,7 +254,7 @@ describe('NativeProvider', () => {
         role: 'assistant',
         content: [
           { type: 'text', text: 'visible' },
-          { type: 'tool-call', toolCallId: 'call-1', toolName: 'read_file', input: { path: 'x' } },
+          { type: 'tool-call', toolCallId: 'call-1', toolName: 'read', input: { path: 'x' } },
         ],
       },
       {
@@ -240,7 +263,7 @@ describe('NativeProvider', () => {
           {
             type: 'tool-result',
             toolCallId: 'call-1',
-            toolName: 'read_file',
+            toolName: 'read',
             output: { type: 'text', value: 'result' },
           },
         ],
@@ -333,7 +356,12 @@ describe('NativeProvider', () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'progress',
-        step: expect.objectContaining({ tool: 'load_skill', status: 'completed' }),
+        step: expect.objectContaining({
+          tool: 'skill',
+          status: 'completed',
+          title: 'Loaded skill',
+          detail: 'local-guide',
+        }),
       }),
     );
     expect(JSON.stringify(requests[0]?.messages)).toContain('**local-guide** (`local-guide`) — Use the local workflow.');
@@ -349,13 +377,13 @@ describe('NativeProvider', () => {
     expect(first).toContainEqual(
       expect.objectContaining({
         type: 'progress',
-        step: expect.objectContaining({ tool: 'todo_update', status: 'completed' }),
+        step: expect.objectContaining({ tool: 'todowrite', status: 'completed' }),
       }),
     );
     expect(first).toContainEqual(
       expect.objectContaining({
         type: 'progress',
-        step: expect.objectContaining({ tool: 'todo_read', status: 'completed' }),
+        step: expect.objectContaining({ tool: 'todoread', status: 'completed' }),
       }),
     );
     expect(JSON.stringify(requests[2]?.messages)).toContain('turn-one-secret');
@@ -363,7 +391,7 @@ describe('NativeProvider', () => {
     todoToolMode = false;
     await collect(new NativeProvider({ model: 'local/test-model' }), continuation);
     expect(JSON.stringify(requests[3]?.messages)).not.toContain('turn-one-secret');
-    expect((requests[3]?.tools as Array<{ function?: { name?: string } }>).some((item) => item.function?.name === 'todo_update')).toBe(true);
+    expect((requests[3]?.tools as Array<{ function?: { name?: string } }>).some((item) => item.function?.name === 'todowrite')).toBe(true);
   });
 
   it('does not advertise todos when tools are disabled for a pushed turn', async () => {
@@ -375,7 +403,7 @@ describe('NativeProvider', () => {
       // Drain both queued turns.
     }
 
-    expect(JSON.stringify(requests[0]?.tools)).toContain('todo_update');
+    expect(JSON.stringify(requests[0]?.tools)).toContain('todowrite');
     expect(JSON.stringify(requests[0]?.messages)).toContain('## In-turn todos');
     expect(requests[1]?.tools).toBeUndefined();
     expect(JSON.stringify(requests[1]?.messages)).not.toContain('## In-turn todos');
@@ -389,9 +417,9 @@ describe('NativeProvider', () => {
       // Drain the turn.
     }
 
-    expect(requests[0]?.tool_choice).toEqual({ type: 'function', function: { name: 'todo_update' } });
+    expect(requests[0]?.tool_choice).toEqual({ type: 'function', function: { name: 'todowrite' } });
     const toolNames = (requests[0]?.tools as Array<{ function: { name: string } }>).map((item) => item.function.name);
-    expect(toolNames).toEqual(['todo_update']);
+    expect(toolNames).toEqual(['todowrite']);
     expect(JSON.stringify(requests[0]?.messages)).toContain('planning-only step');
   });
 

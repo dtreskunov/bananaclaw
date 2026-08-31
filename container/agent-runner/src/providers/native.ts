@@ -119,14 +119,47 @@ function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
   };
 }
 
-function toolStep(part: Record<string, unknown>, status: 'running' | 'completed' | 'error'): ActivityStep {
+function patchTargets(input: Record<string, unknown> | undefined): string | undefined {
+  if (typeof input?.patch !== 'string') return undefined;
+  const files = [...new Set(
+    [...input.patch.matchAll(/^(?:---|\+\+\+)\s+([^\t\n]+)/gm)]
+      .map((match) => match[1].replace(/^[ab]\//, ''))
+      .filter((filename) => filename !== '/dev/null'),
+  )];
+  if (files.length === 0) return undefined;
+  return files.length <= 3
+    ? files.join(', ')
+    : `${files.slice(0, 3).join(', ')} +${files.length - 3} more`;
+}
+
+export function formatNativeToolStep(
+  part: Record<string, unknown>,
+  status: 'running' | 'completed' | 'error',
+): ActivityStep {
   const input = part.input && typeof part.input === 'object' ? (part.input as Record<string, unknown>) : undefined;
+  const tool = String(part.toolName ?? 'tool');
+  let detail = pickActivityDetail(input);
+  let title: string | undefined;
+  if (tool === 'skill' && typeof input?.name === 'string' && input.name.trim()) {
+    detail = typeof input.path === 'string' && input.path.trim()
+      ? `${input.name.trim()}/${input.path.trim()}`
+      : input.name.trim();
+    title = status === 'running' ? 'Loading skill' : 'Loaded skill';
+  } else if (tool === 'patch') {
+    detail = patchTargets(input);
+    title = status === 'running'
+      ? detail ? 'Applying patch to' : 'Applying patch'
+      : detail ? 'Applied patch to' : 'Applied patch';
+  } else if (tool === 'todoread') {
+    title = status === 'running' ? 'Reviewing task list' : 'Reviewed task list';
+  }
   return {
     kind: 'tool',
     id: String(part.toolCallId ?? `native-tool-${Date.now()}`),
-    tool: String(part.toolName ?? 'tool'),
+    tool,
     status,
-    ...(pickActivityDetail(input) ? { detail: pickActivityDetail(input) } : {}),
+    ...(detail ? { detail } : {}),
+    ...(title ? { title } : {}),
     ...(status === 'error' ? { error: errorMessage(part.error) } : {}),
   };
 }
@@ -176,22 +209,24 @@ function lazyMcpManager(servers: Record<string, McpServerConfig> | undefined, cw
 
 export function portableHistory(messages: ModelMessage[]): ModelMessage[] {
   const ephemeralToolCallIds = new Set<string>();
+  const isTodoTool = (toolName: string): boolean =>
+    ['todowrite', 'todoread', 'todo_update', 'todo_read'].includes(toolName);
   for (const message of messages) {
     if (message.role === 'assistant' && Array.isArray(message.content)) {
       for (const part of message.content) {
-        if ('toolName' in part && typeof part.toolName === 'string' && part.toolName.startsWith('todo_')) {
+        if ('toolName' in part && typeof part.toolName === 'string' && isTodoTool(part.toolName)) {
           ephemeralToolCallIds.add(part.toolCallId);
         }
       }
     } else if (message.role === 'tool') {
       for (const part of message.content) {
-        if ('toolName' in part && typeof part.toolName === 'string' && part.toolName.startsWith('todo_')) {
+        if ('toolName' in part && typeof part.toolName === 'string' && isTodoTool(part.toolName)) {
           ephemeralToolCallIds.add(part.toolCallId);
         }
         if (
           part.type === 'tool-result' &&
           part.output.type === 'error-text' &&
-          part.output.value.includes("Available tools: todo_update")
+          /Available tools: (?:todowrite|todo_update)/.test(part.output.value)
         ) {
           ephemeralToolCallIds.add(part.toolCallId);
         }
@@ -203,7 +238,7 @@ export function portableHistory(messages: ModelMessage[]): ModelMessage[] {
     if (message.role === 'assistant' && Array.isArray(message.content)) {
       const content = message.content.filter((part) => {
         if (part.type === 'reasoning' || part.type === 'reasoning-file') return false;
-        if (part.type === 'text' && /\btodo_(?:update|read)\b/.test(part.text)) return false;
+        if (part.type === 'text' && /\b(?:todowrite|todoread|todo_(?:update|read))\b/.test(part.text)) return false;
         return !('toolCallId' in part && ephemeralToolCallIds.has(part.toolCallId));
       });
       if (content.length > 0) output.push({ ...message, content });
@@ -303,11 +338,11 @@ export class NativeProvider implements AgentProvider {
                       prepareStep: ({ stepNumber, instructions }) =>
                         stepNumber === 0
                           ? {
-                              activeTools: ['todo_update'] as const,
-                              toolChoice: { type: 'tool' as const, toolName: 'todo_update' as const },
+                              activeTools: ['todowrite'] as const,
+                              toolChoice: { type: 'tool' as const, toolName: 'todowrite' as const },
                               instructions: `${String(
                                 instructions ?? '',
-                              )}\n\nThis is a planning-only step. Call todo_update exactly once and do not call any other tool.`,
+                              )}\n\nThis is a planning-only step. Call todowrite exactly once and do not call any other tool.`,
                             }
                           : undefined,
                     }
@@ -324,9 +359,9 @@ export class NativeProvider implements AgentProvider {
               for await (const rawPart of result.stream) {
                 yield { type: 'activity' };
                 const part = rawPart as unknown as Record<string, unknown>;
-                if (part.type === 'tool-call') yield { type: 'progress', step: toolStep(part, 'running') };
-                else if (part.type === 'tool-result') yield { type: 'progress', step: toolStep(part, 'completed') };
-                else if (part.type === 'tool-error') yield { type: 'progress', step: toolStep(part, 'error') };
+                if (part.type === 'tool-call') yield { type: 'progress', step: formatNativeToolStep(part, 'running') };
+                else if (part.type === 'tool-result') yield { type: 'progress', step: formatNativeToolStep(part, 'completed') };
+                else if (part.type === 'tool-error') yield { type: 'progress', step: formatNativeToolStep(part, 'error') };
                 else if (part.type === 'error') throw part.error;
                 else if (part.type === 'finish-step') {
                   yield {
