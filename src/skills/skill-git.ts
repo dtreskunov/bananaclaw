@@ -6,11 +6,10 @@
  * about it — where it came from, which commit, whether the agent has changed
  * it — is already recorded by git, so nothing custom is written into the repo.
  */
-import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-const GIT_TIMEOUT_MS = 15_000;
+import { gitOrNull } from './git.js';
 
 export interface SkillGitInfo {
   /** Root of the clone the skill lives in. */
@@ -24,21 +23,6 @@ export interface SkillGitInfo {
   modified: boolean;
   /** Commits the agent made on top of what was fetched. */
   localCommits: number;
-}
-
-function git(args: string[], cwd: string): string | null {
-  try {
-    return execFileSync('git', args, {
-      cwd,
-      timeout: GIT_TIMEOUT_MS,
-      encoding: 'utf8',
-      maxBuffer: 4 * 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/true' },
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return null;
-  }
 }
 
 /** Walk up from `dir` to find the enclosing git worktree, if any. */
@@ -64,7 +48,7 @@ export function readSkillGit(skillDir: string): SkillGitInfo | null {
   const relative = path.relative(repoDir, path.resolve(skillDir)).split(path.sep).join('/');
   // Prefer the recorded sparse path; fall back to the skill's actual position,
   // which is what a full (non-sparse) clone gives.
-  const sparse = git(['sparse-checkout', 'list'], repoDir);
+  const sparse = gitOrNull(['sparse-checkout', 'list'], repoDir);
   const sourcePath =
     sparse
       ?.split('\n')
@@ -72,14 +56,15 @@ export function readSkillGit(skillDir: string): SkillGitInfo | null {
       .find((line) => line !== '' && (line === relative || relative.startsWith(`${line}/`))) ??
     (relative || null);
 
-  const status = git(['status', '--porcelain', '--', '.'], skillDir);
+  const status = gitOrNull(['status', '--porcelain', '--', '.'], skillDir);
   const ahead =
-    git(['rev-list', '--count', 'origin/HEAD..HEAD'], repoDir) ?? git(['rev-list', '--count', '@{u}..HEAD'], repoDir);
+    gitOrNull(['rev-list', '--count', 'origin/HEAD..HEAD'], repoDir) ??
+    gitOrNull(['rev-list', '--count', '@{u}..HEAD'], repoDir);
 
   return {
     repoDir,
-    remote: git(['remote', 'get-url', 'origin'], repoDir),
-    commit: git(['rev-parse', 'HEAD'], repoDir),
+    remote: gitOrNull(['remote', 'get-url', 'origin'], repoDir),
+    commit: gitOrNull(['rev-parse', 'HEAD'], repoDir),
     sourcePath,
     modified: status !== null && status !== '',
     localCommits: Number.parseInt(ahead ?? '0', 10) || 0,
@@ -91,9 +76,9 @@ export function readSkillGit(skillDir: string): SkillGitInfo | null {
  * callers should treat a null as "unknown" rather than "up to date".
  */
 export function checkForUpdate(repoDir: string): boolean | null {
-  if (git(['fetch', '--depth', '1', 'origin'], repoDir) === null) return null;
-  const local = git(['rev-parse', 'HEAD'], repoDir);
-  const remote = git(['rev-parse', 'FETCH_HEAD'], repoDir);
+  if (gitOrNull(['fetch', '--depth', '1', 'origin'], repoDir) === null) return null;
+  const local = gitOrNull(['rev-parse', 'HEAD'], repoDir);
+  const remote = gitOrNull(['rev-parse', 'FETCH_HEAD'], repoDir);
   if (!local || !remote) return null;
   return local !== remote;
 }

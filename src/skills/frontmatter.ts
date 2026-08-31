@@ -5,6 +5,8 @@
  * CLAUDE.md composer and the marketplace installer all read SKILL.md through
  * here, so they can never disagree about what is installed or what it needs.
  */
+import fs from 'fs';
+import path from 'path';
 import { load as parseYaml } from 'js-yaml';
 
 /** Top-level keys the Agent Skills spec defines. Anything else is off-spec. */
@@ -19,6 +21,7 @@ export const SPEC_FRONTMATTER_KEYS = new Set([
 
 export const MAX_SKILL_NAME_LEN = 64;
 export const MAX_SKILL_DESCRIPTION_LEN = 1024;
+export const MAX_SKILL_MD_BYTES = 256 * 1024;
 export const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export interface SkillFrontmatter {
@@ -146,4 +149,27 @@ export function validateSkillFrontmatter(frontmatter: SkillFrontmatter | null, s
   }
 
   return { errors, warnings };
+}
+
+export interface SkillManifest extends SkillValidation {
+  /** Null when the file exists but its frontmatter is unusable. */
+  frontmatter: SkillFrontmatter | null;
+}
+
+/**
+ * Read and check the `SKILL.md` in `dir`. Returns null when there isn't a
+ * readable one — callers distinguish that from "present but invalid", which
+ * comes back as a manifest carrying errors.
+ */
+export function readSkillManifest(dir: string, slug: string): SkillManifest | null {
+  const file = path.join(dir, 'SKILL.md');
+  let markdown: string;
+  try {
+    if (fs.statSync(file).size > MAX_SKILL_MD_BYTES) return null;
+    markdown = fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  const frontmatter = parseSkillFrontmatter(markdown);
+  return { frontmatter, ...validateSkillFrontmatter(frontmatter, slug) };
 }

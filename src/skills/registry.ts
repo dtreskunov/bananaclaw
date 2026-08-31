@@ -23,7 +23,7 @@ import path from 'path';
 
 import { readEnvFile } from '../env.js';
 import { GROUPS_DIR } from '../config.js';
-import { parseSkillFrontmatter, validateSkillFrontmatter } from './frontmatter.js';
+import { readSkillManifest } from './frontmatter.js';
 import { readSkillGit, type SkillGitInfo } from './skill-git.js';
 
 export type SkillOrigin = 'builtin' | 'installed' | 'workspace';
@@ -98,9 +98,14 @@ export function groupSkillRoots(groupFolder: string, projectRoot = process.cwd()
   ];
 }
 
+/** Where a group's skills live — both its own and the ones vendored in. */
+export function groupSkillsDir(groupFolder: string): string {
+  return path.join(GROUPS_DIR, groupFolder, 'skills');
+}
+
 /** Where a group's sparse catalog clones live. */
 export function groupCatalogsDir(groupFolder: string): string {
-  return path.join(GROUPS_DIR, groupFolder, 'skills', CATALOGS_DIRNAME);
+  return path.join(groupSkillsDir(groupFolder), CATALOGS_DIRNAME);
 }
 
 /**
@@ -165,16 +170,9 @@ function readRoot(root: SkillRoot): RawSkill[] {
     const hostPath = path.join(root.hostDir, slug);
     if (!isDirLike(hostPath)) continue;
 
-    let markdown: string;
-    try {
-      markdown = fs.readFileSync(path.join(hostPath, 'SKILL.md'), 'utf8');
-    } catch {
-      continue;
-    }
-
-    const frontmatter = parseSkillFrontmatter(markdown);
-    const { errors, warnings } = validateSkillFrontmatter(frontmatter, slug);
-    if (!frontmatter || errors.length > 0) continue;
+    const manifest = readSkillManifest(hostPath, slug);
+    if (!manifest?.frontmatter || manifest.errors.length > 0) continue;
+    const { frontmatter, warnings } = manifest;
 
     // In the group root a symlink means "vendored from a catalog" — it points
     // into `.catalogs/<id>`. A real directory is the agent's own work.

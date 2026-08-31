@@ -10,12 +10,12 @@
  * Nothing here executes repo content — installing is a plain file copy, and
  * skills only run once an operator selects them for a group.
  */
-import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { log } from '../log.js';
-import { parseSkillFrontmatter, validateSkillFrontmatter, SKILL_NAME_RE } from './frontmatter.js';
+import { readSkillManifest, SKILL_NAME_RE } from './frontmatter.js';
+import { git, gitErrorDetail } from './git.js';
 import {
   deleteMarketplaceRecord,
   getMarketplaceRecord,
@@ -25,8 +25,6 @@ import {
   type MarketplaceRecord,
 } from './store.js';
 
-const GIT_TIMEOUT_MS = 120_000;
-const MAX_SKILL_MD_BYTES = 256 * 1024;
 const MARKETPLACE_MANIFEST = path.join('.claude-plugin', 'marketplace.json');
 const SCAN_MAX_DEPTH = 3;
 const SCAN_MAX_SKILLS = 500;
@@ -120,18 +118,6 @@ function deriveId(repo: string): string {
 
 // ── git ───────────────────────────────────────────────────────────────────
 
-function git(args: string[], cwd?: string): string {
-  return execFileSync('git', args, {
-    cwd,
-    timeout: GIT_TIMEOUT_MS,
-    encoding: 'utf8',
-    maxBuffer: 8 * 1024 * 1024,
-    // Never let git block on a credential prompt inside the host process.
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/true', GCM_INTERACTIVE: 'never' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
-}
-
 /** Clone or fast-forward the cache for a source. Returns the current commit. */
 export function syncMarketplaceCache(record: MarketplaceRecord): string {
   const dir = marketplaceCacheDir(record.id);
@@ -148,7 +134,7 @@ export function syncMarketplaceCache(record: MarketplaceRecord): string {
     }
     return git(['rev-parse', 'HEAD'], dir);
   } catch (err) {
-    const detail = err instanceof Error ? err.message.split('\n')[0] : String(err);
+    const detail = gitErrorDetail(err);
     throw new MarketplaceError(`git sync failed: ${detail}`);
   }
 }
@@ -173,20 +159,11 @@ export function resolveWithin(base: string, rel: string): string | null {
 }
 
 function readSkillAt(dir: string, marketplaceId: string, plugin: string, repoRoot: string): CatalogSkill | null {
-  const skillMd = path.join(dir, 'SKILL.md');
-  let markdown: string;
-  try {
-    if (fs.statSync(skillMd).size > MAX_SKILL_MD_BYTES) return null;
-    markdown = fs.readFileSync(skillMd, 'utf8');
-  } catch {
-    return null;
-  }
-
   const slug = path.basename(dir);
-  const frontmatter = parseSkillFrontmatter(markdown);
-  const { errors, warnings } = validateSkillFrontmatter(frontmatter, slug);
-  if (!frontmatter || errors.length > 0) return null;
+  const manifest = readSkillManifest(dir, slug);
+  if (!manifest?.frontmatter || manifest.errors.length > 0) return null;
   if (!SKILL_NAME_RE.test(slug)) return null;
+  const { frontmatter, warnings } = manifest;
 
   return {
     marketplaceId,

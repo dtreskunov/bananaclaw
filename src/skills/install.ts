@@ -11,29 +11,16 @@
  * `git sparse-checkout list` already record everything we need, so provenance
  * travels with the directory and can't drift out of sync with the files.
  */
-import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { parseSkillFrontmatter, validateSkillFrontmatter, SKILL_NAME_RE, MAX_SKILL_NAME_LEN } from './frontmatter.js';
+import { readSkillManifest, SKILL_NAME_RE, MAX_SKILL_NAME_LEN } from './frontmatter.js';
+import { git, gitErrorDetail, gitOrNull } from './git.js';
 import { findCatalogSkill, MarketplaceError, resolveWithin } from './marketplace.js';
-import { defaultSkillRoots, groupCatalogsDir, listSkills, CATALOGS_DIRNAME } from './registry.js';
+import { defaultSkillRoots, groupCatalogsDir, groupSkillsDir, listSkills, CATALOGS_DIRNAME } from './registry.js';
 import { getMarketplaceRecord } from './store.js';
 
 export class SkillInstallError extends Error {}
-
-const GIT_TIMEOUT_MS = 120_000;
-
-function git(args: string[], cwd?: string): string {
-  return execFileSync('git', args, {
-    cwd,
-    timeout: GIT_TIMEOUT_MS,
-    encoding: 'utf8',
-    maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/true', GCM_INTERACTIVE: 'never' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
-}
 
 function assertInstallableSlug(slug: string, groupFolder: string): void {
   if (!SKILL_NAME_RE.test(slug) || slug.length > MAX_SKILL_NAME_LEN) {
@@ -45,13 +32,14 @@ function assertInstallableSlug(slug: string, groupFolder: string): void {
   }
   // One namespace per group: an authored skill and an installed one can't
   // share a slug, so refuse rather than clobbering the agent's own work.
-  const target = path.join(path.dirname(groupCatalogsDir(groupFolder)), slug);
-  if (fs.existsSync(target) || isBrokenLink(target)) {
+  const target = path.join(groupSkillsDir(groupFolder), slug);
+  if (entryExists(target)) {
     throw new SkillInstallError(`"${slug}" already exists in this agent's skills`);
   }
 }
 
-function isBrokenLink(p: string): boolean {
+/** True for any existing entry, including a dangling symlink. */
+function entryExists(p: string): boolean {
   try {
     fs.lstatSync(p);
     return true;
@@ -97,24 +85,17 @@ function ensureCatalogCheckout(
     }
     git(['checkout'], repoDir);
   } catch (err) {
-    const detail = err instanceof Error ? err.message.split('\n')[0] : String(err);
-    throw new SkillInstallError(`git checkout failed: ${detail}`);
+    throw new SkillInstallError(`git checkout failed: ${gitErrorDetail(err)}`);
   }
 
   return repoDir;
 }
 
 function assertValidSkillSource(dir: string, slug: string): void {
-  let markdown: string;
-  try {
-    markdown = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
-  } catch {
-    throw new SkillInstallError('source has no SKILL.md');
-  }
-  const frontmatter = parseSkillFrontmatter(markdown);
-  const { errors } = validateSkillFrontmatter(frontmatter, slug);
-  if (!frontmatter || errors.length > 0) {
-    throw new SkillInstallError(`invalid SKILL.md: ${errors.join('; ') || 'unparseable frontmatter'}`);
+  const manifest = readSkillManifest(dir, slug);
+  if (!manifest) throw new SkillInstallError('source has no SKILL.md');
+  if (!manifest.frontmatter || manifest.errors.length > 0) {
+    throw new SkillInstallError(`invalid SKILL.md: ${manifest.errors.join('; ') || 'unparseable frontmatter'}`);
   }
 }
 
@@ -152,8 +133,7 @@ export function installCatalogSkill(request: InstallRequest): InstalledSkill {
 
   // Relative so the link resolves identically on the host and at
   // /workspace/agent/skills inside the container.
-  const skillsRoot = path.dirname(groupCatalogsDir(request.groupFolder));
-  const linkPath = path.join(skillsRoot, entry.slug);
+  const linkPath = path.join(groupSkillsDir(request.groupFolder), entry.slug);
   fs.symlinkSync(path.join(CATALOGS_DIRNAME, record.id, entry.path), linkPath);
 
   return {
@@ -172,21 +152,15 @@ export function installCatalogSkill(request: InstallRequest): InstalledSkill {
  * in the skill unless forced, so an uninstall can't silently discard it.
  */
 export function uninstallSkill(groupFolder: string, slug: string, force = false): void {
-  const skillsRoot = path.dirname(groupCatalogsDir(groupFolder));
-  const linkPath = path.join(skillsRoot, slug);
-  if (!isBrokenLink(linkPath)) throw new SkillInstallError(`"${slug}" is not installed for this agent`);
+  const linkPath = path.join(groupSkillsDir(groupFolder), slug);
+  if (!entryExists(linkPath)) throw new SkillInstallError(`"${slug}" is not installed for this agent`);
   if (!fs.lstatSync(linkPath).isSymbolicLink()) {
     throw new SkillInstallError(`"${slug}" is an authored skill — delete it from the workspace instead`);
   }
 
   if (!force) {
-    const resolved = fs.realpathSync(linkPath);
-    const dirty = execFileSync('git', ['status', '--porcelain', '--', '.'], {
-      cwd: resolved,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    if (dirty !== '') {
+    const dirty = gitOrNull(['status', '--porcelain', '--', '.'], fs.realpathSync(linkPath));
+    if (dirty !== null && dirty !== '') {
       throw new SkillInstallError(`"${slug}" has uncommitted local changes — pass force to remove it anyway`);
     }
   }
