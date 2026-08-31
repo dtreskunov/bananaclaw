@@ -4,8 +4,9 @@ import fs from 'fs';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
-import type { ActivityStep, AgentProvider, AgentQuery, FileAttachment, ForkContinuationInput, ModelLimits, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions } from './types.js';
+import type { ActivityStep, AgentProvider, AgentQuery, CallUsage, FileAttachment, ForkContinuationInput, ModelLimits, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions, TurnUsage } from './types.js';
 import { pickActivityDetail } from './types.js';
+import { accumulateCallUsage } from './usage.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { createModelCatalog, type RawLimits } from './model-catalog.js';
 import { parseAssistantOutput } from '../formatter.js';
@@ -200,36 +201,41 @@ export function isEventForSession(eventSessionId: string | undefined, activeSess
  * bills separately. Recording only the final one drops the (usually largest)
  * tool-calling steps, so the sum is what reaches the DB. Exported for tests.
  */
-export function sumOpenCodeUsage(
-  perMessage: Array<import('./types.js').TurnUsage | undefined>,
-): import('./types.js').TurnUsage | null {
-  const present = perMessage.filter((u): u is import('./types.js').TurnUsage => !!u);
-  if (present.length === 0) return null;
-  const total: import('./types.js').TurnUsage = {
-    cost_usd: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    reasoning_tokens: 0,
-    model: '',
-  };
-  for (const u of present) {
-    total.cost_usd += u.cost_usd;
-    total.input_tokens += u.input_tokens;
-    total.output_tokens += u.output_tokens;
-    total.cache_read_tokens += u.cache_read_tokens;
-    total.cache_write_tokens += u.cache_write_tokens;
-    total.reasoning_tokens = (total.reasoning_tokens ?? 0) + (u.reasoning_tokens ?? 0);
-    if (u.model) total.model = u.model;
+export function sumOpenCodeUsage(perMessage: Array<CallUsage | undefined>): TurnUsage | null {
+  let total: TurnUsage | null = null;
+  for (const usage of perMessage) {
+    if (!usage) continue;
+    total = accumulateCallUsage(total, { ...usage, model: usage.model || total?.model || '' });
   }
-  total.num_turns = present.length;
-  // Context occupancy is the last round trip alone, not the sum.
-  const last = present[present.length - 1];
-  const resident =
-    last.input_tokens + last.cache_read_tokens + last.cache_write_tokens + last.output_tokens;
-  if (resident > 0) total.context_tokens = resident;
   return total;
+}
+
+type OpenCodeUsageInfo = {
+  cost?: number;
+  tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } };
+  modelID?: string;
+};
+
+/** Normalize one assistant message's reported usage into a single call.
+ *  Exported for tests. */
+export function callUsageFromInfo(info: OpenCodeUsageInfo | undefined): CallUsage | null {
+  if (!info || (typeof info.cost !== 'number' && !info.tokens)) return null;
+  const input = info.tokens?.input ?? 0;
+  const output = info.tokens?.output ?? 0;
+  const cacheRead = info.tokens?.cache?.read ?? 0;
+  const cacheWrite = info.tokens?.cache?.write ?? 0;
+  // Occupancy for this round trip: the whole prompt it resent plus its reply.
+  const resident = input + cacheRead + cacheWrite + output;
+  return {
+    cost_usd: info.cost ?? 0,
+    input_tokens: input,
+    output_tokens: output,
+    cache_read_tokens: cacheRead,
+    cache_write_tokens: cacheWrite,
+    reasoning_tokens: info.tokens?.reasoning,
+    model: info.modelID ?? '',
+    ...(resident > 0 ? { context_tokens: resident } : {}),
+  };
 }
 
 /**
@@ -908,7 +914,7 @@ export class OpenCodeProvider implements AgentProvider {
         // Keyed by message id because OpenCode re-emits a growing snapshot for
         // the same message as it streams; the turn total is the sum of the
         // final snapshot of each assistant message, not just the last one.
-        const usageByMessageId = new Map<string, import('./types.js').TurnUsage>();
+        const usageByMessageId = new Map<string, CallUsage>();
         // Captured separately so the limits-lookup at yield-time has the
         // provider id (TurnUsage itself doesn't carry it).
         let lastAssistantProviderID: string | undefined;
@@ -969,26 +975,15 @@ export class OpenCodeProvider implements AgentProvider {
                     finishByMessageId.set(info.id, info.finish);
                   }
                   // Capture usage from the last assistant message.
-                  if (info.role === 'assistant' && (typeof info.cost === 'number' || info.tokens)) {
-                    usageByMessageId.set(info.id, {
-                      cost_usd: info.cost ?? 0,
-                      input_tokens: info.tokens?.input ?? 0,
-                      output_tokens: info.tokens?.output ?? 0,
-                      cache_read_tokens: info.tokens?.cache?.read ?? 0,
-                      cache_write_tokens: info.tokens?.cache?.write ?? 0,
-                      reasoning_tokens: info.tokens?.reasoning,
-                      model: info.modelID ?? '',
-                    });
+                  const callUsage = info.role === 'assistant' ? callUsageFromInfo(info) : null;
+                  if (callUsage) {
+                    usageByMessageId.set(info.id, callUsage);
                     lastAssistantProviderID = info.providerID;
                     lastAssistantModelID = info.modelID;
                   }
                   if (firstFinish && info.role === 'assistant') {
-                    const usage = sumOpenCodeUsage(
-                      [...roleByMessageId]
-                        .filter(([, role]) => role === 'assistant')
-                        .map(([id]) => usageByMessageId.get(id)),
-                    );
-                    if (usage) yield { type: 'usage_progress', data: usage };
+                    const usage = usageByMessageId.get(info.id);
+                    if (usage) yield { type: 'usage_call', data: usage };
                     // One step of the prompt loop just closed. The runner
                     // counts these to bound text-only runaways.
                     yield { type: 'assistant_message' };
@@ -1140,18 +1135,11 @@ export class OpenCodeProvider implements AgentProvider {
               providerID?: string;
               modelID?: string;
             } | undefined;
-            if (info && (typeof info.cost === 'number' || info.tokens)) {
-              usageByMessageId.set(lastAssistantId, {
-                cost_usd: info.cost ?? 0,
-                input_tokens: info.tokens?.input ?? 0,
-                output_tokens: info.tokens?.output ?? 0,
-                cache_read_tokens: info.tokens?.cache?.read ?? 0,
-                cache_write_tokens: info.tokens?.cache?.write ?? 0,
-                reasoning_tokens: info.tokens?.reasoning,
-                model: info.modelID ?? '',
-              });
-              if (info.providerID) lastAssistantProviderID = info.providerID;
-              if (info.modelID) lastAssistantModelID = info.modelID;
+            const callUsage = callUsageFromInfo(info);
+            if (callUsage) {
+              usageByMessageId.set(lastAssistantId, callUsage);
+              if (info?.providerID) lastAssistantProviderID = info.providerID;
+              if (info?.modelID) lastAssistantModelID = info.modelID;
             }
           } catch (err) {
             log(`Failed to refresh final assistant usage: ${err instanceof Error ? err.message : String(err)}`);

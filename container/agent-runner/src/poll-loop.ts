@@ -6,7 +6,7 @@ import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
 import { writeTurnActivity } from './db/turn-activity.js';
 import { completeTaskAttempts, markTaskAttemptsProviderInvoked } from './db/task-attempts.js';
 import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
-import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, clearUsageProgress, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, migrateLegacyContinuation, setContinuation, setFailedTurn, setTurnEnded, writeUsageProgress } from './db/session-state.js';
+import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, clearUsageProgress, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, setContinuation, setFailedTurn, setTurnEnded, writeUsageProgress } from './db/session-state.js';
 import { getForkOrigin, type ForkOriginRow } from './db/fork-origin.js';
 import { clearCurrentInReplyTo, getDuplicateSendCount, resetTurnSendTracking, setCurrentInReplyTo } from './current-batch.js';
 import {
@@ -23,6 +23,7 @@ import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import { isAudioMime, transcribeAudio } from './transcribe.js';
 import { getConfig } from './config.js';
 import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderExchange } from './providers/types.js';
+import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
@@ -137,7 +138,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   // provider decides how to use it (Claude resumes a .jsonl transcript,
   // other providers may reload a thread ID, etc.). Keyed per-provider so
   // a Codex thread id never gets handed to Claude or vice versa.
-  let continuation: string | undefined = migrateLegacyContinuation(config.providerName);
+  let continuation: string | undefined = getContinuation(config.providerName);
 
   // Before resuming, drop a session whose on-disk transcript has grown too
   // large/old to cold-resume within the host's idle ceiling. Without this a
@@ -815,6 +816,9 @@ async function processQuery(
   // Captured from the provider's `usage` event; flushed at end of turn so
   // it can be linked to the last outbound row written this turn.
   let pendingUsage: import('./providers/types.js').TurnUsage | null = null;
+  // Runner-owned cumulative snapshot built from disaggregated provider calls.
+  // The host polls an overwrite file, so it must never receive call deltas.
+  let liveUsage: import('./providers/types.js').TurnUsage | null = null;
   // Captured from the provider's `checkpoint` event; flushed with the usage so
   // it lands on the same outbound row.
   let pendingCheckpoint: string | null = null;
@@ -827,6 +831,7 @@ async function processQuery(
   const resetActivityForNextTurn = () => {
     try { clearActivity(); } catch { /* best-effort */ }
     try { clearUsageProgress(); } catch { /* best-effort */ }
+    liveUsage = null;
     activityFlushedCount = 0;
   };
 
@@ -1360,22 +1365,10 @@ async function processQuery(
         // Accumulated, not replaced: a turn that retried, or that errored and
         // was re-prompted, emits one event per attempt and every attempt was
         // billed. Non-additive fields take the latest attempt's value.
-        pendingUsage = pendingUsage
-          ? {
-              ...event.data,
-              cost_usd: pendingUsage.cost_usd + event.data.cost_usd,
-              input_tokens: pendingUsage.input_tokens + event.data.input_tokens,
-              output_tokens: pendingUsage.output_tokens + event.data.output_tokens,
-              cache_read_tokens: pendingUsage.cache_read_tokens + event.data.cache_read_tokens,
-              cache_write_tokens: pendingUsage.cache_write_tokens + event.data.cache_write_tokens,
-              reasoning_tokens: (pendingUsage.reasoning_tokens ?? 0) + (event.data.reasoning_tokens ?? 0),
-              num_turns: (pendingUsage.num_turns ?? 0) + (event.data.num_turns ?? 0) || undefined,
-              // Occupancy, not a total: the newest attempt that reported one wins.
-              context_tokens: event.data.context_tokens ?? pendingUsage.context_tokens,
-            }
-          : event.data;
-      } else if (event.type === 'usage_progress') {
-        try { writeUsageProgress(event.data); } catch { /* best-effort */ }
+        pendingUsage = accumulateTurnUsage(pendingUsage, event.data);
+      } else if (event.type === 'usage_call') {
+        liveUsage = accumulateCallUsage(liveUsage, event.data);
+        try { writeUsageProgress(liveUsage); } catch { /* best-effort */ }
       } else if (event.type === 'checkpoint') {
         pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {

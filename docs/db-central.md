@@ -349,7 +349,7 @@ CREATE TABLE container_configs (
 ```
 
 - **Readers:** `src/container-config.ts`, `src/container-runner.ts`, `src/cli/dispatch.ts` (scope enforcement), `src/claude-md-compose.ts`
-- **Writers:** `src/db/container-configs.ts`, `src/modules/self-mod/apply.ts`, `src/backfill-container-configs.ts`
+- **Writers:** `src/db/container-configs.ts`, `src/modules/self-mod/apply.ts`
 
 ---
 

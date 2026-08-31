@@ -14,6 +14,7 @@ import type {
   ProviderOptions,
   QueryInput,
   QueryPushOptions,
+  CallUsage,
   TurnUsage,
 } from './types.js';
 import { pickActivityDetail } from './types.js';
@@ -84,15 +85,22 @@ function usageFor(
   durationMs: number,
   numTurns: number,
 ): TurnUsage {
+  const usage = callUsageFor(model, raw);
+  const finalStepUsage = callUsageFor(model, finalStepRaw);
+  return {
+    ...usage,
+    num_turns: numTurns,
+    duration_ms: durationMs,
+    context_tokens: finalStepUsage.context_tokens,
+  };
+}
+
+function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
   const usage = (raw ?? {}) as {
     inputTokens?: number;
     outputTokens?: number;
     cachedInputTokens?: number;
     reasoningTokens?: number;
-  };
-  const finalStepUsage = (finalStepRaw ?? {}) as {
-    inputTokens?: number;
-    outputTokens?: number;
   };
   const input = usage.inputTokens ?? 0;
   const output = usage.outputTokens ?? 0;
@@ -104,27 +112,10 @@ function usageFor(
     cache_read_tokens: usage.cachedInputTokens ?? 0,
     cache_write_tokens: 0,
     reasoning_tokens: usage.reasoningTokens,
-    num_turns: numTurns,
-    duration_ms: durationMs,
     model: model.wireId,
     context_window: model.contextWindow,
     max_output_tokens: model.maxOutputTokens,
-    context_tokens: (finalStepUsage.inputTokens ?? 0) + (finalStepUsage.outputTokens ?? 0),
-  };
-}
-
-function addUsage(total: Record<string, number>, raw: unknown): Record<string, number> {
-  const usage = (raw ?? {}) as {
-    inputTokens?: number;
-    outputTokens?: number;
-    cachedInputTokens?: number;
-    reasoningTokens?: number;
-  };
-  return {
-    inputTokens: (total.inputTokens ?? 0) + (usage.inputTokens ?? 0),
-    outputTokens: (total.outputTokens ?? 0) + (usage.outputTokens ?? 0),
-    cachedInputTokens: (total.cachedInputTokens ?? 0) + (usage.cachedInputTokens ?? 0),
-    reasoningTokens: (total.reasoningTokens ?? 0) + (usage.reasoningTokens ?? 0),
+    context_tokens: input + output,
   };
 }
 
@@ -330,8 +321,6 @@ export class NativeProvider implements AgentProvider {
                 ...(typeof options.modelParams?.top_p === 'number' ? { topP: options.modelParams.top_p } : {}),
               });
 
-              let liveUsage: Record<string, number> = {};
-              let completedSteps = 0;
               for await (const rawPart of result.stream) {
                 yield { type: 'activity' };
                 const part = rawPart as unknown as Record<string, unknown>;
@@ -340,11 +329,9 @@ export class NativeProvider implements AgentProvider {
                 else if (part.type === 'tool-error') yield { type: 'progress', step: toolStep(part, 'error') };
                 else if (part.type === 'error') throw part.error;
                 else if (part.type === 'finish-step') {
-                  completedSteps += 1;
-                  liveUsage = addUsage(liveUsage, part.usage);
                   yield {
-                    type: 'usage_progress',
-                    data: usageFor(resolved, liveUsage, part.usage, Date.now() - startedAt, completedSteps),
+                    type: 'usage_call',
+                    data: callUsageFor(resolved, part.usage),
                   };
                   yield { type: 'assistant_message' };
                 }

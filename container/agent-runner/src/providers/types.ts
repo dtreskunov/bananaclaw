@@ -246,6 +246,11 @@ export interface TurnUsage {
   context_tokens?: number;
 }
 
+/** Usage for one completed model call. The runner accumulates these into a
+ * TurnUsage snapshot so lossy host polling never has to reconstruct totals
+ * from individual events. */
+export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms' | 'duration_api_ms'>;
+
 /**
  * One step of a turn's activity trace, in structured form. Providers emit
  * these instead of pre-formatted human strings — the presentation ("Using
@@ -360,12 +365,9 @@ export type ProviderEvent =
    * outbound.db once the result row is created.
    */
   | { type: 'usage'; data: TurnUsage }
-  /**
-   * Latest cumulative usage for an in-flight turn. Unlike `usage`, snapshots
-   * replace one another and are only for live presentation; they are never
-   * added to final billing totals.
-   */
-  | { type: 'usage_progress'; data: TurnUsage }
+  /** Usage for one completed model call. The runner accumulates these into
+   * replacement snapshots for live presentation. */
+  | { type: 'usage_call'; data: CallUsage }
   /**
    * Provider-private handle for the turn just finished, emitted just before
    * the corresponding `result`. The poll-loop stashes it and writes it to

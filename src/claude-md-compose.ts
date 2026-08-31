@@ -155,60 +155,6 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   }
 }
 
-/**
- * One-time cutover from the `groups/global/CLAUDE.md` + `.claude-global.md`
- * pattern. Idempotent — safe to run on every host startup.
- *
- * For each group dir:
- *   - remove `.claude-global.md` symlink if present
- *   - rename `CLAUDE.md` → `CLAUDE.local.md` (only if `CLAUDE.local.md`
- *     doesn't already exist — preserves pre-cutover content as per-group
- *     memory; after the first spawn regenerates `CLAUDE.md`, this branch
- *     is skipped because `CLAUDE.local.md` now exists)
- *
- * Globally:
- *   - delete `groups/global/` (content already in `container/CLAUDE.md`)
- */
-export function migrateGroupsToClaudeLocal(): void {
-  if (!fs.existsSync(GROUPS_DIR)) return;
-
-  const actions: string[] = [];
-
-  for (const entry of fs.readdirSync(GROUPS_DIR, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name === 'global') continue;
-    if (/~\d*$/.test(entry.name)) continue; // archived folder (e.g. `my-group~`, `my-group~2`)
-
-    const groupDir = path.join(GROUPS_DIR, entry.name);
-
-    const oldGlobalLink = path.join(groupDir, '.claude-global.md');
-    try {
-      fs.lstatSync(oldGlobalLink);
-      fs.unlinkSync(oldGlobalLink);
-      actions.push(`${entry.name}/.claude-global.md removed`);
-    } catch {
-      /* already gone */
-    }
-
-    const claudeMd = path.join(groupDir, 'CLAUDE.md');
-    const claudeLocal = path.join(groupDir, 'CLAUDE.local.md');
-    if (fs.existsSync(claudeMd) && !fs.existsSync(claudeLocal)) {
-      fs.renameSync(claudeMd, claudeLocal);
-      actions.push(`${entry.name}/CLAUDE.md → CLAUDE.local.md`);
-    }
-  }
-
-  const globalDir = path.join(GROUPS_DIR, 'global');
-  if (fs.existsSync(globalDir)) {
-    fs.rmSync(globalDir, { recursive: true, force: true });
-    actions.push('groups/global/ removed');
-  }
-
-  if (actions.length > 0) {
-    log.info('Migrated groups to CLAUDE.local.md model', { actions });
-  }
-}
-
 function syncSymlink(linkPath: string, target: string): void {
   let currentTarget: string | null = null;
   try {

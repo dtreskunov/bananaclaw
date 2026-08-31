@@ -11,8 +11,6 @@
  */
 import { getOutboundDb } from './connection.js';
 
-const LEGACY_KEY = 'sdk_session_id';
-
 function continuationKey(providerName: string): string {
   return `continuation:${providerName.toLowerCase()}`;
 }
@@ -32,38 +30,6 @@ function setValue(key: string, value: string): void {
 
 function deleteValue(key: string): void {
   getOutboundDb().prepare('DELETE FROM session_state WHERE key = ?').run(key);
-}
-
-/**
- * One-time migration of the pre-per-provider continuation row.
- *
- * Before this was keyed per provider, continuations lived under the
- * single key `sdk_session_id`. On container start, if that legacy row
- * exists and the current provider has no continuation of its own, adopt
- * the legacy value into the current provider's slot (best-guess — the
- * legacy row was written by whatever provider ran last). The legacy row
- * is always deleted so future provider flips never re-read a stale id
- * through the wrong lens.
- *
- * Returns the continuation the caller should use at startup (either the
- * current provider's existing value, the adopted legacy value, or
- * undefined).
- */
-export function migrateLegacyContinuation(providerName: string): string | undefined {
-  const legacy = getValue(LEGACY_KEY);
-  const currentKey = continuationKey(providerName);
-  const current = getValue(currentKey);
-
-  if (legacy === undefined) return current;
-
-  // Always drop the legacy row so no future provider reads it.
-  deleteValue(LEGACY_KEY);
-
-  // Prefer the current provider's own slot if one already exists.
-  if (current !== undefined) return current;
-
-  setValue(currentKey, legacy);
-  return legacy;
 }
 
 export function getContinuation(providerName: string): string | undefined {

@@ -501,11 +501,3 @@ export function closeSessionDb(): void {
   _outbound?.close();
   _outbound = null;
 }
-
-/**
- * @deprecated Use getInboundDb() / getOutboundDb() instead.
- * Kept for backward compatibility during migration.
- */
-export function getSessionDb(): Database {
-  return getInboundDb();
-}

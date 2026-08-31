@@ -71,7 +71,7 @@ import { routeInbound } from '../src/router.js';
 import { setDeliveryAdapter, startActiveDeliveryPoll, stopDeliveryPolls } from '../src/delivery.js';
 import { getChannelAdapter, registerChannelAdapter, initChannelAdapters } from '../src/channels/channel-registry.js';
 import { findSession } from '../src/db/sessions.js';
-import { sessionDbPath } from '../src/session-manager.js';
+import { inboundDbPath } from '../src/session-manager.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from '../src/channels/adapter.js';
 
 // Track delivered messages
@@ -187,7 +187,7 @@ const checkContainerLogs = () => {
   } catch { /* ignore */ }
 };
 
-const sessDbPath = sessionDbPath('ag-chan', session.id);
+const sessDbPath = inboundDbPath('ag-chan', session.id);
 console.log(`✓ Session DB: ${sessDbPath}`);
 
 // --- Step 4: Wait for delivery through mock adapter ---
