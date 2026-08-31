@@ -78,7 +78,7 @@ function createChatSdkBridge(
 
       chat = new Chat({
         adapters: { [adapter.name]: adapter },
-        state: new SqliteStateAdapter(),
+        state: new SqliteStateAdapter(config.instance ?? adapter.name),
         concurrency: chatConfig.concurrency ?? 'concurrent',
       });
 

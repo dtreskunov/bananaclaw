@@ -221,7 +221,7 @@ async function spawnContainer(session: Session): Promise<void> {
   // idempotent: it only writes paths that don't already exist, so this call
   // is a no-op for groups that have spawned before. Runs before the provider
   // contribution so a surfaces-providing provider finds the group dir ready.
-  const providerName = resolveProviderName(session.agent_provider, containerConfig.provider);
+  const providerName = resolveProviderName(containerConfig.provider);
   initGroupFilesystem(agentGroup, { provider: providerName });
 
   // Resolve the effective provider + any host-side contribution it declares
@@ -341,7 +341,7 @@ export async function runMcpProbeContainer(
   let containerName: string | undefined;
   try {
     const containerConfig = materializeContainerJson(agentGroup.id);
-    const providerName = resolveProviderName(null, containerConfig.provider, resolveEnv('DEFAULT_PROVIDER'));
+    const providerName = resolveProviderName(containerConfig.provider, resolveEnv('DEFAULT_PROVIDER'));
     initGroupFilesystem(agentGroup, { provider: providerName });
     const { provider, contribution } = resolveProviderContribution(probeSession, agentGroup, containerConfig);
     const mounts = buildMounts(agentGroup, probeSession, containerConfig, provider, contribution);
@@ -547,10 +547,9 @@ export function adoptRunningContainers(adopt: Array<{ name: string; sessionId: s
 }
 
 /**
- * Resolve the provider name for a session:
+ * Resolve the provider name for an agent group:
  *
- *   sessions.agent_provider
- *     → container_configs.provider
+ *   container_configs.provider
  *     → DEFAULT_PROVIDER (env)
  *     → 'claude'
  *
@@ -559,11 +558,10 @@ export function adoptRunningContainers(adopt: Array<{ name: string; sessionId: s
  * default; tests can pass any value.
  */
 export function resolveProviderName(
-  sessionProvider: string | null | undefined,
   containerConfigProvider: string | null | undefined,
   envDefaultProvider: string | null | undefined = null,
 ): string {
-  return (sessionProvider || containerConfigProvider || envDefaultProvider || 'claude').toLowerCase();
+  return (containerConfigProvider || envDefaultProvider || 'claude').toLowerCase();
 }
 
 function resolveProviderContribution(
@@ -571,11 +569,7 @@ function resolveProviderContribution(
   agentGroup: AgentGroup,
   containerConfig: import('./container-config.js').ContainerConfig,
 ): { provider: string; contribution: ProviderContainerContribution } {
-  const provider = resolveProviderName(
-    session.agent_provider,
-    containerConfig.provider,
-    resolveEnv('DEFAULT_PROVIDER'),
-  );
+  const provider = resolveProviderName(containerConfig.provider, resolveEnv('DEFAULT_PROVIDER'));
   const fn = getProviderContainerConfig(provider);
   const contribution = fn
     ? fn({

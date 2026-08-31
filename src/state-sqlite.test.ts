@@ -7,9 +7,8 @@
  * bot silently drops every message the first processed — unless each named
  * instance gets its own key namespace.
  *
- * The inverse constraint is just as load-bearing: the DEFAULT instance must
- * keep today's UNPREFIXED keys byte-identically, or live installs orphan
- * every existing subscription/lock/kv row on upgrade.
+ * The default instance uses the adapter name as its namespace, so it is
+ * isolated by the same rule as every named instance.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
@@ -26,36 +25,11 @@ afterEach(() => {
   closeDb();
 });
 
-async function makeAdapter(namespace?: string): Promise<SqliteStateAdapter> {
+async function makeAdapter(namespace: string): Promise<SqliteStateAdapter> {
   const state = new SqliteStateAdapter(namespace);
   await state.connect();
   return state;
 }
-
-describe('default instance — legacy unprefixed keys (live-install regression arm)', () => {
-  it('reads rows written before the namespace dimension existed', async () => {
-    // A pre-existing install's subscription row: bare thread id.
-    getDb().prepare("INSERT INTO chat_sdk_subscriptions (thread_id) VALUES ('T-raw')").run();
-    const state = await makeAdapter();
-    expect(await state.isSubscribed('T-raw')).toBe(true);
-  });
-
-  it('writes raw keys — kv, subscriptions, lists bind the exact input strings', async () => {
-    const state = await makeAdapter();
-    await state.set('k1', { v: 1 });
-    await state.subscribe('slack:T1');
-    await state.appendToList('l1', 'item');
-
-    const kv = getDb().prepare('SELECT key FROM chat_sdk_kv').all() as Array<{ key: string }>;
-    expect(kv.map((r) => r.key)).toEqual(['k1']);
-    const subs = getDb().prepare('SELECT thread_id FROM chat_sdk_subscriptions').all() as Array<{
-      thread_id: string;
-    }>;
-    expect(subs.map((r) => r.thread_id)).toEqual(['slack:T1']);
-    const lists = getDb().prepare('SELECT key FROM chat_sdk_lists').all() as Array<{ key: string }>;
-    expect(lists.map((r) => r.key)).toEqual(['l1']);
-  });
-});
 
 describe('namespaced instance — round-trips and raw-key shape', () => {
   it('kv get/set/setIfNotExists/delete round-trip under a prefixed key', async () => {
@@ -108,14 +82,14 @@ describe('cross-namespace isolation', () => {
     expect(await a.setIfNotExists('dedupe:slack:m1', 1)).toBe(false);
   });
 
-  it("one namespace's subscription is invisible to the other (and to the default)", async () => {
+  it("one namespace's subscription is invisible to the others", async () => {
     const a = await makeAdapter('slack-worker');
     const b = await makeAdapter('slack-tester');
-    const def = await makeAdapter();
+    const primary = await makeAdapter('slack');
     await a.subscribe('slack:T1');
     expect(await a.isSubscribed('slack:T1')).toBe(true);
     expect(await b.isSubscribed('slack:T1')).toBe(false);
-    expect(await def.isSubscribed('slack:T1')).toBe(false);
+    expect(await primary.isSubscribed('slack:T1')).toBe(false);
   });
 });
 

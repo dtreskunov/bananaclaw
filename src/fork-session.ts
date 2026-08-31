@@ -204,7 +204,6 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
   // that inherits its provider from DEFAULT_PROVIDER forks as 'claude' and
   // finds no continuation to branch from.
   const provider = resolveProviderName(
-    parentSession.agent_provider,
     getContainerConfig(agentGroupId)?.provider,
     process.env.DEFAULT_PROVIDER ?? readEnvFile(['DEFAULT_PROVIDER']).DEFAULT_PROVIDER,
   );
@@ -356,7 +355,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
     agent_group_id: agentGroupId,
     messaging_group_id: messagingGroupId,
     thread_id: newThreadId,
-    agent_provider: parentSession.agent_provider,
+    agent_provider: null,
     status: 'active',
     container_status: 'stopped',
     last_active: null,

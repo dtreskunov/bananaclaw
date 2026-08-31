@@ -929,7 +929,7 @@ export function readTurnUsageForOutbound(
       outDb.close();
     }
   } catch {
-    // outbound DB or turn_usage table may not exist
+    // outbound DB may not exist
     return undefined;
   }
 }
@@ -955,7 +955,7 @@ export function readTurnActivityForOutbound(
       outDb.close();
     }
   } catch {
-    // outbound DB or turn_activity table may not exist
+    // outbound DB may not exist
     return undefined;
   }
 }
@@ -1075,73 +1075,64 @@ export function readChatHistory(
         .map((r) => r.id);
       const usageMap = new Map<string, TurnUsageDto>();
       if (outIds.length > 0) {
-        try {
-          const usageRows = outDb
-            .prepare(
-              `SELECT message_out_id, cost_usd, input_tokens, output_tokens,
+        const usageRows = outDb
+          .prepare(
+            `SELECT message_out_id, cost_usd, input_tokens, output_tokens,
                       cache_read_tokens, cache_write_tokens, reasoning_tokens,
                       num_turns, model, context_window, max_output_tokens, context_tokens, duration_ms
                FROM turn_usage WHERE message_out_id IN (${outIds.map(() => '?').join(',')})`,
-            )
-            .all(...outIds) as Array<{
-            message_out_id: string;
-            cost_usd: number;
-            input_tokens: number;
-            output_tokens: number;
-            cache_read_tokens: number;
-            cache_write_tokens: number;
-            reasoning_tokens: number | null;
-            num_turns: number | null;
-            model: string;
-            context_window: number | null;
-            max_output_tokens: number | null;
-            context_tokens: number | null;
-            duration_ms: number | null;
-          }>;
-          for (const u of usageRows) {
-            usageMap.set(u.message_out_id, {
-              cost_usd: u.cost_usd,
-              input_tokens: u.input_tokens,
-              output_tokens: u.output_tokens,
-              cache_read_tokens: u.cache_read_tokens,
-              cache_write_tokens: u.cache_write_tokens,
-              ...(u.reasoning_tokens != null ? { reasoning_tokens: u.reasoning_tokens } : {}),
-              ...(u.num_turns != null ? { num_turns: u.num_turns } : {}),
-              model: u.model,
-              ...(u.context_window != null ? { context_window: u.context_window } : {}),
-              ...(u.max_output_tokens != null ? { max_output_tokens: u.max_output_tokens } : {}),
-              ...(u.context_tokens != null ? { context_tokens: u.context_tokens } : {}),
-              ...(u.duration_ms != null ? { duration_ms: u.duration_ms } : {}),
-            });
-          }
-        } catch {
-          // turn_usage table may not exist in older outbound.db files
+          )
+          .all(...outIds) as Array<{
+          message_out_id: string;
+          cost_usd: number;
+          input_tokens: number;
+          output_tokens: number;
+          cache_read_tokens: number;
+          cache_write_tokens: number;
+          reasoning_tokens: number | null;
+          num_turns: number | null;
+          model: string;
+          context_window: number | null;
+          max_output_tokens: number | null;
+          context_tokens: number | null;
+          duration_ms: number | null;
+        }>;
+        for (const u of usageRows) {
+          usageMap.set(u.message_out_id, {
+            cost_usd: u.cost_usd,
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cache_read_tokens: u.cache_read_tokens,
+            cache_write_tokens: u.cache_write_tokens,
+            ...(u.reasoning_tokens != null ? { reasoning_tokens: u.reasoning_tokens } : {}),
+            ...(u.num_turns != null ? { num_turns: u.num_turns } : {}),
+            model: u.model,
+            ...(u.context_window != null ? { context_window: u.context_window } : {}),
+            ...(u.max_output_tokens != null ? { max_output_tokens: u.max_output_tokens } : {}),
+            ...(u.context_tokens != null ? { context_tokens: u.context_tokens } : {}),
+            ...(u.duration_ms != null ? { duration_ms: u.duration_ms } : {}),
+          });
         }
       }
 
       // Load turn_activity for all outbound messages in one query, grouped
-      // by message id in append order. Older outbound.db files predate the
-      // table — swallow the error and render without traces.
+      // by message id in append order.
       const activityMap = new Map<string, { ts: string; text: string }[]>();
       if (outIds.length > 0) {
-        try {
-          const actRows = outDb
-            .prepare(
-              `SELECT message_out_id, ts, text FROM turn_activity
+        const actRows = outDb
+          .prepare(
+            `SELECT message_out_id, ts, text FROM turn_activity
                 WHERE message_out_id IN (${outIds.map(() => '?').join(',')})
                 ORDER BY message_out_id, ordinal`,
-            )
-            .all(...outIds) as Array<{ message_out_id: string; ts: string; text: string }>;
-          for (const a of actRows) {
-            let arr = activityMap.get(a.message_out_id);
-            if (!arr) {
-              arr = [];
-              activityMap.set(a.message_out_id, arr);
-            }
-            arr.push({ ts: a.ts, text: a.text });
+          )
+          .all(...outIds) as Array<{ message_out_id: string; ts: string; text: string }>;
+        for (const a of actRows) {
+          let arr = activityMap.get(a.message_out_id);
+          if (!arr) {
+            arr = [];
+            activityMap.set(a.message_out_id, arr);
           }
-        } catch {
-          // turn_activity table may not exist in older outbound.db files
+          arr.push({ ts: a.ts, text: a.text });
         }
       }
 
@@ -1243,28 +1234,26 @@ export function readChatHistory(
       const taskRows = isDm
         ? (inDb
             .prepare(
-              `SELECT id, timestamp, process_after, content, recurrence, series_id FROM messages_in
+              `SELECT id, process_after, content, recurrence, series_id FROM messages_in
                 WHERE kind = 'task' AND status = 'completed'
                   AND channel_type = ? AND thread_id IS NULL ORDER BY seq`,
             )
             .all(target.channelType) as {
             id: string;
-            timestamp: string;
-            process_after: string | null;
+            process_after: string;
             content: string;
             recurrence: string | null;
             series_id: string | null;
           }[])
         : (inDb
             .prepare(
-              `SELECT id, timestamp, process_after, content, recurrence, series_id FROM messages_in
+              `SELECT id, process_after, content, recurrence, series_id FROM messages_in
                 WHERE kind = 'task' AND status = 'completed'
                   AND channel_type = ? AND thread_id = ? ORDER BY seq`,
             )
             .all(target.channelType, threadId) as {
             id: string;
-            timestamp: string;
-            process_after: string | null;
+            process_after: string;
             content: string;
             recurrence: string | null;
             series_id: string | null;
@@ -1307,12 +1296,11 @@ export function readChatHistory(
         // occurrence is cloned right after the *previous* run, so its
         // `timestamp` can be a full cadence-interval before it fires (e.g. a
         // daily task's row is created ~24h early); a Run-now nudge rewrites
-        // `process_after` to now while leaving `timestamp` untouched. Falling
-        // back to `timestamp` keeps legacy rows that predate process_after.
+        // `process_after` to now while leaving `timestamp` untouched.
         messages.push({
           direction: 'event',
           id: r.id,
-          timestamp: r.process_after ?? r.timestamp,
+          timestamp: r.process_after,
           text: `${subject} ${verb}${autoPaused ? ' and was auto-paused' : ''}: ${summary}`,
           event: {
             kind: 'task-run',
@@ -1843,49 +1831,44 @@ export function parseOutboundContent(content: string): {
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   suggestedAction?: SuggestedAction;
 } {
-  try {
-    const o = JSON.parse(content);
-    if (typeof o === 'string') return { text: o };
-    const text = typeof o?.text === 'string' ? o.text : typeof o?.markdown === 'string' ? o.markdown : '';
-    const deliveryOrigin =
-      o?.delivery_origin === 'send_message' || o?.delivery_origin === 'send_file' || o?.delivery_origin === 'response'
-        ? o.delivery_origin
-        : undefined;
-    const suggestedAction =
-      o?.suggested_action === 'continue' || o?.suggested_action === 'retry' || o?.suggested_action === 'report'
-        ? o.suggested_action
-        : undefined;
-    // file_paths is a parallel array to files written by send_file with
-    // workspace-relative source paths (or null when the source isn't in
-    // /workspace/agent). Lets the chat UI link the chip to the FILES
-    // panel without changing the established `files: string[]` contract
-    // that delivery / readOutboxFiles depend on.
-    const filePaths: (string | null | undefined)[] = Array.isArray(o?.file_paths) ? o.file_paths : [];
-    const files = Array.isArray(o?.files)
-      ? o.files
-          .map((f: { filename?: string; name?: string; size?: number } | string, i: number) => {
-            if (typeof f === 'string') {
-              const p = filePaths[i];
-              return { filename: f, size: 0, path: typeof p === 'string' ? p : undefined };
-            }
-            const p = filePaths[i];
-            return {
-              filename: String(f?.filename ?? f?.name ?? ''),
-              size: typeof f?.size === 'number' ? f.size : 0,
-              path: typeof p === 'string' ? p : undefined,
-            };
-          })
-          .filter((f: { filename: string }) => f.filename)
+  const o = JSON.parse(content);
+  const text = typeof o?.text === 'string' ? o.text : '';
+  const deliveryOrigin =
+    o?.delivery_origin === 'send_message' || o?.delivery_origin === 'send_file' || o?.delivery_origin === 'response'
+      ? o.delivery_origin
       : undefined;
-    return {
-      text,
-      files,
-      ...(deliveryOrigin ? { deliveryOrigin } : {}),
-      ...(suggestedAction ? { suggestedAction } : {}),
-    };
-  } catch {
-    return { text: content };
-  }
+  const suggestedAction =
+    o?.suggested_action === 'continue' || o?.suggested_action === 'retry' || o?.suggested_action === 'report'
+      ? o.suggested_action
+      : undefined;
+  // file_paths is a parallel array to files written by send_file with
+  // workspace-relative source paths (or null when the source isn't in
+  // /workspace/agent). Lets the chat UI link the chip to the FILES
+  // panel without changing the established `files: string[]` contract
+  // that delivery / readOutboxFiles depend on.
+  const filePaths: (string | null | undefined)[] = Array.isArray(o?.file_paths) ? o.file_paths : [];
+  const files = Array.isArray(o?.files)
+    ? o.files
+        .map((f: { filename?: string; name?: string; size?: number } | string, i: number) => {
+          if (typeof f === 'string') {
+            const p = filePaths[i];
+            return { filename: f, size: 0, path: typeof p === 'string' ? p : undefined };
+          }
+          const p = filePaths[i];
+          return {
+            filename: String(f?.filename ?? f?.name ?? ''),
+            size: typeof f?.size === 'number' ? f.size : 0,
+            path: typeof p === 'string' ? p : undefined,
+          };
+        })
+        .filter((f: { filename: string }) => f.filename)
+    : undefined;
+  return {
+    text,
+    files,
+    ...(deliveryOrigin ? { deliveryOrigin } : {}),
+    ...(suggestedAction ? { suggestedAction } : {}),
+  };
 }
 
 export interface ThreadSummary {
@@ -2194,10 +2177,8 @@ interface UserMessagingContext {
 /**
  * For a non-web channel, return every handle the viewer holds on that
  * channel. We look up the `identities` table first (authoritative —
- * works for OIDC-created UUID user IDs and bootstrap `<channel>:<handle>`
- * IDs alike); as a fallback, parse the channel prefix out of legacy
- * `<channel>:<handle>` user IDs in case some identity rows haven't been
- * backfilled. Returns [] when the viewer has no identity on the channel.
+ * works for every canonical UUID user ID). Returns [] when the viewer has no
+ * identity on the channel.
  */
 function viewerHandlesForChannel(userId: string, channelType: string): string[] {
   if (channelType === WEB_CHANNEL_TYPE) return [];
@@ -2214,11 +2195,6 @@ function viewerHandlesForChannel(userId: string, channelType: string): string[] 
   const set = new Set<string>();
   for (const ident of getIdentitiesForUser(userId)) {
     if (ident.channel === channelType && ident.handle) withVariants(ident.handle, (s) => set.add(s));
-  }
-  if (set.size > 0) return [...set];
-  if (userId.startsWith(prefix)) {
-    const handle = userId.slice(prefix.length);
-    if (handle) withVariants(handle, (s) => set.add(s));
   }
   return [...set];
 }
@@ -2799,24 +2775,20 @@ function collectThreadsFromSharedSession(
           WHERE channel_type = ? AND thread_id = ? AND kind IN ('chat','text')`,
       );
 
-      // Aggregate turn_usage per thread (if the table exists).
+      // Aggregate turn_usage per thread.
       // Note: for shared sessions the turn_usage table covers all threads
       // combined. This is a rough approximation; per-thread scoping would
       // require joining through message_out_id.
       let usageTotals: { cost: number; tokens: number; turns: number } | undefined;
       if (outDb) {
-        try {
-          usageTotals = outDb
-            .prepare(
-              `SELECT COALESCE(SUM(cost_usd), 0) AS cost,
+        usageTotals = outDb
+          .prepare(
+            `SELECT COALESCE(SUM(cost_usd), 0) AS cost,
                     COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
                     COUNT(*) AS turns
              FROM turn_usage`,
-            )
-            .get() as { cost: number; tokens: number; turns: number } | undefined;
-        } catch {
-          // turn_usage table may not exist
-        }
+          )
+          .get() as { cost: number; tokens: number; turns: number } | undefined;
       }
 
       for (const g of groups) {
@@ -2952,21 +2924,17 @@ function readThreadStats(
       count += c.n;
       if (c.t && (!maxTs || Date.parse(normTs(c.t)) > Date.parse(normTs(maxTs)))) maxTs = c.t;
       // Aggregate turn_usage stats for this thread.
-      try {
-        const u = outDb
-          .prepare(
-            `SELECT COALESCE(SUM(cost_usd), 0) AS cost,
+      const u = outDb
+        .prepare(
+          `SELECT COALESCE(SUM(cost_usd), 0) AS cost,
                     COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
                     COUNT(*) AS turns
              FROM turn_usage`,
-          )
-          .get() as { cost: number; tokens: number; turns: number };
-        totalCost = u.cost;
-        totalTokens = u.tokens;
-        turnCount = u.turns;
-      } catch {
-        // turn_usage table may not exist in older outbound.db files
-      }
+        )
+        .get() as { cost: number; tokens: number; turns: number };
+      totalCost = u.cost;
+      totalTokens = u.tokens;
+      turnCount = u.turns;
     } finally {
       outDb.close();
     }

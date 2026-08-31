@@ -71,7 +71,7 @@ CREATE TABLE delivered (
 );
 ```
 
-Writer: `markDelivered()` / `markDeliveryFailed()` in `src/db/session-db.ts`. Older session DBs are brought up to schema lazily by `migrateDeliveredTable()`.
+Writer: `markDelivered()` / `markDeliveryFailed()` in `src/db/session-db.ts`.
 
 ### 2.3 `destinations`
 
@@ -181,6 +181,6 @@ Access: `container/agent-runner/src/db/session-state.ts`.
 
 ## 5. Schema evolution
 
-Unlike the central DB, session DBs do **not** go through numbered migrations. Both `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA` use `CREATE TABLE IF NOT EXISTS`, so a fresh session always gets the current shape. For session folders created under older builds, column-level gaps are patched lazily on open — e.g. `migrateDeliveredTable()` in `src/db/session-db.ts` adds `platform_message_id` and `status` to the `delivered` table if missing.
+Unlike the central DB, session DBs do **not** go through numbered migrations. Both `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA` create the complete current shape for fresh sessions. Existing session files in this deployment are normalized as an explicit data operation before runtime code starts requiring a newly added table or column.
 
-If you add a column to either schema, add a matching lazy migration for existing session folders, and prefer nullable columns or defaulted values so no data backfill is required.
+Before deploying a new required table or column, stop the host, back up the session directory, and normalize every existing session DB explicitly. Verify every file against the new schema and run `PRAGMA quick_check` before removing the compatibility code or restarting the host. Prefer nullable columns or defaulted values when the historical value cannot be reconstructed.

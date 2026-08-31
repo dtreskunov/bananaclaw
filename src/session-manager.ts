@@ -34,7 +34,6 @@ import {
   openOutboundDbRw as openOutboundDbRwRaw,
   upsertSessionRouting,
   insertMessage,
-  migrateMessagesInTable,
 } from './db/session-db.js';
 import { log } from './log.js';
 import { extractInboundText, indexMessage } from './search-index.js';
@@ -410,9 +409,7 @@ function extractAttachmentFiles(
 
 /** Open the inbound DB for a session (host reads/writes). */
 export function openInboundDb(agentGroupId: string, sessionId: string): Database.Database {
-  const db = openInboundDbRaw(inboundDbPath(agentGroupId, sessionId));
-  migrateMessagesInTable(db);
-  return db;
+  return openInboundDbRaw(inboundDbPath(agentGroupId, sessionId));
 }
 
 /** Open the outbound DB for a session (host reads only). */

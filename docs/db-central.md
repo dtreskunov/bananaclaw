@@ -375,4 +375,4 @@ Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMig
 
 Numbers 005 and 006 are intentionally absent — migrations were renumbered during early development.
 
-Session DB schemas (`INBOUND_SCHEMA`, `OUTBOUND_SCHEMA`) are **not** versioned here. They're `CREATE TABLE IF NOT EXISTS` so new columns land via the session-DB lazy migration helpers (`migrateDeliveredTable()` etc.) when a session file from an older build is reopened. See [db-session.md](db-session.md).
+Session DB schemas (`INBOUND_SCHEMA`, `OUTBOUND_SCHEMA`) are **not** versioned here. They describe the complete shape created for every new session; this deployment's existing session DBs are normalized before code begins relying on a newly required table or column. See [db-session.md](db-session.md).

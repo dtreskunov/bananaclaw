@@ -37,18 +37,11 @@ export interface ForkOriginRow {
 
 /**
  * Read the fork origin, or undefined if this session isn't a fork.
- *
- * Tolerates the table being absent: sessions created before forking existed
- * have no `fork_origin` table, and the container can't ALTER a read-only DB
- * to add one.
  */
 export function getForkOrigin(): ForkOriginRow | undefined {
   const db = openInboundDb();
   try {
     return db.prepare('SELECT * FROM fork_origin WHERE id = 1').get() as ForkOriginRow | undefined;
-  } catch {
-    // No such table — not a fork, or an older session DB.
-    return undefined;
   } finally {
     db.close();
   }

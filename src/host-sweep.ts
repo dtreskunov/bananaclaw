@@ -172,14 +172,13 @@ function emitTaskRuns(
     const placeholders = completedIds.map(() => '?').join(',');
     const rows = inDb
       .prepare(
-        `SELECT id, timestamp, process_after, content, recurrence, series_id, platform_id, channel_type, thread_id
+        `SELECT id, process_after, content, recurrence, series_id, platform_id, channel_type, thread_id
            FROM messages_in
           WHERE kind = 'task' AND id IN (${placeholders})`,
       )
       .all(...completedIds) as Array<{
       id: string;
-      timestamp: string;
-      process_after: string | null;
+      process_after: string;
       content: string;
       recurrence: string | null;
       series_id: string | null;
@@ -210,9 +209,8 @@ function emitTaskRuns(
         threadId: r.thread_id,
         id: r.id,
         // Place the firing at the time it was due to run (process_after),
-        // matching the socket-snapshot event bubble; fall back to the row creation
-        // timestamp for legacy rows that predate process_after.
-        timestamp: r.process_after ?? r.timestamp,
+        // matching the socket-snapshot event bubble.
+        timestamp: r.process_after,
         content: r.content,
         recurrence: r.recurrence,
         seriesId: r.series_id,

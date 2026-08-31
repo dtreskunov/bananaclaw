@@ -164,6 +164,8 @@ describe('startTypingRefresh — instance forwarding', () => {
         model: 'minimax/MiniMax-M3',
       }),
     );
+    const writtenAt = new Date(Date.now() + 1);
+    fs.utimesSync(progressPath, writtenAt, writtenAt);
 
     await vi.advanceTimersByTimeAsync(4_500);
     expect(calls.at(-1)?.metadata?.usage).toEqual(

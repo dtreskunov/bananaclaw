@@ -337,7 +337,7 @@ describe('forkThread', () => {
     vi.mocked(readEnvFile).mockReturnValue({ DEFAULT_PROVIDER: 'opencode' });
     try {
       fork('a1');
-      expect(vi.mocked(resolveProviderName).mock.calls.at(-1)?.[2]).toBe('opencode');
+      expect(vi.mocked(resolveProviderName).mock.calls.at(-1)?.[1]).toBe('opencode');
     } finally {
       vi.mocked(readEnvFile).mockReturnValue({});
       if (prior !== undefined) process.env.DEFAULT_PROVIDER = prior;
@@ -428,13 +428,6 @@ describe('forkThread — native fidelity', () => {
     outDb
       .prepare(`INSERT INTO session_state (key, value, updated_at) VALUES ('continuation:opencode', 'ses_1', @now)`)
       .run({ now: ts(4) });
-    outDb.exec(`CREATE TABLE turn_checkpoints (
-      message_out_id    TEXT PRIMARY KEY,
-      provider          TEXT NOT NULL,
-      continuation      TEXT NOT NULL,
-      provider_turn_ref TEXT NOT NULL,
-      created_at        TEXT NOT NULL
-    )`);
     outDb
       .prepare(
         `INSERT INTO turn_checkpoints (message_out_id, provider, continuation, provider_turn_ref, created_at)

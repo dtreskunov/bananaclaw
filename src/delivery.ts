@@ -18,7 +18,6 @@ import {
   getDeliveredIds,
   markDelivered,
   markDeliveryFailed,
-  migrateDeliveredTable,
 } from './db/session-db.js';
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
@@ -210,9 +209,6 @@ async function drainSession(session: Session): Promise<void> {
     const delivered = getDeliveredIds(inDb);
     const undelivered = allDue.filter((m) => !delivered.has(m.id));
     if (undelivered.length === 0) return;
-
-    // Ensure platform_message_id column exists (migration for existing sessions)
-    migrateDeliveredTable(inDb);
 
     for (const msg of undelivered) {
       try {

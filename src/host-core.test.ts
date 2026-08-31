@@ -96,8 +96,13 @@ describe('session manager', () => {
     expect(fs.existsSync(inPath)).toBe(true);
     const inDb = new Database(inPath);
     const inTables = inDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
-    expect(inTables.map((t) => t.name)).toContain('messages_in');
-    expect(inTables.map((t) => t.name)).toContain('delivered');
+    expect(inTables.map((t) => t.name)).toEqual(
+      expect.arrayContaining(['messages_in', 'delivered', 'destinations', 'session_routing', 'thread_titles', 'fork_origin']),
+    );
+    const messageInColumns = inDb.prepare('PRAGMA table_info(messages_in)').all() as Array<{ name: string }>;
+    expect(messageInColumns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(['source_session_id', 'on_wake', 'sender_user_id']),
+    );
     inDb.close();
 
     // Verify outbound.db
@@ -107,8 +112,20 @@ describe('session manager', () => {
     const outTables = outDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
       name: string;
     }>;
-    expect(outTables.map((t) => t.name)).toContain('messages_out');
-    expect(outTables.map((t) => t.name)).toContain('processing_ack');
+    expect(outTables.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'messages_out',
+        'processing_ack',
+        'session_state',
+        'container_state',
+        'turn_checkpoints',
+        'turn_activity',
+        'turn_usage',
+        'task_attempts',
+      ]),
+    );
+    const turnUsageColumns = outDb.prepare('PRAGMA table_info(turn_usage)').all() as Array<{ name: string }>;
+    expect(turnUsageColumns.map((column) => column.name)).toContain('context_tokens');
     outDb.close();
   });
 

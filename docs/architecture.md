@@ -662,7 +662,7 @@ CREATE TABLE agent_groups (
   id               TEXT PRIMARY KEY,
   name             TEXT NOT NULL,
   folder           TEXT NOT NULL UNIQUE,
-  agent_provider   TEXT,              -- default for sessions (null = system default)
+  agent_provider   TEXT,              -- retired; provider lives in container_configs
   container_config TEXT,              -- JSON: { additionalMounts, timeout }
   created_at       TEXT NOT NULL
 );
@@ -752,7 +752,7 @@ CREATE TABLE sessions (
   agent_group_id     TEXT NOT NULL REFERENCES agent_groups(id),
   messaging_group_id TEXT REFERENCES messaging_groups(id),  -- null for internal/spawned sessions
   thread_id          TEXT,              -- platform thread ID (null for shared session mode)
-  agent_provider     TEXT,              -- override per session (null = inherit from agent_group)
+  agent_provider     TEXT,              -- retired; retained as an unused schema column
   status             TEXT DEFAULT 'active',    -- 'active' | 'closed'
   container_status   TEXT DEFAULT 'stopped',   -- 'running' | 'idle' | 'stopped'
   last_active        TEXT,              -- last message activity timestamp

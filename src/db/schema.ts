@@ -326,6 +326,44 @@ CREATE TABLE IF NOT EXISTS container_state (
   updated_at               TEXT NOT NULL
 );
 
+-- Provider continuation metadata for forking a thread at an outbound turn.
+CREATE TABLE IF NOT EXISTS turn_checkpoints (
+  message_out_id    TEXT PRIMARY KEY,
+  provider          TEXT NOT NULL,
+  continuation      TEXT NOT NULL,
+  provider_turn_ref TEXT NOT NULL,
+  created_at        TEXT NOT NULL
+);
+
+-- Ordered progress trace persisted at turn end for historical display.
+CREATE TABLE IF NOT EXISTS turn_activity (
+  message_out_id TEXT NOT NULL,
+  ordinal        INTEGER NOT NULL,
+  ts             TEXT NOT NULL,
+  text           TEXT NOT NULL,
+  PRIMARY KEY (message_out_id, ordinal)
+);
+
+-- Per-turn provider usage linked to the final outbound message.
+CREATE TABLE IF NOT EXISTS turn_usage (
+  id                  TEXT PRIMARY KEY,
+  message_out_id      TEXT,
+  cost_usd            REAL,
+  input_tokens        INTEGER,
+  output_tokens       INTEGER,
+  cache_read_tokens   INTEGER,
+  cache_write_tokens  INTEGER,
+  reasoning_tokens    INTEGER,
+  num_turns           INTEGER,
+  duration_ms         INTEGER,
+  duration_api_ms     INTEGER,
+  model               TEXT,
+  context_window      INTEGER,
+  max_output_tokens   INTEGER,
+  context_tokens      INTEGER,
+  timestamp           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Durable outcome for each scheduled-task occurrence. The task message ID is
 -- unique per scheduled or manual firing; series_id ties recurring attempts
 -- back to the stable task handle shown to users.

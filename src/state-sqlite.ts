@@ -21,7 +21,7 @@ export class SqliteStateAdapter implements StateAdapter {
   private db!: Database.Database;
 
   /**
-   * namespace = adapter-instance name; undefined ⇒ legacy unprefixed keys.
+  * namespace = adapter-instance name.
    *
    * All bridges share the same chat_sdk_* tables, and two same-platform
    * instances see identical thread/message ids — the SDK's dedupe key is
@@ -29,17 +29,13 @@ export class SqliteStateAdapter implements StateAdapter {
    * second bot silently drops every message the first processed, locks
    * serialize across bots, and subscriptions leak engagement between them.
    *
-   * The default instance MUST stay unprefixed: prefixing it would orphan
-   * every live install's existing chat_sdk_subscriptions/kv/locks/lists
-   * rows (silently killing engaged threads) with no clean way to rewrite
-   * them. `k()` is the single choke point between every public method and
-   * its SQL parameter — with namespace undefined it is the identity
-   * function, so every statement binds the exact same strings as before.
+   * `k()` is the single choke point between every public method and its SQL
+   * parameter so every adapter instance, including the default, is isolated.
    */
-  constructor(private readonly namespace?: string) {}
+  constructor(private readonly namespace: string) {}
 
   private k(key: string): string {
-    return this.namespace ? `${this.namespace}:${key}` : key;
+    return `${this.namespace}:${key}`;
   }
 
   async connect(): Promise<void> {

@@ -16,7 +16,7 @@ ncl groups config update --id <group-id> --provider codex
 ncl groups restart --id <group-id>
 ```
 
-Sessions resolve their provider at container spawn (`sessions.agent_provider` is only set when you've explicitly pinned a session), so existing sessions pick up the new provider on their next wake.
+Sessions resolve their provider at container spawn using `container_configs.provider`, then `DEFAULT_PROVIDER`, then `claude`. Existing sessions pick up a changed group provider on their next wake.
 
 ## What carries over automatically
 

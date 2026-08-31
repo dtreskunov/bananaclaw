@@ -16,8 +16,7 @@ export interface TaskRunNotice {
   threadId: string | null;
   /** messages_in.id of the completed task row. */
   id: string;
-  /** ISO timestamp the run was due (process_after, falling back to the row
-   *  creation timestamp for legacy rows). */
+  /** ISO timestamp the run was due (`messages_in.process_after`). */
   timestamp: string;
   /** Raw task content JSON (`{ prompt, script }`) for summary derivation. */
   content: string;

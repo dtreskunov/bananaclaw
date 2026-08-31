@@ -731,7 +731,7 @@ function createProvider(name: ProviderName, config: ProviderConfig): AgentProvid
 }
 ```
 
-The provider name comes from the container's environment (`AGENT_PROVIDER` env var), set by the host based on `agent_groups.agent_provider` or `sessions.agent_provider`.
+The provider name comes from the container's environment (`AGENT_PROVIDER` env var). The host resolves it from `container_configs.provider`, then `DEFAULT_PROVIDER`, then `claude`.
 
 `ProviderConfig` contains provider-specific settings (API keys, model overrides, etc.) passed via environment variables — not via the interface. Each provider reads what it needs from `env`.
 

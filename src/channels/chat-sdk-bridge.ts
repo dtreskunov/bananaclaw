@@ -233,12 +233,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     async setup(hostConfig: ChannelSetup) {
       setupConfig = hostConfig;
 
-      // State namespace: ONLY for a named non-default instance. A skill
-      // that explicitly names the primary instance after the platform
-      // (instance === adapter.name) still lands on the legacy UNPREFIXED
-      // keyspace — prefixing the default would orphan every live install's
-      // chat_sdk_subscriptions/kv/locks/lists rows.
-      state = new SqliteStateAdapter(config.instance && config.instance !== adapter.name ? config.instance : undefined);
+      state = new SqliteStateAdapter(config.instance ?? adapter.name);
 
       chat = new Chat({
         adapters: { [adapter.name]: adapter },

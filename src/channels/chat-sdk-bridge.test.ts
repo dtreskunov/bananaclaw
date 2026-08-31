@@ -129,9 +129,7 @@ describe('createChatSdkBridge — instance identity', () => {
 
   it('rejects empty and whitespace-only instance names (config bug — fail loud)', () => {
     // '' is falsy: a truthiness guard would skip it, dead-ending the
-    // webhook route ('/webhook/' + '') and collapsing the state namespace
-    // into the default instance's unprefixed keyspace — the exact
-    // cross-bot dedupe/lock collisions the namespace exists to prevent.
+    // webhook route ('/webhook/' + '') and collapsing the state namespace.
     for (const bad of ['', ' ', '   ', '\t']) {
       expect(() =>
         createChatSdkBridge({ adapter: stubAdapter({ name: 'slack' }), instance: bad, supportsThreads: true }),
@@ -197,7 +195,7 @@ describe('createChatSdkBridge.setup — webhook route and state namespace', () =
     await bridge.teardown();
   });
 
-  it('named instance namespaces Chat SDK state; default stays unprefixed (live-install constraint)', async () => {
+  it('namespaces named and default instances independently', async () => {
     const { getDb } = await import('../db/connection.js');
 
     const named = createChatSdkBridge({
@@ -215,17 +213,17 @@ describe('createChatSdkBridge.setup — webhook route and state namespace', () =
     const rows = getDb().prepare('SELECT thread_id FROM chat_sdk_subscriptions ORDER BY thread_id').all() as Array<{
       thread_id: string;
     }>;
-    expect(rows.map((r) => r.thread_id)).toEqual(['slack-tester:slack:T1', 'slack:T1']);
+    expect(rows.map((r) => r.thread_id)).toEqual(['slack-tester:slack:T1', 'slack:slack:T1']);
 
     await named.teardown();
     await def.teardown();
   });
 
-  it('explicitly naming the primary instance after the platform stays on the unprefixed keyspace', async () => {
+  it('explicitly naming the primary instance uses the platform namespace', async () => {
     const { getDb } = await import('../db/connection.js');
     const bridge = createChatSdkBridge({
       adapter: setupStubAdapter(),
-      instance: 'slack', // explicit, but equal to adapter.name ⇒ default keyspace
+      instance: 'slack',
       supportsThreads: true,
     });
     await bridge.setup(hostConfig);
@@ -233,7 +231,7 @@ describe('createChatSdkBridge.setup — webhook route and state namespace', () =
     const rows = getDb().prepare('SELECT thread_id FROM chat_sdk_subscriptions').all() as Array<{
       thread_id: string;
     }>;
-    expect(rows.map((r) => r.thread_id)).toEqual(['slack:T9']);
+    expect(rows.map((r) => r.thread_id)).toEqual(['slack:slack:T9']);
     await bridge.teardown();
   });
 });
