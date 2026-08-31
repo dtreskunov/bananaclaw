@@ -21104,7 +21104,8 @@ function UsageMeta({ u: u5 }) {
   const cost = fmtCost(u5.cost_usd);
   const model = u5.model ? shortModel(u5.model) : "";
   const dur = u5.duration_ms ? fmtDur(u5.duration_ms) : "";
-  const ctx2 = u5.context_tokens && u5.context_window ? `${fmtPct(u5.context_tokens, u5.context_window)} ctx` : "";
+  const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
+  const ctx2 = contextTokens && u5.context_window ? `${fmtPct(contextTokens, u5.context_window)} ctx` : "";
   const short = [cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
   const tokens = `${fmtTok(u5.input_tokens)}\u2192${fmtTok(u5.output_tokens)}`;
   const cache = [
@@ -21112,7 +21113,7 @@ function UsageMeta({ u: u5 }) {
     u5.cache_write_tokens > 0 ? `cache write ${fmtTok(u5.cache_write_tokens)}` : "",
     u5.reasoning_tokens ? `reasoning ${fmtTok(u5.reasoning_tokens)}` : ""
   ].filter(Boolean).join(" \xB7 ");
-  const ctxDetail = u5.context_tokens ? `context ${fmtTok(u5.context_tokens)}${u5.context_window ? ` / ${fmtTok(u5.context_window)}` : ""}` : "";
+  const ctxDetail = contextTokens ? `context ${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtTok(u5.context_window)}` : ""}` : "";
   const detail = [tokens, cache, ctxDetail].filter(Boolean).join(" \xB7 ");
   return /* @__PURE__ */ u4("span", { class: "usage", onClick: (e4) => {
     e4.stopPropagation();

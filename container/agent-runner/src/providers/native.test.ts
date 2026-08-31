@@ -130,7 +130,7 @@ beforeEach(() => {
         ? [
             `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"${toolName}","arguments":${JSON.stringify(toolArguments)}}}]},"finish_reason":null}]}`,
             '',
-            'data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}',
+            'data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}',
             '',
             'data: [DONE]',
             '',
@@ -279,6 +279,12 @@ describe('NativeProvider', () => {
     };
     expect(JSON.parse(row.content).text).toBe('hello user');
     expect(requests).toHaveLength(2);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'usage',
+        data: expect.objectContaining({ input_tokens: 15, output_tokens: 5, context_tokens: 7 }),
+      }),
+    );
   });
 
   it('discovers and executes a configured external MCP tool', async () => {
