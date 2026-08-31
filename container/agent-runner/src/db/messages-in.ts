@@ -28,6 +28,8 @@ export interface MessageInRow {
   content: string;
   /** Canonical UUID of the sender (host's users.id). Null when unresolved. */
   sender_user_id?: string | null;
+  /** Namespaced channel identity retained when canonical attribution is unavailable. */
+  sender_identity?: string | null;
 }
 
 // Cap on how many messages reach the agent in one prompt. Read from

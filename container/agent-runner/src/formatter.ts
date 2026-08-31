@@ -80,19 +80,8 @@ export function isRunnerCommand(msg: MessageInRow): boolean {
   return cat === 'admin' || cat === 'passthrough';
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractSenderId(msg: MessageInRow, content: any): string | null {
-  // Authoritative: the host's senderResolver writes the canonical UUID
-  // here. Older inbound rows (written before sender_user_id existed)
-  // fall through to the legacy synthesis path below.
-  if (msg.sender_user_id) return msg.sender_user_id;
-  const raw: string | null = content?.senderId || content?.author?.userId || null;
-  if (!raw) return null;
-  // Already namespaced (e.g. "telegram:123") — use as-is.
-  if (raw.includes(':')) return raw;
-  // Raw platform id from chat-sdk serialization — prefix with channel type.
-  if (!msg.channel_type) return raw;
-  return `${msg.channel_type}:${raw}`;
+function extractSenderId(msg: MessageInRow, _content: unknown): string | null {
+  return msg.sender_user_id ?? msg.sender_identity ?? null;
 }
 
 /**

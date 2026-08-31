@@ -47,13 +47,19 @@ CREATE TABLE messages_in (
   channel_type   TEXT,
   thread_id      TEXT,
   content        TEXT NOT NULL,            -- JSON; shape depends on kind
-  source_session_id TEXT,                  -- agent-to-agent return path
+  source_session_id TEXT,                  -- exact agent-to-agent return path
+  sender_user_id TEXT,                     -- canonical users.id attribution
+  sender_identity TEXT,                    -- observed namespaced identity
   on_wake        INTEGER NOT NULL DEFAULT 0 -- 1 = only deliver on container's first poll
 );
 CREATE INDEX idx_messages_in_series ON messages_in(series_id);
 ```
 
 Content shapes: see [api-details.md §Session DB Schema Details](api-details.md#session-db-schema-details).
+
+`sender_user_id` is canonical attribution when the host can resolve the sender to a current user. `sender_identity` preserves the observed namespaced identity (for example, `telegram:123`) even when no canonical user link exists. Either may be `NULL`; missing provenance remains explicitly unknown and is never reconstructed from `content` by the agent-runner.
+
+For agent-to-agent rows, `source_session_id` is an exact return route. A reply to that agent must use the recorded active session or fail. Unthreaded messages and explicitly targeted sends whose inherited reply reference came from another origin are group-level sends and use the target agent group's normal `agent-shared` session policy.
 
 **Writers (host):** `insertMessage()`, `insertTask()`, `insertRecurrence()` — all in `src/db/session-db.ts`. Each calls `nextEvenSeq()`.
 **Reader (container):** `container/agent-runner/src/db/messages-in.ts` — polls `status='pending' AND (process_after IS NULL OR process_after <= now)`.

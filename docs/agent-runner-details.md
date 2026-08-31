@@ -356,6 +356,8 @@ The agent-runner transforms messages_in rows into a prompt string. The provider 
 
 **Routing field stripping:** `platform_id`, `channel_type`, `thread_id` are never included in the prompt. They're stored as context for writing messages_out.
 
+**Sender attribution:** The formatter uses `sender_user_id` when canonical attribution is available, otherwise `sender_identity`, otherwise an unknown sender. It does not infer identity from `content.senderId`, `content.author.userId`, or display names.
+
 **Single message formatting by kind:**
 
 - **`chat`** — format into message XML:
@@ -431,6 +433,8 @@ interface RoutingContext {
 When writing messages_out (either from provider results or MCP tool calls), the agent-runner copies this routing context by default. The agent never sees routing fields — it just produces text. The routing is implicit: "respond to whoever sent the message."
 
 MCP tools that target a different destination (e.g., `send_to_agent`, `send_message` with explicit channel) override the routing context for that specific messages_out row.
+
+An explicit agent destination can still inherit the current batch's `inReplyTo`. The host treats that as an exact reply only when the referenced inbound came from the selected target agent. References to channel messages or other agents do not become return routes; those messages are group-level sends.
 
 ### Status Management
 

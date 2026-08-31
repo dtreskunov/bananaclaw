@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { setConfigForTest } from './config.js';
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { formatMessages, parseAssistantOutput, stripInternalTags, stripThinkTags } from './formatter.js';
+import { categorizeMessage, formatMessages, parseAssistantOutput, stripInternalTags, stripThinkTags } from './formatter.js';
 import { TIMEZONE } from './timezone.js';
 
 beforeEach(() => {
@@ -29,16 +29,36 @@ function insertMessage(
   id: string,
   kind: string,
   content: object,
-  opts?: { timestamp?: string },
+  opts?: { timestamp?: string; senderUserId?: string; senderIdentity?: string },
 ) {
   const timestamp = opts?.timestamp ?? new Date().toISOString();
   getInboundDb()
     .prepare(
-      `INSERT INTO messages_in (id, kind, timestamp, status, content)
-       VALUES (?, ?, ?, 'pending', ?)`,
+      `INSERT INTO messages_in (id, kind, timestamp, status, content, sender_user_id, sender_identity)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
     )
-    .run(id, kind, timestamp, JSON.stringify(content));
+    .run(id, kind, timestamp, JSON.stringify(content), opts?.senderUserId ?? null, opts?.senderIdentity ?? null);
 }
+
+describe('sender provenance', () => {
+  it('uses canonical sender attribution before the observed identity', () => {
+    insertMessage('m1', 'chat', { text: '/compact' }, {
+      senderUserId: '11111111-1111-4111-8111-111111111111',
+      senderIdentity: 'telegram:123',
+    });
+    expect(categorizeMessage(getPendingMessages()[0]).senderId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('uses explicit observed identity when canonical attribution is unavailable', () => {
+    insertMessage('m1', 'chat', { text: '/compact' }, { senderIdentity: 'telegram:123' });
+    expect(categorizeMessage(getPendingMessages()[0]).senderId).toBe('telegram:123');
+  });
+
+  it('does not infer identity from legacy payload fields', () => {
+    insertMessage('m1', 'chat', { text: '/compact', senderId: 'legacy-user' });
+    expect(categorizeMessage(getPendingMessages()[0]).senderId).toBeNull();
+  });
+});
 
 describe('context timezone header', () => {
   it('prepends <context timezone="..."/> to formatted output', () => {

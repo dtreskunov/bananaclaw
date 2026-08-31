@@ -126,20 +126,23 @@ export function insertMessage(
      * users row was resolved. Authoritative source for the container.
      */
     senderUserId?: string | null;
+    /** Namespaced channel identity observed on the inbound payload. */
+    senderIdentity?: string | null;
     /** Treat an existing message id as a successful replay. */
     idempotent?: boolean;
   },
 ): void {
   assertUserUuid(message.senderUserId, 'insertMessage.senderUserId');
   db.prepare(
-    `${message.idempotent ? 'INSERT OR IGNORE' : 'INSERT'} INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake, sender_user_id)
-     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake, @senderUserId)`,
+    `${message.idempotent ? 'INSERT OR IGNORE' : 'INSERT'} INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake, sender_user_id, sender_identity)
+     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake, @senderUserId, @senderIdentity)`,
   ).run({
     ...message,
     trigger: message.trigger ?? 1,
     onWake: message.onWake ?? 0,
     sourceSessionId: message.sourceSessionId ?? null,
     senderUserId: message.senderUserId ?? null,
+    senderIdentity: message.senderIdentity ?? null,
     seq: nextEvenSeq(db),
   });
 }
@@ -361,40 +364,15 @@ export function markDeliveryFailed(db: Database.Database, messageOutId: string):
   ).run(messageOutId);
 }
 
-/**
- * Look up an inbound row's source_session_id by its message id. Returns null
- * if the row doesn't exist or the column is NULL (channel inbound or
- * pre-migration a2a inbound). Used by a2a routing to route replies back to
- * the originating session.
- */
-export function getInboundSourceSessionId(db: Database.Database, messageId: string): string | null {
-  const row = db.prepare('SELECT source_session_id FROM messages_in WHERE id = ?').get(messageId) as
-    | { source_session_id: string | null }
-    | undefined;
-  return row?.source_session_id ?? null;
+export interface InboundReturnRoute {
+  channel_type: string | null;
+  platform_id: string | null;
+  source_session_id: string | null;
 }
 
-/**
- * Find the source_session_id of the most recent a2a inbound row from a
- * specific peer (by agent group id). Used as a peer-affinity fallback in
- * a2a routing when an outbound reply has no `in_reply_to` (e.g. the
- * container's send_message MCP tool path didn't thread the batch's
- * in_reply_to through).
- *
- * Heuristic: "the last time this peer talked to me, which session was it?"
- * Returns null when no prior a2a inbound from that peer carries a
- * non-null source_session_id (typical for pre-migration installs).
- */
-export function getMostRecentPeerSourceSessionId(db: Database.Database, peerAgentGroupId: string): string | null {
-  const row = db
-    .prepare(
-      `SELECT source_session_id FROM messages_in
-        WHERE channel_type = 'agent'
-          AND platform_id = ?
-          AND source_session_id IS NOT NULL
-        ORDER BY seq DESC
-        LIMIT 1`,
-    )
-    .get(peerAgentGroupId) as { source_session_id: string | null } | undefined;
-  return row?.source_session_id ?? null;
+/** Read the recorded provenance of an inbound row referenced by a reply. */
+export function getInboundReturnRoute(db: Database.Database, messageId: string): InboundReturnRoute | undefined {
+  return db
+    .prepare('SELECT channel_type, platform_id, source_session_id FROM messages_in WHERE id = ?')
+    .get(messageId) as InboundReturnRoute | undefined;
 }

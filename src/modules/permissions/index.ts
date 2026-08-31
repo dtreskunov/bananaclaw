@@ -26,6 +26,7 @@ import {
   setSenderResolver,
   setSenderScopeGate,
   type AccessGateResult,
+  type SenderResolution,
 } from '../../router.js';
 import type { InboundEvent } from '../../channels/adapter.js';
 import { registerResponseHandler, type ResponsePayload } from '../../response-registry.js';
@@ -68,7 +69,7 @@ interface PendingNameInput {
 }
 const awaitingNameInput = new Map<string, PendingNameInput>();
 
-function extractAndUpsertUser(event: InboundEvent): string | null {
+function resolveSender(event: InboundEvent): SenderResolution | null {
   let content: Record<string, unknown>;
   try {
     content = JSON.parse(event.message.content) as Record<string, unknown>;
@@ -98,11 +99,19 @@ function extractAndUpsertUser(event: InboundEvent): string | null {
   // Web users are seeded at UI auth time (redeemAndCreateSession) with a
   // (channel='web', handle=<user uuid>) identity; new platforms create one
   // lazily here.
-  return getOrCreateUserByIdentity({
+  const userId = getOrCreateUserByIdentity({
     channel: event.channelType,
     handle: rawHandle,
     displayName: senderName,
   });
+  return {
+    userId,
+    identity: rawHandle.includes(':') ? rawHandle : `${event.channelType}:${rawHandle}`,
+  };
+}
+
+function extractAndUpsertUser(event: InboundEvent): string | null {
+  return resolveSender(event)?.userId ?? null;
 }
 
 function safeParseContent(raw: string): { text?: string; sender?: string; senderId?: string } {
@@ -171,7 +180,7 @@ function handleUnknownSender(
   // 'public' should have been handled before the gate; fall through silently.
 }
 
-setSenderResolver(extractAndUpsertUser);
+setSenderResolver(resolveSender);
 
 setAccessGate((event, userId, mg, agentGroupId): AccessGateResult => {
   // Public channels skip the access check entirely.

@@ -204,7 +204,12 @@ CREATE TABLE messages_in (
   thread_id      TEXT,
 
   -- payload (structure depends on kind)
-  content        TEXT NOT NULL        -- JSON blob
+  content        TEXT NOT NULL,       -- JSON blob
+
+  -- explicit provenance
+  source_session_id TEXT,             -- exact a2a return session
+  sender_user_id TEXT,                -- canonical users.id attribution
+  sender_identity TEXT                -- observed namespaced identity
 );
 
 -- Agent-runner writes, host reads
@@ -363,7 +368,7 @@ The host reads the `operation` field (if present) and calls the right adapter me
 
 Sending a message to another agent uses the same routing fields as channel delivery. The agent-runner sets `channel_type: 'agent'` and `platform_id` to the target agent group ID. Optionally, `thread_id` can target a specific session (null = find or create the default session).
 
-From the sending agent's perspective, it's the same mechanism as sending to Slack or WhatsApp — just a messages_out row with different routing. The host reads it, checks that this agent group has permission to message the target, resolves the target session, and writes a messages_in row to that session's DB.
+From the sending agent's perspective, it's the same mechanism as sending to Slack or WhatsApp — just a messages_out row with different routing. The host reads it, checks that this agent group has permission to message the target, resolves the target session, and writes a messages_in row to that session's DB with the sending session recorded as `source_session_id`.
 
 ```json
 // messages_out routing fields
@@ -373,6 +378,8 @@ From the sending agent's perspective, it's the same mechanism as sending to Slac
 ```
 
 The receiving agent gets a normal chat message. It doesn't need to know the source is another agent unless that's relevant context.
+
+Replies and group-level sends have different semantics. If `in_reply_to` references an inbound from the selected target agent, the host routes only to that row's exact active `source_session_id`; missing or stale provenance is an error. Unthreaded sends, and explicit sends whose inherited reference came from another origin, use the target agent group's normal `agent-shared` session policy. Historical traffic is never used to infer peer affinity or choose an exact reply session.
 
 ### Routing
 

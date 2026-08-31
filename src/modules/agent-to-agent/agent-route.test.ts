@@ -223,7 +223,7 @@ describe('routeAgentMessage return-path', () => {
     expect(s2Rows).toHaveLength(0);
   });
 
-  it('fallback: a2a with no in_reply_to falls through to newest-session lookup', async () => {
+  it('routes an explicit group-level send through the normal agent-shared session policy', async () => {
     // No prior conversation. B initiates an a2a to A out of the blue.
     await routeAgentMessage(
       {
@@ -235,14 +235,14 @@ describe('routeAgentMessage return-path', () => {
       SB,
     );
 
-    // Newest session wins (current heuristic, preserved).
+    // Group-level delivery uses the target agent's current shared session.
     const s1Rows = readInbound(A, S1.id);
     const s2Rows = readInbound(A, S2.id);
     expect(s1Rows).toHaveLength(0);
     expect(s2Rows).toHaveLength(1);
   });
 
-  it('peer-affinity fallback: with no in_reply_to, routes to most recent peer-source session', async () => {
+  it('does not infer reply affinity for an unthreaded group-level send', async () => {
     // A.S1 sends to B (establishing affinity: B's last contact from A was via S1).
     await routeAgentMessage(
       {
@@ -254,11 +254,9 @@ describe('routeAgentMessage return-path', () => {
       S1,
     );
 
-    // B sends a follow-up but its container forgot to set in_reply_to (e.g.
-    // emitted via an MCP tool path that doesn't thread the batch's in_reply_to
-    // through). The host should still route this to S1 because S1 is the
-    // session most recently in conversation with B — not the chronologically
-    // newest session of A.
+    // Without an explicit reply reference, the second message is a new
+    // group-level delivery. Prior conversation history must not act as an
+    // implicit return address.
     await routeAgentMessage(
       {
         id: 'msg-from-B-followup',
@@ -271,13 +269,12 @@ describe('routeAgentMessage return-path', () => {
 
     const s1Rows = readInbound(A, S1.id);
     const s2Rows = readInbound(A, S2.id);
-    // Affinity wins: reply to S1, not the newer S2.
-    expect(s1Rows).toHaveLength(1);
-    expect(JSON.parse(s1Rows[0].content).text).toBe('standing by');
-    expect(s2Rows).toHaveLength(0);
+    expect(s1Rows).toHaveLength(0);
+    expect(s2Rows).toHaveLength(1);
+    expect(JSON.parse(s2Rows[0].content).text).toBe('standing by');
   });
 
-  it('stale origin fallback: closed origin session falls through to newest active', async () => {
+  it('rejects a reply whose exact origin session is no longer active', async () => {
     // A.S1 sends to B, establishing source_session_id = S1.id on B's inbound.
     await routeAgentMessage(
       { id: 'msg-fwd', platform_id: B, content: JSON.stringify({ text: 'hello' }), in_reply_to: null },
@@ -289,19 +286,63 @@ describe('routeAgentMessage return-path', () => {
     // Close S1 — simulates session cleanup or channel disconnect.
     updateSession(S1.id, { status: 'closed' });
 
-    // B replies. origin points to S1 (closed), should fall through to S2.
-    await routeAgentMessage(
-      { id: 'msg-reply-stale', platform_id: A, content: JSON.stringify({ text: 'reply' }), in_reply_to: inboundId },
-      SB,
-    );
+    await expect(
+      routeAgentMessage(
+        { id: 'msg-reply-stale', platform_id: A, content: JSON.stringify({ text: 'reply' }), in_reply_to: inboundId },
+        SB,
+      ),
+    ).rejects.toThrow(`source session ${S1.id} is not active for ${A}`);
 
-    const s1Rows = readInbound(A, S1.id);
-    const s2Rows = readInbound(A, S2.id);
-    expect(s1Rows).toHaveLength(0);
-    expect(s2Rows).toHaveLength(1);
+    expect(readInbound(A, S1.id)).toHaveLength(0);
+    expect(readInbound(A, S2.id)).toHaveLength(0);
   });
 
-  it('cross-agent-group guard: origin session belonging to wrong agent group is rejected', async () => {
+  it('rejects a historical reply with no exact source-session provenance', async () => {
+    writeSessionMessage(B, SB.id, {
+      id: 'legacy-a2a',
+      kind: 'chat',
+      timestamp: now(),
+      platformId: A,
+      channelType: 'agent',
+      threadId: null,
+      content: JSON.stringify({ text: 'legacy request' }),
+      sourceSessionId: null,
+    });
+
+    await expect(
+      routeAgentMessage(
+        {
+          id: 'msg-reply-legacy',
+          platform_id: A,
+          content: JSON.stringify({ text: 'reply' }),
+          in_reply_to: 'legacy-a2a',
+        },
+        SB,
+      ),
+    ).rejects.toThrow('has no recorded source session');
+
+    expect(readInbound(A, S1.id)).toHaveLength(0);
+    expect(readInbound(A, S2.id)).toHaveLength(0);
+  });
+
+  it('rejects a dangling reply reference with unknown provenance', async () => {
+    await expect(
+      routeAgentMessage(
+        {
+          id: 'msg-dangling-reply',
+          platform_id: A,
+          content: JSON.stringify({ text: 'reply' }),
+          in_reply_to: 'missing-inbound',
+        },
+        SB,
+      ),
+    ).rejects.toThrow('inbound missing-inbound was not found');
+
+    expect(readInbound(A, S1.id)).toHaveLength(0);
+    expect(readInbound(A, S2.id)).toHaveLength(0);
+  });
+
+  it('treats an inherited reply reference from another origin as a group-level send', async () => {
     // Third agent group C sends to B, stamping source_session_id = SC on B's inbound.
     const C = 'ag-C';
     createAgentGroup({ id: C, name: 'C', folder: 'c', agent_provider: null, created_at: now() });
@@ -334,8 +375,8 @@ describe('routeAgentMessage return-path', () => {
     const bRows = readInbound(B, SB.id);
     const cInboundId = bRows.find((r) => r.platform_id === C)!.id;
 
-    // B replies to A, but in_reply_to references the C-originated row.
-    // Guard rejects (SC belongs to C, not A) → falls through to newest of A.
+    // B explicitly targets A while the inherited reply reference belongs to
+    // C. The reference is unrelated to A, so this is a group-level send.
     await routeAgentMessage(
       {
         id: 'msg-reply-tamper',
@@ -352,7 +393,7 @@ describe('routeAgentMessage return-path', () => {
     expect(s2Rows).toHaveLength(1);
   });
 
-  it('in_reply_to referencing a non-a2a row falls through to newest session', async () => {
+  it('treats an inherited channel reply reference as a group-level send', async () => {
     // Write a channel message into B's inbound (no source_session_id).
     writeSessionMessage(B, SB.id, {
       id: 'channel-msg-1',
@@ -364,8 +405,8 @@ describe('routeAgentMessage return-path', () => {
       content: 'hello from slack',
     });
 
-    // B replies to A with in_reply_to pointing to the channel message.
-    // source_session_id is null → peer-affinity finds nothing → newest of A.
+    // The MCP tool inherits the current channel message id even though its
+    // explicit destination is A. This is a group-level send, not a reply to A.
     await routeAgentMessage(
       {
         id: 'msg-reply-channel',

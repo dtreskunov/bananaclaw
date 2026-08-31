@@ -249,7 +249,8 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
         AND substr(sender_user_id, 14, 1) = '-'
         AND substr(sender_user_id, 19, 1) = '-'
         AND substr(sender_user_id, 24, 1) = '-'
-      ))
+      )),
+      sender_identity TEXT
     );
     CREATE TABLE delivered (
       message_out_id      TEXT PRIMARY KEY,

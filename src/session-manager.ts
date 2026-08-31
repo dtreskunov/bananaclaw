@@ -236,6 +236,8 @@ export function writeSessionMessage(
      * that don't have a user identity to attribute.
      */
     senderUserId?: string | null;
+    /** Namespaced channel identity observed on the inbound payload. */
+    senderIdentity?: string | null;
     /** Treat an existing message id as a successful replay. */
     idempotent?: boolean;
   },
@@ -265,6 +267,7 @@ export function writeSessionMessage(
       sourceSessionId: message.sourceSessionId ?? null,
       onWake: message.onWake ?? 0,
       senderUserId: message.senderUserId ?? null,
+      senderIdentity: message.senderIdentity ?? null,
       idempotent: message.idempotent,
     });
   } finally {

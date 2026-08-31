@@ -101,7 +101,7 @@ describe('session manager', () => {
     );
     const messageInColumns = inDb.prepare('PRAGMA table_info(messages_in)').all() as Array<{ name: string }>;
     expect(messageInColumns.map((column) => column.name)).toEqual(
-      expect.arrayContaining(['source_session_id', 'on_wake', 'sender_user_id']),
+      expect.arrayContaining(['source_session_id', 'on_wake', 'sender_user_id', 'sender_identity']),
     );
     inDb.close();
 
@@ -1173,9 +1173,19 @@ describe('agent-to-agent routing', () => {
     // Researcher responds back to PA
     const { getSessionsByAgentGroup } = await import('./db/sessions.js');
     const researcherSession = getSessionsByAgentGroup('ag-researcher')[0];
+    const researcherDb = new Database(inboundDbPath('ag-researcher', researcherSession.id));
+    const researcherInbound = researcherDb.prepare("SELECT id FROM messages_in WHERE channel_type = 'agent'").get() as {
+      id: string;
+    };
+    researcherDb.close();
 
     await routeAgentMessage(
-      { id: 'out-reply', platform_id: 'ag-pa', content: JSON.stringify({ text: 'found it' }), in_reply_to: null },
+      {
+        id: 'out-reply',
+        platform_id: 'ag-pa',
+        content: JSON.stringify({ text: 'found it' }),
+        in_reply_to: researcherInbound.id,
+      },
       researcherSession,
     );
 

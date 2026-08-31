@@ -209,7 +209,10 @@ CREATE TABLE IF NOT EXISTS messages_in (
     AND substr(sender_user_id, 14, 1) = '-'
     AND substr(sender_user_id, 19, 1) = '-'
     AND substr(sender_user_id, 24, 1) = '-'
-  ))
+  )),
+  -- Namespaced channel identity observed on the inbound payload. This is
+  -- preserved even when it cannot be linked to a canonical users.id row.
+  sender_identity TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_in_series ON messages_in(series_id);
 

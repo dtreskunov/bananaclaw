@@ -47,7 +47,12 @@ function generateId(): string {
  * carry enough info to identify a sender. Without the hook, every message
  * arrives at the gate with userId=null.
  */
-export type SenderResolverFn = (event: InboundEvent) => string | null;
+export interface SenderResolution {
+  userId: string;
+  identity: string;
+}
+
+export type SenderResolverFn = (event: InboundEvent) => SenderResolution | null;
 
 let senderResolver: SenderResolverFn | null = null;
 
@@ -260,7 +265,8 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   // 2. Sender resolution (permissions module upserts the users row as a
   //    side effect so later role/access lookups find a real record).
   //    Without the module, userId is null — downstream tolerates it.
-  const userId: string | null = senderResolver ? senderResolver(event) : null;
+  const sender = senderResolver ? senderResolver(event) : null;
+  const userId = sender?.userId ?? null;
 
   // 3. Fetch wired agents in full (we already know the count is > 0; now
   //    we need their actual rows for fan-out).
@@ -295,7 +301,16 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     const scopeOk = engages && (!senderScopeGate || senderScopeGate(event, userId, mg, agent).allowed);
 
     if (engages && accessOk && scopeOk) {
-      await deliverToAgent(agent, agentGroup, mg, event, userId, adapter?.supportsThreads === true, true);
+      await deliverToAgent(
+        agent,
+        agentGroup,
+        mg,
+        event,
+        userId,
+        sender?.identity ?? null,
+        adapter?.supportsThreads === true,
+        true,
+      );
       engagedCount++;
 
       // Mention-sticky: ask the adapter to subscribe the thread so the
@@ -326,7 +341,16 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       // message (which also stages their attachments to disk via
       // writeSessionMessage → extractAttachmentFiles) is exactly what the
       // gate is meant to prevent.
-      await deliverToAgent(agent, agentGroup, mg, event, userId, adapter?.supportsThreads === true, false);
+      await deliverToAgent(
+        agent,
+        agentGroup,
+        mg,
+        event,
+        userId,
+        sender?.identity ?? null,
+        adapter?.supportsThreads === true,
+        false,
+      );
       accumulatedCount++;
     } else {
       log.debug('Message not engaged for agent (drop policy)', {
@@ -411,6 +435,7 @@ async function deliverToAgent(
   mg: MessagingGroup,
   event: InboundEvent,
   userId: string | null,
+  senderIdentity: string | null,
   adapterSupportsThreads: boolean,
   wake: boolean,
 ): Promise<void> {
@@ -480,6 +505,7 @@ async function deliverToAgent(
     content: event.message.content,
     trigger: wake ? 1 : 0,
     senderUserId: userId,
+    senderIdentity,
     idempotent: event.message.idempotent,
   });
 
