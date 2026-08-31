@@ -282,7 +282,7 @@ describe('NativeProvider', () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'usage',
-        data: expect.objectContaining({ input_tokens: 15, output_tokens: 5, context_tokens: 7 }),
+        data: expect.objectContaining({ input_tokens: 15, output_tokens: 5, context_tokens: 7, num_turns: 2 }),
       }),
     );
   });

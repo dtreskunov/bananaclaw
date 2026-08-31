@@ -21099,28 +21099,86 @@ function fmtPct(used, limit) {
   if (pct > 0 && pct < 1) return "<1%";
   return Math.min(100, Math.round(pct)) + "%";
 }
+function fmtContextLimit(tokens) {
+  if (tokens < 1e6) return fmtTok(tokens);
+  return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
+}
 function UsageMeta({ u: u5 }) {
   const [expanded, setExpanded] = h2(false);
   const cost = fmtCost(u5.cost_usd);
   const model = u5.model ? shortModel(u5.model) : "";
   const dur = u5.duration_ms ? fmtDur(u5.duration_ms) : "";
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
-  const ctx2 = contextTokens && u5.context_window ? `${fmtPct(contextTokens, u5.context_window)} ctx` : "";
+  const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
   const short = [cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
-  const tokens = `${fmtTok(u5.input_tokens)}\u2192${fmtTok(u5.output_tokens)}`;
-  const cache = [
-    u5.cache_read_tokens > 0 ? `cache read ${fmtTok(u5.cache_read_tokens)}` : "",
-    u5.cache_write_tokens > 0 ? `cache write ${fmtTok(u5.cache_write_tokens)}` : "",
-    u5.reasoning_tokens ? `reasoning ${fmtTok(u5.reasoning_tokens)}` : ""
-  ].filter(Boolean).join(" \xB7 ");
-  const ctxDetail = contextTokens ? `context ${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtTok(u5.context_window)}` : ""}` : "";
-  const detail = [tokens, cache, ctxDetail].filter(Boolean).join(" \xB7 ");
-  return /* @__PURE__ */ u4("span", { class: "usage", onClick: (e4) => {
-    e4.stopPropagation();
-    setExpanded((v5) => !v5);
-  }, title: "Click for details", children: [
-    short,
-    expanded && detail ? ` \xB7 ${detail}` : ""
+  const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
+  return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "usage",
+        "aria-expanded": expanded,
+        "aria-label": `${short}. ${expanded ? "Hide" : "Show"} usage details`,
+        title: expanded ? "Hide usage details" : "Show usage details",
+        onClick: (e4) => {
+          e4.stopPropagation();
+          setExpanded((v5) => !v5);
+        },
+        onKeyDown: (e4) => {
+          if (e4.key === "Escape") setExpanded(false);
+        },
+        children: short
+      }
+    ),
+    expanded ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4("span", { class: "usage-backdrop", onClick: () => setExpanded(false) }),
+      /* @__PURE__ */ u4("span", { class: "usage-popover", role: "dialog", "aria-label": "Turn usage details", children: [
+        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Estimated cost" }),
+          /* @__PURE__ */ u4("strong", { children: cost })
+        ] }),
+        dur ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Elapsed" }),
+          /* @__PURE__ */ u4("strong", { children: dur })
+        ] }) : null,
+        model ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Model" }),
+          /* @__PURE__ */ u4("strong", { title: u5.model, children: model })
+        ] }) : null,
+        contextDetail ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Context at end" }),
+          /* @__PURE__ */ u4("strong", { children: contextDetail })
+        ] }) : null,
+        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Turn processing" }),
+          /* @__PURE__ */ u4("strong", { children: [
+            fmtTok(u5.input_tokens),
+            " input ",
+            "\xB7",
+            " ",
+            fmtTok(u5.output_tokens),
+            " output"
+          ] })
+        ] }),
+        u5.num_turns ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Model calls" }),
+          /* @__PURE__ */ u4("strong", { children: u5.num_turns })
+        ] }) : null,
+        u5.cache_read_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Cache read" }),
+          /* @__PURE__ */ u4("strong", { children: fmtTok(u5.cache_read_tokens) })
+        ] }) : null,
+        u5.cache_write_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Cache write" }),
+          /* @__PURE__ */ u4("strong", { children: fmtTok(u5.cache_write_tokens) })
+        ] }) : null,
+        u5.reasoning_tokens ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Reasoning" }),
+          /* @__PURE__ */ u4("strong", { children: fmtTok(u5.reasoning_tokens) })
+        ] }) : null
+      ] })
+    ] }) : null
   ] });
 }
 function AgentActionLabel({ label, title }) {

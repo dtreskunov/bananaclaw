@@ -818,6 +818,7 @@ export interface TurnUsageDto {
   cache_read_tokens: number;
   cache_write_tokens: number;
   reasoning_tokens?: number;
+  num_turns?: number;
   model: string;
   context_window?: number;
   max_output_tokens?: number;
@@ -890,7 +891,7 @@ export function readTurnUsageForOutbound(
         .prepare(
           `SELECT cost_usd, input_tokens, output_tokens,
                   cache_read_tokens, cache_write_tokens, reasoning_tokens,
-                  model, context_window, max_output_tokens, context_tokens, duration_ms
+              num_turns, model, context_window, max_output_tokens, context_tokens, duration_ms
              FROM turn_usage WHERE message_out_id = ?`,
         )
         .get(messageOutId) as
@@ -901,6 +902,7 @@ export function readTurnUsageForOutbound(
             cache_read_tokens: number;
             cache_write_tokens: number;
             reasoning_tokens: number | null;
+            num_turns: number | null;
             model: string;
             context_window: number | null;
             max_output_tokens: number | null;
@@ -916,6 +918,7 @@ export function readTurnUsageForOutbound(
         cache_read_tokens: row.cache_read_tokens,
         cache_write_tokens: row.cache_write_tokens,
         ...(row.reasoning_tokens != null ? { reasoning_tokens: row.reasoning_tokens } : {}),
+        ...(row.num_turns != null ? { num_turns: row.num_turns } : {}),
         model: row.model,
         ...(row.context_window != null ? { context_window: row.context_window } : {}),
         ...(row.max_output_tokens != null ? { max_output_tokens: row.max_output_tokens } : {}),
@@ -1077,7 +1080,7 @@ export function readChatHistory(
             .prepare(
               `SELECT message_out_id, cost_usd, input_tokens, output_tokens,
                       cache_read_tokens, cache_write_tokens, reasoning_tokens,
-                      model, context_window, max_output_tokens, context_tokens, duration_ms
+                      num_turns, model, context_window, max_output_tokens, context_tokens, duration_ms
                FROM turn_usage WHERE message_out_id IN (${outIds.map(() => '?').join(',')})`,
             )
             .all(...outIds) as Array<{
@@ -1088,6 +1091,7 @@ export function readChatHistory(
             cache_read_tokens: number;
             cache_write_tokens: number;
             reasoning_tokens: number | null;
+            num_turns: number | null;
             model: string;
             context_window: number | null;
             max_output_tokens: number | null;
@@ -1102,6 +1106,7 @@ export function readChatHistory(
               cache_read_tokens: u.cache_read_tokens,
               cache_write_tokens: u.cache_write_tokens,
               ...(u.reasoning_tokens != null ? { reasoning_tokens: u.reasoning_tokens } : {}),
+              ...(u.num_turns != null ? { num_turns: u.num_turns } : {}),
               model: u.model,
               ...(u.context_window != null ? { context_window: u.context_window } : {}),
               ...(u.max_output_tokens != null ? { max_output_tokens: u.max_output_tokens } : {}),

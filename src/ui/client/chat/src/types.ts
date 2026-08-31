@@ -143,6 +143,8 @@ export interface TurnUsage {
   cache_read_tokens: number;
   cache_write_tokens: number;
   reasoning_tokens?: number;
+  /** Number of provider model calls made during this turn. */
+  num_turns?: number;
   model: string;
   context_window?: number;
   max_output_tokens?: number;

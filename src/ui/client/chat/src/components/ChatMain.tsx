@@ -416,6 +416,11 @@ function fmtPct(used: number, limit: number): string {
   return Math.min(100, Math.round(pct)) + '%';
 }
 
+function fmtContextLimit(tokens: number): string {
+  if (tokens < 1_000_000) return fmtTok(tokens);
+  return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
+}
+
 function UsageMeta({ u }: { u: TurnUsage }) {
   const [expanded, setExpanded] = useState(false);
   const cost = fmtCost(u.cost_usd);
@@ -427,22 +432,43 @@ function UsageMeta({ u }: { u: TurnUsage }) {
   // Context fill, not tokens billed: the counts below sum every round trip of
   // the turn, so only `context_tokens` can be read against the window.
   const ctx = contextTokens && u.context_window
-    ? `${fmtPct(contextTokens, u.context_window)} ctx`
+    ? `Context ${fmtPct(contextTokens, u.context_window)}`
     : '';
   const short = [cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
-  const tokens = `${fmtTok(u.input_tokens)}\u2192${fmtTok(u.output_tokens)}`;
-  const cache = [
-    u.cache_read_tokens > 0 ? `cache read ${fmtTok(u.cache_read_tokens)}` : '',
-    u.cache_write_tokens > 0 ? `cache write ${fmtTok(u.cache_write_tokens)}` : '',
-    u.reasoning_tokens ? `reasoning ${fmtTok(u.reasoning_tokens)}` : '',
-  ].filter(Boolean).join(' \u00b7 ');
-  const ctxDetail = contextTokens
-    ? `context ${fmtTok(contextTokens)}${u.context_window ? ` / ${fmtTok(u.context_window)}` : ''}`
-    : '';
-  const detail = [tokens, cache, ctxDetail].filter(Boolean).join(' \u00b7 ');
+  const contextDetail = contextTokens
+    ? `${fmtTok(contextTokens)}${u.context_window
+      ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})`
+      : ''}`
+    : undefined;
   return (
-    <span class="usage" onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }} title="Click for details">
-      {short}{expanded && detail ? ` \u00b7 ${detail}` : ''}
+    <span class="usage-wrap">
+      <button
+        type="button"
+        class="usage"
+        aria-expanded={expanded}
+        aria-label={`${short}. ${expanded ? 'Hide' : 'Show'} usage details`}
+        title={expanded ? 'Hide usage details' : 'Show usage details'}
+        onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+        onKeyDown={(e) => { if (e.key === 'Escape') setExpanded(false); }}
+      >
+        {short}
+      </button>
+      {expanded ? (
+        <>
+          <span class="usage-backdrop" onClick={() => setExpanded(false)} />
+          <span class="usage-popover" role="dialog" aria-label="Turn usage details">
+            <span class="usage-row"><span>Estimated cost</span><strong>{cost}</strong></span>
+            {dur ? <span class="usage-row"><span>Elapsed</span><strong>{dur}</strong></span> : null}
+            {model ? <span class="usage-row"><span>Model</span><strong title={u.model}>{model}</strong></span> : null}
+            {contextDetail ? <span class="usage-row"><span>Context at end</span><strong>{contextDetail}</strong></span> : null}
+            <span class="usage-row"><span>Turn processing</span><strong>{fmtTok(u.input_tokens)} input {'\u00b7'} {fmtTok(u.output_tokens)} output</strong></span>
+            {u.num_turns ? <span class="usage-row"><span>Model calls</span><strong>{u.num_turns}</strong></span> : null}
+            {u.cache_read_tokens > 0 ? <span class="usage-row"><span>Cache read</span><strong>{fmtTok(u.cache_read_tokens)}</strong></span> : null}
+            {u.cache_write_tokens > 0 ? <span class="usage-row"><span>Cache write</span><strong>{fmtTok(u.cache_write_tokens)}</strong></span> : null}
+            {u.reasoning_tokens ? <span class="usage-row"><span>Reasoning</span><strong>{fmtTok(u.reasoning_tokens)}</strong></span> : null}
+          </span>
+        </>
+      ) : null}
     </span>
   );
 }

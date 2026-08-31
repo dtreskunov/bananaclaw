@@ -77,7 +77,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function usageFor(model: NativeModel, raw: unknown, finalStepRaw: unknown, durationMs: number): TurnUsage {
+function usageFor(
+  model: NativeModel,
+  raw: unknown,
+  finalStepRaw: unknown,
+  durationMs: number,
+  numTurns: number,
+): TurnUsage {
   const usage = (raw ?? {}) as {
     inputTokens?: number;
     outputTokens?: number;
@@ -98,6 +104,7 @@ function usageFor(model: NativeModel, raw: unknown, finalStepRaw: unknown, durat
     cache_read_tokens: usage.cachedInputTokens ?? 0,
     cache_write_tokens: 0,
     reasoning_tokens: usage.reasoningTokens,
+    num_turns: numTurns,
     duration_ms: durationMs,
     model: model.wireId,
     context_window: model.contextWindow,
@@ -320,10 +327,10 @@ export class NativeProvider implements AgentProvider {
 
               const responseMessages = (await result.responseMessages) as ModelMessage[];
               const checkpoint = store.append(continuation, [incoming, ...portableHistory(responseMessages)]);
-              const [usage, finalStep] = await Promise.all([result.usage, result.finalStep]);
+              const [usage, steps] = await Promise.all([result.usage, result.steps]);
               yield {
                 type: 'usage',
-                data: usageFor(resolved, usage, finalStep.usage, Date.now() - startedAt),
+                data: usageFor(resolved, usage, steps.at(-1)?.usage, Date.now() - startedAt, steps.length),
               };
               yield { type: 'checkpoint', ref: checkpoint };
               yield {
