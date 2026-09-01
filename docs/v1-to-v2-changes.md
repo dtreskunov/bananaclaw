@@ -52,7 +52,9 @@ Consequences:
 2. `data/v2-sessions/<session_id>/inbound.db` — **host writes, container reads**. `messages_in`, routing, destinations, pending questions, processing_ack. This is where scheduled tasks live (see "Scheduling" below).
 3. `data/v2-sessions/<session_id>/outbound.db` — **container writes, host reads**. `messages_out`, session_state.
 
-Exactly one writer per file. No cross-mount lock contention. Heartbeat is a file touch at `/workspace/.heartbeat`, not a DB update. Host uses even `seq` numbers, container uses odd.
+Exactly one writer per file. No cross-mount lock contention. Host uses even
+`seq` numbers and the container uses odd. Live runner status uses a private
+per-session Unix socket instead of DB writes or signal files.
 
 Message history (v1 `messages` table, v1 `chats` table) is **not migrated**. The migration copies operationally important state forward (agents, channels, wirings, scheduled tasks, group folders) and leaves chat logs behind.
 
@@ -137,7 +139,12 @@ Owner gets seeded during the `/migrate-from-v1` skill's interview phase ("Which 
 
 **v1:** single Node process. The "agent" was the same process as the router.
 
-**v2:** Node host at top, Bun-runtime Docker container per session. They communicate only via the two session DBs. No shared modules, no IPC, no stdin piping. If you wrote custom code that reached from the agent into host internals (or vice versa), that surface no longer exists — porting it is a `/migrate-from-v1` skill topic, not a mechanical copy.
+**v2:** Node host at top, Bun-runtime Docker container per session. Durable
+messages use the two session DBs; live runner status uses a private per-session
+Unix socket. There are no shared modules or stdin piping. If you wrote custom
+code that reached from the agent into host internals (or vice versa), that
+surface no longer exists — porting it is a `/migrate-from-v1` skill topic, not
+a mechanical copy.
 
 Lockfiles: host uses `pnpm-lock.yaml`, agent-runner uses `bun.lock`. `minimumReleaseAge: 4320` on the host side (3-day supply-chain wait); agent-runner has no release-age gate.
 

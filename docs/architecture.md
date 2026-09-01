@@ -2,7 +2,10 @@
 
 ## Core Idea
 
-Each agent session has a mounted SQLite DB. The DB is the one and only IO mechanism between host and container. No IPC files, no stdin piping. Two tables: messages_in (host → agent-runner) and messages_out (agent-runner → host). Everything is a message.
+Each agent session has two mounted SQLite databases for durable messages:
+`messages_in` carries host → runner work and `messages_out` carries durable
+runner → host output. Live runner status uses a private per-session Unix socket.
+There is no stdin piping or signal-file protocol.
 
 ## Two-Level DB
 
@@ -315,7 +318,9 @@ Output `kind` determines the format and delivery adapter. Default: agent-runner 
 
 ### Interactive Operations (Cards, Reactions, Edits)
 
-All interactive operations flow through messages_in/out — the DB is the only IO boundary for the container. The agent uses MCP tools; the agent-runner translates tool calls into structured messages_out rows; the host delivers through the appropriate adapter method.
+All durable interactive operations flow through `messages_in`/`messages_out`.
+The agent uses MCP tools; the agent-runner translates tool calls into structured
+`messages_out` rows, and the host delivers through the appropriate adapter.
 
 **Cards with user interaction (e.g., "Ask User Question"):**
 
@@ -401,9 +406,10 @@ This is documented as a pattern, not a built-in feature.
 - Container isolation via filesystem mounts
 - Credential proxy (OneCLI)
 - Per-agent-group workspace (folder, CLAUDE.md, skills)
-- Polling-based (not event-driven)
+- Durable messages remain polling-based; live runner status is event-driven
 - Per-agent-group agent-runner recompilation on container startup (agent can modify its own source, request rebuild/restart, changes persist across teardowns)
-- Host ↔ container IO through mounted session DBs (`messages_in` / `messages_out`) — no stdin piping, no IPC files
+- Durable host ↔ container IO uses mounted session DBs; live runner → host
+  status uses a private per-session Unix socket
 - Agent commands are `messages_out` rows with `kind: 'system'`
 - Agent-to-agent supported via target-agent routing on `messages_out`
 - Scheduling uses `process_after` / `deliver_after` + `recurrence` on the same message tables
@@ -817,11 +823,12 @@ The agent-runner is the process inside the container. It mediates between the se
 
 ### IO Model
 
-All IO goes through the session DB. No stdin, no stdout markers, no IPC files.
+Durable IO goes through the session DBs. Live status goes through the
+per-session Unix socket. There are no stdin or signal-file protocols.
 
 - Initial input and follow-ups: poll `messages_in`
 - Output: write `messages_out` rows
-- MCP tools: write DB rows (no IPC files)
+- MCP tools: write durable DB rows
 - Shutdown: host kills the container on idle timeout, or the agent-runner exits when there's no pending work
 
 ### Poll Loop

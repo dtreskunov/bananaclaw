@@ -7,6 +7,7 @@ import os from 'os';
 
 import { CONTAINER_INSTALL_LABEL, ONECLI_URL } from './config.js';
 import { log } from './log.js';
+import { SESSION_LINK_VERSION } from './session-link.js';
 
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
@@ -168,7 +169,7 @@ export function cleanupOrphans(isSessionLive: (sessionId: string) => boolean): R
     // Tab-separated so we can split safely; container names can't contain
     // tabs. The Go template needs the field name in quotes for `--format`.
     const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}\t{{.Label "nanoclaw-session"}}'`,
+      `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}\t{{.Label "nanoclaw-session"}}\t{{.Label "nanoclaw-session-link"}}'`,
       {
         stdio: ['pipe', 'pipe', 'pipe'],
         encoding: 'utf-8',
@@ -177,9 +178,9 @@ export function cleanupOrphans(isSessionLive: (sessionId: string) => boolean): R
     const lines = output.trim().split('\n').filter(Boolean);
     const stopped: string[] = [];
     for (const line of lines) {
-      const [name, sessionId] = line.split('\t');
+      const [name, sessionId, sessionLinkVersion] = line.split('\t');
       if (!name) continue;
-      if (sessionId && isSessionLive(sessionId)) {
+      if (sessionId && sessionLinkVersion === SESSION_LINK_VERSION && isSessionLive(sessionId)) {
         adopt.push({ name, sessionId });
         continue;
       }

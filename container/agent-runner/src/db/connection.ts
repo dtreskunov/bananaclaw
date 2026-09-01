@@ -18,21 +18,12 @@
  * scripts/sanity-live-poll.ts for the empirical validation.
  */
 import { Database } from 'bun:sqlite';
-import fs from 'fs';
 
 const DEFAULT_INBOUND_PATH = '/workspace/inbound.db';
 const DEFAULT_OUTBOUND_PATH = '/workspace/outbound.db';
-const DEFAULT_HEARTBEAT_PATH = '/workspace/.heartbeat';
-const DEFAULT_TURN_ENDED_PATH = '/workspace/.turn-ended';
-const DEFAULT_ACTIVITY_PATH = '/workspace/.activity';
-const DEFAULT_USAGE_PROGRESS_PATH = '/workspace/.usage-progress';
 
 let _inbound: Database | null = null;
 let _outbound: Database | null = null;
-let _heartbeatPath: string = DEFAULT_HEARTBEAT_PATH;
-let _turnEndedPath: string = DEFAULT_TURN_ENDED_PATH;
-let _activityPath: string = DEFAULT_ACTIVITY_PATH;
-let _usageProgressPath: string = DEFAULT_USAGE_PROGRESS_PATH;
 let _testMode = false;
 
 /**
@@ -122,94 +113,6 @@ export function clearContainerToolInFlight(): void {
          updated_at = excluded.updated_at`,
     )
     .run(now);
-}
-
-/**
- * Touch the heartbeat file — replaces the old touchProcessing() DB writes.
- * The host checks this file's mtime for stale container detection.
- * A file touch is cheaper and avoids cross-boundary DB write contention.
- */
-export function touchHeartbeat(): void {
-  const p = _heartbeatPath;
-  const now = new Date();
-  try {
-    fs.utimesSync(p, now, now);
-  } catch {
-    try {
-      fs.writeFileSync(p, '');
-    } catch {
-      // Silently ignore — parent dir may not exist (e.g., in-memory test DBs)
-    }
-  }
-}
-
-/**
- * Append one progress line to the append-only `.activity` file.
- *
- * This file accumulates every progress line for the current turn so the
- * host can forward the *full* ordered trace to the web UI (and derive the
- * single latest typing hint as the last line — there is no separate
- * `.progress` file). Each line is `<epochMs>\t<text>`, where `text` is a
- * JSON-encoded ActivityStep (JSON escapes newlines, so the line format holds
- * even for multi-line tool arguments). The timestamp is the emit time.
- * File-based signaling (not outbound.db) avoids lock contention with the MCP
- * subprocess — both share outbound.db with journal_mode=DELETE (exclusive
- * locks). Cleared at each turn start.
- *
- * The newline-strip below is defensive only: callers pass single-line JSON,
- * but stripping any stray newline keeps the one-line-per-step invariant that
- * the host reader relies on.
- */
-export function appendActivityFile(line: string): void {
-  try {
-    fs.appendFileSync(_activityPath, line.replace(/\r?\n/g, ' ') + '\n');
-  } catch {
-    // Best-effort — same as touchHeartbeat.
-  }
-}
-
-export function clearActivityFile(): void {
-  try {
-    fs.unlinkSync(_activityPath);
-  } catch {
-    // Already gone or parent dir missing — fine.
-  }
-}
-
-export function writeUsageProgressFile(content: string): void {
-  try {
-    fs.writeFileSync(_usageProgressPath, content);
-  } catch {
-    // Best-effort — same as activity and heartbeat signaling.
-  }
-}
-
-export function clearUsageProgressFile(): void {
-  try {
-    fs.unlinkSync(_usageProgressPath);
-  } catch {
-    // Already gone or parent dir missing — fine.
-  }
-}
-
-/**
- * Write the turn-ended marker to a file. The host reads the file's content
- * (epoch ms string) to detect when the agent finishes a turn.
- */
-export function writeTurnEndedFile(epochMs: string): void {
-  try {
-    fs.writeFileSync(_turnEndedPath, epochMs);
-  } catch {
-    // Best-effort.
-  }
-}
-
-export function clearTurnEndedFile(): void {
-  try {
-    fs.unlinkSync(_turnEndedPath);
-  } catch {
-    // Already gone or parent dir missing — fine.
-  }
 }
 
 /**

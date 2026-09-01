@@ -3,7 +3,6 @@ export {
   getOutboundDb,
   initTestSessionDb,
   closeSessionDb,
-  touchHeartbeat,
   clearStaleProcessingAcks,
 } from './connection.js';
 export {

@@ -45,7 +45,8 @@ import {
 } from './db/session-db.js';
 import { defaultProvider } from './env.js';
 import { log } from './log.js';
-import { heartbeatPath, inboundDbPath, outboundDbPath } from './session-manager.js';
+import { inboundDbPath, outboundDbPath } from './session-manager.js';
+import { getSessionSignalLastSeenAt } from './session-link.js';
 
 // Per-process worst-case allowances (MB). Together they decompose the flat
 // 600MB figure this module used to charge every container, so a default
@@ -240,8 +241,7 @@ export function snapshotRunning(
     if (s) {
       estMb = estimateAgentGroupMb(s.agent_group_id);
       try {
-        const hbPath = heartbeatPath(s.agent_group_id, s.id);
-        lastActivityMs = fs.existsSync(hbPath) ? fs.statSync(hbPath).mtimeMs : 0;
+        lastActivityMs = getSessionSignalLastSeenAt(s.id);
         const quiet = lastActivityMs === 0 || now - lastActivityMs > IDLE_EVICT_GRACE_MS;
         idle = quiet && !hasInFlightWork(s.agent_group_id, s.id);
       } catch {

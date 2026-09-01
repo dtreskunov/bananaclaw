@@ -21,7 +21,9 @@ NanoClaw uses **three kinds of SQLite database**, all on the host filesystem:
 
 **Single-writer rule.** Every SQLite file has exactly one writer. Host writes the central DB and every `inbound.db`; container writes only its own `outbound.db`. This eliminates write contention across the Docker/Apple Container mount boundary — SQLite locking across that boundary is unreliable.
 
-**Everything is a message.** There is no IPC, stdin piping, or file watcher between host and container. The two session DBs are the sole IO surface. Heartbeat is a file `touch(2)` on `.heartbeat`, not a DB write.
+Durable messages use the two session databases. Live runner status (heartbeat,
+activity, progressive usage, and turn completion) uses a private per-session
+Unix socket; see [session-link.md](session-link.md).
 
 **Journal mode.** Session DBs use `journal_mode = DELETE` (not WAL). Cross-mount WAL visibility is a bug farm; DELETE mode + open-write-close forces the page cache to flush so the other side sees changes.
 
@@ -39,12 +41,15 @@ data/
       <session_id>/
         inbound.db                        ← host writes, container reads
         outbound.db                       ← container writes, host reads
-        .heartbeat                        ← mtime touched by container
         inbox/<message_id>/               ← decoded user attachments
         outbox/<message_id>/              ← attachments the agent produced
+
+  .session-links/<session-hash>/
+    runner.sock                            ← live runner → host signals
 ```
 
-Path helpers: `sessionDir()`, `inboundDbPath()`, `outboundDbPath()`, `heartbeatPath()` — all in `src/session-manager.ts`.
+Session DB path helpers live in `src/session-manager.ts`; session-link lifecycle
+and paths live in `src/session-link.ts`.
 
 ---
 
@@ -74,7 +79,9 @@ Session DBs are bind-mounted into the container. A few rules you need to know be
 - **`journal_mode = DELETE`, not WAL.** WAL files don't reliably cross the mount and the container can read stale pages. DELETE mode forces each writer to flush the main file.
 - **Open-write-close on the host.** Host-side writes to `inbound.db` open a connection, write, and close it. Keeping a handle open makes cached pages invisible to the container.
 - **Container reads read-only.** The container opens `inbound.db` with `readonly: true` and never writes — all container→host state goes through `outbound.db` (see `processing_ack` in [db-session.md](db-session.md#52-processing_ack)).
-- **Heartbeat is a file touch.** `.heartbeat` mtime is the liveness signal, not a DB column. A DB write per heartbeat would serialize behind other writers.
+- **Live status stays out of SQLite.** The per-session Unix socket carries
+  heartbeat, activity, progressive usage, and turn completion without adding
+  write contention to `outbound.db`.
 
 These rules are enforced by convention in `src/session-manager.ts` and `container/agent-runner/src/db/`. If you change how the DBs are opened, re-read that code first.
 
@@ -86,7 +93,8 @@ These rules are enforced by convention in `src/session-manager.ts` and `containe
 2. **Seq parity.** Even = host, odd = container. Disjoint namespace across both tables lets the agent reference any message by `seq` alone. Details in [db-session.md §3](db-session.md#3-sequence-numbering-invariant).
 3. **Projection pattern.** `agent_destinations` and `session_routing` are projected from the central DB into each session's `inbound.db` on container wake — the container gets a fast, local read path without querying across the mount.
 4. **Ack via reverse channel.** Container never writes to `inbound.db`. Status sync happens through `processing_ack` in `outbound.db`, which the host polls and reconciles.
-5. **Heartbeat out of band.** File `touch` on `.heartbeat`, not a DB write, so liveness doesn't serialize behind other writers.
+5. **One live-status channel.** A private per-session Unix socket replaces the
+  former signal files and avoids serializing live UI updates behind DB writes.
 6. **Lazy session-DB migrations.** Central DB uses numbered migrations; per-session DBs use `IF NOT EXISTS` + ad-hoc `ALTER TABLE` helpers for older session folders.
 7. **ACL = row existence.** `agent_destinations` membership is itself the permission — no separate `permissions` table.
 

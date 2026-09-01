@@ -371,10 +371,9 @@ erDiagram
       <section id="twodb">
         <h2><span class="num">5</span>Two-DB Split</h2>
         <p class="desc">
-          Each SQLite file has exactly one writer. The container touches a
-          heartbeat file instead of <code>UPDATE</code>-ing a liveness row, so host
-          sweep can detect staleness via <code>stat(mtime)</code> without opening the
-          DB. Host uses even seq numbers, container uses odd — collision-free.
+          Each SQLite file has exactly one writer. A private per-session Unix
+          socket carries live status without adding DB writes. Host uses even
+          seq numbers, container uses odd — collision-free.
         </p>
         <div class="diagram">
 <pre class="mermaid">
@@ -382,16 +381,16 @@ flowchart LR
   subgraph Mount["/workspace (volume mount)"]
     In[("inbound.db")]
     Out[("outbound.db")]
-    HB["/.heartbeat (file touch)"]
   end
+  Link["/run/nanoclaw/runner.sock"]
 
   Host[Host process] -->|writes · even seq| In
   Host -->|reads| Out
   Container[agent-runner] -->|reads| In
   Container -->|writes · odd seq| Out
-  Container -->|touch every poll| HB
-  HostSweep[Host sweep] -->|stat mtime| HB
-  HostSweep -->|reads processing_ack| In
+  Container -->|live status| Link
+  Link --> Host
+  HostSweep[Host sweep] -->|reads processing_ack| Out
 </pre>
         </div>
       </section>

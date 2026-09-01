@@ -9,6 +9,7 @@
  */
 import fs from 'fs';
 import Database from 'better-sqlite3';
+import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', async () => {
@@ -20,9 +21,9 @@ import {
   initSessionFolder,
   outboundDbPath,
   readSessionUsageProgress,
-  usageProgressPath,
   writeOutboundDirect,
 } from './session-manager.js';
+import { sessionLinkSocketPath, startSessionSignalServer, stopSessionSignalServer } from './session-link.js';
 
 const TEST_DIR = '/tmp/nanoclaw-test-write-outbound';
 const AG = 'ag-test';
@@ -48,9 +49,20 @@ beforeEach(() => {
   initSessionFolder(AG, SESS);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await stopSessionSignalServer(SESS, true);
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
 });
+
+async function sendSignal(frame: unknown): Promise<void> {
+  await startSessionSignalServer(SESS);
+  await new Promise<void>((resolve, reject) => {
+    const socket = net.createConnection(sessionLinkSocketPath(SESS));
+    socket.once('error', reject);
+    socket.once('connect', () => socket.end(`${JSON.stringify(frame)}\n`));
+    socket.once('close', () => resolve());
+  });
+}
 
 describe('writeOutboundDirect', () => {
   it('inserts into messages_out with an even host-side seq (requires a writable outbound.db)', () => {
@@ -106,9 +118,7 @@ describe('writeOutboundDirect', () => {
 });
 
 describe('readSessionUsageProgress', () => {
-  it('returns a fresh valid snapshot and rejects stale or malformed data', () => {
-    initSessionFolder(AG, SESS);
-    const progressPath = usageProgressPath(AG, SESS);
+  it('returns a fresh valid snapshot received over the session link', async () => {
     const usage = {
       cost_usd: 0.25,
       input_tokens: 1200,
@@ -120,12 +130,10 @@ describe('readSessionUsageProgress', () => {
       context_tokens: 1230,
       context_window: 1_048_576,
     };
-    fs.writeFileSync(progressPath, JSON.stringify(usage));
-
+    const before = Date.now();
+    await sendSignal({ v: 1, type: 'usage', usage });
     expect(readSessionUsageProgress(AG, SESS)).toEqual(usage);
-    expect(readSessionUsageProgress(AG, SESS, fs.statSync(progressPath).mtimeMs + 1)).toBeNull();
-
-    fs.writeFileSync(progressPath, '{"input_tokens":"bad"}');
-    expect(readSessionUsageProgress(AG, SESS)).toBeNull();
+    expect(readSessionUsageProgress(AG, SESS, before)).toEqual(usage);
+    expect(readSessionUsageProgress(AG, SESS, Date.now() + 1)).toBeNull();
   });
 });

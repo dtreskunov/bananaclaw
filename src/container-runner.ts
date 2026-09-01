@@ -47,6 +47,12 @@ import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
 import { ensureOneCliAgent } from './onecli-agent.js';
+import {
+  SESSION_LINK_VERSION,
+  sessionLinkDir,
+  startSessionSignalServer,
+  stopSessionSignalServer,
+} from './session-link.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
 import './providers/index.js';
@@ -57,7 +63,6 @@ import {
   type VolumeMount,
 } from './providers/provider-container-registry.js';
 import {
-  heartbeatPath,
   markContainerRunning,
   markContainerStopped,
   sessionDir,
@@ -120,7 +125,8 @@ export function wakeContainer(session: Session): Promise<boolean> {
     return existing;
   }
   const promise = admitThenSpawn(session)
-    .catch((err) => {
+    .catch(async (err) => {
+      await stopSessionSignalServer(session.id, true);
       log.warn('wakeContainer failed — host-sweep will retry', { sessionId: session.id, err });
       return false;
     })
@@ -229,6 +235,7 @@ async function spawnContainer(session: Session): Promise<void> {
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
 
+  await startSessionSignalServer(session.id);
   const mounts = buildMounts(agentGroup, session, containerConfig, provider, contribution);
   // Docker/podman container names allow only [a-zA-Z0-9_.-]. Folder names
   // can include characters that are legal on disk but not in container
@@ -252,12 +259,6 @@ async function spawnContainer(session: Session): Promise<void> {
   );
 
   log.info('Spawning container', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
-
-  // Clear any orphan heartbeat from a previous container instance — the
-  // sweep's ceiling check treats a missing file as "fresh spawn, give grace"
-  // (host-sweep.ts line 87). Without this, the stale mtime can trigger an
-  // immediate kill before the new container touches the file itself.
-  fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
 
   // Detached mode (`-d` in buildContainerArgs). `docker run -d` exits as
   // soon as the container is created with the container ID on stdout, or
@@ -295,6 +296,7 @@ async function spawnContainer(session: Session): Promise<void> {
     // Make sure no stale row says we're running.
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
+    await stopSessionSignalServer(session.id, true);
     return;
   }
 
@@ -344,7 +346,7 @@ export async function runMcpProbeContainer(
     const providerName = resolveProviderName(containerConfig.provider, resolveEnv('DEFAULT_PROVIDER'));
     initGroupFilesystem(agentGroup, { provider: providerName });
     const { provider, contribution } = resolveProviderContribution(probeSession, agentGroup, containerConfig);
-    const mounts = buildMounts(agentGroup, probeSession, containerConfig, provider, contribution);
+    const mounts = buildMounts(agentGroup, probeSession, containerConfig, provider, contribution, false);
     const folderSlug = agentGroup.folder.replace(/@/g, '_at_').replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 48);
     containerName = `nanoclaw-mcp-probe-${folderSlug}-${Date.now()}`;
     const args = await buildContainerArgs(
@@ -460,6 +462,7 @@ function attachContainerWatcher(sessionId: string, containerName: string): void 
     activeContainers.delete(sessionId);
     markContainerStopped(sessionId);
     stopTypingRefresh(sessionId);
+    void stopSessionSignalServer(sessionId, true);
     log.info('Container exited', { sessionId, code, containerName });
   });
 
@@ -467,6 +470,7 @@ function attachContainerWatcher(sessionId: string, containerName: string): void 
     activeContainers.delete(sessionId);
     markContainerStopped(sessionId);
     stopTypingRefresh(sessionId);
+    void stopSessionSignalServer(sessionId, true);
     log.error('Container watcher error', { sessionId, containerName, err });
   });
 }
@@ -531,7 +535,7 @@ export function killContainer(sessionId: string, reason: string, onExit?: () => 
  * running, and `wakeContainer` would spawn a SECOND container against the
  * same session DB — two writers on outbound.db, racy double-replies.
  */
-export function adoptRunningContainers(adopt: Array<{ name: string; sessionId: string }>): void {
+export async function adoptRunningContainers(adopt: Array<{ name: string; sessionId: string }>): Promise<void> {
   for (const { name, sessionId } of adopt) {
     if (activeContainers.has(sessionId)) {
       // Should not happen on startup (map is empty), but be safe.
@@ -542,6 +546,7 @@ export function adoptRunningContainers(adopt: Array<{ name: string; sessionId: s
       continue;
     }
     log.info('Adopting running container', { sessionId, containerName: name });
+    await startSessionSignalServer(sessionId);
     attachContainerWatcher(sessionId, name);
   }
 }
@@ -590,6 +595,7 @@ export function buildMounts(
   containerConfig: import('./container-config.js').ContainerConfig,
   provider: string,
   providerContribution: ProviderContainerContribution,
+  includeSessionLink = true,
 ): VolumeMount[] {
   const projectRoot = process.cwd();
 
@@ -614,6 +620,10 @@ export function buildMounts(
 
   // Session folder at /workspace (contains inbound.db, outbound.db, outbox/, .claude/)
   mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
+
+  if (includeSessionLink) {
+    mounts.push(sessionLinkMount(session.id));
+  }
 
   // Agent group folder at /workspace/agent (RW for working files + CLAUDE.local.md)
   mounts.push({ hostPath: groupDir, containerPath: '/workspace/agent', readonly: false });
@@ -684,6 +694,14 @@ export function buildMounts(
   }
 
   return mounts;
+}
+
+export function sessionLinkMount(sessionId: string): VolumeMount {
+  return {
+    hostPath: sessionLinkDir(sessionId),
+    containerPath: '/run/nanoclaw',
+    readonly: true,
+  };
 }
 
 // Resolve an env var via process.env first, then the .env file (which the
@@ -827,6 +845,9 @@ async function buildContainerArgs(
     '--label',
     `nanoclaw-agent-group=${agentGroup.id}`,
   ];
+  if (launchMode === 'agent') {
+    args.push('--label', `nanoclaw-session-link=${SESSION_LINK_VERSION}`);
+  }
 
   // Rootless Podman: UID 0 inside the container maps to the host user
   // (e.g. denis/1000). The Dockerfile sets USER node (UID 1000) which would

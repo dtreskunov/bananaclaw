@@ -23,7 +23,9 @@ src/container-runner.ts                    container/agent-runner/src/
     ├── data/v2-sessions/<group>/<session>/ ──> /workspace
     │     ├── inbound.db   (host writes, container reads RO)
     │     ├── outbound.db  (container writes, host reads)
-    │     └── .heartbeat   (container touches → /workspace/.heartbeat)
+    │
+    ├── data/.session-links/<session-hash>/runner.sock
+    │       └──────────────────────────────────────> /run/nanoclaw/runner.sock (RO directory mount)
     ├── groups/<folder> ─────────────────────> /workspace/agent  (cwd)
     ├── <group>/.claude-shared ──────────────> /home/node/.claude
     └── agent-runner src + skills ───────────> /app/src, /app/skills
@@ -159,7 +161,8 @@ grep -n "containerPath" src/container-runner.ts
 
 Expected mount targets inside the container:
 ```
-/workspace            ← session folder (inbound.db, outbound.db, .heartbeat, inbox/, outbox/)
+/workspace            ← session folder (inbound.db, outbound.db, inbox/, outbox/)
+/run/nanoclaw         ← private session-link socket directory (read-only)
 /workspace/agent      ← agent group folder (cwd; CLAUDE.md, skills, working files)
 /home/node/.claude    ← per-group .claude-shared (Claude state, settings, history)
 /app/src              ← agent-runner source (read-only)
@@ -172,13 +175,17 @@ docker run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c 'whoami; ls -la 
 ```
 All of `/workspace/` and `/app/` should be owned by `node`. Use `:ro` on a `-v` mount for read-only.
 
-### 4. Heartbeat / stale-session detection
+### 4. Session-link liveness / stale-session detection
 
-Liveness is a file `touch` on `/workspace/.heartbeat` (host path: `data/v2-sessions/<group>/<session>/.heartbeat`), not a DB write. The host sweep reads its mtime plus the `processing_ack` claim age to decide whether a container is alive or stale. A session stuck "processing" with a stale `.heartbeat` mtime means the container died mid-run:
+Live heartbeat, activity, progressive usage, and turn completion travel over
+the private per-session Unix socket. The host sweep combines the latest valid
+signal timestamp with `processing_ack` claim age to decide whether a container
+is stale. Check the listener and container mount rather than looking for a
+heartbeat file:
 
 ```bash
-stat -f '%Sm' data/v2-sessions/<group>/<session>/.heartbeat   # macOS
-stat -c '%y'  data/v2-sessions/<group>/<session>/.heartbeat   # Linux
+find data/.session-links -name runner.sock -type s -ls
+docker inspect <container-name> --format '{{json .Mounts}}' | jq
 ```
 
 ## Container CLI (`ncl`) inside a session

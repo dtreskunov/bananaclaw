@@ -11,7 +11,7 @@ describe('mcpServersToOpenCodeConfig', () => {
         env: {
           SESSION_INBOUND_DB_PATH: '/workspace/inbound.db',
           SESSION_OUTBOUND_DB_PATH: '/workspace/outbound.db',
-          SESSION_HEARTBEAT_PATH: '/workspace/.heartbeat',
+          SESSION_LINK_PATH: '/run/nanoclaw/runner.sock',
         },
       },
       extra: {
@@ -29,7 +29,7 @@ describe('mcpServersToOpenCodeConfig', () => {
       environment: {
         SESSION_INBOUND_DB_PATH: '/workspace/inbound.db',
         SESSION_OUTBOUND_DB_PATH: '/workspace/outbound.db',
-        SESSION_HEARTBEAT_PATH: '/workspace/.heartbeat',
+        SESSION_LINK_PATH: '/run/nanoclaw/runner.sock',
       },
       enabled: true,
       timeout: 60_000,

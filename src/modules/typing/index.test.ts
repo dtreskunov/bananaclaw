@@ -8,7 +8,7 @@
  * fires through the wrong bot.
  */
 import fs from 'fs';
-import path from 'path';
+import net from 'node:net';
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 
@@ -21,7 +21,7 @@ vi.mock('../../db/agent-groups.js', () => ({ getAgentGroup: () => ({ id: 'ag-1' 
 vi.mock('../../db/container-configs.js', () => ({ getContainerConfig: () => ({ agent_group_id: 'ag-1' }) }));
 
 import { setTypingAdapter, startTypingRefresh, stopTypingRefresh } from './index.js';
-import { usageProgressPath } from '../../session-manager.js';
+import { sessionLinkSocketPath, startSessionSignalServer, stopSessionSignalServer } from '../../session-link.js';
 import type { TypingMetadata } from '../../channels/adapter.js';
 
 type Call = {
@@ -46,8 +46,9 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 
-afterEach(() => {
+afterEach(async () => {
   stopTypingRefresh('sess-1');
+  await stopSessionSignalServer('sess-1', true);
   fs.rmSync('/tmp/nanoclaw-test-typing', { recursive: true, force: true });
   vi.useRealTimers();
 });
@@ -75,7 +76,7 @@ describe('startTypingRefresh — instance forwarding', () => {
     calls.length = 0;
 
     // Two 4s ticks — well inside the 15s grace window, so they fire
-    // unconditionally (no heartbeat file needed) from the stored entry.
+    // unconditionally (no runner signal needed) from the stored entry.
     await vi.advanceTimersByTimeAsync(8_500);
     expect(calls.length).toBeGreaterThanOrEqual(2);
     for (const c of calls) {
@@ -150,22 +151,28 @@ describe('startTypingRefresh — instance forwarding', () => {
     await vi.advanceTimersByTimeAsync(0);
     calls.length = 0;
 
-    const progressPath = usageProgressPath('ag-1', 'sess-1');
-    fs.mkdirSync(path.dirname(progressPath), { recursive: true });
-    fs.writeFileSync(
-      progressPath,
-      JSON.stringify({
-        cost_usd: 0.25,
-        input_tokens: 1200,
-        output_tokens: 30,
-        cache_read_tokens: 1000,
-        cache_write_tokens: 0,
-        num_turns: 2,
-        model: 'minimax/MiniMax-M3',
-      }),
+    await startSessionSignalServer('sess-1');
+    const socket = net.createConnection(sessionLinkSocketPath('sess-1'));
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('error', reject);
+    });
+    socket.write(
+      `${JSON.stringify({
+        v: 1,
+        type: 'usage',
+        usage: {
+          cost_usd: 0.25,
+          input_tokens: 1200,
+          output_tokens: 30,
+          cache_read_tokens: 1000,
+          cache_write_tokens: 0,
+          num_turns: 2,
+          model: 'minimax/MiniMax-M3',
+        },
+      })}\n`,
     );
-    const writtenAt = new Date(Date.now() + 1);
-    fs.utimesSync(progressPath, writtenAt, writtenAt);
+    await vi.advanceTimersByTimeAsync(100);
 
     await vi.advanceTimersByTimeAsync(4_500);
     expect(calls.at(-1)?.metadata?.usage).toEqual(
@@ -175,11 +182,12 @@ describe('startTypingRefresh — instance forwarding', () => {
         num_turns: 2,
       }),
     );
+    socket.destroy();
   });
 });
 
 describe('startTypingRefresh — transient heartbeat stalls', () => {
-  it('re-arms typing when a stale heartbeat becomes fresh again', async () => {
+  it('re-arms typing when a stale session link receives a heartbeat', async () => {
     const setTyping = vi.fn(async () => {});
     const clearTyping = vi.fn(async () => {});
     setTypingAdapter({ setTyping, clearTyping });
@@ -189,13 +197,17 @@ describe('startTypingRefresh — transient heartbeat stalls', () => {
     expect(clearTyping).toHaveBeenCalledTimes(1);
     const callsBeforeRecovery = setTyping.mock.calls.length;
 
-    const heartbeat = '/tmp/nanoclaw-test-typing/v2-sessions/ag-1/sess-1/.heartbeat';
-    fs.mkdirSync('/tmp/nanoclaw-test-typing/v2-sessions/ag-1/sess-1', { recursive: true });
-    fs.writeFileSync(heartbeat, '');
-    const now = new Date(Date.now());
-    fs.utimesSync(heartbeat, now, now);
+    await startSessionSignalServer('sess-1');
+    const socket = net.createConnection(sessionLinkSocketPath('sess-1'));
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('error', reject);
+    });
+    socket.write(`${JSON.stringify({ v: 1, type: 'heartbeat' })}\n`);
+    await vi.advanceTimersByTimeAsync(100);
     await vi.advanceTimersByTimeAsync(4_000);
 
     expect(setTyping.mock.calls.length).toBeGreaterThan(callsBeforeRecovery);
+    socket.destroy();
   });
 });

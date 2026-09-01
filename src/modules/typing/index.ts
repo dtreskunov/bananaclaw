@@ -5,14 +5,11 @@
  * call on message arrival goes stale long before the agent finishes
  * thinking. This module keeps it alive by re-firing `setTyping` on a
  * short interval — but only while the agent is actually WORKING, gated
- * on the heartbeat file's mtime after an initial grace period.
+ * on fresh session-link signals after an initial grace period.
  *
- * Shutdown signal: the container writes `turn_ended_at` to
- * `session_state` on the SDK's `result` / `error` event. The host's
- * active delivery loop calls `checkTurnEndedAndStop` once per tick (~1s)
- * to drop the indicator as soon as that flips, so a final answer or a
- * follow-up question stops the dots without waiting for the heartbeat
- * to age out.
+ * Shutdown signal: the container sends `turn.end` on the SDK's `result` /
+ * `error` event. The session-link listener drops the indicator immediately;
+ * the active delivery loop keeps a compatibility check on every tick.
  *
  * Default module status:
  *   - Lives in src/modules/ for signaling (not really core), but ships
@@ -20,8 +17,6 @@
  *   - Removing requires editing src/router.ts, src/delivery.ts, and
  *     src/container-runner.ts to drop the calls.
  */
-import fs from 'fs';
-
 import { configFromDb } from '../../container-config.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { getContainerConfig } from '../../db/container-configs.js';
@@ -29,7 +24,6 @@ import { getRunningSessions } from '../../db/sessions.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { log } from '../../log.js';
 import {
-  heartbeatPath,
   isSessionProcessing,
   readSessionActivity,
   readSessionProgress,
@@ -37,6 +31,7 @@ import {
   readSessionTurnEndedAt,
   type ActivityLine,
 } from '../../session-manager.js';
+import { getSessionSignalLastSeenAt, onSessionSignal } from '../../session-link.js';
 import type { TypingMetadata } from '../../channels/adapter.js';
 
 const TYPING_REFRESH_MS = 4000;
@@ -87,6 +82,7 @@ const typingRefreshers = new Map<string, TypingTarget>();
 // Last reduced snapshot sent per session. Typing refreshes still run for
 // platform expiry, but unchanged web trace payloads are omitted.
 const activitySnapshotHashes = new Map<string, string>();
+const signalFlushTimers = new Map<string, NodeJS.Timeout>();
 
 /**
  * Bind the typing module to the channel delivery adapter so it can
@@ -109,9 +105,8 @@ async function triggerTyping(
   model?: string,
   instance?: string,
 ): Promise<void> {
-  // Gate the hint on the activity file's mtime: suppress a stale hint left
-  // over from the previous turn until this turn's container writes a fresh
-  // line (the file isn't truncated until the waking container's first write).
+  // Gate the hint on this turn's start time so a stale snapshot from the
+  // previous turn cannot surface before the runner clears or updates it.
   const hint = readSessionProgress(agentGroupId, sessionId, startedAt) ?? undefined;
   const snapshot = readSessionActivity(agentGroupId, sessionId, startedAt);
   const hash = JSON.stringify(snapshot);
@@ -149,13 +144,9 @@ async function triggerClearTyping(channelType: string, platformId: string, threa
 }
 
 function isHeartbeatFresh(agentGroupId: string, sessionId: string): boolean {
-  const hbPath = heartbeatPath(agentGroupId, sessionId);
-  try {
-    const stat = fs.statSync(hbPath);
-    return Date.now() - stat.mtimeMs < HEARTBEAT_FRESH_MS;
-  } catch {
-    return false;
-  }
+  void agentGroupId;
+  const lastSeenAt = getSessionSignalLastSeenAt(sessionId);
+  return lastSeenAt > 0 && Date.now() - lastSeenAt < HEARTBEAT_FRESH_MS;
 }
 
 export function startTypingRefresh(
@@ -302,8 +293,53 @@ export function stopTypingRefresh(sessionId: string): void {
   clearInterval(entry.interval);
   typingRefreshers.delete(sessionId);
   activitySnapshotHashes.delete(sessionId);
+  const signalFlush = signalFlushTimers.get(sessionId);
+  if (signalFlush) clearTimeout(signalFlush);
+  signalFlushTimers.delete(sessionId);
   triggerClearTyping(entry.channelType, entry.platformId, entry.threadId).catch(() => {});
 }
+
+onSessionSignal((sessionId, kind) => {
+  const entry = typingRefreshers.get(sessionId);
+  if (!entry) return;
+  if (kind === 'turn.end') {
+    stopIfTurnEnded(sessionId, entry);
+    return;
+  }
+  if (kind === 'heartbeat' && entry.paused) {
+    entry.paused = false;
+    triggerTyping(
+      sessionId,
+      entry.agentGroupId,
+      entry.channelType,
+      entry.platformId,
+      entry.threadId,
+      entry.startedAt,
+      entry.model,
+      entry.instance,
+    ).catch(() => {});
+    return;
+  }
+  if (entry.channelType !== 'web' || (kind !== 'activity' && kind !== 'usage')) return;
+  if (signalFlushTimers.has(sessionId)) return;
+  const timer = setTimeout(() => {
+    signalFlushTimers.delete(sessionId);
+    const current = typingRefreshers.get(sessionId);
+    if (!current) return;
+    triggerTyping(
+      sessionId,
+      current.agentGroupId,
+      current.channelType,
+      current.platformId,
+      current.threadId,
+      current.startedAt,
+      current.model,
+      current.instance,
+    ).catch(() => {});
+  }, 50);
+  timer.unref?.();
+  signalFlushTimers.set(sessionId, timer);
+});
 
 /**
  * Restart typing refreshers for any session whose container was adopted

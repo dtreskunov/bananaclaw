@@ -106,8 +106,15 @@ export function clearFailedTurn(): void {
   deleteValue(FAILED_TURN_KEY);
 }
 
-import { appendActivityFile, clearActivityFile, writeTurnEndedFile, clearTurnEndedFile, writeUsageProgressFile, clearUsageProgressFile } from './connection.js';
 import type { ActivityStep, TurnUsage } from '../providers/types.js';
+import {
+  clearActivitySignal,
+  clearUsageSignal,
+  emitActivitySignal,
+  emitUsageSignal,
+  endTurnSignal,
+  resumeTurnSignal,
+} from '../session-link.js';
 
 /** One step of a turn's activity trace: an emit-time timestamp (epoch ms as
  *  a string) plus a JSON-encoded {@link ActivityStep} in `text`. Older rows
@@ -134,11 +141,9 @@ const ACTIVITY_MAX_CHARS = 2000;
  *  newlines, the `<ts>\t<json>\n` file line format stays intact even when a
  *  tool's `detail` (e.g. a multi-line bash command) contains newlines.
  *
- *  Written to an append-only file (not outbound.db) to avoid write
- *  contention between the poll-loop process and the nanoclaw MCP server
- *  subprocess — both share outbound.db with journal_mode=DELETE (exclusive
- *  locks). Also buffered in memory so the poll-loop can persist the whole
- *  trace to `turn_activity` at turn end. */
+ *  Sent over the per-session link for live display and also buffered in
+ *  memory so the poll-loop can persist the whole trace to `turn_activity`
+ *  at turn end. */
 // JSON of the last step appended this turn, for consecutive-dedup. Providers
 // re-emit the same step across a tool's running/completed phases; collapsing
 // adjacent duplicates keeps the trace readable without dropping genuinely
@@ -156,7 +161,7 @@ export function appendActivity(step: ActivityStep): void {
   _lastActivity = text;
   const ts = String(Date.now());
   _activityBuffer.push({ ts, text });
-  appendActivityFile(`${ts}\t${text}`);
+  emitActivitySignal(s);
 }
 
 /** Cap user/model/provider text fields before they leave the container. */
@@ -186,15 +191,15 @@ export function getActivityBuffer(): ActivityLine[] {
 export function clearActivity(): void {
   _lastActivity = '';
   _activityBuffer = [];
-  clearActivityFile();
+  clearActivitySignal();
 }
 
 export function writeUsageProgress(usage: TurnUsage): void {
-  writeUsageProgressFile(JSON.stringify(usage));
+  emitUsageSignal(usage);
 }
 
 export function clearUsageProgress(): void {
-  clearUsageProgressFile();
+  clearUsageSignal();
 }
 
 /** Mark that the SDK turn just ended (result/error event). The host
@@ -203,11 +208,11 @@ export function clearUsageProgress(): void {
  *  waiting for the user doesn't leave the dots spinning. Cleared on
  *  the next turn start.
  *
- *  Written to a file (not outbound.db) — same rationale as setProgress. */
+ *  Sent over the per-session link rather than persisted independently. */
 export function setTurnEnded(): void {
-  writeTurnEndedFile(String(Date.now()));
+  endTurnSignal();
 }
 
 export function clearTurnEnded(): void {
-  clearTurnEndedFile();
+  resumeTurnSignal();
 }

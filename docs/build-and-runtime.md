@@ -49,7 +49,7 @@ Both are committed. CI and the Dockerfile run `--frozen-lockfile` variants — a
 ## Session wake (two paths)
 
 1. **Base image ENTRYPOINT** — used for stdin-piped test invocations like the sample in `container/build.sh`: `tini --> entrypoint.sh` captures stdin to `/tmp/input.json`, then `exec bun run src/index.ts`.
-2. **Host-spawned session** — `src/container-runner.ts` at line ~301 uses `--entrypoint bash` with `-c 'exec bun run /app/src/index.ts'`. Bypasses tini (Docker's default PID 1 handling applies). Stdin is unused; all IO flows through the mounted session DBs.
+2. **Host-spawned session** — `src/container-runner.ts` at line ~301 uses `--entrypoint bash` with `-c 'exec bun run /app/src/index.ts'`. Bypasses tini (Docker's default PID 1 handling applies). Stdin is unused; durable IO uses the mounted session DBs and live runner status uses the per-session Unix socket.
 
 Both paths end with Bun running the same source file from `/app/src/index.ts`.
 

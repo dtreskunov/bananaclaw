@@ -12,14 +12,15 @@ Schemas live in `src/db/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA`
 data/v2-sessions/<agent_group_id>/<session_id>/
   inbound.db              ← host writes, container reads (read-only mount)
   outbound.db             ← container writes, host reads (read-only open)
-  .heartbeat              ← mtime touched by container (not a DB write)
   inbox/<message_id>/     ← user attachments, decoded from inbound message content
   outbox/<message_id>/    ← attachments the agent produced
 ```
 
 One session = one folder = one pair of DBs. The `agent_group_id` parent directory also holds per-group state (`.claude-shared/`, `agent-runner-src/`) that is shared across every session of that agent group.
 
-Path helpers in `src/session-manager.ts`: `sessionDir()`, `inboundDbPath()`, `outboundDbPath()`, `heartbeatPath()`.
+DB path helpers in `src/session-manager.ts`: `sessionDir()`, `inboundDbPath()`,
+and `outboundDbPath()`. Live runner status uses the separately mounted
+per-session socket described in [session-link.md](session-link.md).
 
 ---
 

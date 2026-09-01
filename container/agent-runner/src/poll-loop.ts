@@ -5,7 +5,7 @@ import { writeTurnUsage } from './db/turn-usage.js';
 import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
 import { writeTurnActivity } from './db/turn-activity.js';
 import { completeTaskAttempts, markTaskAttemptsProviderInvoked } from './db/task-attempts.js';
-import { getInboundDb, getOutboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
+import { getInboundDb, getOutboundDb, clearStaleProcessingAcks } from './db/connection.js';
 import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, clearUsageProgress, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, setContinuation, setFailedTurn, setTurnEnded, writeUsageProgress } from './db/session-state.js';
 import { getForkOrigin, type ForkOriginRow } from './db/fork-origin.js';
 import { clearCurrentInReplyTo, getDuplicateSendCount, resetTurnSendTracking, setCurrentInReplyTo } from './current-batch.js';
@@ -24,6 +24,7 @@ import { isAudioMime, transcribeAudio } from './transcribe.js';
 import { getConfig } from './config.js';
 import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderExchange } from './providers/types.js';
 import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
+import { signalHeartbeat } from './session-link.js';
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
@@ -173,7 +174,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   // longer than the host typing module's grace window before
   // processQuery's liveHandle starts touching it — leaving the
   // typing indicator to flicker off mid-cold-start.
-  try { touchHeartbeat(); } catch { /* best-effort */ }
+  try { signalHeartbeat(); } catch { /* best-effort */ }
 
   let pollCount = 0;
   let isFirstPoll = true;
@@ -226,7 +227,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Touch the heartbeat the moment we pick up a batch — before any
     // potentially-slow provider boot inside processQuery — so the host
     // typing indicator stays lit through cold-start.
-    try { touchHeartbeat(); } catch { /* best-effort */ }
+    try { signalHeartbeat(); } catch { /* best-effort */ }
 
     const ids = messages.map((m) => m.id);
     markProcessing(ids);
@@ -899,7 +900,7 @@ async function processQuery(
   // transcript on every turn. The Anthropic prompt cache is server-side with
   // a 5-min TTL keyed on prefix hash, so stream lifecycle does NOT affect
   // cache lifetime — close+reopen within 5 min still gets cache hits.
-  // Stream liveness is decided host-side via the heartbeat file + processing
+  // Stream liveness is decided host-side via session-link signals + processing
   // claim age (see src/host-sweep.ts); if something is truly stuck, the host
   // will kill the container and messages get reset to pending.
   let pollInFlight = false;
@@ -1107,7 +1108,7 @@ async function processQuery(
   // The SDK can stall for 10–30s between events while Anthropic generates
   // the first token of a response; without this timer the host-side typing
   // module would mark the agent stale, drop the indicator, and never
-  // re-arm it until the next inbound. Independent of `touchHeartbeat()`
+  // re-arm it until the next inbound. Independent of `signalHeartbeat()`
   // on each event — that path still runs and stays the source of truth
   // when events are flowing.
   //
@@ -1242,7 +1243,7 @@ async function processQuery(
   };
   const liveHandle = setInterval(() => {
     if (!turnActive) return;
-    try { touchHeartbeat(); } catch { /* best-effort */ }
+    try { signalHeartbeat(); } catch { /* best-effort */ }
   }, 2000);
   liveHandle.unref?.();
 
@@ -1255,7 +1256,7 @@ async function processQuery(
 
   try {
     for await (const event of query.events) {
-      touchHeartbeat();
+      signalHeartbeat();
       handleEvent(event, routing);
 
       if (event.type === 'progress' && event.step.kind === 'tool') {

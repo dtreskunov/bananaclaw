@@ -19,7 +19,7 @@ flowchart TB
     SessMgr["Session Manager<br/>(src/session-manager.ts)<br/>creates inbound.db + outbound.db"]
     Runner["Container Runner<br/>(src/container-runner.ts)<br/>OneCLI ensureAgent + spawn"]
     Delivery["Delivery Poller<br/>(src/delivery.ts)<br/>1s active / 60s sweep"]
-    Sweep["Host Sweep<br/>(src/host-sweep.ts)<br/>heartbeat, retry, recurrence"]
+    Sweep["Host Sweep<br/>(src/host-sweep.ts)<br/>liveness, retry, recurrence"]
     Central[("Central DB<br/>data/v2.db<br/>agent_groups<br/>messaging_groups<br/>messaging_group_agents<br/>sessions<br/>pending_approvals")]
   end
 
@@ -35,7 +35,8 @@ flowchart TB
     MCP["MCP Tools<br/>send_message, send_file, edit_message,<br/>add_reaction, send_card, ask_user_question,<br/>schedule_task, create_agent,<br/>install_packages, add_mcp_server"]
     Skills["Container Skills<br/>(container/skills/)"]
     InDB[("inbound.db<br/>host writes<br/>even seq<br/>messages_in<br/>destinations<br/>processing_ack")]
-    OutDB[("outbound.db<br/>container writes<br/>odd seq<br/>messages_out<br/>heartbeat file")]
+    OutDB[("outbound.db<br/>container writes<br/>odd seq<br/>messages_out")]
+    SessionLink["runner.sock<br/>live status"]
   end
 
   subgraph Groups["Agent Group Filesystem (groups/*)"]
@@ -52,6 +53,8 @@ flowchart TB
   Runner --> PollLoop
   PollLoop --> InDB
   PollLoop --> Provider
+  PollLoop -->|live signals| SessionLink
+  SessionLink --> Runner
   Provider --> MCP
   Provider --> Skills
   MCP --> OutDB
@@ -200,16 +203,16 @@ flowchart LR
   subgraph Mount["/workspace (volume mounted into container)"]
     In[("inbound.db")]
     Out[("outbound.db")]
-    HB["/.heartbeat (file touch)"]
   end
+  Link["/run/nanoclaw/runner.sock"]
 
   Host[Host process] -->|"writes only<br/>(even seq)"| In
   Host -->|reads| Out
   Container[agent-runner] -->|reads| In
   Container -->|"writes only<br/>(odd seq)"| Out
-  Container -->|touch every poll| HB
-  HostSweep[Host sweep] -->|stat mtime| HB
-  HostSweep -->|reads processing_ack| In
+  Container -->|live status| Link
+  Link --> Host
+  HostSweep[Host sweep] -->|reads processing_ack| Out
 
   note1["Each file has exactly ONE writer.<br/>Eliminates SQLite cross-process write contention.<br/>Collision-free seq numbering."]
 ```

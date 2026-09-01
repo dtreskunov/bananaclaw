@@ -348,7 +348,9 @@ Everything below is handled by the agent-runner, not the provider.
 - An `ask_user_question` tool call is pending (waiting for user response in messages_in)
 - The agent is actively working (tool calls in progress, subagents running)
 
-The agent-runner signals "busy" status to the host. The mechanism for this is provider-specific — for Claude, the query AsyncGenerator is still yielding events. For others, the agent-runner can write a heartbeat or status indicator to the session DB that the host checks before killing.
+The agent-runner sends heartbeat, activity, progressive usage, and turn
+completion over its private per-session Unix socket. The host uses the latest
+accepted signal timestamp for typing freshness and stuck-container detection.
 
 ### Message Formatting
 

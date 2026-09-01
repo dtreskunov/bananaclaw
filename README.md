@@ -97,9 +97,9 @@ The `web` channel sits in this same flow — the browser is just another
 adapter. Admin UI, file browser, and Pages are separate HTTP routes on the
 same listener; none bypass the session-DB protocol.
 
-Per the [upstream architecture docs](docs/architecture.md): two SQLite files
-per session, exactly one writer each, no IPC. BananaClaw changes none of
-this.
+Per the [architecture docs](docs/architecture.md), durable messages use two
+SQLite files per session with exactly one writer each. Live runner status uses
+a private per-session Unix socket rather than DB writes or signal files.
 
 ## Documentation
 

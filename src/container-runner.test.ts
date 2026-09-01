@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { packageDockerfile, resolveProviderName, syncSkillSymlinks } from './container-runner.js';
+import { packageDockerfile, resolveProviderName, sessionLinkMount, syncSkillSymlinks } from './container-runner.js';
 
 describe('packageDockerfile', () => {
   const none = { apt: [], npm: [], pip: [] };
@@ -57,6 +57,16 @@ describe('resolveProviderName', () => {
   it('falls through env empty/null to claude', () => {
     expect(resolveProviderName(null, '')).toBe('claude');
     expect(resolveProviderName(null, null)).toBe('claude');
+  });
+});
+
+describe('sessionLinkMount', () => {
+  it('mounts only the session capability directory read-only', () => {
+    const mount = sessionLinkMount('session-a');
+    expect(mount.containerPath).toBe('/run/nanoclaw');
+    expect(mount.readonly).toBe(true);
+    expect(mount.hostPath).toMatch(/[\\/]+data[\\/]+\.session-links[\\/]+[a-f0-9]{24}$/);
+    expect(mount.hostPath).not.toContain('session-a');
   });
 });
 

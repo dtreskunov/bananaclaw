@@ -10,6 +10,7 @@ import { deleteOrphanProcessingClaims, getProcessingClaims } from './db/session-
 import {
   ABSOLUTE_CEILING_MS,
   CLAIM_STUCK_MS,
+  SESSION_LINK_START_GRACE_MS,
   _resetStuckProcessingRowsForTesting,
   decideStuckAction,
   parseSqliteUtc,
@@ -23,55 +24,77 @@ function claim(id: string, offsetMs: number) {
 }
 
 describe('decideStuckAction', () => {
-  it('returns ok when heartbeat is fresh and no claims', () => {
+  it('returns ok when the latest signal is fresh and there are no claims', () => {
     expect(
       decideStuckAction({
         now: BASE,
-        heartbeatMtimeMs: BASE - 5_000,
+        lastSignalAtMs: BASE - 5_000,
         containerState: null,
         claims: [],
       }),
     ).toEqual({ action: 'ok' });
   });
 
-  it('returns kill-ceiling when heartbeat older than 30 min', () => {
-    const heartbeatMtimeMs = BASE - ABSOLUTE_CEILING_MS - 1_000;
+  it('returns kill-ceiling when the latest signal is older than 30 min', () => {
+    const lastSignalAtMs = BASE - ABSOLUTE_CEILING_MS - 1_000;
     const res = decideStuckAction({
       now: BASE,
-      heartbeatMtimeMs,
+      lastSignalAtMs,
       containerState: null,
       claims: [],
     });
     expect(res.action).toBe('kill-ceiling');
     if (res.action !== 'kill-ceiling') return;
     expect(res.ceilingMs).toBe(ABSOLUTE_CEILING_MS);
-    expect(res.heartbeatAgeMs).toBeGreaterThan(ABSOLUTE_CEILING_MS);
+    expect(res.signalAgeMs).toBeGreaterThan(ABSOLUTE_CEILING_MS);
   });
 
-  it('skips the ceiling check when no heartbeat file exists (fresh container not yet ticked)', () => {
-    // A freshly-spawned container hasn't produced any SDK events yet, so no
-    // heartbeat. Prior behavior treated this as infinitely stale and killed
+  it('skips the ceiling check when a fresh container has not signaled yet', () => {
+    // A freshly-spawned container hasn't produced any SDK events yet. Treating
+    // the absent signal as infinitely stale would kill
     // every container within seconds of spawn. With no claims either, we
     // should conclude everything is fine.
     const res = decideStuckAction({
       now: BASE,
-      heartbeatMtimeMs: 0,
+      lastSignalAtMs: 0,
       containerState: null,
       claims: [],
     });
     expect(res.action).toBe('ok');
   });
 
-  it('kills on claim-stuck when heartbeat is absent AND a claim has aged past tolerance', () => {
+  it('kills on claim-stuck when signals are absent and a claim has aged past tolerance', () => {
     // Hanging fresh container: spawned, picked up a message (claim recorded
-    // in processing_ack), but never wrote a heartbeat. Falls through the
+    // in processing_ack), but never sent a live signal. Falls through the
     // skipped ceiling check into claim-stuck — which correctly fires.
     const claimedAgeMs = CLAIM_STUCK_MS + 5_000;
     const res = decideStuckAction({
       now: BASE,
-      heartbeatMtimeMs: 0,
+      lastSignalAtMs: 0,
       containerState: null,
       claims: [claim('msg-1', claimedAgeMs)],
+    });
+    expect(res.action).toBe('kill-claim');
+  });
+
+  it('gives an adopted session time to reconnect before evaluating an old claim', () => {
+    const res = decideStuckAction({
+      now: BASE,
+      lastSignalAtMs: 0,
+      sessionLinkStartedAtMs: BASE - SESSION_LINK_START_GRACE_MS + 1,
+      containerState: null,
+      claims: [claim('old-claim', CLAIM_STUCK_MS + 60_000)],
+    });
+    expect(res).toEqual({ action: 'ok' });
+  });
+
+  it('evaluates an old claim after the session-link startup grace expires', () => {
+    const res = decideStuckAction({
+      now: BASE,
+      lastSignalAtMs: 0,
+      sessionLinkStartedAtMs: BASE - SESSION_LINK_START_GRACE_MS,
+      containerState: null,
+      claims: [claim('old-claim', CLAIM_STUCK_MS + 60_000)],
     });
     expect(res.action).toBe('kill-claim');
   });
@@ -81,7 +104,7 @@ describe('decideStuckAction', () => {
     const res = decideStuckAction({
       now: BASE,
       // 45 min — over the default ceiling, but under the Bash timeout
-      heartbeatMtimeMs: BASE - 45 * 60 * 1000,
+      lastSignalAtMs: BASE - 45 * 60 * 1000,
       containerState: {
         current_tool: 'Bash',
         tool_declared_timeout_ms: twoHrMs,
@@ -92,11 +115,11 @@ describe('decideStuckAction', () => {
     expect(res.action).toBe('ok');
   });
 
-  it('returns kill-claim when a claim is past 60s and heartbeat has not moved', () => {
+  it('returns kill-claim when a claim is past 60s and the signal timestamp has not moved', () => {
     const claimedAgeMs = CLAIM_STUCK_MS + 10_000;
     const res = decideStuckAction({
       now: BASE,
-      heartbeatMtimeMs: BASE - claimedAgeMs - 5_000, // older than the claim
+      lastSignalAtMs: BASE - claimedAgeMs - 5_000, // older than the claim
       containerState: null,
       claims: [claim('msg-1', claimedAgeMs)],
     });
@@ -106,11 +129,11 @@ describe('decideStuckAction', () => {
     expect(res.toleranceMs).toBe(CLAIM_STUCK_MS);
   });
 
-  it('does not kill when heartbeat has been touched since the claim', () => {
+  it('does not kill when a signal arrived after the claim', () => {
     const claimedAgeMs = CLAIM_STUCK_MS + 10_000;
     const res = decideStuckAction({
       now: BASE,
-      heartbeatMtimeMs: BASE - 2_000, // fresh, updated after the claim
+      lastSignalAtMs: BASE - 2_000, // fresh, updated after the claim
       containerState: null,
       claims: [claim('msg-1', claimedAgeMs)],
     });
@@ -120,7 +143,7 @@ describe('decideStuckAction', () => {
   it('does not kill when claim age is below tolerance', () => {
     const res = decideStuckAction({
       now: BASE,
-      heartbeatMtimeMs: BASE - CLAIM_STUCK_MS - 10_000, // old, but claim is recent
+      lastSignalAtMs: BASE - CLAIM_STUCK_MS - 10_000, // old, but claim is recent
       containerState: null,
       claims: [claim('msg-1', 5_000)],
     });
@@ -132,7 +155,7 @@ describe('decideStuckAction', () => {
     const res = decideStuckAction({
       now: BASE,
       // 5 min since claim, over the 60s default but under the declared Bash timeout
-      heartbeatMtimeMs: BASE - 5 * 60 * 1000 - 5_000,
+      lastSignalAtMs: BASE - 5 * 60 * 1000 - 5_000,
       containerState: {
         current_tool: 'Bash',
         tool_declared_timeout_ms: tenMinMs,
@@ -146,7 +169,7 @@ describe('decideStuckAction', () => {
   it('ignores claims with unparseable timestamps', () => {
     const res = decideStuckAction({
       now: BASE,
-      heartbeatMtimeMs: BASE - 5_000,
+      lastSignalAtMs: BASE - 5_000,
       containerState: null,
       claims: [{ message_id: 'x', status_changed: 'not-a-date' }],
     });

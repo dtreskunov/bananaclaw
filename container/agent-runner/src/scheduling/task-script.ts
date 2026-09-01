@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { MessageInRow } from '../db/messages-in.js';
-import { touchHeartbeat } from '../db/connection.js';
+import { signalHeartbeat } from '../session-link.js';
 import {
   recordTaskScriptResult,
   startTaskAttempt,
@@ -64,7 +64,7 @@ export async function runScript(
   const startedAt = Date.now();
 
   return new Promise((resolve) => {
-    const heartbeatTimer = setInterval(touchHeartbeat, 15_000);
+    const heartbeatTimer = setInterval(signalHeartbeat, 15_000);
     const child = spawn('bash', [scriptPath], {
       env: process.env,
       detached: true,
@@ -279,12 +279,12 @@ export async function applyPreTaskScripts(messages: MessageInRow[]): Promise<Tas
     }
 
     log(`running script for task ${msg.id}`);
-    touchHeartbeat();
+    signalHeartbeat();
     const configuredTimeout = typeof content.scriptTimeoutMs === 'number'
       ? content.scriptTimeoutMs
       : undefined;
     const execution = await runScript(script, msg.id, configuredTimeout);
-    touchHeartbeat();
+    signalHeartbeat();
 
     const result = execution.result;
     const attemptResult: TaskScriptAttemptResult = {

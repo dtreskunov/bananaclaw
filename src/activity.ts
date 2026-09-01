@@ -1,7 +1,7 @@
 import type { ActivityLine } from './channels/adapter.js';
 
 export type ActivityStep =
-  | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error'; detail?: string; title?: string; error?: string; durationMs?: number }
+  | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error'; detail?: string; title?: string; error?: string; durationMs?: number; rejectedBeforeExecution?: boolean }
   | { kind: 'internal'; id: string; text: string }
   | { kind: 'file'; id: string; path?: string; name?: string; mime?: string }
   | { kind: 'patch'; id: string; files: string[] }

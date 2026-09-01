@@ -4,25 +4,25 @@
  * Two-DB architecture:
  *   - Reads processing_ack + container_state from outbound.db
  *   - Writes to inbound.db (host-owned) for status updates + recurrence
- *   - Uses heartbeat file mtime for liveness (never polls DB for it)
+ *   - Uses the latest validated session-link signal for liveness
  *   - Never writes to outbound.db — preserves single-writer-per-file invariant
  *
  * Stuck / idle detection (replaces the old IDLE_TIMEOUT setTimeout + 10-min
- * heartbeat threshold):
+ * live-signal threshold):
  *
  *   If the container isn't running and there are 'processing' rows left over
  *   (e.g. it crashed mid-turn) → reset them to pending with backoff +
  *   tries++. Existing retry machinery does the rest.
  *
  *   If the container IS running:
- *     1. Absolute ceiling: heartbeat age > max(30 min, current_bash_timeout)
+ *     1. Absolute ceiling: signal age > max(30 min, current_bash_timeout)
  *        → kill. Covers the "alive but silent for 30 min" case. Extended
  *        only while Bash is declared as running longer, honouring the
  *        user's own timeout directive. Kill then resets processing rows.
  *
  *     2. Message-scoped stuck: for each 'processing' row, tolerance =
  *        max(60s, current_bash_timeout_ms_if_Bash_running). If
- *        (claim_age > tolerance) AND (heartbeat_mtime <= status_changed)
+ *        (claim_age > tolerance) AND (last_signal_at <= status_changed)
  *        → kill + reset this message + tries++. Semantics: "container
  *        claimed a message and went quiet past tolerance since the claim."
  */
@@ -46,7 +46,8 @@ import {
   type ContainerState,
 } from './db/session-db.js';
 import { log } from './log.js';
-import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath, heartbeatPath } from './session-manager.js';
+import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath } from './session-manager.js';
+import { getSessionSignalLastSeenAt, getSessionSignalServerStartedAt } from './session-link.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import { publishTaskRun } from './task-events.js';
 import type { Session } from './types.js';
@@ -63,19 +64,20 @@ export function parseSqliteUtc(s: string): number {
 }
 
 const SWEEP_INTERVAL_MS = 60_000;
-// Absolute idle ceiling for a running container. If the heartbeat file hasn't
-// been touched in this long, the container is either stuck or doing genuinely
+// Absolute idle ceiling for a running container. If the session link hasn't
+// reported activity in this long, the container is either stuck or doing genuinely
 // nothing — kill and restart on the next inbound.
 export const ABSOLUTE_CEILING_MS = 30 * 60 * 1000;
 // Stuck tolerance window applied per 'processing' claim — "did we see any
 // signs of life since this message was claimed?"
 export const CLAIM_STUCK_MS = 60 * 1000;
+export const SESSION_LINK_START_GRACE_MS = 15 * 1000;
 const MAX_TRIES = 5;
 const BACKOFF_BASE_MS = 5000;
 
 export type StuckDecision =
   | { action: 'ok' }
-  | { action: 'kill-ceiling'; heartbeatAgeMs: number; ceilingMs: number }
+  | { action: 'kill-ceiling'; signalAgeMs: number; ceilingMs: number }
   | { action: 'kill-claim'; messageId: string; claimAgeMs: number; toleranceMs: number };
 
 /**
@@ -85,26 +87,30 @@ export type StuckDecision =
  */
 export function decideStuckAction(args: {
   now: number;
-  heartbeatMtimeMs: number; // 0 when heartbeat file absent
+  lastSignalAtMs: number; // 0 until the runner sends its first signal
+  sessionLinkStartedAtMs?: number;
   containerState: ContainerState | null;
   claims: Array<{ message_id: string; status_changed: string }>;
 }): StuckDecision {
-  const { now, heartbeatMtimeMs, containerState, claims } = args;
+  const { now, lastSignalAtMs, sessionLinkStartedAtMs = 0, containerState, claims } = args;
   const declaredBashMs = bashTimeoutMs(containerState);
 
-  // Ceiling check only applies when we have an actual heartbeat timestamp.
-  // A freshly-spawned container hasn't had any SDK activity yet so no
-  // heartbeat file exists — if we treated that as infinitely stale we'd
+  if (sessionLinkStartedAtMs > 0 && now - sessionLinkStartedAtMs < SESSION_LINK_START_GRACE_MS) {
+    return { action: 'ok' };
+  }
+
+  // Ceiling check only applies after the runner has sent a signal. A freshly
+  // spawned container has not connected yet; if we treated that as infinitely stale we'd
   // kill every container within seconds of spawn. Genuinely-dead containers
-  // that never wrote a heartbeat are caught by the separate "container
+  // that never sent a signal are caught by the separate "container
   // process not running" cleanup path, not here. If a fresh container is
   // hanging at the gate (claimed a message but never did anything) the
   // claim-stuck check below handles it.
-  if (heartbeatMtimeMs !== 0) {
-    const heartbeatAge = now - heartbeatMtimeMs;
+  if (lastSignalAtMs !== 0) {
+    const signalAgeMs = now - lastSignalAtMs;
     const ceiling = Math.max(ABSOLUTE_CEILING_MS, declaredBashMs ?? 0);
-    if (heartbeatAge > ceiling) {
-      return { action: 'kill-ceiling', heartbeatAgeMs: heartbeatAge, ceilingMs: ceiling };
+    if (signalAgeMs > ceiling) {
+      return { action: 'kill-ceiling', signalAgeMs, ceilingMs: ceiling };
     }
   }
 
@@ -114,7 +120,7 @@ export function decideStuckAction(args: {
     if (Number.isNaN(claimedAt)) continue;
     const claimAge = now - claimedAt;
     if (claimAge <= tolerance) continue;
-    if (heartbeatMtimeMs > claimedAt) continue;
+    if (lastSignalAtMs > claimedAt) continue;
     return { action: 'kill-claim', messageId: claim.message_id, claimAgeMs: claimAge, toleranceMs: tolerance };
   }
 
@@ -304,13 +310,9 @@ async function sweepSession(session: Session): Promise<void> {
   }
 }
 
-function heartbeatMtimeMs(agentGroupId: string, sessionId: string): number {
-  const hbPath = heartbeatPath(agentGroupId, sessionId);
-  try {
-    return fs.statSync(hbPath).mtimeMs;
-  } catch {
-    return 0;
-  }
+function lastSignalAtMs(agentGroupId: string, sessionId: string): number {
+  void agentGroupId;
+  return getSessionSignalLastSeenAt(sessionId);
 }
 
 function bashTimeoutMs(state: ContainerState | null): number | null {
@@ -326,7 +328,8 @@ function enforceRunningContainerSla(
 ): void {
   const decision = decideStuckAction({
     now: Date.now(),
-    heartbeatMtimeMs: heartbeatMtimeMs(agentGroupId, session.id),
+    lastSignalAtMs: lastSignalAtMs(agentGroupId, session.id),
+    sessionLinkStartedAtMs: getSessionSignalServerStartedAt(session.id),
     containerState: getContainerState(outDb),
     claims: getProcessingClaims(outDb),
   });
@@ -336,7 +339,7 @@ function enforceRunningContainerSla(
   if (decision.action === 'kill-ceiling') {
     log.warn('Killing container past absolute ceiling', {
       sessionId: session.id,
-      heartbeatAgeMs: decision.heartbeatAgeMs,
+      signalAgeMs: decision.signalAgeMs,
       ceilingMs: decision.ceilingMs,
     });
     killContainer(session.id, 'absolute-ceiling');

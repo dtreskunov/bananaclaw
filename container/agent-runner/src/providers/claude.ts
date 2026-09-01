@@ -242,7 +242,7 @@ const postToolUseHook: HookCallback = async () => {
 // ── Progress hints ────────────────────────────────────────────────────────
 // Translate the tool_use / thinking blocks the SDK streams in `assistant`
 // messages into structured `progress` ProviderEvents. The poll-loop persists
-// these to the `.activity` file (and turn_activity), which the host forwards
+// these to `turn_activity` and forwards them live over the session link,
 // to the web UI where the presentation happens. Mirrors the OpenCode
 // provider's `formatProgressFromPart` — no human-readable formatting here.
 

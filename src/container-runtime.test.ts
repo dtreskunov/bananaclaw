@@ -26,6 +26,7 @@ import {
 } from './container-runtime.js';
 import { CONTAINER_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
+import { SESSION_LINK_VERSION } from './session-link.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -94,13 +95,13 @@ describe('cleanupOrphans', () => {
     cleanupOrphans(noneLive);
 
     expect(mockExecSync).toHaveBeenCalledWith(
-      `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}\t{{.Label "nanoclaw-session"}}'`,
+      `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}\t{{.Label "nanoclaw-session"}}\t{{.Label "nanoclaw-session-link"}}'`,
       expect.any(Object),
     );
   });
 
   it('stops containers whose session is not live', () => {
-    mockExecSync.mockReturnValueOnce('nanoclaw-group1-111\tsess-1\nnanoclaw-group2-222\tsess-2\n');
+    mockExecSync.mockReturnValueOnce(`nanoclaw-group1-111\tsess-1\t${SESSION_LINK_VERSION}\nnanoclaw-group2-222\tsess-2\t${SESSION_LINK_VERSION}\n`);
     mockExecSync.mockReturnValue('');
 
     const adopted = cleanupOrphans(noneLive);
@@ -120,7 +121,7 @@ describe('cleanupOrphans', () => {
   });
 
   it('adopts containers whose session is still live (does not stop them)', () => {
-    mockExecSync.mockReturnValueOnce('nanoclaw-group1-111\tsess-1\nnanoclaw-group2-222\tsess-2\n');
+    mockExecSync.mockReturnValueOnce(`nanoclaw-group1-111\tsess-1\t${SESSION_LINK_VERSION}\nnanoclaw-group2-222\tsess-2\t${SESSION_LINK_VERSION}\n`);
 
     const adopted = cleanupOrphans(allLive);
 
@@ -137,7 +138,7 @@ describe('cleanupOrphans', () => {
   });
 
   it('mixes adoption and stop in a single pass', () => {
-    mockExecSync.mockReturnValueOnce('keep-name\tlive-sess\nkill-name\tdead-sess\n');
+    mockExecSync.mockReturnValueOnce(`keep-name\tlive-sess\t${SESSION_LINK_VERSION}\nkill-name\tdead-sess\t${SESSION_LINK_VERSION}\n`);
     mockExecSync.mockReturnValue('');
 
     const adopted = cleanupOrphans((sid) => sid === 'live-sess');
@@ -157,6 +158,16 @@ describe('cleanupOrphans', () => {
 
     expect(adopted).toEqual([]);
     expect(mockExecSync).toHaveBeenNthCalledWith(2, `${CONTAINER_RUNTIME_BIN} stop -t 1 orphan-name`, {
+      stdio: 'pipe',
+    });
+  });
+
+  it('stops a live pre-session-link container instead of adopting it', () => {
+    mockExecSync.mockReturnValueOnce('legacy-name\tlive-sess\t\n');
+    mockExecSync.mockReturnValue('');
+
+    expect(cleanupOrphans(allLive)).toEqual([]);
+    expect(mockExecSync).toHaveBeenNthCalledWith(2, `${CONTAINER_RUNTIME_BIN} stop -t 1 legacy-name`, {
       stdio: 'pipe',
     });
   });
@@ -184,7 +195,7 @@ describe('cleanupOrphans', () => {
   });
 
   it('continues stopping remaining containers when one stop fails', () => {
-    mockExecSync.mockReturnValueOnce('nanoclaw-a-1\tdead-1\nnanoclaw-b-2\tdead-2\n');
+    mockExecSync.mockReturnValueOnce(`nanoclaw-a-1\tdead-1\t${SESSION_LINK_VERSION}\nnanoclaw-b-2\tdead-2\t${SESSION_LINK_VERSION}\n`);
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('already stopped');
     });

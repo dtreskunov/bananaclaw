@@ -22,6 +22,7 @@ export interface UsageSnapshot {
   reasoning_tokens?: number;
   num_turns?: number;
   duration_ms?: number;
+  duration_api_ms?: number;
   model: string;
   context_window?: number;
   max_output_tokens?: number;

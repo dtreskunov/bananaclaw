@@ -19,9 +19,11 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-The host is a single Node process that orchestrates per-session agent containers. Platform messages land via channel adapters, route through an entity model (users → messaging groups → agent groups → sessions), get written into the session's inbound DB, and wake a container. The agent-runner inside the container polls the DB, calls Claude, and writes back to the outbound DB. The host polls the outbound DB and delivers through the same adapter.
+The host is a single Node process that orchestrates per-session agent containers. Platform messages land via channel adapters, route through an entity model (users → messaging groups → agent groups → sessions), get written into the session's inbound DB, and wake a container. The agent-runner inside the container polls the DB, calls the configured provider, and writes durable output to the outbound DB. Live runner status flows over a private per-session Unix socket.
 
-**Everything is a message.** There is no IPC, no file watcher, no stdin piping between host and container. The two session DBs are the sole IO surface.
+Durable work and output are messages in the two session DBs. There is no stdin
+or signal-file protocol; heartbeat, activity, progressive usage, and turn
+completion use the session link described in `docs/session-link.md`.
 
 ## Entity Model
 
@@ -47,7 +49,8 @@ Each session has **two** SQLite files under `data/v2-sessions/<session_id>/`:
 - `inbound.db` — host writes, container reads. `messages_in`, routing, destinations, pending_questions, processing_ack.
 - `outbound.db` — container writes, host reads. `messages_out`, session_state.
 
-Exactly one writer per file — no cross-mount lock contention. Heartbeat is a file touch at `/workspace/.heartbeat`, not a DB update. Host uses even `seq` numbers, container uses odd.
+Exactly one writer per file — no cross-mount lock contention. Host uses even
+`seq` numbers and the container uses odd. Live status does not write either DB.
 
 ## Central DB
 
@@ -63,7 +66,8 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/router.ts` | Inbound routing: messaging group → agent group → session → `inbound.db` → wake |
 | `src/delivery.ts` | Polls `outbound.db`, delivers via adapter, handles system actions (schedule, approvals, etc.) |
 | `src/host-sweep.ts` | 60s sweep: `processing_ack` sync, stale detection, due-message wake, recurrence |
-| `src/session-manager.ts` | Resolves sessions; opens `inbound.db` / `outbound.db`; manages heartbeat path |
+| `src/session-manager.ts` | Resolves sessions and opens `inbound.db` / `outbound.db` |
+| `src/session-link.ts` | Per-session Unix socket for validated live runner status |
 | `src/container-runner.ts` | Spawns per-agent-group Docker containers with session DB + outbox mounts, OneCLI `ensureAgent` |
 | `src/container-runtime.ts` | Runtime selection (Docker vs Apple containers), orphan cleanup |
 | `src/modules/permissions/access.ts` | `canAccessAgentGroup` — owner / global admin / scoped admin / member resolution against `user_roles` + `agent_group_members` |

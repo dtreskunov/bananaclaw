@@ -1,8 +1,8 @@
 /**
  * NanoClaw Agent Runner v2
  *
- * Runs inside a container. All IO goes through the session DB.
- * No stdin, no stdout markers, no IPC files.
+ * Runs inside a container. Durable messages use the session DBs; live status
+ * flows to the host over a per-session Unix socket.
  *
  * Config is read from /workspace/agent/container.json (mounted RO).
  * Only TZ and OneCLI networking vars come from env.
@@ -11,7 +11,6 @@
  *   /workspace/
  *     inbound.db        ← host-owned session DB (container reads only)
  *     outbound.db       ← container-owned session DB
- *     .heartbeat        ← container touches for liveness detection
  *     outbox/           ← outbound files
  *     agent/            ← agent group folder (CLAUDE.md, container.json, working files)
  *       container.json  ← per-group config (RO nested mount)
@@ -35,6 +34,7 @@ import { loadProvider } from './providers/index.js';
 import { createProvider, type ProviderName } from './providers/factory.js';
 import type { McpServerConfig } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
+import { startSessionSignalClient } from './session-link.js';
 import { threadTitleInstruction } from './thread-title-request.js';
 
 function log(msg: string): void {
@@ -53,6 +53,7 @@ async function main(): Promise<void> {
   await loadProvider(providerName);
 
   log(`Starting v2 agent-runner (provider: ${providerName})`);
+  startSessionSignalClient();
 
   // Discover additional directories mounted at /workspace/extra/*
   const additionalDirectories: string[] = [];

@@ -53,6 +53,7 @@ import './modules/index.js';
 import './cli/commands/index.js';
 import './cli/delivery-action.js';
 import { startCliServer, stopCliServer } from './cli/socket-server.js';
+import { stopAllSessionSignalServers } from './session-link.js';
 import { startUi, stopUi } from './ui/server/server.js';
 import { registerPrivateWebHostHandler } from './ui/server/pages/private-web.js';
 import { registerPagesHostHandler } from './ui/server/pages/serve.js';
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
   // adoptRunningContainers for why the adoption side is needed.
   const activeSessionIds = new Set(getActiveSessions().map((s) => s.id));
   const adopted = cleanupOrphans((sid) => activeSessionIds.has(sid));
-  adoptRunningContainers(adopted);
+  await adoptRunningContainers(adopted);
 
   // 3. Channel adapters
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {
@@ -208,6 +209,7 @@ async function shutdown(signal: string): Promise<void> {
   }
   stopDeliveryPolls();
   stopHostSweep();
+  await stopAllSessionSignalServers();
   closeSearchDb();
   await stopCliServer();
   await stopUi();

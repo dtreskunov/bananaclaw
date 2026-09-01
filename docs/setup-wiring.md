@@ -8,9 +8,11 @@ Last updated: 2026-04-09
 - Session DB split into `inbound.db` (host-owned) and `outbound.db` (container-owned)
 - Each file has exactly one writer — eliminates SQLite write contention across host-container mount
 - Host uses even seq numbers, container uses odd (collision-free)
-- Container heartbeat via file touch (`/workspace/.heartbeat`) instead of DB UPDATE
+- Live heartbeat, activity, usage, and turn completion via the private
+    per-session Unix socket instead of DB updates or signal files
 - Scheduling MCP tools emit system actions via messages_out; host applies them to inbound.db in `delivery.ts:handleSystemAction()`
-- Host sweep reads `processing_ack` table + heartbeat file mtime for stale detection
+- Host sweep reads `processing_ack` plus the latest accepted session-link signal
+    timestamp for stale detection
 - Container clears stale `processing_ack` entries on startup (crash recovery)
 - Files: `src/db/schema.ts` (INBOUND_SCHEMA + OUTBOUND_SCHEMA), `src/session-manager.ts`, `src/delivery.ts`, `src/host-sweep.ts`, `container/agent-runner/src/db/connection.ts`, `messages-in.ts`, `messages-out.ts`, `poll-loop.ts`, `mcp-tools/scheduling.ts`, `mcp-tools/interactive.ts`
 - Container image rebuilt with tsconfig (`container/agent-runner/tsconfig.json`)

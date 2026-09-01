@@ -16,7 +16,7 @@ import path from 'path';
 
 import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
-import { activityHint, reduceActivityLines } from './activity.js';
+import { activityHint } from './activity.js';
 import type { ActivityLine, OutboundFile, UsageSnapshot } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
@@ -37,6 +37,11 @@ import {
 } from './db/session-db.js';
 import { log } from './log.js';
 import { extractInboundText, indexMessage } from './search-index.js';
+import {
+  getSessionSignalActivity,
+  getSessionSignalTurnEndedAt,
+  getSessionSignalUsage,
+} from './session-link.js';
 import type { Session } from './types.js';
 
 function isPathInside(parent: string, child: string): boolean {
@@ -62,26 +67,6 @@ export function inboundDbPath(agentGroupId: string, sessionId: string): string {
 /** Path to the container-owned outbound DB (messages_out + processing_ack). */
 export function outboundDbPath(agentGroupId: string, sessionId: string): string {
   return path.join(sessionDir(agentGroupId, sessionId), 'outbound.db');
-}
-
-/** Path to the container heartbeat file (touched instead of DB writes). */
-export function heartbeatPath(agentGroupId: string, sessionId: string): string {
-  return path.join(sessionDir(agentGroupId, sessionId), '.heartbeat');
-}
-
-/** Path to the container turn-ended file (written instead of outbound.db). */
-export function turnEndedPath(agentGroupId: string, sessionId: string): string {
-  return path.join(sessionDir(agentGroupId, sessionId), '.turn-ended');
-}
-
-/** Path to the container activity file (append-only progress trace). */
-export function activityPath(agentGroupId: string, sessionId: string): string {
-  return path.join(sessionDir(agentGroupId, sessionId), '.activity');
-}
-
-/** Path to the container's latest in-flight usage snapshot. */
-export function usageProgressPath(agentGroupId: string, sessionId: string): string {
-  return path.join(sessionDir(agentGroupId, sessionId), '.usage-progress');
 }
 
 function generateId(): string {
@@ -467,110 +452,40 @@ export function writeOutboundDirect(
  */
 export type { ActivityLine };
 
-/** Parse one `.activity` line (`<epochMs>\t<text>`) into an ActivityLine.
- *  Legacy lines with no tab / non-numeric prefix are treated as text-only. */
-function parseActivityLine(line: string): ActivityLine {
-  const tab = line.indexOf('\t');
-  if (tab > 0) {
-    const ts = line.slice(0, tab);
-    if (/^\d+$/.test(ts)) return { ts, text: line.slice(tab + 1) };
-  }
-  return { ts: '', text: line };
-}
-
 /**
- * Read the container-side typing hint: the text of the LAST line in the
- * append-only `.activity` file. There is no separate `.progress` file — the
- * latest activity line IS the hint. Used by the typing module to enrich the
- * typing indicator with a one-line activity string.
- *
- * When `sinceMs` is provided, the hint is suppressed unless the `.activity`
- * file was modified at or after that time. This prevents a stale hint from
- * the previous turn from surfacing for one refresh tick at the start of a
- * new turn (the file isn't cleared until the new container's first write).
- * Best-effort — returns null on any error.
- *
- * Reads a file instead of outbound.db to avoid contention between the
- * host reader and the two container-side writers (poll-loop +
- * MCP server subprocess) that share outbound.db with journal_mode=DELETE.
+ * Read the latest runner activity as a one-line typing hint. Live state is
+ * received over the per-session Unix socket and never read from the session
+ * filesystem.
  */
 export function readSessionProgress(
-  agentGroupId: string,
+  _agentGroupId: string,
   sessionId: string,
   sinceMs?: number,
 ): string | null {
-  try {
-    const p = activityPath(agentGroupId, sessionId);
-    if (sinceMs !== undefined) {
-      if (fs.statSync(p).mtimeMs < sinceMs) return null;
-    }
-    const content = fs.readFileSync(p, 'utf8');
-    if (!content) return null;
-    const lines = content.split('\n').filter((l) => l.length > 0).map(parseActivityLine);
-    return activityHint(lines);
-  } catch {
-    return null;
-  }
+  return activityHint(getSessionSignalActivity(sessionId, sinceMs));
 }
 
 /**
- * Read the container-side activity trace from the append-only `.activity`
- * file as an ordered list of timestamped progress steps. Returns every
- * progress step recorded for the current turn so the web UI can show the
- * full trace. The container truncates the file at each turn start.
- * Best-effort — returns an empty array on any error.
+ * Read the current runner activity trace received over the session link.
  */
-export function readSessionActivity(agentGroupId: string, sessionId: string, sinceMs?: number): ActivityLine[] {
-  try {
-    const p = activityPath(agentGroupId, sessionId);
-    if (sinceMs !== undefined && fs.statSync(p).mtimeMs < sinceMs) return [];
-    const content = fs.readFileSync(p, 'utf8');
-    if (!content) return [];
-    return reduceActivityLines(content.split('\n').filter((l) => l.length > 0).map(parseActivityLine));
-  } catch {
-    return [];
-  }
+export function readSessionActivity(_agentGroupId: string, sessionId: string, sinceMs?: number): ActivityLine[] {
+  return getSessionSignalActivity(sessionId, sinceMs);
 }
 
 /** Read the latest in-flight usage snapshot written by the container. */
 export function readSessionUsageProgress(
-  agentGroupId: string,
+  _agentGroupId: string,
   sessionId: string,
   sinceMs?: number,
 ): UsageSnapshot | null {
-  try {
-    const p = usageProgressPath(agentGroupId, sessionId);
-    if (sinceMs !== undefined && fs.statSync(p).mtimeMs < sinceMs) return null;
-    const value = JSON.parse(fs.readFileSync(p, 'utf8')) as Partial<UsageSnapshot>;
-    if (
-      !Number.isFinite(value.cost_usd) ||
-      !Number.isFinite(value.input_tokens) ||
-      !Number.isFinite(value.output_tokens) ||
-      !Number.isFinite(value.cache_read_tokens) ||
-      !Number.isFinite(value.cache_write_tokens) ||
-      typeof value.model !== 'string'
-    ) return null;
-    return value as UsageSnapshot;
-  } catch {
-    return null;
-  }
+  return getSessionSignalUsage(sessionId, sinceMs);
 }
 
 /**
- * Read the container-side `turn_ended_at` marker (epoch ms) from the
- * `.turn-ended` file. The container writes this on the SDK's `result` /
- * `error` event and deletes it when a new turn starts. Used by the
- * typing module to drop the indicator immediately when the agent
- * finishes. Returns 0 when unset / file missing.
+ * Read the latest turn-ended marker received over the session link.
  */
-export function readSessionTurnEndedAt(agentGroupId: string, sessionId: string): number {
-  try {
-    const content = fs.readFileSync(turnEndedPath(agentGroupId, sessionId), 'utf8');
-    const n = Number(content);
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0;
-  }
+export function readSessionTurnEndedAt(_agentGroupId: string, sessionId: string): number {
+  return getSessionSignalTurnEndedAt(sessionId);
 }
 
 /**
