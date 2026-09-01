@@ -1,34 +1,29 @@
 /**
  * Outbound message delivery.
- * Polls session outbound DBs for undelivered messages, delivers through channel adapters.
+ * Delivers newly committed session-link messages through channel adapters.
  *
  * Two-DB architecture:
- *   - Reads messages_out from outbound.db (container-owned, opened read-only)
+ *   - Reads messages_out from host-owned outbound.db
  *   - Tracks delivery in inbound.db's `delivered` table (host-owned)
- *   - Never writes to outbound.db — preserves single-writer-per-file invariant
+ *   - New commits wake delivery immediately; a 60s scan recovers interrupted delivery
  */
 import type Database from 'better-sqlite3';
 
-import { getRunningSessions, getActiveSessions, createQuestion } from './db/sessions.js';
+import { getActiveSessions, createQuestion, getSession } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
-import {
-  getDueOutboundMessages,
-  getDeliveredIds,
-  markDelivered,
-  markDeliveryFailed,
-} from './db/session-db.js';
+import { getDueOutboundMessages, getDeliveredIds, markDelivered, markDeliveryFailed } from './db/session-db.js';
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
 import { extractOutboundText, indexMessage } from './search-index.js';
-import { checkTurnEndedAndStop, flushActivity, setTypingAdapter } from './modules/typing/index.js';
+import { setTypingAdapter } from './modules/typing/index.js';
 import { publishTitlesForDeliveredReplies } from './modules/thread-titles/db.js';
 import type { ActivityLine, DeliveryContext, OutboundFile, TypingMetadata } from './channels/adapter.js';
 import type { Session } from './types.js';
+import { onSessionDurableMessage } from './session-link.js';
 
-const ACTIVE_POLL_MS = 1000;
 const SWEEP_POLL_MS = 60_000;
 const MAX_DELIVERY_ATTEMPTS = 3;
 
@@ -47,19 +42,18 @@ const MAX_BOUNCE_BACKS_PER_SESSION = 3;
 const bounceBackCounts = new Map<string, number>();
 
 /**
- * Sessions whose outbound queue is currently being drained.
- *
- * The active poll (1s, running sessions) and the sweep poll (60s, all
- * active sessions) both call deliverSessionMessages, and a running session
- * is in *both* result sets. Without this guard, the two timer chains can
- * race on the same outbound row: both read it as undelivered, both call
- * the channel adapter, both markDelivered (idempotent in the DB via
- * INSERT OR IGNORE — but the user has already seen the message twice).
- *
- * Skipping (vs. queueing) is correct: any message left over when the
- * second caller skips will be picked up on the next poll tick (~1s).
+ * Serialize each session's deliveries. A notification that arrives during a
+ * drain marks the session dirty so it is drained again before the worker exits.
+ * This avoids duplicate concurrent sends without relying on periodic polling
+ * to recover a message committed after the first drain's snapshot.
  */
 const inflightDeliveries = new Set<string>();
+const dirtyDeliveries = new Set<string>();
+
+onSessionDurableMessage((sessionId) => {
+  const session = getSession(sessionId);
+  if (session) void deliverSessionMessages(session);
+});
 
 export interface ChannelDeliveryAdapter {
   deliver(
@@ -75,12 +69,19 @@ export interface ChannelDeliveryAdapter {
     instance?: string,
     context?: DeliveryContext,
   ): Promise<string | undefined>;
-  setTyping?(channelType: string, platformId: string, threadId: string | null, hint?: string, instance?: string, items?: ActivityLine[], metadata?: TypingMetadata): Promise<void>;
+  setTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    hint?: string,
+    instance?: string,
+    items?: ActivityLine[],
+    metadata?: TypingMetadata,
+  ): Promise<void>;
   clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;
-let activePolling = false;
 let sweepPolling = false;
 
 /**
@@ -122,41 +123,11 @@ export function setDeliveryAdapter(adapter: ChannelDeliveryAdapter): void {
   }
 }
 
-/** Start the active container poll loop (~1s). */
-export function startActiveDeliveryPoll(): void {
-  if (activePolling) return;
-  activePolling = true;
-  pollActive();
-}
-
 /** Start the sweep poll loop (~60s). */
 export function startSweepDeliveryPoll(): void {
   if (sweepPolling) return;
   sweepPolling = true;
   pollSweep();
-}
-
-async function pollActive(): Promise<void> {
-  if (!activePolling) return;
-
-  try {
-    const sessions = getRunningSessions();
-    for (const session of sessions) {
-      await deliverSessionMessages(session);
-      // Forward any new activity-trace lines to the web UI at the ~1s
-      // active cadence (no-op for non-web channels), then drop the typing
-      // indicator as soon as the container marks the turn ended (set on
-      // the SDK's result/error event). Both run every active tick so the
-      // trace stays live and the dots clear within ~1s of the agent
-      // finishing — the in-module 4s refresh tick is the fallback.
-      flushActivity(session.id);
-      checkTurnEndedAndStop(session.id);
-    }
-  } catch (err) {
-    log.error('Active delivery poll error', { err });
-  }
-
-  setTimeout(pollActive, ACTIVE_POLL_MS);
 }
 
 async function pollSweep(): Promise<void> {
@@ -175,13 +146,18 @@ async function pollSweep(): Promise<void> {
 }
 
 export async function deliverSessionMessages(session: Session): Promise<void> {
-  // Reject re-entry from a concurrent poll on the same session — see the
-  // comment on inflightDeliveries above.
-  if (inflightDeliveries.has(session.id)) return;
+  if (!deliveryAdapter) return;
+  if (inflightDeliveries.has(session.id)) {
+    dirtyDeliveries.add(session.id);
+    return;
+  }
   inflightDeliveries.add(session.id);
 
   try {
-    await drainSession(session);
+    do {
+      dirtyDeliveries.delete(session.id);
+      await drainSession(session);
+    } while (dirtyDeliveries.delete(session.id));
   } finally {
     inflightDeliveries.delete(session.id);
   }
@@ -595,6 +571,5 @@ async function handleSystemAction(
 }
 
 export function stopDeliveryPolls(): void {
-  activePolling = false;
   sweepPolling = false;
 }

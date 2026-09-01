@@ -1,6 +1,9 @@
 # Build & Runtime
 
-NanoClaw runs a split stack: the host is Node + pnpm, the agent container is Bun. They communicate exclusively through two SQLite files per session — there are no shared modules between them, which is what lets them use different runtimes cleanly.
+NanoClaw runs a split stack: the host is Node + pnpm, the agent container is
+Bun. Host-to-runner work uses read-only mounted session stores; runner-to-host
+state uses the acknowledged per-session Unix socket. There are no shared code
+modules between the runtimes.
 
 ## Why the split
 

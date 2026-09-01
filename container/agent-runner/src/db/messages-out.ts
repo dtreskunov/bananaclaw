@@ -1,10 +1,66 @@
 /**
  * Outbound message operations (container side).
  *
- * Writes to outbound.db (container-owned).
- * The host polls this DB (read-only) for undelivered messages.
+ * Writes to the runner-state projection. A trigger journals each row and the
+ * session link applies it to the host-owned outbound.db.
  */
-import { getInboundDb, getOutboundDb } from './connection.js';
+import { getInboundDb, getOutboundDb, openHostOutboundDb } from './connection.js';
+import type { Database } from 'bun:sqlite';
+import { isSafeAttachmentName } from '../attachment-safety.js';
+
+const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
+const MAX_CONTENT_ARRAY_ITEMS = 100;
+const MAX_CONTENT_DEPTH = 16;
+const MAX_OUTBOUND_FILES = 32;
+const MAX_QUESTION_OPTIONS = 50;
+
+function validateStructuredContent(value: unknown, depth = 0): boolean {
+  if (depth > MAX_CONTENT_DEPTH) return false;
+  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') return true;
+  if (Array.isArray(value)) {
+    return value.length <= MAX_CONTENT_ARRAY_ITEMS && value.every((item) => validateStructuredContent(item, depth + 1));
+  }
+  if (!value || typeof value !== 'object') return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return (
+    entries.length <= MAX_CONTENT_ARRAY_ITEMS &&
+    entries.every(([key, item]) => key.length <= 256 && validateStructuredContent(item, depth + 1))
+  );
+}
+
+function validateMessageContent(raw: string): void {
+  if (raw.length === 0 || Buffer.byteLength(raw) > MAX_OUTPUT_BYTES) {
+    throw new Error('outbound message exceeds durable link limits');
+  }
+  let content: Record<string, unknown>;
+  try {
+    content = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error('outbound message content must be a JSON object');
+  }
+  if (!content || typeof content !== 'object' || Array.isArray(content) || !validateStructuredContent(content)) {
+    throw new Error('outbound message content exceeds structural limits');
+  }
+  if (
+    content.files !== undefined &&
+    (!Array.isArray(content.files) ||
+      content.files.length > MAX_OUTBOUND_FILES ||
+      !content.files.every((file) => typeof file === 'string' && isSafeAttachmentName(file)))
+  ) {
+    throw new Error('invalid outbound files');
+  }
+  if (
+    content.file_paths !== undefined &&
+    (!Array.isArray(content.file_paths) ||
+      content.file_paths.length > MAX_OUTBOUND_FILES ||
+      !content.file_paths.every((file) => file === null || (typeof file === 'string' && file.length <= 4096)))
+  ) {
+    throw new Error('invalid outbound file paths');
+  }
+  if (content.options !== undefined && (!Array.isArray(content.options) || content.options.length > MAX_QUESTION_OPTIONS)) {
+    throw new Error('invalid question options');
+  }
+}
 
 export interface MessageOutRow {
   id: string;
@@ -45,35 +101,60 @@ export interface WriteMessageOut {
 export function writeMessageOut(msg: WriteMessageOut): number {
   const outbound = getOutboundDb();
   const inbound = getInboundDb();
+  const hostOutbound = openHostOutboundDb();
+  try {
+    return writeMessageOutWithConnections(msg, outbound, inbound, hostOutbound);
+  } finally {
+    hostOutbound.close();
+  }
+}
 
-  // Read max seq from both DBs to maintain global ordering.
-  // Safe: each side only reads the other DB, never writes to it.
-  const maxOut = (outbound.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
-  const maxIn = (inbound.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
-  const max = Math.max(maxOut, maxIn);
-  const nextSeq = max % 2 === 0 ? max + 1 : max + 2; // next odd
+export function writeMessageOutWithConnections(
+  msg: WriteMessageOut,
+  outbound: Database,
+  inbound: Database,
+  hostOutbound: Database,
+): number {
+  validateMessageContent(msg.content);
+  outbound.exec('BEGIN IMMEDIATE');
+  try {
+    // Read max seq from both host stores and the runner projection while
+    // holding the runner-state write lock. A sidecar writer must wait and
+    // then recompute after this row commits.
+    const maxOut = (outbound.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
+    const maxHostOut = (
+      hostOutbound.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }
+    ).m;
+    const maxIn = (inbound.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
+    const max = Math.max(maxOut, maxHostOut, maxIn);
+    const nextSeq = max % 2 === 0 ? max + 1 : max + 2;
 
-  // bun:sqlite requires named parameters to be passed with the prefix character
-  // in the JS object keys (better-sqlite3 auto-stripped it, bun:sqlite does not).
-  outbound
-    .prepare(
-      `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content)
+    // bun:sqlite requires named parameters to be passed with the prefix character
+    // in the JS object keys (better-sqlite3 auto-stripped it, bun:sqlite does not).
+    outbound
+      .prepare(
+        `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content)
      VALUES ($id, $seq, $in_reply_to, datetime('now'), $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content)`,
-    )
-    .run({
-      $id: msg.id,
-      $seq: nextSeq,
-      $in_reply_to: msg.in_reply_to ?? null,
-      $deliver_after: msg.deliver_after ?? null,
-      $recurrence: msg.recurrence ?? null,
-      $kind: msg.kind,
-      $platform_id: msg.platform_id ?? null,
-      $channel_type: msg.channel_type ?? null,
-      $thread_id: msg.thread_id ?? null,
-      $content: msg.content,
-    });
+      )
+      .run({
+        $id: msg.id,
+        $seq: nextSeq,
+        $in_reply_to: msg.in_reply_to ?? null,
+        $deliver_after: msg.deliver_after ?? null,
+        $recurrence: msg.recurrence ?? null,
+        $kind: msg.kind,
+        $platform_id: msg.platform_id ?? null,
+        $channel_type: msg.channel_type ?? null,
+        $thread_id: msg.thread_id ?? null,
+        $content: msg.content,
+      });
 
-  return nextSeq;
+    outbound.exec('COMMIT');
+    return nextSeq;
+  } catch (error) {
+    if (outbound.inTransaction) outbound.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 /**
@@ -91,9 +172,7 @@ export function getMessageIdBySeq(seq: number): string | null {
   const inbound = getInboundDb();
 
   // Inbound messages: ID is already the platform message ID
-  const inRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(seq) as
-    | { id: string }
-    | undefined;
+  const inRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(seq) as { id: string } | undefined;
   if (inRow) return inRow.id;
 
   // Outbound messages: look up platform message ID from delivered table

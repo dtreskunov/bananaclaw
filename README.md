@@ -26,7 +26,7 @@ Agent SDK integration, skills-as-branches, OneCLI credential isolation — is
 NanoClaw's, line-for-line. Upstream's README is preserved as
 [README.nanoclaw.md](README.nanoclaw.md).
 
-What BananaClaw adds is everything *around* the runner: a real web UI, push
+What BananaClaw adds is everything _around_ the runner: a real web UI, push
 notifications, login, file browser, voice composer, public site hosting, and
 rootless Podman support — the surfaces a person uses day-to-day to talk to
 their agents.
@@ -37,26 +37,26 @@ BananaClaw.
 
 ## NanoClaw vs. BananaClaw
 
-| Area | NanoClaw (upstream) | BananaClaw (this fork) |
-|---|---|---|
-| **Primary surface** | Messaging apps | Web UI (PWA) + messaging apps |
-| **Web UI** | — | Preact chat app at `/ui/chat`, mobile + desktop layouts |
-| **PWA / install** | — | Installable on iOS, Android, macOS, Windows |
-| **Push notifications** | — | Web Push, wakes the device when PWA closed |
-| **Admin UI** | `ncl` CLI | Browser admin pane: models, params, packages, MCP servers, skills, restart |
-| **Voice / STT** | Per-channel only | In-browser voice composer, per-agent transcription, send-while-recording |
-| **File browser** | Container FS only | Web file browser: preview, upload, mkdir, rename, delete, drag/drop, "send to chat" |
-| **Public hosting** | — | "Pages": per-group subdomain, served by host, path-traversal sealed |
-| **Auth** | Magic links | Magic links + Google OIDC + generic OIDC, first-login onboarding wizard |
-| **Container runtime** | Docker, Apple Container | Docker, Apple Container, **rootless Podman** (auto-detected) |
-| **Email channel** | — | Native Resend adapter + email-bot personas, owner replyTo+bcc, attachments |
-| **Home Assistant** | — | Native `webhook-conversation` adapter |
-| **OpenCode integration** | Skill-installed adapter | Skill + per-group `model_params`, per-group `small_model`, progress hints, error replay, idle-timeout knob |
-| **Browser as channel** | — | `web` channel adapter — each tab is a thread |
-| **Self-mod model params** | `install_packages`, `add_mcp_server` | Above + `model_params` get/set/unset, container restart with on-wake message |
-| **Stay-small philosophy** | Trunk is registry + infra only | Trunk includes UI + auth + hosting; channels/providers still skill-installed |
-| **License** | MIT | MIT |
-| **Upstream merges** | n/a | NanoClaw half merges cleanly; BananaClaw half is additive |
+| Area                      | NanoClaw (upstream)                  | BananaClaw (this fork)                                                                                     |
+| ------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| **Primary surface**       | Messaging apps                       | Web UI (PWA) + messaging apps                                                                              |
+| **Web UI**                | —                                    | Preact chat app at `/ui/chat`, mobile + desktop layouts                                                    |
+| **PWA / install**         | —                                    | Installable on iOS, Android, macOS, Windows                                                                |
+| **Push notifications**    | —                                    | Web Push, wakes the device when PWA closed                                                                 |
+| **Admin UI**              | `ncl` CLI                            | Browser admin pane: models, params, packages, MCP servers, skills, restart                                 |
+| **Voice / STT**           | Per-channel only                     | In-browser voice composer, per-agent transcription, send-while-recording                                   |
+| **File browser**          | Container FS only                    | Web file browser: preview, upload, mkdir, rename, delete, drag/drop, "send to chat"                        |
+| **Public hosting**        | —                                    | "Pages": per-group subdomain, served by host, path-traversal sealed                                        |
+| **Auth**                  | Magic links                          | Magic links + Google OIDC + generic OIDC, first-login onboarding wizard                                    |
+| **Container runtime**     | Docker, Apple Container              | Docker, Apple Container, **rootless Podman** (auto-detected)                                               |
+| **Email channel**         | —                                    | Native Resend adapter + email-bot personas, owner replyTo+bcc, attachments                                 |
+| **Home Assistant**        | —                                    | Native `webhook-conversation` adapter                                                                      |
+| **OpenCode integration**  | Skill-installed adapter              | Skill + per-group `model_params`, per-group `small_model`, progress hints, error replay, idle-timeout knob |
+| **Browser as channel**    | —                                    | `web` channel adapter — each tab is a thread                                                               |
+| **Self-mod model params** | `install_packages`, `add_mcp_server` | Above + `model_params` get/set/unset, container restart with on-wake message                               |
+| **Stay-small philosophy** | Trunk is registry + infra only       | Trunk includes UI + auth + hosting; channels/providers still skill-installed                               |
+| **License**               | MIT                                  | MIT                                                                                                        |
+| **Upstream merges**       | n/a                                  | NanoClaw half merges cleanly; BananaClaw half is additive                                                  |
 
 See the [marketing site](https://denis.adsoconsulting.org/bananaclaw/) for screenshots and a full feature tour.
 
@@ -90,16 +90,18 @@ messaging apps  ┐
 web (browser)   ├─→  host (router) → inbound.db → container (Bun, Agent SDK)
 HA / email      ┘                                       │
                                                         ↓
-                              host (delivery) ← outbound.db
+                      host-owned outbound.db ← runner.sock
+                                │
+                                └→ host delivery
 ```
 
 The `web` channel sits in this same flow — the browser is just another
 adapter. Admin UI, file browser, and Pages are separate HTTP routes on the
 same listener; none bypass the session-DB protocol.
 
-Per the [architecture docs](docs/architecture.md), durable messages use two
-SQLite files per session with exactly one writer each. Live runner status uses
-a private per-session Unix socket rather than DB writes or signal files.
+Per the [architecture docs](docs/architecture.md), host session databases and
+the runner projection each have one writer. All runner-to-host state uses the
+private per-session Unix socket; durable events are ACKed after host commit.
 
 ## Documentation
 
@@ -128,7 +130,6 @@ picks them up on the next merge. This keeps the runtime canonical and the
 maintenance burden honest.
 
 New channels and providers follow the upstream **skills-as-branches** model.
-
 
 ## License
 

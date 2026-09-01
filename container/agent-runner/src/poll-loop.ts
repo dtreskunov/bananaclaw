@@ -4,11 +4,33 @@ import { writeMessageOut } from './db/messages-out.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
 import { writeTurnActivity } from './db/turn-activity.js';
+import { markBatchPersisted, markTurnPersisted } from './db/runner-state.js';
 import { completeTaskAttempts, markTaskAttemptsProviderInvoked } from './db/task-attempts.js';
 import { getInboundDb, getOutboundDb, clearStaleProcessingAcks } from './db/connection.js';
-import { clearContinuation, clearFailedTurn, clearTurnEnded, appendActivity, clearActivity, clearUsageProgress, getActivityBuffer, getContinuation, getFailedTurn, isForkOriginAbsorbed, markForkOriginAbsorbed, setContinuation, setFailedTurn, setTurnEnded, writeUsageProgress } from './db/session-state.js';
+import {
+  clearContinuation,
+  clearFailedTurn,
+  clearTurnEnded,
+  appendActivity,
+  clearActivity,
+  clearUsageProgress,
+  getActivityBuffer,
+  getContinuation,
+  getFailedTurn,
+  isForkOriginAbsorbed,
+  markForkOriginAbsorbed,
+  setContinuation,
+  setFailedTurn,
+  setTurnEnded,
+  writeUsageProgress,
+} from './db/session-state.js';
 import { getForkOrigin, type ForkOriginRow } from './db/fork-origin.js';
-import { clearCurrentInReplyTo, getDuplicateSendCount, resetTurnSendTracking, setCurrentInReplyTo } from './current-batch.js';
+import {
+  clearCurrentInReplyTo,
+  getDuplicateSendCount,
+  resetTurnSendTracking,
+  setCurrentInReplyTo,
+} from './current-batch.js';
 import {
   formatMessages,
   extractFileAttachments,
@@ -174,7 +196,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   // longer than the host typing module's grace window before
   // processQuery's liveHandle starts touching it — leaving the
   // typing indicator to flicker off mid-cold-start.
-  try { signalHeartbeat(); } catch { /* best-effort */ }
+  try {
+    signalHeartbeat();
+  } catch {
+    /* best-effort */
+  }
 
   let pollCount = 0;
   let isFirstPoll = true;
@@ -191,7 +217,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   // `signal.aborted` and exits.
   let activeQuery: AgentQuery | null = null;
   config.signal?.addEventListener('abort', () => {
-    try { activeQuery?.abort(); } catch { /* best-effort */ }
+    try {
+      activeQuery?.abort();
+    } catch {
+      /* best-effort */
+    }
   });
 
   while (true) {
@@ -227,7 +257,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Touch the heartbeat the moment we pick up a batch — before any
     // potentially-slow provider boot inside processQuery — so the host
     // typing indicator stays lit through cold-start.
-    try { signalHeartbeat(); } catch { /* best-effort */ }
+    try {
+      signalHeartbeat();
+    } catch {
+      /* best-effort */
+    }
 
     const ids = messages.map((m) => m.id);
     markProcessing(ids);
@@ -292,6 +326,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     if (normalMessages.length === 0) {
       const remainingIds = ids.filter((id) => !commandIds.includes(id));
       if (remainingIds.length > 0) markCompleted(remainingIds);
+      markBatchPersisted(getOutboundDb());
       log(`All ${messages.length} message(s) were commands, skipping query`);
       continue;
     }
@@ -315,6 +350,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // MODULE-HOOK:scheduling-pre-task:end
 
     if (keep.length === 0) {
+      markBatchPersisted(getOutboundDb());
       log(`All ${normalMessages.length} non-command message(s) gated by script, skipping query`);
       continue;
     }
@@ -384,6 +420,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const { prompt: resolvedPrompt, files } = await transcribeAudioFiles(rawFiles, prompt);
     prompt = resolvedPrompt;
     const taskAttemptIds = keep.filter((message) => message.kind === 'task').map((message) => message.id);
+    const taskAttemptIdSet = new Set(taskAttemptIds);
+    const finalizedTaskAttemptIds = new Set<string>();
     markTaskAttemptsProviderInvoked(taskAttemptIds);
     let taskProviderFailed = false;
     try {
@@ -408,6 +446,12 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             promptTracker,
             config.provider.onExchangeComplete?.bind(config.provider),
             prompt,
+            (completedIds, providerFailed) => {
+              const completedTaskIds = completedIds.filter((id) => taskAttemptIdSet.has(id));
+              completeTaskAttempts(completedTaskIds, providerFailed);
+              for (const id of completedTaskIds) finalizedTaskAttemptIds.add(id);
+              markBatchPersisted(getOutboundDb());
+            },
           );
           if (!isTaskOnly && result.continuation && result.continuation !== continuation) {
             continuation = result.continuation;
@@ -416,9 +460,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           if (result.unsurfacedError) {
             taskProviderFailed = true;
             const errorRouting = result.unsurfacedError.routing;
-            const tag = result.unsurfacedError.classification
-              ? ` [${result.unsurfacedError.classification}]`
-              : '';
+            const tag = result.unsurfacedError.classification ? ` [${result.unsurfacedError.classification}]` : '';
             writeMessageOut({
               id: generateId(),
               kind: 'chat',
@@ -479,8 +521,12 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     // Ensure completed even if processQuery ended without a result event
     // (e.g. stream closed unexpectedly).
-    completeTaskAttempts(taskAttemptIds, taskProviderFailed);
+    completeTaskAttempts(
+      taskAttemptIds.filter((id) => !finalizedTaskAttemptIds.has(id)),
+      taskProviderFailed,
+    );
     markCompleted(processingIds);
+    markBatchPersisted(getOutboundDb());
     log(`Completed ${ids.length} message(s)`);
   }
 }
@@ -552,8 +598,7 @@ async function adoptForkOrigin(
   const origin = getForkOrigin();
   if (!origin) return {};
 
-  const sameProvider =
-    origin.provider != null && origin.provider.toLowerCase() === config.providerName.toLowerCase();
+  const sameProvider = origin.provider != null && origin.provider.toLowerCase() === config.providerName.toLowerCase();
 
   if (sameProvider && origin.parent_continuation && origin.anchor_ref && config.provider.forkContinuation) {
     try {
@@ -769,6 +814,7 @@ async function processQuery(
   promptTracker?: { latest: string; routing: RoutingContext },
   onExchangeComplete?: (exchange: ProviderExchange) => void,
   initialPrompt = '',
+  onBatchComplete?: (completedIds: string[], providerFailed: boolean) => void,
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let resultSeen = false;
@@ -789,11 +835,14 @@ async function processQuery(
   let malformedToolRecoveryRouting: RoutingContext | null = null;
   let malformedToolRecoveryHadNativeTool = false;
   let postToolDeliveryRecoveryAttempts = 0;
-  const executedToolCalls = new Map<string, {
-    tool: string;
-    detail?: string;
-    status: 'running' | 'completed' | 'error';
-  }>();
+  const executedToolCalls = new Map<
+    string,
+    {
+      tool: string;
+      detail?: string;
+      status: 'running' | 'completed' | 'error';
+    }
+  >();
   let activeTurnRouting = routing;
   // Set when the post-nudge retry comes back as an `<internal>` note (the
   // model confirming, via the escape hatch in the nudge text, that it meant
@@ -807,18 +856,30 @@ async function processQuery(
   let emptyResultSeen = false;
   // A fresh batch is being processed \u2014 wipe any turn-ended marker from
   // the previous turn so the host typing module re-arms cleanly.
-  try { clearTurnEnded(); } catch { /* best-effort */ }
+  try {
+    clearTurnEnded();
+  } catch {
+    /* best-effort */
+  }
   // Start each batch with a fresh activity trace so the web UI shows the
   // work for this wake, not a stale trace from the previous turn.
-  try { clearActivity(); } catch { /* best-effort */ }
-  try { clearUsageProgress(); } catch { /* best-effort */ }
+  try {
+    clearActivity();
+  } catch {
+    /* best-effort */
+  }
+  try {
+    clearUsageProgress();
+  } catch {
+    /* best-effort */
+  }
   let lastProviderError: { message: string; classification?: string } | null = null;
   let sentAny = false;
   // Captured from the provider's `usage` event; flushed at end of turn so
   // it can be linked to the last outbound row written this turn.
   let pendingUsage: import('./providers/types.js').TurnUsage | null = null;
   // Runner-owned cumulative snapshot built from disaggregated provider calls.
-  // The host polls an overwrite file, so it must never receive call deltas.
+  // Live usage is an overwrite snapshot, so it must never receive call deltas.
   let liveUsage: import('./providers/types.js').TurnUsage | null = null;
   // Captured from the provider's `checkpoint` event; flushed with the usage so
   // it lands on the same outbound row.
@@ -830,8 +891,16 @@ async function processQuery(
   // actual turn boundary rather than only when processQuery starts.
   let activityFlushedCount = 0;
   const resetActivityForNextTurn = () => {
-    try { clearActivity(); } catch { /* best-effort */ }
-    try { clearUsageProgress(); } catch { /* best-effort */ }
+    try {
+      clearActivity();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      clearUsageProgress();
+    } catch {
+      /* best-effort */
+    }
     liveUsage = null;
     activityFlushedCount = 0;
   };
@@ -863,9 +932,10 @@ async function processQuery(
    * nudge path must still fire so the answer isn't silently dropped.
    */
   const countTurnContentMessages = (since: number): number => {
-    const rows = getOutboundDb()
-      .prepare('SELECT kind, content FROM messages_out WHERE seq > ?')
-      .all(since) as { kind: string; content: string }[];
+    const rows = getOutboundDb().prepare('SELECT kind, content FROM messages_out WHERE seq > ?').all(since) as {
+      kind: string;
+      content: string;
+    }[];
     let n = 0;
     for (const r of rows) {
       // kind='internal' is the web thought-bubble surfaced by dispatchResultText
@@ -1044,7 +1114,11 @@ async function processQuery(
         }
         turnActive = true;
         turnStartTime = Date.now();
-        try { clearTurnEnded(); } catch { /* best-effort */ }
+        try {
+          clearTurnEnded();
+        } catch {
+          /* best-effort */
+        }
         setCurrentInReplyTo(activeTurnRouting.inReplyTo);
         query.push(prompt, followUpFiles.length > 0 ? followUpFiles : undefined);
         archivePrompts.push(prompt);
@@ -1127,9 +1201,15 @@ async function processQuery(
         id: `nudge:${generateId()}`,
         text: activityText,
       });
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
     turnActive = true;
-    try { clearTurnEnded(); } catch { /* best-effort */ }
+    try {
+      clearTurnEnded();
+    } catch {
+      /* best-effort */
+    }
   };
   // Push the recovery nudge: a self-correction retry within the same warm
   // query. Used for both failure shapes — bare unwrapped text and a reply
@@ -1145,7 +1225,9 @@ async function processQuery(
     // across the nudge→retry boundary (no reset without a queued user batch)
     // and flushes onto the recovered reply's row.
     beginCorrectiveTurn('Reply wasn’t formatted for delivery — asked the agent to re-send it.');
-    const names = getAllDestinations().map((d) => d.name).join(', ');
+    const names = getAllDestinations()
+      .map((d) => d.name)
+      .join(', ');
     query.push(
       `<system>Your reply was not delivered. Either it was not wrapped in ` +
         `<message to="name">...</message> blocks, or it was left inside your ` +
@@ -1189,37 +1271,40 @@ async function processQuery(
     beginCorrectiveTurn(
       'A tool ran but its final reply was malformed - asked the agent to report the result without repeating the action.',
     );
-    const names = getAllDestinations().map((d) => d.name).join(', ');
+    const names = getAllDestinations()
+      .map((d) => d.name)
+      .join(', ');
     const summarizeCall = ({ tool, detail }: { tool: string; detail?: string }): string => {
-        const safeDetail = detail
-          ? JSON.stringify(detail.slice(0, 240))
-              .replace(/&/g, '\\u0026')
-              .replace(/</g, '\\u003c')
-              .replace(/>/g, '\\u003e')
-          : '';
-        return `- ${tool}${safeDetail ? `: ${safeDetail}` : ''}`;
+      const safeDetail = detail
+        ? JSON.stringify(detail.slice(0, 240))
+            .replace(/&/g, '\\u0026')
+            .replace(/</g, '\\u003c')
+            .replace(/>/g, '\\u003e')
+        : '';
+      return `- ${tool}${safeDetail ? `: ${safeDetail}` : ''}`;
     };
     const calls = [...executedToolCalls.values()];
-    const completedCalls = calls
-      .filter((call) => call.status === 'completed')
-      .map(summarizeCall);
-    const uncertainCalls = calls
-      .filter((call) => call.status !== 'completed')
-      .map(summarizeCall);
+    const completedCalls = calls.filter((call) => call.status === 'completed').map(summarizeCall);
+    const uncertainCalls = calls.filter((call) => call.status !== 'completed').map(summarizeCall);
     const callSummary = [
       ...(completedCalls.length > 0
-        ? [`Calls whose tool invocation completed (use their native results above to determine success or failure):\n${completedCalls.join('\n')}`]
+        ? [
+            `Calls whose tool invocation completed (use their native results above to determine success or failure):\n${completedCalls.join('\n')}`,
+          ]
         : []),
       ...(uncertainCalls.length > 0
-        ? [`Calls that started but did not complete cleanly (they may still have effects):\n${uncertainCalls.join('\n')}`]
+        ? [
+            `Calls that started but did not complete cleanly (they may still have effects):\n${uncertainCalls.join('\n')}`,
+          ]
         : []),
     ].join('\n');
-    const retryInstruction = postToolDeliveryRecoveryAttempts > 1
-      ? `Your previous reporting-only response incorrectly tried to use another tool. ` +
-        `Do not continue, inspect, search, verify, or perform more work. Report only what the ` +
-        `completed calls already established and what remains unfinished. Output exactly one ` +
-        `<message to="name">...</message> block and no other text. `
-      : '';
+    const retryInstruction =
+      postToolDeliveryRecoveryAttempts > 1
+        ? `Your previous reporting-only response incorrectly tried to use another tool. ` +
+          `Do not continue, inspect, search, verify, or perform more work. Report only what the ` +
+          `completed calls already established and what remains unfinished. Output exactly one ` +
+          `<message to="name">...</message> block and no other text. `
+        : '';
     const accepted = query.push(
       `<system>At least one native tool already ran in the previous turn, but the final reply ` +
         `was malformed. Here is the execution record:\n${callSummary || 'One or more native tools may have executed.'}\n` +
@@ -1243,7 +1328,11 @@ async function processQuery(
   };
   const liveHandle = setInterval(() => {
     if (!turnActive) return;
-    try { signalHeartbeat(); } catch { /* best-effort */ }
+    try {
+      signalHeartbeat();
+    } catch {
+      /* best-effort */
+    }
   }, 2000);
   liveHandle.unref?.();
 
@@ -1267,8 +1356,8 @@ async function processQuery(
         // for the call to finish: fx only reports what a tool was invoked
         // with on the terminal event, so counting at `running` would collapse
         // its calls the same way.
-        const detailKnown = event.step.detail !== undefined ||
-          event.step.status === 'completed' || event.step.status === 'error';
+        const detailKnown =
+          event.step.detail !== undefined || event.step.status === 'completed' || event.step.status === 'error';
         if (detailKnown && !countedToolCallIds.has(event.step.id)) {
           countedToolCallIds.add(event.step.id);
           consecutiveTextSteps = 0;
@@ -1292,19 +1381,17 @@ async function processQuery(
         }
         const isSubstantiveTool = !event.step.tool.endsWith('send_message');
         const priorCall = executedToolCalls.get(event.step.id);
-        const reachedExecution = !event.step.rejectedBeforeExecution && (
-          event.step.status === 'running' ||
-          event.step.status === 'completed' ||
-          event.step.status === 'error' ||
-          priorCall !== undefined
-        );
+        const reachedExecution =
+          !event.step.rejectedBeforeExecution &&
+          (event.step.status === 'running' ||
+            event.step.status === 'completed' ||
+            event.step.status === 'error' ||
+            priorCall !== undefined);
         if (isSubstantiveTool && reachedExecution) {
           malformedToolRecoveryHadNativeTool = true;
           executedToolCalls.set(event.step.id, {
             tool: event.step.tool,
-            ...(event.step.detail || priorCall?.detail
-              ? { detail: event.step.detail ?? priorCall?.detail }
-              : {}),
+            ...(event.step.detail || priorCall?.detail ? { detail: event.step.detail ?? priorCall?.detail } : {}),
             status: event.step.status === 'pending' ? priorCall!.status : event.step.status,
           });
         }
@@ -1369,7 +1456,11 @@ async function processQuery(
         pendingUsage = accumulateTurnUsage(pendingUsage, event.data);
       } else if (event.type === 'usage_call') {
         liveUsage = accumulateCallUsage(liveUsage, event.data);
-        try { writeUsageProgress(liveUsage); } catch { /* best-effort */ }
+        try {
+          writeUsageProgress(liveUsage);
+        } catch {
+          /* best-effort */
+        }
       } else if (event.type === 'checkpoint') {
         pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {
@@ -1391,9 +1482,8 @@ async function processQuery(
         // into a single assistant response (one result event for two
         // pushed prompts), the leftover batch stays in the queue and
         // gets drained by the stream-end finally block below.
-        let resultRouting = isMalformedToolRecoveryResult && malformedToolRecoveryRouting
-          ? malformedToolRecoveryRouting
-          : routing;
+        let resultRouting =
+          isMalformedToolRecoveryResult && malformedToolRecoveryRouting ? malformedToolRecoveryRouting : routing;
         const drainedIds: string[] = [];
         if (!isMalformedToolRecoveryResult && turnBatchQueue.length > 0) {
           const head = turnBatchQueue.shift()!;
@@ -1407,7 +1497,11 @@ async function processQuery(
         // and the indicator must stay lit across the gap.
         if (turnBatchQueue.length === 0) {
           turnActive = false;
-          try { setTurnEnded(); } catch { /* best-effort */ }
+          try {
+            setTurnEnded();
+          } catch {
+            /* best-effort */
+          }
         }
         // Update MCP send_message routing for any subsequent turn the
         // provider may run within this query (e.g. on the nudge push
@@ -1445,12 +1539,9 @@ async function processQuery(
             resetMalformedToolRecovery();
           }
           const willRetryWrapping =
-            !mcpWroteReply && hasUnwrapped &&
-            !malformedToolRecoveryHadNativeTool &&
-            !nudgedForDelivery;
+            !mcpWroteReply && hasUnwrapped && !malformedToolRecoveryHadNativeTool && !nudgedForDelivery;
           const willRecoverPostToolDelivery =
-            !mcpWroteReply && hasUnwrapped && malformedToolRecoveryHadNativeTool &&
-            !nudgedForDelivery;
+            !mcpWroteReply && hasUnwrapped && malformedToolRecoveryHadNativeTool && !nudgedForDelivery;
           notifyExchangeComplete(onExchangeComplete, {
             prompt: archivePrompts[0] ?? initialPrompt,
             result: event.text,
@@ -1477,8 +1568,13 @@ async function processQuery(
             archivePrompts.shift();
           }
           if (
-            wasRecoveringDelivery && !mcpWroteReply && sent === 0 && internalCount === 0 &&
-            !continuedPostToolDeliveryRecovery && turnBatchQueue.length === 0 && !endedForCommand
+            wasRecoveringDelivery &&
+            !mcpWroteReply &&
+            sent === 0 &&
+            internalCount === 0 &&
+            !continuedPostToolDeliveryRecovery &&
+            turnBatchQueue.length === 0 &&
+            !endedForCommand
           ) {
             endedForCommand = true;
             query.end();
@@ -1508,17 +1604,24 @@ async function processQuery(
           }
           if (drainedIds.length > 0) markCompleted(drainedIds);
           const willNudge =
-            !mcpWroteReply && event.strippedToEmpty === true &&
+            !mcpWroteReply &&
+            event.strippedToEmpty === true &&
             event.malformedToolCall !== true &&
-            !nudgedForDelivery && !lastProviderError;
+            !nudgedForDelivery &&
+            !lastProviderError;
           const willRetryMalformedTool =
-            !mcpWroteReply && !malformedToolRecoveryHadNativeTool &&
+            !mcpWroteReply &&
+            !malformedToolRecoveryHadNativeTool &&
             event.malformedToolCall === true &&
             malformedToolRecoveryAttempts < MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS &&
-            !nudgedForDelivery && !lastProviderError;
+            !nudgedForDelivery &&
+            !lastProviderError;
           const willRecoverPostToolDelivery =
-            !mcpWroteReply && malformedToolRecoveryHadNativeTool &&
-            event.strippedToEmpty === true && !nudgedForDelivery && !lastProviderError;
+            !mcpWroteReply &&
+            malformedToolRecoveryHadNativeTool &&
+            event.strippedToEmpty === true &&
+            !nudgedForDelivery &&
+            !lastProviderError;
           if (continuedPostToolDeliveryRecovery) {
             // Keep the prompt queued: this is another tools-disabled attempt
             // to report the existing result, never permission to resume work.
@@ -1581,9 +1684,12 @@ async function processQuery(
         // numbers don't disappear. Also persist the activity trace against
         // the same row so historical messages show the steps live viewers saw.
         {
-          const lastOutId = (getOutboundDb()
-            .prepare('SELECT id FROM messages_out WHERE seq > ? ORDER BY seq DESC LIMIT 1')
-            .get(outboundMaxAtTurnStart) as { id: string } | undefined)?.id ?? '';
+          const lastOutId =
+            (
+              getOutboundDb()
+                .prepare('SELECT id FROM messages_out WHERE seq > ? ORDER BY seq DESC LIMIT 1')
+                .get(outboundMaxAtTurnStart) as { id: string } | undefined
+            )?.id ?? '';
           if (pendingUsage) {
             // Providers that resolve limits from a remote catalog fill them in
             // here rather than mid-turn, so enrichment is uniform and a slow
@@ -1601,11 +1707,7 @@ async function processQuery(
               log(`Failed to resolve model limits: ${e instanceof Error ? e.message : String(e)}`);
             }
             try {
-              writeTurnUsage(
-                `tu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                lastOutId,
-                pendingUsage,
-              );
+              writeTurnUsage(`tu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, lastOutId, pendingUsage);
             } catch (e) {
               log(`Failed to write turn_usage: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -1643,6 +1745,10 @@ async function processQuery(
           // turn's live snapshot. Persist first, then clear at the boundary.
           if (turnBatchQueue.length > 0) resetActivityForNextTurn();
         }
+        markTurnPersisted(getOutboundDb());
+        if (drainedIds.length > 0) {
+          onBatchComplete?.(drainedIds, !sentAny && lastProviderError !== null);
+        }
         // Reset the per-turn baseline so a follow-up push within the same
         // query starts a fresh "did MCP write anything?" window.
         outboundMaxAtTurnStart = currentOutboundMax();
@@ -1675,12 +1781,20 @@ async function processQuery(
       orphanedIds.push(...turnBatchQueue.shift()!.ids);
     }
     if (orphanedIds.length > 0) {
-      try { markCompleted(orphanedIds); } catch { /* best-effort */ }
+      try {
+        markCompleted(orphanedIds);
+      } catch {
+        /* best-effort */
+      }
       // Stream closed with leftover queued batches — the result branch
       // skipped setTurnEnded because the queue was non-empty, so do it
       // here so the host's typing module clears the indicator promptly
       // instead of waiting for the heartbeat to age out.
-      try { setTurnEnded(); } catch { /* best-effort */ }
+      try {
+        setTurnEnded();
+      } catch {
+        /* best-effort */
+      }
     }
     // Atomic continuation rollback. The `init` handler persisted the new
     // SDK session id immediately (for mid-turn crash recovery), but if the
@@ -1692,8 +1806,14 @@ async function processQuery(
     // on. Restore the prior good id so the next turn resumes from a
     // session that actually completed at least one turn cleanly.
     if (!resultSeen && priorContinuation && queryContinuation && queryContinuation !== priorContinuation) {
-      log(`Turn ended without result; restoring prior continuation ${priorContinuation} (discarding ${queryContinuation})`);
-      try { setContinuation(providerName, priorContinuation); } catch { /* best-effort */ }
+      log(
+        `Turn ended without result; restoring prior continuation ${priorContinuation} (discarding ${queryContinuation})`,
+      );
+      try {
+        setContinuation(providerName, priorContinuation);
+      } catch {
+        /* best-effort */
+      }
       queryContinuation = priorContinuation;
     }
   }
@@ -1792,9 +1912,10 @@ async function processQuery(
     // the turn produced nothing deliverable. If the SDK threw, that path
     // takes over (with stale-session retry); if a message did get sent,
     // a trailing error is best left in the logs.
-    unsurfacedError: !sentAny && lastProviderError
-      ? { ...lastProviderError, routing: promptTracker?.routing ?? activeTurnRouting }
-      : undefined,
+    unsurfacedError:
+      !sentAny && lastProviderError
+        ? { ...lastProviderError, routing: promptTracker?.routing ?? activeTurnRouting }
+        : undefined,
   };
 }
 
@@ -1825,13 +1946,21 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       log(
         `Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`,
       );
-      try { setTurnEnded(); } catch { /* best-effort */ }
+      try {
+        setTurnEnded();
+      } catch {
+        /* best-effort */
+      }
       break;
     case 'progress': {
       const s = event.step;
       const label = s.kind === 'tool' ? s.tool : 'text' in s ? s.text : '';
       log(`Progress: ${s.kind}${label ? ` ${label}` : ''}`);
-      try { appendActivity(s); } catch { /* best-effort */ }
+      try {
+        appendActivity(s);
+      } catch {
+        /* best-effort */
+      }
       break;
     }
   }
@@ -1867,12 +1996,13 @@ function dispatchResultText(
         id: `internal:${generateId()}:${i}`,
         text: parsed.internal[i],
       });
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   }
 
   let sent = 0;
-  const canDeliverUnwrapped = deliverUnwrappedToCurrentRoute &&
-    parsed.deliveries.length === 0 && !!parsed.unwrapped;
+  const canDeliverUnwrapped = deliverUnwrappedToCurrentRoute && parsed.deliveries.length === 0 && !!parsed.unwrapped;
   const scratchpadParts: string[] = parsed.unwrapped && !canDeliverUnwrapped ? [parsed.unwrapped] : [];
 
   if (canDeliverUnwrapped) {
@@ -1956,12 +2086,7 @@ function resolveDeliveryRouting(
   };
 }
 
-function isDuplicateSendMessage(
-  dest: DestinationEntry,
-  body: string,
-  routing: RoutingContext,
-  since: number,
-): boolean {
+function isDuplicateSendMessage(dest: DestinationEntry, body: string, routing: RoutingContext, since: number): boolean {
   const resolved = resolveDeliveryRouting(dest, routing);
   const rows = getOutboundDb()
     .prepare(
@@ -1970,23 +2095,26 @@ function isDuplicateSendMessage(
        WHERE seq > ? AND kind = 'chat'`,
     )
     .all(since) as Array<{
-      platform_id: string | null;
-      channel_type: string | null;
-      thread_id: string | null;
-      content: string;
-    }>;
+    platform_id: string | null;
+    channel_type: string | null;
+    thread_id: string | null;
+    content: string;
+  }>;
   const normalizedBody = normalizeDeliveryText(body);
   return rows.some((row) => {
     if (
       row.platform_id !== resolved.platformId ||
       row.channel_type !== resolved.channelType ||
       row.thread_id !== resolved.threadId
-    ) return false;
+    )
+      return false;
     try {
       const content = JSON.parse(row.content) as { text?: unknown; delivery_origin?: unknown };
-      return content.delivery_origin === 'send_message' &&
+      return (
+        content.delivery_origin === 'send_message' &&
         typeof content.text === 'string' &&
-        normalizeDeliveryText(content.text) === normalizedBody;
+        normalizeDeliveryText(content.text) === normalizedBody
+      );
     } catch {
       return false;
     }

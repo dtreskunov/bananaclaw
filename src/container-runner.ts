@@ -13,6 +13,7 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_IMAGE_BASE,
   CONTAINER_INSTALL_LABEL,
+  CONTAINER_MAX_OUTPUT_SIZE,
   DATA_DIR,
   GROUPS_DIR,
   ONECLI_API_KEY,
@@ -21,13 +22,9 @@ import {
 } from './config.js';
 import { materializeContainerJson } from './container-config.js';
 import type { McpServerConfig } from './container-config.js';
-import {
-  decideAdmission,
-  estimateAgentGroupMb,
-  memoryBudgetMb,
-  snapshotRunning,
-} from './container-admission.js';
+import { decideAdmission, estimateAgentGroupMb, memoryBudgetMb, snapshotRunning } from './container-admission.js';
 import { getContainerConfig, updateContainerConfigScalars } from './db/container-configs.js';
+import { getSession } from './db/sessions.js';
 import { readEnvFile } from './env.js';
 import {
   CONTAINER_RUNTIME_BIN,
@@ -65,6 +62,8 @@ import {
 import {
   markContainerRunning,
   markContainerStopped,
+  inboundDbPath,
+  outboundDbPath,
   sessionDir,
   writeSessionRouting,
 } from './session-manager.js';
@@ -235,7 +234,7 @@ async function spawnContainer(session: Session): Promise<void> {
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
 
-  await startSessionSignalServer(session.id);
+  await startSessionSignalServer(session.id, agentGroup.id);
   const mounts = buildMounts(agentGroup, session, containerConfig, provider, contribution);
   // Docker/podman container names allow only [a-zA-Z0-9_.-]. Folder names
   // can include characters that are legal on disk but not in container
@@ -347,7 +346,10 @@ export async function runMcpProbeContainer(
     initGroupFilesystem(agentGroup, { provider: providerName });
     const { provider, contribution } = resolveProviderContribution(probeSession, agentGroup, containerConfig);
     const mounts = buildMounts(agentGroup, probeSession, containerConfig, provider, contribution, false);
-    const folderSlug = agentGroup.folder.replace(/@/g, '_at_').replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 48);
+    const folderSlug = agentGroup.folder
+      .replace(/@/g, '_at_')
+      .replace(/[^a-zA-Z0-9_.-]/g, '-')
+      .slice(0, 48);
     containerName = `nanoclaw-mcp-probe-${folderSlug}-${Date.now()}`;
     const args = await buildContainerArgs(
       mounts,
@@ -546,7 +548,12 @@ export async function adoptRunningContainers(adopt: Array<{ name: string; sessio
       continue;
     }
     log.info('Adopting running container', { sessionId, containerName: name });
-    await startSessionSignalServer(sessionId);
+    const session = getSession(sessionId);
+    if (!session) {
+      log.warn('Skipping adoption — session no longer exists', { sessionId, containerName: name });
+      continue;
+    }
+    await startSessionSignalServer(sessionId, session.agent_group_id);
     attachContainerWatcher(sessionId, name);
   }
 }
@@ -620,8 +627,9 @@ export function buildMounts(
 
   // Session folder at /workspace (contains inbound.db, outbound.db, outbox/, .claude/)
   mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
-
   if (includeSessionLink) {
+    mounts.push(inboundStoreMount(agentGroup.id, session.id));
+    mounts.push(outboundStoreMount(agentGroup.id, session.id));
     mounts.push(sessionLinkMount(session.id));
   }
 
@@ -700,6 +708,22 @@ export function sessionLinkMount(sessionId: string): VolumeMount {
   return {
     hostPath: sessionLinkDir(sessionId),
     containerPath: '/run/nanoclaw',
+    readonly: true,
+  };
+}
+
+export function outboundStoreMount(agentGroupId: string, sessionId: string): VolumeMount {
+  return {
+    hostPath: outboundDbPath(agentGroupId, sessionId),
+    containerPath: '/workspace/outbound.db',
+    readonly: true,
+  };
+}
+
+export function inboundStoreMount(agentGroupId: string, sessionId: string): VolumeMount {
+  return {
+    hostPath: inboundDbPath(agentGroupId, sessionId),
+    containerPath: '/workspace/inbound.db',
     readonly: true,
   };
 }
@@ -865,6 +889,7 @@ async function buildContainerArgs(
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
+  args.push('-e', `NANOCLAW_MAX_OUTPUT_BYTES=${CONTAINER_MAX_OUTPUT_SIZE}`);
 
   // MCP timeouts. Read by Claude Code (MCP_TIMEOUT, MCP_TOOL_TIMEOUT) and by
   // our opencode mapper (MCP_TOOL_TIMEOUT → mcp[name].timeout). Pulled from
@@ -945,9 +970,7 @@ async function buildContainerArgs(
   const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
   args.push(imageTag);
 
-  args.push('-c', launchMode === 'agent'
-    ? 'exec bun run /app/src/index.ts'
-    : 'exec bun run /app/src/mcp-probe.ts');
+  args.push('-c', launchMode === 'agent' ? 'exec bun run /app/src/index.ts' : 'exec bun run /app/src/mcp-probe.ts');
 
   return args;
 }
@@ -959,10 +982,7 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-export function packageDockerfile(
-  from: string,
-  packages: { apt: string[]; npm: string[]; pip: string[] },
-): string {
+export function packageDockerfile(from: string, packages: { apt: string[]; npm: string[]; pip: string[] }): string {
   let dockerfile = `FROM ${from}\nUSER root\n`;
   if (packages.apt.length > 0) {
     const specs = packages.apt.map(shellQuote).join(' ');

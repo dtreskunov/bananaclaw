@@ -5,8 +5,9 @@
 This is NanoClaw v2, a ground-up rewrite with breaking changes throughout. It cannot be merged into an existing v1 install. Attempting to resolve the conflicts by hand, run builds, or "fix" anything will corrupt the user's install and burn tokens for no result.
 
 **Do this instead:**
+
 1. Abort the merge: `git merge --abort` (or `git reset --hard ORIG_HEAD` if the merge already completed).
-2. Tell the user, verbatim: *"This is the v2 rewrite — it can't be merged into your existing install. Exit Claude Code (or open a separate terminal) and run `bash migrate-v2.sh` from the shell."*
+2. Tell the user, verbatim: _"This is the v2 rewrite — it can't be merged into your existing install. Exit Claude Code (or open a separate terminal) and run `bash migrate-v2.sh` from the shell."_
 3. Wait for the user to confirm before doing anything else. Do not run the migration script yourself — it requires an interactive terminal and cannot be run from within Claude Code.
 
 If you are a fresh install (you ran `git clone`, not `git pull`) and there are no conflicts, ignore this banner and continue below.
@@ -19,11 +20,11 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-The host is a single Node process that orchestrates per-session agent containers. Platform messages land via channel adapters, route through an entity model (users → messaging groups → agent groups → sessions), get written into the session's inbound DB, and wake a container. The agent-runner inside the container polls the DB, calls the configured provider, and writes durable output to the outbound DB. Live runner status flows over a private per-session Unix socket.
+The host is a single Node process that orchestrates per-session agent containers. Platform messages land via channel adapters, route through an entity model (users → messaging groups → agent groups → sessions), get written into the session's inbound DB, and wake a container. The agent-runner polls inbound work, calls the configured provider, and sends all runner→host state over a private per-session Unix socket.
 
-Durable work and output are messages in the two session DBs. There is no stdin
-or signal-file protocol; heartbeat, activity, progressive usage, and turn
-completion use the session link described in `docs/session-link.md`.
+Runner mutations are first committed to `runner-state.db`, then applied by the
+host to `outbound.db` and acknowledged. There is no stdin or signal-file
+protocol; see `docs/session-link.md`.
 
 ## Entity Model
 
@@ -47,46 +48,47 @@ Privilege is user-level (owner/admin), not agent-group-level. See [docs/isolatio
 Each session has **two** SQLite files under `data/v2-sessions/<session_id>/`:
 
 - `inbound.db` — host writes, container reads. `messages_in`, routing, destinations, pending_questions, processing_ack.
-- `outbound.db` — container writes, host reads. `messages_out`, session_state.
+- `outbound.db` — host-owned durable runner projection; container reads only.
+- `runner-state.db` — container-owned projection and pending event journal.
 
 Exactly one writer per file — no cross-mount lock contention. Host uses even
 `seq` numbers and the container uses odd. Live status does not write either DB.
 
 ## Central DB
 
-`data/v2.db` holds everything that isn't per-session: users, user_roles, agent_groups, messaging_groups, wiring, pending_approvals, user_dms, chat_sdk_* (for the Chat SDK bridge), schema_version. Migrations live at `src/db/migrations/`.
+`data/v2.db` holds everything that isn't per-session: users, user*roles, agent_groups, messaging_groups, wiring, pending_approvals, user_dms, chat_sdk*\* (for the Chat SDK bridge), schema_version. Migrations live at `src/db/migrations/`.
 
 For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than the `sqlite3` CLI: `pnpm exec tsx scripts/q.ts <db> "<sql>"`. The host setup intentionally avoids depending on the `sqlite3` binary (`setup/verify.ts:5`); the wrapper goes through the `better-sqlite3` dep that setup already installs and verifies. Default-output format matches `sqlite3 -list` (pipe-separated, no header) so existing skill text reads identically.
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/index.ts` | Entry point: init DB, migrations, channel adapters, delivery polls, sweep, shutdown |
-| `src/router.ts` | Inbound routing: messaging group → agent group → session → `inbound.db` → wake |
-| `src/delivery.ts` | Polls `outbound.db`, delivers via adapter, handles system actions (schedule, approvals, etc.) |
-| `src/host-sweep.ts` | 60s sweep: `processing_ack` sync, stale detection, due-message wake, recurrence |
-| `src/session-manager.ts` | Resolves sessions and opens `inbound.db` / `outbound.db` |
-| `src/session-link.ts` | Per-session Unix socket for validated live runner status |
-| `src/container-runner.ts` | Spawns per-agent-group Docker containers with session DB + outbox mounts, OneCLI `ensureAgent` |
-| `src/container-runtime.ts` | Runtime selection (Docker vs Apple containers), orphan cleanup |
-| `src/modules/permissions/access.ts` | `canAccessAgentGroup` — owner / global admin / scoped admin / member resolution against `user_roles` + `agent_group_members` |
-| `src/modules/approvals/primitive.ts` | `pickApprover`, `pickApprovalDelivery`, `requestApproval`, approval-handler registry |
-| `src/command-gate.ts` | Router-side admin command gate — queries `user_roles` directly (no env var, no container-side check) |
-| `src/modules/approvals/onecli-approvals.ts` | OneCLI credentialed-action approval bridge |
-| `src/modules/permissions/user-dm.ts` | Cold-DM resolution + `user_dms` cache |
-| `src/group-init.ts` | Per-agent-group filesystem scaffold (CLAUDE.md, skills, agent-runner-src overlay) |
-| `src/db/container-configs.ts` | CRUD for `container_configs` table (per-group container runtime config) |
-| `src/skills/` | Skill registry: SKILL.md frontmatter (agentskills.io spec), two-root discovery, catalog install + provenance |
-| `src/container-restart.ts` | Kill + on-wake respawn for agent group containers |
-| `src/db/` | DB layer — agent_groups, messaging_groups, sessions, container_configs, user_roles, user_dms, pending_*, migrations |
-| `src/channels/` | Channel adapter infra (registry, Chat SDK bridge); specific channel adapters are skill-installed from the `channels` branch |
-| `src/providers/` | Host-side provider container-config (`claude` baked in; `opencode` etc. installed from the `providers` branch) |
-| `container/agent-runner/src/` | Agent-runner: poll loop, formatter, provider abstraction, MCP tools, destinations |
-| `container/skills/` | Container skills mounted into every agent session (`onecli-gateway`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`) |
-| `groups/<folder>/` | Per-agent-group filesystem (CLAUDE.md, skills, per-group `agent-runner-src/` overlay) |
-| `scripts/init-first-agent.ts` | Bootstrap the first DM-wired agent (used by `/init-first-agent` skill) |
-| `migrate-v2.sh` + `setup/migrate-v2/` | v1→v2 migration. Standalone script: `bash migrate-v2.sh`. Seeds DB, copies groups/sessions, installs channels, builds container, offers service switchover, then hands off to `/migrate-from-v1` skill for owner setup and CLAUDE.md cleanup. See [docs/migration-dev.md](docs/migration-dev.md). |
+| File                                           | Purpose                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`                                 | Entry point: init DB, migrations, channel adapters, delivery recovery scan, sweep, shutdown                                                                                                                                                                                                                                 |
+| `src/router.ts`                                | Inbound routing: messaging group → agent group → session → `inbound.db` → wake                                                                                                                                                                                                                                              |
+| `src/delivery.ts`                              | Delivers committed outbound rows; 60s recovery scan; handles system actions                                                                                                                                                                                                                                                 |
+| `src/host-sweep.ts`                            | 60s sweep: `processing_ack` sync, stale detection, due-message wake, recurrence                                                                                                                                                                                                                                             |
+| `src/session-manager.ts`                       | Resolves sessions and opens `inbound.db` / `outbound.db`                                                                                                                                                                                                                                                                    |
+| `src/session-link.ts`                          | Per-session Unix socket for validated live and durable runner state                                                                                                                                                                                                                                                         |
+| `src/container-runner.ts`                      | Spawns per-agent-group Docker containers with session DB + outbox mounts, OneCLI `ensureAgent`                                                                                                                                                                                                                              |
+| `src/container-runtime.ts`                     | Runtime selection (Docker vs Apple containers), orphan cleanup                                                                                                                                                                                                                                                              |
+| `src/modules/permissions/access.ts`            | `canAccessAgentGroup` — owner / global admin / scoped admin / member resolution against `user_roles` + `agent_group_members`                                                                                                                                                                                                |
+| `src/modules/approvals/primitive.ts`           | `pickApprover`, `pickApprovalDelivery`, `requestApproval`, approval-handler registry                                                                                                                                                                                                                                        |
+| `src/command-gate.ts`                          | Router-side admin command gate — queries `user_roles` directly (no env var, no container-side check)                                                                                                                                                                                                                        |
+| `src/modules/approvals/onecli-approvals.ts`    | OneCLI credentialed-action approval bridge                                                                                                                                                                                                                                                                                  |
+| `src/modules/permissions/user-dm.ts`           | Cold-DM resolution + `user_dms` cache                                                                                                                                                                                                                                                                                       |
+| `src/group-init.ts`                            | Per-agent-group filesystem scaffold (CLAUDE.md, skills, agent-runner-src overlay)                                                                                                                                                                                                                                           |
+| `src/db/container-configs.ts`                  | CRUD for `container_configs` table (per-group container runtime config)                                                                                                                                                                                                                                                     |
+| `src/skills/`                                  | Skill registry: SKILL.md frontmatter (agentskills.io spec), two-root discovery, catalog install + provenance                                                                                                                                                                                                                |
+| `src/container-restart.ts`                     | Kill + on-wake respawn for agent group containers                                                                                                                                                                                                                                                                           |
+| `src/db/`                                      | DB layer — agent*groups, messaging_groups, sessions, container_configs, user_roles, user_dms, pending*\*, migrations                                                                                                                                                                                                        |
+| `src/channels/`                                | Channel adapter infra (registry, Chat SDK bridge); specific channel adapters are skill-installed from the `channels` branch                                                                                                                                                                                                 |
+| `src/providers/`                               | Host-side provider container-config (`claude` baked in; `opencode` etc. installed from the `providers` branch)                                                                                                                                                                                                              |
+| `container/agent-runner/src/`                  | Agent-runner: poll loop, formatter, provider abstraction, MCP tools, destinations                                                                                                                                                                                                                                           |
+| `container/skills/`                            | Container skills mounted into every agent session (`onecli-gateway`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`)                                                                                                                                                                                      |
+| `groups/<folder>/`                             | Per-agent-group filesystem (CLAUDE.md, skills, per-group `agent-runner-src/` overlay)                                                                                                                                                                                                                                       |
+| `scripts/init-first-agent.ts`                  | Bootstrap the first DM-wired agent (used by `/init-first-agent` skill)                                                                                                                                                                                                                                                      |
+| `migrate-v2.sh` + `setup/migrate-v2/`          | v1→v2 migration. Standalone script: `bash migrate-v2.sh`. Seeds DB, copies groups/sessions, installs channels, builds container, offers service switchover, then hands off to `/migrate-from-v1` skill for owner setup and CLAUDE.md cleanup. See [docs/migration-dev.md](docs/migration-dev.md).                           |
 | `nanoclaw.sh --uninstall` + `setup/uninstall/` | Uninstall this copy only (slug-scoped): service, containers + image, `data/`, `logs/`, `groups/`, this copy's OneCLI agents. Confirms per group; `--dry-run` previews, `--yes` skips prompts. Other copies and the shared OneCLI app are untouched. Bypasses bootstrap entirely; `uninstall.sh` is a pointer that execs it. |
 
 ## Admin CLI (`ncl`)
@@ -99,19 +101,19 @@ ncl <resource> help
 ncl help
 ```
 
-| Resource | Verbs | What it is |
-|----------|-------|------------|
-| groups | list, get, create, update, delete, restart, config get/update, config add-mcp-server/remove-mcp-server, config add-package/remove-package, config set-param/unset-param | Agent groups (workspace, personality, container config) |
-| messaging-groups | list, get, create, update, delete | A single chat/channel on one platform |
-| wirings | list, get, create, update, delete | Links a messaging group to an agent group (session mode, triggers) |
-| users | list, get, create, update | Platform identities (`<channel>:<handle>`) |
-| roles | list, grant, revoke | Owner / admin privileges (global or scoped to an agent group) |
-| members | list, add, remove | Unprivileged access gate for an agent group |
-| destinations | list, add, remove | Where an agent group can send messages |
-| sessions | list, get | Active sessions (read-only) |
-| user-dms | list | Cold-DM cache (read-only) |
-| dropped-messages | list | Messages from unregistered senders (read-only) |
-| approvals | list, get | Pending approval requests (read-only) |
+| Resource         | Verbs                                                                                                                                                                   | What it is                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| groups           | list, get, create, update, delete, restart, config get/update, config add-mcp-server/remove-mcp-server, config add-package/remove-package, config set-param/unset-param | Agent groups (workspace, personality, container config)            |
+| messaging-groups | list, get, create, update, delete                                                                                                                                       | A single chat/channel on one platform                              |
+| wirings          | list, get, create, update, delete                                                                                                                                       | Links a messaging group to an agent group (session mode, triggers) |
+| users            | list, get, create, update                                                                                                                                               | Platform identities (`<channel>:<handle>`)                         |
+| roles            | list, grant, revoke                                                                                                                                                     | Owner / admin privileges (global or scoped to an agent group)      |
+| members          | list, add, remove                                                                                                                                                       | Unprivileged access gate for an agent group                        |
+| destinations     | list, add, remove                                                                                                                                                       | Where an agent group can send messages                             |
+| sessions         | list, get                                                                                                                                                               | Active sessions (read-only)                                        |
+| user-dms         | list                                                                                                                                                                    | Cold-DM cache (read-only)                                          |
+| dropped-messages | list                                                                                                                                                                    | Messages from unregistered senders (read-only)                     |
+| approvals        | list, get                                                                                                                                                               | Pending approval requests (read-only)                              |
 
 Key files: `src/cli/dispatch.ts` (dispatcher + approval handler), `src/cli/crud.ts` (generic CRUD registration), `src/cli/resources/` (per-resource definitions).
 
@@ -140,11 +142,11 @@ Per-agent-group container runtime config (provider, model, packages, MCP servers
 
 **`cli_scope`** — controls what the agent can do with `ncl` from inside the container:
 
-| Value | Behavior |
-|-------|----------|
-| `disabled` | Agent never learns about ncl (instructions excluded from CLAUDE.md). Host dispatch rejects any `cli_request`. |
+| Value             | Behavior                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `disabled`        | Agent never learns about ncl (instructions excluded from CLAUDE.md). Host dispatch rejects any `cli_request`.                                                                                          |
 | `group` (default) | Agent can access `groups`, `sessions`, `destinations`, `members` only, scoped to its own agent group. `--id` and group args are auto-filled. Cross-group access rejected. `cli_scope` changes blocked. |
-| `global` | Unrestricted. Set automatically for owner agent groups via `init-first-agent`. |
+| `global`          | Unrestricted. Set automatically for owner agent groups via `init-first-agent`.                                                                                                                         |
 
 Key files: `src/db/container-configs.ts`, `src/container-config.ts`, `src/cli/dispatch.ts` (scope enforcement), `src/claude-md-compose.ts` (instructions exclusion).
 
@@ -183,7 +185,7 @@ current gateways.
 
 Approval-gating credentialed actions is a **two-sided** flow:
 
-- **Server-side** (OneCLI gateway): decides *when* to hold a request and emit a pending approval. As of `onecli@1.3.0`, the CLI does **not** expose this — `rules create --action` only accepts `block` or `rate_limit`, and `secrets create` has no approval flag. Approval policies must be configured via the OneCLI web UI at `http://127.0.0.1:10254`. If/when the CLI grows an `approve` action, this section needs updating.
+- **Server-side** (OneCLI gateway): decides _when_ to hold a request and emit a pending approval. As of `onecli@1.3.0`, the CLI does **not** expose this — `rules create --action` only accepts `block` or `rate_limit`, and `secrets create` has no approval flag. Approval policies must be configured via the OneCLI web UI at `http://127.0.0.1:10254`. If/when the CLI grows an `approve` action, this section needs updating.
 - **Host-side** (nanoclaw): receives pending approvals and routes them to a human. `src/modules/approvals/onecli-approvals.ts` registers a callback via `onecli.configureManualApproval(cb)` (long-polls `GET /api/approvals/pending`). The callback uses `pickApprover` + `pickApprovalDelivery` from `src/modules/approvals/primitive.ts` to DM an approver. Approvers are resolved from the `user_roles` table — preference order: scoped admins for the agent group → global admins → owners. There is no env var like `NANOCLAW_ADMIN_USER_IDS`; roles are persisted in the central DB only.
 
 If approvals are configured server-side but the host callback isn't running (or throws), every credentialed call hangs until the gateway times out. Conversely, if the gateway has no rule asking for approval, the host callback never fires regardless of how it's wired.
@@ -201,9 +203,9 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 
 Container skills come from two roots, both mounted read-only:
 
-| Root | Host | Container | Managed by |
-|------|------|-----------|------------|
-| built-in | `container/skills/` | `/app/skills` | the repo |
+| Root      | Host                     | Container               | Managed by                  |
+| --------- | ------------------------ | ----------------------- | --------------------------- |
+| built-in  | `container/skills/`      | `/app/skills`           | the repo                    |
 | installed | `data/skills/installed/` | `/app/skills-installed` | skill catalogs (gitignored) |
 
 `src/skills/registry.ts` is the only place that enumerates them — the admin UI, the spawn-time symlink sync, and the CLAUDE.md composer all call `listSkills()`. Directory checks follow symlinks (`statSync`, not `Dirent.isDirectory()`), so a skill folder symlinked in from another checkout is visible everywhere.
@@ -212,16 +214,16 @@ SKILL.md frontmatter follows the [Agent Skills spec](https://agentskills.io/spec
 
 A **catalog** is a git repo, either a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) or any repo of `SKILL.md` folders. Catalogs are cloned shallow to `data/skills/cache/<id>` and only read; installing is a validated file copy that records repo/ref/commit/path plus a tree digest in `data/skills/installed.json` (so "update available" is real, and every version is re-reviewable). Installs refuse symlinks in the source tree and refuse to shadow a built-in slug. Owner / global admin only, via `GET|POST /api/skills`, `POST /api/skills/catalogs[/:id/refresh]`, `DELETE /api/skills/catalogs/:id`, `DELETE /api/skills/:slug`.
 
-| Skill | When to Use |
-|-------|-------------|
-| `/setup` | First-time install, auth, service config |
-| `/init-first-agent` | Bootstrap the first DM-wired agent (channel pick → identity → wire → welcome DM) |
-| `/manage-channels` | Wire channels to agent groups with isolation level decisions |
-| `/customize` | Adding channels, integrations, behavior changes |
-| `/debug` | Container issues, logs, troubleshooting |
-| `/update-nanoclaw` | Bring upstream updates into a customized install |
-| `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials |
-| `/migrate-memory` | Carry a group's agent memory across a provider switch (operator-run, both directions) |
+| Skill               | When to Use                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `/setup`            | First-time install, auth, service config                                              |
+| `/init-first-agent` | Bootstrap the first DM-wired agent (channel pick → identity → wire → welcome DM)      |
+| `/manage-channels`  | Wire channels to agent groups with isolation level decisions                          |
+| `/customize`        | Adding channels, integrations, behavior changes                                       |
+| `/debug`            | Container issues, logs, troubleshooting                                               |
+| `/update-nanoclaw`  | Bring upstream updates into a customized install                                      |
+| `/init-onecli`      | Install OneCLI Agent Vault and migrate `.env` credentials                             |
+| `/migrate-memory`   | Carry a group's agent memory across a provider switch (operator-run, both directions) |
 
 ## Contributing
 
@@ -257,6 +259,7 @@ cd container/agent-runner && bun test      # Container tests (bun:test)
 Container typecheck is a separate tsconfig — if you edit `container/agent-runner/src/`, run `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit` from root (or `bun run typecheck` from `container/agent-runner/`).
 
 Service management:
+
 ```bash
 # macOS (launchd)
 launchctl load   ~/Library/LaunchAgents/com.nanoclaw.plist
@@ -271,10 +274,10 @@ systemctl --user start|stop|restart nanoclaw
 
 Check these first when something goes wrong:
 
-| What | Where |
-|------|-------|
-| Host logs | `logs/nanoclaw.error.log` first (delivery failures, crash-loop backoff, warnings), then `logs/nanoclaw.log` for the full routing chain |
-| Setup logs | `logs/setup.log` (overall), `logs/setup-steps/*.log` (per-step: bootstrap, environment, container, onecli, mounts, service, etc.) |
+| What        | Where                                                                                                                                                                               |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host logs   | `logs/nanoclaw.error.log` first (delivery failures, crash-loop backoff, warnings), then `logs/nanoclaw.log` for the full routing chain                                              |
+| Setup logs  | `logs/setup.log` (overall), `logs/setup-steps/*.log` (per-step: bootstrap, environment, container, onecli, mounts, service, etc.)                                                   |
 | Session DBs | `data/v2-sessions/<agent-group>/<session>/` — `inbound.db` (`messages_in`: did the message reach the container?), `outbound.db` (`messages_out`: did the agent produce a response?) |
 
 Note: container logs are lost after the container exits (`--rm` flag). If the agent silently failed inside the container, there's no persistent log to inspect.
@@ -284,32 +287,33 @@ Note: container logs are lost after the container exits (`--rm` flag). If the ag
 This project uses pnpm with `minimumReleaseAge: 4320` (3 days) in `pnpm-workspace.yaml`. New package versions must exist on the npm registry for 3 days before pnpm will resolve them.
 
 **Rules — do not bypass without explicit human approval:**
+
 - **`minimumReleaseAgeExclude`**: Never add entries without human sign-off. If a package must bypass the release age gate, the human must approve and the entry must pin the exact version being excluded (e.g. `package@1.2.3`), never a range.
 - **`onlyBuiltDependencies`**: Never add packages to this list without human approval — build scripts execute arbitrary code during install.
 - **`pnpm install --frozen-lockfile`** should be used in CI, automation, and container builds. Never run bare `pnpm install` in those contexts.
 
 ## Docs Index
 
-| Doc | Purpose |
-|-----|---------|
-| [docs/architecture.md](docs/architecture.md) | Full architecture writeup |
-| [docs/api-details.md](docs/api-details.md) | Host API + DB schema details |
-| [docs/db.md](docs/db.md) | DB architecture overview: three-DB model, cross-mount rules, readers/writers map |
-| [docs/db-central.md](docs/db-central.md) | Central DB (`data/v2.db`) — every table + migration system |
-| [docs/db-session.md](docs/db-session.md) | Per-session `inbound.db` + `outbound.db` schemas + seq parity |
-| [docs/agent-runner-details.md](docs/agent-runner-details.md) | Agent-runner internals + MCP tool interface |
-| [docs/isolation-model.md](docs/isolation-model.md) | Three-level channel isolation model |
-| [docs/setup-wiring.md](docs/setup-wiring.md) | What's wired, what's open in the setup flow |
-| [docs/architecture-diagram.md](docs/architecture-diagram.md) | Diagram version of the architecture |
-| [docs/build-and-runtime.md](docs/build-and-runtime.md) | Runtime split (Node host + Bun container), lockfiles, image build surface, CI, key invariants |
-| [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md) | v1→v2 architecture diff — vocabulary for where v1 things moved |
-| [docs/migration-dev.md](docs/migration-dev.md) | Migration development guide — testing, debugging, dev loop |
-| [docs/pages.md](docs/pages.md) | Per-group public static websites (Pages) + Traefik / reverse-proxy config |
-| [docs/agent-email.md](docs/agent-email.md) | Per-group Resend addresses, inbound reply routing, and settings behavior |
-| [docs/provider-migration.md](docs/provider-migration.md) | Switching a live agent group between providers (e.g. Claude → Codex) — what carries over, rollback |
-| [docs/customizing.md](docs/customizing.md) | Short intro to customizing via skills |
-| [docs/skills-model.md](docs/skills-model.md) | The skills model in full: recipes, tests, upgrades, migrations |
-| [docs/skill-guidelines.md](docs/skill-guidelines.md) | Authoritative checklist for writing a skill |
+| Doc                                                          | Purpose                                                                                            |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| [docs/architecture.md](docs/architecture.md)                 | Full architecture writeup                                                                          |
+| [docs/api-details.md](docs/api-details.md)                   | Host API + DB schema details                                                                       |
+| [docs/db.md](docs/db.md)                                     | DB architecture overview: three-DB model, cross-mount rules, readers/writers map                   |
+| [docs/db-central.md](docs/db-central.md)                     | Central DB (`data/v2.db`) — every table + migration system                                         |
+| [docs/db-session.md](docs/db-session.md)                     | Per-session `inbound.db` + `outbound.db` schemas + seq parity                                      |
+| [docs/agent-runner-details.md](docs/agent-runner-details.md) | Agent-runner internals + MCP tool interface                                                        |
+| [docs/isolation-model.md](docs/isolation-model.md)           | Three-level channel isolation model                                                                |
+| [docs/setup-wiring.md](docs/setup-wiring.md)                 | What's wired, what's open in the setup flow                                                        |
+| [docs/architecture-diagram.md](docs/architecture-diagram.md) | Diagram version of the architecture                                                                |
+| [docs/build-and-runtime.md](docs/build-and-runtime.md)       | Runtime split (Node host + Bun container), lockfiles, image build surface, CI, key invariants      |
+| [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md)         | v1→v2 architecture diff — vocabulary for where v1 things moved                                     |
+| [docs/migration-dev.md](docs/migration-dev.md)               | Migration development guide — testing, debugging, dev loop                                         |
+| [docs/pages.md](docs/pages.md)                               | Per-group public static websites (Pages) + Traefik / reverse-proxy config                          |
+| [docs/agent-email.md](docs/agent-email.md)                   | Per-group Resend addresses, inbound reply routing, and settings behavior                           |
+| [docs/provider-migration.md](docs/provider-migration.md)     | Switching a live agent group between providers (e.g. Claude → Codex) — what carries over, rollback |
+| [docs/customizing.md](docs/customizing.md)                   | Short intro to customizing via skills                                                              |
+| [docs/skills-model.md](docs/skills-model.md)                 | The skills model in full: recipes, tests, upgrades, migrations                                     |
+| [docs/skill-guidelines.md](docs/skill-guidelines.md)         | Authoritative checklist for writing a skill                                                        |
 
 ## Container Build Cache
 

@@ -13,7 +13,7 @@ import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { adoptRunningContainers } from './container-runner.js';
 import { getActiveSessions } from './db/sessions.js';
-import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
+import { startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { createDeliveryBridge } from './delivery-bridge.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { ensureVapidKeys } from './modules/push/bootstrap.js';
@@ -174,10 +174,10 @@ async function main(): Promise<void> {
   //     in-memory typingRefreshers map doesn't survive process restart.
   resumeTypingForRunningSessions();
 
-  // 5. Start delivery polls
-  startActiveDeliveryPoll();
+  // 5. Start the low-frequency crash-recovery delivery scan. New runner
+  //    messages trigger delivery directly from the session link.
   startSweepDeliveryPoll();
-  log.info('Delivery polls started');
+  log.info('Delivery recovery scan started');
 
   // 6. Start host sweep
   startHostSweep();

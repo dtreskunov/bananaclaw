@@ -138,4 +138,16 @@ describe('send_file MCP tool — multi-file batching', () => {
     const result = await sendFile.handler({ to: 'peer', paths: [path.join(tmpDir, 'nope.txt')] });
     expect(result.isError).toBe(true);
   });
+
+  it('rejects oversized batches and unsafe filename overrides before staging', async () => {
+    const file = path.join(tmpDir, 'safe.txt');
+    fs.writeFileSync(file, 'safe');
+
+    const oversized = await sendFile.handler({ to: 'peer', paths: Array.from({ length: 33 }, () => file) });
+    expect(oversized.isError).toBe(true);
+    const unsafe = await sendFile.handler({ to: 'peer', path: file, filename: '../escaped.txt' });
+    expect(unsafe.isError).toBe(true);
+    expect(getUndeliveredMessages()).toHaveLength(0);
+    expect(fs.existsSync(path.join(outboxRoot, 'escaped.txt'))).toBe(false);
+  });
 });

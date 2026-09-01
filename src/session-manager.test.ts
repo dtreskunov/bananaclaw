@@ -17,12 +17,7 @@ vi.mock('./config.js', async () => {
   return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-write-outbound' };
 });
 
-import {
-  initSessionFolder,
-  outboundDbPath,
-  readSessionUsageProgress,
-  writeOutboundDirect,
-} from './session-manager.js';
+import { initSessionFolder, outboundDbPath, readSessionUsageProgress, writeOutboundDirect } from './session-manager.js';
 import { sessionLinkSocketPath, startSessionSignalServer, stopSessionSignalServer } from './session-link.js';
 
 const TEST_DIR = '/tmp/nanoclaw-test-write-outbound';
@@ -131,7 +126,7 @@ describe('readSessionUsageProgress', () => {
       context_window: 1_048_576,
     };
     const before = Date.now();
-    await sendSignal({ v: 1, type: 'usage', usage });
+    await sendSignal({ v: 2, type: 'usage', usage });
     expect(readSessionUsageProgress(AG, SESS)).toEqual(usage);
     expect(readSessionUsageProgress(AG, SESS, before)).toEqual(usage);
     expect(readSessionUsageProgress(AG, SESS, Date.now() + 1)).toBeNull();

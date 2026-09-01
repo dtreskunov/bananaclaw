@@ -35,7 +35,14 @@ import { ForkError, forkThread } from './fork-session.js';
 import './providers/index.js';
 import { resolveProviderName } from './container-runner.js';
 import { readEnvFile } from './env.js';
-import { inboundDbPath, initSessionFolder, outboundDbPath, sessionDir } from './session-manager.js';
+import {
+  inboundDbPath,
+  initSessionFolder,
+  outboundDbPath,
+  sessionDir,
+  writeOutboundDirect,
+  writeSessionMessage,
+} from './session-manager.js';
 import type { Session } from './types.js';
 
 const TEST_DIR = '/tmp/nanoclaw-test-fork';
@@ -245,6 +252,34 @@ describe('forkThread', () => {
         { message_id: 'u1', status: 'completed' },
         { message_id: 'u2', status: 'completed' },
       ]);
+    } finally {
+      inDb.close();
+      outDb.close();
+    }
+  });
+
+  it('allocates new host sequences above inherited inbound and outbound rows', () => {
+    const result = fork('a2');
+    writeSessionMessage(AG, result.sessionId, {
+      id: 'new-in',
+      kind: 'chat',
+      timestamp: ts(10),
+      content: '{"text":"new inbound"}',
+    });
+    writeOutboundDirect(AG, result.sessionId, {
+      id: 'new-out',
+      kind: 'chat',
+      platformId: null,
+      channelType: null,
+      threadId: NEW_THREAD,
+      content: '{"text":"new outbound"}',
+    });
+
+    const inDb = new Database(inboundDbPath(AG, result.sessionId), { readonly: true });
+    const outDb = new Database(outboundDbPath(AG, result.sessionId), { readonly: true });
+    try {
+      expect(inDb.prepare("SELECT seq FROM messages_in WHERE id = 'new-in'").pluck().get()).toBe(6);
+      expect(outDb.prepare("SELECT seq FROM messages_out WHERE id = 'new-out'").pluck().get()).toBe(8);
     } finally {
       inDb.close();
       outDb.close();

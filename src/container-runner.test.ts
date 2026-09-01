@@ -2,7 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { packageDockerfile, resolveProviderName, sessionLinkMount, syncSkillSymlinks } from './container-runner.js';
+import {
+  outboundStoreMount,
+  inboundStoreMount,
+  packageDockerfile,
+  resolveProviderName,
+  sessionLinkMount,
+  syncSkillSymlinks,
+} from './container-runner.js';
 
 describe('packageDockerfile', () => {
   const none = { apt: [], npm: [], pip: [] };
@@ -70,6 +77,26 @@ describe('sessionLinkMount', () => {
   });
 });
 
+describe('outboundStoreMount', () => {
+  it('overlays the host-owned outbound database read-only', () => {
+    expect(outboundStoreMount('agent-a', 'session-a')).toEqual({
+      hostPath: expect.stringMatching(/[\\/]+data[\\/]+v2-sessions[\\/]+agent-a[\\/]+session-a[\\/]+outbound\.db$/),
+      containerPath: '/workspace/outbound.db',
+      readonly: true,
+    });
+  });
+});
+
+describe('inboundStoreMount', () => {
+  it('overlays the host-owned inbound database read-only', () => {
+    expect(inboundStoreMount('agent-a', 'session-a')).toEqual({
+      hostPath: expect.stringMatching(/[\\/]+data[\\/]+v2-sessions[\\/]+agent-a[\\/]+session-a[\\/]+inbound\.db$/),
+      containerPath: '/workspace/inbound.db',
+      readonly: true,
+    });
+  });
+});
+
 describe('syncSkillSymlinks', () => {
   it('converts selected fx copies back to symlinks and removes unselected shared copies', () => {
     const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
@@ -94,7 +121,8 @@ describe('syncSkillSymlinks', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('links a symlinked skill folder and repoints a slug that moved roots', () => {    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+  it('links a symlinked skill folder and repoints a slug that moved roots', () => {
+    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
     const claudeDir = path.join(root, 'claude');
     const builtin = path.join(root, 'builtin');
     const installed = path.join(root, 'installed');

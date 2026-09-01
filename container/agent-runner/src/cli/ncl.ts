@@ -30,7 +30,8 @@ type ResponseFrame =
 // ---------------------------------------------------------------------------
 
 const INBOUND_DB = '/workspace/inbound.db';
-const OUTBOUND_DB = '/workspace/outbound.db';
+const OUTBOUND_DB = '/workspace/runner-state.db';
+const HOST_OUTBOUND_DB = '/workspace/outbound.db';
 
 // ---------------------------------------------------------------------------
 // DB transport
@@ -53,12 +54,15 @@ function writeRequest(req: RequestFrame): void {
 
   const inDb = new Database(INBOUND_DB, { readonly: true });
   inDb.exec('PRAGMA busy_timeout = 5000');
+  const hostOutDb = new Database(HOST_OUTBOUND_DB, { readonly: true });
+  hostOutDb.exec('PRAGMA busy_timeout = 5000');
 
   try {
     db.exec('BEGIN IMMEDIATE');
     const maxOut = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
+    const maxHostOut = (hostOutDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
     const maxIn = (inDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
-    const max = Math.max(maxOut, maxIn);
+    const max = Math.max(maxOut, maxHostOut, maxIn);
     const nextSeq = max % 2 === 0 ? max + 1 : max + 2;
 
     db.prepare(
@@ -79,6 +83,7 @@ function writeRequest(req: RequestFrame): void {
     db.exec('ROLLBACK');
     throw e;
   } finally {
+    hostOutDb.close();
     inDb.close();
     db.close();
   }

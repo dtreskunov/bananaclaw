@@ -83,6 +83,29 @@ afterEach(() => {
 });
 
 describe('deliverSessionMessages — concurrent invocations', () => {
+  it('leaves messages replayable when delivery runs before adapter registration', async () => {
+    seedAgentAndChannel();
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    insertOutbound('ag-1', session.id, 'out-before-adapter');
+
+    await deliverSessionMessages(session);
+    const inbound = openInboundDb('ag-1', session.id);
+    expect(getDeliveredIds(inbound)).toEqual(new Set());
+
+    let callCount = 0;
+    setDeliveryAdapter({
+      async deliver() {
+        callCount++;
+        return 'plat-after-adapter';
+      },
+    });
+    await deliverSessionMessages(session);
+
+    expect(callCount).toBe(1);
+    expect(getDeliveredIds(inbound)).toEqual(new Set(['out-before-adapter']));
+    inbound.close();
+  });
+
   it('delivers a message exactly once when active and sweep polls overlap', async () => {
     seedAgentAndChannel();
     const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
@@ -127,6 +150,42 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     insertOutbound('ag-1', session.id, 'out-second');
     await deliverSessionMessages(session);
     expect(calls).toHaveLength(2);
+  });
+
+  it('reruns the drain when a new commit arrives while delivery is blocked', async () => {
+    seedAgentAndChannel();
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    insertOutbound('ag-1', session.id, 'out-first');
+
+    let releaseFirst!: () => void;
+    let firstEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      firstEntered = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const calls: string[] = [];
+    setDeliveryAdapter({
+      async deliver(_channelType, _platformId, _threadId, _kind, content) {
+        calls.push(content);
+        if (calls.length === 1) {
+          firstEntered();
+          await release;
+        }
+        return `plat-${calls.length}`;
+      },
+    });
+
+    const firstDrain = deliverSessionMessages(session);
+    await entered;
+    insertOutbound('ag-1', session.id, 'out-second');
+    await deliverSessionMessages(session);
+    releaseFirst();
+    await firstDrain;
+
+    expect(calls).toHaveLength(2);
+    expect(calls.map((content) => JSON.parse(content).text)).toEqual(['hello', 'hello']);
   });
 
   it('does not re-deliver when retried after a successful send (cleanup-after-send safety)', async () => {

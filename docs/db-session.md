@@ -1,6 +1,7 @@
 # NanoClaw — Per-Session DB Schema
 
-Reference for the two SQLite files each session owns: `inbound.db` (host writes, container reads) and `outbound.db` (container writes, host reads). Start with [db.md](db.md) for the three-DB overview, the single-writer rule, and the cross-mount visibility constraints.
+Reference for the three SQLite files in each session: host-owned `inbound.db`
+and `outbound.db`, plus runner-owned `runner-state.db`. Start with [db.md](db.md).
 
 Schemas live in `src/db/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA` constants. Both files are created by `ensureSchema()` in `src/session-manager.ts` when a new session folder is provisioned.
 
@@ -11,7 +12,8 @@ Schemas live in `src/db/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA`
 ```
 data/v2-sessions/<agent_group_id>/<session_id>/
   inbound.db              ← host writes, container reads (read-only mount)
-  outbound.db             ← container writes, host reads (read-only open)
+  outbound.db             ← host writes, container reads (read-only mount)
+  runner-state.db         ← runner projection + pending event journal
   inbox/<message_id>/     ← user attachments, decoded from inbound message content
   outbox/<message_id>/    ← attachments the agent produced
 ```
@@ -116,10 +118,11 @@ Written by `writeSessionRouting()` on every container wake, derived from `sessio
 
 ## 3. Sequence numbering invariant
 
-Every message (in or out) gets a monotonic integer `seq`, unique *within the session* across both tables.
+Every message (in or out) gets a monotonic integer `seq`, unique _within the session_ across both tables.
 
 - **Host writes even seq** (2, 4, 6, …) to `messages_in` — `nextEvenSeq()` at `src/db/session-db.ts:75`.
-- **Container writes odd seq** (1, 3, 5, …) to `messages_out` — logic at `container/agent-runner/src/db/messages-out.ts:54` (`max % 2 === 0 ? max + 1 : max + 2`), reading `MAX(seq)` across *both* tables to preserve global ordering.
+- **Runner assigns odd seq** (1, 3, 5, …) in its projection. The host validates
+  and applies that exact odd seq to `outbound.db`.
 
 Why disjoint? `seq` is the agent-facing message ID. When the agent calls `edit_message(seq=5)` or `add_reaction(seq=6)`, `getMessageIdBySeq()` uses the parity to route the lookup: odd → `messages_out`, even → `messages_in`. The parity alone disambiguates without a join. Collisions would break editing.
 
@@ -129,7 +132,8 @@ If you add a code path that writes to either table, preserve parity — the inva
 
 ## 4. Outbound DB (`outbound.db`)
 
-Container-owned, host reads only. Schema constant: `OUTBOUND_SCHEMA` in `src/db/schema.ts`.
+Host-owned durable projection. The container receives a read-only mount. Schema
+constant: `OUTBOUND_SCHEMA` in `src/db/schema.ts`.
 
 ### 4.1 `messages_out`
 
@@ -153,12 +157,13 @@ CREATE TABLE messages_out (
 
 Content shapes: see [api-details.md §Session DB Schema Details](api-details.md#session-db-schema-details).
 
-**Writer (container):** `writeMessageOut()` in `container/agent-runner/src/db/messages-out.ts`.
-**Readers (host):** `src/delivery.ts` (polling delivery), `getMessageIdBySeq()` / `getRoutingBySeq()` for edit/reaction targeting.
+**Writer (host):** `src/session-link-durable.ts`, after validating a journaled runner event.
+**Readers:** host delivery/UI/forking and runner sequence/reference lookups.
 
 ### 4.2 `processing_ack`
 
-Container-side status for each `messages_in.id` it has touched. The host polls this and syncs status back into `messages_in` — this avoids the container ever writing to `inbound.db`.
+Projected status for each `messages_in.id` the runner has touched. A
+`batch.persisted` event wakes host reconciliation.
 
 ```sql
 CREATE TABLE processing_ack (
@@ -168,11 +173,13 @@ CREATE TABLE processing_ack (
 );
 ```
 
-Crash recovery: on container startup, stale `processing` entries get cleared. Host-side sync: `syncProcessingAcks()` in `src/host-sweep.ts`.
+Crash recovery: runner startup clears stale local `processing` entries and
+journals their deletion. Host-side sync remains in `src/host-sweep.ts`.
 
 ### 4.3 `session_state`
 
-Persistent container-owned KV store. Main consumer is the Chat SDK session ID — storing it here lets the agent's conversation resume across container restarts. Cleared by `/clear`.
+Host projection of runner persistent KV state. The runner reads and mutates its
+local copy; acknowledged events keep this host copy current for forks and recovery.
 
 ```sql
 CREATE TABLE session_state (

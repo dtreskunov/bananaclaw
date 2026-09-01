@@ -1,7 +1,8 @@
 /**
  * Session lifecycle: folders, DBs, messages, container status.
  *
- * Two-DB split — inbound.db (host writes) + outbound.db (container writes).
+ * Host-owned session stores: inbound.db + outbound.db. The runner reads both
+ * and journals mutations in runner-state.db for delivery over the session link.
  * Three cross-mount invariants are load-bearing:
  *   1. journal_mode=DELETE — WAL's mmapped -shm doesn't refresh host→guest;
  *      the container would silently miss every new message.
@@ -34,14 +35,11 @@ import {
   openOutboundDbRw as openOutboundDbRwRaw,
   upsertSessionRouting,
   insertMessage,
+  nextEvenSeq,
 } from './db/session-db.js';
 import { log } from './log.js';
 import { extractInboundText, indexMessage } from './search-index.js';
-import {
-  getSessionSignalActivity,
-  getSessionSignalTurnEndedAt,
-  getSessionSignalUsage,
-} from './session-link.js';
+import { getSessionSignalActivity, getSessionSignalTurnEndedAt, getSessionSignalUsage } from './session-link.js';
 import type { Session } from './types.js';
 
 function isPathInside(parent: string, child: string): boolean {
@@ -64,9 +62,25 @@ export function inboundDbPath(agentGroupId: string, sessionId: string): string {
   return path.join(sessionDir(agentGroupId, sessionId), 'inbound.db');
 }
 
-/** Path to the container-owned outbound DB (messages_out + processing_ack). */
+/** Path to the host-owned outbound DB (messages_out + projected runner state). */
 export function outboundDbPath(agentGroupId: string, sessionId: string): string {
   return path.join(sessionDir(agentGroupId, sessionId), 'outbound.db');
+}
+
+export function runnerStateDbPath(agentGroupId: string, sessionId: string): string {
+  return path.join(sessionDir(agentGroupId, sessionId), 'runner-state.db');
+}
+
+export function seedRunnerState(agentGroupId: string, sessionId: string, overwrite = false): void {
+  const destination = runnerStateDbPath(agentGroupId, sessionId);
+  if (!overwrite && fs.existsSync(destination)) return;
+  fs.copyFileSync(outboundDbPath(agentGroupId, sessionId), destination);
+  const db = openOutboundDbRwRaw(destination);
+  try {
+    db.exec('DROP TABLE IF EXISTS applied_runner_events');
+  } finally {
+    db.close();
+  }
 }
 
 function generateId(): string {
@@ -133,6 +147,7 @@ export function initSessionFolder(agentGroupId: string, sessionId: string): void
 
   ensureSchema(inboundDbPath(agentGroupId, sessionId), 'inbound');
   ensureSchema(outboundDbPath(agentGroupId, sessionId), 'outbound');
+  seedRunnerState(agentGroupId, sessionId);
 }
 
 /**
@@ -405,7 +420,7 @@ export function openOutboundDb(agentGroupId: string, sessionId: string): Databas
   return openOutboundDbRaw(outboundDbPath(agentGroupId, sessionId));
 }
 
-/** Open the outbound DB for a session with write access. Only safe to call when no container is running. */
+/** Open the host-owned outbound DB for writes. */
 export function openOutboundDbRw(agentGroupId: string, sessionId: string): Database.Database {
   return openOutboundDbRwRaw(outboundDbPath(agentGroupId, sessionId));
 }
@@ -416,10 +431,8 @@ export function openOutboundDbRw(agentGroupId: string, sessionId: string): Datab
  * without waking a container.
  *
  * Needs the read-write open — the readonly handle the delivery poll uses
- * can't INSERT. This is a host-side write to the container-owned outbound.db,
- * but it's safe even with a container running: both sides open with DELETE
- * journal + busy_timeout, and the even host seq stays out of the container's
- * odd-seq space.
+ * can't INSERT. The host is now the only outbound.db writer; even host seqs
+ * remain disjoint from odd runner seqs.
  */
 export function writeOutboundDirect(
   agentGroupId: string,
@@ -434,12 +447,15 @@ export function writeOutboundDirect(
   },
 ): void {
   const db = openOutboundDbRw(agentGroupId, sessionId);
+  const inDb = openInboundDb(agentGroupId, sessionId);
   try {
+    const seq = nextEvenSeq(inDb);
     db.prepare(
       `INSERT OR IGNORE INTO messages_out (id, seq, timestamp, kind, platform_id, channel_type, thread_id, content)
-       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 2 FROM messages_out), datetime('now'), ?, ?, ?, ?, ?)`,
-    ).run(message.id, message.kind, message.platformId, message.channelType, message.threadId, message.content);
+       VALUES (?, ?, datetime('now'), ?, ?, ?, ?, ?)`,
+    ).run(message.id, seq, message.kind, message.platformId, message.channelType, message.threadId, message.content);
   } finally {
+    inDb.close();
     db.close();
   }
 }
@@ -457,11 +473,7 @@ export type { ActivityLine };
  * received over the per-session Unix socket and never read from the session
  * filesystem.
  */
-export function readSessionProgress(
-  _agentGroupId: string,
-  sessionId: string,
-  sinceMs?: number,
-): string | null {
+export function readSessionProgress(_agentGroupId: string, sessionId: string, sinceMs?: number): string | null {
   return activityHint(getSessionSignalActivity(sessionId, sinceMs));
 }
 
@@ -500,9 +512,9 @@ export function isSessionProcessing(agentGroupId: string, sessionId: string): bo
   let db: Database.Database | undefined;
   try {
     db = openOutboundDb(agentGroupId, sessionId);
-    const row = db
-      .prepare("SELECT 1 FROM processing_ack WHERE status = 'processing' LIMIT 1")
-      .get() as { 1: number } | undefined;
+    const row = db.prepare("SELECT 1 FROM processing_ack WHERE status = 'processing' LIMIT 1").get() as
+      | { 1: number }
+      | undefined;
     return !!row;
   } catch {
     return false;

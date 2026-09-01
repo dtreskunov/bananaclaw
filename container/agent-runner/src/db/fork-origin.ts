@@ -10,7 +10,7 @@
  * while the user stares at a full transcript.
  *
  * Read-only, like everything else in inbound.db. Consumption is recorded in
- * outbound.db (see `markForkOriginConsumed`) because the container must
+ * runner-state.db (see `markForkOriginConsumed`) because the container must
  * never write to the host's file.
  */
 import { openInboundDb } from './connection.js';

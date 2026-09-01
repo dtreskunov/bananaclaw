@@ -69,7 +69,7 @@ export function recordTaskScriptResult(taskMessageId: string, result: TaskScript
       result.signal,
       clip(result.stdout),
       clip(result.stderr),
-      result.error,
+      result.error === null ? null : clip(result.error),
       result.wakeAgent === null ? null : result.wakeAgent ? 1 : 0,
       taskMessageId,
     );

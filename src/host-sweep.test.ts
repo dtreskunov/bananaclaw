@@ -46,7 +46,7 @@ describe('decideStuckAction', () => {
     expect(res.action).toBe('kill-ceiling');
     if (res.action !== 'kill-ceiling') return;
     expect(res.ceilingMs).toBe(ABSOLUTE_CEILING_MS);
-    expect(res.signalAgeMs).toBeGreaterThan(ABSOLUTE_CEILING_MS);
+    expect(res.activeAgeMs).toBeGreaterThan(ABSOLUTE_CEILING_MS);
   });
 
   it('skips the ceiling check when a fresh container has not signaled yet', () => {
@@ -113,6 +113,34 @@ describe('decideStuckAction', () => {
       claims: [],
     });
     expect(res.action).toBe('ok');
+  });
+
+  it('kills a turn past the absolute ceiling even while heartbeats remain fresh', () => {
+    const res = decideStuckAction({
+      now: BASE,
+      lastSignalAtMs: BASE - 1_000,
+      containerState: null,
+      claims: [claim('msg-1', ABSOLUTE_CEILING_MS + 1)],
+    });
+    expect(res).toEqual({
+      action: 'kill-ceiling',
+      activeAgeMs: ABSOLUTE_CEILING_MS + 1,
+      ceilingMs: ABSOLUTE_CEILING_MS,
+    });
+  });
+
+  it('caps an untrusted declared Bash timeout', () => {
+    const res = decideStuckAction({
+      now: BASE,
+      lastSignalAtMs: BASE - 1_000,
+      containerState: {
+        current_tool: 'Bash',
+        tool_declared_timeout_ms: Number.MAX_SAFE_INTEGER,
+        tool_started_at: new Date(BASE - 7 * 60 * 60 * 1000).toISOString(),
+      },
+      claims: [claim('msg-1', 7 * 60 * 60 * 1000)],
+    });
+    expect(res.action).toBe('kill-ceiling');
   });
 
   it('returns kill-claim when a claim is past 60s and the signal timestamp has not moved', () => {
@@ -193,6 +221,11 @@ describe('decideStuckAction', () => {
 function makeSessionDbs(): { inDb: Database.Database; outDb: Database.Database } {
   const inDb = new Database(':memory:');
   inDb.exec(`
+    CREATE TABLE host_sequence (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_even INTEGER NOT NULL
+    );
+    INSERT INTO host_sequence VALUES (1, 0);
     CREATE TABLE messages_in (
       id            TEXT PRIMARY KEY,
       seq           INTEGER UNIQUE,
@@ -356,6 +389,7 @@ describe('resetStuckProcessingRows — failure bounce', () => {
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, thread_id, content) VALUES ('m-3', 2, 'chat', ?, 'pending', 5, 'chan-1', 'web', 'thread-1', '{\"text\":\"hi\"}')",
       )
       .run(claimedAt);
+    inDb.prepare('UPDATE host_sequence SET last_even = 2 WHERE id = 1').run();
     outDb.prepare("INSERT INTO processing_ack VALUES ('m-3', 'processing', ?)").run(claimedAt);
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');

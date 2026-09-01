@@ -30,7 +30,7 @@ import type Database from 'better-sqlite3';
 import fs from 'fs';
 
 import { ensureEgressNetwork } from './egress-lockdown.js';
-import { getActiveSessions } from './db/sessions.js';
+import { getActiveSessions, getSession } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import {
   countDueMessages,
@@ -48,6 +48,8 @@ import {
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath } from './session-manager.js';
 import { getSessionSignalLastSeenAt, getSessionSignalServerStartedAt } from './session-link.js';
+import { onSessionDurableProcessing } from './session-link.js';
+import { MAX_DECLARED_TOOL_TIMEOUT_MS } from './session-link-durable.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import { publishTaskRun } from './task-events.js';
 import type { Session } from './types.js';
@@ -77,7 +79,7 @@ const BACKOFF_BASE_MS = 5000;
 
 export type StuckDecision =
   | { action: 'ok' }
-  | { action: 'kill-ceiling'; signalAgeMs: number; ceilingMs: number }
+  | { action: 'kill-ceiling'; activeAgeMs: number; ceilingMs: number }
   | { action: 'kill-claim'; messageId: string; claimAgeMs: number; toleranceMs: number };
 
 /**
@@ -99,6 +101,14 @@ export function decideStuckAction(args: {
     return { action: 'ok' };
   }
 
+  const ceiling = Math.max(ABSOLUTE_CEILING_MS, declaredBashMs ?? 0);
+  for (const claim of claims) {
+    const claimedAt = parseSqliteUtc(claim.status_changed);
+    if (Number.isNaN(claimedAt)) continue;
+    const activeAgeMs = now - claimedAt;
+    if (activeAgeMs > ceiling) return { action: 'kill-ceiling', activeAgeMs, ceilingMs: ceiling };
+  }
+
   // Ceiling check only applies after the runner has sent a signal. A freshly
   // spawned container has not connected yet; if we treated that as infinitely stale we'd
   // kill every container within seconds of spawn. Genuinely-dead containers
@@ -108,9 +118,8 @@ export function decideStuckAction(args: {
   // claim-stuck check below handles it.
   if (lastSignalAtMs !== 0) {
     const signalAgeMs = now - lastSignalAtMs;
-    const ceiling = Math.max(ABSOLUTE_CEILING_MS, declaredBashMs ?? 0);
     if (signalAgeMs > ceiling) {
-      return { action: 'kill-ceiling', signalAgeMs, ceilingMs: ceiling };
+      return { action: 'kill-ceiling', activeAgeMs: signalAgeMs, ceilingMs: ceiling };
     }
   }
 
@@ -128,6 +137,34 @@ export function decideStuckAction(args: {
 }
 
 let running = false;
+const sessionSweeps = new Map<string, Promise<void>>();
+const dirtySessionSweeps = new Set<string>();
+
+onSessionDurableProcessing((sessionId) => {
+  const session = getSession(sessionId);
+  if (!session) return;
+  void requestSessionSweep(session).catch((err) => log.error('Event-driven session sweep failed', { sessionId, err }));
+});
+
+function requestSessionSweep(session: Session): Promise<void> {
+  const existing = sessionSweeps.get(session.id);
+  if (existing) {
+    dirtySessionSweeps.add(session.id);
+    return existing;
+  }
+  const promise = (async () => {
+    do {
+      dirtySessionSweeps.delete(session.id);
+      await sweepSession(getSession(session.id) ?? session);
+    } while (dirtySessionSweeps.delete(session.id));
+  })().finally(() => sessionSweeps.delete(session.id));
+  sessionSweeps.set(session.id, promise);
+  return promise;
+}
+
+export function _requestSessionSweepForTesting(session: Session): Promise<void> {
+  return requestSessionSweep(session);
+}
 
 export function startHostSweep(): void {
   if (running) return;
@@ -155,7 +192,7 @@ async function sweep(): Promise<void> {
   try {
     const sessions = getActiveSessions();
     for (const session of sessions) {
-      await sweepSession(session);
+      await requestSessionSweep(session);
     }
   } catch (err) {
     log.error('Host sweep error', { err });
@@ -169,11 +206,7 @@ async function sweep(): Promise<void> {
  * transitioned to completed. Channel adapters subscribe via `onTaskRun` and
  * decide whether/how to surface the firing; this stays channel-agnostic.
  */
-function emitTaskRuns(
-  inDb: Database.Database,
-  outDb: Database.Database | null,
-  completedIds: string[],
-): void {
+function emitTaskRuns(inDb: Database.Database, outDb: Database.Database | null, completedIds: string[]): void {
   try {
     const placeholders = completedIds.map(() => '?').join(',');
     const rows = inDb
@@ -196,9 +229,9 @@ function emitTaskRuns(
       let attempt: { status: string; trigger_source: string; error: string | null } | undefined;
       try {
         attempt = outDb
-          ? outDb.prepare(
-              `SELECT status, trigger_source, error FROM task_attempts WHERE task_message_id = ?`,
-            ).get(r.id) as typeof attempt
+          ? (outDb
+              .prepare(`SELECT status, trigger_source, error FROM task_attempts WHERE task_message_id = ?`)
+              .get(r.id) as typeof attempt)
           : undefined;
       } catch {
         attempt = undefined;
@@ -220,7 +253,8 @@ function emitTaskRuns(
         content: r.content,
         recurrence: r.recurrence,
         seriesId: r.series_id,
-        status: (attempt?.status as 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed') ?? 'completed',
+        status:
+          (attempt?.status as 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed') ?? 'completed',
         triggerSource: attempt?.trigger_source === 'manual' ? 'manual' : 'scheduled',
         error: attempt?.error ?? null,
         autoPaused,
@@ -317,7 +351,9 @@ function lastSignalAtMs(agentGroupId: string, sessionId: string): number {
 
 function bashTimeoutMs(state: ContainerState | null): number | null {
   if (!state || state.current_tool !== 'Bash') return null;
-  return typeof state.tool_declared_timeout_ms === 'number' ? state.tool_declared_timeout_ms : null;
+  return typeof state.tool_declared_timeout_ms === 'number'
+    ? Math.min(state.tool_declared_timeout_ms, MAX_DECLARED_TOOL_TIMEOUT_MS)
+    : null;
 }
 
 function enforceRunningContainerSla(
@@ -339,7 +375,7 @@ function enforceRunningContainerSla(
   if (decision.action === 'kill-ceiling') {
     log.warn('Killing container past absolute ceiling', {
       sessionId: session.id,
-      signalAgeMs: decision.signalAgeMs,
+      activeAgeMs: decision.activeAgeMs,
       ceilingMs: decision.ceilingMs,
     });
     killContainer(session.id, 'absolute-ceiling');
@@ -378,7 +414,7 @@ function resetStuckProcessingRows(
   // User-facing messages that were permanently abandoned this pass. The host
   // is the only actor that can speak for them — the container that would have
   // written an in-turn error notice is already gone. Bounced below via the
-  // writable outbound handle (safe: container confirmed not running).
+  // writable host-owned outbound handle.
   const bounces: Array<{ id: string }> = [];
   for (const { message_id } of claims) {
     const msg = getMessageForRetry(inDb, message_id, 'pending');

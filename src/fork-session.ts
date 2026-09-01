@@ -29,6 +29,8 @@ import {
   openInboundDb,
   openOutboundDb,
   openOutboundDbRw,
+  outboundDbPath,
+  seedRunnerState,
   sessionDir,
   writeSessionRouting,
 } from './session-manager.js';
@@ -453,6 +455,12 @@ function populateForkSession(args: {
         digest,
         created_at: args.createdAt,
       });
+
+    const inheritedEvenMax = [...inRows, ...outRows].reduce((maximum, row) => {
+      const seq = typeof row.seq === 'number' ? row.seq : 0;
+      return seq > maximum && seq % 2 === 0 ? seq : maximum;
+    }, 0);
+    dstIn.prepare('UPDATE host_sequence SET last_even = ? WHERE id = 1').run(inheritedEvenMax);
   } finally {
     dstIn.close();
   }
@@ -477,6 +485,8 @@ function populateForkSession(args: {
     srcOut.close();
     dstOut.close();
   }
+
+  seedRunnerState(agentGroupId, sessionId, true);
 
   const srcDir = sessionDir(agentGroupId, parentSessionId);
   const dstDir = sessionDir(agentGroupId, sessionId);

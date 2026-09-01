@@ -30,8 +30,9 @@ vi.mock('./container-runner.js', () => ({
 import { initTestDb, closeDb, runMigrations, createAgentGroup } from './db/index.js';
 import { createSession } from './db/sessions.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
-import { startHostSweep, stopHostSweep } from './host-sweep.js';
+import { _requestSessionSweepForTesting, startHostSweep, stopHostSweep } from './host-sweep.js';
 import { initSessionFolder, openOutboundDbRw, writeSessionMessage } from './session-manager.js';
+import type { Session } from './types.js';
 
 const TEST_DIR = '/tmp/nanoclaw-test-host-sweep-grace';
 const AG = 'ag-test';
@@ -146,6 +147,38 @@ describe('host sweep justWoke grace period', () => {
     await runSweepTick();
     expect(wakeContainer).toHaveBeenCalledTimes(1); // no second wake
     expect(killContainer).toHaveBeenCalledTimes(1);
-    expect(killContainer).toHaveBeenCalledWith(SESS, 'claim-stuck');
+    expect(killContainer).toHaveBeenCalledWith(SESS, 'absolute-ceiling');
+  });
+
+  it('reruns a session sweep when a batch notification arrives during wake', async () => {
+    let releaseWake!: () => void;
+    const wakeBlocked = new Promise<void>((resolve) => {
+      releaseWake = resolve;
+    });
+    vi.mocked(wakeContainer).mockImplementation(async () => {
+      await wakeBlocked;
+      vi.mocked(isContainerRunning).mockReturnValue(true);
+      return true;
+    });
+
+    const session = {
+      id: SESS,
+      agent_group_id: AG,
+      messaging_group_id: null,
+      thread_id: null,
+      agent_provider: null,
+      status: 'active',
+      container_status: 'stopped',
+      last_active: null,
+      created_at: now(),
+    } satisfies Session;
+    const first = _requestSessionSweepForTesting(session);
+    await vi.waitFor(() => expect(wakeContainer).toHaveBeenCalledTimes(1));
+    const overlapping = _requestSessionSweepForTesting(session);
+    releaseWake();
+    await Promise.all([first, overlapping]);
+
+    expect(killContainer).toHaveBeenCalledTimes(1);
+    expect(killContainer).toHaveBeenCalledWith(SESS, 'absolute-ceiling');
   });
 });

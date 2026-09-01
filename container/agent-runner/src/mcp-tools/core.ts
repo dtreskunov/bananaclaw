@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { isSafeAttachmentName } from '../attachment-safety.js';
 import { getCurrentInReplyTo, noteSendMessage } from '../current-batch.js';
 import { findByName, getAllDestinations } from '../destinations.js';
 import { stripThinkTags } from '../formatter.js';
@@ -177,6 +178,7 @@ export const sendFile: McpToolDefinition = {
         ? [args.path]
         : [];
     if (rawPaths.length === 0) return err('path or paths is required');
+      if (rawPaths.length > 32) return err('send_file supports at most 32 files per message');
 
     const routing = resolveRouting(args.to as string | undefined);
     if ('error' in routing) return err(routing.error);
@@ -186,6 +188,9 @@ export const sendFile: McpToolDefinition = {
       rawPaths.length === 1 && typeof args.filename === 'string' && args.filename.length > 0
         ? (args.filename as string)
         : undefined;
+    if (singleFilenameOverride && !isSafeAttachmentName(singleFilenameOverride)) {
+      return err('filename must be a plain file name without path separators');
+    }
     for (const p of rawPaths) {
       const abs = path.isAbsolute(p) ? p : path.resolve('/workspace/agent', p);
       if (!fs.existsSync(abs)) return err(`File not found: ${p}`);
@@ -195,7 +200,10 @@ export const sendFile: McpToolDefinition = {
       // will then be inert (no nav target).
       const rel = path.relative('/workspace/agent', abs);
       const workspacePath = rel.startsWith('..') || path.isAbsolute(rel) ? null : rel;
-      resolved.push({ src: abs, filename: singleFilenameOverride ?? path.basename(abs), workspacePath });
+      const filename = singleFilenameOverride ?? path.basename(abs);
+      if (!isSafeAttachmentName(filename)) return err(`Unsafe filename: ${filename}`);
+      if (workspacePath !== null && workspacePath.length > 4096) return err(`Workspace path is too long: ${p}`);
+      resolved.push({ src: abs, filename, workspacePath });
     }
 
     const id = generateId();

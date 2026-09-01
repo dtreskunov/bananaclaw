@@ -5,7 +5,8 @@ Last updated: 2026-04-09
 ## What's Done
 
 ### Two-DB Split (session DB write isolation)
-- Session DB split into `inbound.db` (host-owned) and `outbound.db` (container-owned)
+- Host owns `inbound.db` and the durable `outbound.db` projection; the runner
+    owns `runner-state.db` and journals mutations over the session link
 - Each file has exactly one writer — eliminates SQLite write contention across host-container mount
 - Host uses even seq numbers, container uses odd (collision-free)
 - Live heartbeat, activity, usage, and turn completion via the private
@@ -95,7 +96,7 @@ Channel adapter → routeInbound() → resolve messaging_group → resolve agent
 | `src/channels/index.ts` | Channel barrel — registry/Chat SDK bridge only in trunk; skills drop adapters in |
 | `src/router.ts` | Inbound routing, auto-creates messaging groups |
 | `src/session-manager.ts` | Creates inbound.db + outbound.db per session |
-| `src/delivery.ts` | Polls outbound.db, delivers, handles system actions |
+| `src/delivery.ts` | Delivers committed outbound rows, recovers after crashes, handles system actions |
 | `src/host-sweep.ts` | Syncs processing_ack, stale detection, recurrence |
 | `src/container-runner.ts` | Spawns containers, OneCLI ensureAgent + applyContainerConfig |
 | `setup/register.ts` | Creates entities (agent_group, messaging_group, wiring) |

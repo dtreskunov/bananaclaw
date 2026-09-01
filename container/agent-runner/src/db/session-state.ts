@@ -1,6 +1,6 @@
 /**
- * Persistent key/value state for the container. Lives in outbound.db
- * (container-owned, already scoped per channel/thread).
+ * Persistent key/value state for the container. Lives in runner-state.db and
+ * is projected to the host-owned outbound.db over the session link.
  *
  * Primary use: remember each provider's opaque continuation id so the
  * agent's conversation resumes across container restarts. Keyed per
@@ -10,6 +10,8 @@
  * on file and resumes cleanly if the user flips back.
  */
 import { getOutboundDb } from './connection.js';
+
+const MAX_STATE_CHARS = 1024 * 1024;
 
 function continuationKey(providerName: string): string {
   return `continuation:${providerName.toLowerCase()}`;
@@ -23,6 +25,9 @@ function getValue(key: string): string | undefined {
 }
 
 function setValue(key: string, value: string): void {
+  if (key.length === 0 || key.length > 256 || value.length === 0 || value.length > MAX_STATE_CHARS) {
+    throw new Error('session state exceeds durable link limits');
+  }
   getOutboundDb()
     .prepare('INSERT OR REPLACE INTO session_state (key, value, updated_at) VALUES (?, ?, ?)')
     .run(key, value, new Date().toISOString());

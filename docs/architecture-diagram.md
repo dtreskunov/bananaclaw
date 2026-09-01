@@ -34,9 +34,10 @@ flowchart TB
     Provider["Agent providers<br/>(claude, opencode, mock; todo: codex)"]
     MCP["MCP Tools<br/>send_message, send_file, edit_message,<br/>add_reaction, send_card, ask_user_question,<br/>schedule_task, create_agent,<br/>install_packages, add_mcp_server"]
     Skills["Container Skills<br/>(container/skills/)"]
-    InDB[("inbound.db<br/>host writes<br/>even seq<br/>messages_in<br/>destinations<br/>processing_ack")]
-    OutDB[("outbound.db<br/>container writes<br/>odd seq<br/>messages_out")]
-    SessionLink["runner.sock<br/>live status"]
+    InDB[("inbound.db<br/>host writes · runner reads<br/>even seq<br/>messages_in · destinations")]
+    OutDB[("outbound.db<br/>host writes · runner reads<br/>messages_out · projected state")]
+    RunnerState[("runner-state.db<br/>runner writes<br/>projection + event journal")]
+    SessionLink["runner.sock<br/>live + durable events"]
   end
 
   subgraph Groups["Agent Group Filesystem (groups/*)"]
@@ -53,11 +54,14 @@ flowchart TB
   Runner --> PollLoop
   PollLoop --> InDB
   PollLoop --> Provider
+  PollLoop --> RunnerState
+  RunnerState -->|ACK replay| SessionLink
   PollLoop -->|live signals| SessionLink
   SessionLink --> Runner
   Provider --> MCP
   Provider --> Skills
-  MCP --> OutDB
+  MCP --> RunnerState
+  SessionLink --> OutDB
   OutDB --> Delivery
   Delivery --> Central
   Delivery --> Bridge

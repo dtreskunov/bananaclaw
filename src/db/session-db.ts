@@ -1,8 +1,8 @@
 /**
  * SQL operations on per-session inbound/outbound DBs.
  *
- * These are NOT the central app DB — they're the cross-mount SQLite files
- * shared between host and container. Callers own the connection lifecycle
+ * These are NOT the central app DB. inbound.db and outbound.db are host-owned;
+ * the container mounts both read-only. Callers own the connection lifecycle
  * (open-write-close per op). See session-manager.ts header for invariants.
  */
 import Database from 'better-sqlite3';
@@ -26,14 +26,14 @@ export function openInboundDb(dbPath: string): Database.Database {
   return db;
 }
 
-/** Open the outbound DB for a session (host reads only). */
+/** Open the host-owned outbound DB for read-only queries. */
 export function openOutboundDb(dbPath: string): Database.Database {
   const db = new Database(dbPath, { readonly: true });
   db.pragma('busy_timeout = 5000');
   return db;
 }
 
-/** Open the outbound DB for a session with write access. Only safe to call when no container is running. */
+/** Open the host-owned outbound DB for writes. */
 export function openOutboundDbRw(dbPath: string): Database.Database {
   const db = new Database(dbPath);
   db.pragma('journal_mode = DELETE');
@@ -88,8 +88,10 @@ export function replaceDestinations(db: Database.Database, entries: DestinationR
  * the general public API — imported by `src/modules/scheduling/db.ts` only.
  */
 export function nextEvenSeq(db: Database.Database): number {
-  const maxSeq = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
-  return maxSeq < 2 ? 2 : maxSeq + 2 - (maxSeq % 2);
+  const row = db
+    .prepare('UPDATE host_sequence SET last_even = last_even + 2 WHERE id = 1 RETURNING last_even')
+    .get() as { last_even: number };
+  return row.last_even;
 }
 
 export function insertMessage(
@@ -202,11 +204,8 @@ export function getMessageRouting(
 
 /**
  * Write a host-originated chat message into outbound.db so the delivery loop
- * bounces it to the user. Only safe to call when no container is running (the
- * container owns outbound.db) — callers gate on that. The seq is chosen
- * strictly greater than every existing seq in BOTH session tables so it never
- * collides with a container-written outbound row or a host-written inbound row
- * (seq is looked up across both tables for edit/reaction targeting).
+ * bounces it to the user. The shared host sequence counter allocates an even
+ * seq disjoint from odd runner rows.
  */
 export function insertOutboundBounce(
   outDb: Database.Database,
@@ -220,9 +219,7 @@ export function insertOutboundBounce(
     text: string;
   },
 ): void {
-  const maxOut = (outDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
-  const maxIn = (inDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
-  const seq = Math.max(maxOut, maxIn) + 1;
+  const seq = nextEvenSeq(inDb);
   outDb
     .prepare(
       `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, kind, platform_id, channel_type, thread_id, content)

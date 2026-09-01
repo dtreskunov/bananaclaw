@@ -1,7 +1,7 @@
 /**
  * Per-turn activity trace: the ordered list of progress steps (tool calls,
- * phases) the agent emitted during a turn. Written to `turn_activity` in
- * outbound.db by the poll-loop at turn end, linked to the turn's last
+ * phases) the agent emitted during a turn. Written to the journaled local
+ * projection at turn end and applied to host `turn_activity`, linked to the
  * outbound row. Read by the host UI so historical messages can show the
  * same expandable activity trace the user saw live.
  *

@@ -102,6 +102,7 @@ beforeEach(() => {
                '0 9 * * *', ?, 1, ?, 'web', ?, ?)`,
     )
     .run(SERIES_ID, NOW, SERIES_ID, PLATFORM_ID, THREAD_ID, JSON.stringify({ prompt: 'Find deals' }));
+  inDb.prepare('UPDATE host_sequence SET last_even = 2 WHERE id = 1').run();
   inDb.close();
 });
 

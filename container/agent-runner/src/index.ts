@@ -10,7 +10,8 @@
  * Mount structure:
  *   /workspace/
  *     inbound.db        ← host-owned session DB (container reads only)
- *     outbound.db       ← container-owned session DB
+ *     outbound.db       ← host-owned durable store (RO)
+ *     runner-state.db   ← runner projection + pending event journal
  *     outbox/           ← outbound files
  *     agent/            ← agent group folder (CLAUDE.md, container.json, working files)
  *       container.json  ← per-group config (RO nested mount)

@@ -1,7 +1,7 @@
 /**
  * Per-turn provider usage: cost, tokens, model, timing.
- * Written to `turn_usage` in outbound.db by the poll-loop after each
- * provider result. Read by the host UI for per-message and per-thread
+ * Written to the journaled local projection after each provider result and
+ * applied to host `turn_usage`. Read by the host UI for per-message and per-thread
  * usage display.
  */
 import { getOutboundDb } from './connection.js';

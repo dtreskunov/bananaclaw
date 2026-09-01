@@ -147,8 +147,9 @@
           router. The router resolves the messaging group → agent group → session
           and writes to the session's <code>inbound.db</code>. The container runner
           spawns a per-session container (auth via OneCLI), and the agent-runner
-          polls its DB, calls Claude, and writes responses to <code>outbound.db</code>.
-          Delivery polls the outbound DB, re-validates destinations, and ships
+          polls inbound work, calls the provider, and journals responses in
+          <code>runner-state.db</code>. The session link applies them to the
+          host-owned outbound store and wakes delivery,
           messages back through the same bridge.
         </p>
         <div class="diagram">
@@ -184,7 +185,9 @@ flowchart TB
     Provider["Claude Agent SDK<br/>(codex / opencode planned)"]
     MCP["MCP Tools<br/>send_message · send_file · edit_message<br/>send_card · ask_user_question · schedule_task<br/>create_agent · install_packages · add_mcp_server<br/>request_rebuild"]
     InDB[("inbound.db<br/>host writes · even seq")]
-    OutDB[("outbound.db<br/>container writes · odd seq")]
+    OutDB[("outbound.db<br/>host writes · runner reads")]
+    RunnerState[("runner-state.db<br/>runner projection + journal")]
+    SessionLink["runner.sock<br/>live + durable events"]
   end
 
   Folder["Agent Group FS<br/>groups/*<br/>CLAUDE.md · memory · skills"]
@@ -199,8 +202,12 @@ flowchart TB
   Runner --> PollLoop
   PollLoop --> InDB
   PollLoop --> Provider
+  PollLoop --> RunnerState
+  RunnerState -->|ACK replay| SessionLink
+  PollLoop -->|live signals| SessionLink
   Provider --> MCP
-  MCP --> OutDB
+  MCP --> RunnerState
+  SessionLink --> OutDB
   OutDB --> Delivery
   Delivery --> Central
   Delivery --> Bridge

@@ -5,12 +5,17 @@ import path from 'node:path';
 
 import { reduceActivityLines, type ActivityStep } from './activity.js';
 import type { ActivityLine, UsageSnapshot } from './channels/adapter.js';
-import { DATA_DIR } from './config.js';
+import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
+import { applyDurableRunnerEvent } from './session-link-durable.js';
 
-const PROTOCOL_VERSION = 1;
-export const SESSION_LINK_VERSION = 'v1';
-const MAX_FRAME_BYTES = 16 * 1024;
+const PROTOCOL_VERSION = 2;
+export const SESSION_LINK_VERSION = 'v2';
+const MAX_LIVE_FRAME_BYTES = 16 * 1024;
+const MAX_FRAME_BYTES = Math.ceil((CONTAINER_MAX_OUTPUT_SIZE * 4) / 3) + 2 * 1024 * 1024;
+const MAX_FRAME_BYTES_PER_SECOND = 24 * 1024 * 1024;
+const MAX_GLOBAL_FRAMES_PER_SECOND = 512;
+const MAX_GLOBAL_FRAME_BYTES_PER_SECOND = 32 * 1024 * 1024;
 const MAX_FRAMES_PER_SECOND = 256;
 const MAX_CONNECTIONS_PER_SECOND = 32;
 const MAX_ACTIVITY_LINES = 128;
@@ -25,6 +30,7 @@ interface SessionSignalState {
   lastSeenAt: number;
   rateWindowStartedAt: number;
   framesThisWindow: number;
+  frameBytesThisWindow: number;
   connectionWindowStartedAt: number;
   connectionsThisWindow: number;
   activity: ActivityLine[];
@@ -34,6 +40,7 @@ interface SessionSignalState {
 }
 
 interface SessionSignalServer {
+  agentGroupId: string | null;
   server: net.Server;
   connection: net.Socket | null;
   suspended: boolean;
@@ -41,10 +48,35 @@ interface SessionSignalServer {
 }
 
 type SignalListener = (sessionId: string, kind: SignalKind) => void;
+type DurableMessageListener = (sessionId: string) => void;
+type DurableProcessingListener = (sessionId: string) => void;
 
 const servers = new Map<string, SessionSignalServer>();
 const states = new Map<string, SessionSignalState>();
 const listeners = new Set<SignalListener>();
+const durableMessageListeners = new Set<DurableMessageListener>();
+const durableProcessingListeners = new Set<DurableProcessingListener>();
+let globalRateWindowStartedAt = 0;
+let globalFramesThisWindow = 0;
+let globalFrameBytesThisWindow = 0;
+
+function decodeDurablePayload(eventType: string, value: unknown): unknown {
+  if (eventType !== 'message.upsert') return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid wire message payload');
+  const payload = value as Record<string, unknown>;
+  if (typeof payload.content_base64 !== 'string' || 'content' in payload)
+    throw new Error('invalid wire message content');
+  const encoded = payload.content_base64;
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+    throw new Error('invalid base64 message content');
+  }
+  const content = Buffer.from(encoded, 'base64');
+  if (content.length > CONTAINER_MAX_OUTPUT_SIZE || content.toString('base64') !== encoded) {
+    throw new Error('invalid base64 message content');
+  }
+  const { content_base64: _contentBase64, ...rest } = payload;
+  return { ...rest, content: content.toString('utf8') };
+}
 
 function emptyState(): SessionSignalState {
   return {
@@ -53,6 +85,7 @@ function emptyState(): SessionSignalState {
     lastSeenAt: 0,
     rateWindowStartedAt: 0,
     framesThisWindow: 0,
+    frameBytesThisWindow: 0,
     connectionWindowStartedAt: 0,
     connectionsThisWindow: 0,
     activity: [],
@@ -84,6 +117,16 @@ function emit(sessionId: string, kind: SignalKind): void {
 export function onSessionSignal(listener: SignalListener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+export function onSessionDurableMessage(listener: DurableMessageListener): () => void {
+  durableMessageListeners.add(listener);
+  return () => durableMessageListeners.delete(listener);
+}
+
+export function onSessionDurableProcessing(listener: DurableProcessingListener): () => void {
+  durableProcessingListeners.add(listener);
+  return () => durableProcessingListeners.delete(listener);
 }
 
 function socketKey(sessionId: string): string {
@@ -302,10 +345,39 @@ function sanitizeUsage(value: unknown): UsageSnapshot | null {
   return output;
 }
 
-function applyFrame(sessionId: string, raw: unknown): boolean {
+function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown): boolean {
   if (!raw || typeof raw !== 'object') return false;
   const frame = raw as Record<string, unknown>;
   if (frame.v !== PROTOCOL_VERSION || typeof frame.type !== 'string') return false;
+
+  if (frame.type === 'durable') {
+    if (
+      !entry.agentGroupId ||
+      !hasOnlyKeys(frame, ['v', 'type', 'eventId', 'sequence', 'event']) ||
+      typeof frame.eventId !== 'string' ||
+      !Number.isSafeInteger(frame.sequence) ||
+      !frame.event ||
+      typeof frame.event !== 'object' ||
+      Array.isArray(frame.event)
+    )
+      return false;
+    const event = frame.event as Record<string, unknown>;
+    if (!hasOnlyKeys(event, ['type', 'payload']) || typeof event.type !== 'string') return false;
+    const payload = decodeDurablePayload(event.type, event.payload);
+    const result = applyDurableRunnerEvent(entry.agentGroupId, sessionId, {
+      eventId: frame.eventId,
+      sequence: Number(frame.sequence),
+      event: { type: event.type, payload },
+    });
+    entry.connection?.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'ack', eventId: frame.eventId })}\n`);
+    if (result.deliveryReady) {
+      for (const listener of durableMessageListeners) listener(sessionId);
+    }
+    if (result.processingReady) {
+      for (const listener of durableProcessingListeners) listener(sessionId);
+    }
+    return true;
+  }
 
   const state = stateFor(sessionId);
   const now = Date.now();
@@ -401,19 +473,55 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
       if (now - state.rateWindowStartedAt >= 1_000) {
         state.rateWindowStartedAt = now;
         state.framesThisWindow = 0;
+        state.frameBytesThisWindow = 0;
       }
       state.framesThisWindow++;
-      if (state.framesThisWindow > MAX_FRAMES_PER_SECOND) {
+      state.frameBytesThisWindow += Buffer.byteLength(line);
+      if (now - globalRateWindowStartedAt >= 1_000) {
+        globalRateWindowStartedAt = now;
+        globalFramesThisWindow = 0;
+        globalFrameBytesThisWindow = 0;
+      }
+      globalFramesThisWindow++;
+      globalFrameBytesThisWindow += Buffer.byteLength(line);
+      if (
+        state.framesThisWindow > MAX_FRAMES_PER_SECOND ||
+        state.frameBytesThisWindow > MAX_FRAME_BYTES_PER_SECOND ||
+        globalFramesThisWindow > MAX_GLOBAL_FRAMES_PER_SECOND ||
+        globalFrameBytesThisWindow > MAX_GLOBAL_FRAME_BYTES_PER_SECOND
+      ) {
         connection.destroy();
         return;
       }
+      let parsed: Record<string, unknown> | null = null;
       try {
-        if (!applyFrame(sessionId, JSON.parse(line))) {
+        parsed = JSON.parse(line) as Record<string, unknown>;
+        if (parsed.type !== 'durable' && Buffer.byteLength(line) > MAX_LIVE_FRAME_BYTES) {
           connection.destroy();
           return;
         }
-      } catch {
-        connection.destroy();
+        if (!applyFrame(sessionId, entry, parsed)) {
+          connection.destroy();
+          return;
+        }
+      } catch (err) {
+        if (parsed?.type === 'durable' && typeof parsed.eventId === 'string') {
+          const error = err instanceof Error ? err.message.slice(0, 256) : 'rejected';
+          connection.end(`${JSON.stringify({
+            v: PROTOCOL_VERSION,
+            type: 'nack',
+            eventId: parsed.eventId,
+            fatal: true,
+            code: 'durable_rejected',
+            error,
+          })}\n`);
+        } else {
+          connection.destroy();
+        }
+        log.warn('Rejected session link frame', {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return;
       }
     }
@@ -471,7 +579,7 @@ function suspendSessionSignalServer(sessionId: string, entry: SessionSignalServe
   });
 }
 
-export async function startSessionSignalServer(sessionId: string): Promise<void> {
+export async function startSessionSignalServer(sessionId: string, agentGroupId: string | null = null): Promise<void> {
   if (servers.has(sessionId)) return;
   const directory = sessionLinkDir(sessionId);
   const socketPath = sessionLinkSocketPath(sessionId);
@@ -483,6 +591,7 @@ export async function startSessionSignalServer(sessionId: string): Promise<void>
   fs.rmSync(socketPath, { force: true });
 
   const entry: SessionSignalServer = {
+    agentGroupId,
     server: net.createServer(),
     connection: null,
     suspended: false,

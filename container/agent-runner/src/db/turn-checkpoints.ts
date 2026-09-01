@@ -2,8 +2,8 @@
  * Per-turn branch points: the provider-private handle for the turn that
  * produced a given outbound row, plus the continuation it belonged to.
  *
- * Written to `turn_checkpoints` in outbound.db by the poll-loop after each
- * provider result. Read by the *host* when forking a thread, to tell the
+ * Written to the journaled local projection after each provider result and
+ * applied to host `turn_checkpoints`. Read by the host when forking a thread.
  * new session's provider exactly where to cut the parent session. Without a
  * row here a fork can only replay a plain-text digest, so the cost of
  * writing one is paid on every turn to keep every message forkable.

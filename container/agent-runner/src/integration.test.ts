@@ -67,6 +67,33 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
+  it('publishes a completed batch without waiting for the warm query to close', async () => {
+    insertMessage('m1', { sender: 'Alice', text: 'Hello' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const provider = new MockProvider({}, () => '<message to="discord-test">Hi</message>');
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
+
+    await waitFor(
+      () =>
+        (
+          getOutboundDb()
+            .prepare("SELECT COUNT(*) AS count FROM pending_runner_events WHERE event_type = 'batch.persisted'")
+            .get() as { count: number }
+        ).count > 0,
+      2000,
+    );
+
+    const boundaries = getOutboundDb()
+      .prepare("SELECT event_type FROM pending_runner_events WHERE event_type LIKE '%.persisted' ORDER BY sequence")
+      .all() as { event_type: string }[];
+    expect(boundaries.map((row) => row.event_type)).toEqual(['turn.persisted', 'batch.persisted']);
+    expect(getPendingMessages()).toHaveLength(0);
+
+    controller.abort();
+    await loopPromise.catch(() => {});
+  });
+
   it('should process multiple messages in a batch', async () => {
     insertMessage('m1', { sender: 'Alice', text: 'Hello' });
     insertMessage('m2', { sender: 'Bob', text: 'World' });

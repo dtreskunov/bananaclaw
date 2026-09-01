@@ -9,7 +9,7 @@ the approval handler itself — there is no separate "request rebuild" step.
 ## What this module adds
 
 - Two delivery actions (`install_packages`, `add_mcp_server`) that the
-  container's self-mod MCP tools write into outbound.db. On the host, each
+  runner's self-mod MCP tools journal durable system events. On the host, each
   handler validates input and queues an approval via
   `approvals.requestApproval()`.
 - Two matching approval handlers that run on approve:

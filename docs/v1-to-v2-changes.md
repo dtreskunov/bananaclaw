@@ -50,7 +50,8 @@ Consequences:
 
 1. `data/v2.db` — **central**. Everything that isn't per-session: users, roles, agent groups, messaging groups, wirings, pending approvals, user DMs, schema migrations.
 2. `data/v2-sessions/<session_id>/inbound.db` — **host writes, container reads**. `messages_in`, routing, destinations, pending questions, processing_ack. This is where scheduled tasks live (see "Scheduling" below).
-3. `data/v2-sessions/<session_id>/outbound.db` — **container writes, host reads**. `messages_out`, session_state.
+3. `data/v2-sessions/<session_id>/outbound.db` — **host-owned durable runner projection**. `messages_out`, session state, activity, usage.
+4. `data/v2-sessions/<session_id>/runner-state.db` — **container-owned** local projection and unacknowledged event journal.
 
 Exactly one writer per file. No cross-mount lock contention. Host uses even
 `seq` numbers and the container uses odd. Live runner status uses a private
@@ -140,8 +141,8 @@ Owner gets seeded during the `/migrate-from-v1` skill's interview phase ("Which 
 **v1:** single Node process. The "agent" was the same process as the router.
 
 **v2:** Node host at top, Bun-runtime Docker container per session. Durable
-messages use the two session DBs; live runner status uses a private per-session
-Unix socket. There are no shared modules or stdin piping. If you wrote custom
+host-to-runner messages use `inbound.db`; all runner-to-host state uses a private
+per-session Unix socket with acknowledged durable events. There are no shared modules or stdin piping. If you wrote custom
 code that reached from the agent into host internals (or vice versa), that
 surface no longer exists — porting it is a `/migrate-from-v1` skill topic, not
 a mechanical copy.

@@ -4,7 +4,10 @@ Admin-gated approval flow for agent self-modification and OneCLI credential acce
 
 ### Two flows
 
-**Agent-initiated (DB-backed, fire-and-forget).** The container writes a `system`-kind outbound row with one of two actions — `install_packages`, `add_mcp_server`. The module's delivery-action handlers validate, route to the right approver's DM, and persist a `pending_approvals` row. When the admin clicks a button, the registered response handler applies the change (config update → image rebuild if needed → container kill) and notifies the agent via system chat.
+**Agent-initiated (durable, fire-and-forget).** The runner journals a
+`system`-kind outbound event with one of two actions — `install_packages`,
+`add_mcp_server`. The host validates and commits it before delivery-action
+handlers route to the approver and persist `pending_approvals`.
 
 **OneCLI credential (long-poll).** The OneCLI gateway holds an HTTP connection open when it needs credential approval. `onecli-approvals.ts` delivers a card, persists a `pending_approvals` row (action = `onecli_credential`), and waits on an in-memory Promise that resolves on click or expiry timer. Survives host restart: the startup sweep edits stale cards to "Expired (host restarted)" and drops the rows.
 

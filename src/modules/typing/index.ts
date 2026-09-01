@@ -195,10 +195,8 @@ export function startTypingRefresh(
     const entry = typingRefreshers.get(sessionId);
     if (!entry) return; // stopped externally since this tick was scheduled
 
-    // turn_ended_at is also checked from the active delivery poll
-    // (`checkTurnEndedAndStop`) for sub-second clear, but keep the
-    // same check here in case the delivery poll lags or the session
-    // isn't being actively polled.
+    // turn.end normally stops typing directly from the session-link listener;
+    // keep the same check here as a defensive fallback.
     if (stopIfTurnEnded(sessionId, entry)) return;
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;

@@ -1,13 +1,15 @@
 /**
- * Two-DB connection layer.
+ * Runner session storage connections.
  *
  * The session uses two SQLite files to eliminate write contention across
  * the host-container mount boundary:
  *
  *   inbound.db  — host writes new messages here; container opens READ-ONLY
- *   outbound.db — container writes responses + acks here; host opens read-only
+ *   outbound.db — host-owned durable projection; container opens READ-ONLY
+ *   runner-state.db — runner-owned projection + pending event journal
  *
- * Each file has exactly one writer, so no cross-process lock contention.
+ * Each file has exactly one writer. Runner mutations land in runner-state.db
+ * and are acknowledged over the session link after the host applies them.
  *
  * ⚠ Cross-mount visibility: inbound.db MUST be journal_mode=DELETE (set by
  * the host when the file is created). WAL's `-shm` is memory-mapped and
@@ -18,9 +20,13 @@
  * scripts/sanity-live-poll.ts for the empirical validation.
  */
 import { Database } from 'bun:sqlite';
+import fs from 'node:fs';
+import { ensureRunnerStateSchema } from './runner-state.js';
 
 const DEFAULT_INBOUND_PATH = '/workspace/inbound.db';
-const DEFAULT_OUTBOUND_PATH = '/workspace/outbound.db';
+const DEFAULT_HOST_OUTBOUND_PATH = '/workspace/outbound.db';
+const DEFAULT_RUNNER_STATE_PATH = '/workspace/runner-state.db';
+const MAX_DECLARED_TOOL_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 let _inbound: Database | null = null;
 let _outbound: Database | null = null;
@@ -45,7 +51,11 @@ export function openInboundDb(): Database {
   // so the singleton survives for the rest of the test.
   if (_testMode && _inbound) {
     const db = _inbound;
-    return { prepare: (sql: string) => db.prepare(sql), exec: (sql: string) => db.exec(sql), close: () => {} } as unknown as Database;
+    return {
+      prepare: (sql: string) => db.prepare(sql),
+      exec: (sql: string) => db.exec(sql),
+      close: () => {},
+    } as unknown as Database;
   }
   const db = new Database(DEFAULT_INBOUND_PATH, { readonly: true });
   db.exec('PRAGMA busy_timeout = 5000');
@@ -68,15 +78,34 @@ export function getInboundDb(): Database {
   return _inbound;
 }
 
-/** Outbound DB — container owns this file (sole writer). */
+/** Runner-private projection and durable event journal. */
 export function getOutboundDb(): Database {
   if (!_outbound) {
-    _outbound = new Database(DEFAULT_OUTBOUND_PATH);
+    if (!_testMode && !fs.existsSync(DEFAULT_RUNNER_STATE_PATH)) {
+      throw new Error('runner-state.db is missing; refusing to reset durable session state');
+    }
+    _outbound = new Database(DEFAULT_RUNNER_STATE_PATH);
     _outbound.exec('PRAGMA journal_mode = DELETE');
     _outbound.exec('PRAGMA busy_timeout = 5000');
     _outbound.exec('PRAGMA foreign_keys = ON');
+    ensureRunnerStateSchema(_outbound);
   }
   return _outbound;
+}
+
+export function openHostOutboundDb(): Database {
+  if (_testMode && _outbound) {
+    const db = _outbound;
+    return {
+      prepare: (sql: string) => db.prepare(sql),
+      exec: (sql: string) => db.exec(sql),
+      close: () => {},
+    } as unknown as Database;
+  }
+  const db = new Database(DEFAULT_HOST_OUTBOUND_PATH, { readonly: true });
+  db.exec('PRAGMA busy_timeout = 5000');
+  db.exec('PRAGMA mmap_size = 0');
+  return db;
 }
 
 /**
@@ -86,6 +115,10 @@ export function getOutboundDb(): Database {
  */
 export function setContainerToolInFlight(tool: string, declaredTimeoutMs: number | null): void {
   const now = new Date().toISOString();
+  const boundedTimeoutMs =
+    declaredTimeoutMs !== null && Number.isFinite(declaredTimeoutMs) && declaredTimeoutMs >= 0
+      ? Math.min(Math.floor(declaredTimeoutMs), MAX_DECLARED_TOOL_TIMEOUT_MS)
+      : null;
   getOutboundDb()
     .prepare(
       `INSERT INTO container_state (id, current_tool, tool_declared_timeout_ms, tool_started_at, updated_at)
@@ -96,7 +129,7 @@ export function setContainerToolInFlight(tool: string, declaredTimeoutMs: number
          tool_started_at = excluded.tool_started_at,
          updated_at = excluded.updated_at`,
     )
-    .run(tool, declaredTimeoutMs, now, now);
+    .run(tool.slice(0, 256), boundedTimeoutMs, now, now);
 }
 
 /** Clear the in-flight tool — called on PostToolUse / PostToolUseFailure. */
@@ -281,6 +314,7 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
     CREATE INDEX idx_task_attempts_series_started
       ON task_attempts(series_id, started_at DESC);
   `);
+  ensureRunnerStateSchema(_outbound);
 
   return { inbound: _inbound, outbound: _outbound };
 }

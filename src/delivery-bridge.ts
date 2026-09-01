@@ -1,5 +1,5 @@
 /**
- * Bridge between the polling delivery layer (delivery.ts) and channel
+ * Bridge between the durable delivery layer (delivery.ts) and channel
  * adapters (channels/). Wraps `getChannelAdapter` lookup plus per-adapter
  * capability handling:
  *

@@ -165,11 +165,17 @@ CREATE TABLE pending_sender_approvals (
  * This eliminates SQLite write contention across the host-container mount boundary.
  *
  *   inbound.db  — host writes, container reads (read-only mount or open read-only)
- *   outbound.db — container writes, host reads (read-only open)
+ *   outbound.db — host writes validated runner events; container reads only
  */
 
 /** Host-owned: inbound messages + delivery tracking + destination map. */
 export const INBOUND_SCHEMA = `
+CREATE TABLE IF NOT EXISTS host_sequence (
+  id        INTEGER PRIMARY KEY CHECK (id = 1),
+  last_even INTEGER NOT NULL CHECK (last_even >= 0 AND last_even % 2 = 0)
+);
+INSERT OR IGNORE INTO host_sequence (id, last_even) VALUES (1, 0);
+
 CREATE TABLE IF NOT EXISTS messages_in (
   id             TEXT PRIMARY KEY,
   seq            INTEGER UNIQUE,
@@ -217,7 +223,7 @@ CREATE TABLE IF NOT EXISTS messages_in (
 CREATE INDEX IF NOT EXISTS idx_messages_in_series ON messages_in(series_id);
 
 -- Host tracks delivery outcomes for messages_out IDs.
--- Avoids writing to outbound.db (container-owned).
+-- Keeps channel delivery receipts with the host-owned inbound routing state.
 CREATE TABLE IF NOT EXISTS delivered (
   message_out_id      TEXT PRIMARY KEY,
   platform_message_id TEXT,
@@ -283,7 +289,7 @@ CREATE TABLE IF NOT EXISTS fork_origin (
 );
 `;
 
-/** Container-owned: outbound messages + processing acknowledgments. */
+/** Host-owned projection of durable runner output and state. */
 export const OUTBOUND_SCHEMA = `
 CREATE TABLE IF NOT EXISTS messages_out (
   id             TEXT PRIMARY KEY,
@@ -299,8 +305,8 @@ CREATE TABLE IF NOT EXISTS messages_out (
   content        TEXT NOT NULL
 );
 
--- Container tracks processing status here instead of updating messages_in.
--- Host reads this to know which messages have been processed.
+-- Host projects runner processing status here instead of allowing the
+-- container to update messages_in.
 -- On container startup, stale 'processing' entries are cleared (crash recovery).
 CREATE TABLE IF NOT EXISTS processing_ack (
   message_id     TEXT PRIMARY KEY,
@@ -317,8 +323,8 @@ CREATE TABLE IF NOT EXISTS session_state (
   updated_at TEXT NOT NULL
 );
 
--- Current tool-in-flight state. Single-row table (id=1). Container writes on
--- PreToolUse and clears on PostToolUse / PostToolUseFailure. Host reads in the
+-- Current tool-in-flight state. Single-row table (id=1). Runner events update
+-- it on PreToolUse / PostToolUse; host sweep reads it to
 -- sweep to extend the stuck-tolerance window when Bash is running with a
 -- declared timeout > 60s (long-running scripts shouldn't be flagged as stuck).
 CREATE TABLE IF NOT EXISTS container_state (
@@ -388,4 +394,12 @@ CREATE TABLE IF NOT EXISTS task_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_task_attempts_series_started
   ON task_attempts(series_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS applied_runner_events (
+  event_id   TEXT PRIMARY KEY,
+  sequence   INTEGER NOT NULL UNIQUE,
+  event_type TEXT NOT NULL,
+  event_digest TEXT NOT NULL,
+  applied_at TEXT NOT NULL
+);
 `;

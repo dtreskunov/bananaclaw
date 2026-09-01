@@ -2,10 +2,10 @@
 
 ## Core Idea
 
-Each agent session has two mounted SQLite databases for durable messages:
-`messages_in` carries host → runner work and `messages_out` carries durable
-runner → host output. Live runner status uses a private per-session Unix socket.
-There is no stdin piping or signal-file protocol.
+Each agent session has host-owned `inbound.db` and `outbound.db` stores plus a
+runner-owned `runner-state.db`. The runner reads host state through read-only
+mounts and sends live and journaled durable events over a private per-session
+Unix socket. There is no stdin or signal-file protocol.
 
 ## Two-Level DB
 
@@ -14,11 +14,11 @@ There is no stdin piping or signal-file protocol.
 - Maps platform IDs → agent groups → sessions
 - Channel adapters don't touch this directly — the host does the lookup
 
-**Per-session DB (mounted into container):**
-- messages_in (written by host, read by agent-runner)
-- messages_out (written by agent-runner, read by host)
-- Everything is a message: chat, tasks, webhooks, system actions, agent-to-agent — all use these two tables
-- One DB per session, not per agent group
+**Per-session state:**
+- `inbound.db`: host writes, runner reads
+- `outbound.db`: host applies validated runner events, runner reads
+- `runner-state.db`: runner projection and pending event journal
+- Everything durable is scoped per session, not per agent group
 
 ## Agent Groups vs Sessions
 
@@ -36,8 +36,8 @@ Platform event
   → Container spins up (or is already running)
   → Agent-runner polls its session DB, finds new messages
   → Agent-runner processes with Claude
-  → Agent-runner writes response to session DB
-  → Host polls active session DBs for responses
+  → Agent-runner journals response in runner-state.db
+  → Session link sends it to the host and waits for a post-commit ACK
   → Host reads response, looks up conversation, delivers through channel adapter
 ```
 

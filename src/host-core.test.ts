@@ -39,6 +39,10 @@ vi.mock('./container-runner.js', () => ({
   killContainer: vi.fn(),
 }));
 
+vi.mock('./delivery.js', () => ({
+  deliverSessionMessages: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Override DATA_DIR for tests
 vi.mock('./config.js', async () => {
   const actual = await vi.importActual('./config.js');
@@ -475,6 +479,40 @@ describe('router', () => {
 
     // Verify container was woken
     expect(wakeContainer).toHaveBeenCalled();
+  });
+
+  it('delivers a host-generated command denial without waking a container', async () => {
+    const { routeInbound } = await import('./router.js');
+    const { deliverSessionMessages } = await import('./delivery.js');
+    const { wakeContainer } = await import('./container-runner.js');
+    vi.mocked(deliverSessionMessages).mockClear();
+    vi.mocked(wakeContainer).mockClear();
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: null,
+      message: {
+        id: 'msg-denied',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'User', text: '/clear' }),
+        timestamp: now(),
+      },
+    });
+
+    const session = findSession('mg-1', null);
+    expect(session).toBeDefined();
+    expect(deliverSessionMessages).toHaveBeenCalledWith(session);
+    expect(wakeContainer).not.toHaveBeenCalled();
+
+    const db = new Database(outboundDbPath('ag-1', session!.id), { readonly: true });
+    try {
+      expect(JSON.parse(db.prepare('SELECT content FROM messages_out').pluck().get() as string).text).toContain(
+        'Permission denied',
+      );
+    } finally {
+      db.close();
+    }
   });
 
   it('auto-creates messaging group only when the bot is addressed (mention/DM)', async () => {

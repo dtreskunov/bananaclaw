@@ -1,37 +1,61 @@
 import net from 'node:net';
 
+import { getOutboundDb } from './db/connection.js';
+import { acknowledgeRunnerEvent, listPendingRunnerEvents } from './db/runner-state.js';
 import type { ActivityStep, TurnUsage } from './providers/types.js';
 
 const DEFAULT_SOCKET_PATH = '/run/nanoclaw/runner.sock';
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 const MAX_FRAME_BYTES = 16 * 1024;
+const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
+const MAX_DURABLE_FRAME_BYTES = Math.ceil((MAX_OUTPUT_BYTES * 4) / 3) + 2 * 1024 * 1024;
 const MAX_ACTIVITY_LINES = 128;
+const DURABLE_ACK_TIMEOUT_MS = 10_000;
 const INITIAL_RECONNECT_MS = 100;
 const MAX_RECONNECT_MS = 5_000;
 
 type SignalFrame =
-  | { v: 1; type: 'heartbeat' }
-  | { v: 1; type: 'activity.clear' }
-  | { v: 1; type: 'activity'; step: ActivityStep }
-  | { v: 1; type: 'usage.clear' }
-  | { v: 1; type: 'usage'; usage: TurnUsage }
-  | { v: 1; type: 'turn.resume' }
-  | { v: 1; type: 'turn.end' };
+  | { v: 2; type: 'heartbeat' }
+  | { v: 2; type: 'activity.clear' }
+  | { v: 2; type: 'activity'; step: ActivityStep }
+  | { v: 2; type: 'usage.clear' }
+  | { v: 2; type: 'usage'; usage: TurnUsage }
+  | { v: 2; type: 'turn.resume' }
+  | { v: 2; type: 'turn.end' };
+
+interface DurableFrame {
+  v: 2;
+  type: 'durable';
+  eventId: string;
+  sequence: number;
+  event: { type: string; payload: unknown };
+}
 
 export class SessionSignalClient {
   private socket: net.Socket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectMs = INITIAL_RECONNECT_MS;
+  private pumpTimer: ReturnType<typeof setInterval> | null = null;
+  private sentAt = new Map<string, number>();
   private running = false;
   private activity: ActivityStep[] = [];
   private usage: TurnUsage | null = null;
   private turnEnded = false;
+  private durableBlocked = false;
 
-  constructor(private readonly socketPath = DEFAULT_SOCKET_PATH) {}
+  constructor(
+    private readonly socketPath = DEFAULT_SOCKET_PATH,
+    private readonly onDurableFailure: (message: string) => void = (message) => {
+      console.error(`[session-link] ${message}`);
+      process.exit(75);
+    },
+  ) {}
 
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.pumpTimer = setInterval(() => this.flushDurable(), 50);
+    this.pumpTimer.unref?.();
     this.connect();
   }
 
@@ -39,9 +63,12 @@ export class SessionSignalClient {
     this.running = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    if (this.pumpTimer) clearInterval(this.pumpTimer);
+    this.pumpTimer = null;
     const socket = this.socket;
     this.socket = null;
     socket?.destroy();
+    this.sentAt.clear();
   }
 
   heartbeat(): void {
@@ -92,7 +119,57 @@ export class SessionSignalClient {
     this.socket = socket;
     socket.once('connect', () => {
       if (this.socket !== socket) return;
+      this.sentAt.clear();
       this.replaySnapshot();
+      this.flushDurable();
+    });
+    let buffer = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk: string) => {
+      buffer += chunk;
+      let newline: number;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (Buffer.byteLength(line) > MAX_FRAME_BYTES) {
+          socket.destroy();
+          return;
+        }
+        try {
+          const frame = JSON.parse(line) as Record<string, unknown>;
+          if (frame.v !== PROTOCOL_VERSION || typeof frame.eventId !== 'string') {
+            socket.destroy();
+            return;
+          }
+          if (frame.type === 'ack' && Object.keys(frame).every((key) => ['v', 'type', 'eventId'].includes(key))) {
+            acknowledgeRunnerEvent(getOutboundDb(), frame.eventId);
+            this.sentAt.delete(frame.eventId);
+            this.flushDurable();
+          } else if (
+            frame.type === 'nack' &&
+            frame.fatal === true &&
+            frame.code === 'durable_rejected' &&
+            typeof frame.error === 'string' &&
+            Object.keys(frame).every((key) => ['v', 'type', 'eventId', 'fatal', 'code', 'error'].includes(key))
+          ) {
+            const pending = getOutboundDb()
+              .prepare('SELECT sequence FROM pending_runner_events WHERE event_id = ?')
+              .get(frame.eventId) as { sequence: number } | undefined;
+            if (!pending) {
+              socket.destroy();
+              return;
+            }
+            this.blockDurable(pending.sequence, `host rejected event: ${frame.error}`);
+          } else {
+            socket.destroy();
+            return;
+          }
+        } catch {
+          socket.destroy();
+          return;
+        }
+      }
+      if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) socket.destroy();
     });
     socket.once('error', () => socket.destroy());
     socket.once('close', () => {
@@ -129,6 +206,58 @@ export class SessionSignalClient {
   private encode(frame: SignalFrame): string | null {
     const encoded = `${JSON.stringify(frame)}\n`;
     return Buffer.byteLength(encoded) <= MAX_FRAME_BYTES ? encoded : null;
+  }
+
+  private flushDurable(): void {
+    if (this.durableBlocked || !this.socket?.writable || this.socket.connecting) return;
+    const now = Date.now();
+    if (this.sentAt.size > 0) {
+      const oldestSentAt = Math.min(...this.sentAt.values());
+      if (now - oldestSentAt >= DURABLE_ACK_TIMEOUT_MS) this.socket.destroy();
+      return;
+    }
+    for (const pending of listPendingRunnerEvents(getOutboundDb(), 1)) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(pending.payload);
+      } catch {
+        this.blockDurable(pending.sequence, 'invalid journal JSON');
+        return;
+      }
+      if (pending.event_type === 'message.upsert') {
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          this.blockDurable(pending.sequence, 'invalid message payload');
+          return;
+        }
+        const row = payload as Record<string, unknown>;
+        if (typeof row.content !== 'string') {
+          this.blockDurable(pending.sequence, 'missing message content');
+          return;
+        }
+        const { content, ...rest } = row;
+        payload = { ...rest, content_base64: Buffer.from(content, 'utf8').toString('base64') };
+      }
+      const frame: DurableFrame = {
+        v: PROTOCOL_VERSION,
+        type: 'durable',
+        eventId: pending.event_id,
+        sequence: pending.sequence,
+        event: { type: pending.event_type, payload },
+      };
+      const encoded = `${JSON.stringify(frame)}\n`;
+      if (Buffer.byteLength(encoded) > MAX_DURABLE_FRAME_BYTES) {
+        this.blockDurable(pending.sequence, 'event exceeds wire limit');
+        return;
+      }
+      this.socket.write(encoded);
+      this.sentAt.set(pending.event_id, now);
+    }
+  }
+
+  private blockDurable(sequence: number, reason: string): void {
+    this.durableBlocked = true;
+    this.stop();
+    this.onDurableFailure(`durable event ${sequence} blocked: ${reason}`);
   }
 }
 

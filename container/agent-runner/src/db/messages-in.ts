@@ -2,10 +2,11 @@
  * Inbound message operations (container side).
  *
  * Reads from inbound.db (host-owned, opened read-only).
- * Writes processing status to processing_ack in outbound.db (container-owned).
+ * Writes processing status to the runner-state projection. Triggers journal
+ * the mutation for the host-owned outbound.db.
  *
  * The container never writes to inbound.db — all status tracking goes through
- * processing_ack. The host reads processing_ack to sync message lifecycle.
+ * processing_ack. The host applies journaled changes over the session link.
  */
 import { getConfig } from '../config.js';
 import { openInboundDb, getOutboundDb } from './connection.js';
@@ -45,7 +46,7 @@ function getMaxMessagesPerPrompt(): number {
 
 /**
  * Fetch pending messages that are due for processing.
- * Reads from inbound.db (read-only), filters against processing_ack in outbound.db
+ * Reads from inbound.db (read-only), filters against local processing_ack
  * to skip messages already picked up by this or a previous container run.
  *
  * Returns the most recent `MAX_MESSAGES_PER_PROMPT` pending rows in
@@ -72,7 +73,7 @@ export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
 
     if (pending.length === 0) return [];
 
-    // Filter out messages already acknowledged in outbound.db
+    // Filter out messages already acknowledged in the local projection.
     const ackedIds = new Set(
       (outbound.prepare('SELECT message_id FROM processing_ack').all() as Array<{ message_id: string }>).map(
         (r) => r.message_id,
@@ -87,7 +88,7 @@ export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
   }
 }
 
-/** Mark messages as processing — writes to processing_ack in outbound.db. */
+/** Mark messages as processing in the journaled local projection. */
 export function markProcessing(ids: string[]): void {
   if (ids.length === 0) return;
   const db = getOutboundDb();
@@ -99,7 +100,7 @@ export function markProcessing(ids: string[]): void {
   })();
 }
 
-/** Mark messages as completed — updates processing_ack in outbound.db. */
+/** Mark messages as completed in the journaled local projection. */
 export function markCompleted(ids: string[]): void {
   if (ids.length === 0) return;
   const db = getOutboundDb();
@@ -111,7 +112,7 @@ export function markCompleted(ids: string[]): void {
   })();
 }
 
-/** Mark a single message as failed — writes to processing_ack in outbound.db. */
+/** Mark a single message as failed in the journaled local projection. */
 export function markFailed(id: string): void {
   getOutboundDb()
     .prepare(
