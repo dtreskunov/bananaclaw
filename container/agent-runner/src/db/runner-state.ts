@@ -14,6 +14,70 @@ const enqueue = (eventType: string, payload: string): string => `
 
 export function ensureRunnerStateSchema(db: Database): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS messages_in (
+      id TEXT PRIMARY KEY,
+      seq INTEGER UNIQUE,
+      kind TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      process_after TEXT,
+      recurrence TEXT,
+      series_id TEXT,
+      tries INTEGER NOT NULL DEFAULT 0,
+      trigger INTEGER NOT NULL DEFAULT 1,
+      platform_id TEXT,
+      channel_type TEXT,
+      thread_id TEXT,
+      content TEXT NOT NULL,
+      source_session_id TEXT,
+      on_wake INTEGER NOT NULL DEFAULT 0,
+      sender_user_id TEXT,
+      sender_identity TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_runner_messages_in_series ON messages_in(series_id);
+    CREATE TABLE IF NOT EXISTS destinations (
+      name TEXT PRIMARY KEY,
+      display_name TEXT,
+      type TEXT NOT NULL,
+      channel_type TEXT,
+      platform_id TEXT,
+      agent_group_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS session_routing (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      channel_type TEXT,
+      platform_id TEXT,
+      thread_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS fork_origin (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      parent_session_id TEXT NOT NULL,
+      parent_continuation TEXT,
+      provider TEXT NOT NULL,
+      anchor_ref TEXT,
+      digest TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS thread_titles (
+      channel_type TEXT NOT NULL,
+      platform_id TEXT NOT NULL DEFAULT '',
+      thread_id TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'model',
+      request_message_id TEXT NOT NULL,
+      published INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (channel_type, platform_id, thread_id)
+    );
+    CREATE TABLE IF NOT EXISTS host_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS applied_host_events (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_sequence INTEGER NOT NULL
+    );
+    INSERT OR IGNORE INTO applied_host_events (id, last_sequence) VALUES (1, 0);
     CREATE TABLE IF NOT EXISTS messages_out (
       id TEXT PRIMARY KEY,
       seq INTEGER UNIQUE,

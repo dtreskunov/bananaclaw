@@ -22,6 +22,26 @@ async function waitForFile(filePath: string): Promise<void> {
 }
 
 describe('writeMessageOut', () => {
+  it('keeps the rollback journal beside the mounted runner database', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-runner-journal-'));
+    roots.push(root);
+    const stateDir = path.join(root, 'runner-state');
+    fs.mkdirSync(stateDir);
+    const dbPath = path.join(stateDir, 'runner-state.db');
+    const db = new Database(dbPath);
+    db.exec('PRAGMA journal_mode = DELETE');
+    db.exec('CREATE TABLE state (value TEXT)');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('INSERT INTO state VALUES (?)').run('pending');
+      expect(fs.existsSync(`${dbPath}-journal`)).toBe(true);
+      expect(path.dirname(`${dbPath}-journal`)).toBe(stateDir);
+    } finally {
+      db.exec('ROLLBACK');
+      db.close();
+    }
+  });
+
   it('rejects host-incompatible message collections before journaling', async () => {
     const { closeSessionDb, getOutboundDb, initTestSessionDb } = await import('./connection.js');
     const { writeMessageOut } = await import('./messages-out.js');
@@ -44,8 +64,6 @@ describe('writeMessageOut', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-message-seq-'));
     roots.push(root);
     const runnerPath = path.join(root, 'runner-state.db');
-    const inboundPath = path.join(root, 'inbound.db');
-    const hostOutboundPath = path.join(root, 'outbound.db');
     const readyPath = path.join(root, 'ready');
     const resultPath = path.join(root, 'result');
 
@@ -53,13 +71,6 @@ describe('writeMessageOut', () => {
     runner.exec('PRAGMA journal_mode = DELETE');
     runner.exec('PRAGMA busy_timeout = 5000');
     ensureRunnerStateSchema(runner);
-
-    const inbound = new Database(inboundPath);
-    inbound.exec('CREATE TABLE messages_in (seq INTEGER)');
-    inbound.close();
-    const hostOutbound = new Database(hostOutboundPath);
-    hostOutbound.exec('CREATE TABLE messages_out (seq INTEGER)');
-    hostOutbound.close();
 
     runner.exec('BEGIN IMMEDIATE');
     runner
@@ -76,18 +87,13 @@ describe('writeMessageOut', () => {
       import { writeMessageOutWithConnections } from ${JSON.stringify(moduleUrl)};
       const runner = new Database(${JSON.stringify(runnerPath)});
       runner.exec('PRAGMA busy_timeout = 5000');
-      const inbound = new Database(${JSON.stringify(inboundPath)}, { readonly: true });
-      const hostOutbound = new Database(${JSON.stringify(hostOutboundPath)}, { readonly: true });
       fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready');
       const seq = writeMessageOutWithConnections(
         { id: 'sidecar-writer', kind: 'system', content: '{}' },
         runner,
-        inbound,
-        hostOutbound,
+        runner,
       );
       fs.writeFileSync(${JSON.stringify(resultPath)}, String(seq));
-      hostOutbound.close();
-      inbound.close();
       runner.close();
     `;
     const child = Bun.spawn([process.execPath, '-e', childScript], { stdout: 'pipe', stderr: 'pipe' });

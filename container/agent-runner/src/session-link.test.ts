@@ -25,7 +25,7 @@ async function listen(socketPath: string, lines: string[], acknowledge = false):
         if (acknowledge) {
           const frame = JSON.parse(lines.at(-1)!) as { type?: string; eventId?: string };
           if (frame.type === 'durable' && frame.eventId) {
-            socket.write(`${JSON.stringify({ v: 2, type: 'ack', eventId: frame.eventId })}\n`);
+            socket.write(`${JSON.stringify({ v: 3, type: 'ack', eventId: frame.eventId })}\n`);
           }
         }
         buffer = buffer.slice(newline + 1);
@@ -56,6 +56,77 @@ afterEach(async () => {
 });
 
 describe('SessionSignalClient', () => {
+  it('commits host events before ACK and waits for host.ready at startup', async () => {
+    initTestSessionDb();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
+    roots.push(root);
+    const socketPath = path.join(root, 'runner.sock');
+    const acknowledgements: Array<Record<string, unknown>> = [];
+    const server = net.createServer((socket) => {
+      sockets.push(socket);
+      socket.setEncoding('utf8');
+      let buffer = '';
+      socket.on('data', (chunk) => {
+        buffer += chunk;
+        let newline: number;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const frame = JSON.parse(buffer.slice(0, newline)) as Record<string, unknown>;
+          buffer = buffer.slice(newline + 1);
+          if (frame.type === 'host.ack') {
+            acknowledgements.push(frame);
+            socket.write(`${JSON.stringify({ v: 3, type: 'host.ready' })}\n`);
+          }
+        }
+      });
+      socket.write(
+        `${JSON.stringify({
+          v: 3,
+          type: 'host.event',
+          eventId: 'host-1',
+          sequence: 1,
+          event: {
+            type: 'message.upsert',
+            payload: {
+              id: 'in-1',
+              seq: 2,
+              kind: 'chat',
+              timestamp: '2026-09-01 00:00:00',
+              status: 'pending',
+              process_after: null,
+              recurrence: null,
+              series_id: 'in-1',
+              tries: 0,
+              trigger: 1,
+              platform_id: 'chat-1',
+              channel_type: 'web',
+              thread_id: null,
+              content_base64: Buffer.from('{"text":"hello"}').toString('base64'),
+              source_session_id: null,
+              on_wake: 0,
+              sender_user_id: null,
+              sender_identity: 'web:user-1',
+            },
+          },
+        })}\n`,
+      );
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socketPath, resolve);
+    });
+    servers.push(server);
+
+    const client = new SessionSignalClient(socketPath);
+    await client.start();
+
+    expect(acknowledgements).toEqual([{ v: 3, type: 'host.ack', eventId: 'host-1' }]);
+    expect(getOutboundDb().prepare('SELECT id, content FROM messages_in').get()).toEqual({
+      id: 'in-1',
+      content: '{"text":"hello"}',
+    });
+    client.stop();
+  });
+
   it('sends live signals and replays the bounded current snapshot after reconnect', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
     roots.push(root);
@@ -115,7 +186,7 @@ describe('SessionSignalClient', () => {
     );
     const durable = lines.map((line) => JSON.parse(line)).find((frame) => frame.type === 'durable');
     expect(durable).toMatchObject({
-      v: 2,
+      v: 3,
       sequence: 1,
       event: {
         type: 'message.upsert',
@@ -148,7 +219,7 @@ describe('SessionSignalClient', () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(durableFrames()).toHaveLength(1);
 
-    sockets[0].write(`${JSON.stringify({ v: 2, type: 'ack', eventId: durableFrames()[0].eventId })}\n`);
+    sockets[0].write(`${JSON.stringify({ v: 3, type: 'ack', eventId: durableFrames()[0].eventId })}\n`);
     await waitFor(() => durableFrames().length === 2);
     expect(durableFrames().map((frame) => frame.sequence)).toEqual([1, 2]);
     client.stop();
@@ -203,7 +274,7 @@ describe('SessionSignalClient', () => {
           durableFrames++;
           socket.write(
             `${JSON.stringify({
-              v: 2,
+              v: 3,
               type: 'nack',
               eventId: frame.eventId,
               fatal: true,

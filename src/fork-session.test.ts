@@ -42,6 +42,7 @@ import {
   sessionDir,
   writeOutboundDirect,
   writeSessionMessage,
+  runnerStateDbPath,
 } from './session-manager.js';
 import type { Session } from './types.js';
 
@@ -311,6 +312,26 @@ describe('forkThread', () => {
     // Without a per-turn anchor the fork can only be reconstructed from the
     // digest, no matter what the provider supports.
     expect(result.fidelity).toBe('transcript');
+  });
+
+  it('seeds runner state separately while retaining ordered host events for the fork', () => {
+    const result = fork('a1');
+    const runnerDb = new Database(runnerStateDbPath(AG, result.sessionId), { readonly: true });
+    const inDb = new Database(inboundDbPath(AG, result.sessionId), { readonly: true });
+    try {
+      expect(
+        runnerDb.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_in'").pluck().get(),
+      ).toBe(0);
+      expect(inDb.prepare('SELECT sequence FROM pending_host_events ORDER BY sequence').pluck().all()).toEqual(
+        Array.from(
+          { length: Number(inDb.prepare('SELECT COUNT(*) FROM pending_host_events').pluck().get()) },
+          (_, index) => index + 1,
+        ),
+      );
+    } finally {
+      runnerDb.close();
+      inDb.close();
+    }
   });
 
   it('carries the parent title so the branch is not left untitled', () => {

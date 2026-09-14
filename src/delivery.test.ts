@@ -34,7 +34,7 @@ import {
   createMessagingGroup,
   createMessagingGroupAgent,
 } from './db/index.js';
-import { getDeliveredIds } from './db/session-db.js';
+import { getDeliveredIds, markDelivered } from './db/session-db.js';
 import { resolveSession, outboundDbPath, openInboundDb } from './session-manager.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
 
@@ -104,6 +104,47 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     expect(callCount).toBe(1);
     expect(getDeliveredIds(inbound)).toEqual(new Set(['out-before-adapter']));
     inbound.close();
+  });
+
+  it('resolves stable outbound edit targets to platform delivery receipts', async () => {
+    seedAgentAndChannel();
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    const outDb = new Database(outboundDbPath('ag-1', session.id));
+    outDb
+      .prepare(
+        `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
+         VALUES ('original', datetime('now'), 'chat', 'telegram:123', 'telegram', '{"text":"before"}'),
+                ('edit-op', datetime('now'), 'chat', 'telegram:123', 'telegram',
+                 '{"operation":"edit","messageId":"original","text":"after"}')`,
+      )
+      .run();
+    outDb.close();
+    const inDb = openInboundDb('ag-1', session.id);
+    markDelivered(inDb, 'original', 'platform-original');
+    inDb.close();
+
+    const deliveredContents: string[] = [];
+    setDeliveryAdapter({
+      async deliver(_channelType, _platformId, _threadId, _kind, content) {
+        deliveredContents.push(content);
+        return 'platform-edit';
+      },
+    });
+    await deliverSessionMessages(session);
+
+    expect(deliveredContents).toHaveLength(1);
+    expect(JSON.parse(deliveredContents[0])).toMatchObject({
+      operation: 'edit',
+      messageId: 'platform-original',
+      text: 'after',
+    });
+    const stored = new Database(outboundDbPath('ag-1', session.id), { readonly: true });
+    try {
+      expect(JSON.parse(stored.prepare("SELECT content FROM messages_out WHERE id = 'edit-op'").pluck().get() as string))
+        .toMatchObject({ messageId: 'original' });
+    } finally {
+      stored.close();
+    }
   });
 
   it('delivers a message exactly once when active and sweep polls overlap', async () => {

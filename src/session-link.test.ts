@@ -17,8 +17,10 @@ import {
   startSessionSignalServer,
   stopAllSessionSignalServers,
   stopSessionSignalServer,
+  notifySessionHostState,
 } from './session-link.js';
-import { initSessionFolder, outboundDbPath } from './session-manager.js';
+import { inboundDbPath, initSessionFolder, outboundDbPath } from './session-manager.js';
+import { insertMessage } from './db/session-db.js';
 import Database from 'better-sqlite3';
 
 const SESSION_ID = 'session-a';
@@ -27,7 +29,10 @@ const AGENT_GROUP_ID = 'agent-a';
 function connect(): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(sessionLinkSocketPath(SESSION_ID));
-    socket.once('connect', () => resolve(socket));
+    socket.once('connect', () => {
+      socket.resume();
+      resolve(socket);
+    });
     socket.once('error', reject);
   });
 }
@@ -38,6 +43,14 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error('condition not reached');
+}
+
+function parsedFrames(value: string): Array<Record<string, unknown>> {
+  return value
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 beforeEach(async () => {
@@ -55,17 +68,17 @@ afterEach(async () => {
 describe('session signal link', () => {
   it('accepts bounded live state for only the mounted session', async () => {
     const socket = await connect();
-    socket.write(`${JSON.stringify({ v: 2, type: 'activity.clear' })}\n`);
+    socket.write(`${JSON.stringify({ v: 3, type: 'activity.clear' })}\n`);
     socket.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'activity',
         step: { kind: 'tool', id: 'read-1', tool: 'read', status: 'running', detail: 'src/index.ts' },
       })}\n`,
     );
     socket.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'usage',
         usage: {
           cost_usd: 0.1,
@@ -77,7 +90,7 @@ describe('session signal link', () => {
         },
       })}\n`,
     );
-    socket.write(`${JSON.stringify({ v: 2, type: 'turn.end' })}\n`);
+    socket.write(`${JSON.stringify({ v: 3, type: 'turn.end' })}\n`);
 
     await waitFor(() => getSessionSignalTurnEndedAt(SESSION_ID) > 0);
     expect(getSessionSignalActivity(SESSION_ID)).toEqual([
@@ -92,7 +105,7 @@ describe('session signal link', () => {
     const socket = await connect();
     socket.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'activity',
         step: {
           kind: 'tool',
@@ -106,7 +119,7 @@ describe('session signal link', () => {
     );
     socket.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'usage',
         usage: {
           cost_usd: 0.1,
@@ -131,7 +144,7 @@ describe('session signal link', () => {
     const socket = await connect();
     socket.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'usage',
         usage: {
           cost_usd: 0,
@@ -143,7 +156,7 @@ describe('session signal link', () => {
         },
       })}\n`,
     );
-    await new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    await waitFor(() => socket.destroyed);
     expect(getSessionSignalUsage(SESSION_ID)).toBeNull();
   });
 
@@ -151,7 +164,7 @@ describe('session signal link', () => {
     const socket = await connect();
     socket.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'usage',
         usage: {
           cost_usd: 1e308,
@@ -163,14 +176,14 @@ describe('session signal link', () => {
         },
       })}\n`,
     );
-    await new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    await waitFor(() => socket.destroyed);
     expect(getSessionSignalUsage(SESSION_ID)).toBeNull();
   });
 
   it('rejects payload attempts to choose another session', async () => {
     const socket = await connect();
-    socket.write(`${JSON.stringify({ v: 2, type: 'heartbeat', sessionId: 'attempted-spoof' })}\n`);
-    await new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    socket.write(`${JSON.stringify({ v: 3, type: 'heartbeat', sessionId: 'attempted-spoof' })}\n`);
+    await waitFor(() => socket.destroyed);
     expect(getSessionSignalLastSeenAt('attempted-spoof')).toBe(0);
   });
 
@@ -181,7 +194,7 @@ describe('session signal link', () => {
     await startSessionSignalServer(SESSION_ID, AGENT_GROUP_ID);
 
     const second = await connect();
-    second.write(`${JSON.stringify({ v: 2, type: 'heartbeat' })}\n`);
+    second.write(`${JSON.stringify({ v: 3, type: 'heartbeat' })}\n`);
     await waitFor(() => getSessionSignalLastSeenAt(SESSION_ID) > 0);
     second.destroy();
   });
@@ -192,7 +205,7 @@ describe('session signal link', () => {
     for (let i = 0; i < 256; i++) {
       first.write(
         `${JSON.stringify({
-          v: 2,
+          v: 3,
           type: 'activity',
           step: { kind: 'notification', id: `first-${i}`, text: 'ok' },
         })}\n`,
@@ -205,12 +218,12 @@ describe('session signal link', () => {
     const second = await connect();
     second.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'activity',
         step: { kind: 'notification', id: 'bypassed-budget', text: 'no' },
       })}\n`,
     );
-    await new Promise<void>((resolve) => second.once('close', () => resolve()));
+    await waitFor(() => second.destroyed);
     expect(getSessionSignalActivity(SESSION_ID).some((line) => line.text.includes('bypassed-budget'))).toBe(false);
     now.mockRestore();
   });
@@ -238,7 +251,7 @@ describe('session signal link', () => {
     await Promise.all([stopping, starting]);
 
     const replacement = await connect();
-    replacement.write(`${JSON.stringify({ v: 2, type: 'heartbeat' })}\n`);
+    replacement.write(`${JSON.stringify({ v: 3, type: 'heartbeat' })}\n`);
     await waitFor(() => getSessionSignalLastSeenAt(SESSION_ID) > 0);
     first.destroy();
     replacement.destroy();
@@ -246,7 +259,7 @@ describe('session signal link', () => {
 
   it('releases retained live state when a container lifecycle ends', async () => {
     const socket = await connect();
-    socket.write(`${JSON.stringify({ v: 2, type: 'heartbeat' })}\n`);
+    socket.write(`${JSON.stringify({ v: 3, type: 'heartbeat' })}\n`);
     await waitFor(() => getSessionSignalLastSeenAt(SESSION_ID) > 0);
     await stopSessionSignalServer(SESSION_ID, true);
     expect(getSessionSignalLastSeenAt(SESSION_ID)).toBe(0);
@@ -261,7 +274,7 @@ describe('session signal link', () => {
       response += chunk;
     });
     const frame = {
-      v: 2,
+      v: 3,
       type: 'durable',
       eventId: 'event-1',
       sequence: 1,
@@ -331,7 +344,7 @@ describe('session signal link', () => {
     });
     socket.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'durable',
         eventId: 'event-bad',
         sequence: 1,
@@ -340,8 +353,8 @@ describe('session signal link', () => {
     );
     await waitFor(() => response.includes('"type":"nack"'));
 
-    expect(JSON.parse(response.trim())).toEqual({
-      v: 2,
+    expect(parsedFrames(response).find((frame) => frame.type === 'nack')).toEqual({
+      v: 3,
       type: 'nack',
       eventId: 'event-bad',
       fatal: true,
@@ -379,7 +392,7 @@ describe('session signal link', () => {
     });
     gap.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'durable',
         eventId: 'event-gap',
         sequence: 2,
@@ -387,8 +400,8 @@ describe('session signal link', () => {
       })}\n`,
     );
     await waitFor(() => gapResponse.includes('"type":"nack"'));
-    expect(JSON.parse(gapResponse.trim())).toEqual({
-      v: 2,
+    expect(parsedFrames(gapResponse).find((frame) => frame.type === 'nack')).toEqual({
+      v: 3,
       type: 'nack',
       eventId: 'event-gap',
       fatal: true,
@@ -405,7 +418,7 @@ describe('session signal link', () => {
     });
     valid.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'durable',
         eventId: 'event-1',
         sequence: 1,
@@ -415,7 +428,7 @@ describe('session signal link', () => {
     await waitFor(() => ack.includes('"type":"ack"'));
     valid.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'durable',
         eventId: 'event-1',
         sequence: 1,
@@ -434,7 +447,7 @@ describe('session signal link', () => {
       .split('\n')
       .map((line) => JSON.parse(line));
     expect(responses.at(-1)).toEqual({
-      v: 2,
+      v: 3,
       type: 'nack',
       eventId: 'event-1',
       fatal: true,
@@ -449,5 +462,73 @@ describe('session signal link', () => {
     } finally {
       db.close();
     }
+  });
+
+  it('replays a host event until the runner acknowledges its local commit', async () => {
+    const first = await connect();
+    let firstResponse = '';
+    first.setEncoding('utf8');
+    first.on('data', (chunk) => {
+      firstResponse += chunk;
+    });
+
+    const inDb = new Database(inboundDbPath(AGENT_GROUP_ID, SESSION_ID));
+    try {
+      insertMessage(inDb, {
+        id: 'in-1',
+        kind: 'chat',
+        timestamp: '2026-09-01 00:00:00',
+        channelType: 'web',
+        platformId: 'chat-1',
+        threadId: null,
+        content: '{"text":"hello"}',
+        processAfter: null,
+        recurrence: null,
+      });
+    } finally {
+      inDb.close();
+    }
+    notifySessionHostState(SESSION_ID);
+    await waitFor(() => parsedFrames(firstResponse).some((frame) => frame.type === 'host.event'));
+    const firstEvent = parsedFrames(firstResponse).find((frame) => frame.type === 'host.event')!;
+    expect(firstEvent).toMatchObject({ v: 3, type: 'host.event', sequence: 1, event: { type: 'sequence.floor' } });
+
+    first.destroy();
+    await waitFor(() => first.destroyed);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    let secondResponse = '';
+    const second = net.createConnection(sessionLinkSocketPath(SESSION_ID));
+    second.setEncoding('utf8');
+    second.on('data', (chunk) => {
+      secondResponse += chunk;
+    });
+    await new Promise<void>((resolve, reject) => {
+      second.once('connect', resolve);
+      second.once('error', reject);
+    });
+    await waitFor(() => parsedFrames(secondResponse).some((frame) => frame.type === 'host.event'));
+    const replay = parsedFrames(secondResponse).find((frame) => frame.type === 'host.event')!;
+    expect(replay).toMatchObject({ eventId: firstEvent.eventId, sequence: firstEvent.sequence });
+
+    second.write(`${JSON.stringify({ v: 3, type: 'host.ack', eventId: replay.eventId })}\n`);
+    await waitFor(() => parsedFrames(secondResponse).filter((frame) => frame.type === 'host.event').length === 2);
+    const message = parsedFrames(secondResponse).filter((frame) => frame.type === 'host.event')[1];
+    expect(message).toMatchObject({ sequence: 2, event: { type: 'message.upsert' } });
+    expect(
+      Buffer.from(
+        ((message.event as { payload: { content_base64: string } }).payload.content_base64),
+        'base64',
+      ).toString('utf8'),
+    ).toBe('{"text":"hello"}');
+    second.write(`${JSON.stringify({ v: 3, type: 'host.ack', eventId: message.eventId })}\n`);
+    await waitFor(() => {
+      const db = new Database(inboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+      try {
+        return (db.prepare('SELECT COUNT(*) AS count FROM pending_host_events').get() as { count: number }).count === 0;
+      } finally {
+        db.close();
+      }
+    });
+    second.destroy();
   });
 });

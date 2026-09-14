@@ -1,31 +1,15 @@
 /**
  * Runner session storage connections.
  *
- * The session uses two SQLite files to eliminate write contention across
- * the host-container mount boundary:
- *
- *   inbound.db  — host writes new messages here; container opens READ-ONLY
- *   outbound.db — host-owned durable projection; container opens READ-ONLY
- *   runner-state.db — runner-owned projection + pending event journal
- *
- * Each file has exactly one writer. Runner mutations land in runner-state.db
- * and are acknowledged over the session link after the host applies them.
- *
- * ⚠ Cross-mount visibility: inbound.db MUST be journal_mode=DELETE (set by
- * the host when the file is created). WAL's `-shm` is memory-mapped and
- * VirtioFS does not propagate mmap coherency from host to guest, so a
- * WAL-mode inbound.db would leave this reader frozen on an early snapshot
- * and it would silently never see new host messages. See
- * src/session-manager.ts for the full set of cross-mount invariants and
- * scripts/sanity-live-poll.ts for the empirical validation.
+ * The runner opens only runner-state.db. Host events are committed into its
+ * local projection over the session link before ACK; runner mutations are
+ * journaled in the same file and projected back to the host after ACK.
  */
 import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import { ensureRunnerStateSchema } from './runner-state.js';
 
-const DEFAULT_INBOUND_PATH = '/workspace/inbound.db';
-const DEFAULT_HOST_OUTBOUND_PATH = '/workspace/outbound.db';
-const DEFAULT_RUNNER_STATE_PATH = '/workspace/runner-state.db';
+const DEFAULT_RUNNER_STATE_PATH = '/workspace/runner-state/runner-state.db';
 const MAX_DECLARED_TOOL_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 let _inbound: Database | null = null;
@@ -33,49 +17,25 @@ let _outbound: Database | null = null;
 let _testMode = false;
 
 /**
- * Avoid all cached db reads; open inbound.db read-only with mmap and page cache disabled.
- *
- * Use this (not getInboundDb) for readers that need to see host-written rows
- * promptly — e.g. messages_in polling. Caller must .close() the returned
- * connection (try/finally).
- *
- * Needed for mounts where host writes don't reliably invalidate
- * SQLite's caches: virtiofs (Colima, Lima, Podman Machine, Apple
- * Container), NFS.
- *
- * Cost is microseconds per query, so safe for universal use.
+ * Compatibility wrapper for callers that own a short-lived read handle.
+ * Production reads use the runner-state singleton; close() is intentionally
+ * a no-op because the session link shares that connection.
  */
 export function openInboundDb(): Database {
-  // In test mode return a thin wrapper over the in-memory singleton.
-  // Callers do try/finally { db.close() } — the wrapper no-ops close()
-  // so the singleton survives for the rest of the test.
-  if (_testMode && _inbound) {
-    const db = _inbound;
-    return {
-      prepare: (sql: string) => db.prepare(sql),
-      exec: (sql: string) => db.exec(sql),
-      close: () => {},
-    } as unknown as Database;
-  }
-  const db = new Database(DEFAULT_INBOUND_PATH, { readonly: true });
-  db.exec('PRAGMA busy_timeout = 5000');
-  db.exec('PRAGMA mmap_size = 0');
-  return db;
+  const db = _testMode && _inbound ? _inbound : getOutboundDb();
+  return {
+    prepare: (sql: string) => db.prepare(sql),
+    exec: (sql: string) => db.exec(sql),
+    close: () => {},
+  } as unknown as Database;
 }
 
 /**
- * Inbound DB — long-lived singleton, OK for tables the host writes once
- * at spawn and never again (destinations, session_routing). For
- * messages_in polling — where the host writes continuously and a stale
- * view causes the pollHandle hang — use `openInboundDb()` instead.
+ * Host-state projection in the runner-owned database.
  */
 export function getInboundDb(): Database {
-  if (!_inbound) {
-    _inbound = new Database(DEFAULT_INBOUND_PATH, { readonly: true });
-    _inbound.exec('PRAGMA busy_timeout = 5000');
-    _inbound.exec('PRAGMA mmap_size = 0');
-  }
-  return _inbound;
+  if (_testMode && _inbound) return _inbound;
+  return getOutboundDb();
 }
 
 /** Runner-private projection and durable event journal. */
@@ -91,21 +51,6 @@ export function getOutboundDb(): Database {
     ensureRunnerStateSchema(_outbound);
   }
   return _outbound;
-}
-
-export function openHostOutboundDb(): Database {
-  if (_testMode && _outbound) {
-    const db = _outbound;
-    return {
-      prepare: (sql: string) => db.prepare(sql),
-      exec: (sql: string) => db.exec(sql),
-      close: () => {},
-    } as unknown as Database;
-  }
-  const db = new Database(DEFAULT_HOST_OUTBOUND_PATH, { readonly: true });
-  db.exec('PRAGMA busy_timeout = 5000');
-  db.exec('PRAGMA mmap_size = 0');
-  return db;
 }
 
 /**
@@ -158,7 +103,10 @@ export function clearStaleProcessingAcks(): void {
 }
 
 /** For tests — creates in-memory DBs with the session schemas. */
-export function initTestSessionDb(): { inbound: Database; outbound: Database } {
+export function initTestSessionDb(options: { unifiedHostProjection?: boolean } = {}): {
+  inbound: Database;
+  outbound: Database;
+} {
   _testMode = true;
   _inbound = new Database(':memory:');
   _inbound.exec('PRAGMA foreign_keys = ON');
@@ -316,11 +264,16 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
   `);
   ensureRunnerStateSchema(_outbound);
 
+  if (options.unifiedHostProjection) {
+    _inbound.close();
+    _inbound = _outbound;
+  }
+
   return { inbound: _inbound, outbound: _outbound };
 }
 
 export function closeSessionDb(): void {
-  _inbound?.close();
+  if (_inbound && _inbound !== _outbound) _inbound.close();
   _inbound = null;
   _testMode = false;
   _outbound?.close();

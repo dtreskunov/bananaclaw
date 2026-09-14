@@ -8,6 +8,7 @@
 import Database from 'better-sqlite3';
 
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
+import { CONTAINER_MAX_OUTPUT_SIZE } from '../config.js';
 import { assertUserUuid } from './uuid.js';
 
 /** Apply the inbound or outbound schema to a DB file. Idempotent. */
@@ -15,6 +16,62 @@ export function ensureSchema(dbPath: string, schema: 'inbound' | 'outbound'): vo
   const db = new Database(dbPath);
   db.pragma('journal_mode = DELETE');
   db.exec(schema === 'inbound' ? INBOUND_SCHEMA : OUTBOUND_SCHEMA);
+  if (schema === 'inbound') {
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS validate_message_in_size_insert
+      BEFORE INSERT ON messages_in
+      WHEN length(CAST(NEW.content AS BLOB)) > ${CONTAINER_MAX_OUTPUT_SIZE}
+      BEGIN
+        SELECT RAISE(ABORT, 'inbound message exceeds session-link limit');
+      END;
+      CREATE TRIGGER IF NOT EXISTS validate_message_in_size_update
+      BEFORE UPDATE OF content ON messages_in
+      WHEN length(CAST(NEW.content AS BLOB)) > ${CONTAINER_MAX_OUTPUT_SIZE}
+      BEGIN
+        SELECT RAISE(ABORT, 'inbound message exceeds session-link limit');
+      END;
+      CREATE TRIGGER IF NOT EXISTS validate_message_in_envelope_insert
+      BEFORE INSERT ON messages_in
+      WHEN NEW.seq IS NULL OR NEW.seq <= 0 OR NEW.seq % 2 != 0
+        OR length(NEW.id) = 0 OR length(NEW.id) > 256
+        OR length(NEW.kind) = 0 OR length(NEW.kind) > 64
+        OR length(NEW.timestamp) = 0 OR length(NEW.timestamp) > 128
+        OR NEW.status NOT IN ('pending', 'processing', 'processed', 'completed', 'failed', 'paused')
+        OR length(COALESCE(NEW.process_after, '')) > 128
+        OR length(COALESCE(NEW.recurrence, '')) > 1024
+        OR length(COALESCE(NEW.series_id, '')) > 256
+        OR NEW.tries < 0 OR NEW.trigger NOT IN (0, 1)
+        OR length(COALESCE(NEW.platform_id, '')) > 1024
+        OR length(COALESCE(NEW.channel_type, '')) > 64
+        OR length(COALESCE(NEW.thread_id, '')) > 1024
+        OR length(COALESCE(NEW.source_session_id, '')) > 256
+        OR NEW.on_wake NOT IN (0, 1)
+        OR length(COALESCE(NEW.sender_identity, '')) > 1024
+      BEGIN
+        SELECT RAISE(ABORT, 'inbound message envelope exceeds session-link limit');
+      END;
+      CREATE TRIGGER IF NOT EXISTS validate_message_in_envelope_update
+      BEFORE UPDATE ON messages_in
+      WHEN NEW.seq IS NULL OR NEW.seq <= 0 OR NEW.seq % 2 != 0
+        OR length(NEW.id) = 0 OR length(NEW.id) > 256
+        OR length(NEW.kind) = 0 OR length(NEW.kind) > 64
+        OR length(NEW.timestamp) = 0 OR length(NEW.timestamp) > 128
+        OR NEW.status NOT IN ('pending', 'processing', 'processed', 'completed', 'failed', 'paused')
+        OR length(COALESCE(NEW.process_after, '')) > 128
+        OR length(COALESCE(NEW.recurrence, '')) > 1024
+        OR length(COALESCE(NEW.series_id, '')) > 256
+        OR NEW.tries < 0 OR NEW.trigger NOT IN (0, 1)
+        OR length(COALESCE(NEW.platform_id, '')) > 1024
+        OR length(COALESCE(NEW.channel_type, '')) > 64
+        OR length(COALESCE(NEW.thread_id, '')) > 1024
+        OR length(COALESCE(NEW.source_session_id, '')) > 256
+        OR NEW.on_wake NOT IN (0, 1)
+        OR length(COALESCE(NEW.sender_identity, '')) > 1024
+      BEGIN
+        SELECT RAISE(ABORT, 'inbound message envelope exceeds session-link limit');
+      END;
+    `);
+  }
   db.close();
 }
 
@@ -45,14 +102,17 @@ export function upsertSessionRouting(
   db: Database.Database,
   routing: { channel_type: string | null; platform_id: string | null; thread_id: string | null },
 ): void {
-  db.prepare(
-    `INSERT INTO session_routing (id, channel_type, platform_id, thread_id)
-     VALUES (1, @channel_type, @platform_id, @thread_id)
-     ON CONFLICT(id) DO UPDATE SET
-       channel_type = excluded.channel_type,
-       platform_id  = excluded.platform_id,
-       thread_id    = excluded.thread_id`,
-  ).run(routing);
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO session_routing (id, channel_type, platform_id, thread_id)
+       VALUES (1, @channel_type, @platform_id, @thread_id)
+       ON CONFLICT(id) DO UPDATE SET
+         channel_type = excluded.channel_type,
+         platform_id  = excluded.platform_id,
+         thread_id    = excluded.thread_id`,
+    ).run(routing);
+    enqueueHostEvent(db, 'routing.upsert', routing);
+  })();
 }
 
 export interface DestinationRow {
@@ -65,6 +125,20 @@ export interface DestinationRow {
 }
 
 export function replaceDestinations(db: Database.Database, entries: DestinationRow[]): void {
+  if (entries.length > 512) throw new Error('destination snapshot exceeds session-link limit');
+  for (const row of entries) {
+    if (
+      row.name.length === 0 ||
+      row.name.length > 256 ||
+      (row.display_name !== null && row.display_name.length > 256) ||
+      !['channel', 'agent'].includes(row.type) ||
+      (row.channel_type !== null && row.channel_type.length > 64) ||
+      (row.platform_id !== null && row.platform_id.length > 1024) ||
+      (row.agent_group_id !== null && row.agent_group_id.length > 256)
+    ) {
+      throw new Error('invalid destination snapshot row');
+    }
+  }
   const tx = db.transaction((rows: DestinationRow[]) => {
     db.prepare('DELETE FROM destinations').run();
     const stmt = db.prepare(
@@ -72,8 +146,16 @@ export function replaceDestinations(db: Database.Database, entries: DestinationR
        VALUES (@name, @display_name, @type, @channel_type, @platform_id, @agent_group_id)`,
     );
     for (const row of rows) stmt.run(row);
+    enqueueHostEvent(db, 'destinations.replace', { entries: rows });
   });
   tx(entries);
+}
+
+export function enqueueHostEvent(db: Database.Database, eventType: string, payload: unknown): void {
+  db.prepare(
+    `INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+     VALUES (lower(hex(randomblob(16))), ?, ?, datetime('now'))`,
+  ).run(eventType, JSON.stringify(payload));
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +190,7 @@ export function insertMessage(
     recurrence: string | null;
     /**
      * 1 = wake the agent (default); 0 = accumulate as context only.
-     * Host countDueMessages gates on this; container reads everything.
+     * Host countDueMessages gates cold wakes; the runner projection retains both values.
      */
     trigger?: 0 | 1;
     /**
@@ -135,6 +217,21 @@ export function insertMessage(
   },
 ): void {
   assertUserUuid(message.senderUserId, 'insertMessage.senderUserId');
+  const bounded = (value: string | null | undefined, max: number, name: string, required = false): void => {
+    if ((required && !value) || (value !== null && value !== undefined && value.length > max)) {
+      throw new Error(`insertMessage.${name} exceeds session-link limit`);
+    }
+  };
+  bounded(message.id, 256, 'id', true);
+  bounded(message.kind, 64, 'kind', true);
+  bounded(message.timestamp, 128, 'timestamp', true);
+  bounded(message.platformId, 1024, 'platformId');
+  bounded(message.channelType, 64, 'channelType');
+  bounded(message.threadId, 1024, 'threadId');
+  bounded(message.processAfter, 128, 'processAfter');
+  bounded(message.recurrence, 1024, 'recurrence');
+  bounded(message.sourceSessionId, 256, 'sourceSessionId');
+  bounded(message.senderIdentity, 1024, 'senderIdentity');
   db.prepare(
     `${message.idempotent ? 'INSERT OR IGNORE' : 'INSERT'} INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake, sender_user_id, sender_identity)
      VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake, @senderUserId, @senderIdentity)`,

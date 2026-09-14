@@ -1,12 +1,13 @@
 import net from 'node:net';
 
 import { getOutboundDb } from './db/connection.js';
+import { applyHostEvent } from './db/host-state.js';
 import { acknowledgeRunnerEvent, listPendingRunnerEvents } from './db/runner-state.js';
 import type { ActivityStep, TurnUsage } from './providers/types.js';
 
 const DEFAULT_SOCKET_PATH = '/run/nanoclaw/runner.sock';
-const PROTOCOL_VERSION = 2;
-const MAX_FRAME_BYTES = 16 * 1024;
+const PROTOCOL_VERSION = 3;
+const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
 const MAX_DURABLE_FRAME_BYTES = Math.ceil((MAX_OUTPUT_BYTES * 4) / 3) + 2 * 1024 * 1024;
 const MAX_ACTIVITY_LINES = 128;
@@ -15,20 +16,73 @@ const INITIAL_RECONNECT_MS = 100;
 const MAX_RECONNECT_MS = 5_000;
 
 type SignalFrame =
-  | { v: 2; type: 'heartbeat' }
-  | { v: 2; type: 'activity.clear' }
-  | { v: 2; type: 'activity'; step: ActivityStep }
-  | { v: 2; type: 'usage.clear' }
-  | { v: 2; type: 'usage'; usage: TurnUsage }
-  | { v: 2; type: 'turn.resume' }
-  | { v: 2; type: 'turn.end' };
+  | { v: 3; type: 'heartbeat' }
+  | { v: 3; type: 'activity.clear' }
+  | { v: 3; type: 'activity'; step: ActivityStep }
+  | { v: 3; type: 'usage.clear' }
+  | { v: 3; type: 'usage'; usage: TurnUsage }
+  | { v: 3; type: 'turn.resume' }
+  | { v: 3; type: 'turn.end' };
 
 interface DurableFrame {
-  v: 2;
+  v: 3;
   type: 'durable';
   eventId: string;
   sequence: number;
   event: { type: string; payload: unknown };
+}
+
+type HostEventListener = () => void;
+const hostEventListeners = new Set<HostEventListener>();
+let hostEventGeneration = 0;
+
+function emitHostEvent(): void {
+  hostEventGeneration++;
+  for (const listener of hostEventListeners) listener();
+}
+
+export function emitHostEventForTesting(): void {
+  if (process.env.NODE_ENV === 'production') throw new Error('test-only host event hook');
+  emitHostEvent();
+}
+
+export function resetHostEventsForTesting(): void {
+  if (process.env.NODE_ENV === 'production') throw new Error('test-only host event reset');
+  hostEventListeners.clear();
+  hostEventGeneration = 0;
+}
+
+export function onHostEvent(listener: HostEventListener): () => void {
+  hostEventListeners.add(listener);
+  return () => hostEventListeners.delete(listener);
+}
+
+export function getHostEventGeneration(): number {
+  return hostEventGeneration;
+}
+
+export function waitForHostEvent(
+  sinceGeneration: number,
+  timeoutMs?: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (hostEventGeneration !== sinceGeneration || signal?.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      hostEventListeners.delete(finish);
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    hostEventListeners.add(finish);
+    signal?.addEventListener('abort', finish, { once: true });
+    if (timeoutMs !== undefined) {
+      timer = setTimeout(finish, Math.max(0, timeoutMs));
+      timer.unref?.();
+    }
+    if (hostEventGeneration !== sinceGeneration) finish();
+  });
 }
 
 export class SessionSignalClient {
@@ -42,6 +96,8 @@ export class SessionSignalClient {
   private usage: TurnUsage | null = null;
   private turnEnded = false;
   private durableBlocked = false;
+  private readyPromise: Promise<void> | null = null;
+  private resolveReady: (() => void) | null = null;
 
   constructor(
     private readonly socketPath = DEFAULT_SOCKET_PATH,
@@ -51,12 +107,16 @@ export class SessionSignalClient {
     },
   ) {}
 
-  start(): void {
-    if (this.running) return;
+  start(): Promise<void> {
+    if (this.running) return this.readyPromise as Promise<void>;
     this.running = true;
+    this.readyPromise = new Promise<void>((resolve) => {
+      this.resolveReady = resolve;
+    });
     this.pumpTimer = setInterval(() => this.flushDurable(), 50);
     this.pumpTimer.unref?.();
     this.connect();
+    return this.readyPromise;
   }
 
   stop(): void {
@@ -131,17 +191,46 @@ export class SessionSignalClient {
       while ((newline = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
-        if (Buffer.byteLength(line) > MAX_FRAME_BYTES) {
+        if (Buffer.byteLength(line) > MAX_DURABLE_FRAME_BYTES) {
           socket.destroy();
           return;
         }
+        let frame: Record<string, unknown> | null = null;
         try {
-          const frame = JSON.parse(line) as Record<string, unknown>;
-          if (frame.v !== PROTOCOL_VERSION || typeof frame.eventId !== 'string') {
+          frame = JSON.parse(line) as Record<string, unknown>;
+          if (frame.v !== PROTOCOL_VERSION || typeof frame.type !== 'string') {
             socket.destroy();
             return;
           }
-          if (frame.type === 'ack' && Object.keys(frame).every((key) => ['v', 'type', 'eventId'].includes(key))) {
+          if (frame.type === 'host.ready' && Object.keys(frame).every((key) => ['v', 'type'].includes(key))) {
+            this.resolveReady?.();
+            this.resolveReady = null;
+          } else if (
+            frame.type === 'host.event' &&
+            typeof frame.eventId === 'string' &&
+            Number.isSafeInteger(frame.sequence) &&
+            frame.event &&
+            typeof frame.event === 'object' &&
+            !Array.isArray(frame.event) &&
+            Object.keys(frame).every((key) => ['v', 'type', 'eventId', 'sequence', 'event'].includes(key))
+          ) {
+            const event = frame.event as Record<string, unknown>;
+            if (!Object.keys(event).every((key) => ['type', 'payload'].includes(key)) || typeof event.type !== 'string') {
+              socket.destroy();
+              return;
+            }
+            const applied = applyHostEvent({
+              eventId: frame.eventId,
+              sequence: Number(frame.sequence),
+              event: { type: event.type, payload: event.payload },
+            });
+            socket.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'host.ack', eventId: frame.eventId })}\n`);
+            if (applied) emitHostEvent();
+          } else if (
+            typeof frame.eventId === 'string' &&
+            frame.type === 'ack' &&
+            Object.keys(frame).every((key) => ['v', 'type', 'eventId'].includes(key))
+          ) {
             acknowledgeRunnerEvent(getOutboundDb(), frame.eventId);
             this.sentAt.delete(frame.eventId);
             this.flushDurable();
@@ -154,7 +243,7 @@ export class SessionSignalClient {
           ) {
             const pending = getOutboundDb()
               .prepare('SELECT sequence FROM pending_runner_events WHERE event_id = ?')
-              .get(frame.eventId) as { sequence: number } | undefined;
+              .get(frame.eventId as string) as { sequence: number } | undefined;
             if (!pending) {
               socket.destroy();
               return;
@@ -164,12 +253,26 @@ export class SessionSignalClient {
             socket.destroy();
             return;
           }
-        } catch {
-          socket.destroy();
+        } catch (error) {
+          if (frame?.type === 'host.event' && typeof frame.eventId === 'string') {
+            const message = error instanceof Error ? error.message.slice(0, 256) : 'rejected';
+            socket.write(
+              `${JSON.stringify({
+                v: PROTOCOL_VERSION,
+                type: 'host.nack',
+                eventId: frame.eventId,
+                fatal: true,
+                error: message,
+              })}\n`,
+            );
+            this.blockHostEvent(Number(frame.sequence), message);
+          } else {
+            socket.destroy();
+          }
           return;
         }
       }
-      if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) socket.destroy();
+      if (Buffer.byteLength(buffer) > MAX_DURABLE_FRAME_BYTES) socket.destroy();
     });
     socket.once('error', () => socket.destroy());
     socket.once('close', () => {
@@ -205,7 +308,7 @@ export class SessionSignalClient {
 
   private encode(frame: SignalFrame): string | null {
     const encoded = `${JSON.stringify(frame)}\n`;
-    return Buffer.byteLength(encoded) <= MAX_FRAME_BYTES ? encoded : null;
+    return Buffer.byteLength(encoded) <= MAX_LIVE_FRAME_BYTES ? encoded : null;
   }
 
   private flushDurable(): void {
@@ -259,12 +362,18 @@ export class SessionSignalClient {
     this.stop();
     this.onDurableFailure(`durable event ${sequence} blocked: ${reason}`);
   }
+
+  private blockHostEvent(sequence: number, reason: string): void {
+    this.durableBlocked = true;
+    this.stop();
+    this.onDurableFailure(`host event ${sequence} blocked: ${reason}`);
+  }
 }
 
 const client = new SessionSignalClient();
 
-export function startSessionSignalClient(): void {
-  client.start();
+export function startSessionSignalClient(): Promise<void> {
+  return client.start();
 }
 
 export function signalHeartbeat(): void {

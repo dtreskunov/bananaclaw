@@ -4,7 +4,7 @@
  * Writes to the runner-state projection. A trigger journals each row and the
  * session link applies it to the host-owned outbound.db.
  */
-import { getInboundDb, getOutboundDb, openHostOutboundDb } from './connection.js';
+import { getInboundDb, getOutboundDb } from './connection.js';
 import type { Database } from 'bun:sqlite';
 import { isSafeAttachmentName } from '../attachment-safety.js';
 
@@ -101,19 +101,13 @@ export interface WriteMessageOut {
 export function writeMessageOut(msg: WriteMessageOut): number {
   const outbound = getOutboundDb();
   const inbound = getInboundDb();
-  const hostOutbound = openHostOutboundDb();
-  try {
-    return writeMessageOutWithConnections(msg, outbound, inbound, hostOutbound);
-  } finally {
-    hostOutbound.close();
-  }
+  return writeMessageOutWithConnections(msg, outbound, inbound);
 }
 
 export function writeMessageOutWithConnections(
   msg: WriteMessageOut,
   outbound: Database,
   inbound: Database,
-  hostOutbound: Database,
 ): number {
   validateMessageContent(msg.content);
   outbound.exec('BEGIN IMMEDIATE');
@@ -122,9 +116,10 @@ export function writeMessageOutWithConnections(
     // holding the runner-state write lock. A sidecar writer must wait and
     // then recompute after this row commits.
     const maxOut = (outbound.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
-    const maxHostOut = (
-      hostOutbound.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }
-    ).m;
+    const maxHostOut = Number(
+      (outbound.prepare("SELECT value FROM host_state WHERE key = 'sequence_floor'").get() as { value?: string } | undefined)
+        ?.value ?? 0,
+    );
     const maxIn = (inbound.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
     const max = Math.max(maxOut, maxHostOut, maxIn);
     const nextSeq = max % 2 === 0 ? max + 1 : max + 2;
@@ -181,13 +176,8 @@ export function getMessageIdBySeq(seq: number): string | null {
     | undefined;
   if (!outRow) return null;
 
-  // Check if host has stored the platform message ID after delivery
-  const deliveredRow = inbound
-    .prepare('SELECT platform_message_id FROM delivered WHERE message_out_id = ?')
-    .get(outRow.id) as { platform_message_id: string | null } | undefined;
-  if (deliveredRow?.platform_message_id) return deliveredRow.platform_message_id;
-
-  // Fallback to internal ID (edits/reactions on undelivered messages won't work)
+  // The host resolves this stable NanoClaw ID to its platform receipt when
+  // delivering edit/reaction operations.
   return outRow.id;
 }
 

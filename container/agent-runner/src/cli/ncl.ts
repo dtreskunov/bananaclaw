@@ -6,8 +6,9 @@
  * container (the session DBs exist at /workspace/) and uses a DB transport
  * instead of the Unix socket transport.
  *
- * Writes a cli_request system message to outbound.db, polls inbound.db
- * for the response. Self-contained — no imports from agent-runner.
+ * Writes a cli_request system message to runner-state.db and waits for the
+ * host response projected into that same DB. Self-contained — no imports from
+ * agent-runner.
  */
 import { Database } from 'bun:sqlite';
 
@@ -29,9 +30,7 @@ type ResponseFrame =
 // Paths
 // ---------------------------------------------------------------------------
 
-const INBOUND_DB = '/workspace/inbound.db';
-const OUTBOUND_DB = '/workspace/runner-state.db';
-const HOST_OUTBOUND_DB = '/workspace/outbound.db';
+const OUTBOUND_DB = '/workspace/runner-state/runner-state.db';
 
 // ---------------------------------------------------------------------------
 // DB transport
@@ -52,16 +51,14 @@ function writeRequest(req: RequestFrame): void {
   db.exec('PRAGMA journal_mode = DELETE');
   db.exec('PRAGMA busy_timeout = 5000');
 
-  const inDb = new Database(INBOUND_DB, { readonly: true });
-  inDb.exec('PRAGMA busy_timeout = 5000');
-  const hostOutDb = new Database(HOST_OUTBOUND_DB, { readonly: true });
-  hostOutDb.exec('PRAGMA busy_timeout = 5000');
-
   try {
     db.exec('BEGIN IMMEDIATE');
     const maxOut = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
-    const maxHostOut = (hostOutDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
-    const maxIn = (inDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
+    const maxHostOut = Number(
+      (db.prepare("SELECT value FROM host_state WHERE key = 'sequence_floor'").get() as { value?: string } | undefined)
+        ?.value ?? 0,
+    );
+    const maxIn = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
     const max = Math.max(maxOut, maxHostOut, maxIn);
     const nextSeq = max % 2 === 0 ? max + 1 : max + 2;
 
@@ -80,11 +77,9 @@ function writeRequest(req: RequestFrame): void {
     });
     db.exec('COMMIT');
   } catch (e) {
-    db.exec('ROLLBACK');
+    if (db.inTransaction) db.exec('ROLLBACK');
     throw e;
   } finally {
-    hostOutDb.close();
-    inDb.close();
     db.close();
   }
 }
@@ -97,7 +92,7 @@ function pollResponse(requestId: string, timeoutMs: number): ResponseFrame | nul
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const inDb = new Database(INBOUND_DB, { readonly: true });
+    const inDb = new Database(OUTBOUND_DB, { readonly: true });
     inDb.exec('PRAGMA busy_timeout = 5000');
     inDb.exec('PRAGMA mmap_size = 0');
 

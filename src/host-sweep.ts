@@ -47,7 +47,11 @@ import {
 } from './db/session-db.js';
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath } from './session-manager.js';
-import { getSessionSignalLastSeenAt, getSessionSignalServerStartedAt } from './session-link.js';
+import {
+  getSessionSignalLastSeenAt,
+  getSessionSignalServerStartedAt,
+  notifySessionHostState,
+} from './session-link.js';
 import { onSessionDurableProcessing } from './session-link.js';
 import { MAX_DECLARED_TOOL_TIMEOUT_MS } from './session-link-durable.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
@@ -341,6 +345,7 @@ async function sweepSession(session: Session): Promise<void> {
   } finally {
     inDb.close();
     outDb?.close();
+    notifySessionHostState(session.id);
   }
 }
 

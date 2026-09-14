@@ -1,6 +1,6 @@
 /**
- * Project the agent's central `agent_destinations` rows into its per-session
- * `inbound.db` so the running container can resolve names locally. Called on
+ * Journal the agent's central `agent_destinations` rows as a per-session
+ * snapshot so the running container can resolve names in runner-state. Called on
  * every container wake and after admin-time destination edits (e.g. create_agent).
  *
  * Core container-runner calls this via a dynamic import guarded by a
@@ -14,6 +14,7 @@ import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { replaceDestinations, type DestinationRow } from '../../db/session-db.js';
 import { log } from '../../log.js';
 import { inboundDbPath, openInboundDb } from '../../session-manager.js';
+import { notifySessionHostState } from '../../session-link.js';
 import { getDestinations } from './db/agent-destinations.js';
 
 export function writeDestinations(agentGroupId: string, sessionId: string): void {
@@ -74,4 +75,5 @@ export function writeDestinations(agentGroupId: string, sessionId: string): void
     db.close();
   }
   log.debug('Destination map written', { sessionId, count: resolved.length });
+  notifySessionHostState(sessionId);
 }

@@ -1,18 +1,18 @@
 /**
  * NanoClaw Agent Runner v2
  *
- * Runs inside a container. Durable messages use the session DBs; live status
- * flows to the host over a per-session Unix socket.
+ * Runs inside a container. Durable events and live status use one bidirectional
+ * per-session Unix socket.
  *
  * Config is read from /workspace/agent/container.json (mounted RO).
  * Only TZ and OneCLI networking vars come from env.
  *
  * Mount structure:
  *   /workspace/
- *     inbound.db        ← host-owned session DB (container reads only)
- *     outbound.db       ← host-owned durable store (RO)
- *     runner-state.db   ← runner projection + pending event journal
- *     outbox/           ← outbound files
+ *     runner-state/
+ *       runner-state.db ← bidirectional projection + pending runner journal
+ *     inbox/            ← inbound files (RO)
+ *     outbox/           ← outbound files (RW)
  *     agent/            ← agent group folder (CLAUDE.md, container.json, working files)
  *       container.json  ← per-group config (RO nested mount)
  *     global/           ← shared global memory (RO)
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   await loadProvider(providerName);
 
   log(`Starting v2 agent-runner (provider: ${providerName})`);
-  startSessionSignalClient();
+  await startSessionSignalClient();
 
   // Discover additional directories mounted at /workspace/extra/*
   const additionalDirectories: string[] = [];

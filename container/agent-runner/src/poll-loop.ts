@@ -1,5 +1,11 @@
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
-import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
+import {
+  getPendingMessages,
+  markProcessing,
+  markCompleted,
+  nextPendingDueDelayMs,
+  type MessageInRow,
+} from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
@@ -46,10 +52,8 @@ import { isAudioMime, transcribeAudio } from './transcribe.js';
 import { getConfig } from './config.js';
 import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderExchange } from './providers/types.js';
 import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
-import { signalHeartbeat } from './session-link.js';
+import { getHostEventGeneration, onHostEvent, signalHeartbeat, waitForHostEvent } from './session-link.js';
 
-const POLL_INTERVAL_MS = 1000;
-const ACTIVE_POLL_INTERVAL_MS = 500;
 const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
 const MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS = 2;
 /**
@@ -78,11 +82,8 @@ const MAX_CONSECUTIVE_TEXT_STEPS = 6;
 type SuggestedAction = 'continue' | 'retry' | 'report';
 
 /**
- * Number of consecutive `database disk image is malformed` errors after which
- * the follow-up poll gives up and exits the process. At ACTIVE_POLL_INTERVAL_MS
- * = 500ms this is roughly 5 seconds — long enough to dodge a transient torn
- * read during a host write, short enough to recover quickly from a poisoned
- * page cache (host-sweep then respawns with a fresh mount).
+ * Number of consecutive local SQLite corruption errors after which the
+ * follow-up watcher gives up and exits the process.
  */
 const CORRUPTION_STREAK_EXIT = 10;
 
@@ -226,6 +227,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
   while (true) {
     if (config.signal?.aborted) return;
+    const hostGeneration = getHostEventGeneration();
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
     const messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
     isFirstPoll = false;
@@ -237,7 +239,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     }
 
     if (messages.length === 0) {
-      await sleep(POLL_INTERVAL_MS);
+      await waitForHostEvent(hostGeneration, nextPendingDueDelayMs(), config.signal);
       continue;
     }
 
@@ -250,7 +252,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // the "store as context, don't engage" contract. Host-side countDueMessages
     // gates the same way for wake-from-cold (see src/db/session-db.ts).
     if (!messages.some((m) => m.trigger === 1)) {
-      await sleep(POLL_INTERVAL_MS);
+      await waitForHostEvent(hostGeneration, nextPendingDueDelayMs(), config.signal);
       continue;
     }
 
@@ -974,8 +976,11 @@ async function processQuery(
   // claim age (see src/host-sweep.ts); if something is truly stuck, the host
   // will kill the container and messages get reset to pending.
   let pollInFlight = false;
+  let pollDirty = false;
   let endedForCommand = false;
   let corruptionStreak = 0;
+  let followUpTimer: ReturnType<typeof setTimeout> | null = null;
+  let unsubscribeHostEvents: () => void = () => {};
   const resetMalformedToolRecovery = (): void => {
     malformedToolRecoveryAttempts = 0;
     malformedToolRecoveryExhausted = false;
@@ -988,8 +993,28 @@ async function processQuery(
     malformedToolRecoveryExhausted = true;
     malformedToolErrorRouting = failedRouting;
   };
-  const pollHandle = setInterval(() => {
-    if (done || pollInFlight || endedForCommand) return;
+  const stopFollowUpWatcher = () => {
+    unsubscribeHostEvents();
+    unsubscribeHostEvents = () => {};
+    if (followUpTimer) clearTimeout(followUpTimer);
+    followUpTimer = null;
+  };
+  const scheduleNextDue = () => {
+    if (done || endedForCommand || followUpTimer) return;
+    const delay = nextPendingDueDelayMs();
+    if (delay === undefined) return;
+    followUpTimer = setTimeout(() => {
+      followUpTimer = null;
+      pollForFollowUps();
+    }, delay);
+    followUpTimer.unref?.();
+  };
+  const pollForFollowUps = () => {
+    if (done || endedForCommand) return;
+    if (pollInFlight) {
+      pollDirty = true;
+      return;
+    }
     pollInFlight = true;
 
     void (async () => {
@@ -1143,7 +1168,7 @@ async function processQuery(
         if (isMissingDbError(errMsg)) {
           log('Follow-up poll: inbound.db is gone — session was deleted by host. Exiting.');
           done = true;
-          clearInterval(pollHandle);
+          stopFollowUpWatcher();
           setTimeout(() => process.exit(0), 100);
           return;
         }
@@ -1164,7 +1189,7 @@ async function processQuery(
             // Stop touching the heartbeat so host-sweep stale detection fires
             // promptly even if exit() races with in-flight async work.
             done = true;
-            clearInterval(pollHandle);
+            stopFollowUpWatcher();
             // Defer exit one tick so this log line flushes through Docker's
             // log driver before the process dies.
             setTimeout(() => process.exit(75), 100);
@@ -1174,9 +1199,22 @@ async function processQuery(
         }
       } finally {
         pollInFlight = false;
+        if (pollDirty) {
+          pollDirty = false;
+          pollForFollowUps();
+        } else {
+          scheduleNextDue();
+        }
       }
     })();
-  }, ACTIVE_POLL_INTERVAL_MS);
+  };
+  const wakeFollowUpWatcher = () => {
+    if (followUpTimer) clearTimeout(followUpTimer);
+    followUpTimer = null;
+    pollForFollowUps();
+  };
+  unsubscribeHostEvents = onHostEvent(wakeFollowUpWatcher);
+  scheduleNextDue();
 
   // Keep the heartbeat warm for as long as a turn is actually in flight.
   // The SDK can stall for 10–30s between events while Anthropic generates
@@ -1497,6 +1535,7 @@ async function processQuery(
         // and the indicator must stay lit across the gap.
         if (turnBatchQueue.length === 0) {
           turnActive = false;
+          queueMicrotask(wakeFollowUpWatcher);
           try {
             setTurnEnded();
           } catch {
@@ -1766,7 +1805,7 @@ async function processQuery(
     throw err;
   } finally {
     done = true;
-    clearInterval(pollHandle);
+    stopFollowUpWatcher();
     clearInterval(liveHandle);
     // Drain any queued follow-up batches that never reached a `result`
     // event. Without this, when the SDK throws mid-turn the outer catch

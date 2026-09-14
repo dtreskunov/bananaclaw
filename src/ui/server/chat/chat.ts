@@ -28,6 +28,7 @@ import {
   getMessagingGroupByPlatform,
 } from '../../../db/messaging-groups.js';
 import { deleteSession, findSessionByAgentGroup, findSessionForAgent } from '../../../db/sessions.js';
+import { notifySessionHostState } from '../../../session-link.js';
 import { openInboundDb, openOutboundDb, sessionDir, writeSessionMessage } from '../../../session-manager.js';
 import { killContainer } from '../../../container-runner.js';
 import {
@@ -709,6 +710,7 @@ export async function handleChatRequest(
         }
       } finally {
         inDb.close();
+        notifySessionHostState(r.sessionId);
       }
       const tasks = readLiveTaskDetails(m.groupId, r.sessionId, r.channelType, m.threadId, r.isDm);
       writeJson(res, 200, { ok: true, tasks });
@@ -794,6 +796,7 @@ export async function handleChatRequest(
         touched = updateTask(inDb, m.seriesId, update);
       } finally {
         inDb.close();
+        notifySessionHostState(r.sessionId);
       }
       if (touched === 0) {
         writeJson(res, 404, { error: 'task_not_found' });

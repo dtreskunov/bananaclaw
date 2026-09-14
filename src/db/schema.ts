@@ -164,8 +164,8 @@ CREATE TABLE pending_sender_approvals (
  * Session DB schemas — split into two files so each has exactly one writer.
  * This eliminates SQLite write contention across the host-container mount boundary.
  *
- *   inbound.db  — host writes, container reads (read-only mount or open read-only)
- *   outbound.db — host writes validated runner events; container reads only
+ *   inbound.db  — private host input + pending host event journal
+ *   outbound.db — private host projection of validated runner events
  */
 
 /** Host-owned: inbound messages + delivery tracking + destination map. */
@@ -246,7 +246,7 @@ CREATE TABLE IF NOT EXISTS destinations (
 
 -- Default reply routing for this session. Single-row table (id=1).
 -- Host overwrites on every container wake from the session's messaging_group
--- and thread_id. Container reads it in send_message / ask_user_question to
+-- and thread_id. The session link projects it for send_message / ask_user_question to
 -- default the channel/thread of outbound messages when the agent doesn't
 -- specify an explicit destination.
 CREATE TABLE IF NOT EXISTS session_routing (
@@ -287,6 +287,112 @@ CREATE TABLE IF NOT EXISTS fork_origin (
   digest              TEXT NOT NULL,
   created_at          TEXT NOT NULL
 );
+
+-- Ordered host-to-runner journal. The host is the sole writer and removes a
+-- row only after the runner commits it to runner-state.db and ACKs over the
+-- session link.
+CREATE TABLE IF NOT EXISTS pending_host_events (
+  sequence   INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id   TEXT NOT NULL UNIQUE,
+  event_type TEXT NOT NULL,
+  payload    TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS journal_host_sequence_update
+AFTER UPDATE OF last_even ON host_sequence BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'sequence.floor',
+    json_object('seq', NEW.last_even), datetime('now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS journal_message_in_insert
+AFTER INSERT ON messages_in BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'message.upsert', json_object(
+    'id', NEW.id, 'seq', NEW.seq, 'kind', NEW.kind,
+    'timestamp', NEW.timestamp, 'status', NEW.status,
+    'process_after', NEW.process_after, 'recurrence', NEW.recurrence,
+    'series_id', NEW.series_id, 'tries', NEW.tries, 'trigger', NEW.trigger,
+    'platform_id', NEW.platform_id, 'channel_type', NEW.channel_type,
+    'thread_id', NEW.thread_id, 'content_hex', hex(CAST(NEW.content AS BLOB)),
+    'source_session_id', NEW.source_session_id, 'on_wake', NEW.on_wake,
+    'sender_user_id', NEW.sender_user_id, 'sender_identity', NEW.sender_identity
+  ), datetime('now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS journal_message_in_update
+AFTER UPDATE ON messages_in BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'message.upsert', json_object(
+    'id', NEW.id, 'seq', NEW.seq, 'kind', NEW.kind,
+    'timestamp', NEW.timestamp, 'status', NEW.status,
+    'process_after', NEW.process_after, 'recurrence', NEW.recurrence,
+    'series_id', NEW.series_id, 'tries', NEW.tries, 'trigger', NEW.trigger,
+    'platform_id', NEW.platform_id, 'channel_type', NEW.channel_type,
+    'thread_id', NEW.thread_id, 'content_hex', hex(CAST(NEW.content AS BLOB)),
+    'source_session_id', NEW.source_session_id, 'on_wake', NEW.on_wake,
+    'sender_user_id', NEW.sender_user_id, 'sender_identity', NEW.sender_identity
+  ), datetime('now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS journal_message_in_delete
+AFTER DELETE ON messages_in BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'message.delete',
+    json_object('id', OLD.id), datetime('now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS journal_fork_origin_insert
+AFTER INSERT ON fork_origin BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'fork.upsert', json_object(
+    'id', NEW.id, 'parent_session_id', NEW.parent_session_id,
+    'parent_continuation', NEW.parent_continuation, 'provider', NEW.provider,
+    'anchor_ref', NEW.anchor_ref, 'digest', NEW.digest, 'created_at', NEW.created_at
+  ), datetime('now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS journal_fork_origin_update
+AFTER UPDATE ON fork_origin BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'fork.upsert', json_object(
+    'id', NEW.id, 'parent_session_id', NEW.parent_session_id,
+    'parent_continuation', NEW.parent_continuation, 'provider', NEW.provider,
+    'anchor_ref', NEW.anchor_ref, 'digest', NEW.digest, 'created_at', NEW.created_at
+  ), datetime('now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS journal_thread_title_insert
+AFTER INSERT ON thread_titles BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'thread-title.upsert', json_object(
+    'channel_type', NEW.channel_type, 'platform_id', NEW.platform_id,
+    'thread_id', NEW.thread_id, 'title', NEW.title, 'source', NEW.source,
+    'request_message_id', NEW.request_message_id, 'published', NEW.published,
+    'updated_at', NEW.updated_at
+  ), datetime('now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS journal_thread_title_update
+AFTER UPDATE ON thread_titles BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'thread-title.upsert', json_object(
+    'channel_type', NEW.channel_type, 'platform_id', NEW.platform_id,
+    'thread_id', NEW.thread_id, 'title', NEW.title, 'source', NEW.source,
+    'request_message_id', NEW.request_message_id, 'published', NEW.published,
+    'updated_at', NEW.updated_at
+  ), datetime('now'));
+END;
+
+CREATE TRIGGER IF NOT EXISTS journal_thread_title_delete
+AFTER DELETE ON thread_titles BEGIN
+  INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
+  VALUES (lower(hex(randomblob(16))), 'thread-title.delete', json_object(
+    'channel_type', OLD.channel_type, 'platform_id', OLD.platform_id,
+    'thread_id', OLD.thread_id
+  ), datetime('now'));
+END;
 `;
 
 /** Host-owned projection of durable runner output and state. */

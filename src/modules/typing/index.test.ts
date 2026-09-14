@@ -159,7 +159,7 @@ describe('startTypingRefresh — instance forwarding', () => {
     });
     socket.write(
       `${JSON.stringify({
-        v: 2,
+        v: 3,
         type: 'usage',
         usage: {
           cost_usd: 0.25,
@@ -203,7 +203,7 @@ describe('startTypingRefresh — transient heartbeat stalls', () => {
       socket.once('connect', resolve);
       socket.once('error', reject);
     });
-    socket.write(`${JSON.stringify({ v: 2, type: 'heartbeat' })}\n`);
+    socket.write(`${JSON.stringify({ v: 3, type: 'heartbeat' })}\n`);
     await vi.advanceTimersByTimeAsync(100);
     await vi.advanceTimersByTimeAsync(4_000);
 

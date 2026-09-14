@@ -9,8 +9,7 @@ describe('mcpServersToOpenCodeConfig', () => {
         command: 'node',
         args: ['/app/src/mcp-tools/index.js'],
         env: {
-          SESSION_INBOUND_DB_PATH: '/workspace/inbound.db',
-          SESSION_OUTBOUND_DB_PATH: '/workspace/outbound.db',
+          SESSION_RUNNER_STATE_PATH: '/workspace/runner-state/runner-state.db',
           SESSION_LINK_PATH: '/run/nanoclaw/runner.sock',
         },
       },
@@ -27,8 +26,7 @@ describe('mcpServersToOpenCodeConfig', () => {
       type: 'local',
       command: ['node', '/app/src/mcp-tools/index.js'],
       environment: {
-        SESSION_INBOUND_DB_PATH: '/workspace/inbound.db',
-        SESSION_OUTBOUND_DB_PATH: '/workspace/outbound.db',
+        SESSION_RUNNER_STATE_PATH: '/workspace/runner-state/runner-state.db',
         SESSION_LINK_PATH: '/run/nanoclaw/runner.sock',
       },
       enabled: true,

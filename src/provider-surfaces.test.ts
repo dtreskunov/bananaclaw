@@ -193,7 +193,11 @@ describe('buildMounts agent surfaces', () => {
     // Composer did NOT run for this group.
     expect(fs.existsSync(path.join(GROUPS_DIR, ag.folder, 'CLAUDE.md'))).toBe(false);
     // Core mounts and the provider's own contribution are intact.
-    expect(containerPaths).toContain('/workspace');
+    expect(containerPaths).toContain('/workspace/runner-state');
+    expect(containerPaths).toContain('/workspace/inbox');
+    expect(containerPaths).toContain('/workspace/outbox');
+    expect(containerPaths).not.toContain('/workspace/inbound.db');
+    expect(containerPaths).not.toContain('/workspace/outbound.db');
     expect(containerPaths).toContain('/workspace/agent');
     expect(containerPaths).toContain('/app/src');
     expect(containerPaths).toContain('/workspace/agent/OWN-DOC.md');

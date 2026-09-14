@@ -7,6 +7,7 @@ import { MockProvider } from './providers/mock.js';
 import type { AgentProvider, ForkContinuationInput } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
 import { loadConfig } from './config.js';
+import { emitHostEventForTesting, resetHostEventsForTesting } from './session-link.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -20,6 +21,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetHostEventsForTesting();
   closeSessionDb();
 });
 
@@ -48,6 +50,7 @@ function insertMessage(id: string, text: string): void {
        VALUES (?, 'chat', datetime('now'), 'pending', 'chan-1', 'discord', ?)`,
     )
     .run(id, JSON.stringify({ sender: 'Alice', text }));
+  emitHostEventForTesting();
 }
 
 /**

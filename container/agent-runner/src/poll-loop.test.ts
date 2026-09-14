@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
-import { getPendingMessages, markCompleted } from './db/messages-in.js';
+import { getPendingMessages, markCompleted, MAX_TIMER_DELAY_MS, nextPendingDueDelayMs } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
 import {
@@ -18,6 +18,14 @@ beforeEach(() => {
 
 afterEach(() => {
   closeSessionDb();
+});
+
+describe('future message timing', () => {
+  it('caps distant process_after delays below the runtime timeout ceiling', () => {
+    const processAfter = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    insertMessage('future', 'task', { prompt: 'later' }, { processAfter });
+    expect(nextPendingDueDelayMs()).toBe(MAX_TIMER_DELAY_MS);
+  });
 });
 
 function insertMessage(

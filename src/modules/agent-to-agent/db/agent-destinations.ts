@@ -11,16 +11,14 @@
 /**
  * ⚠️  DESTINATION PROJECTION INVARIANT — READ BEFORE ADDING NEW CALL SITES.
  *
- * `agent_destinations` in the central DB is the source of truth, but the
- * agent-runner container reads its destinations from a per-session
- * projection in `inbound.db`. That projection is written by
- * `writeDestinations(agentGroupId, sessionId)` in session-manager.ts.
+ * `agent_destinations` in the central DB is the source of truth.
+ * `writeDestinations(agentGroupId, sessionId)` journals a complete per-session
+ * snapshot, and the session link applies it to `runner-state.db`.
  *
  * `spawnContainer` calls `writeDestinations` on every container wake, so a
- * fresh container always sees the latest destinations. BUT: a container
- * that is ALREADY running when you mutate the central table will keep
- * serving the stale projection until its next wake — the central write
- * does not propagate automatically.
+ * fresh container always sees the latest destinations. Running containers
+ * receive the replacement immediately when the mutation path calls
+ * `writeDestinations`.
  *
  * **Therefore: every time you call `createDestination` / `deleteDestination` /
  * `deleteAllDestinationsTouching` from code that runs while an agent's
@@ -41,7 +39,7 @@ import { getDb } from '../../../db/connection.js';
  * ⚠️  Caller responsibility: after this returns, call
  * `writeDestinations(row.agent_group_id, <sessionId>)` for each active
  * session of that agent group so the change propagates to the running
- * container's inbound.db. See the top-of-file invariant.
+ * container's runner-state projection. See the top-of-file invariant.
  */
 export function createDestination(row: AgentDestination): void {
   getDb()
@@ -86,7 +84,7 @@ export function hasDestination(agentGroupId: string, targetType: 'channel' | 'ag
 /**
  * ⚠️  Caller responsibility: after this returns, call
  * `writeDestinations(agentGroupId, <sessionId>)` for each active session
- * so the deletion propagates to the running container's inbound.db.
+ * so the deletion propagates to the running container's runner-state projection.
  */
 export function deleteDestination(agentGroupId: string, localName: string): void {
   getDb()

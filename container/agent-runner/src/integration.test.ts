@@ -9,6 +9,7 @@ import { MockProvider } from './providers/mock.js';
 import type { ProviderEvent, ProviderExchange, QueryPushOptions } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
 import { loadConfig } from './config.js';
+import { emitHostEventForTesting, resetHostEventsForTesting } from './session-link.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -27,6 +28,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetHostEventsForTesting();
   closeSessionDb();
 });
 
@@ -37,9 +39,31 @@ function insertMessage(id: string, content: object, opts?: { platformId?: string
        VALUES (?, 'chat', datetime('now'), 'pending', ?, ?, ?, ?)`,
     )
     .run(id, opts?.platformId ?? null, opts?.channelType ?? null, opts?.threadId ?? null, JSON.stringify(content));
+  emitHostEventForTesting();
 }
 
 describe('poll loop integration', () => {
+  it('waits for a host event instead of polling local messages', async () => {
+    const provider = new MockProvider({}, () => '<message to="discord-test">event received</message>');
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
+    await sleep(50);
+
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
+         VALUES ('m-no-event', 'chat', datetime('now'), 'pending', 'chan-1', 'discord', ?)`,
+      )
+      .run(JSON.stringify({ sender: 'Alice', text: 'wait for event' }));
+    await sleep(200);
+    expect(getUndeliveredMessages()).toHaveLength(0);
+
+    emitHostEventForTesting();
+    await waitFor(() => getUndeliveredMessages().length === 1, 1000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+  });
+
   it('should pick up a message, process it, and write a response', async () => {
     insertMessage('m1', { sender: 'Alice', text: 'What is the meaning of life?' }, { platformId: 'chan-1', channelType: 'discord', threadId: 'thread-1' });
 
@@ -812,6 +836,7 @@ describe('poll loop — scheduled task during active query', () => {
          VALUES ('task-fired', 'task', datetime('now'), 'pending', datetime('now', '-1 minute'), 1, 'chan-1', 'discord', ?)`,
       )
       .run(JSON.stringify({ prompt: 'Send a message to discord-test containing exactly: scheduled msg' }));
+    emitHostEventForTesting();
 
     // Graceful end (not abort), and a second query is started for the task.
     await waitFor(() => provider.ends === 1, 2000);

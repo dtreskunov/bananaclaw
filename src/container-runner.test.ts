@@ -3,10 +3,9 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import {
-  outboundStoreMount,
-  inboundStoreMount,
   packageDockerfile,
   resolveProviderName,
+  runnerStateStoreMount,
   sessionLinkMount,
   syncSkillSymlinks,
 } from './container-runner.js';
@@ -77,22 +76,14 @@ describe('sessionLinkMount', () => {
   });
 });
 
-describe('outboundStoreMount', () => {
-  it('overlays the host-owned outbound database read-only', () => {
-    expect(outboundStoreMount('agent-a', 'session-a')).toEqual({
-      hostPath: expect.stringMatching(/[\\/]+data[\\/]+v2-sessions[\\/]+agent-a[\\/]+session-a[\\/]+outbound\.db$/),
-      containerPath: '/workspace/outbound.db',
-      readonly: true,
-    });
-  });
-});
-
-describe('inboundStoreMount', () => {
-  it('overlays the host-owned inbound database read-only', () => {
-    expect(inboundStoreMount('agent-a', 'session-a')).toEqual({
-      hostPath: expect.stringMatching(/[\\/]+data[\\/]+v2-sessions[\\/]+agent-a[\\/]+session-a[\\/]+inbound\.db$/),
-      containerPath: '/workspace/inbound.db',
-      readonly: true,
+describe('runnerStateStoreMount', () => {
+  it('mounts only the runner-owned database read-write', () => {
+    expect(runnerStateStoreMount('agent-a', 'session-a')).toEqual({
+      hostPath: expect.stringMatching(
+        /[\\/]+data[\\/]+v2-sessions[\\/]+agent-a[\\/]+session-a[\\/]+runner-state$/,
+      ),
+      containerPath: '/workspace/runner-state',
+      readonly: false,
     });
   });
 });

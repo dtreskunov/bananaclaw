@@ -22,7 +22,7 @@ import { setTypingAdapter } from './modules/typing/index.js';
 import { publishTitlesForDeliveredReplies } from './modules/thread-titles/db.js';
 import type { ActivityLine, DeliveryContext, OutboundFile, TypingMetadata } from './channels/adapter.js';
 import type { Session } from './types.js';
-import { onSessionDurableMessage } from './session-link.js';
+import { notifySessionHostState, onSessionDurableMessage } from './session-link.js';
 
 const SWEEP_POLL_MS = 60_000;
 const MAX_DELIVERY_ATTEMPTS = 3;
@@ -191,6 +191,7 @@ async function drainSession(session: Session): Promise<void> {
         const platformMsgId = await deliverMessage(msg, session, inDb);
         markDelivered(inDb, msg.id, platformMsgId ?? null);
         publishTitlesForDeliveredReplies(inDb, outDb);
+        notifySessionHostState(session.id);
         deliveryAttempts.delete(msg.id);
 
         // Fire-and-forget: index outbound chat messages for search.
@@ -370,6 +371,7 @@ async function deliverMessage(
   // System actions — handle internally (schedule_task, cancel_task, etc.)
   if (msg.kind === 'system') {
     await handleSystemAction(content, session, inDb);
+    notifySessionHostState(session.id);
     return;
   }
 
@@ -491,12 +493,25 @@ async function deliverMessage(
       ? readOutboxFiles(session.agent_group_id, session.id, msg.id, content.files as string[])
       : undefined;
 
+  let adapterContent = msg.content;
+  if (
+    (content.operation === 'edit' || content.operation === 'reaction') &&
+    typeof content.messageId === 'string'
+  ) {
+    const receipt = inDb
+      .prepare('SELECT platform_message_id FROM delivered WHERE message_out_id = ? AND status = ?')
+      .get(content.messageId, 'delivered') as { platform_message_id: string | null } | undefined;
+    if (receipt?.platform_message_id) {
+      adapterContent = JSON.stringify({ ...content, messageId: receipt.platform_message_id });
+    }
+  }
+
   const platformMsgId = await deliveryAdapter.deliver(
     msg.channel_type,
     msg.platform_id,
     msg.thread_id,
     msg.kind,
-    msg.content,
+    adapterContent,
     files,
     msg.id,
     deliverInstance,

@@ -1,15 +1,9 @@
 /**
  * Session lifecycle: folders, DBs, messages, container status.
  *
- * Host-owned session stores: inbound.db + outbound.db. The runner reads both
- * and journals mutations in runner-state.db for delivery over the session link.
- * Three cross-mount invariants are load-bearing:
- *   1. journal_mode=DELETE — WAL's mmapped -shm doesn't refresh host→guest;
- *      the container would silently miss every new message.
- *   2. Host opens-writes-CLOSES per op — close invalidates the container's
- *      page cache; a long-lived connection freezes its view at first read.
- *   3. One writer per file — DELETE-mode journal-unlink isn't atomic across
- *      the mount; concurrent writers corrupt the DB.
+ * Host-owned session stores: inbound.db + outbound.db. Neither is mounted into
+ * the container. The bidirectional session link projects host events and
+ * runner mutations into the receiver's local database after commit ACKs.
  */
 import type Database from 'better-sqlite3';
 import fs from 'fs';
@@ -19,7 +13,7 @@ import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
 import { activityHint } from './activity.js';
 import type { ActivityLine, OutboundFile, UsageSnapshot } from './channels/adapter.js';
-import { DATA_DIR } from './config.js';
+import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createSession,
@@ -39,7 +33,12 @@ import {
 } from './db/session-db.js';
 import { log } from './log.js';
 import { extractInboundText, indexMessage } from './search-index.js';
-import { getSessionSignalActivity, getSessionSignalTurnEndedAt, getSessionSignalUsage } from './session-link.js';
+import {
+  getSessionSignalActivity,
+  getSessionSignalTurnEndedAt,
+  getSessionSignalUsage,
+  notifySessionHostState,
+} from './session-link.js';
 import type { Session } from './types.js';
 
 function isPathInside(parent: string, child: string): boolean {
@@ -68,12 +67,13 @@ export function outboundDbPath(agentGroupId: string, sessionId: string): string 
 }
 
 export function runnerStateDbPath(agentGroupId: string, sessionId: string): string {
-  return path.join(sessionDir(agentGroupId, sessionId), 'runner-state.db');
+  return path.join(sessionDir(agentGroupId, sessionId), 'runner-state', 'runner-state.db');
 }
 
 export function seedRunnerState(agentGroupId: string, sessionId: string, overwrite = false): void {
   const destination = runnerStateDbPath(agentGroupId, sessionId);
   if (!overwrite && fs.existsSync(destination)) return;
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.copyFileSync(outboundDbPath(agentGroupId, sessionId), destination);
   const db = openOutboundDbRwRaw(destination);
   try {
@@ -143,6 +143,7 @@ export function resolveSession(
 export function initSessionFolder(agentGroupId: string, sessionId: string): void {
   const dir = sessionDir(agentGroupId, sessionId);
   fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'outbox'), { recursive: true });
 
   ensureSchema(inboundDbPath(agentGroupId, sessionId), 'inbound');
@@ -153,8 +154,8 @@ export function initSessionFolder(agentGroupId: string, sessionId: string): void
 /**
  * Write the default reply routing for a session into its inbound.db.
  *
- * The container reads this as the default (channel_type, platform_id, thread_id)
- * for outbound messages when the agent doesn't specify an explicit destination.
+ * The session link projects this as the default (channel_type, platform_id,
+ * thread_id) for outbound messages when the agent omits a destination.
  * Derived from session.messaging_group_id → messaging_groups row + session.thread_id.
  *
  * Called on every container wake alongside the agent-to-agent module's
@@ -189,6 +190,7 @@ export function writeSessionRouting(agentGroupId: string, sessionId: string): vo
     db.close();
   }
   log.debug('Session routing written', { sessionId, channelType, platformId, threadId: session.thread_id });
+  notifySessionHostState(sessionId);
 }
 
 /**
@@ -252,6 +254,9 @@ export function writeSessionMessage(
 
     // Extract base64 attachment data, save to inbox, replace with file paths
     content = extractAttachmentFiles(agentGroupId, sessionId, message.id, message.content);
+    if (Buffer.byteLength(content) > CONTAINER_MAX_OUTPUT_SIZE) {
+      throw new Error(`Inbound message ${message.id} exceeds the ${CONTAINER_MAX_OUTPUT_SIZE}-byte session-link limit`);
+    }
 
     insertMessage(db, {
       id: message.id,
@@ -300,6 +305,7 @@ export function writeSessionMessage(
   }
 
   updateSession(sessionId, { last_active: new Date().toISOString() });
+  notifySessionHostState(sessionId);
 }
 
 /**
@@ -458,6 +464,7 @@ export function writeOutboundDirect(
     inDb.close();
     db.close();
   }
+  notifySessionHostState(sessionId);
 }
 
 /**

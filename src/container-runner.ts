@@ -62,8 +62,7 @@ import {
 import {
   markContainerRunning,
   markContainerStopped,
-  inboundDbPath,
-  outboundDbPath,
+  runnerStateDbPath,
   sessionDir,
   writeSessionRouting,
 } from './session-manager.js';
@@ -625,12 +624,15 @@ export function buildMounts(
   const sessDir = sessionDir(agentGroup.id, session.id);
   const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
 
-  // Session folder at /workspace (contains inbound.db, outbound.db, outbox/, .claude/)
-  mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
   if (includeSessionLink) {
-    mounts.push(inboundStoreMount(agentGroup.id, session.id));
-    mounts.push(outboundStoreMount(agentGroup.id, session.id));
+    mounts.push(runnerStateStoreMount(agentGroup.id, session.id));
+    mounts.push({ hostPath: path.join(sessDir, 'inbox'), containerPath: '/workspace/inbox', readonly: true });
+    mounts.push({ hostPath: path.join(sessDir, 'outbox'), containerPath: '/workspace/outbox', readonly: false });
     mounts.push(sessionLinkMount(session.id));
+  } else {
+    // Configuration probes do not run the session protocol or touch durable
+    // state; preserve their temporary workspace mount.
+    mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
   }
 
   // Agent group folder at /workspace/agent (RW for working files + CLAUDE.local.md)
@@ -712,19 +714,11 @@ export function sessionLinkMount(sessionId: string): VolumeMount {
   };
 }
 
-export function outboundStoreMount(agentGroupId: string, sessionId: string): VolumeMount {
+export function runnerStateStoreMount(agentGroupId: string, sessionId: string): VolumeMount {
   return {
-    hostPath: outboundDbPath(agentGroupId, sessionId),
-    containerPath: '/workspace/outbound.db',
-    readonly: true,
-  };
-}
-
-export function inboundStoreMount(agentGroupId: string, sessionId: string): VolumeMount {
-  return {
-    hostPath: inboundDbPath(agentGroupId, sessionId),
-    containerPath: '/workspace/inbound.db',
-    readonly: true,
+    hostPath: path.dirname(runnerStateDbPath(agentGroupId, sessionId)),
+    containerPath: '/workspace/runner-state',
+    readonly: false,
   };
 }
 

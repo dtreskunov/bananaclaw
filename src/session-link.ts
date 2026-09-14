@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -9,8 +10,8 @@ import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
 import { applyDurableRunnerEvent } from './session-link-durable.js';
 
-const PROTOCOL_VERSION = 2;
-export const SESSION_LINK_VERSION = 'v2';
+const PROTOCOL_VERSION = 3;
+export const SESSION_LINK_VERSION = 'v3';
 const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_FRAME_BYTES = Math.ceil((CONTAINER_MAX_OUTPUT_SIZE * 4) / 3) + 2 * 1024 * 1024;
 const MAX_FRAME_BYTES_PER_SECOND = 24 * 1024 * 1024;
@@ -21,6 +22,7 @@ const MAX_CONNECTIONS_PER_SECOND = 32;
 const MAX_ACTIVITY_LINES = 128;
 const MAX_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 2_000;
+const HOST_ACK_TIMEOUT_MS = 10_000;
 
 type SignalKind = 'disconnected' | 'heartbeat' | 'activity' | 'usage' | 'turn.end';
 
@@ -45,6 +47,9 @@ interface SessionSignalServer {
   connection: net.Socket | null;
   suspended: boolean;
   relistenTimer: NodeJS.Timeout | null;
+  hostInFlight: { eventId: string; sequence: number } | null;
+  hostAckTimer: NodeJS.Timeout | null;
+  hostReadySent: boolean;
 }
 
 type SignalListener = (sessionId: string, kind: SignalKind) => void;
@@ -59,6 +64,66 @@ const durableProcessingListeners = new Set<DurableProcessingListener>();
 let globalRateWindowStartedAt = 0;
 let globalFramesThisWindow = 0;
 let globalFrameBytesThisWindow = 0;
+
+function inboundPath(agentGroupId: string, sessionId: string): string {
+  return path.join(DATA_DIR, 'v2-sessions', agentGroupId, sessionId, 'inbound.db');
+}
+
+function hostWirePayload(eventType: string, value: unknown): unknown {
+  if (eventType !== 'message.upsert') return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid host message event');
+  const payload = value as Record<string, unknown>;
+  if (typeof payload.content_hex !== 'string' || !/^(?:[A-Fa-f0-9]{2})*$/.test(payload.content_hex)) {
+    throw new Error('invalid host message content');
+  }
+  const content = Buffer.from(payload.content_hex, 'hex');
+  if (content.length > CONTAINER_MAX_OUTPUT_SIZE) throw new Error('invalid host message content');
+  const { content_hex: _contentHex, ...rest } = payload;
+  return { ...rest, content_base64: content.toString('base64') };
+}
+
+function flushHostEvents(sessionId: string, entry: SessionSignalServer): void {
+  const connection = entry.connection;
+  if (!entry.agentGroupId || !connection?.writable || connection.connecting || entry.hostInFlight) return;
+  const db = new Database(inboundPath(entry.agentGroupId, sessionId));
+  try {
+    const pending = db
+      .prepare('SELECT sequence, event_id, event_type, payload FROM pending_host_events ORDER BY sequence LIMIT 1')
+      .get() as { sequence: number; event_id: string; event_type: string; payload: string } | undefined;
+    if (!pending) {
+      if (!entry.hostReadySent) {
+        connection.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'host.ready' })}\n`);
+        entry.hostReadySent = true;
+      }
+      return;
+    }
+    const frame = {
+      v: PROTOCOL_VERSION,
+      type: 'host.event',
+      eventId: pending.event_id,
+      sequence: pending.sequence,
+      event: { type: pending.event_type, payload: hostWirePayload(pending.event_type, JSON.parse(pending.payload)) },
+    };
+    const encoded = `${JSON.stringify(frame)}\n`;
+    if (Buffer.byteLength(encoded) > MAX_FRAME_BYTES) throw new Error(`host event ${pending.sequence} exceeds wire limit`);
+    connection.write(encoded);
+    entry.hostInFlight = { eventId: pending.event_id, sequence: pending.sequence };
+    entry.hostAckTimer = setTimeout(() => {
+      if (entry.connection === connection && entry.hostInFlight?.eventId === pending.event_id) connection.destroy();
+    }, HOST_ACK_TIMEOUT_MS);
+    entry.hostAckTimer.unref?.();
+  } catch (err) {
+    log.error('Failed to send host session event', { sessionId, err });
+    connection.destroy();
+  } finally {
+    db.close();
+  }
+}
+
+export function notifySessionHostState(sessionId: string): void {
+  const entry = servers.get(sessionId);
+  if (entry) flushHostEvents(sessionId, entry);
+}
 
 function decodeDurablePayload(eventType: string, value: unknown): unknown {
   if (eventType !== 'message.upsert') return value;
@@ -350,6 +415,50 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
   const frame = raw as Record<string, unknown>;
   if (frame.v !== PROTOCOL_VERSION || typeof frame.type !== 'string') return false;
 
+  if (frame.type === 'host.ack') {
+    if (
+      !entry.agentGroupId ||
+      !hasOnlyKeys(frame, ['v', 'type', 'eventId']) ||
+      typeof frame.eventId !== 'string' ||
+      entry.hostInFlight?.eventId !== frame.eventId
+    ) {
+      return false;
+    }
+    const db = new Database(inboundPath(entry.agentGroupId, sessionId));
+    try {
+      db.prepare('DELETE FROM pending_host_events WHERE event_id = ? AND sequence = ?').run(
+        frame.eventId,
+        entry.hostInFlight.sequence,
+      );
+    } finally {
+      db.close();
+    }
+    if (entry.hostAckTimer) clearTimeout(entry.hostAckTimer);
+    entry.hostAckTimer = null;
+    entry.hostInFlight = null;
+    flushHostEvents(sessionId, entry);
+    return true;
+  }
+
+  if (frame.type === 'host.nack') {
+    if (
+      !hasOnlyKeys(frame, ['v', 'type', 'eventId', 'fatal', 'error']) ||
+      typeof frame.eventId !== 'string' ||
+      frame.fatal !== true ||
+      typeof frame.error !== 'string' ||
+      entry.hostInFlight?.eventId !== frame.eventId
+    ) {
+      return false;
+    }
+    log.error('Runner rejected host session event', {
+      sessionId,
+      sequence: entry.hostInFlight.sequence,
+      error: frame.error.slice(0, 256),
+    });
+    entry.connection?.destroy();
+    return true;
+  }
+
   if (frame.type === 'durable') {
     if (
       !entry.agentGroupId ||
@@ -456,6 +565,8 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
   }
   entry.connection = connection;
   state.connected = true;
+  entry.hostReadySent = false;
+  flushHostEvents(sessionId, entry);
 
   let buffer = '';
   connection.setEncoding('utf8');
@@ -504,6 +615,7 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
           connection.destroy();
           return;
         }
+        flushHostEvents(sessionId, entry);
       } catch (err) {
         if (parsed?.type === 'durable' && typeof parsed.eventId === 'string') {
           const error = err instanceof Error ? err.message.slice(0, 256) : 'rejected';
@@ -530,6 +642,9 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
   connection.on('close', () => {
     if (entry.connection !== connection) return;
     entry.connection = null;
+    if (entry.hostAckTimer) clearTimeout(entry.hostAckTimer);
+    entry.hostAckTimer = null;
+    entry.hostInFlight = null;
     state.connected = false;
     emit(sessionId, 'disconnected');
   });
@@ -596,6 +711,9 @@ export async function startSessionSignalServer(sessionId: string, agentGroupId: 
     connection: null,
     suspended: false,
     relistenTimer: null,
+    hostInFlight: null,
+    hostAckTimer: null,
+    hostReadySent: false,
   };
   entry.server.on('connection', (connection) => handleConnection(sessionId, entry, connection));
   await listen(entry, socketPath);
@@ -611,6 +729,7 @@ export async function stopSessionSignalServer(sessionId: string, clearState = fa
   }
   servers.delete(sessionId);
   if (entry.relistenTimer) clearTimeout(entry.relistenTimer);
+  if (entry.hostAckTimer) clearTimeout(entry.hostAckTimer);
   entry.connection?.destroy();
   fs.rmSync(sessionLinkSocketPath(sessionId), { force: true });
   if (clearState) states.delete(sessionId);

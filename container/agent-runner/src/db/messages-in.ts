@@ -1,15 +1,17 @@
 /**
  * Inbound message operations (container side).
  *
- * Reads from inbound.db (host-owned, opened read-only).
+ * Reads host events projected into runner-state.db.
  * Writes processing status to the runner-state projection. Triggers journal
  * the mutation for the host-owned outbound.db.
  *
- * The container never writes to inbound.db — all status tracking goes through
- * processing_ack. The host applies journaled changes over the session link.
+ * Processing status goes through the runner journal and is projected back to
+ * the host over the same session link.
  */
 import { getConfig } from '../config.js';
 import { openInboundDb, getOutboundDb } from './connection.js';
+
+export const MAX_TIMER_DELAY_MS = 2_147_000_000;
 
 export interface MessageInRow {
   id: string;
@@ -45,8 +47,8 @@ function getMaxMessagesPerPrompt(): number {
 }
 
 /**
- * Fetch pending messages that are due for processing.
- * Reads from inbound.db (read-only), filters against local processing_ack
+ * Fetch pending projected messages that are due for processing.
+ * Filters against local processing_ack
  * to skip messages already picked up by this or a previous container run.
  *
  * Returns the most recent `MAX_MESSAGES_PER_PROMPT` pending rows in
@@ -83,6 +85,24 @@ export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
     // Reverse: we fetched DESC to take the most recent N, but the agent
     // should see them in chronological order (oldest first).
     return pending.filter((m) => !ackedIds.has(m.id)).reverse();
+  } finally {
+    inbound.close();
+  }
+}
+
+/** Milliseconds until the next future pending row becomes due. */
+export function nextPendingDueDelayMs(): number | undefined {
+  const inbound = openInboundDb();
+  try {
+    const row = inbound
+      .prepare(
+        `SELECT CAST(MAX(0, (julianday(MIN(process_after)) - julianday('now')) * 86400000) AS INTEGER) AS delay_ms
+         FROM messages_in
+         WHERE status = 'pending' AND process_after IS NOT NULL
+           AND datetime(process_after) > datetime('now')`,
+      )
+      .get() as { delay_ms: number | null };
+    return row.delay_ms === null ? undefined : Math.min(row.delay_ms, MAX_TIMER_DELAY_MS);
   } finally {
     inbound.close();
   }
