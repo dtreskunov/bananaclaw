@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 
-const DEFAULT_PATH = '/workspace/native-state.db';
+const DEFAULT_PATH = '/workspace/native-state/native-state.db';
 
 interface StoredMessageRow {
   id: number;

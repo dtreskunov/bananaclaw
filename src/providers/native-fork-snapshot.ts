@@ -13,7 +13,7 @@ function maxDbBytes(): number {
 }
 
 export function cloneNativeSessionState(parentSessionDir: string, newSessionDir: string): boolean {
-  const source = path.join(parentSessionDir, 'native-state.db');
+  const source = path.join(parentSessionDir, 'native-state', 'native-state.db');
   if (!fs.existsSync(source)) return false;
 
   const size = fs.statSync(source).size;
@@ -23,7 +23,8 @@ export function cloneNativeSessionState(parentSessionDir: string, newSessionDir:
     return false;
   }
 
-  const destination = path.join(newSessionDir, 'native-state.db');
+  const destination = path.join(newSessionDir, 'native-state', 'native-state.db');
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.mkdirSync(newSessionDir, { recursive: true });
   let db: Database.Database | undefined;
   try {

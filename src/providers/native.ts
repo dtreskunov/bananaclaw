@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { readEnvFile } from '../env.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 import { cloneNativeSessionState } from './native-fork-snapshot.js';
@@ -25,7 +28,12 @@ registerProviderContainerConfig(
       const value = context.hostEnv[name] ?? fileEnv[name];
       if (value) env[name] = value;
     }
-    return { env };
+    const stateDir = path.join(context.sessionDir, 'native-state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    return {
+      env,
+      mounts: [{ hostPath: stateDir, containerPath: '/workspace/native-state', readonly: false }],
+    };
   },
   { forkSessionState: cloneNativeSessionState },
 );

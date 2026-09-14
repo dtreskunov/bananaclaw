@@ -25,7 +25,8 @@ afterEach(() => {
 
 describe('cloneNativeSessionState', () => {
   it('creates a consistent standalone snapshot while the parent is open', () => {
-    const source = path.join(parentDir, 'native-state.db');
+    const source = path.join(parentDir, 'native-state', 'native-state.db');
+    fs.mkdirSync(path.dirname(source), { recursive: true });
     const parent = new Database(source);
     parent.pragma('journal_mode = DELETE');
     parent.exec('CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT)');
@@ -34,19 +35,20 @@ describe('cloneNativeSessionState', () => {
     expect(cloneNativeSessionState(parentDir, forkDir)).toBe(true);
     parent.close();
 
-    const snapshot = new Database(path.join(forkDir, 'native-state.db'), { readonly: true });
+    const snapshot = new Database(path.join(forkDir, 'native-state', 'native-state.db'), { readonly: true });
     expect(snapshot.prepare('SELECT body FROM messages').pluck().get()).toBe('persisted');
     snapshot.close();
   });
 
   it('declines snapshots over the configured limit', () => {
-    const source = path.join(parentDir, 'native-state.db');
+    const source = path.join(parentDir, 'native-state', 'native-state.db');
+    fs.mkdirSync(path.dirname(source), { recursive: true });
     const parent = new Database(source);
     parent.exec('CREATE TABLE messages (id INTEGER PRIMARY KEY)');
     parent.close();
     process.env.NATIVE_FORK_MAX_DB_BYTES = '1';
 
     expect(cloneNativeSessionState(parentDir, forkDir)).toBe(false);
-    expect(fs.existsSync(path.join(forkDir, 'native-state.db'))).toBe(false);
+    expect(fs.existsSync(path.join(forkDir, 'native-state', 'native-state.db'))).toBe(false);
   });
 });
