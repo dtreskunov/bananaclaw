@@ -12,6 +12,9 @@ dist/
 store/
 data/
 logs/
+!logs/
+logs/*
+!logs/README.md
 
 # Groups - per-installation state, not tracked
 groups
