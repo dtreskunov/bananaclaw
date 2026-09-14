@@ -85,8 +85,8 @@ Privilege is a user-level concept — there is no "main" agent group or "admin" 
 ### Message Flow
 ```
 Channel adapter → routeInbound() → resolve messaging_group → resolve agent via messaging_group_agents
-→ resolve/create session → write to inbound.db → wake container → agent-runner polls inbound.db
-→ agent responds → writes to outbound.db → host delivery poll reads outbound.db → deliver via adapter
+→ resolve/create session → journal in inbound.db → wake container → session link projects to runner-state.db
+→ agent responds → journals in runner-state.db → session link projects to outbound.db → deliver via adapter
 ```
 
 ### Key Files

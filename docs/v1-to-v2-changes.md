@@ -49,13 +49,13 @@ Consequences:
 **v2:** three DB shapes.
 
 1. `data/v2.db` — **central**. Everything that isn't per-session: users, roles, agent groups, messaging groups, wirings, pending approvals, user DMs, schema migrations.
-2. `data/v2-sessions/<session_id>/inbound.db` — **host writes, container reads**. `messages_in`, routing, destinations, pending questions, processing_ack. This is where scheduled tasks live (see "Scheduling" below).
-3. `data/v2-sessions/<session_id>/outbound.db` — **host-owned durable runner projection**. `messages_out`, session state, activity, usage.
-4. `data/v2-sessions/<session_id>/runner-state.db` — **container-owned** local projection and unacknowledged event journal.
+2. `data/v2-sessions/<session_id>/inbound.db` — **private host journal**. `messages_in`, routing, destinations, delivery receipts, and pending host events. Scheduled tasks live here.
+3. `data/v2-sessions/<session_id>/outbound.db` — **private host-owned durable runner projection**. `messages_out`, session state, activity, usage.
+4. `data/v2-sessions/<session_id>/runner-state/runner-state.db` — **container-owned** bidirectional projection and unacknowledged runner event journal. The directory mount also persists SQLite rollback journals.
 
-Exactly one writer per file. No cross-mount lock contention. Host uses even
-`seq` numbers and the container uses odd. Live runner status uses a private
-per-session Unix socket instead of DB writes or signal files.
+Exactly one writer per file. Host databases are not mounted into containers.
+Host uses even `seq` numbers and the container uses odd. Durable events and live
+runner status use one private per-session Unix socket.
 
 Message history (v1 `messages` table, v1 `chats` table) is **not migrated**. The migration copies operationally important state forward (agents, channels, wirings, scheduled tasks, group folders) and leaves chat logs behind.
 

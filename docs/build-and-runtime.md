@@ -1,9 +1,9 @@
 # Build & Runtime
 
 NanoClaw runs a split stack: the host is Node + pnpm, the agent container is
-Bun. Host-to-runner work uses read-only mounted session stores; runner-to-host
-state uses the acknowledged per-session Unix socket. There are no shared code
-modules between the runtimes.
+Bun. All host/runner communication uses the acknowledged per-session Unix
+socket; host SQLite stores are not mounted into the container. There are no
+shared code modules between the runtimes.
 
 ## Why the split
 

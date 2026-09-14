@@ -11,24 +11,26 @@ Schemas live in `src/db/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA`
 
 ```
 data/v2-sessions/<agent_group_id>/<session_id>/
-  inbound.db              ← host writes, container reads (read-only mount)
-  outbound.db             ← host writes, container reads (read-only mount)
-  runner-state.db         ← runner projection + pending event journal
-  inbox/<message_id>/     ← user attachments, decoded from inbound message content
+  inbound.db              ← private host input + pending host event journal
+  outbound.db             ← private host projection of runner output
+  runner-state/           ← mounted runner-owned SQLite directory
+    runner-state.db       ← projection + pending runner journal
+  inbox/<message_id>/     ← user attachments, mounted read-only
   outbox/<message_id>/    ← attachments the agent produced
 ```
 
 One session = one folder = one pair of DBs. The `agent_group_id` parent directory also holds per-group state (`.claude-shared/`, `agent-runner-src/`) that is shared across every session of that agent group.
 
 DB path helpers in `src/session-manager.ts`: `sessionDir()`, `inboundDbPath()`,
-and `outboundDbPath()`. Live runner status uses the separately mounted
-per-session socket described in [session-link.md](session-link.md).
+and `outboundDbPath()`. The container mounts neither host database; durable
+events and live status share the per-session socket described in
+[session-link.md](session-link.md).
 
 ---
 
 ## 2. Inbound DB (`inbound.db`)
 
-Host-owned, container-read-only. Schema constant: `INBOUND_SCHEMA` in `src/db/schema.ts`.
+Host-owned and host-private. Schema constant: `INBOUND_SCHEMA` in `src/db/schema.ts`.
 
 ### 2.1 `messages_in`
 
@@ -53,7 +55,7 @@ CREATE TABLE messages_in (
   source_session_id TEXT,                  -- exact agent-to-agent return path
   sender_user_id TEXT,                     -- canonical users.id attribution
   sender_identity TEXT,                    -- observed namespaced identity
-  on_wake        INTEGER NOT NULL DEFAULT 0 -- 1 = only deliver on container's first poll
+  on_wake        INTEGER NOT NULL DEFAULT 0 -- 1 = only deliver on a fresh container
 );
 CREATE INDEX idx_messages_in_series ON messages_in(series_id);
 ```
@@ -65,11 +67,15 @@ Content shapes: see [api-details.md §Session DB Schema Details](api-details.md#
 For agent-to-agent rows, `source_session_id` is an exact return route. A reply to that agent must use the recorded active session or fail. Unthreaded messages and explicitly targeted sends whose inherited reply reference came from another origin are group-level sends and use the target agent group's normal `agent-shared` session policy.
 
 **Writers (host):** `insertMessage()`, `insertTask()`, `insertRecurrence()` — all in `src/db/session-db.ts`. Each calls `nextEvenSeq()`.
-**Reader (container):** `container/agent-runner/src/db/messages-in.ts` — polls `status='pending' AND (process_after IS NULL OR process_after <= now)`.
+Message mutations are journaled into `pending_host_events`, projected into the
+runner's local `messages_in`, and consumed by
+`container/agent-runner/src/db/messages-in.ts` after socket notification.
 
 ### 2.2 `delivered`
 
-Host writes here after handing a `messages_out` row to the channel adapter. Container reads `platform_message_id` to target edits and reactions.
+Host writes here after handing a `messages_out` row to the channel adapter. Edit
+and reaction operations retain a stable NanoClaw message ID; the host resolves
+that ID to `platform_message_id` immediately before adapter delivery.
 
 ```sql
 CREATE TABLE delivered (
@@ -84,7 +90,7 @@ Writer: `markDelivered()` / `markDeliveryFailed()` in `src/db/session-db.ts`.
 
 ### 2.3 `destinations`
 
-Projection of the central `agent_destinations` table (see [db-central.md §1.10](db-central.md#110-agent_destinations)) for this session's agent. The container resolves `to="name"` against this table; if the row is absent, the send is rejected as `unknown destination`.
+Host projection of the central `agent_destinations` table (see [db-central.md §1.10](db-central.md#110-agent_destinations)) for this session's agent. Each replacement is journaled as one atomic snapshot and applied to the runner-local table. The container resolves `to="name"` there.
 
 ```sql
 CREATE TABLE destinations (
@@ -112,7 +118,14 @@ CREATE TABLE session_routing (
 );
 ```
 
-Written by `writeSessionRouting()` on every container wake, derived from `sessions.messaging_group_id` + `sessions.thread_id`.
+Written by `writeSessionRouting()` on every container wake, journaled, and
+projected into runner state before `host.ready`.
+
+### 2.5 `pending_host_events`
+
+Ordered host-to-runner journal. Message/sequence/fork triggers and explicit
+routing/destination helpers append rows. The host sends one row at a time and
+deletes it only after `host.ack`; reconnect replays the retained head.
 
 ---
 
@@ -132,7 +145,7 @@ If you add a code path that writes to either table, preserve parity — the inva
 
 ## 4. Outbound DB (`outbound.db`)
 
-Host-owned durable projection. The container receives a read-only mount. Schema
+Host-owned durable projection. It is not mounted into the container. Schema
 constant: `OUTBOUND_SCHEMA` in `src/db/schema.ts`.
 
 ### 4.1 `messages_out`
@@ -158,7 +171,8 @@ CREATE TABLE messages_out (
 Content shapes: see [api-details.md §Session DB Schema Details](api-details.md#session-db-schema-details).
 
 **Writer (host):** `src/session-link-durable.ts`, after validating a journaled runner event.
-**Readers:** host delivery/UI/forking and runner sequence/reference lookups.
+**Readers:** host delivery, UI, and forking. Runner sequence/reference lookups
+use its local projection.
 
 ### 4.2 `processing_ack`
 
@@ -193,7 +207,24 @@ Access: `container/agent-runner/src/db/session-state.ts`.
 
 ---
 
-## 5. Schema evolution
+## 5. Runner State (`runner-state/runner-state.db`)
+
+Runner-owned and the only database mounted into the container. Its parent
+directory is mounted so SQLite rollback journals survive container crashes. It contains the
+runner's writable output/state tables, `pending_runner_events`, and local copies
+of host-owned `messages_in`, `destinations`, `session_routing`, and `fork_origin`.
+
+`applied_host_events.last_sequence` advances in the same transaction that
+applies each `host.event`. Replayed sequences at or below that cursor are ACKed
+without reapplying; gaps fail closed. `host_state.sequence_floor` tracks even
+host-only output rows so odd runner sequence allocation remains collision-free
+without reading `outbound.db`.
+
+The host never opens this file. The runner never opens either host DB.
+
+---
+
+## 6. Schema evolution
 
 Unlike the central DB, session DBs do **not** go through numbered migrations. Both `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA` create the complete current shape for fresh sessions. Existing session files in this deployment are normalized as an explicit data operation before runtime code starts requiring a newly added table or column.
 

@@ -86,13 +86,11 @@ pnpm exec tsx src/ui/scripts/mint-magic.ts <id>     # prints a magic-link URL
 Identical to upstream:
 
 ```
-messaging apps  ┐
-web (browser)   ├─→  host (router) → inbound.db → container (Bun, Agent SDK)
-HA / email      ┘                                       │
-                                                        ↓
-                      host-owned outbound.db ← runner.sock
-                                │
-                                └→ host delivery
+messaging apps  ┐                    runner.sock
+web (browser)   ├─→  host journals ←────────────→ container (Bun, Agent SDK)
+HA / email      ┘         │                         runner-state.db
+                           ↓
+                     host delivery
 ```
 
 The `web` channel sits in this same flow — the browser is just another

@@ -16,19 +16,20 @@ NanoClaw uses **four kinds of SQLite database**, all on the host filesystem:
 | DB                   | Location                                                         | Writer    | Readers                            | Purpose                                                  |
 | -------------------- | ---------------------------------------------------------------- | --------- | ---------------------------------- | -------------------------------------------------------- |
 | **Central**          | `data/v2.db`                                                     | host      | host                               | Identity, permissions, routing, wiring — the admin plane |
-| **Session inbound**  | `data/v2-sessions/<agent_group_id>/<session_id>/inbound.db`      | host      | host (sync), container (read-only) | Host → container messages + routing projections          |
-| **Session outbound** | `data/v2-sessions/<agent_group_id>/<session_id>/outbound.db`     | host      | host, container (read-only)        | Durable runner output projected by the host              |
-| **Runner state**     | `data/v2-sessions/<agent_group_id>/<session_id>/runner-state.db` | container | container                          | Local projection + unacknowledged event journal          |
+| **Session inbound**  | `data/v2-sessions/<agent_group_id>/<session_id>/inbound.db`      | host      | host                               | Durable host messages, routing, and host event journal   |
+| **Session outbound** | `data/v2-sessions/<agent_group_id>/<session_id>/outbound.db`     | host      | host                               | Durable runner output projected by the host              |
+| **Runner state**     | `data/v2-sessions/<agent_group_id>/<session_id>/runner-state/runner-state.db` | container | container                | Local bidirectional projection + runner event journal    |
 
 **Single-writer rule.** Every SQLite file has exactly one writer. The host writes
 the central, inbound, and outbound stores. The container writes only
 `runner-state.db`; the host never opens it.
 
-Durable messages use the two session databases. Live runner status (heartbeat,
-activity, progressive usage, and turn completion) uses a private per-session
-Unix socket; see [session-link.md](session-link.md).
+Both host journals communicate with the runner projection over one acknowledged
+per-session Unix socket. Live runner status uses the same socket; see
+[session-link.md](session-link.md).
 
-**Journal mode.** Session DBs use `journal_mode = DELETE` (not WAL). Cross-mount WAL visibility is a bug farm; DELETE mode + open-write-close forces the page cache to flush so the other side sees changes.
+**Journal mode.** Session DBs use `journal_mode = DELETE` (not WAL). Each file
+has one local writer; the socket protocol crosses the container boundary.
 
 ---
 
@@ -42,14 +43,15 @@ data/
       .claude-shared/                     ← shared Claude state for the agent group
       agent-runner-src/                   ← per-group agent-runner overlay
       <session_id>/
-        inbound.db                        ← host writes, container reads
-        outbound.db                       ← host writes, container reads RO
-        runner-state.db                   ← container projection + journal
-        inbox/<message_id>/               ← decoded user attachments
+        inbound.db                        ← private host input + event journal
+        outbound.db                       ← private host runner projection
+        runner-state/                     ← mounted so DB rollback journals persist
+          runner-state.db                 ← container projection + event journal
+        inbox/<message_id>/               ← decoded attachments, mounted RO
         outbox/<message_id>/              ← attachments the agent produced
 
   .session-links/<session-hash>/
-    runner.sock                            ← live runner → host signals
+    runner.sock                            ← bidirectional events + live signals
 ```
 
 Session DB path helpers live in `src/session-manager.ts`; session-link lifecycle
@@ -69,24 +71,19 @@ and paths live in `src/session-link.ts`.
 | Dropped-message audit          | central                             | Global ops view                                            |
 | Inbound messages, retry state  | session `inbound.db`                | Per-session workload; host is sole writer                  |
 | Outbound messages, agent state | session `outbound.db`               | Host applies acknowledged runner events                    |
-| Delivery outcome               | session `inbound.db` (`delivered`)  | Host writes on success; container reads for edit targeting |
+| Delivery outcome               | session `inbound.db` (`delivered`)  | Host writes and resolves edit/reaction targets             |
 | Processing status              | runner journal → host `outbound.db` | Container can't write to `inbound.db`                      |
 
 Heuristic: if the value is a message, routing projection, or runtime ack, it goes per-session. Everything else is central.
 
 ---
 
-## 4. Cross-mount visibility
+## 4. Isolation boundary
 
-Session DBs are bind-mounted into the container. A few rules you need to know before touching the DB code:
-
-- **`journal_mode = DELETE`, not WAL.** WAL files don't reliably cross the mount and the container can read stale pages. DELETE mode forces each writer to flush the main file.
-- **Open-write-close on the host.** Host-side writes to `inbound.db` open a connection, write, and close it. Keeping a handle open makes cached pages invisible to the container.
-- **Container reads host stores read-only.** All runner mutations go to its
-  private projection and are applied by the host over the session link.
-- **Live status stays out of SQLite.** The per-session Unix socket carries
-  heartbeat, activity, progressive usage, and turn completion without adding
-  write contention to `outbound.db`.
+Host databases are not bind-mounted into the container. `runner-state.db` is the
+only mounted database and the host never opens it. Durable events cross the
+boundary one at a time and are removed from the sender's journal only after the
+receiver commits and ACKs. `inbox/` is read-only; `outbox/` is writable.
 
 These rules are enforced by convention in `src/session-manager.ts` and `container/agent-runner/src/db/`. If you change how the DBs are opened, re-read that code first.
 
@@ -97,9 +94,10 @@ These rules are enforced by convention in `src/session-manager.ts` and `containe
 1. **Host stores plus runner projection.** `inbound.db` and `outbound.db` are
    host-owned; `runner-state.db` is runner-owned. No SQLite file has cross-boundary writers.
 2. **Seq parity.** Even = host, odd = container. Disjoint namespace across both tables lets the agent reference any message by `seq` alone. Details in [db-session.md §3](db-session.md#3-sequence-numbering-invariant).
-3. **Projection pattern.** `agent_destinations` and `session_routing` are projected from the central DB into each session's `inbound.db` on container wake — the container gets a fast, local read path without querying across the mount.
-4. **Acknowledged reverse channel.** Runner mutations are journaled and applied
-   in order over the session link. The host ACKs only after commit.
+3. **Projection pattern.** Host messages, destinations, and routing are
+  journaled in `inbound.db` and projected into `runner-state.db` over the link.
+4. **Acknowledged bidirectional channel.** Each side journals durable mutations
+  and ACKs only after the other side commits them locally.
 5. **One live-status channel.** A private per-session Unix socket replaces the
    former signal files and avoids serializing live UI updates behind DB writes.
 6. **Lazy session-DB migrations.** Central DB uses numbered migrations; per-session DBs use `IF NOT EXISTS` + ad-hoc `ALTER TABLE` helpers for older session folders.

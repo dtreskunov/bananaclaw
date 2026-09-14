@@ -3,9 +3,9 @@
 ## Core Idea
 
 Each agent session has host-owned `inbound.db` and `outbound.db` stores plus a
-runner-owned `runner-state.db`. The runner reads host state through read-only
-mounts and sends live and journaled durable events over a private per-session
-Unix socket. There is no stdin or signal-file protocol.
+runner-owned `runner-state.db`. Both sides exchange journaled durable events and
+live status over a private per-session Unix socket. Host databases are not
+mounted into the container. There is no stdin or signal-file protocol.
 
 ## Two-Level DB
 
@@ -15,9 +15,9 @@ Unix socket. There is no stdin or signal-file protocol.
 - Channel adapters don't touch this directly — the host does the lookup
 
 **Per-session state:**
-- `inbound.db`: host writes, runner reads
-- `outbound.db`: host applies validated runner events, runner reads
-- `runner-state.db`: runner projection and pending event journal
+- `inbound.db`: private host messages/routing + pending host event journal
+- `outbound.db`: private host projection of validated runner events
+- `runner-state.db`: runner's bidirectional projection + pending runner journal
 - Everything durable is scoped per session, not per agent group
 
 ## Agent Groups vs Sessions
@@ -31,14 +31,15 @@ Platform event
   → Channel adapter (trigger check, ID extraction)
   → Returns: { platformChannelId, platformThreadId, triggered }
   → Host maps platformChannelId + platformThreadId → agent group + session
-  → Host writes message to session's DB
+  → Host journals message in inbound.db
   → Host calls wakeUpAgent(session)
   → Container spins up (or is already running)
-  → Agent-runner polls its session DB, finds new messages
+  → Session link projects the message to runner-state.db and receives an ACK
+  → Agent-runner wakes on the host event
   → Agent-runner processes with Claude
   → Agent-runner journals response in runner-state.db
   → Session link sends it to the host and waits for a post-commit ACK
-  → Host reads response, looks up conversation, delivers through channel adapter
+  → Host delivers the committed response through the channel adapter
 ```
 
 ## Channel Adapters

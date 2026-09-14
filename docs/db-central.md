@@ -224,7 +224,11 @@ CREATE TABLE agent_destinations (
 CREATE INDEX idx_agent_dest_target ON agent_destinations(target_type, target_id);
 ```
 
-**Projection invariant (load-bearing).** The central table is the source of truth, but each running container reads from a projection in its own `inbound.db` (see [db-session.md §2.3](db-session.md#23-destinations)). Any code that mutates `agent_destinations` while a container is running must also call `writeDestinations()` (`src/session-manager.ts`) or the container will reject sends with stale data. Known call sites: `createMessagingGroupAgent()` in `src/db/messaging-groups.ts`, the `create_agent` system action in `src/delivery.ts`.
+**Projection invariant (load-bearing).** The central table is the source of
+truth. `writeDestinations()` writes one atomic snapshot event to the session's
+host journal, and the session link applies it to `runner-state.db` (see
+[db-session.md §2.3](db-session.md#23-destinations)). Every mutation call site
+must still invoke `writeDestinations()` so a running agent sees the update.
 
 Access layer: `src/db/agent-destinations.ts`.
 

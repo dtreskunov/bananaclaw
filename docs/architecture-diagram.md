@@ -18,7 +18,7 @@ flowchart TB
     Router["Router<br/>(src/router.ts)<br/>platformId + threadId -> messaging_group -> agent_group -> session"]
     SessMgr["Session Manager<br/>(src/session-manager.ts)<br/>creates inbound.db + outbound.db"]
     Runner["Container Runner<br/>(src/container-runner.ts)<br/>OneCLI ensureAgent + spawn"]
-    Delivery["Delivery Poller<br/>(src/delivery.ts)<br/>1s active / 60s sweep"]
+    Delivery["Delivery<br/>(src/delivery.ts)<br/>event-driven + 60s crash recovery"]
     Sweep["Host Sweep<br/>(src/host-sweep.ts)<br/>liveness, retry, recurrence"]
     Central[("Central DB<br/>data/v2.db<br/>agent_groups<br/>messaging_groups<br/>messaging_group_agents<br/>sessions<br/>pending_approvals")]
   end
@@ -28,16 +28,16 @@ flowchart TB
     Approvals["configureManualApproval<br/>-> pending_approvals"]
   end
 
-  subgraph Session["Per-Session Container (Docker / Apple Container)"]
+  subgraph Session["Per-Session State + Container"]
     direction TB
-    PollLoop["Poll Loop<br/>(container/agent-runner)"]
+    PollLoop["Event Loop<br/>(container/agent-runner)"]
     Provider["Agent providers<br/>(claude, opencode, mock; todo: codex)"]
     MCP["MCP Tools<br/>send_message, send_file, edit_message,<br/>add_reaction, send_card, ask_user_question,<br/>schedule_task, create_agent,<br/>install_packages, add_mcp_server"]
     Skills["Container Skills<br/>(container/skills/)"]
-    InDB[("inbound.db<br/>host writes · runner reads<br/>even seq<br/>messages_in · destinations")]
-    OutDB[("outbound.db<br/>host writes · runner reads<br/>messages_out · projected state")]
-    RunnerState[("runner-state.db<br/>runner writes<br/>projection + event journal")]
-    SessionLink["runner.sock<br/>live + durable events"]
+    InDB[("inbound.db<br/>private host journal<br/>messages + pending host events")]
+    OutDB[("outbound.db<br/>private host projection<br/>runner output + state")]
+    RunnerState[("runner-state.db<br/>runner writes<br/>bidirectional projection + journal")]
+    SessionLink["runner.sock v3<br/>bidirectional ACKed events + live status"]
   end
 
   subgraph Groups["Agent Group Filesystem (groups/*)"]
@@ -52,16 +52,18 @@ flowchart TB
   SessMgr --> Runner
   Runner --> OneCLI
   Runner --> PollLoop
-  PollLoop --> InDB
+  InDB -->|host.event| SessionLink
+  SessionLink -->|commit + host.ack| RunnerState
+  RunnerState --> PollLoop
   PollLoop --> Provider
   PollLoop --> RunnerState
-  RunnerState -->|ACK replay| SessionLink
+  RunnerState -->|durable event| SessionLink
   PollLoop -->|live signals| SessionLink
   SessionLink --> Runner
   Provider --> MCP
   Provider --> Skills
   MCP --> RunnerState
-  SessionLink --> OutDB
+  SessionLink -->|commit + ACK| OutDB
   OutDB --> Delivery
   Delivery --> Central
   Delivery --> Bridge
@@ -84,9 +86,11 @@ sequenceDiagram
   participant R as Router
   participant SM as Session Manager
   participant IDB as inbound.db
+  participant L as Session Link
+  participant RS as runner-state.db
   participant C as Container (agent-runner)
   participant ODB as outbound.db
-  participant D as Delivery Poller
+  participant D as Delivery
 
   P->>B: new message
   B->>R: routeInbound(platformId, threadId, msg)
@@ -94,10 +98,15 @@ sequenceDiagram
   R->>SM: ensure session + DBs exist
   R->>IDB: INSERT messages_in (even seq)
   R->>C: wake container (docker run / already running)
-  C->>IDB: poll messages_in
+  IDB->>L: queued host.event
+  L->>RS: project message
+  RS-->>L: host.ack after commit
+  RS->>C: event wake
   C->>C: format xml, stream to selected provider
-  C->>ODB: INSERT messages_out (odd seq)<br/>parse <message to="name"> blocks
-  D->>ODB: 1s poll (active) / 60s (sweep)
+  C->>RS: INSERT messages_out (odd seq)<br/>parse <message to="name"> blocks
+  RS->>L: queued durable event
+  L->>ODB: validated projection + ACK
+  ODB->>D: commit notification
   D->>D: hasDestination() re-validate
   D->>B: deliver via adapter
   B->>P: send message / edit / react / file / card
@@ -111,14 +120,14 @@ flowchart LR
     A_out["output:<br/>&lt;message to='slack'&gt;...&lt;/message&gt;<br/>&lt;message to='browser-agent'&gt;...&lt;/message&gt;<br/>&lt;internal&gt;scratchpad&lt;/internal&gt;"]
   end
 
-  subgraph Dests["inbound.db.destinations (per agent)"]
+  subgraph Dests["runner-state.db destinations projection"]
     D1["slack -> messaging_group 42"]
     D2["browser-agent -> agent_group 7<br/>(bidirectional row)"]
     D3["github -> messaging_group 13"]
   end
 
   subgraph AgentB["Agent Group B (browser sub-agent)"]
-    B_session["own inbound.db / outbound.db<br/>inherited destination back to A"]
+    B_session["own runner-state.db<br/>inherited destination back to A"]
   end
 
   Slack[Slack channel]
@@ -126,7 +135,7 @@ flowchart LR
 
   A_out -->|parse + lookup| Dests
   D1 -->|deliver| Slack
-  D2 -->|write to B's inbound.db| B_session
+  D2 -->|host.event to B| B_session
   D3 -->|deliver| GitHub
   B_session -.reply via 'parent'.-> Dests
 ```
@@ -200,23 +209,22 @@ erDiagram
 | 2. Same agent, separate sessions | `shared` / `per-thread` | Workspace + memory only | One agent across 3 Telegram chats |
 | 3. Separate agent groups | (different `agent_group_id`) | Nothing | Personal vs work channels |
 
-## Two-DB Split (why)
+## Three-DB Session State
 
 ```mermaid
 flowchart LR
-  subgraph Mount["/workspace (volume mounted into container)"]
-    In[("inbound.db")]
-    Out[("outbound.db")]
-  end
-  Link["/run/nanoclaw/runner.sock"]
+  In[("inbound.db<br/>host only")]
+  Out[("outbound.db<br/>host only")]
+  Link["/run/nanoclaw/runner.sock v3"]
+  RunnerState[("runner-state.db<br/>container only")]
 
-  Host[Host process] -->|"writes only<br/>(even seq)"| In
-  Host -->|reads| Out
-  Container[agent-runner] -->|reads| In
-  Container -->|"writes only<br/>(odd seq)"| Out
+  Host[Host process] -->|journal host events| In
+  In -->|host.event| Link
+  Link -->|commit + host.ack| RunnerState
+  RunnerState -->|journal runner events| Link
+  Link -->|commit + ACK| Out
+  RunnerState --> Container[agent-runner]
   Container -->|live status| Link
-  Link --> Host
-  HostSweep[Host sweep] -->|reads processing_ack| Out
 
-  note1["Each file has exactly ONE writer.<br/>Eliminates SQLite cross-process write contention.<br/>Collision-free seq numbering."]
+  note1["Each file has exactly ONE writer.<br/>Host DBs are not mounted.<br/>Collision-free even/odd seq numbering."]
 ```

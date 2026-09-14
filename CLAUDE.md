@@ -20,11 +20,11 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-The host is a single Node process that orchestrates per-session agent containers. Platform messages land via channel adapters, route through an entity model (users → messaging groups → agent groups → sessions), get written into the session's inbound DB, and wake a container. The agent-runner polls inbound work, calls the configured provider, and sends all runner→host state over a private per-session Unix socket.
+The host is a single Node process that orchestrates per-session agent containers. Platform messages land via channel adapters, route through an entity model (users → messaging groups → agent groups → sessions), get journaled in the session's inbound DB, and wake a container. The agent-runner receives host events, calls the configured provider, and exchanges all host/runner state over a private per-session Unix socket.
 
-Runner mutations are first committed to `runner-state.db`, then applied by the
-host to `outbound.db` and acknowledged. There is no stdin or signal-file
-protocol; see `docs/session-link.md`.
+Each side journals durable mutations, projects them to the receiver over the
+session link, and removes them only after commit acknowledgement. There is no
+stdin, signal-file, or cross-mounted SQLite protocol; see `docs/session-link.md`.
 
 ## Entity Model
 
@@ -45,13 +45,13 @@ Privilege is user-level (owner/admin), not agent-group-level. See [docs/isolatio
 
 ## Two-DB Session Split
 
-Each session has **two** SQLite files under `data/v2-sessions/<session_id>/`:
+Each session has **three** SQLite files under `data/v2-sessions/<session_id>/`:
 
-- `inbound.db` — host writes, container reads. `messages_in`, routing, destinations, pending_questions, processing_ack.
-- `outbound.db` — host-owned durable runner projection; container reads only.
-- `runner-state.db` — container-owned projection and pending event journal.
+- `inbound.db` — private host input journal: `messages_in`, routing, destinations, delivery receipts, and pending host events.
+- `outbound.db` — private host-owned durable runner projection.
+- `runner-state/runner-state.db` — container-owned bidirectional projection and pending runner event journal; its directory mount persists rollback journals.
 
-Exactly one writer per file — no cross-mount lock contention. Host uses even
+Exactly one writer per file; host DBs are not mounted into containers. Host uses even
 `seq` numbers and the container uses odd. Live status does not write either DB.
 
 ## Central DB

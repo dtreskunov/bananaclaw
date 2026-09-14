@@ -145,12 +145,11 @@
         <p class="desc">
           Inbound messages land at the Chat SDK bridge, which hands off to the
           router. The router resolves the messaging group → agent group → session
-          and writes to the session's <code>inbound.db</code>. The container runner
+          and journals it in the session's <code>inbound.db</code>. The container runner
           spawns a per-session container (auth via OneCLI), and the agent-runner
-          polls inbound work, calls the provider, and journals responses in
-          <code>runner-state.db</code>. The session link applies them to the
-          host-owned outbound store and wakes delivery,
-          messages back through the same bridge.
+          receives ACKed host events, calls the provider, and journals responses
+          in <code>runner-state.db</code>. The bidirectional session link projects
+          responses to the host-owned outbound store and wakes delivery.
         </p>
         <div class="diagram">
 <pre class="mermaid">
@@ -169,7 +168,7 @@ flowchart TB
     Router["Router<br/>src/router.ts<br/>platformId + threadId → session"]
     SessMgr["Session Manager<br/>src/session-manager.ts"]
     Runner["Container Runner<br/>src/container-runner.ts<br/>OneCLI ensureAgent + spawn"]
-    Delivery["Delivery Poller<br/>src/delivery.ts<br/>1s active / 60s sweep"]
+    Delivery["Delivery<br/>src/delivery.ts<br/>event-driven / 60s recovery"]
     Sweep["Host Sweep<br/>src/host-sweep.ts"]
     Central[("Central DB · data/v2.db<br/>agent_groups · messaging_groups<br/>messaging_group_agents · sessions<br/>pending_approvals")]
   end
@@ -179,15 +178,15 @@ flowchart TB
     Approvals["configureManualApproval"]
   end
 
-  subgraph Session["Per-Session Container"]
+  subgraph Session["Per-Session State + Container"]
     direction TB
-    PollLoop["Poll Loop<br/>container/agent-runner"]
+    PollLoop["Event Loop<br/>container/agent-runner"]
     Provider["Claude Agent SDK<br/>(codex / opencode planned)"]
     MCP["MCP Tools<br/>send_message · send_file · edit_message<br/>send_card · ask_user_question · schedule_task<br/>create_agent · install_packages · add_mcp_server<br/>request_rebuild"]
-    InDB[("inbound.db<br/>host writes · even seq")]
-    OutDB[("outbound.db<br/>host writes · runner reads")]
-    RunnerState[("runner-state.db<br/>runner projection + journal")]
-    SessionLink["runner.sock<br/>live + durable events"]
+    InDB[("inbound.db<br/>private host journal · even seq")]
+    OutDB[("outbound.db<br/>private host runner projection")]
+    RunnerState[("runner-state.db<br/>bidirectional projection + runner journal")]
+    SessionLink["runner.sock v3<br/>ACKed events + live status"]
   end
 
   Folder["Agent Group FS<br/>groups/*<br/>CLAUDE.md · memory · skills"]
@@ -200,14 +199,16 @@ flowchart TB
   SessMgr --> Runner
   Runner --> OneCLI
   Runner --> PollLoop
-  PollLoop --> InDB
+  InDB -->|host.event| SessionLink
+  SessionLink -->|commit + host.ack| RunnerState
+  RunnerState --> PollLoop
   PollLoop --> Provider
   PollLoop --> RunnerState
-  RunnerState -->|ACK replay| SessionLink
+  RunnerState -->|durable event| SessionLink
   PollLoop -->|live signals| SessionLink
   Provider --> MCP
   MCP --> RunnerState
-  SessionLink --> OutDB
+  SessionLink -->|commit + ACK| OutDB
   OutDB --> Delivery
   Delivery --> Central
   Delivery --> Bridge
@@ -227,8 +228,8 @@ flowchart TB
         <h2><span class="num">2</span>Message Flow</h2>
         <p class="desc">
           End-to-end path of a single message. The host and container never write
-          to the same SQLite file — the split between inbound and outbound DBs is
-          what makes this lock-free under concurrent activity.
+          to the same SQLite file. Host stores remain private, and the session
+          link projects events into the runner-owned database.
         </p>
         <div class="diagram">
 <pre class="mermaid">
@@ -238,9 +239,11 @@ sequenceDiagram
   participant R as Router
   participant SM as Session Manager
   participant IDB as inbound.db
+  participant L as Session Link
+  participant RS as runner-state.db
   participant C as Container (agent-runner)
   participant ODB as outbound.db
-  participant D as Delivery Poller
+  participant D as Delivery
 
   P->>B: new message
   B->>R: routeInbound(platformId, threadId, msg)
@@ -248,10 +251,15 @@ sequenceDiagram
   R->>SM: ensure session + DBs exist
   R->>IDB: INSERT messages_in (even seq)
   R->>C: wake container (spawn or signal)
-  C->>IDB: poll messages_in
+  IDB->>L: queued host.event
+  L->>RS: project message
+  RS-->>L: host.ack after commit
+  RS->>C: event wake
   C->>C: format xml → Claude SDK stream
-  C->>ODB: INSERT messages_out (odd seq)<br/>parse &lt;message to='name'&gt; blocks
-  D->>ODB: 1s active poll / 60s sweep
+  C->>RS: INSERT messages_out (odd seq)<br/>parse &lt;message to='name'&gt; blocks
+  RS->>L: queued durable event
+  L->>ODB: validated projection + ACK
+  ODB->>D: commit notification
   D->>D: hasDestination() re-validate
   D->>B: deliver via adapter
   B->>P: send · edit · react · file · card
@@ -265,7 +273,7 @@ sequenceDiagram
           Agents address outputs by local name. The host looks up each name against
           the agent's destinations table at delivery time — dropping anything
           unauthorized. The same table routes agent-to-agent messages to a sibling
-          agent's <code>inbound.db</code> with bidirectional permission rows.
+          target agent's host journal with bidirectional permission rows.
         </p>
         <div class="diagram">
 <pre class="mermaid">
@@ -274,14 +282,14 @@ flowchart LR
     A_out["&lt;message to='slack'&gt;...&lt;/message&gt;<br/>&lt;message to='browser-agent'&gt;...&lt;/message&gt;<br/>&lt;internal&gt;scratchpad&lt;/internal&gt;"]
   end
 
-  subgraph Dests["inbound.db.destinations (per agent)"]
+  subgraph Dests["runner-state.db destinations projection"]
     D1["slack → messaging_group 42"]
     D2["browser-agent → agent_group 7<br/>(bidirectional)"]
     D3["github → messaging_group 13"]
   end
 
   subgraph AgentB["Agent Group B (browser sub-agent)"]
-    B_session["own inbound.db / outbound.db<br/>inherited destination back to A"]
+    B_session["own runner-state.db<br/>inherited destination back to A"]
   end
 
   Slack[Slack]
@@ -289,7 +297,7 @@ flowchart LR
 
   A_out -->|parse + lookup| Dests
   D1 -->|deliver| Slack
-  D2 -->|write to B's inbound.db| B_session
+  D2 -->|host.event to B| B_session
   D3 -->|deliver| GitHub
   B_session -.reply via 'parent'.-> Dests
 </pre>
@@ -376,28 +384,27 @@ erDiagram
       </section>
 
       <section id="twodb">
-        <h2><span class="num">5</span>Two-DB Split</h2>
+        <h2><span class="num">5</span>Three-DB Session State</h2>
         <p class="desc">
           Each SQLite file has exactly one writer. A private per-session Unix
-          socket carries live status without adding DB writes. Host uses even
-          seq numbers, container uses odd — collision-free.
+          socket carries acknowledged events in both directions plus live status.
+          Host databases are not mounted into the container.
         </p>
         <div class="diagram">
 <pre class="mermaid">
 flowchart LR
-  subgraph Mount["/workspace (volume mount)"]
-    In[("inbound.db")]
-    Out[("outbound.db")]
-  end
-  Link["/run/nanoclaw/runner.sock"]
+  In[("inbound.db<br/>host only")]
+  Out[("outbound.db<br/>host only")]
+  Link["/run/nanoclaw/runner.sock v3"]
+  RunnerState[("runner-state.db<br/>container only")]
 
-  Host[Host process] -->|writes · even seq| In
-  Host -->|reads| Out
-  Container[agent-runner] -->|reads| In
-  Container -->|writes · odd seq| Out
+  Host[Host process] -->|journal host events| In
+  In -->|host.event| Link
+  Link -->|commit + host.ack| RunnerState
+  RunnerState -->|journal runner events| Link
+  Link -->|commit + ACK| Out
+  RunnerState --> Container[agent-runner]
   Container -->|live status| Link
-  Link --> Host
-  HostSweep[Host sweep] -->|reads processing_ack| Out
 </pre>
         </div>
       </section>
