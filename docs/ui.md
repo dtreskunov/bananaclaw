@@ -72,6 +72,20 @@ Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visib
 
 Everything else falls back to a download link.
 
+### Feedback notifications
+
+Error toasts across the UI remain visible until explicitly dismissed. Their text
+can be selected and copied, long messages wrap and scroll, and each has a
+keyboard-accessible **Dismiss** button. Later notifications queue behind an
+unread error rather than replacing it. Success messages still auto-dismiss;
+action prompts (such as a new-version reload) remain clickable and persistent.
+
+If a catalog skill fails to install, the error includes Git's diagnostic when
+available. Catalog browsing uses a local cache: a listed skill can still fail to
+install if its source repository has since been removed, made private, or become
+unreachable. `Repository not found` means GitHub does not expose that repository
+to the install process, not that the skill's metadata failed validation.
+
 ## Security posture
 
 - Magic-link tokens and session tokens are 256-bit random; only their sha256 hashes are stored.

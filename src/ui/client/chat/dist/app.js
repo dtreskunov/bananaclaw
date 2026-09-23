@@ -17247,37 +17247,53 @@ function u4(e4, t4, n3, o4, i5, u5) {
 // src/components/Toast.tsx
 var nextId = 1;
 var hideTimer = null;
-function showToast(text, kind = "ok", ms = 1800) {
+var pending2 = [];
+function displayToast(message, ms) {
   if (hideTimer) {
     clearTimeout(hideTimer);
     hideTimer = null;
   }
-  const id = nextId++;
-  toastMessage.value = { id, text, kind };
+  toastMessage.value = message;
+  if (message.kind === "err" || message.action) return;
   hideTimer = setTimeout(() => {
-    if (toastMessage.value && toastMessage.value.id === id) toastMessage.value = null;
     hideTimer = null;
+    if (toastMessage.value?.id === message.id) dismissToast();
   }, ms);
 }
-function showStickyToast(text, onClick, kind = "ok") {
-  if (hideTimer) {
-    clearTimeout(hideTimer);
-    hideTimer = null;
+function enqueueToast(message, ms = 1800) {
+  if (toastMessage.value?.kind === "err") {
+    pending2.push({ message, ms });
+  } else {
+    displayToast(message, ms);
   }
-  const id = nextId++;
-  toastMessage.value = { id, text, kind, action: onClick };
+}
+function showToast(text, kind = "ok", ms = 1800) {
+  enqueueToast({ id: nextId++, text, kind }, ms);
+}
+function showStickyToast(text, onClick, kind = "ok") {
+  enqueueToast({ id: nextId++, text, kind, action: onClick });
 }
 function dismissToast() {
   if (hideTimer) {
     clearTimeout(hideTimer);
     hideTimer = null;
   }
-  toastMessage.value = null;
+  const next = pending2.shift();
+  if (next) displayToast(next.message, next.ms);
+  else toastMessage.value = null;
 }
 function Toast() {
   const t4 = toastMessage.value;
-  y2(() => void 0, [t4?.id]);
   if (!t4) return null;
+  if (t4.kind === "err") {
+    return /* @__PURE__ */ u4("div", { class: "toast toast-err toast-sticky", children: [
+      /* @__PURE__ */ u4("span", { class: "toast-text", role: "alert", children: t4.text }),
+      /* @__PURE__ */ u4("div", { class: "toast-controls", children: [
+        t4.action ? /* @__PURE__ */ u4("button", { type: "button", onClick: t4.action, children: "Continue" }) : null,
+        /* @__PURE__ */ u4("button", { type: "button", onClick: dismissToast, "aria-label": "Dismiss error", children: "Dismiss" })
+      ] })
+    ] }, t4.id);
+  }
   const sticky = !!t4.action;
   return /* @__PURE__ */ u4(
     "button",
@@ -17440,8 +17456,7 @@ async function enableNotifications() {
   notifMutedSig.value = true;
   showToast(
     result === "denied" ? "Notifications are blocked in browser settings" : result === "unsupported" ? "Notifications are not supported on this device" : "Could not enable notifications",
-    "err",
-    3e3
+    "err"
   );
 }
 async function ensureSubscribed(requestPermission) {
@@ -28578,12 +28593,12 @@ function SettingsTab({
     }
     return out;
   }
-  const pending2 = changedFields();
-  const changed = pending2.size > 0;
-  const needsRestart = [...pending2].some((f5) => RESTART_REQUIRING_FIELDS.has(f5));
-  const imageRebuildNeeded = pending2.has("image_tag") && draft.image_tag != null && !!images && !images.images.some((i5) => i5.value === draft.image_tag);
-  const packagesChanged = pending2.has("packages_apt") || pending2.has("packages_npm") || pending2.has("packages_pip");
-  const providerChangedWithCustomImage = pending2.has("provider") && draft.image_tag != null;
+  const pending3 = changedFields();
+  const changed = pending3.size > 0;
+  const needsRestart = [...pending3].some((f5) => RESTART_REQUIRING_FIELDS.has(f5));
+  const imageRebuildNeeded = pending3.has("image_tag") && draft.image_tag != null && !!images && !images.images.some((i5) => i5.value === draft.image_tag);
+  const packagesChanged = pending3.has("packages_apt") || pending3.has("packages_npm") || pending3.has("packages_pip");
+  const providerChangedWithCustomImage = pending3.has("provider") && draft.image_tag != null;
   const needsRebuild = imageRebuildNeeded || packagesChanged || providerChangedWithCustomImage;
   const [confirmOpen, setConfirmOpen] = h2(false);
   const [restartChecked, setRestartChecked] = h2(false);
@@ -28617,53 +28632,53 @@ function SettingsTab({
         "packages_npm",
         "packages_pip"
       ]);
-      const settingsChanged = [...pending2].some((f5) => !JSON_FIELDS.has(f5));
+      const settingsChanged = [...pending3].some((f5) => !JSON_FIELDS.has(f5));
       if (settingsChanged) {
         const body = { ...draft };
         if (data && draftName.trim() !== data.name) body.name = draftName.trim();
-        if (pending2.has("site_enabled")) body.site_enabled = siteEnabled;
-        if (pending2.has("site_slug")) body.site_slug = siteSlug.trim() || null;
-        if (pending2.has("email_enabled")) body.email_enabled = emailEnabled;
-        if (pending2.has("email_slug")) body.email_slug = emailSlug.trim() || null;
+        if (pending3.has("site_enabled")) body.site_enabled = siteEnabled;
+        if (pending3.has("site_slug")) body.site_slug = siteSlug.trim() || null;
+        if (pending3.has("email_enabled")) body.email_enabled = emailEnabled;
+        if (pending3.has("email_slug")) body.email_slug = emailSlug.trim() || null;
         const r4 = await call(apiPath(gid, "/settings"), "PATCH", body);
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending2.has("model_params")) {
+      if (pending3.has("model_params")) {
         const r4 = await call(apiPath(gid, "/model-params"), "PATCH", { params: draftModelParams });
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending2.has("packages_apt") || pending2.has("packages_npm") || pending2.has("packages_pip")) {
+      if (pending3.has("packages_apt") || pending3.has("packages_npm") || pending3.has("packages_pip")) {
         const body = {};
-        if (pending2.has("packages_apt")) body.apt = draftPackages.apt;
-        if (pending2.has("packages_npm")) body.npm = draftPackages.npm;
-        if (pending2.has("packages_pip")) body.pip = draftPackages.pip;
+        if (pending3.has("packages_apt")) body.apt = draftPackages.apt;
+        if (pending3.has("packages_npm")) body.npm = draftPackages.npm;
+        if (pending3.has("packages_pip")) body.pip = draftPackages.pip;
         const r4 = await call(apiPath(gid, "/packages"), "PATCH", body);
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending2.has("mcp_servers")) {
+      if (pending3.has("mcp_servers")) {
         const r4 = await call(apiPath(gid, "/mcp-servers"), "PATCH", { servers: draftMcpServers });
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending2.has("skills")) {
+      if (pending3.has("skills")) {
         const r4 = await call(apiPath(gid, "/skills"), "PATCH", { skills: draftSkills });
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending2.has("disabled_skills")) {
+      if (pending3.has("disabled_skills")) {
         const r4 = await call(apiPath(gid, "/disabled-skills"), "PATCH", {
           disabledSkills: draftDisabledSkills
         });
@@ -29059,7 +29074,7 @@ function SettingsTab({
         onCatalogChanged: refresh
       }
     ) : null,
-    /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending2.size} unsaved change${pending2.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),
+    /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending3.size} unsaved change${pending3.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),
     confirmOpen ? /* @__PURE__ */ u4(
       MobileDialog,
       {
@@ -29071,12 +29086,12 @@ function SettingsTab({
         children: [
           /* @__PURE__ */ u4("div", { class: "settings-body", children: [
             /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
-              pending2.size,
+              pending3.size,
               " setting",
-              pending2.size === 1 ? "" : "s",
+              pending3.size === 1 ? "" : "s",
               " will be saved:",
               " ",
-              /* @__PURE__ */ u4("code", { children: [...pending2].join(", ") })
+              /* @__PURE__ */ u4("code", { children: [...pending3].join(", ") })
             ] }),
             /* @__PURE__ */ u4("div", { class: "ga-confirm-options", children: [
               /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [

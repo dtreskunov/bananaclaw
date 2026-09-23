@@ -1,4 +1,4 @@
-/* Transient feedback button (e.g. "Link copied"). Mounts/unmounts via
+/* Shared feedback (e.g. "Link copied"). Mounts/unmounts via
    the Toast component, which keys on a per-message id so the animation
    re-plays for each new toast. */
 
@@ -19,7 +19,16 @@
   animation: toast-in 160ms ease-out, toast-out 220ms ease-in 1.45s forwards;
 }
 .toast-err {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 32px));
+  border-radius: var(--radius-md);
   background: var(--toast-error);
+  color: #fff;
+  line-height: 1.4;
+  text-align: left;
 }
 .toast-err:hover:not(:disabled) {
   background: var(--toast-error);
@@ -33,6 +42,25 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.toast-err .toast-text {
+  max-height: 50dvh;
+  overflow-y: auto;
+  user-select: text;
+}
+.toast-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.toast-controls button {
+  min-height: var(--control-action-size);
+  border-color: currentColor;
+}
+.toast-controls button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
 @keyframes toast-in {
   from { opacity: 0; transform: translate(-50%, -8px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
@@ -44,8 +72,10 @@
   .toast { animation: none; }
 }
 
-/* Sticky actions remain until clicked. */
+/* Errors and sticky actions have no fade-out animation. */
 .toast-sticky {
   animation: toast-in 160ms ease-out;
 }
-.toast-sticky .toast-text { white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .toast-sticky { animation: none; }
+}

@@ -136,7 +136,6 @@ async function enableNotifications(): Promise<void> {
         ? 'Notifications are not supported on this device'
         : 'Could not enable notifications',
     'err',
-    3000,
   );
 }
 

@@ -39,7 +39,12 @@ export function gitOrNull(args: string[], cwd?: string, timeoutMs = GIT_LOCAL_TI
   }
 }
 
-/** First line of a git failure — the rest is usually noise for an error message. */
+/** Preserve git's diagnostic, not just execFileSync's "Command failed" header. */
 export function gitErrorDetail(err: unknown): string {
-  return err instanceof Error ? err.message.split('\n')[0] : String(err);
+  if (err instanceof Error && 'stderr' in err) {
+    const stderr =
+      typeof err.stderr === 'string' ? err.stderr : Buffer.isBuffer(err.stderr) ? err.stderr.toString('utf8') : '';
+    if (stderr.trim()) return stderr.trim();
+  }
+  return err instanceof Error ? err.message : String(err);
 }

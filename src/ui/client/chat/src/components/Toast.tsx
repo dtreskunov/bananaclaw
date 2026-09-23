@@ -1,19 +1,33 @@
-// Top-center feedback button for transient messages and sticky actions.
+// Shared feedback: errors persist until dismissed; successes are transient.
 import './Toast.css';
-import { useEffect } from 'preact/hooks';
 import { toastMessage } from '../state';
+import type { ToastMessage } from '../types';
 
 let nextId = 1;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
+const pending: { message: ToastMessage; ms: number }[] = [];
+
+function displayToast(message: ToastMessage, ms: number): void {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+  toastMessage.value = message;
+  if (message.kind === 'err' || message.action) return;
+  hideTimer = setTimeout(() => {
+    hideTimer = null;
+    if (toastMessage.value?.id === message.id) dismissToast();
+  }, ms);
+}
+
+function enqueueToast(message: ToastMessage, ms = 1800): void {
+  // A later success, error, or reload prompt must not erase an unread error.
+  if (toastMessage.value?.kind === 'err') {
+    pending.push({ message, ms });
+  } else {
+    displayToast(message, ms);
+  }
+}
 
 export function showToast(text: string, kind: 'ok' | 'err' = 'ok', ms = 1800): void {
-  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-  const id = nextId++;
-  toastMessage.value = { id, text, kind };
-  hideTimer = setTimeout(() => {
-    if (toastMessage.value && toastMessage.value.id === id) toastMessage.value = null;
-    hideTimer = null;
-  }, ms);
+  enqueueToast({ id: nextId++, text, kind }, ms);
 }
 
 // Sticky toast action — does not auto-hide. Caller's onClick is responsible
@@ -23,21 +37,30 @@ export function showStickyToast(
   onClick: () => void,
   kind: 'ok' | 'err' = 'ok',
 ): void {
-  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-  const id = nextId++;
-  toastMessage.value = { id, text, kind, action: onClick };
+  enqueueToast({ id: nextId++, text, kind, action: onClick });
 }
 
 export function dismissToast(): void {
   if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-  toastMessage.value = null;
+  const next = pending.shift();
+  if (next) displayToast(next.message, next.ms);
+  else toastMessage.value = null;
 }
 
 export function Toast() {
   const t = toastMessage.value;
-  // Re-mount on each new id so the CSS animation re-plays.
-  useEffect(() => undefined, [t?.id]);
   if (!t) return null;
+  if (t.kind === 'err') {
+    return (
+      <div class="toast toast-err toast-sticky" key={t.id}>
+        <span class="toast-text" role="alert">{t.text}</span>
+        <div class="toast-controls">
+          {t.action ? <button type="button" onClick={t.action}>Continue</button> : null}
+          <button type="button" onClick={dismissToast} aria-label="Dismiss error">Dismiss</button>
+        </div>
+      </div>
+    );
+  }
   const sticky = !!t.action;
   return (
     <button
