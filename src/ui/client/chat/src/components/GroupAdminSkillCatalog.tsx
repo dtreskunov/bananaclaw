@@ -1,6 +1,4 @@
-// Install-wide skill catalogs — Claude Code plugin marketplaces and plain
-// Agent Skills repos. Owner / global admin only: installing adds code to the
-// host, while picking an installed skill for a group does not.
+// Install-wide catalogs; skill installations belong to the selected agent.
 //
 // Search lives with the skill list above; this section is the catalog side of
 // it — what's configured, what each one ships, add and remove.
@@ -142,8 +140,8 @@ export function SkillCatalogSection({
           <a href="https://agentskills.io/specification" target="_blank" rel="noreferrer noopener">
             Agent Skills
           </a>
-          . Installing makes a skill selectable by every group; it does not enable it anywhere. Nothing from
-          a catalog runs at install time.
+          . Installing copies the cached revision into this agent's workspace.
+          Existing installations are not updated. Nothing from a catalog runs at install time.
         </p>
       </div>
 
@@ -274,10 +272,15 @@ export function SkillCatalogSection({
                                     source={catalog.source}
                                     slug={skill.slug}
                                     installed={installedSlugs.has(skill.slug)}
-                                    disabled={busy}
+                                    disabled={busy || !catalog.commit}
                                     onInstall={(ack) =>
                                       install(
-                                        { marketplaceId: catalog.id, plugin: plugin.name, slug: skill.slug },
+                                        {
+                                          marketplaceId: catalog.id,
+                                          plugin: plugin.name,
+                                          slug: skill.slug,
+                                          expectedCommit: catalog.commit,
+                                        },
                                         skill.slug,
                                         ack,
                                       )

@@ -2,10 +2,10 @@
  * Host-wide skill administration — catalogs (Claude Code plugin marketplaces
  * and plain Agent Skills repos) and installed skills.
  *
- * These are install-wide, not per-group: installing a skill only makes it
- * *offerable*, and each agent group still opts in through its own Skills
- * selection. Reserved for owners and global admins for that reason — a scoped
- * admin can pick from what's installed but cannot add new code to the host.
+ * Catalog registration and browsing caches are install-wide; each skill
+ * installation is a revision-pinned checkout owned by one agent group.
+ * Mutations are reserved for owners and global admins; scoped admins can
+ * select available skills but cannot add new code to the host.
  */
 import http from 'http';
 
@@ -20,6 +20,7 @@ import {
 import { installCatalogSkill, uninstallSkill, SkillInstallError } from '../../../skills/install.js';
 import {
   addMarketplace,
+  assertCatalogSnapshot,
   githubSourceOf,
   listCatalogs,
   normalizeRepoSource,
@@ -31,7 +32,7 @@ import {
   type MarketplaceCatalog,
 } from '../../../skills/marketplace.js';
 import { listSkills, groupSkillRoots, BUILTIN_CATALOG_ID, WORKSPACE_CATALOG_ID } from '../../../skills/registry.js';
-import { readMarketplaceRecords } from '../../../skills/store.js';
+import { readMarketplaceRecords, type MarketplaceRecord } from '../../../skills/store.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { recordAdminAction } from './audit.js';
 import { listAvailableSkills } from './skill-catalog.js';
@@ -51,6 +52,14 @@ function fail(err: unknown): SkillsAdminResult {
 
 function str(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function expectedCommitOf(body: Record<string, unknown>): string | undefined {
+  if (body.expectedCommit === undefined) return undefined;
+  if (typeof body.expectedCommit !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(body.expectedCommit)) {
+    throw new SkillInstallError('expectedCommit must be a full catalog commit hash');
+  }
+  return body.expectedCommit;
 }
 
 /**
@@ -199,6 +208,7 @@ export async function installSkill(body: Record<string, unknown>, actorUserId: s
     return { status: 400, body: { error: 'gid, marketplaceId, plugin and slug are required' } };
   }
   try {
+    const expectedCommit = expectedCommitOf(body);
     // Audits are keyed by the directory's `owner/repo`, which is the catalog's
     // repo minus the git URL wrapper.
     const catalog = readMarketplaceRecords().find((entry) => entry.id === marketplaceId);
@@ -211,7 +221,13 @@ export async function installSkill(body: Record<string, unknown>, actorUserId: s
       };
     }
 
-    const record = installCatalogSkill({ groupFolder: groupFolderOf(gid), marketplaceId, plugin, slug });
+    const record = installCatalogSkill({
+      groupFolder: groupFolderOf(gid),
+      marketplaceId,
+      plugin,
+      slug,
+      expectedCommit,
+    });
     recordAdminAction({
       actorUserId,
       action: 'skill_install',
@@ -238,19 +254,32 @@ export async function installSkill(body: Record<string, unknown>, actorUserId: s
 export async function discoverSkills(query: string): Promise<SkillsAdminResult> {
   try {
     const result = await searchDirectory(query);
-    const configured = new Map(readMarketplaceRecords().map((record) => [record.repo, record.id]));
-    const bySource = new Map<string, { source: string; catalogId: string | null; skills: typeof result.skills }>();
+    const configured = new Map(readMarketplaceRecords().map((record) => [record.repo, record]));
+    const bySource = new Map<
+      string,
+      {
+        source: string;
+        catalogId: string | null;
+        snapshot: { commit: string; ref: string } | null;
+        skills: typeof result.skills;
+      }
+    >();
 
     for (const skill of result.skills) {
       let group = bySource.get(skill.source);
       if (!group) {
-        let catalogId: string | null = null;
+        let catalog: MarketplaceRecord | undefined;
         try {
-          catalogId = configured.get(normalizeRepoSource(skill.source)) ?? null;
+          catalog = configured.get(normalizeRepoSource(skill.source));
         } catch {
           continue; // A source we could never turn into a catalog (e.g. a bare domain).
         }
-        group = { source: skill.source, catalogId, skills: [] };
+        group = {
+          source: skill.source,
+          catalogId: catalog?.id ?? null,
+          snapshot: catalog?.commit ? { commit: catalog.commit, ref: catalog.ref } : null,
+          skills: [],
+        };
         bySource.set(skill.source, group);
       }
       group.skills.push(skill);
@@ -315,6 +344,7 @@ export async function installFromRepo(body: Record<string, unknown>, actorUserId
 
   let audits: AuditEntry[] | null = null;
   try {
+    const expectedCommit = expectedCommitOf(body);
     const normalized = normalizeRepoSource(repo);
     audits = await fetchAudits(repo, slug);
     if (audits && auditIsBlocking(audits) && !acknowledgeRisk) {
@@ -326,7 +356,7 @@ export async function installFromRepo(body: Record<string, unknown>, actorUserId
 
     let record = readMarketplaceRecords().find((entry) => entry.repo === normalized);
     if (!record) {
-      record = addMarketplace({ repo, ref: str(body.ref) || undefined });
+      record = addMarketplace({ repo, ref: str(body.ref) || undefined, expectedCommit });
       recordAdminAction({
         actorUserId,
         action: 'skill_catalog_add',
@@ -336,6 +366,7 @@ export async function installFromRepo(body: Record<string, unknown>, actorUserId
       });
     }
 
+    assertCatalogSnapshot(record, expectedCommit ?? record.commit);
     const plugin = readCatalog(record).plugins.find((entry) => entry.skills.some((s) => s.slug === slug));
     if (!plugin) {
       return { status: 404, body: { error: `"${slug}" is not in ${record.repo}` } };
@@ -346,6 +377,7 @@ export async function installFromRepo(body: Record<string, unknown>, actorUserId
       marketplaceId: record.id,
       plugin: plugin.name,
       slug,
+      expectedCommit,
     });
     recordAdminAction({
       actorUserId,

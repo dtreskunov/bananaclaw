@@ -9,6 +9,7 @@ import {
   SkillDirectoryResults,
   slugIsRedundant,
   type DiscoverResponse,
+  type CatalogSnapshot,
 } from './GroupAdminSkillDirectory';
 import type { AuditDto } from './GroupAdminSkillInstall';
 import { showToast } from './Toast';
@@ -128,12 +129,15 @@ export function SkillsSection({
     repo: string,
     slug: string,
     acknowledgeRisk: boolean,
+    snapshot?: CatalogSnapshot,
   ): Promise<{ ok: boolean; audits?: AuditDto[] | null }> {
     const r = await call<{ audits?: AuditDto[]; error?: string }>(`${SKILLS_API}/install-from-repo`, 'POST', {
       gid,
       repo,
       slug,
       acknowledgeRisk,
+      expectedCommit: snapshot?.commit,
+      ref: snapshot?.ref,
     });
     if (!r.ok) {
       if (r.status === 409 && r.data?.error === 'audit_blocked') return { ok: false, audits: r.data.audits ?? null };

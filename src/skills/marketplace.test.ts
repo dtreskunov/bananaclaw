@@ -10,10 +10,13 @@ import {
   listCatalogs,
   MarketplaceError,
   normalizeRepoSource,
+  previewCatalog,
+  refreshMarketplace,
   removeMarketplace,
 } from './marketplace.js';
 import { listSkills } from './registry.js';
-import { setSkillsStoreRoot } from './store.js';
+import { findRepoRoot, readSkillGit } from './skill-git.js';
+import { getMarketplaceRecord, marketplaceCacheDir, setSkillsStoreRoot } from './store.js';
 import { GROUPS_DIR } from '../config.js';
 
 /** Scratch group the vendored-install tests install into. */
@@ -191,13 +194,13 @@ describe('installing from a catalog', () => {
     const link = path.join(skillsRoot(), 'pdf');
     expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
     // Relative, so it resolves the same on the host and at /workspace/agent.
-    expect(fs.readlinkSync(link)).toBe(path.join('.catalogs', 'test-catalog', 'skills', 'pdf'));
+    expect(fs.readlinkSync(link)).toBe(path.join('.catalogs', `test-catalog@${record.commit}`, 'skills', 'pdf'));
     expect(fs.existsSync(path.join(link, 'SKILL.md'))).toBe(true);
     expect(record).toMatchObject({ slug: 'pdf', catalogId: 'test-catalog', sourcePath: 'skills/pdf' });
     expect(record.commit).toMatch(/^[0-9a-f]{40}$/);
 
     // Only the requested path is checked out, not the whole catalog.
-    const checkout = path.join(skillsRoot(), '.catalogs', 'test-catalog', 'skills');
+    const checkout = path.join(skillsRoot(), '.catalogs', `test-catalog@${record.commit}`, 'skills');
     expect(fs.readdirSync(checkout)).toEqual(['pdf']);
   });
 
@@ -234,8 +237,9 @@ describe('installing from a catalog', () => {
       installCatalogSkill({ groupFolder: GROUP_FOLDER, marketplaceId: 'test-catalog', plugin, slug });
     }
 
-    expect(fs.readdirSync(path.join(skillsRoot(), '.catalogs'))).toEqual(['test-catalog']);
-    expect(fs.readdirSync(path.join(skillsRoot(), '.catalogs', 'test-catalog', 'skills')).sort()).toEqual([
+    const commit = getMarketplaceRecord('test-catalog')!.commit;
+    expect(fs.readdirSync(path.join(skillsRoot(), '.catalogs'))).toEqual([`test-catalog@${commit}`]);
+    expect(fs.readdirSync(path.join(skillsRoot(), '.catalogs', `test-catalog@${commit}`, 'skills')).sort()).toEqual([
       'canvas-design',
       'pdf',
     ]);
@@ -282,7 +286,7 @@ describe('installing from a catalog', () => {
 
   it('uninstall drops the link but keeps the shared checkout, and guards local edits', () => {
     setup();
-    installCatalogSkill({
+    const installed = installCatalogSkill({
       groupFolder: GROUP_FOLDER,
       marketplaceId: 'test-catalog',
       plugin: 'document-skills',
@@ -295,7 +299,222 @@ describe('installing from a catalog', () => {
     uninstallSkill(GROUP_FOLDER, 'pdf', true);
     expect(fs.existsSync(path.join(skillsRoot(), 'pdf'))).toBe(false);
     // The checkout stays — other skills may still be pointing into it.
-    expect(fs.existsSync(path.join(skillsRoot(), '.catalogs', 'test-catalog'))).toBe(true);
+    expect(fs.existsSync(path.join(skillsRoot(), '.catalogs', `test-catalog@${installed.commit}`))).toBe(true);
     expect(() => uninstallSkill(GROUP_FOLDER, 'pdf')).toThrow(SkillInstallError);
+  });
+
+  function installPdf(expectedCommit?: string) {
+    return installCatalogSkill({
+      groupFolder: GROUP_FOLDER,
+      marketplaceId: 'test-catalog',
+      plugin: 'document-skills',
+      slug: 'pdf',
+      expectedCommit,
+    });
+  }
+
+  function installCanvas(expectedCommit?: string) {
+    return installCatalogSkill({
+      groupFolder: GROUP_FOLDER,
+      marketplaceId: 'test-catalog',
+      plugin: 'design-skills',
+      slug: 'canvas-design',
+      expectedCommit,
+    });
+  }
+
+  function advanceRemote(repo: string): void {
+    writeSkill(repo, 'skills/pdf', 'name: pdf\ndescription: Updated PDF skill.');
+    writeSkill(repo, 'skills/canvas-design', 'name: canvas-design\ndescription: Updated canvas skill.');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'update skills'], repo);
+  }
+
+  it('installs the cached commit even when upstream has moved ahead', () => {
+    const { repo } = setup();
+    const commit = getMarketplaceRecord('test-catalog')!.commit!;
+    advanceRemote(repo);
+
+    const installed = installPdf(commit);
+    expect(installed.commit).toBe(commit);
+    expect(fs.readFileSync(path.join(skillsRoot(), 'pdf/SKILL.md'), 'utf8')).toContain('Work with PDF files.');
+    expect(readSkillGit(fs.realpathSync(path.join(skillsRoot(), 'pdf')))).toMatchObject({
+      remote: repo,
+      commit,
+      localCommits: 0,
+      modified: false,
+    });
+  });
+
+  it('installs offline and remains independent after the browsing cache is removed', () => {
+    const { repo } = setup();
+    const offline = `${repo}-offline`;
+    fs.renameSync(repo, offline);
+    tempDirs.push(offline);
+
+    const installed = installPdf();
+    const checkout = findRepoRoot(fs.realpathSync(path.join(skillsRoot(), 'pdf')))!;
+    expect(fs.existsSync(path.join(checkout, '.git/objects/info/alternates'))).toBe(false);
+    expect(readSkillGit(fs.realpathSync(path.join(skillsRoot(), 'pdf')))?.remote).toBe(repo);
+    removeMarketplace('test-catalog');
+
+    git(['fsck', '--full'], checkout);
+    git(['sparse-checkout', 'add', 'skills/canvas-design'], checkout);
+    expect(fs.readFileSync(path.join(checkout, 'skills/canvas-design/SKILL.md'), 'utf8')).toContain(
+      'Design on a canvas.',
+    );
+    expect(readSkillGit(fs.realpathSync(path.join(skillsRoot(), 'pdf')))?.commit).toBe(installed.commit);
+  });
+
+  it('rejects a stale preview instead of silently installing the refreshed commit', () => {
+    const { repo } = setup();
+    const oldCommit = getMarketplaceRecord('test-catalog')!.commit!;
+    advanceRemote(repo);
+    const fresh = refreshMarketplace('test-catalog');
+    expect(fresh.commit).not.toBe(oldCommit);
+
+    expect(() => installPdf(oldCommit)).toThrow(/changed since it was displayed/);
+    expect(fs.existsSync(path.join(skillsRoot(), 'pdf'))).toBe(false);
+  });
+
+  it('isolates new revisions without overwriting existing agent edits or commits', () => {
+    const { repo } = setup();
+    const first = installPdf();
+    const firstDir = findRepoRoot(fs.realpathSync(path.join(skillsRoot(), 'pdf')))!;
+    fs.appendFileSync(path.join(skillsRoot(), 'pdf/SKILL.md'), '\nCommitted agent edit.\n');
+    git(['add', '-A'], firstDir);
+    git(['commit', '-m', 'agent edit'], firstDir);
+    fs.appendFileSync(path.join(skillsRoot(), 'pdf/SKILL.md'), '\nUncommitted agent edit.\n');
+    const before = readSkillGit(fs.realpathSync(path.join(skillsRoot(), 'pdf')));
+    advanceRemote(repo);
+    const refreshed = refreshMarketplace('test-catalog');
+
+    const second = installCanvas(refreshed.commit!);
+    expect(second.commit).not.toBe(first.commit);
+    expect(readSkillGit(fs.realpathSync(path.join(skillsRoot(), 'pdf')))).toEqual(before);
+    expect(fs.readFileSync(path.join(skillsRoot(), 'pdf/SKILL.md'), 'utf8')).toContain('Uncommitted agent edit.');
+    expect(fs.readFileSync(path.join(skillsRoot(), 'canvas-design/SKILL.md'), 'utf8')).toContain(
+      'Updated canvas skill.',
+    );
+    expect(
+      listSkills([{ origin: 'workspace', hostDir: skillsRoot(), containerDir: '/workspace/agent/skills' }]).map(
+        (skill) => skill.catalogId,
+      ),
+    ).toEqual(['test-catalog', 'test-catalog']);
+  });
+
+  it.each(['uncommitted', 'committed'])('isolates a same-revision install from %s changes to its source', (mode) => {
+    setup();
+    const first = installPdf();
+    const firstDir = findRepoRoot(fs.realpathSync(path.join(skillsRoot(), 'pdf')))!;
+    git(['sparse-checkout', 'add', 'skills/canvas-design'], firstDir);
+    const edited = path.join(firstDir, 'skills/canvas-design/SKILL.md');
+    fs.appendFileSync(edited, '\nAgent changes.\n');
+    if (mode === 'committed') {
+      git(['add', '-A'], firstDir);
+      git(['commit', '-m', 'agent edit'], firstDir);
+    }
+
+    const second = installCanvas(first.commit);
+    expect(second.commit).toBe(first.commit);
+    expect(findRepoRoot(fs.realpathSync(path.join(skillsRoot(), 'canvas-design')))).not.toBe(firstDir);
+    expect(fs.readFileSync(path.join(skillsRoot(), 'canvas-design/SKILL.md'), 'utf8')).not.toContain('Agent changes.');
+    expect(fs.readFileSync(edited, 'utf8')).toContain('Agent changes.');
+    expect(
+      listSkills([{ origin: 'workspace', hostDir: skillsRoot(), containerDir: '/workspace/agent/skills' }]).map(
+        (skill) => skill.catalogId,
+      ),
+    ).toEqual(['test-catalog', 'test-catalog']);
+  });
+
+  it('adds a sparse path without disturbing uncommitted edits to another installed skill', () => {
+    setup();
+    installPdf();
+    const firstDir = findRepoRoot(fs.realpathSync(path.join(skillsRoot(), 'pdf')))!;
+    fs.appendFileSync(path.join(skillsRoot(), 'pdf/SKILL.md'), '\nKeep this edit.\n');
+    installCanvas();
+    expect(findRepoRoot(fs.realpathSync(path.join(skillsRoot(), 'canvas-design')))).toBe(firstDir);
+    expect(fs.readFileSync(path.join(skillsRoot(), 'pdf/SKILL.md'), 'utf8')).toContain('Keep this edit.');
+  });
+
+  it('leaves legacy checkouts and their catalog identity intact', () => {
+    setup();
+    installPdf();
+    const link = path.join(skillsRoot(), 'pdf');
+    const firstDir = findRepoRoot(fs.realpathSync(link))!;
+    const legacy = path.join(skillsRoot(), '.catalogs/test-catalog');
+    fs.renameSync(firstDir, legacy);
+    fs.unlinkSync(link);
+    fs.symlinkSync('.catalogs/test-catalog/skills/pdf', link);
+    fs.appendFileSync(path.join(link, 'SKILL.md'), '\nLegacy edit.\n');
+
+    installCanvas();
+    expect(fs.readlinkSync(link)).toBe('.catalogs/test-catalog/skills/pdf');
+    expect(fs.readFileSync(path.join(link, 'SKILL.md'), 'utf8')).toContain('Legacy edit.');
+    expect(
+      listSkills([{ origin: 'workspace', hostDir: skillsRoot(), containerDir: '/workspace/agent/skills' }]).map(
+        (skill) => skill.catalogId,
+      ),
+    ).toEqual(['test-catalog', 'test-catalog']);
+  });
+
+  it('rejects a missing or edited cache without trying the upstream', () => {
+    setup();
+    const cache = marketplaceCacheDir('test-catalog');
+    fs.appendFileSync(path.join(cache, 'skills/pdf/SKILL.md'), '\nUnreviewed cache edit.\n');
+    expect(() => installPdf()).toThrow(/cache has local changes/);
+    fs.rmSync(cache, { recursive: true });
+    expect(() => installPdf()).toThrow(/snapshot unavailable/);
+    expect(fs.existsSync(path.join(skillsRoot(), 'pdf'))).toBe(false);
+  });
+});
+
+describe('registering preview snapshots', () => {
+  it('uses the expanded preview without fetching the newer upstream revision', () => {
+    setSkillsStoreRoot(tempDir('nanoclaw-skill-store-'));
+    const repo = makeMarketplaceRepo();
+    const preview = previewCatalog({ repo });
+    fs.appendFileSync(path.join(repo, 'skills/pdf/SKILL.md'), '\nNew upstream change.\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'new upstream'], repo);
+
+    const registered = addMarketplace({ repo, ref: preview.ref, expectedCommit: preview.commit! });
+    expect(registered.commit).toBe(preview.commit);
+    expect(registered.refreshedAt).toBeNull();
+    const installed = installCatalogSkill({
+      groupFolder: GROUP_FOLDER,
+      marketplaceId: registered.id,
+      plugin: 'document-skills',
+      slug: 'pdf',
+      expectedCommit: preview.commit!,
+    });
+    expect(installed.commit).toBe(preview.commit);
+    expect(fs.readFileSync(path.join(GROUPS_DIR, GROUP_FOLDER, 'skills/pdf/SKILL.md'), 'utf8')).not.toContain(
+      'New upstream change.',
+    );
+  });
+
+  it('uses a registered catalog with a custom id when previewing its source', () => {
+    setSkillsStoreRoot(tempDir('nanoclaw-skill-store-'));
+    const repo = makeMarketplaceRepo();
+    const registered = addMarketplace({ repo, id: 'custom-id' });
+    expect(previewCatalog({ repo }).id).toBe(registered.id);
+    expect(previewCatalog({ repo }).commit).toBe(registered.commit);
+  });
+
+  it('rejects a replaced preview without deleting its newer cache', () => {
+    setSkillsStoreRoot(tempDir('nanoclaw-skill-store-'));
+    const repo = makeMarketplaceRepo();
+    const first = previewCatalog({ repo });
+    fs.appendFileSync(path.join(repo, 'skills/pdf/SKILL.md'), '\nNew revision.\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'new revision'], repo);
+    const second = previewCatalog({ repo });
+    expect(second.commit).not.toBe(first.commit);
+
+    expect(() => addMarketplace({ repo, ref: first.ref, expectedCommit: first.commit! })).toThrow(/cache changed/);
+    expect(getMarketplaceRecord(first.id)).toBeNull();
+    expect(fs.existsSync(path.join(marketplaceCacheDir(first.id), '.git'))).toBe(true);
+    expect(addMarketplace({ repo, ref: second.ref, expectedCommit: second.commit! }).commit).toBe(second.commit);
   });
 });

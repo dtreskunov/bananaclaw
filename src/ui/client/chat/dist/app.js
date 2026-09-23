@@ -27785,7 +27785,7 @@ function SkillDirectoryResults({
       else next.add(source);
       return next;
     });
-    if (open || previews[source]) return;
+    if (open || previews[source] && previews[source] !== "error") return;
     setPreviews((prev) => ({ ...prev, [source]: "loading" }));
     const r4 = await call(
       `${SKILLS_API2}/preview?repo=${encodeURIComponent(source)}`
@@ -27795,7 +27795,14 @@ function SkillDirectoryResults({
       setPreviews((prev) => ({ ...prev, [source]: "error" }));
       return;
     }
-    setPreviews((prev) => ({ ...prev, [source]: r4.data.catalog.plugins.flatMap((plugin) => plugin.skills) }));
+    setPreviews((prev) => ({
+      ...prev,
+      [source]: {
+        commit: r4.data.catalog.commit,
+        ref: r4.data.catalog.ref,
+        skills: r4.data.catalog.plugins.flatMap((plugin) => plugin.skills)
+      }
+    }));
   }
   if (sources.length === 0) {
     return /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No further matches in the directory." });
@@ -27811,9 +27818,11 @@ function SkillDirectoryResults({
     /* @__PURE__ */ u4("ul", { class: "ga-discover-list", children: sources.map((entry) => {
       const preview = previews[entry.source];
       const open = expanded.has(entry.source);
-      const loaded = open && Array.isArray(preview);
+      const catalog = preview && typeof preview === "object" ? preview : null;
+      const loaded = open && catalog !== null;
+      const snapshot = catalog ? catalog.commit ? { commit: catalog.commit, ref: catalog.ref } : null : entry.snapshot;
       const installsBySlug = new Map(entry.skills.map((skill) => [skill.slug, skill.installs]));
-      const rows = loaded ? preview.filter((skill) => !installedSlugs.has(skill.slug)) : entry.skills.map((skill) => ({
+      const rows = loaded ? catalog.skills.filter((skill) => !installedSlugs.has(skill.slug)) : entry.skills.map((skill) => ({
         slug: skill.slug,
         name: skill.name,
         description: "",
@@ -27825,7 +27834,8 @@ function SkillDirectoryResults({
           /* @__PURE__ */ u4("span", { class: "ga-catalog-title", children: [
             /* @__PURE__ */ u4("strong", { children: entry.source }),
             entry.catalogId ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: "catalog added" }) : null,
-            /* @__PURE__ */ u4("span", { class: "ga-catalog-meta", children: loaded ? `${rows.length} skill${rows.length === 1 ? "" : "s"}` : `${entry.skills.length} match${entry.skills.length === 1 ? "" : "es"}` })
+            /* @__PURE__ */ u4("span", { class: "ga-catalog-meta", children: loaded ? `${rows.length} skill${rows.length === 1 ? "" : "s"}` : `${entry.skills.length} match${entry.skills.length === 1 ? "" : "es"}` }),
+            snapshot ? /* @__PURE__ */ u4("code", { title: snapshot.commit, children: snapshot.commit.slice(0, 7) }) : null
           ] })
         ] }),
         preview === "loading" ? /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
@@ -27852,9 +27862,9 @@ function SkillDirectoryResults({
                 source: entry.source,
                 slug: skill.slug,
                 installed: installedSlugs.has(skill.slug),
-                disabled: busy,
+                disabled: busy || preview === "loading" || !!catalog && !snapshot,
                 label: entry.catalogId ? "Install" : "Add & install",
-                onInstall: (ack) => onInstall(entry.source, skill.slug, ack)
+                onInstall: (ack) => onInstall(entry.source, skill.slug, ack, snapshot ?? void 0)
               }
             )
           ] }, skill.slug);
@@ -27942,7 +27952,7 @@ function SkillCatalogSection({
       ") or any repo of",
       " ",
       /* @__PURE__ */ u4("a", { href: "https://agentskills.io/specification", target: "_blank", rel: "noreferrer noopener", children: "Agent Skills" }),
-      ". Installing makes a skill selectable by every group; it does not enable it anywhere. Nothing from a catalog runs at install time."
+      ". Installing copies the cached revision into this agent's workspace. Existing installations are not updated. Nothing from a catalog runs at install time."
     ] }) }),
     /* @__PURE__ */ u4(GroupAdminField, { label: "Add a catalog", info: "owner/repo, or an https clone URL.", children: /* @__PURE__ */ u4("div", { class: "ga-catalog-add", children: [
       /* @__PURE__ */ u4(
@@ -28050,9 +28060,14 @@ function SkillCatalogSection({
                 source: catalog.source,
                 slug: skill.slug,
                 installed: installedSlugs.has(skill.slug),
-                disabled: busy,
+                disabled: busy || !catalog.commit,
                 onInstall: (ack) => install(
-                  { marketplaceId: catalog.id, plugin: plugin.name, slug: skill.slug },
+                  {
+                    marketplaceId: catalog.id,
+                    plugin: plugin.name,
+                    slug: skill.slug,
+                    expectedCommit: catalog.commit
+                  },
                   skill.slug,
                   ack
                 )
@@ -28134,12 +28149,14 @@ function SkillsSection({
       setSearching(false);
     }
   }
-  async function installFromRepo(repo, slug, acknowledgeRisk) {
+  async function installFromRepo(repo, slug, acknowledgeRisk, snapshot) {
     const r4 = await call(`${SKILLS_API4}/install-from-repo`, "POST", {
       gid,
       repo,
       slug,
-      acknowledgeRisk
+      acknowledgeRisk,
+      expectedCommit: snapshot?.commit,
+      ref: snapshot?.ref
     });
     if (!r4.ok) {
       if (r4.status === 409 && r4.data?.error === "audit_blocked") return { ok: false, audits: r4.data.audits ?? null };

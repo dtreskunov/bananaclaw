@@ -7,8 +7,8 @@
  * any repo that just follows the Agent Skills layout.
  *
  * Repos are cloned shallow into `data/skills/cache/<id>` and only ever read.
- * Nothing here executes repo content — installing is a plain file copy, and
- * skills only run once an operator selects them for a group.
+ * Nothing here executes repo content. Installs clone this local snapshot into
+ * an independent, revision-pinned sparse checkout for the agent group.
  */
 import fs from 'fs';
 import path from 'path';
@@ -137,6 +137,29 @@ export function syncMarketplaceCache(record: MarketplaceRecord): string {
     const detail = gitErrorDetail(err);
     throw new MarketplaceError(`git sync failed: ${detail}`);
   }
+}
+
+/** Refuse stale previews and edited caches rather than install different bytes. */
+export function assertCatalogSnapshot(record: MarketplaceRecord, expectedCommit = record.commit): string {
+  if (!expectedCommit || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedCommit)) {
+    throw new MarketplaceError('catalog has no valid snapshot commit; refresh it and review again');
+  }
+  if (record.commit !== expectedCommit) {
+    throw new MarketplaceError('catalog changed since it was displayed; reload the catalog and review again');
+  }
+  const dir = marketplaceCacheDir(record.id);
+  try {
+    if (git(['rev-parse', 'HEAD'], dir) !== expectedCommit) {
+      throw new MarketplaceError('catalog cache changed; refresh it and review again');
+    }
+    if (git(['status', '--porcelain', '--untracked-files=all'], dir) !== '') {
+      throw new MarketplaceError('catalog cache has local changes; refresh it and review again');
+    }
+  } catch (err) {
+    if (err instanceof MarketplaceError) throw err;
+    throw new MarketplaceError(`catalog snapshot unavailable: ${gitErrorDetail(err)}`);
+  }
+  return expectedCommit;
 }
 
 // ── manifest parsing ──────────────────────────────────────────────────────
@@ -362,7 +385,7 @@ function syncWithDefaultBranchFallback(record: MarketplaceRecord): MarketplaceRe
 export function previewCatalog(input: { repo: string; ref?: string }): MarketplaceCatalog {
   const repo = normalizeRepoSource(input.repo);
   const id = deriveId(repo);
-  const existing = getMarketplaceRecord(id);
+  const existing = readMarketplaceRecords().find((record) => record.repo === repo);
   if (existing) return readCatalog(existing);
 
   pruneUnreferencedCaches();
@@ -409,7 +432,12 @@ function pruneUnreferencedCaches(keep = 8): void {
   }
 }
 
-export function addMarketplace(input: { repo: string; ref?: string; id?: string }): MarketplaceRecord {
+export function addMarketplace(input: {
+  repo: string;
+  ref?: string;
+  id?: string;
+  expectedCommit?: string;
+}): MarketplaceRecord {
   const repo = normalizeRepoSource(input.repo);
   const ref = assertRef((input.ref ?? 'main').trim() || 'main');
   const id = input.id?.trim() || deriveId(repo);
@@ -428,17 +456,28 @@ export function addMarketplace(input: { repo: string; ref?: string; id?: string 
   };
 
   let synced: MarketplaceRecord;
-  try {
-    synced = syncWithDefaultBranchFallback(draft);
-  } catch (err) {
-    fs.rmSync(marketplaceCacheDir(id), { recursive: true, force: true });
-    throw err;
+  if (input.expectedCommit !== undefined) {
+    // An expanded directory result already has a preview clone. Register that
+    // snapshot without fetching a potentially different revision.
+    synced = { ...draft, commit: input.expectedCommit };
+    assertCatalogSnapshot(synced);
+    const origin = git(['remote', 'get-url', 'origin'], marketplaceCacheDir(id));
+    if (origin !== repo) throw new MarketplaceError('preview repository changed; reload the preview');
+  } else {
+    try {
+      synced = syncWithDefaultBranchFallback(draft);
+    } catch (err) {
+      fs.rmSync(marketplaceCacheDir(id), { recursive: true, force: true });
+      throw err;
+    }
   }
 
   const record: MarketplaceRecord = {
     ...synced,
     ...readManifestIdentity(id),
-    refreshedAt: new Date().toISOString(),
+    // Preview-only clones do not yet persist a fetch timestamp. Registration
+    // must not claim that reusing one contacted the upstream just now.
+    refreshedAt: input.expectedCommit === undefined ? new Date().toISOString() : null,
   };
   putMarketplaceRecord(record);
   return record;

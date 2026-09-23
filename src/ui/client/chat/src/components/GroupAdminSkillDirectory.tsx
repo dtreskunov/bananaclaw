@@ -23,7 +23,13 @@ export interface DiscoverSkillDto {
 export interface DiscoverSourceDto {
   source: string;
   catalogId: string | null;
+  snapshot: CatalogSnapshot | null;
   skills: DiscoverSkillDto[];
+}
+
+export interface CatalogSnapshot {
+  commit: string;
+  ref: string;
 }
 
 export interface DiscoverResponse {
@@ -38,6 +44,12 @@ interface PreviewSkill {
   name: string;
   description: string;
   license: string | null;
+}
+
+interface PreviewCatalog {
+  commit: string | null;
+  ref: string;
+  skills: PreviewSkill[];
 }
 
 const SKILLS_API = '/ui/chat/api/skills';
@@ -62,10 +74,12 @@ export function SkillDirectoryResults({
   discover: DiscoverResponse;
   installedSlugs: Set<string>;
   busy: boolean;
-  onInstall: (repo: string, slug: string, ack: boolean) => Promise<{ ok: boolean; audits?: AuditDto[] | null }>;
+  onInstall: (
+    repo: string, slug: string, ack: boolean, snapshot?: CatalogSnapshot,
+  ) => Promise<{ ok: boolean; audits?: AuditDto[] | null }>;
 }): JSX.Element {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [previews, setPreviews] = useState<Record<string, PreviewSkill[] | 'loading' | 'error'>>({});
+  const [previews, setPreviews] = useState<Record<string, PreviewCatalog | 'loading' | 'error'>>({});
 
   // Anything already installed is shown above with a checkbox; repeating it
   // here as "Installed" is noise.
@@ -81,10 +95,10 @@ export function SkillDirectoryResults({
       else next.add(source);
       return next;
     });
-    if (open || previews[source]) return;
+    if (open || (previews[source] && previews[source] !== 'error')) return;
 
     setPreviews((prev) => ({ ...prev, [source]: 'loading' }));
-    const r = await call<{ catalog: { plugins: { skills: PreviewSkill[] }[] } }>(
+    const r = await call<{ catalog: { commit: string | null; ref: string; plugins: { skills: PreviewSkill[] }[] } }>(
       `${SKILLS_API}/preview?repo=${encodeURIComponent(source)}`,
     );
     if (!r.ok) {
@@ -92,7 +106,14 @@ export function SkillDirectoryResults({
       setPreviews((prev) => ({ ...prev, [source]: 'error' }));
       return;
     }
-    setPreviews((prev) => ({ ...prev, [source]: r.data.catalog.plugins.flatMap((plugin) => plugin.skills) }));
+    setPreviews((prev) => ({
+      ...prev,
+      [source]: {
+        commit: r.data.catalog.commit,
+        ref: r.data.catalog.ref,
+        skills: r.data.catalog.plugins.flatMap((plugin) => plugin.skills),
+      },
+    }));
   }
 
   if (sources.length === 0) {
@@ -110,13 +131,17 @@ export function SkillDirectoryResults({
         {sources.map((entry) => {
           const preview = previews[entry.source];
           const open = expanded.has(entry.source);
-          const loaded = open && Array.isArray(preview);
+          const catalog = preview && typeof preview === 'object' ? preview : null;
+          const loaded = open && catalog !== null;
+          const snapshot = catalog
+            ? (catalog.commit ? { commit: catalog.commit, ref: catalog.ref } : null)
+            : entry.snapshot;
           const installsBySlug = new Map(entry.skills.map((skill) => [skill.slug, skill.installs] as const));
 
           // Collapsed shows the search hits; expanded shows everything the repo
           // actually ships, with the descriptions the directory doesn't return.
           const rows: PreviewSkill[] = loaded
-            ? (preview as PreviewSkill[]).filter((skill) => !installedSlugs.has(skill.slug))
+            ? catalog.skills.filter((skill) => !installedSlugs.has(skill.slug))
             : entry.skills.map((skill) => ({
                 slug: skill.slug,
                 name: skill.name,
@@ -136,6 +161,7 @@ export function SkillDirectoryResults({
                       ? `${rows.length} skill${rows.length === 1 ? '' : 's'}`
                       : `${entry.skills.length} match${entry.skills.length === 1 ? '' : 'es'}`}
                   </span>
+                  {snapshot ? <code title={snapshot.commit}>{snapshot.commit.slice(0, 7)}</code> : null}
                 </span>
               </button>
 
@@ -160,9 +186,9 @@ export function SkillDirectoryResults({
                         source={entry.source}
                         slug={skill.slug}
                         installed={installedSlugs.has(skill.slug)}
-                        disabled={busy}
+                        disabled={busy || preview === 'loading' || (!!catalog && !snapshot)}
                         label={entry.catalogId ? 'Install' : 'Add & install'}
-                        onInstall={(ack) => onInstall(entry.source, skill.slug, ack)}
+                        onInstall={(ack) => onInstall(entry.source, skill.slug, ack, snapshot ?? undefined)}
                       />
                     </li>
                   );

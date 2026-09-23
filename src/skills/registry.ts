@@ -7,7 +7,7 @@
  *
  * The workspace root holds both kinds of per-group skill. A skill the agent
  * wrote is a real directory; a skill installed from a catalog is a symlink
- * into a sparse clone of that catalog under `.catalogs/<id>`. That is the only
+ * into a sparse clone under `.catalogs/<id>@<commit>`. That is the only
  * thing distinguishing them, and it means provenance is whatever git already
  * knows — nothing custom is written into the repo.
  *
@@ -175,7 +175,7 @@ function readRoot(root: SkillRoot): RawSkill[] {
     const { frontmatter, warnings } = manifest;
 
     // In the group root a symlink means "vendored from a catalog" — it points
-    // into `.catalogs/<id>`. A real directory is the agent's own work.
+    // into `.catalogs/`. A real directory is the agent's own work.
     let git: SkillGitInfo | null = null;
     let origin = root.origin;
     if (root.origin === 'workspace' && isSymlink(hostPath)) {
@@ -235,9 +235,9 @@ export function listSkills(roots: SkillRoot[] = defaultSkillRoots()): Discovered
     .sort((a, b) => a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug));
 }
 
-/** The clone lives at `.catalogs/<id>`, so its directory name is the id. */
+/** Accept revision-isolated checkouts and the legacy `.catalogs/<id>` layout. */
 function catalogIdOf(git: SkillGitInfo | null): string | null {
-  return git ? path.basename(git.repoDir) : null;
+  return git ? path.basename(git.repoDir).replace(/@(?:[a-f0-9]{64}|[a-f0-9]{40})(?:-[A-Za-z0-9]+)?$/, '') : null;
 }
 
 export function getSkillBySlug(slug: string, roots?: SkillRoot[]): DiscoveredSkill | null {

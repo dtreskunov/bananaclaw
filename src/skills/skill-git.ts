@@ -2,7 +2,7 @@
  * Reading a vendored skill's provenance out of git.
  *
  * A skill installed from a catalog is a symlink into a sparse clone of that
- * catalog under `<group>/skills/.catalogs/<id>`. Everything we need to know
+ * catalog under `<group>/skills/.catalogs/<id>@<commit>`. Everything we need to know
  * about it — where it came from, which commit, whether the agent has changed
  * it — is already recorded by git, so nothing custom is written into the repo.
  */

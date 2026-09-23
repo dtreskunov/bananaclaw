@@ -1,11 +1,10 @@
 /**
  * Installing a catalog skill into an agent group's workspace.
  *
- * A skill is vendored as a sparse checkout: the catalog is cloned once per
- * group into `<group>/skills/.catalogs/<id>` with only the paths that group
- * actually uses, and each installed skill is a symlink from
- * `<group>/skills/<slug>` into that clone. Adding a second skill from the same
- * catalog costs one more sparse path and one more symlink, not another clone.
+ * A skill is vendored from the browsing cache into an independent sparse
+ * checkout at `<group>/skills/.catalogs/<id>@<commit>`. Revisions are isolated
+ * so a newer install cannot update existing skills. Unmodified checkouts at
+ * the same revision are reused; an edited checkout gets a separate sibling.
  *
  * Nothing custom is written into the repo — `git remote`, `git rev-parse` and
  * `git sparse-checkout list` already record everything we need, so provenance
@@ -16,9 +15,9 @@ import path from 'path';
 
 import { readSkillManifest, SKILL_NAME_RE, MAX_SKILL_NAME_LEN } from './frontmatter.js';
 import { git, gitErrorDetail, gitOrNull } from './git.js';
-import { findCatalogSkill, MarketplaceError, resolveWithin } from './marketplace.js';
-import { defaultSkillRoots, groupCatalogsDir, groupSkillsDir, listSkills, CATALOGS_DIRNAME } from './registry.js';
-import { getMarketplaceRecord } from './store.js';
+import { assertCatalogSnapshot, findCatalogSkill, MarketplaceError, resolveWithin } from './marketplace.js';
+import { defaultSkillRoots, groupCatalogsDir, groupSkillsDir, listSkills } from './registry.js';
+import { getMarketplaceRecord, marketplaceCacheDir } from './store.js';
 
 export class SkillInstallError extends Error {}
 
@@ -49,46 +48,62 @@ function entryExists(p: string): boolean {
 }
 
 /**
- * Clone the catalog into the group (sparse, blob-filtered) if it isn't there
- * yet, then make sure `sourcePath` is one of the checked-out paths.
+ * Copy Git objects from the cache, never borrow them: removing or refreshing
+ * the browsing cache must not affect installed skills.
  */
 function ensureCatalogCheckout(
   groupFolder: string,
   catalogId: string,
   repo: string,
-  ref: string,
+  commit: string,
   sourcePath: string,
 ): string {
-  const repoDir = path.join(groupCatalogsDir(groupFolder), catalogId);
+  const baseDir = path.join(groupCatalogsDir(groupFolder), `${catalogId}@${commit}`);
+  let stagingDir: string | null = null;
 
   try {
-    if (!fs.existsSync(path.join(repoDir, '.git'))) {
-      fs.rmSync(repoDir, { recursive: true, force: true });
-      fs.mkdirSync(path.dirname(repoDir), { recursive: true });
-      git([
-        'clone',
-        '--filter=blob:none',
-        '--no-checkout',
-        '--depth',
-        '1',
-        '--single-branch',
-        '--branch',
-        ref,
-        '--',
-        repo,
-        repoDir,
-      ]);
-      git(['sparse-checkout', 'init', '--cone'], repoDir);
-      git(['sparse-checkout', 'set', sourcePath], repoDir);
-    } else {
-      git(['sparse-checkout', 'add', sourcePath], repoDir);
+    if (
+      fs.existsSync(path.join(baseDir, '.git')) &&
+      git(['rev-parse', 'HEAD'], baseDir) === commit &&
+      git(['remote', 'get-url', 'origin'], baseDir) === repo &&
+      git(
+        ['--literal-pathspecs', 'status', '--porcelain', '--untracked-files=all', '--ignored', '--', sourcePath],
+        baseDir,
+      ) === ''
+    ) {
+      git(['sparse-checkout', 'add', '--', sourcePath], baseDir);
+      return baseDir;
     }
-    git(['checkout'], repoDir);
+
+    fs.mkdirSync(path.dirname(baseDir), { recursive: true });
+    stagingDir = fs.mkdtempSync(`${baseDir}-`);
+    git([
+      'clone',
+      '--no-local',
+      '--no-checkout',
+      '--depth',
+      '1',
+      '--single-branch',
+      '--no-tags',
+      '--',
+      marketplaceCacheDir(catalogId),
+      stagingDir,
+    ]);
+    git(['sparse-checkout', 'init', '--cone'], stagingDir);
+    git(['sparse-checkout', 'set', '--', sourcePath], stagingDir);
+    git(['checkout', '--detach', commit], stagingDir);
+    git(['remote', 'set-url', 'origin', repo], stagingDir);
+
+    // Never reset or replace an existing checkout, including legacy layouts.
+    const repoDir = entryExists(baseDir) ? stagingDir : baseDir;
+    if (repoDir !== stagingDir) fs.renameSync(stagingDir, repoDir);
+    stagingDir = null;
+    return repoDir;
   } catch (err) {
     throw new SkillInstallError(`git checkout failed: ${gitErrorDetail(err)}`);
+  } finally {
+    if (stagingDir) fs.rmSync(stagingDir, { recursive: true, force: true });
   }
-
-  return repoDir;
 }
 
 function assertValidSkillSource(dir: string, slug: string): void {
@@ -104,6 +119,8 @@ export interface InstallRequest {
   marketplaceId: string;
   plugin: string;
   slug: string;
+  /** Commit displayed by the UI. Omission selects the current cached snapshot. */
+  expectedCommit?: string;
 }
 
 export interface InstalledSkill {
@@ -119,12 +136,13 @@ export function installCatalogSkill(request: InstallRequest): InstalledSkill {
   const record = getMarketplaceRecord(request.marketplaceId);
   if (!record) throw new MarketplaceError(`unknown catalog "${request.marketplaceId}"`);
 
+  const commit = assertCatalogSnapshot(record, request.expectedCommit ?? record.commit);
   const entry = findCatalogSkill(request.marketplaceId, request.plugin, request.slug);
   if (!entry) throw new SkillInstallError(`"${request.slug}" is not in ${request.marketplaceId}/${request.plugin}`);
 
   assertInstallableSlug(entry.slug, request.groupFolder);
 
-  const repoDir = ensureCatalogCheckout(request.groupFolder, record.id, record.repo, record.ref, entry.path);
+  const repoDir = ensureCatalogCheckout(request.groupFolder, record.id, record.repo, commit, entry.path);
   const contentDir = resolveWithin(repoDir, entry.path);
   if (!contentDir || !fs.existsSync(contentDir)) {
     throw new SkillInstallError(`"${entry.path}" is missing from ${record.repo}`);
@@ -134,14 +152,14 @@ export function installCatalogSkill(request: InstallRequest): InstalledSkill {
   // Relative so the link resolves identically on the host and at
   // /workspace/agent/skills inside the container.
   const linkPath = path.join(groupSkillsDir(request.groupFolder), entry.slug);
-  fs.symlinkSync(path.join(CATALOGS_DIRNAME, record.id, entry.path), linkPath);
+  fs.symlinkSync(path.relative(groupSkillsDir(request.groupFolder), contentDir), linkPath);
 
   return {
     slug: entry.slug,
     catalogId: record.id,
     repo: record.repo,
     ref: record.ref,
-    commit: git(['rev-parse', 'HEAD'], repoDir),
+    commit,
     sourcePath: entry.path,
   };
 }

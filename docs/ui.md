@@ -81,10 +81,30 @@ unread error rather than replacing it. Success messages still auto-dismiss;
 action prompts (such as a new-version reload) remain clickable and persistent.
 
 If a catalog skill fails to install, the error includes Git's diagnostic when
-available. Catalog browsing uses a local cache: a listed skill can still fail to
-install if its source repository has since been removed, made private, or become
-unreachable. `Repository not found` means GitHub does not expose that repository
-to the install process, not that the skill's metadata failed validation.
+available. `Repository not found` during a catalog add or refresh means the
+upstream is unavailable to the host; it does not invalidate an existing snapshot.
+
+### Catalog snapshots and skill installation
+
+Catalogs are cached under `data/skills/cache/<catalog-id>`. Installs use that local
+Git snapshot, not a fresh clone of the upstream. The UI sends the displayed commit
+with the install request; if the cache has changed, installation stops with a
+request to reload and review the catalog rather than silently using another
+revision. Directory results that have not yet been cached are cloned once when
+added; expanded previews reuse their existing snapshot when added.
+
+Each group receives an independent sparse checkout at
+`groups/<folder>/skills/.catalogs/<catalog-id>@<commit>`, with relative skill
+symlinks into it. The checkout's `origin` remains the original repository URL,
+but no Git objects are borrowed from the browsing cache: removing or refreshing
+that cache cannot break installed skills. Installing another revision does not
+update existing skills. Local edits and commits are preserved; if a checkout
+cannot safely supply the requested skill, a separate suffixed checkout is used.
+Legacy `.catalogs/<catalog-id>` checkouts continue to work unchanged.
+
+Installing a cached skill does not require the upstream repository to exist.
+Existing security-audit checks and acknowledgements still apply. Catalog refresh
+and updating an agent's installed skills remain separate operations.
 
 ## Security posture
 
