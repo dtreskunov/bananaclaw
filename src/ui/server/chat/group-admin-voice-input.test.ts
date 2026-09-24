@@ -61,8 +61,8 @@ beforeEach(() => {
     INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at)
     VALUES ('web:owner', 'owner', NULL, 'web:owner', 'now');
     INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 'now');
-    INSERT INTO container_configs (agent_group_id, voice_mode, transcription_model, updated_at)
-    VALUES ('g', 'audio', 'legacy/audio-model', 'now');
+    INSERT INTO container_configs (agent_group_id, updated_at)
+    VALUES ('g', 'now');
   `);
 });
 
@@ -78,6 +78,10 @@ describe('group voice input settings', () => {
     expect(response.body.config.voice_input_backend).toBeNull();
     expect(response.body.config.voice_input_enabled).toBe(true);
     expect(response.body.defaults.voice_input_backend).toBe('elevenlabs');
+    expect(response.body.config).not.toHaveProperty('voice_mode');
+    expect(response.body.config).not.toHaveProperty('transcription_model');
+    expect(response.body.defaults).not.toHaveProperty('transcription_model');
+    expect(response.body).not.toHaveProperty('validVoiceModes');
     expect(response.body.voiceInput).toEqual({
       backend: 'elevenlabs',
       ready: false,
@@ -89,25 +93,20 @@ describe('group voice input settings', () => {
     expect(JSON.stringify(response.body)).not.toContain('private-admin-test-key');
   });
 
-  it.each(['future-provider', 'elevenlabs', null] as const)(
-    'saves %s without restarting or changing legacy audio-note settings',
-    async (backend) => {
-      const response = await settings('PATCH', { voice_input_backend: backend });
-      expect(response.status).toBe(200);
-      expect(response.body.config.voice_input_backend).toBe(backend);
-      expect(getContainerConfig('g')).toMatchObject({
-        voice_input_backend: backend,
-        voice_mode: 'audio',
-        transcription_model: 'legacy/audio-model',
-      });
-      expect(restartAgentGroupContainers).not.toHaveBeenCalled();
-      expect(recordAdminAction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          payload: { voice_input_backend: backend },
-        }),
-      );
-    },
-  );
+  it.each(['future-provider', 'elevenlabs', null] as const)('saves %s without restarting', async (backend) => {
+    const response = await settings('PATCH', { voice_input_backend: backend });
+    expect(response.status).toBe(200);
+    expect(response.body.config.voice_input_backend).toBe(backend);
+    expect(getContainerConfig('g')).toMatchObject({
+      voice_input_backend: backend,
+    });
+    expect(restartAgentGroupContainers).not.toHaveBeenCalled();
+    expect(recordAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: { voice_input_backend: backend },
+      }),
+    );
+  });
 
   it.each([true, 1, {}])('rejects invalid backend type %j', async (backend) => {
     const response = await settings('PATCH', { voice_input_backend: backend });
@@ -126,20 +125,16 @@ describe('group voice input settings', () => {
     expect(getContainerConfig('g')).toMatchObject({
       voice_input_enabled: enabled ? 1 : 0,
       voice_input_backend: 'future-provider',
-      voice_mode: 'audio',
-      transcription_model: 'legacy/audio-model',
     });
     expect(restartAgentGroupContainers).not.toHaveBeenCalled();
   });
 
-  it('saves both host-only fields without restarting or changing legacy settings', async () => {
+  it('saves both host-only fields without restarting', async () => {
     const response = await settings('PATCH', { voice_input_enabled: false, voice_input_backend: 'elevenlabs' });
     expect(response.status).toBe(200);
     expect(response.body.config).toMatchObject({
       voice_input_enabled: false,
       voice_input_backend: 'elevenlabs',
-      voice_mode: 'audio',
-      transcription_model: 'legacy/audio-model',
     });
     expect(restartAgentGroupContainers).not.toHaveBeenCalled();
   });
@@ -164,16 +159,22 @@ describe('group voice input settings', () => {
     expect((await settings('GET')).body.config.voice_input_backend).toBe('future-provider');
   });
 
-  it('keeps legacy transcription updates independent of web voice backend', async () => {
-    updateContainerConfigScalars('g', { voice_input_enabled: 0 });
-    const response = await settings('PATCH', { transcription_model: 'legacy/new-model' });
-    expect(response.status).toBe(200);
-    expect(getContainerConfig('g')).toMatchObject({
-      voice_input_backend: null,
-      voice_input_enabled: 0,
-      voice_mode: 'transcribe',
-      transcription_model: 'legacy/new-model',
-    });
-    expect(response.body.voiceInput).toMatchObject({ backend: 'disabled', ready: false });
+  it.each([
+    { transcription_model: 'legacy/new-model' },
+    { transcription_model: null },
+    { voice_mode: 'audio' },
+    { voice_mode: null },
+    { transcription_model: 'legacy/new-model', voice_input_backend: 'elevenlabs' },
+    { voice_mode: 'audio', voice_input_enabled: false, name: 'Changed' },
+  ])('rejects unsupported legacy settings atomically: %j', async (body) => {
+    updateContainerConfigScalars('g', { voice_input_backend: 'future-provider', voice_input_enabled: 0 });
+    const before = getContainerConfig('g');
+    const response = await settings('PATCH', body);
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('unsupported setting');
+    expect(getContainerConfig('g')).toEqual(before);
+    expect((await settings('GET')).body.name).toBe('Group');
+    expect(recordAdminAction).not.toHaveBeenCalled();
+    expect(restartAgentGroupContainers).not.toHaveBeenCalled();
   });
 });

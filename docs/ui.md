@@ -86,7 +86,7 @@ Pressing the connecting indicator cancels startup without changing the draft.
 Voice works with every agent model and with question-card text answers. It is
 separate from attaching an audio file for a model to hear. Browser speech
 recognition and the old web `/voice/transcribe` upload endpoint are replaced by
-streaming STT; incoming channel voice-note transcription is unchanged.
+streaming STT. Received audio files use the separate attachment behavior below.
 
 The initial backend is ElevenLabs `scribe_v2_realtime`, accessed directly from
 the **host** through AI SDK's experimental streaming transcription API. Use
@@ -109,8 +109,6 @@ do not restart agents.
 When voice input is not ready, the disabled microphone shows
 "Live voice input is not configured" as a tooltip instead of an inline notice;
 Agent Settings retains the detailed availability reason.
-Legacy `transcription_model` / `voice_mode` settings retain their non-web
-audio-message meaning and are not converted into streaming backend IDs.
 
 Microphone capture requires HTTPS (or localhost) and browser permission. Set
 `UI_BASE_URL` to the actual external UI URL: the voice WebSocket checks the
@@ -134,11 +132,42 @@ to ElevenLabs; only submitted text enters the chat journal. The request disables
 provider logging where supported; provider retention and account terms still
 apply. Spoken editing commands and assistant speech playback are not included.
 
-After upgrading, install the updated host lockfile and rebuild both the host
-and the chat UI, then restart the host. No agent image rebuild is needed.
-To roll back the UI behavior, restore the previous application version; the new
-nullable backend setting is additive and legacy transcription configuration
-remains intact.
+### Audio attachments and channel voice messages
+
+Audio received through WhatsApp, Telegram, other channels, or web file uploads
+is an ordinary attachment. The **+ > Record audio attachment** action is
+available whenever the browser supports microphone capture, independently of
+the selected model and live dictation settings.
+
+There is no automatic file transcription or hidden STT fallback. The original
+file is saved in the workspace and its name, MIME type, and path are included
+in the prompt. Providers embed audio only when model capabilities, their
+transport, and the file format support it. Otherwise the agent receives the
+file reference and can use its available tools; it is not told that the audio
+was transcribed.
+
+The native provider supports direct MP3/WAV audio with a known audio-input
+model over OpenAI-compatible Chat. Unknown audio capabilities (including a
+custom endpoint without model metadata), unsupported formats such as OGG/Opus,
+WebM, and M4A, or the Anthropic Messages transport use file references instead.
+OpenCode's current file-part adapter does not encode native audio input, so
+audio stays a file reference there too. Claude and fx also retain filesystem
+access to audio without automatically transcribing it. No conversion is added.
+
+**Upgrade behavior change:** channel voice notes sent to text-only models no
+longer get automatically transcribed. `DEFAULT_TRANSCRIPTION_MODEL` is ignored
+and can be removed from the host environment; `transcription_model` and
+`voice_mode` are removed by a new database migration. Historical migrations
+remain unchanged. The live web dictation backend and enable flag are preserved.
+Legacy transcription settings are not converted to dictation settings.
+
+Rebuild the host and chat UI, then restart the host and affected agent
+containers to pick up this simplification. Runner source is bind-mounted, so
+this source-only change does not require rebuilding per-group images.
+Idle containers restarted through `ncl groups restart` start fresh on the next
+message. Back up the database before
+upgrading if rollback to the legacy schema is needed; the removal migration
+does not preserve the retired settings.
 
 ### Feedback notifications
 

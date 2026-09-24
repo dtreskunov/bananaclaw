@@ -31,7 +31,9 @@ beforeEach(() => {
   const db = initTestDb();
   runMigrations(
     db,
-    migrations.filter((migration) => migration.name !== 'voice-input-backend'),
+    migrations.filter(
+      (migration) => migration.name !== 'voice-input-backend' && migration.name !== 'drop-legacy-transcription-config',
+    ),
   );
   db.exec(`
     INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 'now');
@@ -48,14 +50,14 @@ afterEach(() => {
 });
 
 describe('host voice input configuration', () => {
-  it('migrates legacy rows to server default without changing audio-note configuration', () => {
+  it('migrates legacy rows to the server default and removes audio-note configuration', () => {
     runMigrations(getDb());
     expect(getContainerConfig('g')).toMatchObject({
       voice_input_backend: null,
       voice_input_enabled: 1,
-      voice_mode: 'audio',
-      transcription_model: 'legacy/audio-model',
     });
+    expect(getContainerConfig('g')).not.toHaveProperty('voice_mode');
+    expect(getContainerConfig('g')).not.toHaveProperty('transcription_model');
     expect(VOICE_INPUT_MODEL).toBe('scribe_v2_realtime');
     expect(resolveVoiceInputConfig('g')).toEqual({
       backend: 'elevenlabs',
@@ -155,9 +157,18 @@ describe('host voice input configuration', () => {
     vi.stubEnv('ELEVENLABS_API_KEY', 'private-test-key');
     updateContainerConfigScalars('g', { voice_input_backend: 'elevenlabs', voice_input_enabled: 0 });
     const config = configFromDb(getContainerConfig('g')!, getAgentGroup('g')!);
-    expect(config).toMatchObject({ voiceMode: 'audio', transcriptionModel: 'legacy/audio-model' });
+    expect(config).not.toHaveProperty('voiceMode');
+    expect(config).not.toHaveProperty('transcriptionModel');
     const serialized = JSON.stringify(config);
     expect(serialized).not.toMatch(/voice_input|voiceInput|ELEVENLABS|private-test-key/);
+  });
+
+  it.each(['voice_mode', 'transcription_model'])('rejects removed scalar column %s', (field) => {
+    const row = getContainerConfig('g');
+    expect(() => updateContainerConfigScalars('g', { [field]: 'legacy-value' })).toThrow(
+      `Invalid scalar column: ${field}`,
+    );
+    expect(getContainerConfig('g')).toEqual(row);
   });
 
   it('normalizes omitted values on creation and persists explicit values', () => {

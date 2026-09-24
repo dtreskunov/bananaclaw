@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
 import { formatNativeToolStep, NativeProvider, portableHistory, userMessage } from './native.js';
+import * as nativeCatalog from './native/catalog.js';
 import type { ProviderEvent } from './types.js';
 
 let root: string;
@@ -225,6 +226,27 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(openai)).toContain('clip.mp4');
   });
 
+  it('only embeds audio for a known audio-capable model and supported format/protocol', () => {
+    const file = { path: path.join(root, 'speech.mp3'), mime: 'audio/mpeg', filename: 'speech.mp3' };
+    fs.writeFileSync(file.path, Buffer.from([1, 2, 3]));
+    const prompt = '[audio; audio/mpeg: speech.mp3 — saved to ' + file.path + ']';
+    for (const model of [
+      undefined,
+      { protocol: 'openai-chat' as const },
+      { protocol: 'openai-chat' as const, inputModalities: ['text'] },
+      { protocol: 'anthropic-messages' as const, inputModalities: ['text', 'audio'] },
+    ]) {
+      expect(userMessage(prompt, [file], model)).toEqual({ role: 'user', content: prompt });
+    }
+    const audioModel = { protocol: 'openai-chat' as const, inputModalities: ['text', 'audio'] };
+    expect(userMessage(prompt, [file], audioModel)).toMatchObject({
+      content: [{ type: 'text', text: prompt }, { type: 'file', mediaType: 'audio/mpeg', data: 'AQID' }],
+    });
+    for (const mime of ['audio/ogg', 'audio/webm', 'audio/mp4']) {
+      expect(userMessage(prompt, [{ ...file, mime }], audioModel)).toEqual({ role: 'user', content: prompt });
+    }
+  });
+
   it('removes provider-private reasoning while preserving portable tool history', () => {
     expect(
       portableHistory([
@@ -436,7 +458,7 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests[1]?.messages)).toContain('data:image/png;base64,iVBORw==');
   });
 
-  it('encodes PDF, text, audio, and video through OpenAI-compatible Chat', async () => {
+  it('encodes existing file types but omits audio bytes when custom endpoint capabilities are unknown', async () => {
     const files = [
       { path: path.join(root, 'document.pdf'), mime: 'application/pdf', filename: 'document.pdf' },
       { path: path.join(root, 'notes.txt'), mime: 'text/plain', filename: 'notes.txt' },
@@ -452,8 +474,31 @@ describe('NativeProvider', () => {
     const body = JSON.stringify(requests[0]?.messages);
     expect(body).toContain('data:application/pdf;base64,AQID');
     expect(body).toContain('hello document');
-    expect(body).toContain('"input_audio":{"data":"BAUG","format":"mp3"}');
+    expect(body).not.toContain('input_audio');
     expect(body).toContain('data:video/mp4;base64,BwgJ');
+  });
+
+  it('encodes and replays native audio when the selected model declares audio input', async () => {
+    const resolveModel = nativeCatalog.resolveNativeModel;
+    const catalog = spyOn(nativeCatalog, 'resolveNativeModel').mockImplementation(async (id) => ({
+      ...await resolveModel(id),
+      inputModalities: ['text', 'audio'],
+    }));
+    try {
+      const file = { path: path.join(root, 'speech.mp3'), mime: 'audio/mpeg', filename: 'speech.mp3' };
+      fs.writeFileSync(file.path, Buffer.from([4, 5, 6]));
+      const events = await collect(new NativeProvider({ model: 'local/audio-model' }), undefined, [file]);
+      const init = events.find((event) => event.type === 'init');
+      expect(init?.type).toBe('init');
+      if (init?.type !== 'init') throw new Error('Missing continuation');
+      await collect(new NativeProvider({ model: 'local/audio-model' }), init.continuation);
+      for (const request of requests) {
+        expect(JSON.stringify(request.messages)).toContain('"input_audio":{"data":"BAUG","format":"mp3"}');
+      }
+      expect(requests).toHaveLength(2);
+    } finally {
+      catalog.mockRestore();
+    }
   });
 
   it('streams direct MiniMax over Anthropic Messages', async () => {

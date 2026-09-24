@@ -316,14 +316,11 @@ const EXT_TO_MIME: Record<string, string> = {
   webm: 'audio/webm',
 };
 
-/**
- * Normalize audio MIME types that providers (e.g. OpenRouter) don't accept.
- * Maps unsupported container MIME types to their closest accepted equivalent.
- */
-const AUDIO_MIME_NORMALIZE: Record<string, string> = {
-  'audio/webm': 'audio/ogg',   // Opus in WebM → treat as Ogg (same codec)
-  'audio/x-m4a': 'audio/mp4',  // Non-standard m4a MIME → standard
-};
+function attachmentMime(attachment: { name?: string; filename?: string; mimeType?: string; mime?: string }): string | undefined {
+  const ext = (attachment.name || attachment.filename || '').split('.').pop()?.toLowerCase() || '';
+  const mime = attachment.mimeType || attachment.mime || EXT_TO_MIME[ext];
+  return mime === 'audio/x-m4a' ? 'audio/mp4' : mime;
+}
 
 /**
  * Extract file attachments from a batch of messages. Returns absolute
@@ -337,10 +334,8 @@ export function extractFileAttachments(messages: MessageInRow[]): FileAttachment
     if (!Array.isArray(attachments)) continue;
     for (const a of attachments) {
       if (!a.localPath) continue;
-      const ext = (a.name || a.filename || '').split('.').pop()?.toLowerCase() || '';
-      const rawMime = a.mimeType || a.mime || EXT_TO_MIME[ext];
-      if (!rawMime) continue;
-      const mime = AUDIO_MIME_NORMALIZE[rawMime] || rawMime;
+      const mime = attachmentMime(a);
+      if (!mime) continue;
       files.push({
         path: `/workspace/${a.localPath}`,
         mime,
@@ -357,12 +352,14 @@ function formatAttachments(attachments: any[] | undefined): string {
   const parts = attachments.map((a) => {
     const name = a.name || a.filename || 'attachment';
     const type = a.type || 'file';
+    const mime = attachmentMime(a);
+    const label = mime ? `${type}; ${mime}` : type;
     const localPath = a.localPath ? `/workspace/${a.localPath}` : '';
     const url = a.url || '';
     if (localPath) {
-      return `[${type}: ${escapeXml(name)} — saved to ${escapeXml(localPath)}]`;
+      return `[${escapeXml(label)}: ${escapeXml(name)} — saved to ${escapeXml(localPath)}]`;
     }
-    return url ? `[${type}: ${escapeXml(name)} (${escapeXml(url)})]` : `[${type}: ${escapeXml(name)}]`;
+    return url ? `[${escapeXml(label)}: ${escapeXml(name)} (${escapeXml(url)})]` : `[${escapeXml(label)}: ${escapeXml(name)}]`;
   });
   return '\n' + parts.join('\n');
 }

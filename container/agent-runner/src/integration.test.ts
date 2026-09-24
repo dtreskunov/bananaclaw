@@ -6,17 +6,13 @@ import { getPendingMessages } from './db/messages-in.js';
 import { getActivityBuffer, getContinuation, setContinuation } from './db/session-state.js';
 import { getCurrentInReplyTo } from './current-batch.js';
 import { MockProvider } from './providers/mock.js';
-import type { ProviderEvent, ProviderExchange, QueryPushOptions } from './providers/types.js';
+import type { FileAttachment, ProviderEvent, ProviderExchange, QueryInput, QueryPushOptions } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
 import { loadConfig } from './config.js';
 import { emitHostEventForTesting, resetHostEventsForTesting } from './session-link.js';
 
 beforeEach(() => {
   initTestSessionDb();
-  // runPollLoop reads runtime config (e.g. voiceMode for audio transcription).
-  // The container always calls loadConfig() before runPollLoop; mirror that
-  // here. With no container.json present, loadConfig() falls back to defaults
-  // (voiceMode 'off'), so transcription is skipped.
   loadConfig();
   // Seed a destination so output parsing can resolve "discord-test" → routing
   getInboundDb()
@@ -43,6 +39,43 @@ function insertMessage(id: string, content: object, opts?: { platformId?: string
 }
 
 describe('poll loop integration', () => {
+  it('passes channel audio files and on-disk references unchanged on initial and follow-up turns', async () => {
+    const received: Array<{ prompt: string; files?: FileAttachment[] }> = [];
+    class AttachmentProvider extends MockProvider {
+      override query(input: QueryInput) {
+        received.push({ prompt: input.prompt, files: input.files });
+        const query = super.query(input);
+        const push = query.push.bind(query);
+        query.push = (prompt, files, options) => {
+          received.push({ prompt, files });
+          return push(prompt, files, options);
+        };
+        return query;
+      }
+    }
+    const provider = new AttachmentProvider({}, () => '<message to="discord-test">received</message>');
+    const audio = { type: 'audio', name: 'voice.ogg', mimeType: 'audio/ogg', localPath: 'inbox/voice.ogg' };
+    insertMessage('audio-1', { attachments: [audio] }, { platformId: 'chan-1', channelType: 'telegram' });
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider, controller.signal, 3000);
+    try {
+      await waitFor(() => getUndeliveredMessages().length === 1, 2000);
+      insertMessage('audio-2', { attachments: [audio] }, { platformId: 'chan-1', channelType: 'whatsapp' });
+      await waitFor(() => received.length === 2, 2000);
+      for (const turn of received) {
+        expect(turn.files).toEqual([{ path: '/workspace/inbox/voice.ogg', mime: 'audio/ogg', filename: 'voice.ogg' }]);
+        expect(turn.prompt).toContain('audio/ogg');
+        expect(turn.prompt).toContain('/workspace/inbox/voice.ogg');
+        expect(turn.prompt).not.toContain('[voice message transcript]');
+      }
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
+
   it('waits for a host event instead of polling local messages', async () => {
     const provider = new MockProvider({}, () => '<message to="discord-test">event received</message>');
     const controller = new AbortController();

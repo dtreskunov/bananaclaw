@@ -76,7 +76,6 @@ import { bareIdForResponse, dbValueFromBareId, getModelDetails, listModelsForPro
 import { resolveUpstreamForWireId } from './models-dev-catalog.js';
 import { listAvailableSkills, type AvailableSkill } from './skill-catalog.js';
 import { groupSkillRoots } from '../../../skills/registry.js';
-import { deriveVoiceMode } from './voice-mode.js';
 import { defaultVoiceInputBackend, resolveVoiceInputConfig, type VoiceInputConfig } from './voice-input-config.js';
 import { allocateSiteSlug, isValidSlug, pagesBaseDomain, pagesEnabled, siteFqdn, siteUrl } from '../pages/site.js';
 
@@ -91,7 +90,6 @@ const SCALAR_FIELDS = [
   'assistant_name',
   'max_messages_per_prompt',
   'cli_scope',
-  'transcription_model',
   'voice_input_backend',
   'voice_input_enabled',
 ] as const;
@@ -105,7 +103,6 @@ const SCALAR_FIELDS = [
 const VALID_PROVIDERS = VALID_AGENT_PROVIDERS;
 const SELECTABLE_PROVIDERS = SELECTABLE_AGENT_PROVIDERS;
 const VALID_CLI_SCOPES = ['disabled', 'group', 'global'] as const;
-const VALID_VOICE_MODES = ['off', 'transcribe', 'audio'] as const;
 
 // ── dispatcher ────────────────────────────────────────────────────────────
 
@@ -243,8 +240,6 @@ interface SettingsResponse {
     | 'assistant_name'
     | 'max_messages_per_prompt'
     | 'cli_scope'
-    | 'voice_mode'
-    | 'transcription_model'
     | 'voice_input_backend'
   > & { voice_input_enabled: boolean };
   voiceInput: VoiceInputConfig;
@@ -266,12 +261,10 @@ interface SettingsResponse {
     /** Default model per provider — model ids don't carry across providers. */
     models: Record<string, string | null>;
     image_tag: string | null;
-    transcription_model: string | null;
     voice_input_backend: VoiceInputConfig['backend'];
   };
   validProviders: readonly string[];
   validCliScopes: readonly string[];
-  validVoiceModes: readonly string[];
   /** Per-group static website. `available` reflects PAGES_BASE_DOMAIN being set. */
   site: {
     available: boolean;
@@ -336,7 +329,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
   }
 
   // Resolve effective defaults for fields the UI shows as placeholders.
-  const envDefaults = readEnvFile(['DEFAULT_PROVIDER', 'DEFAULT_TRANSCRIPTION_MODEL']);
+  const envDefaults = readEnvFile(['DEFAULT_PROVIDER']);
   const defaultProviderName = envDefaults.DEFAULT_PROVIDER || 'claude';
   // Every provider the picker can land on, so the Model placeholder can track
   // the drafted provider without another round trip.
@@ -344,7 +337,6 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
   for (const p of new Set([...SELECTABLE_PROVIDERS, defaultProviderName, ...(cfg.provider ? [cfg.provider] : [])])) {
     defaultModels[p] = bareIdForResponse(p, resolveDefaultModel(p) ?? null);
   }
-  const defaultTranscriptionModel = envDefaults.DEFAULT_TRANSCRIPTION_MODEL || null;
   const defaultImage = CONTAINER_IMAGE || null;
   const emailConfig = getAgentEmailConfig();
 
@@ -364,8 +356,6 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
       assistant_name: cfg.assistant_name,
       max_messages_per_prompt: cfg.max_messages_per_prompt,
       cli_scope: cfg.cli_scope,
-      voice_mode: cfg.voice_mode,
-      transcription_model: cfg.transcription_model,
       voice_input_backend: cfg.voice_input_backend ?? null,
       voice_input_enabled: cfg.voice_input_enabled !== 0,
     },
@@ -384,12 +374,10 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
       provider: defaultProviderName,
       models: defaultModels,
       image_tag: defaultImage,
-      transcription_model: defaultTranscriptionModel,
       voice_input_backend: defaultVoiceInputBackend(),
     },
     validProviders: SELECTABLE_PROVIDERS,
     validCliScopes: VALID_CLI_SCOPES,
-    validVoiceModes: VALID_VOICE_MODES,
     site: {
       available: pagesEnabled(),
       baseDomain: pagesEnabled() ? pagesBaseDomain() : null,
@@ -421,6 +409,9 @@ async function handlePatchSettings(
   gid: string,
 ): Promise<void> {
   const body = (await readJsonBody(req)) as Record<string, unknown>;
+  for (const field of ['voice_mode', 'transcription_model']) {
+    if (field in body) throw new BadRequest(`unsupported setting: ${field}`);
+  }
   // Distinguish "key absent" (skip) from "key present with null/empty"
   // (clear to null). The DB columns for provider/model/effort/image_tag/
   // assistant_name/max_messages_per_prompt/cli_scope all allow NULL.
@@ -436,8 +427,6 @@ async function handlePatchSettings(
       | 'assistant_name'
       | 'max_messages_per_prompt'
       | 'cli_scope'
-      | 'voice_mode'
-      | 'transcription_model'
       | 'voice_input_backend'
       | 'voice_input_enabled'
     >
@@ -633,23 +622,6 @@ async function handlePatchSettings(
     const existing = getContainerConfig(gid);
     const effectiveProvider = updates.provider ?? existing?.provider ?? null;
     updates.small_model = dbValueFromBareId(effectiveProvider, updates.small_model ?? null);
-  }
-
-  if ('transcription_model' in updates || 'provider' in updates || 'model' in updates) {
-    const existing = getContainerConfig(gid);
-    const envDefaults = readEnvFile(['DEFAULT_PROVIDER', 'DEFAULT_TRANSCRIPTION_MODEL']);
-    const effectiveProvider = updates.provider ?? existing?.provider ?? envDefaults.DEFAULT_PROVIDER ?? 'claude';
-    // The default model in .env is the DB wire value — use as-is.
-    const effectiveModel =
-      'model' in updates ? updates.model : (existing?.model ?? resolveDefaultModel(effectiveProvider) ?? null);
-    // Fall back to DEFAULT_TRANSCRIPTION_MODEL so clearing the per-group
-    // override re-enables voice (mirrors voice-mode.ts:deriveVoiceModeForConfig
-    // and the env fallback already used by streamTranscribe).
-    const effectiveTranscriptionModel =
-      'transcription_model' in updates
-        ? (updates.transcription_model ?? envDefaults.DEFAULT_TRANSCRIPTION_MODEL ?? null)
-        : (existing?.transcription_model ?? envDefaults.DEFAULT_TRANSCRIPTION_MODEL ?? null);
-    updates.voice_mode = await deriveVoiceMode(effectiveProvider, effectiveModel ?? null, effectiveTranscriptionModel);
   }
 
   if (

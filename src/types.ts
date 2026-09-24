@@ -47,8 +47,6 @@ export interface ContainerConfigRow {
   packages_pip: string; // JSON: string[]
   additional_mounts: string; // JSON: AdditionalMountConfig[]
   cli_scope: string; // 'disabled' | 'group' | 'global'
-  voice_mode: string; // 'off' | 'transcribe' | 'audio'
-  transcription_model: string | null;
   /** Host-only web microphone backend; null inherits the server default. */
   voice_input_backend?: string | null;
   /** Host-only web microphone enable flag; 1 by default. */

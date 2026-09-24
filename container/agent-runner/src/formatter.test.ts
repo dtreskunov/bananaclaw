@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { setConfigForTest } from './config.js';
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { categorizeMessage, formatMessages, parseAssistantOutput, stripInternalTags, stripThinkTags } from './formatter.js';
+import { categorizeMessage, extractFileAttachments, formatMessages, parseAssistantOutput, stripInternalTags, stripThinkTags } from './formatter.js';
 import { TIMEZONE } from './timezone.js';
 
 beforeEach(() => {
@@ -47,6 +47,23 @@ describe('sender provenance', () => {
       senderIdentity: 'telegram:123',
     });
     expect(categorizeMessage(getPendingMessages()[0]).senderId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  describe('generic audio attachments', () => {
+    it('preserves real audio containers and includes their MIME and filesystem references', () => {
+      insertMessage('audio', 'chat', { attachments: [
+        { type: 'audio', name: 'voice.webm', mimeType: 'audio/webm', localPath: 'inbox/voice.webm' },
+        { type: 'audio', name: 'voice.mp3', localPath: 'inbox/voice.mp3' },
+        { type: 'audio', name: 'voice.m4a', mimeType: 'audio/x-m4a', localPath: 'inbox/voice.m4a' },
+      ] });
+      const messages = getPendingMessages();
+      expect(extractFileAttachments(messages).map((file) => file.mime)).toEqual(['audio/webm', 'audio/mpeg', 'audio/mp4']);
+      const prompt = formatMessages(messages);
+      expect(prompt).toContain('[audio; audio/webm: voice.webm — saved to /workspace/inbox/voice.webm]');
+      expect(prompt).toContain('[audio; audio/mpeg: voice.mp3 — saved to /workspace/inbox/voice.mp3]');
+      expect(prompt).toContain('[audio; audio/mp4: voice.m4a — saved to /workspace/inbox/voice.m4a]');
+      expect(prompt).not.toContain('audio/ogg');
+    });
   });
 
   it('uses explicit observed identity when canonical attribution is unavailable', () => {

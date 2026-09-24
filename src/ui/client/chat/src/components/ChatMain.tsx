@@ -8,7 +8,7 @@ import {
   chatMessages, chatStatus, chatLoading, chatReady, isTyping, typingHint, typingStartedAt, typingModel, typingUsage, activityLog, threadId, channelType, canSend, pending,
   threads, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions, respondingQuestionIds,
-  highlightMessageId, searchQuery, voiceMode, voiceInput, isMobile, scrollToBottomTick,
+  highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
   pendingWebSends,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
@@ -1606,9 +1606,6 @@ function Composer() {
     addFiles(Array.from(items));
   };
 
-  // Live dictation is model-independent; the separate audio attachment
-  // action still depends on the responding model's audio capability.
-  const vm = voiceMode.value;
   const attachRecording = isRecording.value;
   const startVoice = (): void => {
     if (!gid || !tid || unavailable || composerDisabled || isRecording.value) return;
@@ -1693,7 +1690,7 @@ function Composer() {
           <ComposerPlusMenu
             disabled={composerDisabled || voiceState.sending || !['idle', 'error'].includes(voiceState.phase)}
             title={composerDisabled ? (hasQuestion ? 'Answer the question above' : 'Disconnected') : 'Add\u2026'}
-            showRecordAudio={vm === 'audio' && hasGetUserMedia()}
+            showRecordAudio={hasGetUserMedia()}
             showQuickCapture={hasGetUserMedia()}
             onUploadFile={onAttachClick}
             onQuickCapture={() => setQuickCapture(true)}

@@ -357,7 +357,6 @@ export interface WsPayload {
     author?: { userId: string; displayName: string };
   }>;
   author?: { userId: string; displayName: string };
-  voiceMode?: 'off' | 'transcribe' | 'audio';
   voiceInput?: VoiceInputCapability;
   canSend?: boolean;
   on?: boolean;

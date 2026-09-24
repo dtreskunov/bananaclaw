@@ -11,8 +11,6 @@ const SCALAR_COLUMNS = new Set([
   'assistant_name',
   'max_messages_per_prompt',
   'cli_scope',
-  'voice_mode',
-  'transcription_model',
   'voice_input_backend',
   'voice_input_enabled',
 ]);
@@ -83,8 +81,6 @@ export function updateContainerConfigScalars(
       | 'assistant_name'
       | 'max_messages_per_prompt'
       | 'cli_scope'
-      | 'voice_mode'
-      | 'transcription_model'
       | 'voice_input_backend'
       | 'voice_input_enabled'
     >

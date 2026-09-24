@@ -66,7 +66,6 @@ export const threadId: Signal<string | null> = signal<string | null>(null);
 export const channelType: Signal<ChannelType> = signal<ChannelType>('web');
 export const messagingGroupId: Signal<string | null> = signal<string | null>(null);
 export const canSend: Signal<boolean> = signal(true);
-export const voiceMode: Signal<'off' | 'transcribe' | 'audio'> = signal<'off' | 'transcribe' | 'audio'>('off');
 export const voiceInput = signal<VoiceInputCapability>({
   backend: 'disabled',
   ready: false,

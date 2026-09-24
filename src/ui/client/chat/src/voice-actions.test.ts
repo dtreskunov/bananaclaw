@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat, runSync } from './actions';
-import { channelType, groupId, threadId, voiceInput, voiceMode } from './state';
+import { channelType, groupId, threadId, voiceInput } from './state';
 import { voice } from './voice-audio';
 
 vi.hoisted(() => {
@@ -18,7 +18,6 @@ describe('voice capability integration', () => {
     groupId.value = 'g';
     threadId.value = 't';
     channelType.value = 'telegram';
-    voiceMode.value = 'off';
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -28,7 +27,6 @@ describe('voice capability integration', () => {
     );
     await runSync();
     expect(voiceInput.value).toEqual({ backend: 'elevenlabs', ready: true });
-    expect(voiceMode.value).toBe('off');
   });
 
   it('ignores a stale sync capability after navigation', async () => {

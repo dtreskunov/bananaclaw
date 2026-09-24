@@ -17,7 +17,6 @@ import { WebSocketServer, type WebSocket } from 'ws';
 
 import { reduceActivityLines } from '../../../activity.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
-import { getContainerConfig } from '../../../db/container-configs.js';
 import { getDb } from '../../../db/connection.js';
 import {
   createMessagingGroup,
@@ -75,7 +74,6 @@ import { extractDisplayQuery, HA_CHANNEL_TYPE } from '../../../channels/homeassi
 import { setResendPendingWebOverride } from '../../../channels/resend.js';
 import type { OutboundMessage } from '../../../channels/adapter.js';
 import { authenticate, COOKIE_NAME } from '../auth.js';
-import { reconcileVoiceMode } from './voice-mode.js';
 import { resolveVoiceInputConfig } from './voice-input-config.js';
 import { handleVoiceUpgrade } from './voice-stream.js';
 import { uiBaseUrl } from '../server.js';
@@ -3377,13 +3375,11 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
       channelType: WEB_CHANNEL_TYPE,
       messagingGroupId: ctx.messagingGroupId,
     });
-    const voiceMode = await reconcileVoiceMode(ctx.groupId, getContainerConfig(ctx.groupId));
     frameSender.finish(
       {
         kind: 'history',
         threadId: ctx.threadId,
         messages,
-        voiceMode,
         voiceInput: resolveVoiceInputConfig(ctx.groupId),
         canSend: ctx.canSend,
       },

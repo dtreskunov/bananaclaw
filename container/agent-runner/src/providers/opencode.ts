@@ -748,6 +748,24 @@ function sessionErrorMessage(props: { error?: unknown }): string {
   return JSON.stringify(props.error) || 'OpenCode session error';
 }
 
+export function buildOpenCodePromptParts(text: string, files: FileAttachment[] = []) {
+  const parts: Array<{ type: string; text?: string; mime?: string; url?: string; filename?: string }> = [
+    { type: 'text', text },
+  ];
+  for (const file of files) {
+    // OpenCode file parts do not encode input_audio; retain the
+    // formatter's on-disk reference instead of sending invalid bytes.
+    if (file.mime.startsWith('audio/')) continue;
+    try {
+      const b64 = fs.readFileSync(file.path).toString('base64');
+      parts.push({ type: 'file', mime: file.mime, url: `data:${file.mime};base64,${b64}`, filename: file.filename });
+    } catch (err) {
+      log(`Failed to read attachment ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return parts;
+}
+
 export class OpenCodeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = false;
 
@@ -871,21 +889,7 @@ export class OpenCodeProvider implements AgentProvider {
           initYielded = true;
         }
 
-        // Build prompt parts: text + any inline file attachments (first turn only).
-        const parts: Array<{ type: string; text?: string; mime?: string; url?: string; filename?: string }> = [
-          { type: 'text', text: turn.text },
-        ];
-        if (turn.files && turn.files.length > 0) {
-          for (const file of turn.files) {
-            try {
-              const data = fs.readFileSync(file.path);
-              const b64 = data.toString('base64');
-              parts.push({ type: 'file', mime: file.mime, url: `data:${file.mime};base64,${b64}`, filename: file.filename });
-            } catch (err) {
-              log(`Failed to read attachment ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
-            }
-          }
-        }
+        const parts = buildOpenCodePromptParts(turn.text, turn.files);
 
         const modelSelection = resolveModelForPrompt(self.options.model);
         const toolIds = await client.tool.ids({ query: { directory: input.cwd } });

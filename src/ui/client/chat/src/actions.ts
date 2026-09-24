@@ -9,7 +9,6 @@ import {
   channelType,
   messagingGroupId,
   canSend,
-  voiceMode,
   voiceInput,
   chatMessages,
   chatStatus,
@@ -907,7 +906,6 @@ function connectChatWs(ctx: ChatSocketContext): void {
     if (payload.kind === 'history') {
       if (payload.threadId !== tid || !Array.isArray(payload.messages)) return;
       replaceIncomingMessages(payload.messages);
-      voiceMode.value = payload.voiceMode || 'off';
       voiceInput.value = payload.voiceInput || {
         backend: 'disabled',
         ready: false,

@@ -49,8 +49,6 @@ function seedGroup(id: string): void {
     packages_pip: '[]',
     additional_mounts: '[]',
     cli_scope: 'group',
-    voice_mode: 'off',
-    transcription_model: null,
     model_params: '{}',
     updated_at: now(),
   });

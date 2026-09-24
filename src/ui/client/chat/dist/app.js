@@ -15541,8 +15541,11 @@ var threadId = y3(null);
 var channelType = y3("web");
 var messagingGroupId = y3(null);
 var canSend = y3(true);
-var voiceMode = y3("off");
-var voiceInput = y3({ backend: "disabled", ready: false, reason: "Live voice input is not configured." });
+var voiceInput = y3({
+  backend: "disabled",
+  ready: false,
+  reason: "Live voice input is not configured."
+});
 var chatMessages = y3([]);
 var chatStatus = y3("");
 var chatLoading = y3(false);
@@ -15709,7 +15712,9 @@ var VoiceController = class {
     const query = params.size ? `?${params.toString()}` : "";
     let socket;
     try {
-      socket = this.deps.socket(`${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream${query}`);
+      socket = this.deps.socket(
+        `${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream${query}`
+      );
     } catch (error) {
       this.fail(error instanceof Error ? error.message : "Could not connect to voice input.");
       return;
@@ -15737,22 +15742,26 @@ var VoiceController = class {
         this.update({ phase: "listening" });
         const captureAbort = new AbortController();
         this.captureAbort = captureAbort;
-        void this.deps.capture((chunk) => {
-          if (!this.current(generation2) || this.finishSent || socket.readyState !== 1) return;
-          if (socket.bufferedAmount > 1024 * 1024) {
-            this.fail("Voice connection is too slow. Current text has been kept.");
-            return;
-          }
-          try {
-            for (let offset = 0; offset < chunk.byteLength; offset += 32768) {
-              socket.send(chunk.slice(offset, offset + 32768));
+        void this.deps.capture(
+          (chunk) => {
+            if (!this.current(generation2) || this.finishSent || socket.readyState !== 1) return;
+            if (socket.bufferedAmount > 1024 * 1024) {
+              this.fail("Voice connection is too slow. Current text has been kept.");
+              return;
             }
-          } catch {
-            this.fail("Voice connection was interrupted. Current text has been kept.");
-          }
-        }, (message2) => {
-          if (this.current(generation2)) this.fail(message2);
-        }, captureAbort.signal).then((capture) => {
+            try {
+              for (let offset = 0; offset < chunk.byteLength; offset += 32768) {
+                socket.send(chunk.slice(offset, offset + 32768));
+              }
+            } catch {
+              this.fail("Voice connection was interrupted. Current text has been kept.");
+            }
+          },
+          (message2) => {
+            if (this.current(generation2)) this.fail(message2);
+          },
+          captureAbort.signal
+        ).then((capture) => {
           if (!this.current(generation2) || this.state.value.phase !== "listening") {
             capture.cancel();
             return;
@@ -15782,14 +15791,17 @@ var VoiceController = class {
         if (intent === "send") void this.sendDraft();
         else this.detach();
       } else if (message.type === "error") {
-        this.fail(typeof message.message === "string" ? message.message : "Voice input failed. Current text has been kept.");
+        this.fail(
+          typeof message.message === "string" ? message.message : "Voice input failed. Current text has been kept."
+        );
       }
     };
     socket.onerror = () => {
       if (this.current(generation2)) this.fail("Voice connection failed. Current text has been kept.");
     };
     socket.onclose = () => {
-      if (this.current(generation2)) this.fail("Voice connection closed before finalization. Current text has been kept.");
+      if (this.current(generation2))
+        this.fail("Voice connection closed before finalization. Current text has been kept.");
     };
   }
   stop() {
@@ -15825,7 +15837,8 @@ var VoiceController = class {
     this.timer = null;
     const generation2 = this.generation;
     this.timeout = setTimeout(() => {
-      if (this.current(generation2)) this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.");
+      if (this.current(generation2))
+        this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.");
     }, 2e4);
     const capture = this.capture;
     void (capture?.stop() ?? Promise.resolve()).then(() => {
@@ -15877,8 +15890,10 @@ var VoiceController = class {
 
 // src/voice-audio.ts
 function voiceBrowserReason() {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return "Microphone access requires a supported browser and HTTPS.";
-  if (typeof AudioContext === "undefined" || typeof AudioWorkletNode === "undefined") return "Live voice requires AudioWorklet support in this browser.";
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia)
+    return "Microphone access requires a supported browser and HTTPS.";
+  if (typeof AudioContext === "undefined" || typeof AudioWorkletNode === "undefined")
+    return "Live voice requires AudioWorklet support in this browser.";
   return null;
 }
 async function captureVoice(onChunk, onError, signal) {
@@ -15942,7 +15957,8 @@ async function captureVoice(onChunk, onError, signal) {
       if (!closed && data instanceof ArrayBuffer) onChunk(data);
     };
     node.onprocessorerror = () => onError("Audio capture failed. Current text has been kept.");
-    for (const track of stream2.getTracks()) track.onended = () => onError("Microphone disconnected. Current text has been kept.");
+    for (const track of stream2.getTracks())
+      track.onended = () => onError("Microphone disconnected. Current text has been kept.");
     return {
       cancel,
       stop: () => new Promise((resolve, reject) => {
@@ -16011,7 +16027,9 @@ async function startRecording() {
       return false;
     }
     stream = next;
-    const mimeType = ["audio/ogg;codecs=opus", "audio/mp4;codecs=opus", "audio/mp4", "audio/webm;codecs=opus"].find((type) => MediaRecorder.isTypeSupported(type));
+    const mimeType = ["audio/ogg;codecs=opus", "audio/mp4;codecs=opus", "audio/mp4", "audio/webm;codecs=opus"].find(
+      (type) => MediaRecorder.isTypeSupported(type)
+    );
     recorder = new MediaRecorder(next, mimeType ? { mimeType } : void 0);
     chunks = [];
     recorder.ondataavailable = ({ data }) => {
@@ -18369,7 +18387,8 @@ async function runSync(options = {}) {
   if (requestId !== refs.syncRequestId) return false;
   if (gid && groupId.value === gid && tid === threadId.value && res.voiceInput) {
     voiceInput.value = res.voiceInput;
-    if (!res.voiceInput.ready) voice.interrupt(res.voiceInput.reason || "Live voice input is no longer available. Current text has been kept.");
+    if (!res.voiceInput.ready)
+      voice.interrupt(res.voiceInput.reason || "Live voice input is no longer available. Current text has been kept.");
   }
   if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
   if (gid && groupId.value === gid && tid === threadId.value && Array.isArray(res.questions)) {
@@ -18732,8 +18751,11 @@ function connectChatWs(ctx2) {
     if (payload.kind === "history") {
       if (payload.threadId !== tid || !Array.isArray(payload.messages)) return;
       replaceIncomingMessages(payload.messages);
-      voiceMode.value = payload.voiceMode || "off";
-      voiceInput.value = payload.voiceInput || { backend: "disabled", ready: false, reason: "Live voice input is not configured." };
+      voiceInput.value = payload.voiceInput || {
+        backend: "disabled",
+        ready: false,
+        reason: "Live voice input is not configured."
+      };
       canSend.value = payload.canSend === true;
       return;
     }
@@ -22444,7 +22466,6 @@ function Composer() {
     ev.preventDefault();
     addFiles(Array.from(items));
   };
-  const vm = voiceMode.value;
   const attachRecording = isRecording.value;
   const startVoice = () => {
     if (!gid || !tid || unavailable || composerDisabled || isRecording.value) return;
@@ -22541,7 +22562,7 @@ function Composer() {
               {
                 disabled: composerDisabled || voiceState.sending || !["idle", "error"].includes(voiceState.phase),
                 title: composerDisabled ? hasQuestion ? "Answer the question above" : "Disconnected" : "Add\u2026",
-                showRecordAudio: vm === "audio" && hasGetUserMedia(),
+                showRecordAudio: hasGetUserMedia(),
                 showQuickCapture: hasGetUserMedia(),
                 onUploadFile: onAttachClick,
                 onQuickCapture: () => setQuickCapture(true),
@@ -29146,7 +29167,7 @@ function SettingsTab({
         GroupAdminField,
         {
           label: "Voice input backend",
-          info: "Web microphone transcription runs on the host using ElevenLabs Scribe v2 Realtime (scribe_v2_realtime). Requires ELEVENLABS_API_KEY on the host; no key is sent to the browser or agent container. Audio-note transcription settings are unchanged. Takes effect without restarting sessions.",
+          info: "Web microphone transcription runs on the host using ElevenLabs Scribe v2 Realtime (scribe_v2_realtime). Requires ELEVENLABS_API_KEY on the host; no key is sent to the browser or agent container. Takes effect without restarting sessions.",
           children: [
             /* @__PURE__ */ u4(
               "select",

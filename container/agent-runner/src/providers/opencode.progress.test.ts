@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  buildOpenCodePromptParts,
   buildOpenCodeConfig,
   buildOpenCodeToolOverrides,
   finalTextFromAssistantMessages,
@@ -11,6 +12,16 @@ import {
   isSchemaRejectedNativeToolPart,
   isRecoverableReasoningOnlyCompletion,
 } from './opencode.js';
+
+describe('buildOpenCodePromptParts', () => {
+  it('retains audio as generic on-disk references instead of unsupported inline parts', () => {
+    const text = '[audio; audio/ogg: voice.ogg — saved to /workspace/inbox/voice.ogg]';
+    expect(buildOpenCodePromptParts(text, [
+      { path: '/workspace/inbox/voice.ogg', filename: 'voice.ogg', mime: 'audio/ogg' },
+      { path: '/workspace/inbox/voice.mp3', filename: 'voice.mp3', mime: 'audio/mpeg' },
+    ])).toEqual([{ type: 'text', text }]);
+  });
+});
 
 describe('buildOpenCodeConfig', () => {
   it('disables the native question tool', () => {

@@ -23,8 +23,6 @@ export interface RunnerConfig {
   model?: string;
   smallModel?: string;
   effort?: string;
-  voiceMode: 'off' | 'transcribe' | 'audio';
-  transcriptionModel?: string;
   /**
    * Freeform provider knobs from the host. Always an object — the host
    * materializer guarantees this. Providers ignore keys they don't
@@ -64,8 +62,6 @@ export function loadConfig(): RunnerConfig {
     model: (raw.model as string) || undefined,
     smallModel: (raw.smallModel as string) || undefined,
     effort: (raw.effort as string) || undefined,
-    voiceMode: raw.voiceMode === 'transcribe' || raw.voiceMode === 'audio' ? raw.voiceMode : 'off',
-    transcriptionModel: (raw.transcriptionModel as string) || undefined,
     modelParams: isPlainObject(raw.modelParams) ? (raw.modelParams as Record<string, unknown>) : {},
   };
 

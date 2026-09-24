@@ -61,8 +61,6 @@ interface SettingsResponse {
     assistant_name: string | null;
     max_messages_per_prompt: number | null;
     cli_scope: string | null;
-    voice_mode: string | null;
-    transcription_model: string | null;
     voice_input_backend: string | null;
     voice_input_enabled: boolean;
   };
@@ -77,12 +75,10 @@ interface SettingsResponse {
     provider: string | null;
     models: Record<string, string | null>;
     image_tag: string | null;
-    transcription_model: string | null;
     voice_input_backend: 'disabled' | 'elevenlabs';
   };
   validProviders: string[];
   validCliScopes: string[];
-  validVoiceModes: string[];
   runningSessionCount: number;
   selectedModelDetail: { label: string; detail?: string; tooltip?: string } | null;
   selectedImageDetail: { label: string; createdAt: string | null; size: number | null } | null;
@@ -365,7 +361,7 @@ function SettingsTab({
       if (!r.ok) throw new Error(errMsg(r.data, `HTTP ${r.status}`));
       if (!Array.isArray(r.data.availableSkills)) throw new Error('Missing skills in settings response.');
       // Skill/catalog mutations must not reset unsaved settings or enabled flags.
-      setData((current) => current ? { ...current, availableSkills: r.data.availableSkills } : current);
+      setData((current) => (current ? { ...current, availableSkills: r.data.availableSkills } : current));
     } catch (error) {
       showToast(`Could not reload skills: ${error instanceof Error ? error.message : String(error)}`, 'err');
     }
@@ -512,7 +508,6 @@ function SettingsTab({
       ]);
       const settingsChanged = [...pending].some((f) => !JSON_FIELDS.has(f));
       if (settingsChanged) {
-        // Do not re-submit legacy audio-note settings for a host-only voice change.
         const body: Record<string, unknown> = voiceOnlyChange
           ? { voice_input_backend: draft.voice_input_backend, voice_input_enabled: draft.voice_input_enabled }
           : { ...draft };
@@ -737,7 +732,7 @@ function SettingsTab({
           <Field
             label="Voice input backend"
             info={
-              'Web microphone transcription runs on the host using ElevenLabs Scribe v2 Realtime (scribe_v2_realtime). Requires ELEVENLABS_API_KEY on the host; no key is sent to the browser or agent container. Audio-note transcription settings are unchanged. Takes effect without restarting sessions.'
+              'Web microphone transcription runs on the host using ElevenLabs Scribe v2 Realtime (scribe_v2_realtime). Requires ELEVENLABS_API_KEY on the host; no key is sent to the browser or agent container. Takes effect without restarting sessions.'
             }
           >
             <select

@@ -57,6 +57,7 @@ export function userMessage(
     const modality = attachmentModality(file);
     if (!modality) return false;
     if (model && !protocolSupportsModality(model.protocol, modality)) return false;
+    if (modality === 'audio') return model?.inputModalities?.includes('audio') === true;
     return !model?.inputModalities || model.inputModalities.includes(modality);
   });
   if (nativeFiles.length === 0) return { role: 'user', content: text };

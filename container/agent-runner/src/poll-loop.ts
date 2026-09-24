@@ -48,9 +48,7 @@ import {
   type RoutingContext,
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
-import { isAudioMime, transcribeAudio } from './transcribe.js';
-import { getConfig } from './config.js';
-import type { AgentProvider, AgentQuery, FileAttachment, ProviderEvent, ProviderExchange } from './providers/types.js';
+import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
 import { getHostEventGeneration, onHostEvent, signalHeartbeat, waitForHostEvent } from './session-link.js';
 
@@ -418,9 +416,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // local transcript is gone), clear the continuation and retry once
     // with a fresh session — silently, so the user never sees the error.
     let attempt = 0;
-    const rawFiles = extractFileAttachments(keep);
-    const { prompt: resolvedPrompt, files } = await transcribeAudioFiles(rawFiles, prompt);
-    prompt = resolvedPrompt;
+    const files = extractFileAttachments(keep);
     const taskAttemptIds = keep.filter((message) => message.kind === 'task').map((message) => message.id);
     const taskAttemptIdSet = new Set(taskAttemptIds);
     const finalizedTaskAttemptIds = new Set<string>();
@@ -531,41 +527,6 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     markBatchPersisted(getOutboundDb());
     log(`Completed ${ids.length} message(s)`);
   }
-}
-
-/**
- * Transcribe any audio files in the attachment list. Replaces audio entries
- * with transcript text prepended to the prompt. Non-audio files pass through.
- */
-async function transcribeAudioFiles(
-  files: FileAttachment[],
-  prompt: string,
-): Promise<{ prompt: string; files: FileAttachment[] }> {
-  const cfg = getConfig();
-  if (cfg.voiceMode !== 'transcribe') return { prompt, files };
-
-  const nonAudio: FileAttachment[] = [];
-  const transcripts: string[] = [];
-  const model = cfg.transcriptionModel;
-  for (const file of files) {
-    if (!isAudioMime(file.mime)) {
-      nonAudio.push(file);
-      continue;
-    }
-    const text = await transcribeAudio(file.path, file.mime, model);
-    if (text) {
-      log(`Transcribed ${file.filename}: "${text.slice(0, 80)}${text.length > 80 ? '…' : ''}"`);
-      transcripts.push(text);
-    } else {
-      log(`Transcription failed for ${file.filename}, passing as file`);
-      nonAudio.push(file);
-    }
-  }
-  if (transcripts.length > 0) {
-    const prefix = transcripts.map((t) => `[voice message transcript]: ${t}`).join('\n');
-    prompt = prefix + '\n\n' + prompt;
-  }
-  return { prompt, files: nonAudio };
 }
 
 /**
@@ -1105,10 +1066,8 @@ async function processQuery(
         if (done) return;
 
         const keptIds = keep.map((m) => m.id);
-        let prompt = formatMessages(keep);
-        const rawFollowUpFiles = extractFileAttachments(keep);
-        const { prompt: resolvedFollowUp, files: followUpFiles } = await transcribeAudioFiles(rawFollowUpFiles, prompt);
-        prompt = resolvedFollowUp;
+        const prompt = formatMessages(keep);
+        const followUpFiles = extractFileAttachments(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         // Reset the per-turn delivery/notice flags for the new turn. On a
         // long-lived provider (OpenCode) the query stays open across turns, so

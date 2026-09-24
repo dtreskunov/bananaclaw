@@ -70,8 +70,6 @@ export interface ContainerConfig {
   model?: string;
   smallModel?: string;
   effort?: string;
-  voiceMode?: string;
-  transcriptionModel?: string;
   /**
    * Freeform provider knobs (e.g. `{ max_tokens: 8192 }`). Mirrors the
    * `model_params` JSON column in `container_configs`. Always present as
@@ -170,8 +168,6 @@ export function configFromDb(row: ContainerConfigRow, group: AgentGroup): Contai
     model: row.model ?? resolveDefaultModel(provider),
     smallModel: row.small_model ?? undefined,
     effort: row.effort ?? envFallback('DEFAULT_EFFORT'),
-    voiceMode: row.voice_mode,
-    transcriptionModel: row.transcription_model ?? envFallback('DEFAULT_TRANSCRIPTION_MODEL'),
     modelParams: parseModelParams(row.model_params),
     siteFqdn:
       PAGES_BASE_DOMAIN && group.site_enabled && group.site_slug
