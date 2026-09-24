@@ -28,6 +28,9 @@ export interface MarketplaceRecord {
   commit: string | null;
   addedAt: string;
   refreshedAt: string | null;
+  /** Failed attempts never advance refreshedAt or replace the usable snapshot. */
+  lastRefreshAttemptAt?: string | null;
+  lastRefreshError?: string | null;
 }
 
 let storeRoot: string | null = null;

@@ -60,6 +60,7 @@ import {
   readSkillsAdminBody,
   refreshCatalog,
   removeSkill,
+  updateSkill,
   type SkillsAdminResult,
 } from './skills-admin.js';
 import { handleWriteRequest } from './write.js';
@@ -349,6 +350,11 @@ on(
   'POST',
   '/api/skills/install-from-repo',
   skillsAdmin((body, userId) => installFromRepo(body, userId)),
+);
+on(
+  'POST',
+  '/api/skills/:slug/update',
+  skillsAdmin((body, userId, p) => updateSkill(p.slug!, body, userId)),
 );
 on(
   'POST',

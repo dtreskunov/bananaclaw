@@ -27662,6 +27662,89 @@ function PackageListField({
   ] }) });
 }
 
+// src/catalog-refresh.ts
+function emptyCatalogRefreshState() {
+  return { refreshing: /* @__PURE__ */ new Set(), updates: {}, versions: {} };
+}
+function currentPreview(preview, version) {
+  return preview?.version === version ? preview.value : void 0;
+}
+function catalogWithRefresh(catalog, state) {
+  return { ...catalog, ...state.updates[catalog.id] };
+}
+function directoryWithRefresh(source, state) {
+  const update = source.catalogId ? state.updates[source.catalogId] : void 0;
+  if (!update) return source;
+  return {
+    ...source,
+    ...update,
+    snapshot: update.commit !== void 0 ? update.commit ? { commit: update.commit, ref: update.ref } : null : source.snapshot
+  };
+}
+var CatalogRefreshController = class {
+  constructor(onChange) {
+    this.onChange = onChange;
+  }
+  state = emptyCatalogRefreshState();
+  publish(state) {
+    this.state = state;
+    this.onChange(state);
+  }
+  async refresh(id) {
+    if (this.state.refreshing.has(id)) return null;
+    this.publish({ ...this.state, refreshing: /* @__PURE__ */ new Set([...this.state.refreshing, id]) });
+    let failedCatalog = null;
+    try {
+      const response = await call(
+        `/ui/chat/api/skills/catalogs/${encodeURIComponent(id)}/refresh`,
+        "POST",
+        {}
+      );
+      if (!response.ok) {
+        failedCatalog = response.data.catalog ?? null;
+        throw new Error(errMsg2(response.data, `HTTP ${response.status}`));
+      }
+      if (!response.data.catalog) throw new Error("Refresh response did not include a catalog.");
+      this.publish({
+        ...this.state,
+        updates: {
+          ...this.state.updates,
+          [id]: { ...response.data.catalog, lastRefreshError: null }
+        },
+        versions: { ...this.state.versions, [id]: (this.state.versions[id] ?? 0) + 1 }
+      });
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.publish({
+        ...this.state,
+        updates: {
+          ...this.state.updates,
+          [id]: { ...this.state.updates[id], ...failedCatalog, lastRefreshError: message }
+        }
+      });
+      return { ok: false, error: message };
+    } finally {
+      const refreshing = new Set(this.state.refreshing);
+      refreshing.delete(id);
+      this.publish({ ...this.state, refreshing });
+    }
+  }
+};
+
+// src/skill-update.ts
+async function updateInstalledSkill(gid, slug) {
+  const response = await call(
+    `/ui/chat/api/skills/${encodeURIComponent(slug)}/update`,
+    "POST",
+    { gid }
+  );
+  if (!response.ok) throw new Error(errMsg2(response.data, `HTTP ${response.status}`));
+  if (response.data.skill?.slug !== slug || !response.data.skill.commit) {
+    throw new Error("Update response did not include the installed skill revision. Reload the skills list.");
+  }
+}
+
 // src/components/GroupAdminSkillInstall.tsx
 var SKILLS_API = "/ui/chat/api/skills";
 function AuditPanel({ audits }) {
@@ -27758,6 +27841,24 @@ function InstallControl({
   ] });
 }
 
+// src/components/GroupAdminSkillRefresh.tsx
+function CatalogRefreshStatus({
+  catalog: { refreshedAt, lastRefreshError }
+}) {
+  return /* @__PURE__ */ u4("div", { class: "ga-catalog-refresh-status", "aria-live": "polite", children: [
+    /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
+      "Last successful refresh: ",
+      refreshedAt ? /* @__PURE__ */ u4(RelativeTime, { ts: refreshedAt, className: "ga-catalog-refresh-time" }) : "Not recorded"
+    ] }),
+    lastRefreshError ? /* @__PURE__ */ u4("p", { class: "ga-skills-unavailable ga-catalog-refresh-error", children: [
+      "Refresh failed: ",
+      lastRefreshError,
+      /* @__PURE__ */ u4("br", {}),
+      "Previously cached skills remain available."
+    ] }) : null
+  ] });
+}
+
 // src/components/GroupAdminSkillDirectory.tsx
 var SKILLS_API2 = "/ui/chat/api/skills";
 function slugIsRedundant(name, slug) {
@@ -27772,10 +27873,60 @@ function SkillDirectoryResults({
   discover,
   installedSlugs,
   busy,
-  onInstall
+  onInstall,
+  refreshState,
+  onRefresh
 }) {
   const [expanded, setExpanded] = h2(/* @__PURE__ */ new Set());
   const [previews, setPreviews] = h2({});
+  const requests = A2({});
+  const latest = A2({ discover, refreshState });
+  latest.current = { discover, refreshState };
+  function versionFor(source) {
+    const id = latest.current.discover.sources.find((entry) => entry.source === source)?.catalogId;
+    return id ? latest.current.refreshState.versions[id] ?? 0 : 0;
+  }
+  async function loadPreview(source, version) {
+    const request = (requests.current[source] ?? 0) + 1;
+    requests.current[source] = request;
+    const current = () => requests.current[source] === request && versionFor(source) === version;
+    setPreviews((prev) => ({ ...prev, [source]: { version, value: "loading" } }));
+    try {
+      const r4 = await call(
+        `${SKILLS_API2}/preview?repo=${encodeURIComponent(source)}`
+      );
+      if (!current()) return;
+      if (!r4.ok) throw new Error(errMsg2(r4.data, `HTTP ${r4.status}`));
+      setPreviews((prev) => ({
+        ...prev,
+        [source]: {
+          version,
+          value: {
+            commit: r4.data.catalog.commit,
+            ref: r4.data.catalog.ref,
+            refreshedAt: r4.data.catalog.refreshedAt,
+            lastRefreshAttemptAt: r4.data.catalog.lastRefreshAttemptAt,
+            lastRefreshError: r4.data.catalog.lastRefreshError,
+            skills: r4.data.catalog.plugins.flatMap((plugin) => plugin.skills)
+          }
+        }
+      }));
+    } catch (error) {
+      if (!current()) return;
+      showToast(`Couldn\u2019t read ${source}: ${error instanceof Error ? error.message : String(error)}`, "err");
+      setPreviews((prev) => ({ ...prev, [source]: { version, value: "error" } }));
+    }
+  }
+  y2(() => {
+    for (const entry of discover.sources) {
+      if (!expanded.has(entry.source) || entry.catalogId && refreshState.refreshing.has(entry.catalogId)) continue;
+      const version = versionFor(entry.source);
+      if (!currentPreview(previews[entry.source], version)) void loadPreview(entry.source, version);
+    }
+  }, [discover, expanded, previews, refreshState]);
+  y2(() => () => {
+    requests.current = {};
+  }, []);
   const sources = discover.sources.map((entry) => ({ ...entry, skills: entry.skills.filter((skill) => !installedSlugs.has(skill.slug)) })).filter((entry) => entry.skills.length > 0);
   async function toggle(source) {
     const open = expanded.has(source);
@@ -27785,24 +27936,11 @@ function SkillDirectoryResults({
       else next.add(source);
       return next;
     });
-    if (open || previews[source] && previews[source] !== "error") return;
-    setPreviews((prev) => ({ ...prev, [source]: "loading" }));
-    const r4 = await call(
-      `${SKILLS_API2}/preview?repo=${encodeURIComponent(source)}`
-    );
-    if (!r4.ok) {
-      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-      setPreviews((prev) => ({ ...prev, [source]: "error" }));
-      return;
-    }
-    setPreviews((prev) => ({
-      ...prev,
-      [source]: {
-        commit: r4.data.catalog.commit,
-        ref: r4.data.catalog.ref,
-        skills: r4.data.catalog.plugins.flatMap((plugin) => plugin.skills)
-      }
-    }));
+    const version = versionFor(source);
+    const preview = currentPreview(previews[source], version);
+    const entry = discover.sources.find((item) => item.source === source);
+    if (open || preview && preview !== "error" || entry?.catalogId && refreshState.refreshing.has(entry.catalogId)) return;
+    await loadPreview(source, version);
   }
   if (sources.length === 0) {
     return /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No further matches in the directory." });
@@ -27816,7 +27954,9 @@ function SkillDirectoryResults({
       " \xB7 install counts are popularity, not safety"
     ] }),
     /* @__PURE__ */ u4("ul", { class: "ga-discover-list", children: sources.map((entry) => {
-      const preview = previews[entry.source];
+      const version = entry.catalogId ? refreshState.versions[entry.catalogId] ?? 0 : 0;
+      const preview = currentPreview(previews[entry.source], version);
+      const refreshing = !!entry.catalogId && refreshState.refreshing.has(entry.catalogId);
       const open = expanded.has(entry.source);
       const catalog = preview && typeof preview === "object" ? preview : null;
       const loaded = open && catalog !== null;
@@ -27829,15 +27969,27 @@ function SkillDirectoryResults({
         license: null
       }));
       return /* @__PURE__ */ u4("li", { class: "ga-discover-source", children: [
-        /* @__PURE__ */ u4("button", { type: "button", class: "ga-catalog-toggle", onClick: () => toggle(entry.source), children: [
-          /* @__PURE__ */ u4("span", { class: "ga-catalog-caret", children: open ? "\u25BE" : "\u25B8" }),
-          /* @__PURE__ */ u4("span", { class: "ga-catalog-title", children: [
-            /* @__PURE__ */ u4("strong", { children: entry.source }),
-            entry.catalogId ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: "catalog added" }) : null,
-            /* @__PURE__ */ u4("span", { class: "ga-catalog-meta", children: loaded ? `${rows.length} skill${rows.length === 1 ? "" : "s"}` : `${entry.skills.length} match${entry.skills.length === 1 ? "" : "es"}` }),
-            snapshot ? /* @__PURE__ */ u4("code", { title: snapshot.commit, children: snapshot.commit.slice(0, 7) }) : null
-          ] })
+        /* @__PURE__ */ u4("div", { class: "ga-catalog-head", children: [
+          /* @__PURE__ */ u4("button", { type: "button", class: "ga-catalog-toggle", onClick: () => toggle(entry.source), children: [
+            /* @__PURE__ */ u4("span", { class: "ga-catalog-caret", children: open ? "\u25BE" : "\u25B8" }),
+            /* @__PURE__ */ u4("span", { class: "ga-catalog-title", children: [
+              /* @__PURE__ */ u4("strong", { children: entry.source }),
+              entry.catalogId ? /* @__PURE__ */ u4("span", { class: "ga-skills-badge", children: "catalog added" }) : null,
+              /* @__PURE__ */ u4("span", { class: "ga-catalog-meta", children: loaded ? `${rows.length} skill${rows.length === 1 ? "" : "s"}` : `${entry.skills.length} match${entry.skills.length === 1 ? "" : "es"}` }),
+              snapshot ? /* @__PURE__ */ u4("code", { title: snapshot.commit, children: snapshot.commit.slice(0, 7) }) : null
+            ] })
+          ] }),
+          entry.catalogId ? /* @__PURE__ */ u4("span", { class: "ga-catalog-actions", children: /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              disabled: busy || refreshing,
+              onClick: () => onRefresh(entry.catalogId),
+              children: refreshing ? "Refreshing\u2026" : "Refresh"
+            }
+          ) }) : null
         ] }),
+        entry.catalogId ? /* @__PURE__ */ u4(CatalogRefreshStatus, { catalog: { ...entry, ...catalog ?? {}, ...refreshState.updates[entry.catalogId] } }) : null,
         preview === "loading" ? /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
           "Reading ",
           entry.source,
@@ -27862,10 +28014,11 @@ function SkillDirectoryResults({
                 source: entry.source,
                 slug: skill.slug,
                 installed: installedSlugs.has(skill.slug),
-                disabled: busy || preview === "loading" || !!catalog && !snapshot,
+                disabled: busy || refreshing || open && !preview || preview === "loading" || !!catalog && !snapshot,
                 label: entry.catalogId ? "Install" : "Add & install",
                 onInstall: (ack) => onInstall(entry.source, skill.slug, ack, snapshot ?? void 0)
-              }
+              },
+              snapshot?.commit ?? "unpinned"
             )
           ] }, skill.slug);
         }) })
@@ -27880,24 +28033,40 @@ function SkillCatalogSection({
   gid,
   installedSlugs,
   reloadKey,
-  onChanged
+  onChanged,
+  refreshState,
+  onRefresh
 }) {
   const [catalogs, setCatalogs] = h2(null);
   const [busy, setBusy] = h2(false);
   const [repo, setRepo] = h2("");
   const [ref, setRef] = h2("");
   const [expanded, setExpanded] = h2(/* @__PURE__ */ new Set());
+  const [loadedVersions, setLoadedVersions] = h2({});
+  const requestId = A2(0);
+  const latest = A2({ gid, reloadKey, versions: refreshState.versions });
+  latest.current = { gid, reloadKey, versions: refreshState.versions };
   async function load() {
-    const r4 = await call(`${SKILLS_API3}?gid=${encodeURIComponent(gid)}`);
-    if (!r4.ok) {
-      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-      setCatalogs([]);
-      return;
+    const request = ++requestId.current;
+    const started = latest.current;
+    const current = () => request === requestId.current && started.gid === latest.current.gid && started.reloadKey === latest.current.reloadKey;
+    try {
+      const r4 = await call(`${SKILLS_API3}?gid=${encodeURIComponent(gid)}`);
+      if (!current()) return;
+      if (!r4.ok) throw new Error(errMsg2(r4.data, `HTTP ${r4.status}`));
+      setCatalogs(r4.data.catalogs);
+      setLoadedVersions(started.versions);
+    } catch (error) {
+      if (!current()) return;
+      showToast(`Couldn\u2019t load catalogs: ${error instanceof Error ? error.message : String(error)}`, "err");
+      setCatalogs((previous) => previous ?? []);
     }
-    setCatalogs(r4.data.catalogs);
   }
   y2(() => {
     load();
+    return () => {
+      requestId.current += 1;
+    };
   }, [gid, reloadKey]);
   async function mutate(url, method, body, okMessage) {
     setBusy(true);
@@ -27990,8 +28159,11 @@ function SkillCatalogSection({
         }
       )
     ] }) }),
-    catalogs === null ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Loading catalogs\u2026" }) : /* @__PURE__ */ u4("ul", { class: "ga-catalog-list", children: catalogs.map((catalog) => {
+    catalogs === null ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Loading catalogs\u2026" }) : /* @__PURE__ */ u4("ul", { class: "ga-catalog-list", children: catalogs.map((cachedCatalog) => {
+      const catalog = catalogWithRefresh(cachedCatalog, refreshState);
       const readOnly = catalog.kind === "built-in" || catalog.kind === "workspace";
+      const refreshing = refreshState.refreshing.has(catalog.id);
+      const stale = (loadedVersions[catalog.id] ?? 0) !== (refreshState.versions[catalog.id] ?? 0);
       return /* @__PURE__ */ u4("li", { class: "ga-catalog", children: [
         /* @__PURE__ */ u4("div", { class: "ga-catalog-head", children: [
           /* @__PURE__ */ u4("button", { type: "button", class: "ga-catalog-toggle", onClick: () => toggle(catalog.id), children: [
@@ -28006,14 +28178,9 @@ function SkillCatalogSection({
               "button",
               {
                 type: "button",
-                disabled: busy,
-                onClick: () => mutate(
-                  `${SKILLS_API3}/catalogs/${encodeURIComponent(catalog.id)}/refresh`,
-                  "POST",
-                  {},
-                  "Catalog refreshed."
-                ),
-                children: "Refresh"
+                disabled: busy || refreshing,
+                onClick: () => onRefresh(catalog.id),
+                children: refreshing ? "Refreshing\u2026" : "Refresh"
               }
             ),
             /* @__PURE__ */ u4(
@@ -28021,7 +28188,7 @@ function SkillCatalogSection({
               {
                 type: "button",
                 class: "ga-catalog-remove",
-                disabled: busy,
+                disabled: busy || refreshing,
                 onClick: () => mutate(
                   `${SKILLS_API3}/catalogs/${encodeURIComponent(catalog.id)}`,
                   "DELETE",
@@ -28034,6 +28201,7 @@ function SkillCatalogSection({
           ] })
         ] }),
         /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: readOnly ? `${catalog.kind === "workspace" ? "Agent workspace" : "Built in"} \xB7 ${catalog.plugins[0]?.skills.length ?? 0} skill${(catalog.plugins[0]?.skills.length ?? 0) === 1 ? "" : "s"}` : `${catalog.kind === "plugin-marketplace" ? "Plugin marketplace" : "Skills repo"} \xB7 ${catalog.ref}${catalog.commit ? ` \xB7 ${catalog.commit.slice(0, 7)}` : ""}` }),
+        readOnly ? null : /* @__PURE__ */ u4(CatalogRefreshStatus, { catalog }),
         catalog.description ? /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: catalog.description }) : null,
         catalog.error ? /* @__PURE__ */ u4("p", { class: "ga-skills-unavailable", children: catalog.error }) : null,
         expanded.has(catalog.id) ? catalog.plugins.map((plugin) => /* @__PURE__ */ u4("div", { class: "ga-catalog-plugin", children: [
@@ -28060,7 +28228,7 @@ function SkillCatalogSection({
                 source: catalog.source,
                 slug: skill.slug,
                 installed: installedSlugs.has(skill.slug),
-                disabled: busy || !catalog.commit,
+                disabled: busy || refreshing || stale || !catalog.commit,
                 onInstall: (ack) => install(
                   {
                     marketplaceId: catalog.id,
@@ -28071,7 +28239,8 @@ function SkillCatalogSection({
                   skill.slug,
                   ack
                 )
-              }
+              },
+              catalog.commit
             )
           ] }, skill.slug)) })
         ] }, plugin.name)) : null
@@ -28113,6 +28282,35 @@ function SkillsSection({
   const [discover, setDiscover] = h2(null);
   const [searching, setSearching] = h2(false);
   const [catalogReloads, setCatalogReloads] = h2(0);
+  const [refreshState, setRefreshState] = h2(emptyCatalogRefreshState);
+  const [refreshController] = h2(() => new CatalogRefreshController(setRefreshState));
+  const searchRequest = A2(0);
+  const [updatingSlug, setUpdatingSlug] = h2(null);
+  const updateInFlight = A2(false);
+  async function updateSkill(slug) {
+    if (updateInFlight.current) return;
+    updateInFlight.current = true;
+    setUpdatingSlug(slug);
+    try {
+      await updateInstalledSkill(gid, slug);
+      await onCatalogChanged();
+    } catch (error) {
+      showToast(`Skill update failed: ${error instanceof Error ? error.message : String(error)}`, "err");
+    } finally {
+      updateInFlight.current = false;
+      setUpdatingSlug(null);
+    }
+  }
+  async function refreshCatalog(id) {
+    const result = await refreshController.refresh(id);
+    if (!result) return;
+    if (!result.ok) {
+      showToast(`Catalog refresh failed: ${result.error}`, "err");
+      return;
+    }
+    setCatalogReloads((n3) => n3 + 1);
+    onCatalogChanged();
+  }
   const isAll = value === "all";
   const list = isAll ? availableSkills.filter((skill) => skill.available).map((skill) => skill.slug) : value;
   const installedSlugs = new Set(availableSkills.map((skill) => skill.slug));
@@ -28131,22 +28329,28 @@ function SkillsSection({
     );
   }
   async function runSearch(q5) {
+    const request = ++searchRequest.current;
     const trimmed = q5.trim();
     if (!elevated || trimmed.length < 2) {
       setDiscover(null);
+      setSearching(false);
       return;
     }
     setSearching(true);
     try {
       const r4 = await call(`${SKILLS_API4}/discover?q=${encodeURIComponent(trimmed)}`);
+      if (request !== searchRequest.current) return;
       if (!r4.ok) {
         showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
         setDiscover(null);
         return;
       }
       setDiscover(r4.data);
+    } catch (error) {
+      if (request !== searchRequest.current) return;
+      showToast(`Directory search failed: ${error instanceof Error ? error.message : String(error)}`, "err");
     } finally {
-      setSearching(false);
+      if (request === searchRequest.current) setSearching(false);
     }
   }
   async function installFromRepo(repo, slug, acknowledgeRisk, snapshot) {
@@ -28239,30 +28443,45 @@ function SkillsSection({
             skill.warnings.map((warning) => /* @__PURE__ */ u4("span", { class: "ga-skills-unavailable", children: warning }, warning))
           ] })
         ] }),
-        elevated && skill.origin === "installed" ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "ga-catalog-remove",
-            disabled: busy,
-            onClick: async () => {
-              if (await uninstallSkill(gid, skill.slug)) {
-                setSkill(skill.slug, false);
-                onCatalogChanged();
-              }
-            },
-            children: "Uninstall"
-          }
-        ) : null
+        elevated && skill.origin === "installed" ? /* @__PURE__ */ u4("span", { class: "ga-catalog-actions ga-skills-actions", children: [
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              "aria-label": `Update ${skill.name}`,
+              title: "Update this skill from its cached catalog. Refresh the catalog separately to fetch newer revisions.",
+              disabled: busy || updatingSlug !== null,
+              onClick: () => updateSkill(skill.slug),
+              children: updatingSlug === skill.slug ? "Updating\u2026" : "Update"
+            }
+          ),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "ga-catalog-remove",
+              disabled: busy || updatingSlug !== null,
+              onClick: async () => {
+                if (await uninstallSkill(gid, skill.slug)) {
+                  setSkill(skill.slug, false);
+                  onCatalogChanged();
+                }
+              },
+              children: "Uninstall"
+            }
+          )
+        ] }) : null
       ] }, skill.slug);
     }) }),
     discover ? /* @__PURE__ */ u4(
       SkillDirectoryResults,
       {
-        discover,
+        discover: { ...discover, sources: discover.sources.map((source) => directoryWithRefresh(source, refreshState)) },
         installedSlugs,
         busy,
-        onInstall: installFromRepo
+        onInstall: installFromRepo,
+        refreshState,
+        onRefresh: refreshCatalog
       }
     ) : null,
     missingSkills.length > 0 ? /* @__PURE__ */ u4(
@@ -28292,7 +28511,9 @@ function SkillsSection({
         gid,
         installedSlugs,
         reloadKey: catalogReloads,
-        onChanged: onCatalogChanged
+        onChanged: onCatalogChanged,
+        refreshState,
+        onRefresh: refreshCatalog
       }
     ) : null
   ] });
@@ -28527,6 +28748,16 @@ function SettingsTab({
       setDraftDisabledSkills([...r4.data.disabledSkills ?? []]);
     } finally {
       setBusy(false);
+    }
+  }
+  async function refreshAvailableSkills() {
+    try {
+      const r4 = await call(apiPath(gid, "/settings"));
+      if (!r4.ok) throw new Error(errMsg2(r4.data, `HTTP ${r4.status}`));
+      if (!Array.isArray(r4.data.availableSkills)) throw new Error("Missing skills in settings response.");
+      setData((current) => current ? { ...current, availableSkills: r4.data.availableSkills } : current);
+    } catch (error) {
+      showToast(`Could not reload skills: ${error instanceof Error ? error.message : String(error)}`, "err");
     }
   }
   y2(() => {
@@ -29088,7 +29319,7 @@ function SettingsTab({
         busy,
         onChange: updateSkills,
         onDisabledChange: setDraftDisabledSkills,
-        onCatalogChanged: refresh
+        onCatalogChanged: refreshAvailableSkills
       }
     ) : null,
     /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending3.size} unsaved change${pending3.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),

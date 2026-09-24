@@ -2,13 +2,15 @@
 //
 // Search lives with the skill list above; this section is the catalog side of
 // it — what's configured, what each one ships, add and remove.
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
+import { catalogWithRefresh, type CatalogRefreshMetadata, type CatalogRefreshState } from '../catalog-refresh';
 import { call, errMsg } from './GroupAdminApi';
 import { GroupAdminField as Field } from './GroupAdminField';
 import { slugIsRedundant } from './GroupAdminSkillDirectory';
 import { InstallControl, type AuditDto } from './GroupAdminSkillInstall';
+import { CatalogRefreshStatus } from './GroupAdminSkillRefresh';
 import { showToast } from './Toast';
 
 export interface CatalogSkillDto {
@@ -29,7 +31,7 @@ export interface CatalogPluginDto {
   unsupportedReason: string | null;
 }
 
-export interface CatalogDto {
+export interface CatalogDto extends CatalogRefreshMetadata {
   id: string;
   repo: string;
   source: string | null;
@@ -50,31 +52,48 @@ export function SkillCatalogSection({
   installedSlugs,
   reloadKey,
   onChanged,
+  refreshState,
+  onRefresh,
 }: {
   gid: string;
   installedSlugs: Set<string>;
   /** Bump to re-read catalogs after an install elsewhere added one. */
   reloadKey: number;
   onChanged: () => void;
+  refreshState: CatalogRefreshState;
+  onRefresh: (id: string) => Promise<void>;
 }): JSX.Element {
   const [catalogs, setCatalogs] = useState<CatalogDto[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [repo, setRepo] = useState('');
   const [ref, setRef] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [loadedVersions, setLoadedVersions] = useState<Record<string, number>>({});
+  const requestId = useRef(0);
+  const latest = useRef({ gid, reloadKey, versions: refreshState.versions });
+  latest.current = { gid, reloadKey, versions: refreshState.versions };
 
   async function load(): Promise<void> {
-    const r = await call<{ catalogs: CatalogDto[] }>(`${SKILLS_API}?gid=${encodeURIComponent(gid)}`);
-    if (!r.ok) {
-      showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
-      setCatalogs([]);
-      return;
+    const request = ++requestId.current;
+    const started = latest.current;
+    const current = () => request === requestId.current
+      && started.gid === latest.current.gid && started.reloadKey === latest.current.reloadKey;
+    try {
+      const r = await call<{ catalogs: CatalogDto[] }>(`${SKILLS_API}?gid=${encodeURIComponent(gid)}`);
+      if (!current()) return;
+      if (!r.ok) throw new Error(errMsg(r.data, `HTTP ${r.status}`));
+      setCatalogs(r.data.catalogs);
+      setLoadedVersions(started.versions);
+    } catch (error) {
+      if (!current()) return;
+      showToast(`Couldn’t load catalogs: ${error instanceof Error ? error.message : String(error)}`, 'err');
+      setCatalogs((previous) => previous ?? []);
     }
-    setCatalogs(r.data.catalogs);
   }
 
   useEffect(() => {
     load();
+    return () => { requestId.current += 1; };
   }, [gid, reloadKey]);
 
   async function mutate(url: string, method: string, body: unknown, okMessage: string): Promise<void> {
@@ -180,8 +199,11 @@ export function SkillCatalogSection({
         <p class="group-admin-help">Loading catalogs…</p>
       ) : (
         <ul class="ga-catalog-list">
-          {catalogs.map((catalog) => {
+          {catalogs.map((cachedCatalog) => {
+            const catalog = catalogWithRefresh(cachedCatalog, refreshState);
             const readOnly = catalog.kind === 'built-in' || catalog.kind === 'workspace';
+            const refreshing = refreshState.refreshing.has(catalog.id);
+            const stale = (loadedVersions[catalog.id] ?? 0) !== (refreshState.versions[catalog.id] ?? 0);
             return (
               <li key={catalog.id} class="ga-catalog">
                 <div class="ga-catalog-head">
@@ -196,22 +218,15 @@ export function SkillCatalogSection({
                     <span class="ga-catalog-actions">
                       <button
                         type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          mutate(
-                            `${SKILLS_API}/catalogs/${encodeURIComponent(catalog.id)}/refresh`,
-                            'POST',
-                            {},
-                            'Catalog refreshed.',
-                          )
-                        }
+                        disabled={busy || refreshing}
+                        onClick={() => onRefresh(catalog.id)}
                       >
-                        Refresh
+                        {refreshing ? 'Refreshing…' : 'Refresh'}
                       </button>
                       <button
                         type="button"
                         class="ga-catalog-remove"
-                        disabled={busy}
+                        disabled={busy || refreshing}
                         onClick={() =>
                           mutate(
                             `${SKILLS_API}/catalogs/${encodeURIComponent(catalog.id)}`,
@@ -236,6 +251,7 @@ export function SkillCatalogSection({
                         catalog.commit ? ` · ${catalog.commit.slice(0, 7)}` : ''
                       }`}
                 </p>
+                {readOnly ? null : <CatalogRefreshStatus catalog={catalog} />}
                 {catalog.description ? <p class="ga-catalog-meta">{catalog.description}</p> : null}
                 {catalog.error ? <p class="ga-skills-unavailable">{catalog.error}</p> : null}
 
@@ -272,7 +288,8 @@ export function SkillCatalogSection({
                                     source={catalog.source}
                                     slug={skill.slug}
                                     installed={installedSlugs.has(skill.slug)}
-                                    disabled={busy || !catalog.commit}
+                                    key={catalog.commit}
+                                    disabled={busy || refreshing || stale || !catalog.commit}
                                     onInstall={(ack) =>
                                       install(
                                         {

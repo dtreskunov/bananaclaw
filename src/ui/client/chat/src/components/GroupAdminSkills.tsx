@@ -1,7 +1,9 @@
 import './GroupAdminSkills.css';
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
+import { CatalogRefreshController, directoryWithRefresh, emptyCatalogRefreshState } from '../catalog-refresh';
+import { updateInstalledSkill } from '../skill-update';
 import { call, errMsg } from './GroupAdminApi';
 import { GroupAdminField as Field } from './GroupAdminField';
 import { SkillCatalogSection, uninstallSkill } from './GroupAdminSkillCatalog';
@@ -68,12 +70,43 @@ export function SkillsSection({
   elevated: boolean;
   onChange: (next: string[] | 'all') => void;
   onDisabledChange: (next: string[]) => void;
-  onCatalogChanged: () => void;
+  onCatalogChanged: () => void | Promise<void>;
 }): JSX.Element {
   const [query, setQuery] = useState('');
   const [discover, setDiscover] = useState<DiscoverResponse | null>(null);
   const [searching, setSearching] = useState(false);
   const [catalogReloads, setCatalogReloads] = useState(0);
+  const [refreshState, setRefreshState] = useState(emptyCatalogRefreshState);
+  const [refreshController] = useState(() => new CatalogRefreshController(setRefreshState));
+  const searchRequest = useRef(0);
+  const [updatingSlug, setUpdatingSlug] = useState<string | null>(null);
+  const updateInFlight = useRef(false);
+
+  async function updateSkill(slug: string): Promise<void> {
+    if (updateInFlight.current) return;
+    updateInFlight.current = true;
+    setUpdatingSlug(slug);
+    try {
+      await updateInstalledSkill(gid, slug);
+      await onCatalogChanged();
+    } catch (error) {
+      showToast(`Skill update failed: ${error instanceof Error ? error.message : String(error)}`, 'err');
+    } finally {
+      updateInFlight.current = false;
+      setUpdatingSlug(null);
+    }
+  }
+
+  async function refreshCatalog(id: string): Promise<void> {
+    const result = await refreshController.refresh(id);
+    if (!result) return;
+    if (!result.ok) {
+      showToast(`Catalog refresh failed: ${result.error}`, 'err');
+      return;
+    }
+    setCatalogReloads((n) => n + 1);
+    onCatalogChanged();
+  }
 
   // A group can still be stored as `'all'` (the CLI sets it, and older configs
   // use it). There's no toggle for it any more, so it reads as "everything
@@ -106,22 +139,28 @@ export function SkillsSection({
   }
 
   async function runSearch(q: string): Promise<void> {
+    const request = ++searchRequest.current;
     const trimmed = q.trim();
     if (!elevated || trimmed.length < 2) {
       setDiscover(null);
+      setSearching(false);
       return;
     }
     setSearching(true);
     try {
       const r = await call<DiscoverResponse>(`${SKILLS_API}/discover?q=${encodeURIComponent(trimmed)}`);
+      if (request !== searchRequest.current) return;
       if (!r.ok) {
         showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
         setDiscover(null);
         return;
       }
       setDiscover(r.data);
+    } catch (error) {
+      if (request !== searchRequest.current) return;
+      showToast(`Directory search failed: ${error instanceof Error ? error.message : String(error)}`, 'err');
     } finally {
-      setSearching(false);
+      if (request === searchRequest.current) setSearching(false);
     }
   }
 
@@ -247,19 +286,30 @@ export function SkillsSection({
                   </span>
                 </label>
                 {elevated && skill.origin === 'installed' ? (
-                  <button
-                    type="button"
-                    class="ga-catalog-remove"
-                    disabled={busy}
-                    onClick={async () => {
-                      if (await uninstallSkill(gid, skill.slug)) {
-                        setSkill(skill.slug, false);
-                        onCatalogChanged();
-                      }
-                    }}
-                  >
-                    Uninstall
-                  </button>
+                  <span class="ga-catalog-actions ga-skills-actions">
+                    <button
+                      type="button"
+                      aria-label={`Update ${skill.name}`}
+                      title="Update this skill from its cached catalog. Refresh the catalog separately to fetch newer revisions."
+                      disabled={busy || updatingSlug !== null}
+                      onClick={() => updateSkill(skill.slug)}
+                    >
+                      {updatingSlug === skill.slug ? 'Updating…' : 'Update'}
+                    </button>
+                    <button
+                      type="button"
+                      class="ga-catalog-remove"
+                      disabled={busy || updatingSlug !== null}
+                      onClick={async () => {
+                        if (await uninstallSkill(gid, skill.slug)) {
+                          setSkill(skill.slug, false);
+                          onCatalogChanged();
+                        }
+                      }}
+                    >
+                      Uninstall
+                    </button>
+                  </span>
                 ) : null}
               </li>
             );
@@ -269,10 +319,12 @@ export function SkillsSection({
 
       {discover ? (
         <SkillDirectoryResults
-          discover={discover}
+          discover={{ ...discover, sources: discover.sources.map((source) => directoryWithRefresh(source, refreshState)) }}
           installedSlugs={installedSlugs}
           busy={busy}
           onInstall={installFromRepo}
+          refreshState={refreshState}
+          onRefresh={refreshCatalog}
         />
       ) : null}
 
@@ -306,6 +358,8 @@ export function SkillsSection({
           installedSlugs={installedSlugs}
           reloadKey={catalogReloads}
           onChanged={onCatalogChanged}
+          refreshState={refreshState}
+          onRefresh={refreshCatalog}
         />
       ) : null}
     </>

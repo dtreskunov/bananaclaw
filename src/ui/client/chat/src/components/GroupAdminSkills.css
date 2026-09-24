@@ -21,6 +21,11 @@
 
 .ga-skills-catalog-item > .ga-skills-details { padding: 10px 0; }
 
+@media (max-width: 600px) {
+  .ga-skills-catalog-item:has(> .ga-skills-actions) > .ga-skills-option { flex-basis: 100%; }
+  .ga-skills-actions { margin-left: auto; padding-bottom: 8px; }
+}
+
 .ga-skills-option {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -173,6 +178,9 @@
 }
 
 .ga-catalog-plugin { margin-top: 12px; }
+
+.ga-catalog-refresh-error { margin: 4px 0 0; overflow-wrap: anywhere; }
+.ga-catalog-refresh-status { margin-bottom: 6px; }
 
 .ga-catalog-plugin-name {
   margin: 0;

@@ -2,27 +2,42 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { fetchAudits, searchDirectory } from '../../../skills/directory.js';
-import { installCatalogSkill } from '../../../skills/install.js';
-import { addMarketplace, assertCatalogSnapshot, MarketplaceError, readCatalog } from '../../../skills/marketplace.js';
-import { readMarketplaceRecords, type MarketplaceRecord } from '../../../skills/store.js';
+import {
+  installCatalogSkill,
+  resolveSkillUpdate,
+  updateCatalogSkill,
+  SkillInstallError,
+} from '../../../skills/install.js';
+import {
+  addMarketplace,
+  assertCatalogSnapshot,
+  MarketplaceError,
+  readCatalog,
+  refreshMarketplace,
+} from '../../../skills/marketplace.js';
+import { getMarketplaceRecord, readMarketplaceRecords, type MarketplaceRecord } from '../../../skills/store.js';
 import { recordAdminAction } from './audit.js';
-import { discoverSkills, installFromRepo, installSkill } from './skills-admin.js';
+import { discoverSkills, installFromRepo, installSkill, refreshCatalog, updateSkill } from './skills-admin.js';
 
 vi.mock('../../../db/agent-groups.js', () => ({ getAgentGroup: vi.fn() }));
 vi.mock('./audit.js', () => ({ recordAdminAction: vi.fn() }));
 vi.mock('../../../skills/store.js', async (original) => ({
   ...(await original<typeof import('../../../skills/store.js')>()),
   readMarketplaceRecords: vi.fn(),
+  getMarketplaceRecord: vi.fn(),
 }));
 vi.mock('../../../skills/install.js', async (original) => ({
   ...(await original<typeof import('../../../skills/install.js')>()),
   installCatalogSkill: vi.fn(),
+  resolveSkillUpdate: vi.fn(),
+  updateCatalogSkill: vi.fn(),
 }));
 vi.mock('../../../skills/marketplace.js', async (original) => ({
   ...(await original<typeof import('../../../skills/marketplace.js')>()),
   addMarketplace: vi.fn(),
   assertCatalogSnapshot: vi.fn(),
   readCatalog: vi.fn(),
+  refreshMarketplace: vi.fn(),
 }));
 vi.mock('../../../skills/directory.js', async (original) => ({
   ...(await original<typeof import('../../../skills/directory.js')>()),
@@ -62,9 +77,12 @@ beforeEach(() => {
     created_at: catalog.addedAt,
   });
   vi.mocked(readMarketplaceRecords).mockReturnValue([catalog]);
+  vi.mocked(getMarketplaceRecord).mockReturnValue(catalog);
   vi.mocked(fetchAudits).mockResolvedValue(null);
   vi.mocked(readCatalog).mockReturnValue({
     ...catalog,
+    lastRefreshAttemptAt: null,
+    lastRefreshError: null,
     source: 'example/skills',
     kind: 'skill-repo',
     error: null,
@@ -78,6 +96,133 @@ beforeEach(() => {
     ref: catalog.ref,
     commit,
     sourcePath: skill.path,
+  });
+  vi.mocked(resolveSkillUpdate).mockReturnValue({
+    groupFolder: 'test-group',
+    marketplaceId: catalog.id,
+    plugin: skill.plugin,
+    slug: skill.slug,
+    expectedCommit: commit,
+  });
+  vi.mocked(updateCatalogSkill).mockReturnValue({
+    slug: skill.slug,
+    catalogId: catalog.id,
+    repo: catalog.repo,
+    ref: catalog.ref,
+    commit,
+    sourcePath: skill.path,
+  });
+});
+
+describe('cached skill update endpoint', () => {
+  it('resolves the installed source, checks audits, and updates only the pinned cached revision', async () => {
+    const result = await updateSkill(
+      skill.slug,
+      {
+        gid: 'group',
+        marketplaceId: 'untrusted-catalog',
+        plugin: 'untrusted-plugin',
+        expectedCommit: 'b'.repeat(40),
+      },
+      'owner',
+    );
+    expect(result).toMatchObject({ status: 200, body: { skill: { commit, slug: skill.slug } } });
+    expect(resolveSkillUpdate).toHaveBeenCalledWith('test-group', skill.slug);
+    expect(fetchAudits).toHaveBeenCalledWith('example/skills', skill.slug);
+    expect(updateCatalogSkill).toHaveBeenCalledWith({
+      groupFolder: 'test-group',
+      marketplaceId: catalog.id,
+      plugin: skill.plugin,
+      slug: skill.slug,
+      expectedCommit: commit,
+    });
+    expect(refreshMarketplace).not.toHaveBeenCalled();
+    expect(installCatalogSkill).not.toHaveBeenCalled();
+    expect(recordAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: 'owner',
+        action: 'skill_update',
+        targetId: skill.slug,
+        payload: expect.objectContaining({ agentGroupId: 'group', commit, path: skill.path }),
+      }),
+    );
+  });
+
+  it('refuses blocking audits without introducing an acknowledgement flow', async () => {
+    vi.mocked(fetchAudits).mockResolvedValue([
+      {
+        provider: 'test',
+        slug: skill.slug,
+        status: 'fail',
+        summary: 'Blocked',
+        auditedAt: null,
+        riskLevel: 'HIGH',
+        categories: [],
+      },
+    ]);
+    const result = await updateSkill(skill.slug, { gid: 'group', acknowledgeRisk: true }, 'owner');
+    expect(result).toMatchObject({ status: 409, body: { error: expect.stringContaining('not changed') } });
+    expect(updateCatalogSkill).not.toHaveBeenCalled();
+    expect(recordAdminAction).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing input and unknown groups before resolving a skill', async () => {
+    expect(await updateSkill(skill.slug, {}, 'owner')).toMatchObject({ status: 400 });
+    expect(await updateSkill('', { gid: 'group' }, 'owner')).toMatchObject({ status: 400 });
+    vi.mocked(getAgentGroup).mockReturnValue(undefined);
+    expect(await updateSkill(skill.slug, { gid: 'missing' }, 'owner')).toMatchObject({
+      status: 400,
+      body: { error: expect.stringContaining('unknown agent group') },
+    });
+    expect(resolveSkillUpdate).not.toHaveBeenCalled();
+    expect(updateCatalogSkill).not.toHaveBeenCalled();
+  });
+
+  it('preserves explicit local-edit errors before making audit requests', async () => {
+    vi.mocked(resolveSkillUpdate).mockImplementation(() => {
+      throw new SkillInstallError('local edits');
+    });
+    expect(await updateSkill(skill.slug, { gid: 'group' }, 'owner')).toEqual({
+      status: 400,
+      body: { error: 'local edits' },
+    });
+    expect(fetchAudits).not.toHaveBeenCalled();
+    expect(updateCatalogSkill).not.toHaveBeenCalled();
+  });
+
+  it('reports stale-snapshot rejection after an asynchronous audit without logging success', async () => {
+    vi.mocked(updateCatalogSkill).mockImplementation(() => {
+      throw new MarketplaceError('catalog changed');
+    });
+    expect(await updateSkill(skill.slug, { gid: 'group' }, 'owner')).toEqual({
+      status: 400,
+      body: { error: 'catalog changed' },
+    });
+    expect(recordAdminAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('catalog refresh endpoint', () => {
+  it('waits for refresh and returns the new successful timestamp', async () => {
+    const updated = { ...catalog, refreshedAt: '2026-09-23T20:30:00Z', lastRefreshError: null };
+    vi.mocked(refreshMarketplace).mockResolvedValue(updated);
+    expect(await refreshCatalog(catalog.id, 'owner')).toEqual({ status: 200, body: { catalog: updated } });
+    expect(recordAdminAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'skill_catalog_refresh' }));
+  });
+
+  it('returns retained snapshot metadata and a visible refresh error on failure', async () => {
+    const retained = {
+      ...catalog,
+      lastRefreshError: 'Repository not found',
+      lastRefreshAttemptAt: '2026-09-23T20:30:00Z',
+    };
+    vi.mocked(refreshMarketplace).mockRejectedValue(new MarketplaceError('Repository not found'));
+    vi.mocked(getMarketplaceRecord).mockReturnValue(retained);
+    expect(await refreshCatalog(catalog.id, 'owner')).toEqual({
+      status: 400,
+      body: { error: 'Repository not found', catalog: retained },
+    });
+    expect(recordAdminAction).not.toHaveBeenCalled();
   });
 });
 

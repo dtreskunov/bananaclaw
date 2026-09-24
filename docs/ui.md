@@ -17,10 +17,10 @@ Restart the host. The routes are mounted on the webhook listener (default `0.0.0
 
 ## Configuration
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `UI_ENABLED` | `false` | Mount the UI shell and every registered app. |
-| `UI_SECURE` | `false` | Mark session cookies `Secure`. Set when fronted by HTTPS (reverse proxy, ngrok, etc.). |
+| Env var       | Default                               | Purpose                                                                                                                                        |
+| ------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UI_ENABLED`  | `false`                               | Mount the UI shell and every registered app.                                                                                                   |
+| `UI_SECURE`   | `false`                               | Mark session cookies `Secure`. Set when fronted by HTTPS (reverse proxy, ngrok, etc.).                                                         |
 | `UI_BASE_URL` | `http://localhost:${WEBHOOK_PORT}/ui` | External base URL embedded in magic-link URLs. Override when the host is behind a reverse proxy or tunnel (e.g. `https://bot.example.com/ui`). |
 
 ## Getting a login link
@@ -105,6 +105,50 @@ Legacy `.catalogs/<catalog-id>` checkouts continue to work unchanged.
 Installing a cached skill does not require the upstream repository to exist.
 Existing security-audit checks and acknowledgements still apply. Catalog refresh
 and updating an agent's installed skills remain separate operations.
+
+### Refreshing catalogs
+
+Owners and global admins can **Refresh** a registered catalog from either its
+catalog card or its directory-search result. Both show **Last successful refresh**: the
+last successful upstream check, with an exact timestamp on hover. Older preview
+snapshots without a recorded fetch time show **Not recorded**. Installing a skill
+does not change this timestamp.
+
+Refresh is manual; browsing does not trigger a network refresh. While a refresh
+is running, its controls show progress and repeated requests for that catalog
+join the same operation. Other catalogs remain usable. Git network operations
+run asynchronously so they do not block host routing or other UI requests.
+
+The host prepares a separate checkout, fetches the configured branch, and validates
+the catalog before publishing its tree and metadata together. A failed fetch or
+validation preserves the previous cache, commit, and successful timestamp. The
+latest failure and attempt time are retained and displayed, and cached skills
+remain installable. Publication errors roll back the previous tree; an unsuccessful
+rollback preserves staging files and logs their location for operator recovery.
+Removing a catalog during its refresh is refused.
+
+Successful refreshes update the timestamp even when the commit has not changed,
+clear the previous failure, and invalidate the displayed catalog and directory
+previews so subsequent installs use the newly displayed commit. Refresh never
+updates agent checkouts or discards agent edits.
+
+### Updating installed skills
+
+Owners and global admins have an **Update** button beside each catalog-installed
+skill. It uses the current local catalog snapshot; it does not fetch upstream.
+Use **Refresh** separately when a newer catalog revision is wanted. Built-in
+and agent-authored skills have no catalog update action.
+
+Update prepares and validates the target revision before atomically switching
+only that skill's link. Other installed skills and the old checkout remain
+untouched. Updating to the already-installed revision is a no-op. Local edits
+or commits, missing sources, invalid snapshots, and blocking security audits
+stop the update with an error instead of replacing the current skill. There is
+no review or confirmation flow and no automatic restart.
+
+Skill updates and catalog refreshes show button progress and updated revision
+metadata without success notifications. Failures remain visible. Enabled flags
+and unsaved settings are preserved; restart the agent to pick up updated skills.
 
 ## Security posture
 

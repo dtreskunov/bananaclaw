@@ -355,6 +355,18 @@ function SettingsTab({
     }
   }
 
+  async function refreshAvailableSkills(): Promise<void> {
+    try {
+      const r = await call<SettingsResponse>(apiPath(gid, '/settings'));
+      if (!r.ok) throw new Error(errMsg(r.data, `HTTP ${r.status}`));
+      if (!Array.isArray(r.data.availableSkills)) throw new Error('Missing skills in settings response.');
+      // Skill/catalog mutations must not reset unsaved settings or enabled flags.
+      setData((current) => current ? { ...current, availableSkills: r.data.availableSkills } : current);
+    } catch (error) {
+      showToast(`Could not reload skills: ${error instanceof Error ? error.message : String(error)}`, 'err');
+    }
+  }
+
   useEffect(() => {
     refresh();
   }, [gid]);
@@ -955,7 +967,7 @@ function SettingsTab({
           busy={busy}
           onChange={updateSkills}
           onDisabledChange={setDraftDisabledSkills}
-          onCatalogChanged={refresh}
+          onCatalogChanged={refreshAvailableSkills}
         />
       ) : null}
 

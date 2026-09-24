@@ -4,11 +4,13 @@
 // that. Expanding clones the repo into the catalog cache and reads its real
 // SKILL.md metadata, which is also what an install would use — the preview and
 // the install see the same tree.
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
+import { currentPreview, type CatalogRefreshMetadata, type CatalogRefreshState, type VersionedPreview } from '../catalog-refresh';
 import { call, errMsg } from './GroupAdminApi';
 import { InstallControl, type AuditDto } from './GroupAdminSkillInstall';
+import { CatalogRefreshStatus } from './GroupAdminSkillRefresh';
 import { showToast } from './Toast';
 
 export interface DiscoverSkillDto {
@@ -20,7 +22,7 @@ export interface DiscoverSkillDto {
   url: string | null;
 }
 
-export interface DiscoverSourceDto {
+export interface DiscoverSourceDto extends CatalogRefreshMetadata {
   source: string;
   catalogId: string | null;
   snapshot: CatalogSnapshot | null;
@@ -46,7 +48,7 @@ interface PreviewSkill {
   license: string | null;
 }
 
-interface PreviewCatalog {
+interface PreviewCatalog extends CatalogRefreshMetadata {
   commit: string | null;
   ref: string;
   skills: PreviewSkill[];
@@ -70,16 +72,72 @@ export function SkillDirectoryResults({
   installedSlugs,
   busy,
   onInstall,
+  refreshState,
+  onRefresh,
 }: {
   discover: DiscoverResponse;
   installedSlugs: Set<string>;
   busy: boolean;
+  refreshState: CatalogRefreshState;
+  onRefresh: (id: string) => Promise<void>;
   onInstall: (
     repo: string, slug: string, ack: boolean, snapshot?: CatalogSnapshot,
   ) => Promise<{ ok: boolean; audits?: AuditDto[] | null }>;
 }): JSX.Element {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [previews, setPreviews] = useState<Record<string, PreviewCatalog | 'loading' | 'error'>>({});
+  const [previews, setPreviews] = useState<Record<string, VersionedPreview<PreviewCatalog>>>({});
+  const requests = useRef<Record<string, number>>({});
+  const latest = useRef({ discover, refreshState });
+  latest.current = { discover, refreshState };
+
+  function versionFor(source: string): number {
+    const id = latest.current.discover.sources.find((entry) => entry.source === source)?.catalogId;
+    return id ? latest.current.refreshState.versions[id] ?? 0 : 0;
+  }
+
+  async function loadPreview(source: string, version: number): Promise<void> {
+    const request = (requests.current[source] ?? 0) + 1;
+    requests.current[source] = request;
+    const current = () => requests.current[source] === request && versionFor(source) === version;
+    setPreviews((prev) => ({ ...prev, [source]: { version, value: 'loading' } }));
+    try {
+      const r = await call<{ catalog: CatalogRefreshMetadata & { commit: string | null; ref: string; plugins: { skills: PreviewSkill[] }[] } }>(
+        `${SKILLS_API}/preview?repo=${encodeURIComponent(source)}`,
+      );
+      if (!current()) return;
+      if (!r.ok) throw new Error(errMsg(r.data, `HTTP ${r.status}`));
+      setPreviews((prev) => ({
+        ...prev,
+        [source]: {
+          version,
+          value: {
+            commit: r.data.catalog.commit,
+            ref: r.data.catalog.ref,
+            refreshedAt: r.data.catalog.refreshedAt,
+            lastRefreshAttemptAt: r.data.catalog.lastRefreshAttemptAt,
+            lastRefreshError: r.data.catalog.lastRefreshError,
+            skills: r.data.catalog.plugins.flatMap((plugin) => plugin.skills),
+          },
+        },
+      }));
+    } catch (error) {
+      if (!current()) return;
+      showToast(`Couldn’t read ${source}: ${error instanceof Error ? error.message : String(error)}`, 'err');
+      setPreviews((prev) => ({ ...prev, [source]: { version, value: 'error' } }));
+    }
+  }
+
+  // Only expanded, invalidated previews are re-read. This uses the host cache;
+  // refreshing never repeats the skills.sh search or starts a periodic fetch.
+  useEffect(() => {
+    for (const entry of discover.sources) {
+      if (!expanded.has(entry.source) || (entry.catalogId && refreshState.refreshing.has(entry.catalogId))) continue;
+      const version = versionFor(entry.source);
+      if (!currentPreview(previews[entry.source], version)) void loadPreview(entry.source, version);
+    }
+  }, [discover, expanded, previews, refreshState]);
+
+  useEffect(() => () => { requests.current = {}; }, []);
 
   // Anything already installed is shown above with a checkbox; repeating it
   // here as "Installed" is noise.
@@ -95,25 +153,12 @@ export function SkillDirectoryResults({
       else next.add(source);
       return next;
     });
-    if (open || (previews[source] && previews[source] !== 'error')) return;
-
-    setPreviews((prev) => ({ ...prev, [source]: 'loading' }));
-    const r = await call<{ catalog: { commit: string | null; ref: string; plugins: { skills: PreviewSkill[] }[] } }>(
-      `${SKILLS_API}/preview?repo=${encodeURIComponent(source)}`,
-    );
-    if (!r.ok) {
-      showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
-      setPreviews((prev) => ({ ...prev, [source]: 'error' }));
-      return;
-    }
-    setPreviews((prev) => ({
-      ...prev,
-      [source]: {
-        commit: r.data.catalog.commit,
-        ref: r.data.catalog.ref,
-        skills: r.data.catalog.plugins.flatMap((plugin) => plugin.skills),
-      },
-    }));
+    const version = versionFor(source);
+    const preview = currentPreview(previews[source], version);
+    const entry = discover.sources.find((item) => item.source === source);
+    if (open || (preview && preview !== 'error')
+      || (entry?.catalogId && refreshState.refreshing.has(entry.catalogId))) return;
+    await loadPreview(source, version);
   }
 
   if (sources.length === 0) {
@@ -129,7 +174,9 @@ export function SkillDirectoryResults({
       </p>
       <ul class="ga-discover-list">
         {sources.map((entry) => {
-          const preview = previews[entry.source];
+          const version = entry.catalogId ? refreshState.versions[entry.catalogId] ?? 0 : 0;
+          const preview = currentPreview(previews[entry.source], version);
+          const refreshing = !!entry.catalogId && refreshState.refreshing.has(entry.catalogId);
           const open = expanded.has(entry.source);
           const catalog = preview && typeof preview === 'object' ? preview : null;
           const loaded = open && catalog !== null;
@@ -151,19 +198,35 @@ export function SkillDirectoryResults({
 
           return (
             <li key={entry.source} class="ga-discover-source">
-              <button type="button" class="ga-catalog-toggle" onClick={() => toggle(entry.source)}>
-                <span class="ga-catalog-caret">{open ? '▾' : '▸'}</span>
-                <span class="ga-catalog-title">
-                  <strong>{entry.source}</strong>
-                  {entry.catalogId ? <span class="ga-skills-badge">catalog added</span> : null}
-                  <span class="ga-catalog-meta">
-                    {loaded
-                      ? `${rows.length} skill${rows.length === 1 ? '' : 's'}`
-                      : `${entry.skills.length} match${entry.skills.length === 1 ? '' : 'es'}`}
+              <div class="ga-catalog-head">
+                <button type="button" class="ga-catalog-toggle" onClick={() => toggle(entry.source)}>
+                  <span class="ga-catalog-caret">{open ? '▾' : '▸'}</span>
+                  <span class="ga-catalog-title">
+                    <strong>{entry.source}</strong>
+                    {entry.catalogId ? <span class="ga-skills-badge">catalog added</span> : null}
+                    <span class="ga-catalog-meta">
+                      {loaded
+                        ? `${rows.length} skill${rows.length === 1 ? '' : 's'}`
+                        : `${entry.skills.length} match${entry.skills.length === 1 ? '' : 'es'}`}
+                    </span>
+                    {snapshot ? <code title={snapshot.commit}>{snapshot.commit.slice(0, 7)}</code> : null}
                   </span>
-                  {snapshot ? <code title={snapshot.commit}>{snapshot.commit.slice(0, 7)}</code> : null}
-                </span>
-              </button>
+                </button>
+                {entry.catalogId ? (
+                  <span class="ga-catalog-actions">
+                    <button
+                      type="button"
+                      disabled={busy || refreshing}
+                      onClick={() => onRefresh(entry.catalogId!)}
+                    >
+                      {refreshing ? 'Refreshing…' : 'Refresh'}
+                    </button>
+                  </span>
+                ) : null}
+              </div>
+              {entry.catalogId ? (
+                <CatalogRefreshStatus catalog={{ ...entry, ...(catalog ?? {}), ...refreshState.updates[entry.catalogId] }} />
+              ) : null}
 
               {preview === 'loading' ? <p class="ga-catalog-meta">Reading {entry.source}…</p> : null}
               {preview === 'error' ? <p class="ga-skills-unavailable">Couldn’t read this repository.</p> : null}
@@ -183,10 +246,11 @@ export function SkillDirectoryResults({
                         {skill.description ? <span class="ga-skills-description">{skill.description}</span> : null}
                       </span>
                       <InstallControl
+                        key={snapshot?.commit ?? 'unpinned'}
                         source={entry.source}
                         slug={skill.slug}
                         installed={installedSlugs.has(skill.slug)}
-                        disabled={busy || preview === 'loading' || (!!catalog && !snapshot)}
+                        disabled={busy || refreshing || (open && !preview) || preview === 'loading' || (!!catalog && !snapshot)}
                         label={entry.catalogId ? 'Install' : 'Add & install'}
                         onInstall={(ack) => onInstall(entry.source, skill.slug, ack, snapshot ?? undefined)}
                       />

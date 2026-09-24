@@ -15,13 +15,14 @@ import path from 'path';
 
 import { log } from '../log.js';
 import { readSkillManifest, SKILL_NAME_RE } from './frontmatter.js';
-import { git, gitErrorDetail } from './git.js';
+import { git, gitAsync, gitErrorDetail } from './git.js';
 import {
   deleteMarketplaceRecord,
   getMarketplaceRecord,
   marketplaceCacheDir,
   putMarketplaceRecord,
   readMarketplaceRecords,
+  skillsStoreRoot,
   type MarketplaceRecord,
 } from './store.js';
 
@@ -62,6 +63,8 @@ export interface MarketplaceCatalog {
   description: string | null;
   commit: string | null;
   refreshedAt: string | null;
+  lastRefreshAttemptAt: string | null;
+  lastRefreshError: string | null;
   /** Manifest-driven, a scanned layout, or one of the read-only local sets. */
   kind: 'plugin-marketplace' | 'skill-repo' | 'built-in' | 'workspace';
   plugins: CatalogPlugin[];
@@ -297,8 +300,7 @@ function pluginsFromManifest(repoRoot: string, id: string, manifest: Record<stri
 }
 
 /** Read the catalog out of an already-synced cache directory. */
-export function readCatalog(record: MarketplaceRecord): MarketplaceCatalog {
-  const repoRoot = marketplaceCacheDir(record.id);
+export function readCatalog(record: MarketplaceRecord, repoRoot = marketplaceCacheDir(record.id)): MarketplaceCatalog {
   const base: Omit<MarketplaceCatalog, 'kind' | 'plugins' | 'error'> = {
     id: record.id,
     repo: record.repo,
@@ -308,6 +310,8 @@ export function readCatalog(record: MarketplaceRecord): MarketplaceCatalog {
     description: record.description,
     commit: record.commit,
     refreshedAt: record.refreshedAt,
+    lastRefreshAttemptAt: record.lastRefreshAttemptAt ?? null,
+    lastRefreshError: record.lastRefreshError ?? null,
   };
 
   if (!fs.existsSync(repoRoot)) {
@@ -342,11 +346,15 @@ export function readCatalog(record: MarketplaceRecord): MarketplaceCatalog {
 }
 
 /** Manifest `name` + `metadata.description`, for labeling a newly added source. */
-function readManifestIdentity(id: string): { label: string | null; description: string | null } {
+function readManifestIdentity(
+  id: string,
+  repoRoot = marketplaceCacheDir(id),
+): { label: string | null; description: string | null } {
   try {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(marketplaceCacheDir(id), MARKETPLACE_MANIFEST), 'utf8'),
-    ) as Record<string, unknown>;
+    const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, MARKETPLACE_MANIFEST), 'utf8')) as Record<
+      string,
+      unknown
+    >;
     const metadata =
       manifest.metadata && typeof manifest.metadata === 'object' ? (manifest.metadata as Record<string, unknown>) : {};
     return {
@@ -483,21 +491,109 @@ export function addMarketplace(input: {
   return record;
 }
 
-export function refreshMarketplace(id: string): MarketplaceRecord {
+const refreshes = new Map<string, Promise<MarketplaceRecord>>();
+
+/** Concurrent callers join the same operation; only completed snapshots become visible. */
+export function refreshMarketplace(id: string): Promise<MarketplaceRecord> {
+  const pending = refreshes.get(id);
+  if (pending) return pending;
   const record = getMarketplaceRecord(id);
-  if (!record) throw new MarketplaceError(`unknown catalog "${id}"`);
-  const commit = syncMarketplaceCache(record);
-  const updated: MarketplaceRecord = {
-    ...record,
-    ...readManifestIdentity(id),
-    commit,
-    refreshedAt: new Date().toISOString(),
-  };
-  putMarketplaceRecord(updated);
-  return updated;
+  if (!record) return Promise.reject(new MarketplaceError(`unknown catalog "${id}"`));
+  const operation = refreshSnapshot(record).finally(() => refreshes.delete(id));
+  refreshes.set(id, operation);
+  return operation;
+}
+
+async function refreshSnapshot(record: MarketplaceRecord): Promise<MarketplaceRecord> {
+  const attemptedAt = new Date().toISOString();
+  const cacheDir = marketplaceCacheDir(record.id);
+  let workDir: string | null = null;
+  let preserveWorkDir = false;
+  try {
+    const ref = assertRef(record.ref);
+    putMarketplaceRecord({ ...record, lastRefreshAttemptAt: attemptedAt });
+    // Outside cache/ so preview-cache pruning cannot remove an active refresh.
+    workDir = fs.mkdtempSync(path.join(skillsStoreRoot(), `.refresh-${record.id}-`));
+    const candidateDir = path.join(workDir, 'next');
+    if (fs.existsSync(path.join(cacheDir, '.git'))) {
+      await gitAsync(['clone', '--no-local', '--no-checkout', '--', cacheDir, candidateDir]);
+      await gitAsync(['remote', 'set-url', 'origin', record.repo], candidateDir);
+      await gitAsync(['fetch', '--depth', '1', 'origin', ref], candidateDir);
+      await gitAsync(['reset', '--hard', 'FETCH_HEAD'], candidateDir);
+    } else {
+      await gitAsync(['clone', '--depth', '1', '--single-branch', '--branch', ref, '--', record.repo, candidateDir]);
+    }
+    const commit = await gitAsync(['rev-parse', 'HEAD'], candidateDir);
+    const updated: MarketplaceRecord = {
+      ...record,
+      ...readManifestIdentity(record.id, candidateDir),
+      commit,
+      refreshedAt: new Date().toISOString(),
+      lastRefreshAttemptAt: attemptedAt,
+      lastRefreshError: null,
+    };
+    const catalog = readCatalog(updated, candidateDir);
+    if (catalog.error) throw new MarketplaceError(`refreshed catalog is invalid: ${catalog.error}`);
+    if (!catalog.plugins.some((plugin) => plugin.skills.length > 0)) {
+      throw new MarketplaceError(
+        'refreshed catalog contains no supported, valid skills; keeping the previous snapshot',
+      );
+    }
+
+    const current = getMarketplaceRecord(record.id);
+    if (!current || current.repo !== record.repo || current.ref !== record.ref || current.commit !== record.commit) {
+      throw new MarketplaceError('catalog changed during refresh; retry with its current configuration');
+    }
+
+    const backupDir = path.join(workDir, 'previous');
+    const hadCache = fs.existsSync(cacheDir);
+    fs.mkdirSync(path.dirname(cacheDir), { recursive: true });
+    if (hadCache) fs.renameSync(cacheDir, backupDir);
+    let published = false;
+    try {
+      // No awaits in publication: host readers cannot see a mismatched tree
+      // and record. Restore the old tree if either rename or metadata save fails.
+      fs.renameSync(candidateDir, cacheDir);
+      published = true;
+      putMarketplaceRecord(updated);
+    } catch (err) {
+      try {
+        if (published) fs.renameSync(cacheDir, candidateDir);
+        if (hadCache) fs.renameSync(backupDir, cacheDir);
+      } catch (restoreError) {
+        preserveWorkDir = true;
+        log.error('catalog refresh rollback failed; preserving recovery files', {
+          id: record.id,
+          workDir,
+          err,
+          restoreError,
+        });
+        throw new MarketplaceError(`catalog refresh rollback failed; recovery files preserved at ${workDir}`);
+      }
+      throw err;
+    }
+    return updated;
+  } catch (err) {
+    const message = err instanceof MarketplaceError ? err.message : `catalog refresh failed: ${gitErrorDetail(err)}`;
+    const current = getMarketplaceRecord(record.id);
+    if (current) {
+      putMarketplaceRecord({ ...current, lastRefreshAttemptAt: attemptedAt, lastRefreshError: message });
+    }
+    log.warn('catalog refresh failed; retaining previous snapshot', { id: record.id, err });
+    throw new MarketplaceError(message);
+  } finally {
+    if (workDir && !preserveWorkDir) {
+      try {
+        fs.rmSync(workDir, { recursive: true, force: true });
+      } catch (err) {
+        log.warn('catalog refresh staging cleanup failed', { id: record.id, workDir, err });
+      }
+    }
+  }
 }
 
 export function removeMarketplace(id: string): void {
+  if (refreshes.has(id)) throw new MarketplaceError('catalog is refreshing; wait for it to finish before removing it');
   if (!getMarketplaceRecord(id)) throw new MarketplaceError(`unknown catalog "${id}"`);
   deleteMarketplaceRecord(id);
   fs.rmSync(marketplaceCacheDir(id), { recursive: true, force: true });

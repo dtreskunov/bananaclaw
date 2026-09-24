@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { installCatalogSkill, uninstallSkill, SkillInstallError } from './install.js';
 import {
@@ -11,12 +11,14 @@ import {
   MarketplaceError,
   normalizeRepoSource,
   previewCatalog,
+  readCatalog,
   refreshMarketplace,
   removeMarketplace,
 } from './marketplace.js';
 import { listSkills } from './registry.js';
 import { findRepoRoot, readSkillGit } from './skill-git.js';
-import { getMarketplaceRecord, marketplaceCacheDir, setSkillsStoreRoot } from './store.js';
+import { getMarketplaceRecord, marketplaceCacheDir, putMarketplaceRecord, setSkillsStoreRoot } from './store.js';
+import * as skillGit from './git.js';
 import { GROUPS_DIR } from '../config.js';
 
 /** Scratch group the vendored-install tests install into. */
@@ -77,6 +79,7 @@ function makeMarketplaceRepo(): string {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   setSkillsStoreRoot(null);
   fs.rmSync(path.join(GROUPS_DIR, GROUP_FOLDER), { recursive: true, force: true });
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
@@ -366,18 +369,18 @@ describe('installing from a catalog', () => {
     expect(readSkillGit(fs.realpathSync(path.join(skillsRoot(), 'pdf')))?.commit).toBe(installed.commit);
   });
 
-  it('rejects a stale preview instead of silently installing the refreshed commit', () => {
+  it('rejects a stale preview instead of silently installing the refreshed commit', async () => {
     const { repo } = setup();
     const oldCommit = getMarketplaceRecord('test-catalog')!.commit!;
     advanceRemote(repo);
-    const fresh = refreshMarketplace('test-catalog');
+    const fresh = await refreshMarketplace('test-catalog');
     expect(fresh.commit).not.toBe(oldCommit);
 
     expect(() => installPdf(oldCommit)).toThrow(/changed since it was displayed/);
     expect(fs.existsSync(path.join(skillsRoot(), 'pdf'))).toBe(false);
   });
 
-  it('isolates new revisions without overwriting existing agent edits or commits', () => {
+  it('isolates new revisions without overwriting existing agent edits or commits', async () => {
     const { repo } = setup();
     const first = installPdf();
     const firstDir = findRepoRoot(fs.realpathSync(path.join(skillsRoot(), 'pdf')))!;
@@ -387,7 +390,7 @@ describe('installing from a catalog', () => {
     fs.appendFileSync(path.join(skillsRoot(), 'pdf/SKILL.md'), '\nUncommitted agent edit.\n');
     const before = readSkillGit(fs.realpathSync(path.join(skillsRoot(), 'pdf')));
     advanceRemote(repo);
-    const refreshed = refreshMarketplace('test-catalog');
+    const refreshed = await refreshMarketplace('test-catalog');
 
     const second = installCanvas(refreshed.commit!);
     expect(second.commit).not.toBe(first.commit);
@@ -493,7 +496,193 @@ describe('registering preview snapshots', () => {
       'New upstream change.',
     );
   });
+});
 
+describe('refreshing catalog snapshots', () => {
+  function setupRefresh() {
+    const store = tempDir('nanoclaw-refresh-store-');
+    setSkillsStoreRoot(store);
+    const repo = makeMarketplaceRepo();
+    const record = {
+      ...addMarketplace({ repo, id: 'refresh-catalog' }),
+      refreshedAt: '2020-01-01T00:00:00.000Z',
+    };
+    putMarketplaceRecord(record);
+    return { store, repo, record, cache: marketplaceCacheDir(record.id) };
+  }
+
+  it('publishes a validated commit and identity with a new successful-refresh timestamp', async () => {
+    const { repo, record } = setupRefresh();
+    fs.appendFileSync(path.join(repo, 'skills/pdf/SKILL.md'), '\nRefreshed content.\n');
+    const manifestPath = path.join(repo, '.claude-plugin/marketplace.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.name = 'refreshed-name';
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'refresh'], repo);
+
+    const refreshed = await refreshMarketplace(record.id);
+    expect(refreshed.commit).not.toBe(record.commit);
+    expect(refreshed.label).toBe('refreshed-name');
+    expect(Date.parse(refreshed.refreshedAt!)).toBeGreaterThan(Date.parse(record.refreshedAt));
+    expect(refreshed.lastRefreshAttemptAt).toBeTruthy();
+    expect(refreshed.lastRefreshError).toBeNull();
+    expect(readCatalog(refreshed)).toMatchObject({ commit: refreshed.commit, error: null });
+    expect(getMarketplaceRecord(record.id)).toEqual(refreshed);
+  });
+
+  it('records successful checks even if the remote commit has not changed', async () => {
+    const { record } = setupRefresh();
+    putMarketplaceRecord({ ...record, lastRefreshError: 'previous failure' });
+    const refreshed = await refreshMarketplace(record.id);
+    expect(refreshed.commit).toBe(record.commit);
+    expect(refreshed.refreshedAt).not.toBe(record.refreshedAt);
+    expect(refreshed.lastRefreshError).toBeNull();
+  });
+
+  it('keeps the prior cache installable after an upstream failure', async () => {
+    const { repo, record, cache, store } = setupRefresh();
+    const original = fs.readFileSync(path.join(cache, 'skills/pdf/SKILL.md'), 'utf8');
+    const moved = `${repo}-offline`;
+    fs.renameSync(repo, moved);
+    tempDirs.push(moved);
+
+    await expect(refreshMarketplace(record.id)).rejects.toThrow(/refresh failed/);
+    const after = getMarketplaceRecord(record.id)!;
+    expect(after).toMatchObject({ commit: record.commit, refreshedAt: record.refreshedAt });
+    expect(after.lastRefreshError).toContain('refresh failed');
+    expect(after.lastRefreshAttemptAt).toBeTruthy();
+    expect(fs.readFileSync(path.join(cache, 'skills/pdf/SKILL.md'), 'utf8')).toBe(original);
+    expect(fs.readdirSync(store).filter((entry) => entry.startsWith('.refresh-'))).toEqual([]);
+    expect(
+      installCatalogSkill({
+        groupFolder: GROUP_FOLDER,
+        marketplaceId: record.id,
+        plugin: 'document-skills',
+        slug: 'pdf',
+        expectedCommit: record.commit!,
+      }).commit,
+    ).toBe(record.commit);
+  });
+
+  it('rejects an invalid refreshed catalog without replacing a valid snapshot', async () => {
+    const { repo, record, cache } = setupRefresh();
+    const oldManifest = fs.readFileSync(path.join(cache, '.claude-plugin/marketplace.json'), 'utf8');
+    fs.writeFileSync(path.join(repo, '.claude-plugin/marketplace.json'), '{invalid');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'invalid catalog'], repo);
+
+    await expect(refreshMarketplace(record.id)).rejects.toThrow(/refreshed catalog is invalid/);
+    expect(getMarketplaceRecord(record.id)).toMatchObject({ commit: record.commit, refreshedAt: record.refreshedAt });
+    expect(fs.readFileSync(path.join(cache, '.claude-plugin/marketplace.json'), 'utf8')).toBe(oldManifest);
+  });
+
+  it('deduplicates overlapping refreshes while the old snapshot remains readable', async () => {
+    const { record, cache } = setupRefresh();
+    const actual = skillGit.gitAsync;
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(skillGit, 'gitAsync').mockImplementation(async (...args) => {
+      await wait;
+      return actual(...args);
+    });
+
+    const first = refreshMarketplace(record.id);
+    const second = refreshMarketplace(record.id);
+    expect(first).toBe(second);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(readCatalog(getMarketplaceRecord(record.id)!)).toMatchObject({ commit: record.commit, error: null });
+    expect(() => removeMarketplace(record.id)).toThrow(/catalog is refreshing/);
+    expect(fs.existsSync(path.join(cache, '.git'))).toBe(true);
+    release();
+    await first;
+    expect(spy.mock.calls.filter(([args]) => args[0] === 'fetch')).toHaveLength(1);
+  });
+
+  it('does not replace a usable snapshot with a manifest containing no valid skills', async () => {
+    const { record, repo } = setupRefresh();
+    fs.writeFileSync(path.join(repo, '.claude-plugin/marketplace.json'), '{"plugins":[]}');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'empty catalog'], repo);
+    await expect(refreshMarketplace(record.id)).rejects.toThrow(/no supported, valid skills/);
+    expect(readCatalog(getMarketplaceRecord(record.id)!).plugins.flatMap((plugin) => plugin.skills)).not.toEqual([]);
+    expect(getMarketplaceRecord(record.id)?.refreshedAt).toBe(record.refreshedAt);
+  });
+
+  it('restores the previous cache when publication fails', async () => {
+    const { record, cache, store } = setupRefresh();
+    const rename = fs.renameSync;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(from).endsWith('/next') && to === cache) {
+        throw new Error('publication rename denied');
+      }
+      return rename(from, to);
+    });
+
+    await expect(refreshMarketplace(record.id)).rejects.toThrow(/publication rename denied/);
+    expect(readCatalog(getMarketplaceRecord(record.id)!)).toMatchObject({ commit: record.commit, error: null });
+    expect(getMarketplaceRecord(record.id)?.refreshedAt).toBe(record.refreshedAt);
+    expect(fs.readdirSync(store).filter((entry) => entry.startsWith('.refresh-'))).toEqual([]);
+  });
+
+  it('rebuilds a missing browsing cache and clears its failure state', async () => {
+    const { record, cache } = setupRefresh();
+    fs.rmSync(cache, { recursive: true });
+    const updated = await refreshMarketplace(record.id);
+    expect(updated.commit).toBe(record.commit);
+    expect(readCatalog(updated).error).toBeNull();
+    expect(updated.lastRefreshError).toBeNull();
+  });
+
+  it('restores the old snapshot if saving the published metadata fails', async () => {
+    const { record, cache } = setupRefresh();
+    const rename = fs.renameSync;
+    let published = false;
+    let failSave = true;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(from).endsWith('/next') && to === cache) published = true;
+      if (published && failSave && String(to).endsWith('/marketplaces.json')) {
+        failSave = false;
+        throw new Error('metadata write denied');
+      }
+      return rename(from, to);
+    });
+    await expect(refreshMarketplace(record.id)).rejects.toThrow(/metadata write denied/);
+    expect(readCatalog(getMarketplaceRecord(record.id)!)).toMatchObject({ commit: record.commit, error: null });
+    expect(getMarketplaceRecord(record.id)?.refreshedAt).toBe(record.refreshedAt);
+  });
+
+  it('keeps installed checkout objects and local edits unchanged across refresh', async () => {
+    const { record, repo } = setupRefresh();
+    installCatalogSkill({
+      groupFolder: GROUP_FOLDER,
+      marketplaceId: record.id,
+      plugin: 'document-skills',
+      slug: 'pdf',
+      expectedCommit: record.commit!,
+    });
+    const installed = path.join(GROUPS_DIR, GROUP_FOLDER, 'skills/pdf');
+    fs.appendFileSync(path.join(installed, 'SKILL.md'), '\nKeep installed edits.\n');
+    const before = readSkillGit(fs.realpathSync(installed));
+    fs.appendFileSync(path.join(repo, 'skills/pdf/SKILL.md'), '\nNew upstream content.\n');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'new upstream content'], repo);
+    await refreshMarketplace(record.id);
+    expect(readSkillGit(fs.realpathSync(installed))).toEqual(before);
+    const content = fs.readFileSync(path.join(installed, 'SKILL.md'), 'utf8');
+    expect(content).toContain('Keep installed edits.');
+    expect(content).not.toContain('New upstream content.');
+  });
+
+  it('rejects unknown catalogs asynchronously', async () => {
+    setSkillsStoreRoot(tempDir('nanoclaw-refresh-store-'));
+    await expect(refreshMarketplace('missing')).rejects.toThrow('unknown catalog');
+  });
+});
+
+describe('preview snapshot identity', () => {
   it('uses a registered catalog with a custom id when previewing its source', () => {
     setSkillsStoreRoot(tempDir('nanoclaw-skill-store-'));
     const repo = makeMarketplaceRepo();

@@ -17,7 +17,13 @@ import {
   DirectoryError,
   type AuditEntry,
 } from '../../../skills/directory.js';
-import { installCatalogSkill, uninstallSkill, SkillInstallError } from '../../../skills/install.js';
+import {
+  installCatalogSkill,
+  resolveSkillUpdate,
+  updateCatalogSkill,
+  uninstallSkill,
+  SkillInstallError,
+} from '../../../skills/install.js';
 import {
   addMarketplace,
   assertCatalogSnapshot,
@@ -32,7 +38,7 @@ import {
   type MarketplaceCatalog,
 } from '../../../skills/marketplace.js';
 import { listSkills, groupSkillRoots, BUILTIN_CATALOG_ID, WORKSPACE_CATALOG_ID } from '../../../skills/registry.js';
-import { readMarketplaceRecords, type MarketplaceRecord } from '../../../skills/store.js';
+import { getMarketplaceRecord, readMarketplaceRecords, type MarketplaceRecord } from '../../../skills/store.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { recordAdminAction } from './audit.js';
 import { listAvailableSkills } from './skill-catalog.js';
@@ -90,6 +96,8 @@ function builtinCatalog(): MarketplaceCatalog {
     description: 'Ships with this install. Always available to select; nothing to add or refresh.',
     commit: null,
     refreshedAt: null,
+    lastRefreshAttemptAt: null,
+    lastRefreshError: null,
     kind: 'built-in',
     plugins:
       skills.length > 0 ? [{ name: BUILTIN_CATALOG_ID, description: null, skills, unsupportedReason: null }] : [],
@@ -129,6 +137,8 @@ function workspaceCatalog(gid: string): MarketplaceCatalog | null {
     description: 'Written by this agent in its own workspace. Always active, and only for this group.',
     commit: null,
     refreshedAt: null,
+    lastRefreshAttemptAt: null,
+    lastRefreshError: null,
     kind: 'workspace',
     plugins: [{ name: WORKSPACE_CATALOG_ID, description: null, skills, unsupportedReason: null }],
     error: null,
@@ -172,9 +182,9 @@ export function addCatalog(body: Record<string, unknown>, actorUserId: string): 
   }
 }
 
-export function refreshCatalog(id: string, actorUserId: string): SkillsAdminResult {
+export async function refreshCatalog(id: string, actorUserId: string): Promise<SkillsAdminResult> {
   try {
-    const record = refreshMarketplace(id);
+    const record = await refreshMarketplace(id);
     recordAdminAction({
       actorUserId,
       action: 'skill_catalog_refresh',
@@ -184,7 +194,14 @@ export function refreshCatalog(id: string, actorUserId: string): SkillsAdminResu
     });
     return { status: 200, body: { catalog: record } };
   } catch (err) {
-    return fail(err);
+    const result = fail(err);
+    return {
+      status: result.status,
+      body: {
+        error: err instanceof MarketplaceError ? err.message : 'internal_error',
+        catalog: getMarketplaceRecord(id),
+      },
+    };
   }
 }
 
@@ -196,6 +213,12 @@ export function deleteCatalog(id: string, actorUserId: string): SkillsAdminResul
   } catch (err) {
     return fail(err);
   }
+}
+
+async function catalogAudits(marketplaceId: string, slug: string): Promise<AuditEntry[] | null> {
+  const catalog = getMarketplaceRecord(marketplaceId);
+  const source = catalog ? githubSourceOf(catalog.repo) : null;
+  return source ? fetchAudits(source, slug) : null;
 }
 
 export async function installSkill(body: Record<string, unknown>, actorUserId: string): Promise<SkillsAdminResult> {
@@ -211,9 +234,7 @@ export async function installSkill(body: Record<string, unknown>, actorUserId: s
     const expectedCommit = expectedCommitOf(body);
     // Audits are keyed by the directory's `owner/repo`, which is the catalog's
     // repo minus the git URL wrapper.
-    const catalog = readMarketplaceRecords().find((entry) => entry.id === marketplaceId);
-    const source = catalog ? githubSourceOf(catalog.repo) : null;
-    const audits = source ? await fetchAudits(source, slug) : null;
+    const audits = await catalogAudits(marketplaceId, slug);
     if (audits && auditIsBlocking(audits) && !acknowledgeRisk) {
       return {
         status: 409,
@@ -248,6 +269,45 @@ export async function installSkill(body: Record<string, unknown>, actorUserId: s
   }
 }
 
+export async function updateSkill(
+  slug: string,
+  body: Record<string, unknown>,
+  actorUserId: string,
+): Promise<SkillsAdminResult> {
+  const gid = str(body.gid);
+  if (!gid || !slug) return { status: 400, body: { error: 'gid and slug are required' } };
+  try {
+    const request = resolveSkillUpdate(groupFolderOf(gid), slug);
+    const audits = await catalogAudits(request.marketplaceId, slug);
+    if (audits && auditIsBlocking(audits)) {
+      return {
+        status: 409,
+        body: {
+          error: `Security audits flagged ${slug}; the installed skill was not changed.`,
+          audits,
+        },
+      };
+    }
+    const record = updateCatalogSkill(request);
+    recordAdminAction({
+      actorUserId,
+      action: 'skill_update',
+      targetKind: 'skill',
+      targetId: slug,
+      payload: {
+        agentGroupId: gid,
+        repo: record.repo,
+        ref: record.ref,
+        commit: record.commit,
+        path: record.sourcePath,
+      },
+    });
+    return { status: 200, body: { skill: record } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 // ── discovery (skills.sh) ─────────────────────────────────────────────────
 
 /** Search the directory and group hits by the repo we'd add as a catalog. */
@@ -261,6 +321,9 @@ export async function discoverSkills(query: string): Promise<SkillsAdminResult> 
         source: string;
         catalogId: string | null;
         snapshot: { commit: string; ref: string } | null;
+        refreshedAt: string | null;
+        lastRefreshAttemptAt: string | null;
+        lastRefreshError: string | null;
         skills: typeof result.skills;
       }
     >();
@@ -278,6 +341,9 @@ export async function discoverSkills(query: string): Promise<SkillsAdminResult> 
           source: skill.source,
           catalogId: catalog?.id ?? null,
           snapshot: catalog?.commit ? { commit: catalog.commit, ref: catalog.ref } : null,
+          refreshedAt: catalog?.refreshedAt ?? null,
+          lastRefreshAttemptAt: catalog?.lastRefreshAttemptAt ?? null,
+          lastRefreshError: catalog?.lastRefreshError ?? null,
           skills: [],
         };
         bySource.set(skill.source, group);
