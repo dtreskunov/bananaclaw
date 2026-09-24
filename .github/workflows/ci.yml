@@ -21,6 +21,8 @@ jobs:
       - name: Install agent-runner deps (Bun)
         working-directory: container/agent-runner
         run: bun install --frozen-lockfile
+      - name: Install audio test tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Format check
         run: pnpm run format:check

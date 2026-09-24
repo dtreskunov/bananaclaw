@@ -146,13 +146,30 @@ transport, and the file format support it. Otherwise the agent receives the
 file reference and can use its available tools; it is not told that the audio
 was transcribed.
 
-The native provider supports direct MP3/WAV audio with a known audio-input
-model over OpenAI-compatible Chat. Unknown audio capabilities (including a
-custom endpoint without model metadata), unsupported formats such as OGG/Opus,
-WebM, and M4A, or the Anthropic Messages transport use file references instead.
-OpenCode's current file-part adapter does not encode native audio input, so
-audio stays a file reference there too. Claude and fx also retain filesystem
-access to audio without automatically transcribing it. No conversion is added.
+The native provider requires a known audio-input model over OpenAI-compatible
+Chat before inspecting any audio. `NATIVE_BASE_URL` overrides the endpoint
+address, not the canonical model's catalog capabilities. Unknown custom models
+remain unknown; catalog outages produce a diagnostic and leave custom endpoints
+usable with unknown capabilities (catalog retries back off for one minute).
+Explicit endpoints retain their independently selected `NATIVE_PROTOCOL`
+(OpenAI-compatible Chat by default).
+
+Eligible audio is inspected by `ffprobe`, not trusted solely by its declared
+MIME type or extension. Compatible MP3 and PCM WAV can be embedded directly;
+common voice-note formats such as OGG/Opus, WebM, M4A/AAC, and FLAC are normalized
+to MP3 with `ffmpeg`. The original file is never replaced. Conversions are not
+cached; temporary preparation files are cleaned up immediately afterward.
+See [audio preparation limits](build-and-runtime.md#audio-attachment-preparation).
+
+Unknown or text-only model capabilities, unsupported adapters, invalid media,
+and processing limits or failures retain the original file reference, with an
+explicit reason in the model prompt and runner logs. Anthropic Messages,
+OpenCode's current file-part adapter, Claude, and fx do not embed native audio.
+These agents can still access the original file through their tools. Catalog
+audio support does **not** promise every endpoint accepts every audio format;
+provider rejection is surfaced rather than retried with a different attachment
+representation. Live dictation, attachment controls, and Agent Settings are
+unchanged by this preparation.
 
 **Upgrade behavior change:** channel voice notes sent to text-only models no
 longer get automatically transcribed. `DEFAULT_TRANSCRIPTION_MODEL` is ignored

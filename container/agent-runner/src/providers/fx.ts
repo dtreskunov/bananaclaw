@@ -21,6 +21,7 @@ import path from 'path';
 import { startFxGatewayShim, type FxGatewayShim } from './fx-gateway-shim.js';
 
 import { registerProvider } from './provider-registry.js';
+import { audioReferencePrompt } from './attachment-routing.js';
 import { mcpServersToFxConfig } from './mcp-to-fx.js';
 import { startFxMcpShims, type FxMcpShims } from './fx-mcp-shim.js';
 import { createModelCatalog, type RawLimits } from './model-catalog.js';
@@ -1004,6 +1005,7 @@ export class FxProvider implements AgentProvider {
  */
 export function buildPromptBlocks(text: string, files?: FileAttachment[]): Array<Record<string, unknown>> {
   if (!files?.length) return [{ type: 'text', text }];
+  text = audioReferencePrompt(text, files, 'adapter-does-not-support-audio');
   const manifest = files.map((f) => `- ${f.filename} (${f.mime}): ${f.path}`).join('\n');
   const imageHint = files.some((f) => f.mime.startsWith('image/'))
     ? '\nTo look at an image, call the vision tool with `paths` set to its path above. Do not use `image_ids` — these images are not attached to the request, so no ids exist for them.'

@@ -266,6 +266,15 @@ describe('buildPrompt', () => {
 });
 
 describe('buildPromptBlocks', () => {
+  test('explains audio references without embedding bytes', () => {
+    const blocks = buildPromptBlocks('listen', [
+      { path: '/workspace/inbox/voice.ogg', filename: 'voice.ogg', mime: 'audio/ogg' },
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.type).toBe('text');
+    expect(blocks[0]?.text).toContain('adapter-does-not-support-audio');
+    expect(blocks[0]?.text).toContain('/workspace/inbox/voice.ogg');
+  });
   test('sends a bare text block when there are no attachments', () => {
     expect(buildPromptBlocks('hello')).toEqual([{ type: 'text', text: 'hello' }]);
   });

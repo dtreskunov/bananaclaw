@@ -1,5 +1,4 @@
-import fs from 'node:fs';
-import { isStepCount, streamText, type ModelMessage, type ToolSet, type UserModelMessage } from 'ai';
+import { isStepCount, streamText, type ModelMessage, type ToolSet } from 'ai';
 
 import { registerProvider } from './provider-registry.js';
 import { loadConfig } from '../config.js';
@@ -19,6 +18,8 @@ import type {
 } from './types.js';
 import { pickActivityDetail } from './types.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
+import { inlineHistoryBytes, MAX_INLINE_BYTES, prepareNativeUserMessage } from './native/attachments.js';
+export { prepareNativeUserMessage as userMessage } from './native/attachments.js';
 import { loadNativeInstructions } from './native/instructions.js';
 import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
@@ -27,52 +28,6 @@ import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from '.
 
 function log(message: string): void {
   console.error(`[native-provider] ${message}`);
-}
-
-const NATIVE_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-const NATIVE_AUDIO_MIME_TYPES = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav']);
-
-function attachmentModality(file: FileAttachment): string | null {
-  if (NATIVE_IMAGE_MIME_TYPES.has(file.mime)) return 'image';
-  if (NATIVE_AUDIO_MIME_TYPES.has(file.mime)) return 'audio';
-  if (file.mime.startsWith('video/')) return 'video';
-  if (file.mime === 'application/pdf') return 'pdf';
-  if (file.mime === 'text/plain') return 'text';
-  return null;
-}
-
-function protocolSupportsModality(protocol: NativeModel['protocol'], modality: string): boolean {
-  if (protocol === 'anthropic-messages') return modality === 'text' || modality === 'image' || modality === 'pdf';
-  return (
-    modality === 'text' || modality === 'image' || modality === 'audio' || modality === 'video' || modality === 'pdf'
-  );
-}
-
-export function userMessage(
-  text: string,
-  files: FileAttachment[] | undefined,
-  model?: Pick<NativeModel, 'protocol' | 'inputModalities'>,
-): UserModelMessage {
-  const nativeFiles = (files ?? []).filter((file) => {
-    const modality = attachmentModality(file);
-    if (!modality) return false;
-    if (model && !protocolSupportsModality(model.protocol, modality)) return false;
-    if (modality === 'audio') return model?.inputModalities?.includes('audio') === true;
-    return !model?.inputModalities || model.inputModalities.includes(modality);
-  });
-  if (nativeFiles.length === 0) return { role: 'user', content: text };
-  return {
-    role: 'user',
-    content: [
-      { type: 'text', text },
-      ...nativeFiles.map((file) => ({
-        type: 'file' as const,
-        data: fs.readFileSync(file.path).toString('base64'),
-        mediaType: file.mime,
-        filename: file.filename,
-      })),
-    ],
-  };
 }
 
 function errorMessage(error: unknown): string {
@@ -313,7 +268,11 @@ export class NativeProvider implements AgentProvider {
               if (!configuredModel) throw new Error('native requires a canonical model setting');
               const resolved = await resolveNativeModel(configuredModel);
               const prior = portableHistory(store.messages(continuation));
-              const incoming = userMessage(turn.text, turn.files, resolved);
+              const incoming = await prepareNativeUserMessage(turn.text, turn.files, resolved, {
+                signal: abortController.signal,
+                maxInlineBytes: MAX_INLINE_BYTES - inlineHistoryBytes(prior),
+              });
+              if (abortController.signal.aborted) return;
               const tools = turn.toolsDisabled
                 ? {}
                 : {

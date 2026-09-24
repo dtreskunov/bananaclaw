@@ -4,6 +4,7 @@ import fs from 'fs';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
+import { audioReferencePrompt, isAudioAttachment } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, CallUsage, FileAttachment, ForkContinuationInput, ModelLimits, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions, TurnUsage } from './types.js';
 import { pickActivityDetail } from './types.js';
 import { accumulateCallUsage } from './usage.js';
@@ -750,12 +751,12 @@ function sessionErrorMessage(props: { error?: unknown }): string {
 
 export function buildOpenCodePromptParts(text: string, files: FileAttachment[] = []) {
   const parts: Array<{ type: string; text?: string; mime?: string; url?: string; filename?: string }> = [
-    { type: 'text', text },
+    { type: 'text', text: audioReferencePrompt(text, files, 'adapter-does-not-support-audio') },
   ];
   for (const file of files) {
     // OpenCode file parts do not encode input_audio; retain the
     // formatter's on-disk reference instead of sending invalid bytes.
-    if (file.mime.startsWith('audio/')) continue;
+    if (isAudioAttachment(file)) continue;
     try {
       const b64 = fs.readFileSync(file.path).toString('base64');
       parts.push({ type: 'file', mime: file.mime, url: `data:${file.mime};base64,${b64}`, filename: file.filename });

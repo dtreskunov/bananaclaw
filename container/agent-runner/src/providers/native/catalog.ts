@@ -55,6 +55,10 @@ export interface NativeModel {
 }
 
 let cachedCatalog: Catalog | null = null;
+let pendingCatalog: Promise<Catalog> | null = null;
+let retryCatalogAt = 0;
+
+class CatalogUnavailableError extends Error {}
 
 function splitWireId(wireId: string): { providerId: string; modelId: string } {
   const slash = wireId.indexOf('/');
@@ -66,44 +70,63 @@ function splitWireId(wireId: string): { providerId: string; modelId: string } {
 
 async function catalog(): Promise<Catalog> {
   if (cachedCatalog) return cachedCatalog;
-  const response = await fetch(MODELS_DEV_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`models.dev returned HTTP ${response.status}`);
-  cachedCatalog = (await response.json()) as Catalog;
-  return cachedCatalog;
+  if (Date.now() < retryCatalogAt) throw new CatalogUnavailableError('Model catalog temporarily unavailable');
+  pendingCatalog ??= (async () => {
+    try {
+      const response = await fetch(MODELS_DEV_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      if (!response.ok) throw new CatalogUnavailableError(`models.dev returned HTTP ${response.status}`);
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new CatalogUnavailableError('Invalid model catalog response');
+      }
+      cachedCatalog = data as Catalog;
+      return cachedCatalog;
+    } catch (error) {
+      retryCatalogAt = Date.now() + 60_000;
+      console.error('[native-catalog] Model metadata unavailable; custom endpoints will use unknown capabilities.');
+      throw new CatalogUnavailableError('Could not load model metadata', { cause: error });
+    } finally {
+      pendingCatalog = null;
+    }
+  })();
+  return pendingCatalog;
 }
 
 export async function resolveNativeModel(wireId: string): Promise<NativeModel> {
   const { providerId, modelId } = splitWireId(wireId);
   const explicitBaseURL = process.env.NATIVE_BASE_URL?.replace(/\/+$/, '');
-  if (explicitBaseURL) {
-    const explicitProtocol = process.env.NATIVE_PROTOCOL;
-    if (explicitProtocol && explicitProtocol !== 'openai-chat' && explicitProtocol !== 'anthropic-messages') {
-      throw new Error(`Unsupported NATIVE_PROTOCOL: ${explicitProtocol}`);
-    }
-    const protocol: NativeProtocol = explicitProtocol === 'anthropic-messages' ? 'anthropic-messages' : 'openai-chat';
-    return {
-      wireId,
-      providerId,
-      modelId,
-      baseURL: explicitBaseURL,
-      protocol,
-    };
+  const explicitProtocol = process.env.NATIVE_PROTOCOL;
+  if (
+    explicitBaseURL &&
+    explicitProtocol &&
+    explicitProtocol !== 'openai-chat' &&
+    explicitProtocol !== 'anthropic-messages'
+  ) {
+    throw new Error(`Unsupported NATIVE_PROTOCOL: ${explicitProtocol}`);
   }
-
-  const provider = (await catalog())[providerId];
+  let provider: CatalogProvider | undefined;
+  try {
+    provider = (await catalog())[providerId];
+  } catch (error) {
+    if (!explicitBaseURL || !(error instanceof CatalogUnavailableError)) throw error;
+  }
   const model = provider?.models?.[modelId];
-  if (!provider || !model) throw new Error(`Model ${wireId} was not found in models.dev`);
-  if (model.tool_call === false || !model.modalities?.output?.includes('text')) {
+  if ((!provider || !model) && !explicitBaseURL) throw new Error(`Model ${wireId} was not found in models.dev`);
+  if (model && (model.tool_call === false || !model.modalities?.output?.includes('text'))) {
     throw new Error(`Model ${wireId} does not support the text/tool surface required by native`);
   }
 
-  const packageName = model.provider?.npm ?? provider.npm ?? '@ai-sdk/openai-compatible';
-  const protocol = nativeProtocolForPackage(packageName);
+  const packageName = model?.provider?.npm ?? provider?.npm ?? '@ai-sdk/openai-compatible';
+  const protocol = explicitBaseURL
+    ? explicitProtocol === 'anthropic-messages'
+      ? 'anthropic-messages'
+      : 'openai-chat'
+    : nativeProtocolForPackage(packageName);
   if (!protocol) {
     throw new Error(`Model ${wireId} uses unsupported protocol package ${packageName}`);
   }
 
-  const baseURL = (model.provider?.api ?? provider.api)?.replace(/\/+$/, '');
+  const baseURL = explicitBaseURL ?? (model?.provider?.api ?? provider?.api)?.replace(/\/+$/, '');
   if (!baseURL || baseURL.includes('${')) {
     throw new Error(`Model ${wireId} has no directly callable Chat Completions endpoint`);
   }
@@ -111,17 +134,19 @@ export async function resolveNativeModel(wireId: string): Promise<NativeModel> {
   return {
     wireId,
     providerId,
-    modelId: model.id ?? modelId,
+    modelId: explicitBaseURL ? modelId : (model?.id ?? modelId),
     baseURL,
     protocol,
-    contextWindow: model.limit?.context,
-    maxOutputTokens: model.limit?.output,
-    inputCostPerMTok: model.cost?.input,
-    outputCostPerMTok: model.cost?.output,
-    inputModalities: model.modalities?.input,
+    contextWindow: model?.limit?.context,
+    maxOutputTokens: model?.limit?.output,
+    inputCostPerMTok: model?.cost?.input,
+    outputCostPerMTok: model?.cost?.output,
+    inputModalities: model?.modalities?.input,
   };
 }
 
 export function clearNativeCatalogForTest(): void {
   cachedCatalog = null;
+  pendingCatalog = null;
+  retryCatalogAt = 0;
 }

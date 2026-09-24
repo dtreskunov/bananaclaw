@@ -50,6 +50,14 @@ describe('sender provenance', () => {
   });
 
   describe('generic audio attachments', () => {
+    it('recognizes Opus filenames when the channel omits MIME metadata', () => {
+      insertMessage('opus', 'chat', { attachments: [
+        { type: 'audio', name: 'voice.opus', localPath: 'inbox/voice.opus' },
+      ] });
+      expect(extractFileAttachments(getPendingMessages())).toEqual([
+        { path: '/workspace/inbox/voice.opus', filename: 'voice.opus', mime: 'audio/ogg' },
+      ]);
+    });
     it('preserves real audio containers and includes their MIME and filesystem references', () => {
       insertMessage('audio', 'chat', { attachments: [
         { type: 'audio', name: 'voice.webm', mimeType: 'audio/webm', localPath: 'inbox/voice.webm' },

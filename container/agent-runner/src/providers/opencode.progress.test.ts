@@ -19,7 +19,11 @@ describe('buildOpenCodePromptParts', () => {
     expect(buildOpenCodePromptParts(text, [
       { path: '/workspace/inbox/voice.ogg', filename: 'voice.ogg', mime: 'audio/ogg' },
       { path: '/workspace/inbox/voice.mp3', filename: 'voice.mp3', mime: 'audio/mpeg' },
-    ])).toEqual([{ type: 'text', text }]);
+    ])).toEqual([{ type: 'text', text: expect.stringContaining(text) }]);
+    const parts = buildOpenCodePromptParts(text, [
+      { path: '/workspace/inbox/voice.ogg', filename: 'voice.ogg', mime: 'audio/ogg' },
+    ]);
+    expect(parts[0]?.text).toContain('adapter-does-not-support-audio');
   });
 });
 

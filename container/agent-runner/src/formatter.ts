@@ -308,6 +308,7 @@ const EXT_TO_MIME: Record<string, string> = {
   csv: 'text/csv',
   mp3: 'audio/mpeg',
   ogg: 'audio/ogg',
+  opus: 'audio/ogg',
   wav: 'audio/wav',
   mp4: 'video/mp4',
   m4a: 'audio/mp4',

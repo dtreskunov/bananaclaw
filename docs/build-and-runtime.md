@@ -51,8 +51,57 @@ Both are committed. CI and the Dockerfile run `--frozen-lockfile` variants — a
 - **CJK fonts** — `ARG INSTALL_CJK_FONTS=false`. `container/build.sh` reads `INSTALL_CJK_FONTS` from `.env` and passes it through. Default build saves ~200MB; opt in when the user works with Chinese/Japanese/Korean content.
 - **BuildKit cache mounts** — `/var/cache/apt`, `/var/lib/apt`, `/root/.bun/install/cache`, `/root/.cache/pnpm`. Rebuilds where `package.json`/`bun.lock` haven't changed are fast. Requires BuildKit (default on Docker 23+, Apple Container-compat).
 - **`tini` as init** — reaps Chromium zombies, forwards signals so in-flight `outbound.db` writes finalize on SIGTERM.
+- **`ffmpeg` / `ffprobe`** — inspect and normalize eligible native-provider audio attachments; installed by the image's system package block.
 - **`entrypoint.sh`** (extracted) — `exec bun run /app/src/index.ts` under tini. Readable and diffable.
 - **No compiled `/app/dist`** — Bun runs TS directly. The host also mounts fresh source over `/app/src` at session start, so host edits take effect without rebuilding the image.
+
+## Audio attachment preparation
+
+Only native-provider models with catalog `audio` input capability and the
+OpenAI-compatible Chat adapter enter media preparation. Other adapters and
+unknown/text-only models receive the original filesystem reference, without
+running media tools. This is independent of browser streaming dictation.
+
+Preparation keeps the original attachment intact and inspects its actual
+container/codec using `ffprobe`. Compatible MP3 or signed 16-bit PCM WAV is
+embedded directly. Common audio containers (OGG/Opus, WebM, M4A/AAC, FLAC, and
+other supported WAV encodings) are converted to MP3. Declaring an arbitrary
+file `audio/*` does not make it valid audio. Audio capability metadata does not
+specify endpoint codec acceptance; normalization targets the adapter's MP3/WAV
+wire formats, not a universal promise that the endpoint will accept them.
+The conversion preset is `libmp3lame`, 128 kbit/s, stereo, 48 kHz, with
+metadata stripped and one encoder thread. Direct embedding accepts mono/stereo
+audio up to 48 kHz; otherwise eligible content is normalized.
+
+Resource policy:
+
+- Original file: at most **20 MiB** and **10 minutes**.
+- Each probe: **10 seconds**; conversion: **30 seconds**, with cancellation.
+  Duration-less browser WebM gets an additional bounded full PCM decode to
+  measure duration, rather than accepting a silently truncated prefix.
+- Inline audio output: at most **10 MiB** per file.
+- Aggregate inline attachment budget: **16 MiB of base64**, including prior
+  user attachment parts replayed into the request. New attachments that do not
+  fit remain file references; existing conversation history is not discarded.
+- Failed inspection, unsupported content, unavailable tools, and exceeded
+  limits produce a reason in the prompt and logs, not automatic transcription.
+  A rejected model request is not reissued with altered attachment content.
+
+Conversions are not cached. Each preparation uses a private temporary directory
+in the container's temporary filesystem for inspection snapshots and output
+validation. It is removed after success, failure, or cancellation; files left
+by a forcibly killed process disappear with the container. Nothing is written
+to the persistent runner-state mount for conversion reuse. Already-embedded
+audio remains in conversation history as base64, so replay does not require
+the original file or another conversion.
+
+**Upgrading an existing install:** rebuild the base agent image using
+`./container/build.sh`, rebuild any per-group derivative images, and recycle
+affected containers so they use the new image. A host restart alone adopts
+existing containers and does not install media tools. Old images continue to
+work, but eligible audio falls back with a missing-tool reason. Verify
+`ffmpeg -version` and `ffprobe -version` inside the selected agent image.
+Local media tests also require these binaries on `PATH`.
 
 ## Session wake (two paths)
 

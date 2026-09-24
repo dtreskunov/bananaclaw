@@ -6,6 +6,7 @@ import path from 'node:path';
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
 import { formatNativeToolStep, NativeProvider, portableHistory, userMessage } from './native.js';
 import * as nativeCatalog from './native/catalog.js';
+import * as nativeAudio from './native/audio.js';
 import type { ProviderEvent } from './types.js';
 
 let root: string;
@@ -18,6 +19,9 @@ let anthropicToolMode: boolean;
 let externalMcpToolMode: boolean;
 let skillToolMode: boolean;
 let todoToolMode: boolean;
+let rejectAudio: boolean;
+let catalogFetch: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
+let catalogModels: Record<string, unknown>;
 
 async function collect(
   provider: NativeProvider,
@@ -32,6 +36,11 @@ async function collect(
 }
 
 beforeEach(() => {
+  nativeCatalog.clearNativeCatalogForTest();
+  catalogModels = {};
+  const realFetch = globalThis.fetch;
+  catalogFetch = spyOn(globalThis, 'fetch').mockImplementation((input, init) =>
+    String(input) === 'https://models.dev/api.json' ? Promise.resolve(Response.json(catalogModels)) : realFetch(input, init));
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-provider-'));
   requests = [];
   requestUrls = [];
@@ -41,6 +50,7 @@ beforeEach(() => {
   externalMcpToolMode = false;
   skillToolMode = false;
   todoToolMode = false;
+  rejectAudio = false;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -54,6 +64,9 @@ beforeEach(() => {
       requestUrls.push(request.url);
       requestHeaders.push(request.headers);
       requests.push((await request.json()) as Record<string, unknown>);
+      if (rejectAudio && JSON.stringify(requests.at(-1)?.messages).includes('input_audio')) {
+        return Response.json({ error: { message: 'Unsupported audio format', type: 'invalid_request_error' } }, { status: 400 });
+      }
       if (new URL(request.url).pathname.endsWith('/messages')) {
         const requestBody = requests.at(-1)!;
         const hasToolResult = JSON.stringify(requestBody.messages).includes('tool_result');
@@ -152,6 +165,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  catalogFetch.mockRestore();
+  nativeCatalog.clearNativeCatalogForTest();
   server.stop(true);
   closeSessionDb();
   delete process.env.NATIVE_BASE_URL;
@@ -186,11 +201,11 @@ describe('NativeProvider', () => {
     )).not.toHaveProperty('detail');
   });
 
-  it('stores supported image attachments as replayable base64 message parts', () => {
+  it('stores supported image attachments as replayable base64 message parts', async () => {
     const imagePath = path.join(root, 'pixel.png');
     fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 
-    expect(userMessage('inspect', [{ path: imagePath, mime: 'image/png', filename: 'pixel.png' }])).toEqual({
+    expect(await userMessage('inspect', [{ path: imagePath, mime: 'image/png', filename: 'pixel.png' }])).toEqual({
       role: 'user',
       content: [
         { type: 'text', text: 'inspect' },
@@ -199,7 +214,7 @@ describe('NativeProvider', () => {
     });
   });
 
-  it('gates file modalities by model capability and transport protocol', () => {
+  it('gates file modalities by model capability and transport protocol', async () => {
     const files = [
       { path: path.join(root, 'image.png'), mime: 'image/png', filename: 'image.png' },
       { path: path.join(root, 'document.pdf'), mime: 'application/pdf', filename: 'document.pdf' },
@@ -209,24 +224,25 @@ describe('NativeProvider', () => {
     ];
     for (const file of files) fs.writeFileSync(file.path, Buffer.from([1, 2, 3]));
 
-    const anthropic = userMessage('inspect', files, {
+    const anthropic = await userMessage('inspect', files, {
       protocol: 'anthropic-messages',
       inputModalities: ['text', 'image', 'pdf', 'audio', 'video'],
     });
-    const openai = userMessage('inspect', files, {
+    const openai = await userMessage('inspect', files, {
       protocol: 'openai-chat',
       inputModalities: ['text', 'image', 'pdf', 'audio', 'video'],
     });
 
     expect(JSON.stringify(anthropic)).toContain('document.pdf');
     expect(JSON.stringify(anthropic)).toContain('notes.txt');
-    expect(JSON.stringify(anthropic)).not.toContain('speech.mp3');
+    expect(JSON.stringify(anthropic)).toContain('adapter-does-not-support-audio');
+    expect(JSON.stringify(anthropic)).not.toContain('"mediaType":"audio/');
     expect(JSON.stringify(anthropic)).not.toContain('clip.mp4');
     expect(JSON.stringify(openai)).toContain('speech.mp3');
     expect(JSON.stringify(openai)).toContain('clip.mp4');
   });
 
-  it('only embeds audio for a known audio-capable model and supported format/protocol', () => {
+  it('only inspects audio for a known audio-capable model and supported protocol', async () => {
     const file = { path: path.join(root, 'speech.mp3'), mime: 'audio/mpeg', filename: 'speech.mp3' };
     fs.writeFileSync(file.path, Buffer.from([1, 2, 3]));
     const prompt = '[audio; audio/mpeg: speech.mp3 — saved to ' + file.path + ']';
@@ -236,14 +252,24 @@ describe('NativeProvider', () => {
       { protocol: 'openai-chat' as const, inputModalities: ['text'] },
       { protocol: 'anthropic-messages' as const, inputModalities: ['text', 'audio'] },
     ]) {
-      expect(userMessage(prompt, [file], model)).toEqual({ role: 'user', content: prompt });
+      const prepare = async (): Promise<never> => { throw new Error('Must not inspect disabled audio'); };
+      const message = await userMessage(prompt, [file], model, { prepare });
+      expect(typeof message.content).toBe('string');
+      expect(message.content).toContain(prompt);
+      expect(message.content).toContain('file-reference');
     }
     const audioModel = { protocol: 'openai-chat' as const, inputModalities: ['text', 'audio'] };
-    expect(userMessage(prompt, [file], audioModel)).toMatchObject({
-      content: [{ type: 'text', text: prompt }, { type: 'file', mediaType: 'audio/mpeg', data: 'AQID' }],
+    const prepare: typeof nativeAudio.prepareAudio = async (attachment) => ({
+      kind: 'inline', file: { ...attachment, mime: 'audio/mpeg' },
+      bytes: Buffer.from([1, 2, 3]), converted: true,
+    });
+    expect(await userMessage(prompt, [file], audioModel, { prepare })).toMatchObject({
+      content: [{ type: 'text', text: expect.stringContaining(prompt) }, { type: 'file', mediaType: 'audio/mpeg', data: 'AQID' }],
     });
     for (const mime of ['audio/ogg', 'audio/webm', 'audio/mp4']) {
-      expect(userMessage(prompt, [{ ...file, mime }], audioModel)).toEqual({ role: 'user', content: prompt });
+      expect(await userMessage(prompt, [{ ...file, mime }], audioModel, { prepare })).toMatchObject({
+        content: [{ type: 'text' }, { type: 'file', mediaType: 'audio/mpeg', data: 'AQID' }],
+      });
     }
   });
 
@@ -484,10 +510,18 @@ describe('NativeProvider', () => {
       ...await resolveModel(id),
       inputModalities: ['text', 'audio'],
     }));
+    const audio = spyOn(nativeAudio, 'prepareAudio').mockImplementation(async (file) => ({
+      kind: 'inline', file: { ...file, mime: 'audio/mpeg' }, bytes: Buffer.from([4, 5, 6]),
+      converted: false,
+    }));
     try {
       const file = { path: path.join(root, 'speech.mp3'), mime: 'audio/mpeg', filename: 'speech.mp3' };
       fs.writeFileSync(file.path, Buffer.from([4, 5, 6]));
-      const events = await collect(new NativeProvider({ model: 'local/audio-model' }), undefined, [file]);
+      const query = new NativeProvider({ model: 'local/audio-model' }).query({ prompt: 'listen', cwd: root, files: [file] });
+      query.push('another voice note', [{ ...file, mime: 'audio/ogg', filename: 'voice.ogg' }]);
+      query.end();
+      const events: ProviderEvent[] = [];
+      for await (const event of query.events) events.push(event);
       const init = events.find((event) => event.type === 'init');
       expect(init?.type).toBe('init');
       if (init?.type !== 'init') throw new Error('Missing continuation');
@@ -495,8 +529,82 @@ describe('NativeProvider', () => {
       for (const request of requests) {
         expect(JSON.stringify(request.messages)).toContain('"input_audio":{"data":"BAUG","format":"mp3"}');
       }
-      expect(requests).toHaveLength(2);
+      expect(requests).toHaveLength(3);
+      expect(audio).toHaveBeenCalledTimes(2);
     } finally {
+      audio.mockRestore();
+      catalog.mockRestore();
+    }
+  });
+
+  it('normalizes real Opus audio on initial and pushed turns, and replays without source files', async () => {
+    catalogModels = { local: { models: { 'audio-model': { modalities: { input: ['text', 'audio'], output: ['text'] } } } } };
+    const originalPath = path.join(root, 'voice.ogg');
+    const fixture = Bun.spawnSync(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.1',
+      '-c:a', 'libopus', originalPath]);
+    expect(fixture.exitCode).toBe(0);
+    const original = fs.readFileSync(originalPath);
+    const prepareAudio = nativeAudio.prepareAudio;
+    const tempDir = path.join(root, 'audio-temp');
+    fs.mkdirSync(tempDir);
+    const prepared: Array<Awaited<ReturnType<typeof prepareAudio>>> = [];
+    const audio = spyOn(nativeAudio, 'prepareAudio').mockImplementation(async (file, options) => {
+      const result = await prepareAudio(file, { ...options, tempDir });
+      prepared.push(result);
+      return result;
+    });
+    try {
+      const file = { path: originalPath, filename: 'voice.ogg', mime: 'audio/ogg' };
+      const query = new NativeProvider({ model: 'local/audio-model' }).query({ prompt: 'listen', cwd: root, files: [file] });
+      query.push('listen again', [file]);
+      query.end();
+      let continuation: string | undefined;
+      for await (const event of query.events) {
+        expect(event.type).not.toBe('error');
+        if (event.type === 'init') continuation = event.continuation;
+      }
+      expect(prepared).toMatchObject([
+        { kind: 'inline', converted: true },
+        { kind: 'inline', converted: true },
+      ]);
+      expect(fs.readFileSync(originalPath)).toEqual(original);
+      const firstAudio = prepared[0];
+      if (firstAudio?.kind !== 'inline') throw new Error('Expected real converted audio');
+      expect(firstAudio.file.mime).toBe('audio/mpeg');
+      expect(firstAudio.bytes.equals(original)).toBe(false);
+      expect(continuation).toBeDefined();
+      fs.unlinkSync(originalPath);
+      expect(fs.readdirSync(tempDir)).toEqual([]);
+      await collect(new NativeProvider({ model: 'local/audio-model' }), continuation);
+      expect(requests).toHaveLength(3);
+      for (const request of requests) {
+        expect(JSON.stringify(request.messages)).toContain(JSON.stringify({
+          input_audio: { data: firstAudio.bytes.toString('base64'), format: 'mp3' },
+        }).slice(1, -1));
+      }
+      expect(prepared).toHaveLength(2);
+    } finally {
+      audio.mockRestore();
+    }
+  });
+
+  it('surfaces an audio rejection without retrying the turn as a file reference', async () => {
+    rejectAudio = true;
+    const catalog = spyOn(nativeCatalog, 'resolveNativeModel').mockResolvedValue({
+      wireId: 'local/audio-model', providerId: 'local', modelId: 'audio-model',
+      baseURL: process.env.NATIVE_BASE_URL!, protocol: 'openai-chat', inputModalities: ['text', 'audio'],
+    });
+    const audio = spyOn(nativeAudio, 'prepareAudio').mockImplementation(async (file) => ({
+      kind: 'inline', file, bytes: Buffer.from([4, 5, 6]), converted: false,
+    }));
+    try {
+      const events = await collect(new NativeProvider({ model: 'local/audio-model' }), undefined, [{
+        path: '/voice.mp3', filename: 'voice.mp3', mime: 'audio/mpeg',
+      }]);
+      expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringContaining('Unsupported audio format') }));
+      expect(requests).toHaveLength(1);
+    } finally {
+      audio.mockRestore();
       catalog.mockRestore();
     }
   });

@@ -6,6 +6,7 @@ import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
+import { audioReferencePrompt } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import { pickActivityDetail } from './types.js';
 
@@ -493,7 +494,7 @@ export class ClaudeProvider implements AgentProvider {
 
   query(input: QueryInput): AgentQuery {
     const stream = new MessageStream();
-    stream.push(input.prompt);
+    stream.push(audioReferencePrompt(input.prompt, input.files, 'adapter-does-not-support-audio'));
 
     const instructions = input.systemContext?.instructions;
 
@@ -663,9 +664,9 @@ export class ClaudeProvider implements AgentProvider {
     }
 
     return {
-      push: (msg, _files, options) => {
+      push: (msg, files, options) => {
         if (options?.tools === 'disabled') return false;
-        stream.push(msg);
+        stream.push(audioReferencePrompt(msg, files, 'adapter-does-not-support-audio'));
         return true;
       },
       end: () => stream.end(),
