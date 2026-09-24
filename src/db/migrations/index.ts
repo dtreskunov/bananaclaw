@@ -31,6 +31,7 @@ import { migration030 } from './030-shared-web-destinations.js';
 import { migration031 } from './031-ui-private-web-sessions.js';
 import { migration032 } from './032-agent-email.js';
 import { migration033 } from './033-thread-forks.js';
+import { migration034 } from './034-voice-input-backend.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 import { moduleContainerConfigsDisabledSkills } from './module-container-configs-disabled-skills.js';
@@ -98,6 +99,7 @@ export const migrations: Migration[] = [
   moduleContainerConfigsSmallModel,
   moduleContainerConfigsUpstreamProvider,
   moduleContainerConfigsDisabledSkills,
+  migration034,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a

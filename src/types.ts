@@ -49,6 +49,10 @@ export interface ContainerConfigRow {
   cli_scope: string; // 'disabled' | 'group' | 'global'
   voice_mode: string; // 'off' | 'transcribe' | 'audio'
   transcription_model: string | null;
+  /** Host-only web microphone backend; null inherits the server default. */
+  voice_input_backend?: string | null;
+  /** Host-only web microphone enable flag; 1 by default. */
+  voice_input_enabled?: 0 | 1;
   /**
    * Provider-knob bag (JSON). Freeform key/value pairs the active provider
    * may interpret (e.g. `max_tokens`, `temperature`, `top_p`,

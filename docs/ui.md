@@ -72,6 +72,74 @@ Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visib
 
 Everything else falls back to a download link.
 
+### Live voice input
+
+The microphone starts live dictation directly into the composer. Speech appears
+as revisable text; **silence never sends a message**. While listening, the
+microphone becomes a stopwatch: press it to stop capture and finalize the text.
+A spinner indicates finalization, then the microphone returns and the draft
+can be edited normally. Press it again to dictate more at the cursor.
+The existing Send button finalizes active dictation before submitting once.
+There is no separate voice panel. Existing text and attachments are retained.
+Pressing the connecting indicator cancels startup without changing the draft.
+
+Voice works with every agent model and with question-card text answers. It is
+separate from attaching an audio file for a model to hear. Browser speech
+recognition and the old web `/voice/transcribe` upload endpoint are replaced by
+streaming STT; incoming channel voice-note transcription is unchanged.
+
+The initial backend is ElevenLabs `scribe_v2_realtime`, accessed directly from
+the **host** through AI SDK's experimental streaming transcription API. Use
+Node **22 or newer**. Configure `ELEVENLABS_API_KEY` in the host's restricted
+`.env` file or service environment. Never put the key in group files, container
+configuration, or a browser build. The host reads the key explicitly and does
+not pass it to agent containers. This is a host-only credential exception to
+agent-side OneCLI routing; WebSocket STT does not go through OneCLI.
+
+In Agent Settings, voice input has a separate enable toggle and a **Voice input
+backend** selector for the server default or ElevenLabs. The database stores
+`voice_input_enabled` separately from the nullable `voice_input_backend`;
+`NULL` selects the server default, and backend IDs are not restricted by a
+database provider whitelist. The host checks whether a backend is supported.
+The server default is ElevenLabs; set `DEFAULT_VOICE_INPUT_BACKEND=disabled`
+to disable inherited voice input by default. A missing key, unsupported backend,
+or invalid server default shows an unavailable status rather than falling back
+to another provider. Voice setting changes affect the next voice session and
+do not restart agents.
+When voice input is not ready, the disabled microphone shows
+"Live voice input is not configured" as a tooltip instead of an inline notice;
+Agent Settings retains the detailed availability reason.
+Legacy `transcription_model` / `voice_mode` settings retain their non-web
+audio-message meaning and are not converted into streaming backend IDs.
+
+Microphone capture requires HTTPS (or localhost) and browser permission. Set
+`UI_BASE_URL` to the actual external UI URL: the voice WebSocket checks the
+browser Origin against it. Reverse proxies must forward WebSocket upgrades.
+The host accepts 16 kHz mono PCM over an authenticated, group-authorized
+connection. Limits are one active session per user, eight globally, five
+minutes per capture, and bounded audio queues. Stopping and starting dictation
+creates a fresh stream. Finalization times out after ten seconds instead of sending incomplete
+text.
+
+Hiding the page or leaving a conversation releases the microphone. Provider
+errors, disconnects, and quota exhaustion preserve recovered, editable text and
+show an error but cancel automatic submission; review the text before pressing
+Send again or starting another dictation.
+No automatic paid fallback is configured. Provider free allowances and
+spending settings are managed in the ElevenLabs account, not guaranteed by the
+application.
+
+Audio and provisional transcripts are not persisted by the host. Audio is sent
+to ElevenLabs; only submitted text enters the chat journal. The request disables
+provider logging where supported; provider retention and account terms still
+apply. Spoken editing commands and assistant speech playback are not included.
+
+After upgrading, install the updated host lockfile and rebuild both the host
+and the chat UI, then restart the host. No agent image rebuild is needed.
+To roll back the UI behavior, restore the previous application version; the new
+nullable backend setting is additive and legacy transcription configuration
+remains intact.
+
 ### Feedback notifications
 
 Error toasts across the UI remain visible until explicitly dismissed. Their text

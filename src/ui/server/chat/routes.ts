@@ -64,6 +64,7 @@ import {
   type SkillsAdminResult,
 } from './skills-admin.js';
 import { handleWriteRequest } from './write.js';
+import { resolveVoiceInputConfig } from './voice-input-config.js';
 
 export { handleChatUpgrade };
 
@@ -187,6 +188,7 @@ function redirectToLogin(ctx: Ctx): void {
 // Static + public.
 on('GET', '/', (ctx) => serveShell(ctx, 'index.html'));
 on('GET', '/index.html', (ctx) => serveShell(ctx, 'index.html'));
+on('GET', '/voice-worklet.js', (ctx) => serveStatic(ctx, 'voice-worklet.js'));
 // Web Share Target landing — the manifest points /ui/chat/share here.
 // We serve the SPA shell; the client reads the share params from the URL.
 on('GET', '/share', (ctx) => serveShell(ctx, 'index.html'));
@@ -730,12 +732,14 @@ interface SyncResponse {
   questions?: QuestionDto[];
   threads?: ThreadSummary[];
   threadMessages?: HistoryMessage[];
+  voiceInput?: ReturnType<typeof resolveVoiceInputConfig>;
 }
 
 function handleSync(ctx: Ctx, userId: string): void {
   const out: SyncResponse = { approvals: listApprovalsForUser(userId) };
   const gid = ctx.url.searchParams.get('gid') || '';
   if (gid && canAccessAgentGroup(userId, gid).allowed && getAgentGroup(gid)) {
+    out.voiceInput = resolveVoiceInputConfig(gid);
     // Elevated users also see every non-web thread. Shared web threads are
     // already visible to every member through listAllThreadsForUser.
     const elevated = isOwner(userId) || isGlobalAdmin(userId);

@@ -77,6 +77,7 @@ import { resolveUpstreamForWireId } from './models-dev-catalog.js';
 import { listAvailableSkills, type AvailableSkill } from './skill-catalog.js';
 import { groupSkillRoots } from '../../../skills/registry.js';
 import { deriveVoiceMode } from './voice-mode.js';
+import { defaultVoiceInputBackend, resolveVoiceInputConfig, type VoiceInputConfig } from './voice-input-config.js';
 import { allocateSiteSlug, isValidSlug, pagesBaseDomain, pagesEnabled, siteFqdn, siteUrl } from '../pages/site.js';
 
 // ── allowed scalar config fields (mirrors ncl groups config update) ───────
@@ -91,6 +92,8 @@ const SCALAR_FIELDS = [
   'max_messages_per_prompt',
   'cli_scope',
   'transcription_model',
+  'voice_input_backend',
+  'voice_input_enabled',
 ] as const;
 
 // Provider list is parsed once at startup from the agent-runner's
@@ -242,7 +245,9 @@ interface SettingsResponse {
     | 'cli_scope'
     | 'voice_mode'
     | 'transcription_model'
-  >;
+    | 'voice_input_backend'
+  > & { voice_input_enabled: boolean };
+  voiceInput: VoiceInputConfig;
   /** Freeform provider knobs (e.g. `{ max_tokens: 8192 }`). Edited via PATCH /model-params. */
   modelParams: Record<string, unknown>;
   /** Installed packages — image rebuild required to take effect. */
@@ -262,6 +267,7 @@ interface SettingsResponse {
     models: Record<string, string | null>;
     image_tag: string | null;
     transcription_model: string | null;
+    voice_input_backend: VoiceInputConfig['backend'];
   };
   validProviders: readonly string[];
   validCliScopes: readonly string[];
@@ -360,7 +366,10 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
       cli_scope: cfg.cli_scope,
       voice_mode: cfg.voice_mode,
       transcription_model: cfg.transcription_model,
+      voice_input_backend: cfg.voice_input_backend ?? null,
+      voice_input_enabled: cfg.voice_input_enabled !== 0,
     },
+    voiceInput: resolveVoiceInputConfig(gid),
     modelParams: parseModelParams(cfg.model_params),
     packages: {
       apt: parseStringArray(cfg.packages_apt),
@@ -376,6 +385,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
       models: defaultModels,
       image_tag: defaultImage,
       transcription_model: defaultTranscriptionModel,
+      voice_input_backend: defaultVoiceInputBackend(),
     },
     validProviders: SELECTABLE_PROVIDERS,
     validCliScopes: VALID_CLI_SCOPES,
@@ -428,6 +438,8 @@ async function handlePatchSettings(
       | 'cli_scope'
       | 'voice_mode'
       | 'transcription_model'
+      | 'voice_input_backend'
+      | 'voice_input_enabled'
     >
   > = {};
   const isElevated = isOwner(actorUserId) || isGlobalAdmin(actorUserId);
@@ -533,6 +545,16 @@ async function handlePatchSettings(
         throw new BadRequest(`provider must be one of: ${VALID_PROVIDERS.join(', ')}`);
       }
       updates.provider = v;
+    } else if (key === 'voice_input_backend') {
+      if (raw !== null && typeof raw !== 'string') {
+        throw new BadRequest('voice_input_backend must be null or a backend ID string');
+      }
+      updates.voice_input_backend = raw;
+    } else if (key === 'voice_input_enabled') {
+      if (typeof raw !== 'boolean') {
+        throw new BadRequest('voice_input_enabled must be a boolean');
+      }
+      updates.voice_input_enabled = raw ? 1 : 0;
     } else if (key === 'cli_scope') {
       if (isCleared) {
         // cli_scope is NOT NULL in container_configs (TEXT DEFAULT 'group')

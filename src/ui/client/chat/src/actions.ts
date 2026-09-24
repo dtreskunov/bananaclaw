@@ -1,5 +1,7 @@
 // Action orchestrators. Mutate signals + perform IO.
 import { batch, type Signal } from '@preact/signals';
+import { voice } from './voice-audio';
+import { cancelRecording } from './recorder';
 import {
   groupId,
   threads,
@@ -8,6 +10,7 @@ import {
   messagingGroupId,
   canSend,
   voiceMode,
+  voiceInput,
   chatMessages,
   chatStatus,
   chatLoading,
@@ -73,6 +76,7 @@ import type {
   PendingFile,
   PendingApprovalDto,
   PendingQuestionDto,
+  VoiceInputCapability,
   WsPayload,
   SearchResult,
   SuggestedAction,
@@ -350,6 +354,9 @@ export function clearSearch(): void {
 
 // ── chat ────────────────────────────────────────────────────────────
 export function clearChat(): void {
+  voice.detach();
+  cancelRecording();
+  voiceInput.value = { backend: 'disabled', ready: false, reason: 'Waiting for chat configuration.' };
   refs.chatGeneration++;
   batch(() => {
     chatMessages.value = [];
@@ -419,6 +426,7 @@ interface SyncResponse {
   questions?: PendingQuestionDto[];
   threads?: Thread[];
   threadMessages?: ServerMessage[];
+  voiceInput?: VoiceInputCapability;
 }
 
 /** Returns whether `threads` now holds a fresh server list for the current group. */
@@ -449,6 +457,11 @@ export async function runSync(
     return false;
   }
   if (requestId !== refs.syncRequestId) return false;
+  if (gid && groupId.value === gid && tid === threadId.value && res.voiceInput) {
+    voiceInput.value = res.voiceInput;
+    if (!res.voiceInput.ready)
+      voice.interrupt(res.voiceInput.reason || 'Live voice input is no longer available. Current text has been kept.');
+  }
   if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
   if (gid && groupId.value === gid && tid === threadId.value && Array.isArray(res.questions)) {
     const serverIds = new Set(res.questions.map((question) => question.questionId));
@@ -640,6 +653,9 @@ interface ChatStartResponse {
 export async function openChat(gid: string, resumeTid: string | null, opts: ThreadCtx | null): Promise<void> {
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
   if (!resumeTid && refs.newChatInFlight) return;
+  voice.detach();
+  cancelRecording();
+  voiceInput.value = { backend: 'disabled', ready: false, reason: 'Waiting for chat configuration.' };
   const generation = ++refs.chatGeneration;
   if (refs.ws) {
     try {
@@ -892,6 +908,11 @@ function connectChatWs(ctx: ChatSocketContext): void {
       if (payload.threadId !== tid || !Array.isArray(payload.messages)) return;
       replaceIncomingMessages(payload.messages);
       voiceMode.value = payload.voiceMode || 'off';
+      voiceInput.value = payload.voiceInput || {
+        backend: 'disabled',
+        ready: false,
+        reason: 'Live voice input is not configured.',
+      };
       canSend.value = payload.canSend === true;
       return;
     }
@@ -1802,8 +1823,8 @@ export async function respondApproval(approvalId: string, value: string): Promis
   }
 }
 
-export async function respondQuestion(questionId: string, value: string): Promise<void> {
-  if (respondingQuestionIds.value.has(questionId)) return;
+export async function respondQuestion(questionId: string, value: string): Promise<boolean> {
+  if (respondingQuestionIds.value.has(questionId)) return false;
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);
   respondingQuestionIds.value = next;
@@ -1820,6 +1841,7 @@ export async function respondQuestion(questionId: string, value: string): Promis
       { value },
     );
     if (!res.ok) throw new Error(res.data?.error || 'HTTP ' + res.status);
+    return true;
   } catch (err) {
     console.error('question respond failed', err);
     chatStatus.value = 'response failed: ' + (err instanceof Error ? err.message : String(err));
@@ -1829,6 +1851,7 @@ export async function respondQuestion(questionId: string, value: string): Promis
     runSync().catch(() => {
       /* ignore */
     });
+    return false;
   } finally {
     const cleared = new Set(respondingQuestionIds.value);
     cleared.delete(questionId);

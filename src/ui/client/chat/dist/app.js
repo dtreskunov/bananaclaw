@@ -15542,6 +15542,7 @@ var channelType = y3("web");
 var messagingGroupId = y3(null);
 var canSend = y3(true);
 var voiceMode = y3("off");
+var voiceInput = y3({ backend: "disabled", ready: false, reason: "Live voice input is not configured." });
 var chatMessages = y3([]);
 var chatStatus = y3("");
 var chatLoading = y3(false);
@@ -15639,6 +15640,434 @@ var BRAND = {
   themeColor: g4.themeColor || "#151515",
   backgroundColor: g4.backgroundColor || "#0d1117"
 };
+
+// src/voice.ts
+function replaceSegment(segments, next) {
+  const index = segments.findIndex((segment) => segment.id === next.id);
+  if (index < 0) return [...segments, next];
+  const previous = segments[index];
+  if (previous.sequence >= next.sequence || previous.final && !next.final) return segments;
+  return segments.map((segment, i5) => i5 === index ? next : segment);
+}
+function insertVoiceText(prefix, text, suffix) {
+  if (!text) return prefix + suffix;
+  return prefix + (prefix && !/\s$/.test(prefix) ? " " : "") + text + (suffix && !/^\s/.test(suffix) ? " " : "") + suffix;
+}
+var initialState = () => ({
+  phase: "idle",
+  target: null,
+  elapsedMs: 0,
+  error: "",
+  sending: false
+});
+var VoiceController = class {
+  constructor(deps) {
+    this.deps = deps;
+  }
+  state = y3(initialState());
+  target = null;
+  generation = 0;
+  socket = null;
+  capture = null;
+  captureAbort = null;
+  timeout = null;
+  timer = null;
+  segments = [];
+  prefix = "";
+  suffix = "";
+  intent = "stop";
+  finishSent = false;
+  update(patch) {
+    this.state.value = { ...this.state.value, ...patch };
+  }
+  current(generation2) {
+    return this.generation === generation2 && !!this.target?.isCurrent();
+  }
+  start(target, caret = target.getText().length) {
+    if (this.state.value.sending || !["idle", "error"].includes(this.state.value.phase)) return;
+    this.detach();
+    this.target = target;
+    this.update({ target: target.key });
+    this.connect(caret);
+  }
+  connect(caret) {
+    const target = this.target;
+    const draft = target.getText();
+    this.prefix = draft.slice(0, caret);
+    this.suffix = draft.slice(caret);
+    this.segments = [];
+    this.intent = "stop";
+    this.finishSent = false;
+    const generation2 = ++this.generation;
+    this.update({ phase: "connecting", error: "" });
+    const base = this.deps.origin().replace(/^http/, "ws");
+    const params = new URLSearchParams();
+    if (target.channelType && target.channelType !== "web") {
+      params.set("channel", target.channelType);
+      if (target.messagingGroupId) params.set("mg", target.messagingGroupId);
+    }
+    const query = params.size ? `?${params.toString()}` : "";
+    let socket;
+    try {
+      socket = this.deps.socket(`${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream${query}`);
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : "Could not connect to voice input.");
+      return;
+    }
+    this.socket = socket;
+    this.timeout = setTimeout(() => {
+      if (this.current(generation2)) this.fail("Voice input did not become ready. Try again.");
+    }, 15e3);
+    socket.onmessage = (event) => {
+      if (!this.current(generation2)) return;
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        this.fail("Invalid voice server response.");
+        return;
+      }
+      if (!message || typeof message !== "object") {
+        this.fail("Invalid voice server response.");
+        return;
+      }
+      if (message.type === "ready" && this.state.value.phase === "connecting") {
+        if (this.timeout) clearTimeout(this.timeout);
+        this.timeout = null;
+        this.update({ phase: "listening" });
+        const captureAbort = new AbortController();
+        this.captureAbort = captureAbort;
+        void this.deps.capture((chunk) => {
+          if (!this.current(generation2) || this.finishSent || socket.readyState !== 1) return;
+          if (socket.bufferedAmount > 1024 * 1024) {
+            this.fail("Voice connection is too slow. Current text has been kept.");
+            return;
+          }
+          try {
+            for (let offset = 0; offset < chunk.byteLength; offset += 32768) {
+              socket.send(chunk.slice(offset, offset + 32768));
+            }
+          } catch {
+            this.fail("Voice connection was interrupted. Current text has been kept.");
+          }
+        }, (message2) => {
+          if (this.current(generation2)) this.fail(message2);
+        }, captureAbort.signal).then((capture) => {
+          if (!this.current(generation2) || this.state.value.phase !== "listening") {
+            capture.cancel();
+            return;
+          }
+          this.capture = capture;
+          const started = Date.now();
+          const elapsed = this.state.value.elapsedMs;
+          this.timer = setInterval(() => this.update({ elapsedMs: elapsed + Date.now() - started }), 250);
+        }).catch((error) => {
+          if (this.current(generation2)) this.fail(error instanceof Error ? error.message : "Microphone unavailable.");
+        });
+      } else if (message.type === "transcript" && (this.state.value.phase === "listening" || this.state.value.phase === "finalizing")) {
+        if (typeof message.id !== "string" || typeof message.sequence !== "number" || !Number.isSafeInteger(message.sequence) || typeof message.text !== "string" || typeof message.final !== "boolean") {
+          this.fail("Invalid transcript response. Current text has been kept.");
+          return;
+        }
+        this.segments = replaceSegment(this.segments, message);
+        const text = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
+        target.setText(insertVoiceText(this.prefix, text, this.suffix));
+      } else if (message.type === "finished" && this.state.value.phase === "finalizing" && this.finishSent) {
+        if (this.intent === "send" && !this.segments.some((segment) => segment.text.trim()) || this.segments.some((segment) => segment.text.trim() && !segment.final)) {
+          this.fail("No complete transcript was received. Review current text before using it.");
+          return;
+        }
+        const intent = this.intent;
+        this.release();
+        if (intent === "send") void this.sendDraft();
+        else this.detach();
+      } else if (message.type === "error") {
+        this.fail(typeof message.message === "string" ? message.message : "Voice input failed. Current text has been kept.");
+      }
+    };
+    socket.onerror = () => {
+      if (this.current(generation2)) this.fail("Voice connection failed. Current text has been kept.");
+    };
+    socket.onclose = () => {
+      if (this.current(generation2)) this.fail("Voice connection closed before finalization. Current text has been kept.");
+    };
+  }
+  stop() {
+    if (this.state.value.sending) return;
+    if (this.state.value.phase === "connecting") this.detach();
+    else this.finalize("stop");
+  }
+  send() {
+    if (this.state.value.phase === "listening") this.finalize("send");
+    else if (this.state.value.phase === "error") void this.sendDraft();
+  }
+  async sendDraft() {
+    const target = this.target;
+    if (!target?.isCurrent() || this.state.value.sending) return;
+    this.update({ sending: true });
+    const generation2 = this.generation;
+    try {
+      const sent = await target.send();
+      if (!this.current(generation2)) return;
+      if (sent) this.detach();
+      else this.fail("Message was not sent. Your draft is still available.");
+    } catch {
+      if (this.current(generation2)) this.fail("Message was not sent. Your draft is still available.");
+    } finally {
+      if (this.current(generation2)) this.update({ sending: false });
+    }
+  }
+  finalize(intent) {
+    if (this.state.value.phase !== "listening") return;
+    this.intent = intent;
+    this.update({ phase: "finalizing" });
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    const generation2 = this.generation;
+    this.timeout = setTimeout(() => {
+      if (this.current(generation2)) this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.");
+    }, 2e4);
+    const capture = this.capture;
+    void (capture?.stop() ?? Promise.resolve()).then(() => {
+      if (!this.current(generation2)) return;
+      this.capture = null;
+      this.finishSent = true;
+      this.socket?.send(JSON.stringify({ type: "finish" }));
+    }).catch(() => {
+      if (this.current(generation2)) this.fail("Could not finalize voice input. Current text has been kept.");
+    });
+  }
+  /** Navigation/unmount invalidates callbacks before stopping hardware. No automatic resume. */
+  detach() {
+    this.release(true);
+    this.target = null;
+    this.state.value = initialState();
+  }
+  interrupt(reason = "Microphone stopped because this page is no longer active. Review current text before sending or dictating again.") {
+    if (["connecting", "listening", "finalizing"].includes(this.state.value.phase)) {
+      this.fail(reason);
+    }
+  }
+  fail(error) {
+    this.release(true);
+    this.intent = "stop";
+    this.update({ phase: "error", error, sending: false });
+  }
+  release(cancel = false) {
+    ++this.generation;
+    if (this.timeout) clearTimeout(this.timeout);
+    if (this.timer) clearInterval(this.timer);
+    this.timeout = this.timer = null;
+    this.captureAbort?.abort();
+    this.captureAbort = null;
+    this.capture?.cancel();
+    this.capture = null;
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
+      socket.onmessage = socket.onclose = socket.onerror = null;
+      try {
+        if (cancel && socket.readyState === 1) socket.send(JSON.stringify({ type: "cancel" }));
+        socket.close();
+      } catch {
+      }
+    }
+  }
+};
+
+// src/voice-audio.ts
+function voiceBrowserReason() {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return "Microphone access requires a supported browser and HTTPS.";
+  if (typeof AudioContext === "undefined" || typeof AudioWorkletNode === "undefined") return "Live voice requires AudioWorklet support in this browser.";
+  return null;
+}
+async function captureVoice(onChunk, onError, signal) {
+  const reason = voiceBrowserReason();
+  if (reason) throw new Error(reason);
+  const context = new AudioContext({ sampleRate: 16e3 });
+  let stream2 = null;
+  let node = null;
+  let source = null;
+  let closed = false;
+  const stopTracks = () => {
+    for (const track of stream2?.getTracks() ?? []) {
+      track.onended = null;
+      try {
+        track.stop();
+      } catch {
+      }
+    }
+  };
+  const cancel = () => {
+    if (closed) return;
+    closed = true;
+    signal?.removeEventListener("abort", cancel);
+    stopTracks();
+    try {
+      source?.disconnect();
+    } catch {
+    }
+    try {
+      node?.disconnect();
+    } catch {
+    }
+    try {
+      void context.close().catch(() => {
+      });
+    } catch {
+    }
+  };
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
+  const checkCancelled = () => {
+    if (!closed) return;
+    stopTracks();
+    throw new Error("Microphone capture was cancelled.");
+  };
+  try {
+    checkCancelled();
+    await context.resume();
+    checkCancelled();
+    await context.audioWorklet.addModule("/ui/chat/voice-worklet.js");
+    checkCancelled();
+    stream2 = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, sampleRate: 16e3, echoCancellation: true, noiseSuppression: true }
+    });
+    checkCancelled();
+    node = new AudioWorkletNode(context, "voice-pcm");
+    source = context.createMediaStreamSource(stream2);
+    source.connect(node);
+    node.connect(context.destination);
+    node.port.onmessage = ({ data }) => {
+      if (!closed && data instanceof ArrayBuffer) onChunk(data);
+    };
+    node.onprocessorerror = () => onError("Audio capture failed. Current text has been kept.");
+    for (const track of stream2.getTracks()) track.onended = () => onError("Microphone disconnected. Current text has been kept.");
+    return {
+      cancel,
+      stop: () => new Promise((resolve, reject) => {
+        if (closed) {
+          resolve();
+          return;
+        }
+        const timeout = setTimeout(() => {
+          cancel();
+          reject(new Error("Audio flush timed out"));
+        }, 1e3);
+        node.port.onmessage = ({ data }) => {
+          if (data instanceof ArrayBuffer) onChunk(data);
+          else if (data === "flushed") {
+            clearTimeout(timeout);
+            cancel();
+            resolve();
+          }
+        };
+        try {
+          node.port.postMessage("finish");
+        } catch (error) {
+          clearTimeout(timeout);
+          cancel();
+          reject(error);
+        }
+      })
+    };
+  } catch (error) {
+    cancel();
+    throw error;
+  }
+}
+var voice = new VoiceController({
+  socket: (url) => new WebSocket(url),
+  capture: captureVoice,
+  origin: () => location.origin
+});
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) voice.interrupt();
+  });
+  window.addEventListener("pagehide", () => voice.interrupt());
+}
+
+// src/recorder.ts
+var isRecording = y3(false);
+var recordingDuration = y3(0);
+function hasGetUserMedia() {
+  return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+}
+var recorder = null;
+var stream = null;
+var timer = null;
+var generation = 0;
+var startedAt = 0;
+var chunks = [];
+async function startRecording() {
+  if (isRecording.value || !hasGetUserMedia() || typeof MediaRecorder === "undefined") return false;
+  const token = ++generation;
+  isRecording.value = true;
+  try {
+    const next = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (token !== generation) {
+      next.getTracks().forEach((track) => track.stop());
+      return false;
+    }
+    stream = next;
+    const mimeType = ["audio/ogg;codecs=opus", "audio/mp4;codecs=opus", "audio/mp4", "audio/webm;codecs=opus"].find((type) => MediaRecorder.isTypeSupported(type));
+    recorder = new MediaRecorder(next, mimeType ? { mimeType } : void 0);
+    chunks = [];
+    recorder.ondataavailable = ({ data }) => {
+      if (token === generation && data.size) chunks.push(data);
+    };
+    recorder.onerror = () => {
+      if (token === generation) cancelRecording();
+    };
+    recorder.start(250);
+    startedAt = Date.now();
+    timer = setInterval(() => {
+      recordingDuration.value = Date.now() - startedAt;
+    }, 250);
+    return true;
+  } catch {
+    if (token === generation) cancelRecording();
+    return false;
+  }
+}
+function stopRecording() {
+  return new Promise((resolve) => {
+    if (!recorder || recorder.state === "inactive") {
+      cancelRecording();
+      resolve(null);
+      return;
+    }
+    const active = recorder;
+    const token = generation;
+    active.onstop = () => {
+      if (token !== generation) {
+        resolve(null);
+        return;
+      }
+      const durationMs = Date.now() - startedAt;
+      const blob = new Blob(chunks, { type: active.mimeType || "audio/webm" });
+      cleanup();
+      resolve(durationMs < 2e3 ? null : { blob, durationMs });
+    };
+    active.stop();
+  });
+}
+function cancelRecording() {
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+  cleanup();
+}
+function cleanup() {
+  generation++;
+  if (timer) clearInterval(timer);
+  timer = null;
+  stream?.getTracks().forEach((track) => track.stop());
+  stream = null;
+  recorder = null;
+  chunks = [];
+  isRecording.value = false;
+  recordingDuration.value = 0;
+}
 
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
@@ -17544,7 +17973,7 @@ function urlBase64ToUint8Array(base64String) {
 // src/reconnect-countdown.ts
 function startReconnectCountdown(delayMs, onTick, onElapsed) {
   const deadline = Date.now() + delayMs;
-  let timer = null;
+  let timer2 = null;
   let cancelled = false;
   const tick = () => {
     if (cancelled) return;
@@ -17555,12 +17984,12 @@ function startReconnectCountdown(delayMs, onTick, onElapsed) {
       return;
     }
     onTick(Math.ceil(remaining / 1e3));
-    timer = setTimeout(tick, Math.min(1e3, remaining));
+    timer2 = setTimeout(tick, Math.min(1e3, remaining));
   };
   tick();
   return () => {
     cancelled = true;
-    if (timer) clearTimeout(timer);
+    if (timer2) clearTimeout(timer2);
   };
 }
 function runReconnectImmediately(cancelCountdown, reconnect) {
@@ -17571,14 +18000,14 @@ function runReconnectImmediately(cancelCountdown, reconnect) {
 }
 function startConnectionTimeout(delayMs, onElapsed) {
   let active = true;
-  const timer = setTimeout(() => {
+  const timer2 = setTimeout(() => {
     if (!active) return;
     active = false;
     onElapsed();
   }, delayMs);
   return () => {
     active = false;
-    clearTimeout(timer);
+    clearTimeout(timer2);
   };
 }
 
@@ -17820,7 +18249,7 @@ async function searchThreads(gid, query) {
     clearSearch();
     return;
   }
-  const generation = ++searchGeneration;
+  const generation2 = ++searchGeneration;
   searchController?.abort();
   const controller = new AbortController();
   searchController = controller;
@@ -17833,17 +18262,17 @@ async function searchThreads(gid, query) {
   try {
     const url = `api/groups/${encodeURIComponent(gid)}/chat/search?q=${encodeURIComponent(query)}`;
     const { results } = await api(url, { signal: controller.signal });
-    if (generation !== searchGeneration || controller.signal.aborted) return;
+    if (generation2 !== searchGeneration || controller.signal.aborted) return;
     searchResults.value = results ?? [];
   } catch (err) {
-    if (generation !== searchGeneration || controller.signal.aborted) return;
+    if (generation2 !== searchGeneration || controller.signal.aborted) return;
     console.error("search failed", err);
     n2(() => {
       searchError.value = "Search failed. Check your connection and try again.";
       searchResults.value = [];
     });
   } finally {
-    if (generation === searchGeneration) {
+    if (generation2 === searchGeneration) {
       searchLoading.value = false;
       searchController = null;
     }
@@ -17862,6 +18291,9 @@ function clearSearch() {
   });
 }
 function clearChat() {
+  voice.detach();
+  cancelRecording();
+  voiceInput.value = { backend: "disabled", ready: false, reason: "Waiting for chat configuration." };
   refs.chatGeneration++;
   n2(() => {
     chatMessages.value = [];
@@ -17935,6 +18367,10 @@ async function runSync(options = {}) {
     return false;
   }
   if (requestId !== refs.syncRequestId) return false;
+  if (gid && groupId.value === gid && tid === threadId.value && res.voiceInput) {
+    voiceInput.value = res.voiceInput;
+    if (!res.voiceInput.ready) voice.interrupt(res.voiceInput.reason || "Live voice input is no longer available. Current text has been kept.");
+  }
   if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
   if (gid && groupId.value === gid && tid === threadId.value && Array.isArray(res.questions)) {
     const serverIds = new Set(res.questions.map((question) => question.questionId));
@@ -18069,7 +18505,10 @@ function applyReaction(targetId, emoji, ts) {
 async function openChat(gid, resumeTid, opts) {
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
   if (!resumeTid && refs.newChatInFlight) return;
-  const generation = ++refs.chatGeneration;
+  voice.detach();
+  cancelRecording();
+  voiceInput.value = { backend: "disabled", ready: false, reason: "Waiting for chat configuration." };
+  const generation2 = ++refs.chatGeneration;
   if (refs.ws) {
     try {
       refs.ws.close();
@@ -18129,11 +18568,11 @@ async function openChat(gid, resumeTid, opts) {
   if (resumeTid) {
     writeHash();
     if (ct === "web") {
-      connectChatWs({ gid, tid: resumeTid, mg, generation });
+      connectChatWs({ gid, tid: resumeTid, mg, generation: generation2 });
       void runSync();
     } else {
       await runSync({ replaceThreadMessages: true });
-      if (generation !== refs.chatGeneration) return;
+      if (generation2 !== refs.chatGeneration) return;
       chatLoading.value = false;
       chatStatus.value = "";
     }
@@ -18149,7 +18588,7 @@ async function openChat(gid, resumeTid, opts) {
     chatLoading.value = true;
     chatStatus.value = "syncing\u2026";
     writeHash();
-    connectChatWs({ gid, tid: empty.threadId, mg: empty.messagingGroupId || null, generation });
+    connectChatWs({ gid, tid: empty.threadId, mg: empty.messagingGroupId || null, generation: generation2 });
     void runSync();
     focusComposerSoon({ mobile: true });
     return;
@@ -18172,11 +18611,11 @@ async function openChat(gid, resumeTid, opts) {
     started = await r4.json();
   } catch (err) {
     const m6 = err instanceof Error ? err.message : String(err);
-    if (generation === refs.chatGeneration) chatStatus.value = "failed to start chat: " + m6;
+    if (generation2 === refs.chatGeneration) chatStatus.value = "failed to start chat: " + m6;
     refs.newChatInFlight = false;
     return;
   }
-  if (generation !== refs.chatGeneration) {
+  if (generation2 !== refs.chatGeneration) {
     refs.newChatInFlight = false;
     return;
   }
@@ -18200,7 +18639,7 @@ async function openChat(gid, resumeTid, opts) {
     gid,
     tid: started.threadId,
     mg: started.messagingGroupId || null,
-    generation
+    generation: generation2
   });
   void runSync();
   focusComposerSoon({ mobile: true });
@@ -18208,15 +18647,15 @@ async function openChat(gid, resumeTid, opts) {
 }
 var WS_CONNECT_TIMEOUT_MS = 1e4;
 function connectChatWs(ctx2) {
-  const { gid, tid, mg, generation } = ctx2;
-  if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
+  const { gid, tid, mg, generation: generation2 } = ctx2;
+  if (generation2 !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   let wsUrl = `${proto}//${location.host}/ui/chat/api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/ws`;
   if (mg) wsUrl += `?mg=${encodeURIComponent(mg)}`;
   const ws = new WebSocket(wsUrl);
   refs.ws = ws;
   refs.wsConnectCancel = startConnectionTimeout(WS_CONNECT_TIMEOUT_MS, () => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    if (refs.ws !== ws || generation2 !== refs.chatGeneration) return;
     refs.wsConnectCancel = null;
     chatReady.value = false;
     chatStatus.value = "connection timed out";
@@ -18226,7 +18665,7 @@ function connectChatWs(ctx2) {
     }
   });
   ws.onopen = () => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    if (refs.ws !== ws || generation2 !== refs.chatGeneration) return;
     if (refs.wsConnectCancel) {
       refs.wsConnectCancel();
       refs.wsConnectCancel = null;
@@ -18243,7 +18682,7 @@ function connectChatWs(ctx2) {
     }, 25e3);
   };
   ws.onclose = () => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    if (refs.ws !== ws || generation2 !== refs.chatGeneration) return;
     refs.ws = null;
     if (refs.wsConnectCancel) {
       refs.wsConnectCancel();
@@ -18266,24 +18705,24 @@ function connectChatWs(ctx2) {
     refs.reconnectCancel = startReconnectCountdown(
       delay,
       (seconds) => {
-        if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
+        if (generation2 !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
         chatStatus.value = `disconnected \xB7 reconnecting in ${seconds}s\u2026`;
       },
       () => {
         refs.reconnectCancel = null;
-        if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
+        if (generation2 !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
         chatStatus.value = "disconnected \xB7 reconnecting\u2026";
         connectChatWs(ctx2);
       }
     );
   };
   ws.onerror = () => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    if (refs.ws !== ws || generation2 !== refs.chatGeneration) return;
     chatReady.value = false;
     chatStatus.value = "connection error";
   };
   ws.onmessage = (ev) => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
+    if (refs.ws !== ws || generation2 !== refs.chatGeneration) return;
     let payload;
     try {
       payload = JSON.parse(ev.data);
@@ -18294,6 +18733,7 @@ function connectChatWs(ctx2) {
       if (payload.threadId !== tid || !Array.isArray(payload.messages)) return;
       replaceIncomingMessages(payload.messages);
       voiceMode.value = payload.voiceMode || "off";
+      voiceInput.value = payload.voiceInput || { backend: "disabled", ready: false, reason: "Live voice input is not configured." };
       canSend.value = payload.canSend === true;
       return;
     }
@@ -18507,7 +18947,7 @@ function connectChatWs(ctx2) {
 }
 async function sendChat(text, files) {
   if (!groupId.value || !threadId.value) return false;
-  const generation = refs.chatGeneration;
+  const generation2 = refs.chatGeneration;
   const gid = groupId.value;
   const tid = threadId.value;
   const clientMessageId = crypto.randomUUID();
@@ -18550,7 +18990,7 @@ async function sendChat(text, files) {
     if (!res.ok) {
       pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     }
-    if (generation !== refs.chatGeneration) return false;
+    if (generation2 !== refs.chatGeneration) return false;
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
@@ -18570,7 +19010,7 @@ async function sendChat(text, files) {
   } catch (err) {
     console.error("send failed", err);
     pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
-    if (generation !== refs.chatGeneration) return false;
+    if (generation2 !== refs.chatGeneration) return false;
     const m6 = err instanceof Error ? err.message : "network error";
     chatStatus.value = `send failed: ${m6}`;
     return false;
@@ -18613,7 +19053,7 @@ function openFileSearch(root) {
 async function searchFiles(gid, query) {
   const trimmed = query.trim();
   if (!trimmed) return;
-  const generation = ++fileSearchGeneration;
+  const generation2 = ++fileSearchGeneration;
   fileSearchController?.abort();
   const controller = new AbortController();
   fileSearchController = controller;
@@ -18629,20 +19069,20 @@ async function searchFiles(gid, query) {
   try {
     const url = `api/groups/${encodeURIComponent(gid)}/search-files?path=${encodeURIComponent(root)}&q=${encodeURIComponent(trimmed)}`;
     const response = await api(url, { signal: controller.signal });
-    if (generation !== fileSearchGeneration || controller.signal.aborted) return;
+    if (generation2 !== fileSearchGeneration || controller.signal.aborted) return;
     n2(() => {
       fileSearchResults.value = response.results ?? [];
       fileSearchTruncated.value = !!response.truncated;
     });
   } catch (err) {
-    if (generation !== fileSearchGeneration || controller.signal.aborted) return;
+    if (generation2 !== fileSearchGeneration || controller.signal.aborted) return;
     console.error("file search failed", err);
     n2(() => {
       fileSearchError.value = "Search failed. Check your connection and try again.";
       fileSearchResults.value = [];
     });
   } finally {
-    if (generation === fileSearchGeneration) {
+    if (generation2 === fileSearchGeneration) {
       fileSearchLoading.value = false;
       fileSearchController = null;
     }
@@ -18986,9 +19426,6 @@ function removePending(i5) {
   next.splice(i5, 1);
   pending.value = next;
 }
-function clearPending() {
-  pending.value = [];
-}
 var NOW_TICK_MS = 3e4;
 function installLivenessHandlers() {
   setInterval(() => {
@@ -19051,7 +19488,7 @@ async function respondApproval(approvalId, value) {
   }
 }
 async function respondQuestion(questionId, value) {
-  if (respondingQuestionIds.value.has(questionId)) return;
+  if (respondingQuestionIds.value.has(questionId)) return false;
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);
   respondingQuestionIds.value = next;
@@ -19064,6 +19501,7 @@ async function respondQuestion(questionId, value) {
       { value }
     );
     if (!res.ok) throw new Error(res.data?.error || "HTTP " + res.status);
+    return true;
   } catch (err) {
     console.error("question respond failed", err);
     chatStatus.value = "response failed: " + (err instanceof Error ? err.message : String(err));
@@ -19072,6 +19510,7 @@ async function respondQuestion(questionId, value) {
     }, 4e3);
     runSync().catch(() => {
     });
+    return false;
   } finally {
     const cleared = new Set(respondingQuestionIds.value);
     cleared.delete(questionId);
@@ -20247,211 +20686,41 @@ function ThreadsRail() {
   );
 }
 
-// src/recorder.ts
-var isRecording = y3(false);
-var recordingDuration = y3(0);
-function hasGetUserMedia() {
-  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-}
-function hasSpeechRecognition() {
-  return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-}
-function appendTranscriptDelta(text, delta) {
-  if (!text || !delta) return text + delta;
-  if (/\s$/.test(text) || /^\s/.test(delta)) return text + delta;
-  const endsWord = /[\p{L}\p{N}.,!?;:)\]}"]$/u.test(text);
-  const startsWord = /^[\p{L}\p{N}([{"]/u.test(delta);
-  if (endsWord && startsWord) return `${text} ${delta}`;
-  return text + delta;
-}
-var mediaRecorder = null;
-var audioChunks = [];
-var stream = null;
-var recognition = null;
-var transcript = "";
-var durationTimer = null;
-var startTime = 0;
-var recordingToken = 0;
-var MIN_DURATION_MS = 2e3;
-async function startRecording(transcribe) {
-  if (isRecording.value) return true;
-  if (!hasGetUserMedia()) return false;
-  const token = ++recordingToken;
-  let nextStream;
-  try {
-    nextStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch {
-    return false;
-  }
-  if (token !== recordingToken) {
-    for (const track of nextStream.getTracks()) track.stop();
-    return false;
-  }
-  stream = nextStream;
-  audioChunks = [];
-  transcript = "";
-  const mimeType = MediaRecorder.isTypeSupported("audio/ogg;codecs=opus") ? "audio/ogg;codecs=opus" : MediaRecorder.isTypeSupported("audio/mp4;codecs=opus") ? "audio/mp4;codecs=opus" : MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
-  mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : void 0);
-  mediaRecorder.ondataavailable = (ev) => {
-    if (ev.data.size > 0) audioChunks.push(ev.data);
-  };
-  mediaRecorder.start(250);
-  startTime = Date.now();
-  recordingDuration.value = 0;
-  durationTimer = setInterval(() => {
-    recordingDuration.value = Date.now() - startTime;
-  }, 1e3);
-  if (transcribe && hasSpeechRecognition()) {
-    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SpeechRecognitionCtor();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.onresult = (ev) => {
-      for (let i5 = ev.resultIndex; i5 < ev.results.length; i5++) {
-        if (ev.results[i5].isFinal) {
-          transcript += ev.results[i5][0].transcript;
-        }
-      }
-    };
-    recognition.onerror = () => {
-    };
-    try {
-      recognition.start();
-    } catch {
+// src/components/VoiceButton.tsx
+function VoiceButton({ target, controller, onStart, configured, unavailable, disabled, id, className = "" }) {
+  const state = controller.state.value;
+  const active = state.target === target;
+  const connecting = active && state.phase === "connecting";
+  const listening = active && state.phase === "listening";
+  const finalizing = active && state.phase === "finalizing";
+  const label = connecting ? "Cancel dictation" : listening ? "Stop dictation" : finalizing ? "Finalizing dictation" : "Start dictation";
+  const blocked = state.sending || finalizing || !(connecting || listening) && (disabled || !configured || !!unavailable || !["idle", "error"].includes(state.phase));
+  const seconds = Math.floor(state.elapsedMs / 1e3);
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      id,
+      class: `mic-overlay ${className}${listening ? " voice-stopwatch" : ""}`,
+      title: connecting || listening || finalizing ? label : !configured ? "Live voice input is not configured" : unavailable || label,
+      "aria-label": label,
+      "aria-busy": connecting || finalizing,
+      disabled: blocked,
+      onMouseDown: (event) => event.preventDefault(),
+      onClick: () => {
+        if (connecting || listening) controller.stop();
+        else onStart();
+      },
+      children: listening ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("span", { class: "voice-recording-dot", "aria-hidden": "true" }),
+        /* @__PURE__ */ u4("time", { "aria-hidden": "true", children: [
+          Math.floor(seconds / 60),
+          ":",
+          String(seconds % 60).padStart(2, "0")
+        ] })
+      ] }) : connecting || finalizing ? /* @__PURE__ */ u4("span", { class: "voice-spinner", "aria-hidden": "true" }) : "\u{1F399}\uFE0F"
     }
-  }
-  isRecording.value = true;
-  return true;
-}
-function stopRecording() {
-  return new Promise((resolve) => {
-    if (!mediaRecorder || mediaRecorder.state === "inactive") {
-      cleanup();
-      resolve(null);
-      return;
-    }
-    mediaRecorder.onstop = () => {
-      const durationMs = Date.now() - startTime;
-      const mimeType = mediaRecorder?.mimeType || "audio/webm";
-      const chunks = audioChunks.slice();
-      const finalTranscript = transcript.trim() || null;
-      cleanup();
-      if (durationMs < MIN_DURATION_MS) {
-        resolve(null);
-        return;
-      }
-      const ext = mimeType.includes("webm") ? "webm" : "ogg";
-      const blob = new Blob(chunks, { type: mimeType });
-      resolve({
-        blob,
-        transcript: finalTranscript,
-        durationMs
-      });
-    };
-    if (recognition) {
-      try {
-        recognition.stop();
-      } catch {
-      }
-    }
-    mediaRecorder.stop();
-  });
-}
-function cancelRecording() {
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.onstop = null;
-    mediaRecorder.stop();
-  }
-  if (recognition) {
-    try {
-      recognition.stop();
-    } catch {
-    }
-  }
-  cleanup();
-}
-function cleanup() {
-  recordingToken++;
-  if (durationTimer) {
-    clearInterval(durationTimer);
-    durationTimer = null;
-  }
-  if (stream) {
-    for (const track of stream.getTracks()) track.stop();
-    stream = null;
-  }
-  mediaRecorder = null;
-  recognition = null;
-  audioChunks = [];
-  isRecording.value = false;
-  recordingDuration.value = 0;
-}
-function transcribeViaServer(blob, groupId2, threadId2, callbacks) {
-  const controller = new AbortController();
-  const fd = new FormData();
-  const ext = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "mp4" : "ogg";
-  fd.append("audio", blob, `voice.${ext}`);
-  const url = `/ui/chat/api/groups/${encodeURIComponent(groupId2)}/chat/${encodeURIComponent(threadId2)}/voice/transcribe`;
-  fetch(url, {
-    method: "POST",
-    body: fd,
-    signal: controller.signal,
-    credentials: "same-origin"
-  }).then(async (res) => {
-    if (!res.ok || !res.body) {
-      const errJson = await res.text().catch(() => "");
-      callbacks.onError(errJson || `http_${res.status}`);
-      return;
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    let fullText = "";
-    let doneFired = false;
-    const fireDone = (text) => {
-      if (doneFired) return;
-      doneFired = true;
-      callbacks.onDone(text);
-    };
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() || "";
-      let eventType = "";
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          eventType = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          const data = line.slice(6);
-          try {
-            const parsed = JSON.parse(data);
-            if (eventType === "partial" && parsed.text) {
-              const nextText = appendTranscriptDelta(fullText, parsed.text);
-              const normalizedDelta = nextText.slice(fullText.length);
-              fullText = nextText;
-              callbacks.onPartial(normalizedDelta);
-            } else if (eventType === "done" && parsed.text) {
-              fireDone(parsed.text);
-            } else if (eventType === "error") {
-              callbacks.onError(parsed.error || "transcription_failed");
-            }
-          } catch {
-          }
-          eventType = "";
-        }
-      }
-    }
-    if (fullText && !controller.signal.aborted) {
-      fireDone(fullText);
-    }
-  }).catch((err) => {
-    if (!controller.signal.aborted) {
-      callbacks.onError(err instanceof Error ? err.message : "network_error");
-    }
-  });
-  return controller;
+  );
 }
 
 // src/question-timeline.ts
@@ -20836,7 +21105,6 @@ function ZoomableImage({ src, alt, className = "", autoFocus = false }) {
 }
 
 // src/components/ChatMain.tsx
-var activeRecordingTarget = y3(null);
 var imageViewer = y3(null);
 function imageFileName(src) {
   try {
@@ -21016,10 +21284,10 @@ function ActivityTraceRow({ line, open, live, now, onToggle }) {
   const step = !live && parsedStep.kind === "tool" && (parsedStep.status === "pending" || parsedStep.status === "running") ? { ...parsedStep, status: "completed" } : parsedStep;
   const headline = stepHeadline(step);
   const running = live && step.kind === "tool" && step.status === "running";
-  const startedAt = Number(line.ts);
-  const hasStartedAt = Number.isFinite(startedAt);
+  const startedAt2 = Number(line.ts);
+  const hasStartedAt = Number.isFinite(startedAt2);
   const code = open ? stepBody(step) : null;
-  const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
+  const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt2) : null;
   const meta = open ? stepMeta(step, elapsedMs) : null;
   return /* @__PURE__ */ u4("li", { class: `trace-row${open ? " open" : ""}`, children: [
     /* @__PURE__ */ u4(
@@ -21676,15 +21944,15 @@ function TaskIndicator() {
 function TypingIndicator({ traceExpanded, onToggleTrace }) {
   const stableStartedAt = typingStartedAt.value;
   const fallbackStartedAt = A2(Date.now());
-  const startedAt = stableStartedAt ?? fallbackStartedAt.current;
+  const startedAt2 = stableStartedAt ?? fallbackStartedAt.current;
   const [now, setNow] = h2(() => Date.now());
   y2(() => {
     setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1e3);
-    return () => window.clearInterval(timer);
-  }, [startedAt]);
+    const timer2 = window.setInterval(() => setNow(Date.now()), 1e3);
+    return () => window.clearInterval(timer2);
+  }, [startedAt2]);
   const model = typingModel.value ? shortModel(typingModel.value) : "";
-  const elapsed = Math.max(0, now - startedAt);
+  const elapsed = Math.max(0, now - startedAt2);
   const metadata = [fmtDur(elapsed), model].filter(Boolean).join(" \xB7 ");
   const usage = typingUsage.value ? { ...typingUsage.value, duration_ms: elapsed } : null;
   const liveHeadline = latestActivityHeadline(activityLog.value);
@@ -21944,141 +22212,54 @@ function PendingTray() {
 function QuestionCardItem({ question: q5, busy }) {
   const [answer, setAnswer] = h2("");
   const answerRef = A2("");
-  const target = `question:${q5.questionId}`;
-  const recording = isRecording.value && activeRecordingTarget.value === target;
-  const recorderBusy = isRecording.value;
-  const serverTranscribeAvailable = voiceMode.value !== "off";
-  const micCapable = hasGetUserMedia() && (serverTranscribeAvailable || hasSpeechRecognition());
-  const [transcribeStatus, setTranscribeStatus] = h2("");
-  const holdTimerRef = A2(null);
-  const holdModeRef = A2(false);
-  const submitAfterTranscriptRef = A2(false);
+  const textareaRef = A2(null);
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const target = `${gid}:${tid}:question:${q5.questionId}`;
+  const channel = channelType.value;
+  const mg = messagingGroupId.value;
+  const voiceState = voice.state.value;
+  const active = voiceState.target === target;
+  const voiceLocked = active && voiceState.phase !== "error";
+  const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
+  const pendingRef = A2(q5.status === "pending");
+  pendingRef.current = q5.status === "pending";
+  const sendBusyRef = A2(false);
   const canType = q5.responseMode === "text" || q5.responseMode === "choice_or_text";
   const answered = q5.status === "answered";
-  const submitAnswer = (value = answerRef.current) => {
+  const submitAnswer = async (value = answerRef.current) => {
     const trimmed = value.trim();
-    if (trimmed) respondQuestion(q5.questionId, trimmed).catch(console.error);
-  };
-  const insertTranscript = (text) => {
-    const current = answerRef.current;
-    const next = current && !/\s$/.test(current) ? `${current} ${text}` : current + text;
-    answerRef.current = next;
-    setAnswer(next);
-    if (submitAfterTranscriptRef.current) {
-      submitAfterTranscriptRef.current = false;
-      submitAnswer(next);
+    if (!trimmed || busy || sendBusyRef.current || !pendingRef.current) return false;
+    sendBusyRef.current = true;
+    try {
+      return await respondQuestion(q5.questionId, trimmed);
+    } finally {
+      sendBusyRef.current = false;
     }
   };
-  const finishQuestionRecording = async () => {
-    if (activeRecordingTarget.value !== target) return;
-    const result = await stopRecording();
-    activeRecordingTarget.value = null;
-    if (!result) {
-      submitAfterTranscriptRef.current = false;
-      chatStatus.value = "too short \u2014 discarded";
-      setTimeout(() => {
-        if (chatStatus.value === "too short \u2014 discarded") chatStatus.value = "connected";
-      }, 2e3);
-      return;
-    }
-    if (result.transcript) {
-      insertTranscript(result.transcript);
-      return;
-    }
-    if (!serverTranscribeAvailable || !groupId.value || !threadId.value) {
-      submitAfterTranscriptRef.current = false;
-      chatStatus.value = "transcription unavailable";
-      setTimeout(() => {
-        if (chatStatus.value === "transcription unavailable") chatStatus.value = "connected";
-      }, 3e3);
-      return;
-    }
-    setTranscribeStatus("transcribing\u2026");
-    transcribeViaServer(result.blob, groupId.value, threadId.value, {
-      onPartial: (delta) => {
-        setTranscribeStatus((previous) => (previous === "transcribing\u2026" ? "" : previous) + delta);
+  const startVoice = () => {
+    if (!gid || !tid || unavailable || busy || isRecording.value) return;
+    voice.start({
+      key: target,
+      groupId: gid,
+      threadId: tid,
+      channelType: channel,
+      messagingGroupId: mg,
+      getText: () => answerRef.current,
+      setText: (text) => {
+        answerRef.current = text;
+        setAnswer(text);
       },
-      onDone: (fullText) => {
-        setTranscribeStatus("");
-        const trimmed = fullText.trim();
-        if (!trimmed || trimmed === "[inaudible]") {
-          submitAfterTranscriptRef.current = false;
-          return;
-        }
-        if (looksLikeRefusal(trimmed)) {
-          submitAfterTranscriptRef.current = false;
-          chatStatus.value = "transcription unclear \u2014 try again";
-          setTimeout(() => {
-            if (chatStatus.value === "transcription unclear \u2014 try again") chatStatus.value = "connected";
-          }, 3e3);
-          return;
-        }
-        insertTranscript(trimmed);
-      },
-      onError: (error) => {
-        submitAfterTranscriptRef.current = false;
-        setTranscribeStatus("");
-        chatStatus.value = `transcription failed: ${error}`;
-        setTimeout(() => {
-          if (chatStatus.value.startsWith("transcription failed")) chatStatus.value = "connected";
-        }, 3e3);
-      }
-    });
-  };
-  const startQuestionRecording = async () => {
-    if (recorderBusy) return;
-    activeRecordingTarget.value = target;
-    const started = await startRecording(true);
-    if (!started) {
-      activeRecordingTarget.value = null;
-      chatStatus.value = "microphone unavailable";
-      setTimeout(() => {
-        if (chatStatus.value === "microphone unavailable") chatStatus.value = "connected";
-      }, 3e3);
-    }
-  };
-  const onMicPointerDown = (event) => {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    holdModeRef.current = false;
-    holdTimerRef.current = setTimeout(() => {
-      holdModeRef.current = true;
-      startQuestionRecording().catch(console.error);
-    }, 300);
-  };
-  const onMicPointerUp = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    if (holdModeRef.current || recording) {
-      holdModeRef.current = false;
-      finishQuestionRecording().catch(console.error);
-    } else {
-      startQuestionRecording().catch(console.error);
-    }
-  };
-  const onMicPointerCancel = () => {
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = null;
-    holdModeRef.current = false;
-    if (recording) {
-      cancelRecording();
-      activeRecordingTarget.value = null;
-    }
+      isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && pendingRef.current,
+      send: () => submitAnswer()
+    }, textareaRef.current?.selectionStart ?? answerRef.current.length);
   };
   y2(() => {
-    if (q5.status !== "pending" && activeRecordingTarget.value === target) {
-      cancelRecording();
-      activeRecordingTarget.value = null;
-    }
+    if (q5.status !== "pending" && voice.state.value.target === target) voice.detach();
     return () => {
-      if (activeRecordingTarget.value === target) {
-        cancelRecording();
-        activeRecordingTarget.value = null;
-      }
+      if (voice.state.value.target === target) voice.detach();
     };
-  }, [q5.status, target]);
+  }, [q5.status, target, channel, mg]);
   return /* @__PURE__ */ u4("div", { class: `msg ${answered ? "in question-card-answered" : "out agent-action"} question-card`, "data-msg-id": q5.questionId, children: [
     /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
     /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.question }),
@@ -22089,7 +22270,10 @@ function QuestionCardItem({ question: q5, busy }) {
           type: "button",
           class: "question-card-btn",
           disabled: busy,
-          onClick: () => respondQuestion(q5.questionId, o4.value).catch(console.error),
+          onClick: () => {
+            if (voice.state.value.target === target) voice.detach();
+            respondQuestion(q5.questionId, o4.value).catch(console.error);
+          },
           children: o4.label
         },
         o4.value
@@ -22100,60 +22284,58 @@ function QuestionCardItem({ question: q5, busy }) {
           class: "question-card-text-form",
           onSubmit: (event) => {
             event.preventDefault();
-            if (recording) {
-              submitAfterTranscriptRef.current = true;
-              finishQuestionRecording().catch(console.error);
-              return;
-            }
-            if (transcribeStatus) {
-              submitAfterTranscriptRef.current = true;
-              return;
-            }
-            submitAnswer();
+            if (active) voice.send();
+            else submitAnswer().catch(console.error);
           },
-          children: /* @__PURE__ */ u4("div", { class: `composer-input-wrap question-response-input-wrap${recording ? " recording" : ""}${transcribeStatus ? " transcribing" : ""}`, children: [
-            /* @__PURE__ */ u4(
-              "textarea",
-              {
-                class: "question-card-input",
-                rows: 1,
-                value: answer,
-                disabled: busy,
-                "aria-label": "Your answer",
-                placeholder: "Type your answer\u2026",
-                onInput: (event) => {
-                  answerRef.current = event.currentTarget.value;
-                  setAnswer(event.currentTarget.value);
+          children: [
+            /* @__PURE__ */ u4("div", { class: `composer-input-wrap question-response-input-wrap${active && voiceState.phase === "listening" ? " voice-listening" : ""}`, children: [
+              /* @__PURE__ */ u4(
+                "textarea",
+                {
+                  class: "question-card-input",
+                  rows: 1,
+                  value: answer,
+                  ref: textareaRef,
+                  disabled: busy,
+                  readOnly: voiceLocked || active && voiceState.sending,
+                  "aria-label": "Your answer",
+                  placeholder: "Type your answer\u2026",
+                  onInput: (event) => {
+                    answerRef.current = event.currentTarget.value;
+                    setAnswer(event.currentTarget.value);
+                  }
                 }
-              }
-            ),
-            micCapable ? /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: `mic-overlay question-response-mic${recording ? " recording" : ""}${transcribeStatus ? " transcribing" : ""}`,
-                title: recording ? "Tap to stop and transcribe" : transcribeStatus ? "Transcribing\u2026" : "Hold to record, tap to toggle",
-                "aria-label": recording ? "Stop recording answer" : transcribeStatus ? "Transcribing answer" : "Record voice answer",
-                disabled: busy || !!transcribeStatus || recorderBusy && !recording,
-                onPointerDown: onMicPointerDown,
-                onPointerUp: onMicPointerUp,
-                onPointerCancel: onMicPointerCancel,
-                children: recording ? /* @__PURE__ */ u4("span", { class: "recording-time", children: formatRecordingDuration(recordingDuration.value) }) : transcribeStatus ? /* @__PURE__ */ u4("span", { class: "mic-spinner", "aria-hidden": "true" }) : "\u{1F399}\uFE0F"
-              }
-            ) : null,
-            /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "submit",
-                class: "accent-icon-btn question-response-send",
-                "aria-label": "Send answer",
-                title: recording || transcribeStatus ? "Stop, transcribe, and send" : "Send answer",
-                disabled: busy || !answer.trim() && !recording && !transcribeStatus,
-                onMouseDown: (event) => event.preventDefault(),
-                children: "\u2191"
-              }
-            )
-          ] })
+              ),
+              /* @__PURE__ */ u4(
+                VoiceButton,
+                {
+                  target,
+                  controller: voice,
+                  onStart: startVoice,
+                  className: "question-response-mic",
+                  configured: voiceInput.value.ready,
+                  unavailable,
+                  disabled: busy || isRecording.value
+                }
+              ),
+              /* @__PURE__ */ u4(
+                "button",
+                {
+                  type: "submit",
+                  class: "accent-icon-btn question-response-send",
+                  "aria-label": "Send answer",
+                  title: active && voiceState.phase === "listening" ? "Finalize and send answer" : "Send answer",
+                  disabled: busy || active && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)) || !answer.trim() && !active,
+                  onMouseDown: (event) => event.preventDefault(),
+                  children: "\u2191"
+                }
+              )
+            ] }),
+            active && voiceState.error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: [
+              voiceState.error,
+              " Nothing is sent automatically."
+            ] })
+          ]
         }
       )
     ] }),
@@ -22163,17 +22345,6 @@ function QuestionCardItem({ question: q5, busy }) {
       !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null
     ] })
   ] });
-}
-var REFUSAL_PATTERNS = [
-  /^i'?m sorry,? (but )?i (can'?t|cannot)/i,
-  /^i (can'?t|cannot) (process|transcribe|help|assist|fulfill|comply)/i,
-  /^sorry,? (but )?i (can'?t|cannot)/i,
-  /^as an ai (language )?model/i,
-  /^i (do not|don'?t) have the ability to/i
-];
-function looksLikeRefusal(text) {
-  const head = text.slice(0, 200);
-  return REFUSAL_PATTERNS.some((re) => re.test(head));
 }
 function Composer() {
   const inputRef = A2(null);
@@ -22186,6 +22357,17 @@ function Composer() {
     (q5) => q5.status === "pending" && (!q5.threadId || q5.threadId === threadId.value)
   );
   const composerDisabled = wsDown || hasQuestion;
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const target = `${gid}:${tid}:composer`;
+  const channel = channelType.value;
+  const mg = messagingGroupId.value;
+  const voiceState = voice.state.value;
+  const activeVoice = voiceState.target === target;
+  const voiceLocked = activeVoice && (voiceState.phase !== "error" || voiceState.sending);
+  const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
+  const sendBusyRef = A2(false);
+  const [multiLine, setMultiLine] = h2(false);
   const autosize = () => {
     const el = inputRef.current;
     if (!el) return;
@@ -22211,36 +22393,34 @@ function Composer() {
   }, []);
   const onSubmit = (ev) => {
     ev.preventDefault();
-    if (recording && recordingModeRef.current === "mic") {
-      autoSendRef.current = true;
-      finishRecording().catch(console.error);
-      return;
-    }
-    if (transcribingRef.current) {
-      autoSendRef.current = true;
-      return;
-    }
-    doSubmit();
+    if (composerDisabled) return;
+    if (activeVoice) voice.send();
+    else doSubmit().catch(console.error);
   };
-  const doSubmit = () => {
+  const doSubmit = async () => {
+    if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg || isWeb && !chatReady.value || pendingQuestions.value.some((q5) => q5.status === "pending" && (!q5.threadId || q5.threadId === tid))) return false;
     const text = (inputRef.current?.value || "").trim();
     const files = pending.value.slice();
-    if (!text && files.length === 0) return;
+    if (!text && files.length === 0) return false;
     const pins = pinnedContext.value;
     const prefix = pins.length > 0 ? "> Context (file browser):\n" + pins.map((p5) => `> - \`${p5}\``).join("\n") + "\n\n" : "";
     const fullText = prefix + text;
-    if (inputRef.current) inputRef.current.value = "";
-    autosize();
-    clearPending();
-    clearPinnedContext();
-    if (isMobile.value) document.getElementById("chat-log")?.focus({ preventScroll: true });
-    sendChat(fullText, files).catch(console.error);
-  };
-  const autoSendRef = A2(false);
-  const maybeAutoSend = () => {
-    if (!autoSendRef.current) return;
-    autoSendRef.current = false;
-    doSubmit();
+    sendBusyRef.current = true;
+    try {
+      const sent = await sendChat(fullText, files);
+      if (!sent || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return false;
+      if (inputRef.current?.value.trim() === text) inputRef.current.value = "";
+      autosize();
+      for (const file of files) {
+        const index = pending.value.indexOf(file);
+        if (index >= 0) removePending(index);
+      }
+      if (pinnedContext.value === pins) clearPinnedContext();
+      if (isMobile.value) document.getElementById("chat-log")?.focus({ preventScroll: true });
+      return true;
+    } finally {
+      sendBusyRef.current = false;
+    }
   };
   const onKey = (ev) => {
     if (ev.key === "Enter" && !ev.shiftKey && !isMobile.value) {
@@ -22265,193 +22445,56 @@ function Composer() {
     addFiles(Array.from(items));
   };
   const vm = voiceMode.value;
-  const serverTranscribeAvailable = vm !== "off";
-  const micCapable = hasGetUserMedia() && (serverTranscribeAvailable || hasSpeechRecognition());
-  const recorderBusy = isRecording.value;
-  const recording = recorderBusy && activeRecordingTarget.value === "composer";
-  const holdTimerRef = A2(null);
-  const holdModeRef = A2(false);
-  const recordingModeRef = A2(null);
-  const attachRecording = recording && recordingModeRef.current === "attach";
-  const transcribingRef = A2(false);
-  const [transcribeStatus, setTranscribeStatus] = h2("");
-  const [multiLine, setMultiLine] = h2(false);
-  const pendingInsertRef = A2(null);
-  const doInsert = (el, text) => {
-    const cur = el.value;
-    const hasFocus = document.activeElement === el;
-    const start = hasFocus ? el.selectionStart ?? cur.length : cur.length;
-    const end = hasFocus ? el.selectionEnd ?? start : cur.length;
-    const before = cur.slice(0, start);
-    const after = cur.slice(end);
-    const leftPad = before && !/\s$/.test(before) ? " " : "";
-    const rightPad = after && !/^\s/.test(after) ? " " : "";
-    const insert = leftPad + text + rightPad;
-    el.value = before + insert + after;
-    autosize();
-    const caret = (before + insert).length;
-    if (!isMobile.value) {
-      el.focus();
-      el.setSelectionRange(caret, caret);
-    }
-    maybeAutoSend();
-  };
-  y2(() => {
-    if (pendingInsertRef.current == null) return;
+  const attachRecording = isRecording.value;
+  const startVoice = () => {
+    if (!gid || !tid || unavailable || composerDisabled || isRecording.value) return;
     const el = inputRef.current;
-    if (!el) return;
-    const text = pendingInsertRef.current;
-    pendingInsertRef.current = null;
-    doInsert(el, text);
-  });
-  const insertIntoComposer = (text) => {
-    const el = inputRef.current;
-    if (el) {
-      doInsert(el, text);
-      return;
-    }
-    const queued = pendingInsertRef.current;
-    pendingInsertRef.current = queued ? `${queued} ${text}` : text;
-  };
-  const attachAudioBlob = (blob) => {
-    const rawType = blob.type.split(";")[0] || "audio/mp4";
-    const ext = rawType.includes("ogg") ? "ogg" : rawType.includes("mp4") ? "m4a" : rawType.includes("wav") ? "wav" : "webm";
-    const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: rawType });
-    addPendingFiles([file], UPLOAD_MAX_FILES, UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE);
-  };
-  const finishRecording = async () => {
-    if (activeRecordingTarget.value !== "composer") return;
-    const mode = recordingModeRef.current;
-    recordingModeRef.current = null;
-    const result = await stopRecording();
-    activeRecordingTarget.value = null;
-    if (!result) {
-      chatStatus.value = "too short \u2014 discarded";
-      setTimeout(() => {
-        if (chatStatus.value === "too short \u2014 discarded") chatStatus.value = "connected";
-      }, 2e3);
-      maybeAutoSend();
-      return;
-    }
-    if (mode === "attach") {
-      attachAudioBlob(result.blob);
-      return;
-    }
-    if (result.transcript) {
-      insertIntoComposer(result.transcript);
-      return;
-    }
-    if (!serverTranscribeAvailable) {
-      chatStatus.value = "transcription unavailable";
-      setTimeout(() => {
-        if (chatStatus.value === "transcription unavailable") chatStatus.value = "connected";
-      }, 3e3);
-      maybeAutoSend();
-      return;
-    }
-    if (!groupId.value || !threadId.value) {
-      maybeAutoSend();
-      return;
-    }
-    transcribingRef.current = true;
-    setTranscribeStatus("transcribing\u2026");
-    transcribeViaServer(result.blob, groupId.value, threadId.value, {
-      onPartial: (delta) => {
-        setTranscribeStatus((prev) => {
-          const cur = prev === "transcribing\u2026" ? "" : prev;
-          return cur + delta;
-        });
+    voice.start({
+      key: target,
+      groupId: gid,
+      threadId: tid,
+      channelType: channel,
+      messagingGroupId: mg,
+      getText: () => inputRef.current?.value || "",
+      setText: (text) => {
+        if (inputRef.current) inputRef.current.value = text;
+        autosize();
       },
-      onDone: (fullText) => {
-        transcribingRef.current = false;
-        setTranscribeStatus("");
-        const trimmed = fullText.trim();
-        if (!trimmed || trimmed === "[inaudible]") {
-          maybeAutoSend();
-          return;
-        }
-        if (looksLikeRefusal(trimmed)) {
-          chatStatus.value = "transcription unclear \u2014 try again";
-          setTimeout(() => {
-            if (chatStatus.value === "transcription unclear \u2014 try again") chatStatus.value = "connected";
-          }, 3e3);
-          maybeAutoSend();
-          return;
-        }
-        insertIntoComposer(trimmed);
-      },
-      onError: (err) => {
-        transcribingRef.current = false;
-        setTranscribeStatus("");
-        chatStatus.value = `transcription failed: ${err}`;
-        setTimeout(() => {
-          if (chatStatus.value.startsWith("transcription failed")) chatStatus.value = "connected";
-        }, 3e3);
-        maybeAutoSend();
-      }
-    });
-  };
-  const onMicPointerDown = (ev) => {
-    ev.preventDefault();
-    ev.currentTarget.setPointerCapture(ev.pointerId);
-    holdModeRef.current = false;
-    holdTimerRef.current = setTimeout(() => {
-      holdModeRef.current = true;
-      recordingModeRef.current = "mic";
-      activeRecordingTarget.value = "composer";
-      startRecording(true).then((started) => {
-        if (!started) activeRecordingTarget.value = null;
-      }).catch(console.error);
-    }, 300);
-  };
-  const onMicPointerUp = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    if (holdModeRef.current) {
-      holdModeRef.current = false;
-      finishRecording().catch(console.error);
-    } else if (recording) {
-      finishRecording().catch(console.error);
-    } else {
-      recordingModeRef.current = "mic";
-      activeRecordingTarget.value = "composer";
-      startRecording(true).then((started) => {
-        if (!started) activeRecordingTarget.value = null;
-      }).catch(console.error);
-    }
-  };
-  const onMicPointerCancel = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    if (holdModeRef.current || recording) {
-      cancelRecording();
-      activeRecordingTarget.value = null;
-      recordingModeRef.current = null;
-      holdModeRef.current = false;
-    }
+      isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg,
+      send: doSubmit
+    }, el?.selectionStart ?? el?.value.length);
   };
   const startAudioAttachRecording = async () => {
-    if (recorderBusy) return;
-    recordingModeRef.current = "attach";
-    activeRecordingTarget.value = "composer";
-    const ok = await startRecording(false);
+    if (isRecording.value || voice.state.value.sending || !["idle", "error"].includes(voice.state.value.phase)) return;
+    const ok = await startRecording();
     if (!ok) {
-      recordingModeRef.current = null;
-      activeRecordingTarget.value = null;
       chatStatus.value = "microphone unavailable";
-      setTimeout(() => {
-        if (chatStatus.value === "microphone unavailable") chatStatus.value = "connected";
-      }, 3e3);
     }
   };
   const stopAttachRecording = () => {
-    if (recordingModeRef.current !== "attach") return;
-    finishRecording().catch(console.error);
+    void stopRecording().then((result) => {
+      if (!result || groupId.value !== gid || threadId.value !== tid) return;
+      const type = result.blob.type.split(";")[0] || "audio/webm";
+      const ext = type.includes("ogg") ? "ogg" : type.includes("mp4") ? "m4a" : "webm";
+      addFiles([new File([result.blob], `voice-${Date.now()}.${ext}`, { type })]);
+    });
   };
+  y2(() => {
+    const hidden = () => {
+      if (document.hidden) cancelRecording();
+    };
+    document.addEventListener("visibilitychange", hidden);
+    window.addEventListener("pagehide", cancelRecording);
+    return () => {
+      document.removeEventListener("visibilitychange", hidden);
+      window.removeEventListener("pagehide", cancelRecording);
+      cancelRecording();
+      if (voice.state.value.target === target) voice.detach();
+    };
+  }, [target, channel, mg]);
+  y2(() => {
+    if ((hasQuestion || !showComposer) && voice.state.value.target === target) voice.interrupt("Composer is no longer available. Current text has been kept.");
+  }, [hasQuestion, showComposer, target]);
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(
       "form",
@@ -22459,10 +22502,10 @@ function Composer() {
         id: "chat-form",
         onSubmit,
         style: showComposer ? "" : "display:none",
-        class: `${composerDisabled ? "ws-down" : ""} ${recording ? "recording" : ""}`,
+        class: composerDisabled ? "ws-down" : "",
         children: [
           /* @__PURE__ */ u4("input", { type: "file", id: "chat-file", multiple: true, hidden: true, ref: fileRef, onChange: onFileChange }),
-          attachRecording ? /* @__PURE__ */ u4(
+          attachRecording && /* @__PURE__ */ u4(
             "button",
             {
               type: "button",
@@ -22476,7 +22519,8 @@ function Composer() {
                 /* @__PURE__ */ u4("span", { class: "recording-stop-label", children: "Stop" })
               ]
             }
-          ) : /* @__PURE__ */ u4("div", { class: "composer-input-wrap" + (multiLine ? " multi-line" : "") + (recording ? " recording" : "") + (transcribeStatus ? " transcribing" : ""), children: [
+          ),
+          /* @__PURE__ */ u4("div", { class: "composer-input-wrap" + (multiLine ? " multi-line" : "") + (activeVoice && voiceState.phase === "listening" ? " voice-listening" : ""), style: attachRecording ? "display:none" : "", children: [
             /* @__PURE__ */ u4(
               "textarea",
               {
@@ -22488,13 +22532,14 @@ function Composer() {
                 onKeyDown: onKey,
                 onPaste,
                 autocomplete: "off",
-                disabled: hasQuestion
+                disabled: hasQuestion,
+                readOnly: voiceLocked
               }
             ),
             /* @__PURE__ */ u4(
               ComposerPlusMenu,
               {
-                disabled: composerDisabled || recording,
+                disabled: composerDisabled || voiceState.sending || !["idle", "error"].includes(voiceState.phase),
                 title: composerDisabled ? hasQuestion ? "Answer the question above" : "Disconnected" : "Add\u2026",
                 showRecordAudio: vm === "audio" && hasGetUserMedia(),
                 showQuickCapture: hasGetUserMedia(),
@@ -22505,21 +22550,18 @@ function Composer() {
                 }
               }
             ),
-            micCapable ? /* @__PURE__ */ u4(
-              "button",
+            /* @__PURE__ */ u4(
+              VoiceButton,
               {
-                type: "button",
+                target,
+                controller: voice,
+                onStart: startVoice,
                 id: "chat-mic",
-                class: "mic-overlay" + (recording ? " recording" : "") + (transcribeStatus ? " transcribing" : ""),
-                title: recording ? "Tap to stop and transcribe" : transcribeStatus ? "Transcribing\u2026" : wsDown ? "Disconnected" : "Hold to record, tap to toggle",
-                "aria-label": recording ? "Stop recording" : transcribeStatus ? "Transcribing" : "Record voice message",
-                disabled: composerDisabled && !recording || !!transcribeStatus || recorderBusy && !recording,
-                onPointerDown: onMicPointerDown,
-                onPointerUp: onMicPointerUp,
-                onPointerCancel: onMicPointerCancel,
-                children: recording ? /* @__PURE__ */ u4("span", { class: "recording-time", children: formatRecordingDuration(recordingDuration.value) }) : transcribeStatus ? /* @__PURE__ */ u4("span", { class: "mic-spinner", "aria-hidden": "true" }) : "\u{1F399}\uFE0F"
+                configured: voiceInput.value.ready,
+                unavailable,
+                disabled: composerDisabled || isRecording.value
               }
-            ) : null,
+            ),
             /* @__PURE__ */ u4(
               "button",
               {
@@ -22527,8 +22569,8 @@ function Composer() {
                 id: "chat-send",
                 class: "accent-icon-btn",
                 "aria-label": "Send",
-                title: recording || transcribeStatus ? "Stop, transcribe, and send" : "Send",
-                disabled: composerDisabled,
+                title: activeVoice && voiceState.phase === "listening" ? "Finalize and send" : "Send",
+                disabled: composerDisabled || activeVoice && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)),
                 onMouseDown: (e4) => e4.preventDefault(),
                 children: "\u2191"
               }
@@ -22537,6 +22579,10 @@ function Composer() {
         ]
       }
     ),
+    activeVoice && voiceState.error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: [
+      voiceState.error,
+      " Nothing is sent automatically."
+    ] }),
     quickCapture ? /* @__PURE__ */ u4(
       QuickCapture,
       {
@@ -28843,6 +28889,7 @@ function SettingsTab({
   }
   const pending3 = changedFields();
   const changed = pending3.size > 0;
+  const voiceOnlyChange = pending3.size > 0 && [...pending3].every((field) => field === "voice_input_backend" || field === "voice_input_enabled");
   const needsRestart = [...pending3].some((f5) => RESTART_REQUIRING_FIELDS.has(f5));
   const imageRebuildNeeded = pending3.has("image_tag") && draft.image_tag != null && !!images && !images.images.some((i5) => i5.value === draft.image_tag);
   const packagesChanged = pending3.has("packages_apt") || pending3.has("packages_npm") || pending3.has("packages_pip");
@@ -28854,8 +28901,8 @@ function SettingsTab({
   const [archiveOpen, setArchiveOpen] = h2(false);
   const [archiveConfirm, setArchiveConfirm] = h2("");
   const [archiveBusy, setArchiveBusy] = h2(false);
-  const effectiveRestart = restartChecked || rebuildChecked;
-  const effectiveRebuild = rebuildChecked;
+  const effectiveRestart = !voiceOnlyChange && (restartChecked || rebuildChecked);
+  const effectiveRebuild = !voiceOnlyChange && rebuildChecked;
   const canSave = changed;
   y2(() => {
     onActions({ refresh, apply: apply2, busy, canSave });
@@ -28882,7 +28929,7 @@ function SettingsTab({
       ]);
       const settingsChanged = [...pending3].some((f5) => !JSON_FIELDS.has(f5));
       if (settingsChanged) {
-        const body = { ...draft };
+        const body = voiceOnlyChange ? { voice_input_backend: draft.voice_input_backend, voice_input_enabled: draft.voice_input_enabled } : { ...draft };
         if (data && draftName.trim() !== data.name) body.name = draftName.trim();
         if (pending3.has("site_enabled")) body.site_enabled = siteEnabled;
         if (pending3.has("site_slug")) body.site_slug = siteSlug.trim() || null;
@@ -29083,23 +29130,49 @@ function SettingsTab({
           )
         }
       ),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Voice input", children: /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "checkbox",
+            checked: draft.voice_input_enabled,
+            disabled: busy,
+            onChange: (e4) => update("voice_input_enabled", e4.currentTarget.checked)
+          }
+        ),
+        /* @__PURE__ */ u4("span", { children: "Enable web microphone input" })
+      ] }) }),
       /* @__PURE__ */ u4(
         GroupAdminField,
         {
-          label: "Transcription model",
-          info: "OpenRouter model used when the main model cannot accept audio directly. When set, a mic button appears in the chat composer.\nLeave blank to disable voice input.",
-          children: /* @__PURE__ */ u4(
-            ModelPickerDialog,
-            {
-              value: draft.transcription_model,
-              provider: "openrouter",
-              placeholder: data.defaults.transcription_model || "google/gemini-2.0-flash-lite-001",
-              disabled: busy,
-              apiBasePath: apiPath(gid, ""),
-              inputModality: "audio",
-              onChange: (v5) => update("transcription_model", v5)
-            }
-          )
+          label: "Voice input backend",
+          info: "Web microphone transcription runs on the host using ElevenLabs Scribe v2 Realtime (scribe_v2_realtime). Requires ELEVENLABS_API_KEY on the host; no key is sent to the browser or agent container. Audio-note transcription settings are unchanged. Takes effect without restarting sessions.",
+          children: [
+            /* @__PURE__ */ u4(
+              "select",
+              {
+                value: draft.voice_input_backend === null ? "default" : `backend:${draft.voice_input_backend}`,
+                disabled: busy,
+                onChange: (e4) => update(
+                  "voice_input_backend",
+                  e4.currentTarget.value === "default" ? null : e4.currentTarget.value.slice("backend:".length)
+                ),
+                children: [
+                  /* @__PURE__ */ u4("option", { value: "default", children: [
+                    "Server default (",
+                    data.defaults.voice_input_backend,
+                    ")"
+                  ] }),
+                  /* @__PURE__ */ u4("option", { value: "backend:elevenlabs", children: "ElevenLabs \u2014 Scribe v2 Realtime" }),
+                  draft.voice_input_backend !== null && draft.voice_input_backend !== "elevenlabs" ? /* @__PURE__ */ u4("option", { value: `backend:${draft.voice_input_backend}`, children: [
+                    draft.voice_input_backend || "(empty ID)",
+                    " \u2014 unsupported backend"
+                  ] }) : null
+                ]
+              }
+            ),
+            /* @__PURE__ */ u4("p", { class: "group-admin-help", role: "status", children: draft.voice_input_backend !== data.config.voice_input_backend || draft.voice_input_enabled !== data.config.voice_input_enabled ? "Save to apply this backend and refresh its readiness status." : data.voiceInput.ready ? "Ready \u2014 ElevenLabs Scribe v2 Realtime." : data.voiceInput.reason || "Voice input is unavailable." })
+          ]
         }
       ),
       /* @__PURE__ */ u4(
@@ -29348,7 +29421,7 @@ function SettingsTab({
                   {
                     type: "checkbox",
                     checked: effectiveRestart,
-                    disabled: busy || rebuildChecked,
+                    disabled: busy || voiceOnlyChange || rebuildChecked,
                     onChange: (e4) => setRestartChecked(e4.target.checked)
                   }
                 ),
@@ -29366,8 +29439,8 @@ function SettingsTab({
                   "input",
                   {
                     type: "checkbox",
-                    checked: rebuildChecked,
-                    disabled: busy,
+                    checked: effectiveRebuild,
+                    disabled: busy || voiceOnlyChange,
                     onChange: (e4) => setRebuildChecked(e4.target.checked)
                   }
                 ),

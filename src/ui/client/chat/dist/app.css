@@ -2566,9 +2566,6 @@ nav.tab-bar-strip.group-strip {
   background: transparent;
   color: inherit;
 }
-.chat-main .composer-input-wrap.recording textarea {
-  padding-right: 88px;
-}
 .chat-main .composer-input-wrap.multi-line textarea {
   padding: 5px 8px 36px 8px;
 }
@@ -2625,47 +2622,52 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.35;
   cursor: not-allowed;
 }
-.chat-main #chat-mic.recording,
-.chat-main .question-response-mic.recording {
-  width: auto;
-  min-width: 44px;
-  padding: 0 8px;
-  opacity: 1;
-  color: rgb(220, 38, 38);
-  background: rgba(220, 38, 38, 0.12);
+.chat-main #chat-mic.voice-stopwatch,
+.chat-main .question-response-mic.voice-stopwatch {
+  width: 64px;
+  gap: 5px;
   font-size: 12px;
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
-}
-.chat-main #chat-mic.transcribing,
-.chat-main .question-response-mic.transcribing {
   opacity: 1;
-  background: var(--wash);
 }
-.chat-main #chat-mic.transcribing:disabled,
-.chat-main .question-response-mic.transcribing:disabled {
-  opacity: 1;
-  cursor: progress;
+.chat-main .composer-input-wrap.voice-listening:not(.multi-line) textarea {
+  padding-right: calc(var(--control-action-size) + 76px);
 }
-.chat-main .mic-spinner {
-  display: inline-block;
+.voice-recording-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e34a4a;
+}
+.voice-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--border);
-  border-top-color: var(--fg);
+  border: 2px solid currentColor;
+  border-right-color: transparent;
   border-radius: 50%;
-  animation: mic-spin 0.8s linear infinite;
+  animation: voice-spin 1s linear infinite;
 }
-@keyframes mic-spin {
+@keyframes voice-spin {
   to {
     transform: rotate(360deg);
   }
 }
+@media (prefers-reduced-motion: reduce) {
+  .voice-spinner {
+    animation: none;
+  }
+}
+.voice-error {
+  color: var(--danger, #c44747);
+  font-size: 12px;
+  margin: 4px 0;
+}
+#chat-input[readonly],
+.question-card-input[readonly] {
+  cursor: default;
+}
 .chat-main .recording-time {
   font-variant-numeric: tabular-nums;
-}
-.chat-main form.recording {
-  border-color: rgba(220, 38, 38, 0.4);
 }
 .chat-main form.ws-down textarea,
 .chat-main form.ws-down > button {
@@ -2791,15 +2793,8 @@ nav.tab-bar-strip.group-strip {
     min-height: 44px;
     padding: 10px 92px 10px 44px;
   }
-  .chat-main .composer-input-wrap.recording textarea {
-    padding-right: 116px;
-  }
   .chat-main .composer-input-wrap.multi-line textarea {
     padding: 10px 10px 48px 10px;
-  }
-  .chat-main #chat-mic.recording {
-    min-width: 56px;
-    font-size: 14px;
   }
   .chat-main .message-action-btn {
     min-height: 44px;

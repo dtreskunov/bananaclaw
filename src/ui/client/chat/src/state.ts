@@ -18,6 +18,7 @@ import type {
   ActivityLine,
   TurnUsage,
   TaskPanelRequest,
+  VoiceInputCapability,
 } from './types';
 
 // ── reactive state ──────────────────────────────────────────────────
@@ -66,6 +67,11 @@ export const channelType: Signal<ChannelType> = signal<ChannelType>('web');
 export const messagingGroupId: Signal<string | null> = signal<string | null>(null);
 export const canSend: Signal<boolean> = signal(true);
 export const voiceMode: Signal<'off' | 'transcribe' | 'audio'> = signal<'off' | 'transcribe' | 'audio'>('off');
+export const voiceInput = signal<VoiceInputCapability>({
+  backend: 'disabled',
+  ready: false,
+  reason: 'Live voice input is not configured.',
+});
 export const chatMessages: Signal<ChatMessage[]> = signal<ChatMessage[]>([]);
 export const chatStatus: Signal<string> = signal('');
 export const chatLoading: Signal<boolean> = signal(false);

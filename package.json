@@ -28,11 +28,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@ai-sdk/elevenlabs": "3.0.46",
     "@chat-adapter/telegram": "4.26.0",
     "@clack/core": "^1.2.0",
     "@clack/prompts": "^1.2.0",
     "@onecli-sh/sdk": "3.1.0",
     "@resend/chat-sdk-adapter": "0.2.2",
+    "ai": "7.0.107",
     "archiver": "^8.0.0",
     "better-sqlite3": "11.10.0",
     "busboy": "^1.6.0",
@@ -66,6 +68,6 @@
     "vitest": "^4.0.18"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

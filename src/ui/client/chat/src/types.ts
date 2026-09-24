@@ -358,6 +358,7 @@ export interface WsPayload {
   }>;
   author?: { userId: string; displayName: string };
   voiceMode?: 'off' | 'transcribe' | 'audio';
+  voiceInput?: VoiceInputCapability;
   canSend?: boolean;
   on?: boolean;
   /** reaction frame: target message id the emoji attaches to. */
@@ -403,4 +404,9 @@ export interface WsPayload {
   triggerSource?: 'scheduled' | 'manual';
   error?: string | null;
   autoPaused?: boolean;
+}
+export interface VoiceInputCapability {
+  backend: 'elevenlabs' | 'disabled';
+  ready: boolean;
+  reason?: string;
 }

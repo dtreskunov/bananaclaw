@@ -6,21 +6,23 @@ import type { JSX } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
   chatMessages, chatStatus, chatLoading, chatReady, isTyping, typingHint, typingStartedAt, typingModel, typingUsage, activityLog, threadId, channelType, canSend, pending,
-  threads, groupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
+  threads, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions, respondingQuestionIds,
-  highlightMessageId, searchQuery, voiceMode, isMobile, scrollToBottomTick,
+  highlightMessageId, searchQuery, voiceMode, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
   pendingWebSends,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
 } from '../state';
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
 import {
-  sendChat, addPendingFiles, removePending, clearPending,
+  sendChat, addPendingFiles, removePending,
   navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
   openChat, openTaskPanel, reconnectChatNow, forkThreadAt,
 } from '../actions';
 import { requestConfirm } from './PromptModal';
-import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia, hasSpeechRecognition, transcribeViaServer } from '../recorder';
+import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia } from '../recorder';
+import { voice, voiceBrowserReason } from '../voice-audio';
+import { VoiceButton } from './VoiceButton';
 import { mergeQuestionTimeline } from '../question-timeline';
 import { showsMidTurnLabel } from '../chat-protocol';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
@@ -32,7 +34,6 @@ import { ZoomableImage } from './ZoomableImage';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
 
-const activeRecordingTarget = signal<string | null>(null);
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
 
 function imageFileName(src: string): string {
@@ -1358,139 +1359,49 @@ function PendingTray() {
 function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto; busy: boolean }) {
   const [answer, setAnswer] = useState('');
   const answerRef = useRef('');
-  const target = `question:${q.questionId}`;
-  const recording = isRecording.value && activeRecordingTarget.value === target;
-  const recorderBusy = isRecording.value;
-  const serverTranscribeAvailable = voiceMode.value !== 'off';
-  const micCapable = hasGetUserMedia() && (serverTranscribeAvailable || hasSpeechRecognition());
-  const [transcribeStatus, setTranscribeStatus] = useState('');
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const holdModeRef = useRef(false);
-  const submitAfterTranscriptRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const target = `${gid}:${tid}:question:${q.questionId}`;
+  const channel = channelType.value;
+  const mg = messagingGroupId.value;
+  const voiceState = voice.state.value;
+  const active = voiceState.target === target;
+  const voiceLocked = active && voiceState.phase !== 'error';
+  const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || 'Live voice input is not configured.' : '');
+  const pendingRef = useRef(q.status === 'pending');
+  pendingRef.current = q.status === 'pending';
+  const sendBusyRef = useRef(false);
   const canType = q.responseMode === 'text' || q.responseMode === 'choice_or_text';
   const answered = q.status === 'answered';
 
-  const submitAnswer = (value = answerRef.current): void => {
+  const submitAnswer = async (value = answerRef.current): Promise<boolean> => {
     const trimmed = value.trim();
-    if (trimmed) respondQuestion(q.questionId, trimmed).catch(console.error);
+    if (!trimmed || busy || sendBusyRef.current || !pendingRef.current) return false;
+    sendBusyRef.current = true;
+    try {
+      return await respondQuestion(q.questionId, trimmed);
+    } finally { sendBusyRef.current = false; }
   };
 
-  const insertTranscript = (text: string): void => {
-    const current = answerRef.current;
-    const next = current && !/\s$/.test(current) ? `${current} ${text}` : current + text;
-    answerRef.current = next;
-    setAnswer(next);
-    if (submitAfterTranscriptRef.current) {
-      submitAfterTranscriptRef.current = false;
-      submitAnswer(next);
-    }
-  };
-
-  const finishQuestionRecording = async (): Promise<void> => {
-    if (activeRecordingTarget.value !== target) return;
-    const result = await stopRecording();
-    activeRecordingTarget.value = null;
-    if (!result) {
-      submitAfterTranscriptRef.current = false;
-      chatStatus.value = 'too short — discarded';
-      setTimeout(() => { if (chatStatus.value === 'too short — discarded') chatStatus.value = 'connected'; }, 2000);
-      return;
-    }
-    if (result.transcript) {
-      insertTranscript(result.transcript);
-      return;
-    }
-    if (!serverTranscribeAvailable || !groupId.value || !threadId.value) {
-      submitAfterTranscriptRef.current = false;
-      chatStatus.value = 'transcription unavailable';
-      setTimeout(() => { if (chatStatus.value === 'transcription unavailable') chatStatus.value = 'connected'; }, 3000);
-      return;
-    }
-    setTranscribeStatus('transcribing…');
-    transcribeViaServer(result.blob, groupId.value, threadId.value, {
-      onPartial: (delta) => {
-        setTranscribeStatus((previous) => (previous === 'transcribing…' ? '' : previous) + delta);
-      },
-      onDone: (fullText) => {
-        setTranscribeStatus('');
-        const trimmed = fullText.trim();
-        if (!trimmed || trimmed === '[inaudible]') {
-          submitAfterTranscriptRef.current = false;
-          return;
-        }
-        if (looksLikeRefusal(trimmed)) {
-          submitAfterTranscriptRef.current = false;
-          chatStatus.value = 'transcription unclear — try again';
-          setTimeout(() => { if (chatStatus.value === 'transcription unclear — try again') chatStatus.value = 'connected'; }, 3000);
-          return;
-        }
-        insertTranscript(trimmed);
-      },
-      onError: (error) => {
-        submitAfterTranscriptRef.current = false;
-        setTranscribeStatus('');
-        chatStatus.value = `transcription failed: ${error}`;
-        setTimeout(() => { if (chatStatus.value.startsWith('transcription failed')) chatStatus.value = 'connected'; }, 3000);
-      },
-    });
-  };
-
-  const startQuestionRecording = async (): Promise<void> => {
-    if (recorderBusy) return;
-    activeRecordingTarget.value = target;
-    const started = await startRecording(true);
-    if (!started) {
-      activeRecordingTarget.value = null;
-      chatStatus.value = 'microphone unavailable';
-      setTimeout(() => { if (chatStatus.value === 'microphone unavailable') chatStatus.value = 'connected'; }, 3000);
-    }
-  };
-
-  const onMicPointerDown = (event: PointerEvent): void => {
-    event.preventDefault();
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    holdModeRef.current = false;
-    holdTimerRef.current = setTimeout(() => {
-      holdModeRef.current = true;
-      startQuestionRecording().catch(console.error);
-    }, 300);
-  };
-
-  const onMicPointerUp = (): void => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    if (holdModeRef.current || recording) {
-      holdModeRef.current = false;
-      finishQuestionRecording().catch(console.error);
-    } else {
-      startQuestionRecording().catch(console.error);
-    }
-  };
-
-  const onMicPointerCancel = (): void => {
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = null;
-    holdModeRef.current = false;
-    if (recording) {
-      cancelRecording();
-      activeRecordingTarget.value = null;
-    }
+  const startVoice = (): void => {
+    if (!gid || !tid || unavailable || busy || isRecording.value) return;
+    voice.start({
+      key: target, groupId: gid, threadId: tid,
+      channelType: channel, messagingGroupId: mg,
+      getText: () => answerRef.current,
+      setText: (text) => { answerRef.current = text; setAnswer(text); },
+      isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && pendingRef.current,
+      send: () => submitAnswer(),
+    }, textareaRef.current?.selectionStart ?? answerRef.current.length);
   };
 
   useEffect(() => {
-    if (q.status !== 'pending' && activeRecordingTarget.value === target) {
-      cancelRecording();
-      activeRecordingTarget.value = null;
-    }
+    if (q.status !== 'pending' && voice.state.value.target === target) voice.detach();
     return () => {
-      if (activeRecordingTarget.value === target) {
-        cancelRecording();
-        activeRecordingTarget.value = null;
-      }
+      if (voice.state.value.target === target) voice.detach();
     };
-  }, [q.status, target]);
+  }, [q.status, target, channel, mg]);
 
   return (
     <div class={`msg ${answered ? 'in question-card-answered' : 'out agent-action'} question-card`} data-msg-id={q.questionId}>
@@ -1511,7 +1422,10 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
                   type="button"
                   class="question-card-btn"
                   disabled={busy}
-                  onClick={() => respondQuestion(q.questionId, o.value).catch(console.error)}
+                  onClick={() => {
+                    if (voice.state.value.target === target) voice.detach();
+                    respondQuestion(q.questionId, o.value).catch(console.error);
+                  }}
                   key={o.value}
                 >{o.label}</button>
               ))}
@@ -1522,24 +1436,18 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
               class="question-card-text-form"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (recording) {
-                  submitAfterTranscriptRef.current = true;
-                  finishQuestionRecording().catch(console.error);
-                  return;
-                }
-                if (transcribeStatus) {
-                  submitAfterTranscriptRef.current = true;
-                  return;
-                }
-                submitAnswer();
+                if (active) voice.send();
+                else submitAnswer().catch(console.error);
               }}
             >
-              <div class={`composer-input-wrap question-response-input-wrap${recording ? ' recording' : ''}${transcribeStatus ? ' transcribing' : ''}`}>
+              <div class={`composer-input-wrap question-response-input-wrap${active && voiceState.phase === 'listening' ? ' voice-listening' : ''}`}>
                 <textarea
                   class="question-card-input"
                   rows={1}
                   value={answer}
+                  ref={textareaRef}
                   disabled={busy}
+                  readOnly={voiceLocked || (active && voiceState.sending)}
                   aria-label="Your answer"
                   placeholder="Type your answer…"
                   onInput={(event) => {
@@ -1547,33 +1455,19 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
                     setAnswer(event.currentTarget.value);
                   }}
                 />
-                {micCapable ? (
-                  <button
-                    type="button"
-                    class={`mic-overlay question-response-mic${recording ? ' recording' : ''}${transcribeStatus ? ' transcribing' : ''}`}
-                    title={recording ? 'Tap to stop and transcribe' : transcribeStatus ? 'Transcribing…' : 'Hold to record, tap to toggle'}
-                    aria-label={recording ? 'Stop recording answer' : transcribeStatus ? 'Transcribing answer' : 'Record voice answer'}
-                    disabled={busy || !!transcribeStatus || (recorderBusy && !recording)}
-                    onPointerDown={onMicPointerDown as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
-                    onPointerUp={onMicPointerUp as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
-                    onPointerCancel={onMicPointerCancel as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
-                  >
-                    {recording
-                      ? <span class="recording-time">{formatRecordingDuration(recordingDuration.value)}</span>
-                      : transcribeStatus
-                        ? <span class="mic-spinner" aria-hidden="true"></span>
-                        : '\uD83C\uDF99\uFE0F'}
-                  </button>
-                ) : null}
+                <VoiceButton target={target} controller={voice} onStart={startVoice}
+                  className="question-response-mic" configured={voiceInput.value.ready}
+                  unavailable={unavailable} disabled={busy || isRecording.value} />
                 <button
                   type="submit"
                   class="accent-icon-btn question-response-send"
                   aria-label="Send answer"
-                  title={recording || transcribeStatus ? 'Stop, transcribe, and send' : 'Send answer'}
-                  disabled={busy || (!answer.trim() && !recording && !transcribeStatus)}
+                  title={active && voiceState.phase === 'listening' ? 'Finalize and send answer' : 'Send answer'}
+                  disabled={busy || (active && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase))) || (!answer.trim() && !active)}
                   onMouseDown={(event) => event.preventDefault()}
                 >{'\u2191'}</button>
               </div>
+              {active && voiceState.error && <p class="voice-error" role="alert">{voiceState.error} Nothing is sent automatically.</p>}
             </form>
           )}
         </>
@@ -1585,21 +1479,6 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
       </div>
     </div>
   );
-}
-
-// Detect refusal-style output from a misconfigured server-side transcription
-// model (e.g. a chat LLM standing in for whisper). These should never reach
-// the composer.
-const REFUSAL_PATTERNS = [
-  /^i'?m sorry,? (but )?i (can'?t|cannot)/i,
-  /^i (can'?t|cannot) (process|transcribe|help|assist|fulfill|comply)/i,
-  /^sorry,? (but )?i (can'?t|cannot)/i,
-  /^as an ai (language )?model/i,
-  /^i (do not|don'?t) have the ability to/i,
-];
-function looksLikeRefusal(text: string): boolean {
-  const head = text.slice(0, 200);
-  return REFUSAL_PATTERNS.some((re) => re.test(head));
 }
 
 function Composer() {
@@ -1617,6 +1496,17 @@ function Composer() {
     (q) => q.status === 'pending' && (!q.threadId || q.threadId === threadId.value),
   );
   const composerDisabled = wsDown || hasQuestion;
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const target = `${gid}:${tid}:composer`;
+  const channel = channelType.value;
+  const mg = messagingGroupId.value;
+  const voiceState = voice.state.value;
+  const activeVoice = voiceState.target === target;
+  const voiceLocked = activeVoice && (voiceState.phase !== 'error' || voiceState.sending);
+  const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || 'Live voice input is not configured.' : '');
+  const sendBusyRef = useRef(false);
+  const [multiLine, setMultiLine] = useState(false);
   const autosize = (): void => {
     const el = inputRef.current;
     if (!el) return;
@@ -1658,45 +1548,37 @@ function Composer() {
   }, []);
   const onSubmit = (ev: JSX.TargetedEvent<HTMLFormElement>): void => {
     ev.preventDefault();
-    // Mic recording in flight → stop, transcribe, then submit. The
-    // finishRecording / transcribe-callback paths trigger maybeAutoSend()
-    // once the transcript (if any) is folded into the composer.
-    if (recording && recordingModeRef.current === 'mic') {
-      autoSendRef.current = true;
-      finishRecording().catch(console.error);
-      return;
-    }
-    // User already stopped, transcription still in flight → queue submit
-    // for when onDone/onError fires.
-    if (transcribingRef.current) {
-      autoSendRef.current = true;
-      return;
-    }
-    doSubmit();
+    if (composerDisabled) return;
+    if (activeVoice) voice.send();
+    else doSubmit().catch(console.error);
   };
-  const doSubmit = (): void => {
+  const doSubmit = async (): Promise<boolean> => {
+    if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid
+      || channelType.value !== channel || messagingGroupId.value !== mg
+      || (isWeb && !chatReady.value)
+      || pendingQuestions.value.some((q) => q.status === 'pending' && (!q.threadId || q.threadId === tid))) return false;
     const text = (inputRef.current?.value || '').trim();
     const files = pending.value.slice();
-    if (!text && files.length === 0) return;
+    if (!text && files.length === 0) return false;
     const pins = pinnedContext.value;
     const prefix = pins.length > 0
       ? '> Context (file browser):\n' + pins.map((p) => `> - \`${p}\``).join('\n') + '\n\n'
       : '';
     const fullText = prefix + text;
-    if (inputRef.current) inputRef.current.value = '';
-    autosize();
-    clearPending();
-    clearPinnedContext();
-    if (isMobile.value) document.getElementById('chat-log')?.focus({ preventScroll: true });
-    sendChat(fullText, files).catch(console.error);
-  };
-  // Set by onSubmit when the user presses Send while mic recording or
-  // transcribing. Consumed by maybeAutoSend(); cleared on first fire.
-  const autoSendRef = useRef(false);
-  const maybeAutoSend = (): void => {
-    if (!autoSendRef.current) return;
-    autoSendRef.current = false;
-    doSubmit();
+    sendBusyRef.current = true;
+    try {
+      const sent = await sendChat(fullText, files);
+      if (!sent || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return false;
+      if (inputRef.current?.value.trim() === text) inputRef.current.value = '';
+      autosize();
+      for (const file of files) {
+        const index = pending.value.indexOf(file);
+        if (index >= 0) removePending(index);
+      }
+      if (pinnedContext.value === pins) clearPinnedContext();
+      if (isMobile.value) document.getElementById('chat-log')?.focus({ preventScroll: true });
+      return true;
+    } finally { sendBusyRef.current = false; }
   };
   const onKey = (ev: JSX.TargetedKeyboardEvent<HTMLTextAreaElement>): void => {
     // On mobile, Enter inserts a newline (matches platform keyboard
@@ -1724,227 +1606,52 @@ function Composer() {
     addFiles(Array.from(items));
   };
 
-  // ── Voice capture ──────────────────────────────────────────────────
-  // Two paths share the recorder:
-  //   - mic button (PTT or tap-toggle): always transcribes, inserts text
-  //     into the composer for editing. Never auto-sends.
-  //   - + menu "Record audio attachment": records a blob and adds it as a
-  //     pending file (only available when the responding model accepts
-  //     audio — voiceMode === 'audio').
+  // Live dictation is model-independent; the separate audio attachment
+  // action still depends on the responding model's audio capability.
   const vm = voiceMode.value;
-  const serverTranscribeAvailable = vm !== 'off';
-  const micCapable = hasGetUserMedia() && (serverTranscribeAvailable || hasSpeechRecognition());
-  const recorderBusy = isRecording.value;
-  const recording = recorderBusy && activeRecordingTarget.value === 'composer';
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const holdModeRef = useRef(false);
-  // 'mic' = transcribe-to-composer; 'attach' = blob-only attachment.
-  const recordingModeRef = useRef<'mic' | 'attach' | null>(null);
-  const attachRecording = recording && recordingModeRef.current === 'attach';
-
-  const transcribingRef = useRef(false);
-  const [transcribeStatus, setTranscribeStatus] = useState('');
-  // True once the textarea has grown beyond a single line. Triggers the
-  // "buttons get their own row" layout: textarea uses full width for
-  // text, +/mic/Send sit in a dedicated strip at the bottom.
-  const [multiLine, setMultiLine] = useState(false);
-  // Holds transcript text that arrived while the textarea was unmounted
-  // (replaced by the recording or transcribing indicator). Drained by the
-  // useEffect below once the textarea re-mounts.
-  const pendingInsertRef = useRef<string | null>(null);
-
-  const doInsert = (el: HTMLTextAreaElement, text: string): void => {
-    const cur = el.value;
-    // Insert at the caret (or replace the current selection). When the
-    // textarea has never been focused, selectionStart/End sit at 0 by
-    // default — fall back to end-of-text so dictation doesn't land before
-    // typed content.
-    const hasFocus = document.activeElement === el;
-    const start = hasFocus ? (el.selectionStart ?? cur.length) : cur.length;
-    const end = hasFocus ? (el.selectionEnd ?? start) : cur.length;
-    const before = cur.slice(0, start);
-    const after = cur.slice(end);
-    const leftPad = before && !/\s$/.test(before) ? ' ' : '';
-    const rightPad = after && !/^\s/.test(after) ? ' ' : '';
-    const insert = leftPad + text + rightPad;
-    el.value = before + insert + after;
-    autosize();
-    const caret = (before + insert).length;
-    // Skip .focus() on mobile so the OS keyboard doesn't pop up after
-    // dictation. The user taps the textarea explicitly if they want to
-    // edit. Desktop benefits from focus so they can keep typing.
-    if (!isMobile.value) {
-      el.focus();
-      el.setSelectionRange(caret, caret);
-    }
-    maybeAutoSend();
-  };
-
-  // Drain pendingInsert after every render. Re-runs whenever the textarea
-  // becomes available (recording → false, transcribeStatus → '').
-  useEffect(() => {
-    if (pendingInsertRef.current == null) return;
+  const attachRecording = isRecording.value;
+  const startVoice = (): void => {
+    if (!gid || !tid || unavailable || composerDisabled || isRecording.value) return;
     const el = inputRef.current;
-    if (!el) return;
-    const text = pendingInsertRef.current;
-    pendingInsertRef.current = null;
-    doInsert(el, text);
-  });
-
-  const insertIntoComposer = (text: string): void => {
-    const el = inputRef.current;
-    if (el) {
-      doInsert(el, text);
-      return;
-    }
-    // Textarea is currently hidden behind the recording / transcribing
-    // indicator. Stash the text and let the useEffect insert it once the
-    // textarea re-mounts.
-    const queued = pendingInsertRef.current;
-    pendingInsertRef.current = queued ? `${queued} ${text}` : text;
+    voice.start({
+      key: target, groupId: gid, threadId: tid,
+      channelType: channel, messagingGroupId: mg,
+      getText: () => inputRef.current?.value || '',
+      setText: (text) => { if (inputRef.current) inputRef.current.value = text; autosize(); },
+      isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg,
+      send: doSubmit,
+    }, el?.selectionStart ?? el?.value.length);
   };
-
-  const attachAudioBlob = (blob: Blob): void => {
-    const rawType = blob.type.split(';')[0] || 'audio/mp4';
-    const ext = rawType.includes('ogg') ? 'ogg' : rawType.includes('mp4') ? 'm4a' : rawType.includes('wav') ? 'wav' : 'webm';
-    const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: rawType });
-    addPendingFiles([file], UPLOAD_MAX_FILES, UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE);
+  const startAudioAttachRecording = async (): Promise<void> => {
+    if (isRecording.value || voice.state.value.sending || !['idle', 'error'].includes(voice.state.value.phase)) return;
+    const ok = await startRecording();
+    if (!ok) {
+      chatStatus.value = 'microphone unavailable';
+    }
   };
-
-  const finishRecording = async (): Promise<void> => {
-    if (activeRecordingTarget.value !== 'composer') return;
-    const mode = recordingModeRef.current;
-    recordingModeRef.current = null;
-    const result = await stopRecording();
-    activeRecordingTarget.value = null;
-    if (!result) {
-      chatStatus.value = 'too short — discarded';
-      setTimeout(() => { if (chatStatus.value === 'too short — discarded') chatStatus.value = 'connected'; }, 2000);
-      maybeAutoSend();
-      return;
-    }
-    if (mode === 'attach') {
-      attachAudioBlob(result.blob);
-      return;
-    }
-    // mic mode → transcribe to composer. Prefer client transcript;
-    // fall back to server when a transcription model is configured.
-    if (result.transcript) {
-      insertIntoComposer(result.transcript);
-      return;
-    }
-    if (!serverTranscribeAvailable) {
-      chatStatus.value = 'transcription unavailable';
-      setTimeout(() => { if (chatStatus.value === 'transcription unavailable') chatStatus.value = 'connected'; }, 3000);
-      maybeAutoSend();
-      return;
-    }
-    if (!groupId.value || !threadId.value) {
-      maybeAutoSend();
-      return;
-    }
-    transcribingRef.current = true;
-    setTranscribeStatus('transcribing…');
-    transcribeViaServer(result.blob, groupId.value, threadId.value, {
-      onPartial: (delta) => {
-        setTranscribeStatus((prev) => {
-          const cur = prev === 'transcribing…' ? '' : prev;
-          return cur + delta;
-        });
-      },
-      onDone: (fullText) => {
-        transcribingRef.current = false;
-        setTranscribeStatus('');
-        const trimmed = fullText.trim();
-        if (!trimmed || trimmed === '[inaudible]') {
-          maybeAutoSend();
-          return;
-        }
-        if (looksLikeRefusal(trimmed)) {
-          chatStatus.value = 'transcription unclear — try again';
-          setTimeout(() => { if (chatStatus.value === 'transcription unclear — try again') chatStatus.value = 'connected'; }, 3000);
-          maybeAutoSend();
-          return;
-        }
-        insertIntoComposer(trimmed);
-      },
-      onError: (err) => {
-        transcribingRef.current = false;
-        setTranscribeStatus('');
-        chatStatus.value = `transcription failed: ${err}`;
-        setTimeout(() => { if (chatStatus.value.startsWith('transcription failed')) chatStatus.value = 'connected'; }, 3000);
-        maybeAutoSend();
-      },
+  const stopAttachRecording = (): void => {
+    void stopRecording().then((result) => {
+      if (!result || groupId.value !== gid || threadId.value !== tid) return;
+      const type = result.blob.type.split(';')[0] || 'audio/webm';
+      const ext = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm';
+      addFiles([new File([result.blob], `voice-${Date.now()}.${ext}`, { type })]);
     });
   };
 
-  const onMicPointerDown = (ev: PointerEvent): void => {
-    ev.preventDefault();
-    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    holdModeRef.current = false;
-    holdTimerRef.current = setTimeout(() => {
-      // Held > 300ms → hold mode
-      holdModeRef.current = true;
-      recordingModeRef.current = 'mic';
-      activeRecordingTarget.value = 'composer';
-      startRecording(true).then((started) => {
-        if (!started) activeRecordingTarget.value = null;
-      }).catch(console.error);
-    }, 300);
-  };
-
-  const onMicPointerUp = (): void => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    if (holdModeRef.current) {
-      // Release after hold → stop & transcribe
-      holdModeRef.current = false;
-      finishRecording().catch(console.error);
-    } else if (recording) {
-      // Tap while recording (toggle mode) → stop & transcribe
-      finishRecording().catch(console.error);
-    } else {
-      // Short tap → toggle mode start
-      recordingModeRef.current = 'mic';
-      activeRecordingTarget.value = 'composer';
-      startRecording(true).then((started) => {
-        if (!started) activeRecordingTarget.value = null;
-      }).catch(console.error);
-    }
-  };
-
-  const onMicPointerCancel = (): void => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    if (holdModeRef.current || recording) {
+  useEffect(() => {
+    const hidden = (): void => { if (document.hidden) cancelRecording(); };
+    document.addEventListener('visibilitychange', hidden);
+    window.addEventListener('pagehide', cancelRecording);
+    return () => {
+      document.removeEventListener('visibilitychange', hidden);
+      window.removeEventListener('pagehide', cancelRecording);
       cancelRecording();
-      activeRecordingTarget.value = null;
-      recordingModeRef.current = null;
-      holdModeRef.current = false;
-    }
-  };
-
-  const startAudioAttachRecording = async (): Promise<void> => {
-    if (recorderBusy) return;
-    recordingModeRef.current = 'attach';
-    activeRecordingTarget.value = 'composer';
-    const ok = await startRecording(false);
-    if (!ok) {
-      recordingModeRef.current = null;
-      activeRecordingTarget.value = null;
-      chatStatus.value = 'microphone unavailable';
-      setTimeout(() => { if (chatStatus.value === 'microphone unavailable') chatStatus.value = 'connected'; }, 3000);
-    }
-  };
-
-  const stopAttachRecording = (): void => {
-    if (recordingModeRef.current !== 'attach') return;
-    finishRecording().catch(console.error);
-  };
+      if (voice.state.value.target === target) voice.detach();
+    };
+  }, [target, channel, mg]);
+  useEffect(() => {
+    if ((hasQuestion || !showComposer) && voice.state.value.target === target) voice.interrupt('Composer is no longer available. Current text has been kept.');
+  }, [hasQuestion, showComposer, target]);
 
   return (
     <>
@@ -1952,10 +1659,10 @@ function Composer() {
       id="chat-form"
       onSubmit={onSubmit}
       style={showComposer ? '' : 'display:none'}
-      class={`${composerDisabled ? 'ws-down' : ''} ${recording ? 'recording' : ''}`}
+      class={composerDisabled ? 'ws-down' : ''}
     >
       <input type="file" id="chat-file" multiple hidden ref={fileRef} onChange={onFileChange} />
-      {attachRecording ? (
+      {attachRecording && (
         <button
           type="button"
           id="chat-recording-indicator"
@@ -1967,13 +1674,10 @@ function Composer() {
           <span class="recording-time">{formatRecordingDuration(recordingDuration.value)}</span>
           <span class="recording-stop-label">Stop</span>
         </button>
-      ) : (
-        <div class={'composer-input-wrap' + (multiLine ? ' multi-line' : '') + (recording ? ' recording' : '') + (transcribeStatus ? ' transcribing' : '')}>
-          {/* Textarea stays mounted across recording/transcribing states so
-              the user's drafted text is never lost. Indicators render on
-              top of it. The +, mic, and Send buttons are absolutely
-              positioned inside this wrap to save horizontal space; the
-              textarea reserves room for them via padding-left/right. */}
+      )}
+        <div class={'composer-input-wrap' + (multiLine ? ' multi-line' : '') + (activeVoice && voiceState.phase === 'listening' ? ' voice-listening' : '')} style={attachRecording ? 'display:none' : ''}>
+          {/* Dictation updates only its insertion span; editing is locked
+              until finalization so typed text cannot race provider revisions. */}
           <textarea
             id="chat-input"
             rows={1}
@@ -1984,9 +1688,10 @@ function Composer() {
             onPaste={onPaste as unknown as JSX.ClipboardEventHandler<HTMLTextAreaElement>}
             autocomplete="off"
             disabled={hasQuestion}
+            readOnly={voiceLocked}
           ></textarea>
           <ComposerPlusMenu
-            disabled={composerDisabled || recording}
+            disabled={composerDisabled || voiceState.sending || !['idle', 'error'].includes(voiceState.phase)}
             title={composerDisabled ? (hasQuestion ? 'Answer the question above' : 'Disconnected') : 'Add\u2026'}
             showRecordAudio={vm === 'audio' && hasGetUserMedia()}
             showQuickCapture={hasGetUserMedia()}
@@ -1994,43 +1699,21 @@ function Composer() {
             onQuickCapture={() => setQuickCapture(true)}
             onRecordAudio={() => { startAudioAttachRecording().catch(console.error); }}
           />
-          {micCapable ? (
-            <button
-              type="button"
-              id="chat-mic"
-              class={'mic-overlay' + (recording ? ' recording' : '') + (transcribeStatus ? ' transcribing' : '')}
-              title={recording
-                ? 'Tap to stop and transcribe'
-                : transcribeStatus
-                  ? 'Transcribing\u2026'
-                  : wsDown
-                    ? 'Disconnected'
-                    : 'Hold to record, tap to toggle'}
-              aria-label={recording ? 'Stop recording' : transcribeStatus ? 'Transcribing' : 'Record voice message'}
-              disabled={(composerDisabled && !recording) || !!transcribeStatus || (recorderBusy && !recording)}
-              onPointerDown={onMicPointerDown as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
-              onPointerUp={onMicPointerUp as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
-              onPointerCancel={onMicPointerCancel as unknown as JSX.PointerEventHandler<HTMLButtonElement>}
-            >
-              {recording
-                ? <span class="recording-time">{formatRecordingDuration(recordingDuration.value)}</span>
-                : transcribeStatus
-                  ? <span class="mic-spinner" aria-hidden="true"></span>
-                  : '\uD83C\uDF99\uFE0F'}
-            </button>
-          ) : null}
+          <VoiceButton target={target} controller={voice} onStart={startVoice} id="chat-mic"
+            configured={voiceInput.value.ready} unavailable={unavailable}
+            disabled={composerDisabled || isRecording.value} />
           <button
             type="submit"
             id="chat-send"
             class="accent-icon-btn"
             aria-label="Send"
-            title={recording || transcribeStatus ? 'Stop, transcribe, and send' : 'Send'}
-            disabled={composerDisabled}
+            title={activeVoice && voiceState.phase === 'listening' ? 'Finalize and send' : 'Send'}
+            disabled={composerDisabled || (activeVoice && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase)))}
             onMouseDown={(e) => e.preventDefault()}
           >{'\u2191'}</button>
         </div>
-      )}
     </form>
+    {activeVoice && voiceState.error && <p class="voice-error" role="alert">{voiceState.error} Nothing is sent automatically.</p>}
     {quickCapture ? (
       <QuickCapture
         onCapture={(file) => { setQuickCapture(false); addFiles([file]); }}

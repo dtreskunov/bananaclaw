@@ -63,7 +63,10 @@ interface SettingsResponse {
     cli_scope: string | null;
     voice_mode: string | null;
     transcription_model: string | null;
+    voice_input_backend: string | null;
+    voice_input_enabled: boolean;
   };
+  voiceInput: { backend: 'disabled' | 'elevenlabs'; ready: boolean; reason?: string };
   modelParams: Record<string, unknown>;
   packages: { apt: string[]; npm: string[]; pip: string[] };
   mcpServers: Record<string, McpServerConfigDto>;
@@ -75,6 +78,7 @@ interface SettingsResponse {
     models: Record<string, string | null>;
     image_tag: string | null;
     transcription_model: string | null;
+    voice_input_backend: 'disabled' | 'elevenlabs';
   };
   validProviders: string[];
   validCliScopes: string[];
@@ -459,6 +463,9 @@ function SettingsTab({
 
   const pending = changedFields();
   const changed = pending.size > 0;
+  const voiceOnlyChange =
+    pending.size > 0 &&
+    [...pending].every((field) => field === 'voice_input_backend' || field === 'voice_input_enabled');
   const needsRestart = [...pending].some((f) => RESTART_REQUIRING_FIELDS.has(f));
   const imageRebuildNeeded =
     pending.has('image_tag') &&
@@ -474,8 +481,8 @@ function SettingsTab({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState('');
   const [archiveBusy, setArchiveBusy] = useState(false);
-  const effectiveRestart = restartChecked || rebuildChecked;
-  const effectiveRebuild = rebuildChecked;
+  const effectiveRestart = !voiceOnlyChange && (restartChecked || rebuildChecked);
+  const effectiveRebuild = !voiceOnlyChange && rebuildChecked;
   const canSave = changed;
 
   useEffect(() => {
@@ -505,7 +512,10 @@ function SettingsTab({
       ]);
       const settingsChanged = [...pending].some((f) => !JSON_FIELDS.has(f));
       if (settingsChanged) {
-        const body: Record<string, unknown> = { ...draft };
+        // Do not re-submit legacy audio-note settings for a host-only voice change.
+        const body: Record<string, unknown> = voiceOnlyChange
+          ? { voice_input_backend: draft.voice_input_backend, voice_input_enabled: draft.voice_input_enabled }
+          : { ...draft };
         if (data && draftName.trim() !== data.name) body.name = draftName.trim();
         if (pending.has('site_enabled')) body.site_enabled = siteEnabled;
         if (pending.has('site_slug')) body.site_slug = siteSlug.trim() || null;
@@ -713,21 +723,49 @@ function SettingsTab({
               onChange={(v) => update('small_model', v)}
             />
           </Field>
+          <Field label="Voice input">
+            <label class="group-admin-check">
+              <input
+                type="checkbox"
+                checked={draft.voice_input_enabled}
+                disabled={busy}
+                onChange={(e) => update('voice_input_enabled', e.currentTarget.checked)}
+              />
+              <span>Enable web microphone input</span>
+            </label>
+          </Field>
           <Field
-            label="Transcription model"
+            label="Voice input backend"
             info={
-              'OpenRouter model used when the main model cannot accept audio directly. When set, a mic button appears in the chat composer.\nLeave blank to disable voice input.'
+              'Web microphone transcription runs on the host using ElevenLabs Scribe v2 Realtime (scribe_v2_realtime). Requires ELEVENLABS_API_KEY on the host; no key is sent to the browser or agent container. Audio-note transcription settings are unchanged. Takes effect without restarting sessions.'
             }
           >
-            <ModelPickerDialog
-              value={draft.transcription_model}
-              provider="openrouter"
-              placeholder={data.defaults.transcription_model || 'google/gemini-2.0-flash-lite-001'}
+            <select
+              value={draft.voice_input_backend === null ? 'default' : `backend:${draft.voice_input_backend}`}
               disabled={busy}
-              apiBasePath={apiPath(gid, '')}
-              inputModality="audio"
-              onChange={(v) => update('transcription_model', v)}
-            />
+              onChange={(e) =>
+                update(
+                  'voice_input_backend',
+                  e.currentTarget.value === 'default' ? null : e.currentTarget.value.slice('backend:'.length),
+                )
+              }
+            >
+              <option value="default">Server default ({data.defaults.voice_input_backend})</option>
+              <option value="backend:elevenlabs">ElevenLabs — Scribe v2 Realtime</option>
+              {draft.voice_input_backend !== null && draft.voice_input_backend !== 'elevenlabs' ? (
+                <option value={`backend:${draft.voice_input_backend}`}>
+                  {draft.voice_input_backend || '(empty ID)'} — unsupported backend
+                </option>
+              ) : null}
+            </select>
+            <p class="group-admin-help" role="status">
+              {draft.voice_input_backend !== data.config.voice_input_backend ||
+              draft.voice_input_enabled !== data.config.voice_input_enabled
+                ? 'Save to apply this backend and refresh its readiness status.'
+                : data.voiceInput.ready
+                  ? 'Ready — ElevenLabs Scribe v2 Realtime.'
+                  : data.voiceInput.reason || 'Voice input is unavailable.'}
+            </p>
           </Field>
           <ModelParamsEditor
             gid={gid}
@@ -997,7 +1035,7 @@ function SettingsTab({
                 <input
                   type="checkbox"
                   checked={effectiveRestart}
-                  disabled={busy || rebuildChecked /* rebuild always restarts */}
+                  disabled={busy || voiceOnlyChange || rebuildChecked /* rebuild always restarts */}
                   onChange={(e) => setRestartChecked((e.target as HTMLInputElement).checked)}
                 />
                 <span>Restart sessions</span>
@@ -1014,8 +1052,8 @@ function SettingsTab({
               <label class="group-admin-check">
                 <input
                   type="checkbox"
-                  checked={rebuildChecked}
-                  disabled={busy}
+                  checked={effectiveRebuild}
+                  disabled={busy || voiceOnlyChange}
                   onChange={(e) => setRebuildChecked((e.target as HTMLInputElement).checked)}
                 />
                 <span>Rebuild image</span>

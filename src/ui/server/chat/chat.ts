@@ -75,24 +75,11 @@ import { extractDisplayQuery, HA_CHANNEL_TYPE } from '../../../channels/homeassi
 import { setResendPendingWebOverride } from '../../../channels/resend.js';
 import type { OutboundMessage } from '../../../channels/adapter.js';
 import { authenticate, COOKIE_NAME } from '../auth.js';
-import { streamTranscribe } from './voice-transcribe.js';
-import { ensureOneCliAgent } from './onecli-proxy.js';
 import { reconcileVoiceMode } from './voice-mode.js';
+import { resolveVoiceInputConfig } from './voice-input-config.js';
+import { handleVoiceUpgrade } from './voice-stream.js';
+import { uiBaseUrl } from '../server.js';
 import fs from 'fs';
-
-function appendTranscriptDelta(text: string, delta: string): string {
-  if (!text || !delta) return text + delta;
-  if (/\s$/.test(text) || /^\s/.test(delta)) return text + delta;
-  // LLM transcription tokens occasionally arrive without their leading space,
-  // producing "Hello.World" or "okay,let's". Insert one when the boundary
-  // looks like a word break — the previous chunk ends in a letter/digit or a
-  // sentence-final / closing punctuation mark, and the new chunk starts with
-  // a letter/digit or an opening bracket/quote.
-  const endsWord = /[\p{L}\p{N}.,!?;:)\]}"]$/u.test(text);
-  const startsWord = /^[\p{L}\p{N}([{"]/u.test(delta);
-  if (endsWord && startsWord) return `${text} ${delta}`;
-  return text + delta;
-}
 
 /** Map an agent group to its shared web platform_id. */
 function platformIdFor(agentGroupId: string): string {
@@ -188,7 +175,6 @@ export function matchChatPath(pathname: string):
   | { kind: 'task-update'; groupId: string; threadId: string; seriesId: string }
   | { kind: 'delete'; groupId: string; threadId: string }
   | { kind: 'fork'; groupId: string; threadId: string }
-  | { kind: 'voice-transcribe'; groupId: string; threadId: string }
   | { kind: 'attachment'; groupId: string; threadId: string; attachmentPath: string }
   | null {
   const start = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/start$/);
@@ -197,13 +183,6 @@ export function matchChatPath(pathname: string):
   if (threads) return { kind: 'threads', groupId: threads[1] };
   const search = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/search$/);
   if (search) return { kind: 'search', groupId: decodeURIComponent(search[1]) };
-  const voiceTranscribe = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/voice\/transcribe$/);
-  if (voiceTranscribe)
-    return {
-      kind: 'voice-transcribe',
-      groupId: decodeURIComponent(voiceTranscribe[1]),
-      threadId: decodeURIComponent(voiceTranscribe[2]),
-    };
   const attachment = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/attachments\/(.+)$/);
   if (attachment)
     return {
@@ -477,58 +456,6 @@ export async function handleChatRequest(
     } catch (err) {
       log.error('web chat send failed', { userId, groupId: m.groupId, err });
       writeJson(res, 500, { error: 'send_failed' });
-    }
-    return true;
-  }
-
-  if (m.kind === 'voice-transcribe') {
-    if (req.method !== 'POST') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
-    const cfg = getContainerConfig(m.groupId);
-    if (!cfg || cfg.voice_mode !== 'transcribe') {
-      writeJson(res, 400, { error: 'voice_disabled' });
-      return true;
-    }
-    try {
-      const parsed = await readMultipartBody(req);
-      const file = parsed.files[0];
-      if (!file || !file.contentType.startsWith('audio/')) {
-        writeJson(res, 400, { error: 'audio_file_required' });
-        return true;
-      }
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
-      let fullText = '';
-      try {
-        // Scope transcription credentials to the agent group: the OneCLI
-        // proxy injects whichever vault entries that agent has access to.
-        // Mirrors container-runner.ts — identifier is always agentGroup.id.
-        const group = getAgentGroup(m.groupId);
-        if (group) await ensureOneCliAgent(group.name, group.id);
-        for await (const delta of streamTranscribe(file.buffer, file.contentType, cfg.transcription_model, m.groupId)) {
-          const nextText = appendTranscriptDelta(fullText, delta);
-          const normalizedDelta = nextText.slice(fullText.length);
-          fullText = nextText;
-          res.write(`event: partial\ndata: ${JSON.stringify({ text: normalizedDelta })}\n\n`);
-        }
-        res.write(`event: done\ndata: ${JSON.stringify({ text: fullText })}\n\n`);
-        res.end();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'transcription_failed';
-        res.write(`event: error\ndata: ${JSON.stringify({ error: msg })}\n\n`);
-        res.end();
-      }
-    } catch (err) {
-      const code = (err as Error).message;
-      const status =
-        code === 'file_too_large' || code === 'total_too_large' ? 413 : code === 'too_many_files' ? 400 : 400;
-      writeJson(res, status, { error: code });
     }
     return true;
   }
@@ -3135,6 +3062,24 @@ function readCookieToken(req: http.IncomingMessage): string | null {
 
 /** Upgrade handler — mount at `/ui/chat` via mountUpgradeHandler. */
 export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Duplex, head: Buffer): void {
+  if (
+    handleVoiceUpgrade(req, socket, head, {
+      expectedOrigin: new URL(uiBaseUrl()).origin,
+      canSend: (userId, groupId, query) => {
+        const mg = query.get('mg');
+        const channel = query.get('channel') || WEB_CHANNEL_TYPE;
+        if (!mg) ensureWebMessagingGroup(groupId);
+        const target = resolveTargetMessagingGroup(
+          userId,
+          groupId,
+          mg ? { channelType: channel, messagingGroupId: mg } : undefined,
+          false,
+        );
+        return !!target && userOwnsMessagingGroup(userId, groupId, target.channelType, target.messagingGroupId);
+      },
+    })
+  )
+    return;
   const url = req.url || '/';
   const pathname = url.split('?')[0];
   const match = matchChatWsPath(pathname);
@@ -3439,6 +3384,7 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
         threadId: ctx.threadId,
         messages,
         voiceMode,
+        voiceInput: resolveVoiceInputConfig(ctx.groupId),
         canSend: ctx.canSend,
       },
       { kind: 'ready', threadId: ctx.threadId },

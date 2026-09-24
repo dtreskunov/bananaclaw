@@ -13,6 +13,8 @@ const SCALAR_COLUMNS = new Set([
   'cli_scope',
   'voice_mode',
   'transcription_model',
+  'voice_input_backend',
+  'voice_input_enabled',
 ]);
 const JSON_COLUMNS = new Set([
   'skills',
@@ -42,14 +44,18 @@ export function createContainerConfig(config: ContainerConfigRow): void {
       `INSERT INTO container_configs (
         agent_group_id, provider, model, effort, image_tag, assistant_name,
         max_messages_per_prompt, skills, mcp_servers, packages_apt, packages_npm,
-        packages_pip, additional_mounts, model_params, updated_at
+        packages_pip, additional_mounts, model_params, voice_input_backend, voice_input_enabled, updated_at
       ) VALUES (
         @agent_group_id, @provider, @model, @effort, @image_tag, @assistant_name,
         @max_messages_per_prompt, @skills, @mcp_servers, @packages_apt, @packages_npm,
-        @packages_pip, @additional_mounts, @model_params, @updated_at
+        @packages_pip, @additional_mounts, @model_params, @voice_input_backend, @voice_input_enabled, @updated_at
       )`,
     )
-    .run(config);
+    .run({
+      ...config,
+      voice_input_backend: config.voice_input_backend ?? null,
+      voice_input_enabled: config.voice_input_enabled ?? 1,
+    });
 }
 
 /** Create an empty config row with sensible defaults. Idempotent — no-ops if row exists. */
@@ -79,6 +85,8 @@ export function updateContainerConfigScalars(
       | 'cli_scope'
       | 'voice_mode'
       | 'transcription_model'
+      | 'voice_input_backend'
+      | 'voice_input_enabled'
     >
   >,
 ): void {

@@ -5,6 +5,11 @@ Bun. All host/runner communication uses the acknowledged per-session Unix
 socket; host SQLite stores are not mounted into the container. There are no
 shared code modules between the runtimes.
 
+The host requires Node 22 or newer (including the host-side AI SDK streaming
+speech-to-text integration). The host and container pin their own AI SDK
+versions independently; installing the container dependency does not make it
+available to the host.
+
 ## Why the split
 
 - **Host stays on Node** because Baileys (WhatsApp) depends on `libsignal-node` native bindings and a long-tested WebSocket/HTTP stack. Bun's Node-API compat has improved, but this isn't where we want risk.
