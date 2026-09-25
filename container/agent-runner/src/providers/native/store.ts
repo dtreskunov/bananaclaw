@@ -94,6 +94,19 @@ export class NativeStore {
     return child;
   }
 
+  replaceAfter(conversationId: string, anchorRef: string, messages: ModelMessage[]): string {
+    return this.db.transaction(() => {
+      this.db.prepare('DELETE FROM messages WHERE conversation_id = ? AND id > ?')
+        .run(conversationId, Number(anchorRef));
+      return this.append(conversationId, messages);
+    })();
+  }
+
+  updateMessage(conversationId: string, id: string, message: ModelMessage): void {
+    this.db.prepare('UPDATE messages SET content_json = ? WHERE conversation_id = ? AND id = ?')
+      .run(JSON.stringify(message), conversationId, Number(id));
+  }
+
   private head(conversationId: string): string | null {
     const row = this.db.prepare('SELECT MAX(id) AS id FROM messages WHERE conversation_id = ?').get(conversationId) as {
       id: number | null;

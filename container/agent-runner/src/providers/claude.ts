@@ -5,6 +5,7 @@ import path from 'path';
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
+import { appendActivity } from '../db/session-state.js';
 import { registerProvider } from './provider-registry.js';
 import { audioReferencePrompt } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
@@ -71,7 +72,7 @@ function warnUnknownClaudeParamsOnce(modelParams: Record<string, unknown> | unde
 //   scheduling via mcp__nanoclaw__schedule_task.
 // - AskUserQuestion: SDK returns a placeholder instead of blocking on a
 //   real answer — we have mcp__nanoclaw__ask_user_question that persists
-//   the question and blocks on the real reply.
+//   the question and returns immediately; the reply becomes a later turn.
 // - EnterPlanMode / ExitPlanMode / EnterWorktree / ExitWorktree: Claude
 //   Code UI affordances; in a headless container they'd appear stuck.
 const SDK_DISALLOWED_TOOLS = [
@@ -231,9 +232,20 @@ const preToolUseHook: HookCallback = async (input) => {
 };
 
 /** Clear in-flight tool on PostToolUse / PostToolUseFailure. */
-const postToolUseHook: HookCallback = async () => {
+const postToolUseHook: HookCallback = async (input) => {
   try {
     clearContainerToolInFlight();
+    if (input.hook_event_name === 'PostToolUse' || input.hook_event_name === 'PostToolUseFailure') {
+      appendActivity({
+        kind: 'tool',
+        id: input.tool_use_id,
+        tool: input.tool_name,
+        status: input.hook_event_name === 'PostToolUse' ? 'completed' : input.is_interrupt ? 'interrupted' : 'error',
+        ...(input.hook_event_name === 'PostToolUseFailure'
+          ? { error: input.is_interrupt ? 'Interrupted; outcome unknown. External side effects may have occurred.' : input.error }
+          : {}),
+      });
+    }
   } catch (err) {
     log(`PostToolUse: failed to clear container_state: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -493,6 +505,7 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   query(input: QueryInput): AgentQuery {
+    const abortController = new AbortController();
     const stream = new MessageStream();
     stream.push(audioReferencePrompt(input.prompt, input.files, 'adapter-does-not-support-audio'));
 
@@ -503,6 +516,7 @@ export class ClaudeProvider implements AgentProvider {
     const sdkResult = sdkQuery({
       prompt: stream,
       options: {
+        abortController,
         cwd: input.cwd,
         additionalDirectories: this.additionalDirectories,
         resume: input.continuation,
@@ -535,6 +549,8 @@ export class ClaudeProvider implements AgentProvider {
     });
 
     let aborted = false;
+    let ended = false;
+    let closeTimer: ReturnType<typeof setTimeout> | undefined;
 
     async function* translateEvents(): AsyncGenerator<ProviderEvent> {
       let messageCount = 0;
@@ -549,7 +565,6 @@ export class ClaudeProvider implements AgentProvider {
       // an individual assistant message reports one request's own context.
       let lastContextTokens: number | undefined;
       for await (const message of sdkResult) {
-        if (aborted) return;
         messageCount++;
 
         // Yield activity for every SDK event so the poll loop knows the agent is working
@@ -665,15 +680,29 @@ export class ClaudeProvider implements AgentProvider {
 
     return {
       push: (msg, files, options) => {
-        if (options?.tools === 'disabled') return false;
+        if (ended || aborted || options?.tools === 'disabled') return false;
         stream.push(audioReferencePrompt(msg, files, 'adapter-does-not-support-audio'));
         return true;
       },
-      end: () => stream.end(),
-      events: translateEvents(),
+      end: () => {
+        ended = true;
+        stream.end();
+      },
+      events: (async function* () {
+        try {
+          yield* translateEvents();
+        } finally {
+          ended = true;
+          clearTimeout(closeTimer);
+          sdkResult.close();
+        }
+      })(),
       abort: () => {
+        if (aborted) return;
         aborted = true;
         stream.end();
+        abortController.abort();
+        closeTimer = setTimeout(() => sdkResult.close(), 1500);
       },
     };
   }

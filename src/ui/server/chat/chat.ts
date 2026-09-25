@@ -27,7 +27,14 @@ import {
   getMessagingGroupByPlatform,
 } from '../../../db/messaging-groups.js';
 import { deleteSession, findSessionByAgentGroup, findSessionForAgent } from '../../../db/sessions.js';
-import { notifySessionHostState } from '../../../session-link.js';
+import {
+  getSessionActiveTurn,
+  isSessionTurnId,
+  notifySessionHostState,
+  onSessionSignal,
+  requestSessionTurnStop,
+  type SessionActiveTurn,
+} from '../../../session-link.js';
 import { openInboundDb, openOutboundDb, sessionDir, writeSessionMessage } from '../../../session-manager.js';
 import { killContainer } from '../../../container-runner.js';
 import {
@@ -78,6 +85,7 @@ import { resolveVoiceInputConfig } from './voice-input-config.js';
 import { handleVoiceUpgrade } from './voice-stream.js';
 import { uiBaseUrl } from '../server.js';
 import fs from 'fs';
+import { readStoppedTurnStats, type StoppedTurnStats } from '../../shared/stopped-turn.js';
 
 /** Map an agent group to its shared web platform_id. */
 function platformIdFor(agentGroupId: string): string {
@@ -160,6 +168,7 @@ export function createBufferedFrameSender(sendEncoded: (frame: string) => void):
 export function matchChatPath(pathname: string):
   | { kind: 'start'; groupId: string }
   | { kind: 'send'; groupId: string; threadId: string }
+  | { kind: 'stop'; groupId: string; threadId: string }
   | { kind: 'threads'; groupId: string }
   | { kind: 'search'; groupId: string }
   | { kind: 'tasks'; groupId: string; threadId: string }
@@ -191,6 +200,8 @@ export function matchChatPath(pathname: string):
     };
   const send = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/send$/);
   if (send) return { kind: 'send', groupId: decodeURIComponent(send[1]), threadId: decodeURIComponent(send[2]) };
+  const stop = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/stop$/);
+  if (stop) return { kind: 'stop', groupId: decodeURIComponent(stop[1]), threadId: decodeURIComponent(stop[2]) };
   const fork = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/fork$/);
   if (fork) return { kind: 'fork', groupId: decodeURIComponent(fork[1]), threadId: decodeURIComponent(fork[2]) };
   const tasksList = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks$/);
@@ -352,6 +363,63 @@ export async function handleChatRequest(
     const messagingGroupId = ensureWebMessagingGroup(m.groupId);
     const threadId = crypto.randomUUID();
     writeJson(res, 200, { threadId, messagingGroupId, platformId: platformIdFor(m.groupId) });
+    return true;
+  }
+
+  if (m.kind === 'stop') {
+    if (req.method !== 'POST') {
+      writeJson(res, 405, { error: 'method_not_allowed' });
+      return true;
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(req, 4096);
+    } catch {
+      writeJson(res, 400, { error: 'invalid_body' });
+      return true;
+    }
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      Object.keys(body).length !== 1 ||
+      !('turnId' in body) ||
+      !isSessionTurnId(body.turnId)
+    ) {
+      writeJson(res, 400, { error: 'invalid_turn_id' });
+      return true;
+    }
+    const query = new URLSearchParams((req.url || '').split('?')[1] || '');
+    if (
+      query.has('channel') !== query.has('mg') ||
+      query.has('sessionId') ||
+      (query.has('channel') && (!query.get('channel') || !query.get('mg')))
+    ) {
+      writeJson(res, 400, { error: 'invalid_context' });
+      return true;
+    }
+    const context = resolveTurnContext(userId, m.groupId, m.threadId, taskOverride(req));
+    if (!context || !context.canSend) {
+      writeJson(res, 403, { error: 'forbidden' });
+      return true;
+    }
+    if (!context.sessionId) {
+      writeJson(res, 409, { error: 'not_active' });
+      return true;
+    }
+    const current = getSessionActiveTurn(context.sessionId);
+    if (current.turn && !turnMatchesContext(current.turn, context)) {
+      writeJson(res, 409, { error: 'not_active' });
+      return true;
+    }
+    const result = await requestSessionTurnStop(context.sessionId, body.turnId);
+    if (!result.accepted) {
+      writeJson(res, result.error === 'disconnected' ? 503 : result.error === 'invalid_turn_id' ? 400 : 409, {
+        error: result.error,
+      });
+      return true;
+    }
+    writeJson(res, 202, { activeTurn: publicActiveTurn(result.turn), connected: true });
     return true;
   }
 
@@ -760,6 +828,7 @@ export interface TurnUsageDto {
 type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface HistoryMessage {
+  stoppedStats?: StoppedTurnStats;
   /** Human sender attribution for inbound messages. */
   author?: { userId: string; displayName: string };
   direction: 'in' | 'out' | 'internal' | 'event';
@@ -1131,6 +1200,7 @@ export function readChatHistory(
           files: parsed.files,
           ...(parsed.deliveryOrigin ? { deliveryOrigin: parsed.deliveryOrigin } : {}),
           ...(parsed.suggestedAction ? { suggestedAction: parsed.suggestedAction } : {}),
+          ...(parsed.stoppedStats ? { stoppedStats: parsed.stoppedStats } : {}),
           ...(usage ? { usage } : {}),
           ...(activity && activity.length > 0 ? { activity } : {}),
         });
@@ -1345,6 +1415,72 @@ function resolveSessionForMode(
       )
       .get(agentGroupId) as { id: string } | undefined)
   );
+}
+
+interface TurnContext {
+  sessionId?: string;
+  channelType: string;
+  platformIds: string[];
+  threadId: string | null;
+  canSend: boolean;
+}
+
+export type ChatActiveTurn = Pick<SessionActiveTurn, 'id' | 'status'>;
+
+function publicActiveTurn(turn: SessionActiveTurn): ChatActiveTurn {
+  return { id: turn.id, status: turn.status };
+}
+
+function resolveTurnContext(
+  userId: string,
+  groupId: string,
+  threadId: string,
+  override?: { channelType: string; messagingGroupId: string },
+): TurnContext | null {
+  if (!canAccessAgentGroup(userId, groupId).allowed) return null;
+  const target = resolveTargetMessagingGroup(userId, groupId, override, isElevated(userId));
+  if (!target) return null;
+  const mg = getMessagingGroup(target.messagingGroupId);
+  if (!mg || mg.channel_type !== target.channelType) return null;
+  const isDm = threadId.startsWith('__dm:');
+  if (isDm && threadId !== `__dm:${mg.id}`) return null;
+  const session = resolveSessionForMode(groupId, mg.id, target.sessionMode, isDm ? '' : threadId);
+  const owned = userOwnsMessagingGroup(userId, groupId, target.channelType, mg.id);
+  const adapter = target.channelType === WEB_CHANNEL_TYPE ? null : getChannelAdapter(target.channelType);
+  return {
+    sessionId: session?.id,
+    channelType: target.channelType,
+    platformIds:
+      isDm && target.channelType !== WEB_CHANNEL_TYPE
+        ? viewerHandlesForChannel(userId, target.channelType)
+        : [mg.platform_id],
+    threadId: isDm ? null : threadId,
+    canSend: owned && (target.channelType === WEB_CHANNEL_TYPE || !!adapter?.isConnected()),
+  };
+}
+
+function turnMatchesContext(turn: SessionActiveTurn, context: TurnContext): boolean {
+  return (
+    turn.channelType === context.channelType &&
+    context.platformIds.includes(turn.platformId) &&
+    turn.threadId === context.threadId
+  );
+}
+
+/** Never expose another conversation's active turn from a shared session. */
+export function readChatActiveTurn(
+  userId: string,
+  groupId: string,
+  threadId: string,
+  override?: { channelType: string; messagingGroupId: string },
+): { activeTurn: ChatActiveTurn | null; connected: boolean } {
+  const context = resolveTurnContext(userId, groupId, threadId, override);
+  if (!context?.sessionId) return { activeTurn: null, connected: false };
+  const current = getSessionActiveTurn(context.sessionId);
+  return {
+    activeTurn: current.turn && turnMatchesContext(current.turn, context) ? publicActiveTurn(current.turn) : null,
+    connected: current.connected,
+  };
 }
 
 /**
@@ -1758,8 +1894,10 @@ export function parseOutboundContent(content: string): {
   files?: { filename: string; size: number; path?: string }[];
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   suggestedAction?: SuggestedAction;
+  stoppedStats?: StoppedTurnStats;
 } {
   const o = JSON.parse(content);
+  const stoppedStats = readStoppedTurnStats(o);
   const text = typeof o?.text === 'string' ? o.text : '';
   const deliveryOrigin =
     o?.delivery_origin === 'send_message' || o?.delivery_origin === 'send_file' || o?.delivery_origin === 'response'
@@ -1796,6 +1934,7 @@ export function parseOutboundContent(content: string): {
     files,
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
     ...(suggestedAction ? { suggestedAction } : {}),
+    ...(stoppedStats ? { stoppedStats } : {}),
   };
 }
 
@@ -3355,6 +3494,21 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
     },
   };
   const unsubscribe = subscribeWeb(ctx.platformId, ctx.threadId, subscriber);
+  const readTurn = () =>
+    readChatActiveTurn(ctx.userId, ctx.groupId, ctx.threadId, {
+      channelType: WEB_CHANNEL_TYPE,
+      messagingGroupId: ctx.messagingGroupId,
+    });
+  let lastTurn = JSON.stringify(readTurn());
+  const unsubscribeTurn = onSessionSignal((sessionId, kind) => {
+    if (kind !== 'turn.state' && kind !== 'disconnected') return;
+    if (sessionId !== resolveSessionIdForUsage()) return;
+    const state = readTurn();
+    const snapshot = JSON.stringify(state);
+    if (snapshot === lastTurn) return;
+    lastTurn = snapshot;
+    sendFrame({ kind: 'turn', turn: state.activeTurn, connected: state.connected });
+  });
 
   // Mark socket alive and refresh liveness on any inbound frame (pong from
   // the auto-response to our ping, or an app-level ping from the client).
@@ -3367,7 +3521,10 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
     keepalive.isAlive = true;
   });
 
-  ws.on('close', () => unsubscribe());
+  ws.on('close', () => {
+    unsubscribe();
+    unsubscribeTurn();
+  });
   ws.on('error', (err) => log.warn('web chat ws error', { err }));
 
   try {
@@ -3382,11 +3539,13 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
         messages,
         voiceInput: resolveVoiceInputConfig(ctx.groupId),
         canSend: ctx.canSend,
+        ...readTurn(),
       },
-      { kind: 'ready', threadId: ctx.threadId },
+      { kind: 'ready', threadId: ctx.threadId, ...readTurn() },
     );
   } catch (err) {
     unsubscribe();
+    unsubscribeTurn();
     log.warn('web chat ws initialization failed', { err });
     ws.close(1011, 'initialization failed');
   }

@@ -181,6 +181,7 @@ export interface ChatMessage {
   /** Safe next-turn action suggested by the agent runner. */
   suggestedAction?: SuggestedAction;
   usage?: TurnUsage;
+  stoppedStats?: import('../../../shared/stopped-turn').StoppedTurnStats;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
   /** Persisted activity trace for an outbound turn, in emit order. */
@@ -337,9 +338,27 @@ export interface RouterApi {
   notFound: (msg: string) => void;
 }
 
+export interface ActiveTurn {
+  id: string;
+  status: 'running' | 'stopping';
+}
+
 // Value sent by the chat WS.
 export interface WsPayload {
-  kind: 'history' | 'ready' | 'typing' | 'inbound' | 'outbound' | 'usage' | 'activity' | 'task-run' | 'reaction';
+  kind:
+    | 'history'
+    | 'ready'
+    | 'typing'
+    | 'turn'
+    | 'inbound'
+    | 'outbound'
+    | 'usage'
+    | 'activity'
+    | 'task-run'
+    | 'reaction';
+  turn?: ActiveTurn | null;
+  activeTurn?: ActiveTurn | null;
+  connected?: boolean;
   threadId?: string;
   messages?: Array<{
     id?: string;
@@ -351,6 +370,7 @@ export interface WsPayload {
     deliveryOrigin?: 'send_message' | 'send_file' | 'response';
     suggestedAction?: SuggestedAction;
     usage?: TurnUsage;
+    stoppedStats?: import('../../../shared/stopped-turn').StoppedTurnStats;
     activity?: ActivityLine[];
     event?: TimelineEvent;
     reactions?: MessageReaction[];
@@ -382,6 +402,8 @@ export interface WsPayload {
         fallbackText?: string;
         delivery_origin?: 'send_message' | 'send_file' | 'response';
         suggested_action?: SuggestedAction;
+        stopped?: boolean;
+        stopped_stats?: unknown;
       };
   card?: DisplayCard;
   files?: ChatMessageFile[] | null;

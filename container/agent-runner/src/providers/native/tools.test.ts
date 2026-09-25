@@ -74,4 +74,24 @@ describe('native coding tools', () => {
   it('runs shell commands in the workspace', async () => {
     expect(String(await execute('bash', { command: 'pwd' }))).toContain(root);
   });
+
+  it('escalates cancellation for a shell ignoring SIGTERM and does not start pre-aborted commands', async () => {
+    const controller = new AbortController();
+    const bash = createNativeTools(root).bash;
+    const started = Date.now();
+    const result = bash.execute!({ command: "trap '' TERM; printf ready > ready; while :; do sleep 1; done" }, {
+      toolCallId: 'interrupt', messages: [], abortSignal: controller.signal,
+    });
+    while (!fs.existsSync(path.join(root, 'ready'))) {
+      if (Date.now() - started > 2000) throw new Error('shell did not start');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    controller.abort();
+    await expect(result).rejects.toThrow('outcome unknown');
+    expect(Date.now() - started).toBeLessThan(3500);
+    await expect(bash.execute!({ command: 'touch must-not-exist' }, {
+      toolCallId: 'already-stopped', messages: [], abortSignal: controller.signal,
+    })).rejects.toThrow();
+    expect(fs.existsSync(path.join(root, 'must-not-exist'))).toBe(false);
+  });
 });

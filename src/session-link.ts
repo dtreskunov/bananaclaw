@@ -24,7 +24,32 @@ const MAX_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 2_000;
 const HOST_ACK_TIMEOUT_MS = 10_000;
 
-type SignalKind = 'disconnected' | 'heartbeat' | 'activity' | 'usage' | 'turn.end';
+type SignalKind = 'disconnected' | 'heartbeat' | 'activity' | 'usage' | 'turn.end' | 'turn.state';
+
+export interface SessionActiveTurn {
+  id: string;
+  status: 'running' | 'stopping';
+  channelType: string;
+  platformId: string;
+  threadId: string | null;
+}
+
+export type SessionTurnStopResult =
+  | { accepted: true; turn: SessionActiveTurn }
+  | { accepted: false; error: 'invalid_turn_id' | 'not_active' | 'disconnected' };
+
+export function isSessionTurnId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+function isTurnRoutingText(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 1024 &&
+    [...value].every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127)
+  );
+}
 
 interface SessionSignalState {
   connected: boolean;
@@ -39,6 +64,8 @@ interface SessionSignalState {
   usage: UsageSnapshot | null;
   usageUpdatedAt: number;
   turnEndedAt: number;
+  activeTurn: SessionActiveTurn | null;
+  turnStateReady: boolean;
 }
 
 interface SessionSignalServer {
@@ -50,6 +77,7 @@ interface SessionSignalServer {
   hostInFlight: { eventId: string; sequence: number } | null;
   hostAckTimer: NodeJS.Timeout | null;
   hostReadySent: boolean;
+  stopRequest: { turnId: string; promise: Promise<SessionTurnStopResult> } | null;
 }
 
 type SignalListener = (sessionId: string, kind: SignalKind) => void;
@@ -105,7 +133,8 @@ function flushHostEvents(sessionId: string, entry: SessionSignalServer): void {
       event: { type: pending.event_type, payload: hostWirePayload(pending.event_type, JSON.parse(pending.payload)) },
     };
     const encoded = `${JSON.stringify(frame)}\n`;
-    if (Buffer.byteLength(encoded) > MAX_FRAME_BYTES) throw new Error(`host event ${pending.sequence} exceeds wire limit`);
+    if (Buffer.byteLength(encoded) > MAX_FRAME_BYTES)
+      throw new Error(`host event ${pending.sequence} exceeds wire limit`);
     connection.write(encoded);
     entry.hostInFlight = { eventId: pending.event_id, sequence: pending.sequence };
     entry.hostAckTimer = setTimeout(() => {
@@ -157,6 +186,8 @@ function emptyState(): SessionSignalState {
     usage: null,
     usageUpdatedAt: 0,
     turnEndedAt: 0,
+    activeTurn: null,
+    turnStateReady: false,
   };
 }
 
@@ -243,7 +274,11 @@ function sanitizeActivityStep(value: unknown): ActivityStep | null {
       )
         return null;
       const tool = boundedString(input.tool, MAX_ID_CHARS);
-      if (!tool || !['pending', 'running', 'completed', 'error'].includes(String(input.status))) return null;
+      if (
+        !tool ||
+        !['pending', 'running', 'completed', 'error', 'interrupted', 'unknown'].includes(String(input.status))
+      )
+        return null;
       const detail = optionalString(input.detail);
       const title = optionalString(input.title);
       const error = optionalString(input.error);
@@ -261,7 +296,7 @@ function sanitizeActivityStep(value: unknown): ActivityStep | null {
         kind: 'tool',
         id,
         tool,
-        status: input.status as 'pending' | 'running' | 'completed' | 'error',
+        status: input.status as Extract<ActivityStep, { kind: 'tool' }>['status'],
         ...(detail !== undefined ? { detail } : {}),
         ...(title !== undefined ? { title } : {}),
         ...(error !== undefined ? { error } : {}),
@@ -491,6 +526,37 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
   const state = stateFor(sessionId);
   const now = Date.now();
   switch (frame.type) {
+    case 'turn.state': {
+      if (!hasOnlyKeys(frame, ['v', 'type', 'turn'])) return false;
+      const turn = frame.turn as Record<string, unknown> | null;
+      if (
+        turn !== null &&
+        (!turn ||
+          typeof turn !== 'object' ||
+          Array.isArray(turn) ||
+          !hasOnlyKeys(turn, ['id', 'status', 'channelType', 'platformId', 'threadId']) ||
+          !isSessionTurnId(turn.id) ||
+          (turn.status !== 'running' && turn.status !== 'stopping') ||
+          !isTurnRoutingText(turn.channelType) ||
+          !isTurnRoutingText(turn.platformId) ||
+          (turn.threadId !== null && !isTurnRoutingText(turn.threadId)))
+      )
+        return false;
+      if (entry.stopRequest?.turnId !== turn?.id) entry.stopRequest = null;
+      const activeTurn = turn === null ? null : ({ ...turn } as unknown as SessionActiveTurn);
+      if (
+        activeTurn &&
+        activeTurn.id === state.activeTurn?.id &&
+        state.activeTurn.status === 'stopping' &&
+        entry.stopRequest?.turnId === activeTurn.id
+      )
+        activeTurn.status = 'stopping';
+      state.activeTurn = activeTurn;
+      state.turnStateReady = true;
+      state.lastSeenAt = now;
+      emit(sessionId, 'turn.state');
+      return true;
+    }
     case 'heartbeat':
       if (!hasOnlyKeys(frame, ['v', 'type'])) return false;
       state.lastSeenAt = now;
@@ -565,6 +631,8 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
   }
   entry.connection = connection;
   state.connected = true;
+  state.turnStateReady = false;
+  entry.stopRequest = null;
   entry.hostReadySent = false;
   flushHostEvents(sessionId, entry);
 
@@ -619,14 +687,16 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
       } catch (err) {
         if (parsed?.type === 'durable' && typeof parsed.eventId === 'string') {
           const error = err instanceof Error ? err.message.slice(0, 256) : 'rejected';
-          connection.end(`${JSON.stringify({
-            v: PROTOCOL_VERSION,
-            type: 'nack',
-            eventId: parsed.eventId,
-            fatal: true,
-            code: 'durable_rejected',
-            error,
-          })}\n`);
+          connection.end(
+            `${JSON.stringify({
+              v: PROTOCOL_VERSION,
+              type: 'nack',
+              eventId: parsed.eventId,
+              fatal: true,
+              code: 'durable_rejected',
+              error,
+            })}\n`,
+          );
         } else {
           connection.destroy();
         }
@@ -646,6 +716,8 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
     entry.hostAckTimer = null;
     entry.hostInFlight = null;
     state.connected = false;
+    state.turnStateReady = false;
+    entry.stopRequest = null;
     emit(sessionId, 'disconnected');
   });
   connection.on('error', () => {
@@ -714,6 +786,7 @@ export async function startSessionSignalServer(sessionId: string, agentGroupId: 
     hostInFlight: null,
     hostAckTimer: null,
     hostReadySent: false,
+    stopRequest: null,
   };
   entry.server.on('connection', (connection) => handleConnection(sessionId, entry, connection));
   await listen(entry, socketPath);
@@ -763,4 +836,54 @@ export function getSessionSignalUsage(sessionId: string, sinceMs?: number): Usag
 
 export function getSessionSignalTurnEndedAt(sessionId: string): number {
   return states.get(sessionId)?.turnEndedAt ?? 0;
+}
+
+export function getSessionActiveTurn(sessionId: string): { turn: SessionActiveTurn | null; connected: boolean } {
+  const state = states.get(sessionId);
+  const connection = servers.get(sessionId)?.connection;
+  return {
+    turn: state?.activeTurn ? { ...state.activeTurn } : null,
+    connected: !!(state?.connected && state.turnStateReady && connection?.writable && !connection.destroyed),
+  };
+}
+
+/** Acceptance confirms transport, not completion; only runner turn.state clears a turn. */
+export function requestSessionTurnStop(sessionId: string, turnId: string): Promise<SessionTurnStopResult> {
+  if (!isSessionTurnId(turnId)) return Promise.resolve({ accepted: false, error: 'invalid_turn_id' });
+  const current = getSessionActiveTurn(sessionId);
+  if (!current.connected) return Promise.resolve({ accepted: false, error: 'disconnected' });
+  if (current.turn?.id !== turnId) return Promise.resolve({ accepted: false, error: 'not_active' });
+  const entry = servers.get(sessionId)!;
+  if (entry.stopRequest?.turnId === turnId) return entry.stopRequest.promise;
+  if (current.turn.status === 'stopping') return Promise.resolve({ accepted: true, turn: current.turn });
+  const connection = entry.connection!;
+  const promise = new Promise<SessionTurnStopResult>((resolve) => {
+    const timer = setTimeout(() => {
+      connection.destroy();
+      resolve({ accepted: false, error: 'disconnected' });
+    }, 5_000);
+    timer.unref?.();
+    const finish = (err?: Error | null) => {
+      clearTimeout(timer);
+      const latest = getSessionActiveTurn(sessionId);
+      if (err || entry.connection !== connection || !latest.connected) {
+        connection.destroy();
+        resolve({ accepted: false, error: 'disconnected' });
+      } else if (latest.turn?.id !== turnId) {
+        resolve({ accepted: false, error: 'not_active' });
+      } else {
+        const turn: SessionActiveTurn = { ...latest.turn, status: 'stopping' };
+        stateFor(sessionId).activeTurn = turn;
+        emit(sessionId, 'turn.state');
+        resolve({ accepted: true, turn: { ...turn } });
+      }
+    };
+    try {
+      connection.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'turn.stop', turnId })}\n`, finish);
+    } catch (err) {
+      finish(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+  entry.stopRequest = { turnId, promise };
+  return promise;
 }

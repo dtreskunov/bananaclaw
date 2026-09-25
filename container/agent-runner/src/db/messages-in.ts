@@ -120,6 +120,12 @@ export function markProcessing(ids: string[]): void {
   })();
 }
 
+export function releaseProcessing(ids: string[]): void {
+  const db = getOutboundDb();
+  const stmt = db.prepare("DELETE FROM processing_ack WHERE message_id = ? AND status = 'processing'");
+  db.transaction(() => { for (const id of ids) stmt.run(id); })();
+}
+
 /** Mark messages as completed in the journaled local projection. */
 export function markCompleted(ids: string[]): void {
   if (ids.length === 0) return;
@@ -175,4 +181,3 @@ export function findQuestionResponse(questionId: string): MessageInRow | undefin
     inbound.close();
   }
 }
-

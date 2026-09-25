@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto';
+import { loadConfig } from './config.js';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
   markProcessing,
+  releaseProcessing,
   markCompleted,
   nextPendingDueDelayMs,
   type MessageInRow,
@@ -50,7 +53,7 @@ import {
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
-import { getHostEventGeneration, onHostEvent, signalHeartbeat, waitForHostEvent } from './session-link.js';
+import { drainSessionJournal, getHostEventGeneration, onHostEvent, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
 
 const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
 const MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS = 2;
@@ -782,6 +785,8 @@ async function processQuery(
   let queryContinuation: string | undefined;
   let resultSeen = false;
   let done = false;
+  let userStopped = false;
+  let turnId = randomUUID();
   // Set once we've pushed the recovery nudge this turn — a self-correction
   // retry asking the model to re-send its reply properly wrapped. Fires for
   // BOTH failure shapes: (a) the model emitted bare top-level text it forgot
@@ -803,7 +808,7 @@ async function processQuery(
     {
       tool: string;
       detail?: string;
-      status: 'running' | 'completed' | 'error';
+      status: 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
     }
   >();
   let activeTurnRouting = routing;
@@ -844,6 +849,7 @@ async function processQuery(
   // Runner-owned cumulative snapshot built from disaggregated provider calls.
   // Live usage is an overwrite snapshot, so it must never receive call deltas.
   let liveUsage: import('./providers/types.js').TurnUsage | null = null;
+  let latestUsage: import('./providers/types.js').TurnUsage | null = null;
   // Captured from the provider's `checkpoint` event; flushed with the usage so
   // it lands on the same outbound row.
   let pendingCheckpoint: string | null = null;
@@ -865,6 +871,7 @@ async function processQuery(
       /* best-effort */
     }
     liveUsage = null;
+    latestUsage = null;
     activityFlushedCount = 0;
   };
 
@@ -961,7 +968,7 @@ async function processQuery(
     followUpTimer = null;
   };
   const scheduleNextDue = () => {
-    if (done || endedForCommand || followUpTimer) return;
+    if (done || userStopped || endedForCommand || followUpTimer) return;
     const delay = nextPendingDueDelayMs();
     if (delay === undefined) return;
     followUpTimer = setTimeout(() => {
@@ -971,7 +978,7 @@ async function processQuery(
     followUpTimer.unref?.();
   };
   const pollForFollowUps = () => {
-    if (done || endedForCommand) return;
+    if (done || userStopped || endedForCommand) return;
     if (pollInFlight) {
       pollDirty = true;
       return;
@@ -1063,7 +1070,10 @@ async function processQuery(
         // Re-check done — the outer query may have finished while the script
         // was awaited. Pushing into a closed stream is wasted work; the
         // claimed messages get released by the host's processing-claim sweep.
-        if (done) return;
+        if (done || userStopped) {
+          releaseProcessing(keep.map((message) => message.id));
+          return;
+        }
 
         const keptIds = keep.map((m) => m.id);
         const prompt = formatMessages(keep);
@@ -1097,6 +1107,8 @@ async function processQuery(
           resetMalformedToolRecovery();
         }
         turnActive = true;
+        turnId = randomUUID();
+        publishTurn();
         turnStartTime = Date.now();
         try {
           clearTurnEnded();
@@ -1104,7 +1116,14 @@ async function processQuery(
           /* best-effort */
         }
         setCurrentInReplyTo(activeTurnRouting.inReplyTo);
-        query.push(prompt, followUpFiles.length > 0 ? followUpFiles : undefined);
+        if (!query.push(prompt, followUpFiles.length > 0 ? followUpFiles : undefined)) {
+          releaseProcessing(keptIds);
+          turnActive = false;
+          signalTurnState(null);
+          endedForCommand = true;
+          query.end();
+          return;
+        }
         archivePrompts.push(prompt);
         // Enqueue this push as its own batch. We do NOT markCompleted here —
         // that happens when the corresponding `result` event drains the
@@ -1191,6 +1210,26 @@ async function processQuery(
   // loop doesn't touch the heartbeat either).
   let turnActive = true;
   let turnStartTime = Date.now();
+  const publishTurn = (): void => {
+    signalTurnState({
+      id: turnId,
+      status: userStopped ? 'stopping' : 'running',
+      channelType: activeTurnRouting.channelType ?? '',
+      platformId: activeTurnRouting.platformId ?? '',
+      threadId: activeTurnRouting.threadId,
+    });
+  };
+  const unsubscribeStop = onTurnStop((requestedId) => {
+    if (requestedId !== turnId || !turnActive || userStopped || done) return;
+    userStopped = true;
+    stopFollowUpWatcher();
+    // A crash while the provider is settling must not replay cancelled input.
+    // Ordinary queued messages have not been claimed and are not in this list.
+    markCompleted(turnBatchQueue.flatMap((batch) => batch.ids));
+    publishTurn();
+    query.abort('user');
+  });
+  publishTurn();
   const beginCorrectiveTurn = (activityText: string): void => {
     try {
       appendActivity({
@@ -1343,6 +1382,7 @@ async function processQuery(
   try {
     for await (const event of query.events) {
       signalHeartbeat();
+      if (userStopped && !['init', 'progress', 'usage', 'usage_call', 'checkpoint'].includes(event.type)) continue;
       handleEvent(event, routing);
 
       if (event.type === 'progress' && event.step.kind === 'tool') {
@@ -1352,7 +1392,7 @@ async function processQuery(
         // streak guard. Wait for the first event that carries the detail, or
         // for the call to finish if no arguments are reported.
         const detailKnown =
-          event.step.detail !== undefined || event.step.status === 'completed' || event.step.status === 'error';
+          event.step.detail !== undefined || !['pending', 'running'].includes(event.step.status);
         if (detailKnown && !countedToolCallIds.has(event.step.id)) {
           countedToolCallIds.add(event.step.id);
           consecutiveTextSteps = 0;
@@ -1381,6 +1421,8 @@ async function processQuery(
           (event.step.status === 'running' ||
             event.step.status === 'completed' ||
             event.step.status === 'error' ||
+            event.step.status === 'interrupted' ||
+            event.step.status === 'unknown' ||
             priorCall !== undefined);
         if (isSubstantiveTool && reachedExecution) {
           malformedToolRecoveryHadNativeTool = true;
@@ -1449,8 +1491,10 @@ async function processQuery(
         // was re-prompted, emits one event per attempt and every attempt was
         // billed. Non-additive fields take the latest attempt's value.
         pendingUsage = accumulateTurnUsage(pendingUsage, event.data);
+        latestUsage = pendingUsage;
       } else if (event.type === 'usage_call') {
         liveUsage = accumulateCallUsage(liveUsage, event.data);
+        latestUsage = liveUsage;
         try {
           writeUsageProgress(liveUsage);
         } catch {
@@ -1492,7 +1536,6 @@ async function processQuery(
         // and the indicator must stay lit across the gap.
         if (turnBatchQueue.length === 0) {
           turnActive = false;
-          queueMicrotask(wakeFollowUpWatcher);
           try {
             setTurnEnded();
           } catch {
@@ -1749,19 +1792,26 @@ async function processQuery(
         // query starts a fresh "did MCP write anything?" window.
         outboundMaxAtTurnStart = currentOutboundMax();
         turnStartTime = Date.now();
+        if (!turnActive) {
+          signalTurnState(null);
+          queueMicrotask(wakeFollowUpWatcher);
+        }
       }
     }
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    notifyExchangeComplete(onExchangeComplete, {
-      prompt: archivePrompts[0] ?? initialPrompt,
-      result: `Error: ${errMsg}`,
-      continuation: queryContinuation ?? priorContinuation,
-      status: 'error',
-    });
-    throw err;
+    if (!userStopped) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      notifyExchangeComplete(onExchangeComplete, {
+        prompt: archivePrompts[0] ?? initialPrompt,
+        result: `Error: ${errMsg}`,
+        continuation: queryContinuation ?? priorContinuation,
+        status: 'error',
+      });
+      throw err;
+    }
   } finally {
     done = true;
+    unsubscribeStop();
     stopFollowUpWatcher();
     clearInterval(liveHandle);
     // Drain any queued follow-up batches that never reached a `result`
@@ -1801,7 +1851,7 @@ async function processQuery(
     // into a fresh session and the agent eventually has nothing to anchor
     // on. Restore the prior good id so the next turn resumes from a
     // session that actually completed at least one turn cleanly.
-    if (!resultSeen && priorContinuation && queryContinuation && queryContinuation !== priorContinuation) {
+    if (!userStopped && !resultSeen && priorContinuation && queryContinuation && queryContinuation !== priorContinuation) {
       log(
         `Turn ended without result; restoring prior continuation ${priorContinuation} (discarding ${queryContinuation})`,
       );
@@ -1812,7 +1862,59 @@ async function processQuery(
       }
       queryContinuation = priorContinuation;
     }
+    if (userStopped) {
+      const latestTools = new Map<string, import('./providers/types.js').ActivityStep>();
+      for (const line of getActivityBuffer()) {
+        try {
+          const step = JSON.parse(line.text) as import('./providers/types.js').ActivityStep;
+          if (step.kind === 'tool') latestTools.set(step.id, step);
+        } catch { /* legacy activity text */ }
+      }
+      for (const step of latestTools.values()) {
+        if (step.kind === 'tool' && (step.status === 'running' || step.status === 'pending')) {
+          appendActivity({
+            ...step,
+            status: 'interrupted',
+            error: 'Interrupted; outcome unknown. External side effects may have occurred.',
+          });
+        }
+      }
+      appendActivity({ kind: 'notification', id: `stopped:${turnId}`, text: 'Stopped by user.' });
+      const noticeId = generateId();
+      const usage = latestUsage;
+      const durationMs = Math.max(0, Date.now() - turnStartTime);
+      writeMessageOut({
+        id: noticeId,
+        in_reply_to: activeTurnRouting.inReplyTo,
+        kind: 'chat',
+        platform_id: activeTurnRouting.platformId,
+        channel_type: activeTurnRouting.channelType,
+        thread_id: activeTurnRouting.threadId,
+        content: JSON.stringify({
+          text: 'Stopped by user.',
+          stopped: true,
+          turn_id: turnId,
+          stopped_stats: {
+            durationMs,
+            model: usage?.model || loadConfig().model || null,
+          },
+        }),
+      });
+      writeTurnActivity(noticeId, getActivityBuffer());
+      if (usage) writeTurnUsage(`tu-${randomUUID()}`, noticeId, { ...usage, duration_ms: durationMs });
+      const savedContinuation = queryContinuation ?? priorContinuation;
+      if (pendingCheckpoint && savedContinuation) {
+        writeTurnCheckpoint(noticeId, providerName, savedContinuation, pendingCheckpoint);
+      }
+      clearFailedTurn();
+      markTurnPersisted(getOutboundDb());
+      await drainSessionJournal();
+      setTurnEnded();
+    }
+    signalTurnState(null);
   }
+
+  if (userStopped) return { continuation: queryContinuation ?? priorContinuation };
 
   const writeTurnNotice = (
     noticeRouting: RoutingContext,

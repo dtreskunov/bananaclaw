@@ -4,9 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
+import { resetTurnSendTracking } from '../current-batch.js';
 import { formatNativeToolStep, NativeProvider, portableHistory, userMessage } from './native.js';
 import * as nativeCatalog from './native/catalog.js';
 import * as nativeAudio from './native/audio.js';
+import { NativeStore } from './native/store.js';
 import type { ProviderEvent } from './types.js';
 
 let root: string;
@@ -20,6 +22,8 @@ let externalMcpToolMode: boolean;
 let skillToolMode: boolean;
 let todoToolMode: boolean;
 let rejectAudio: boolean;
+let holdModelResponse: boolean;
+let slowToolMode: boolean;
 let catalogFetch: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 let catalogModels: Record<string, unknown>;
 
@@ -36,6 +40,7 @@ async function collect(
 }
 
 beforeEach(() => {
+  resetTurnSendTracking();
   nativeCatalog.clearNativeCatalogForTest();
   catalogModels = {};
   const realFetch = globalThis.fetch;
@@ -51,6 +56,8 @@ beforeEach(() => {
   skillToolMode = false;
   todoToolMode = false;
   rejectAudio = false;
+  holdModelResponse = false;
+  slowToolMode = false;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -64,6 +71,13 @@ beforeEach(() => {
       requestUrls.push(request.url);
       requestHeaders.push(request.headers);
       requests.push((await request.json()) as Record<string, unknown>);
+      if (holdModelResponse) {
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"id":"waiting","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'));
+          },
+        }), { headers: { 'content-type': 'text/event-stream' } });
+      }
       if (rejectAudio && JSON.stringify(requests.at(-1)?.messages).includes('input_audio')) {
         return Response.json({ error: { message: 'Unsupported audio format', type: 'invalid_request_error' } }, { status: 400 });
       }
@@ -77,10 +91,10 @@ beforeEach(() => {
                 'data: {"type":"message_start","message":{"id":"msg_minimax_tool","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0}}}',
                 '',
                 'event: content_block_start',
-                'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_minimax_1","name":"mcp__nanoclaw__send_message","input":{}}}',
+                `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_minimax_1","name":"${slowToolMode ? 'bash' : 'mcp__nanoclaw__send_message'}","input":{}}}`,
                 '',
                 'event: content_block_delta',
-                'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"text\\":\\"hello from direct tool\\"}"}}',
+                `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":${JSON.stringify(slowToolMode ? '{"command":"sleep 30"}' : '{"text":"hello from direct tool"}')}}}`,
                 '',
                 'event: content_block_stop',
                 'data: {"type":"content_block_stop","index":0}',
@@ -121,8 +135,8 @@ beforeEach(() => {
       const toolResultCount = messages.filter((message) => message.role === 'tool').length;
       const shouldCallTool = todoToolMode
         ? toolResultCount < 2
-        : (toolMode || externalMcpToolMode || skillToolMode) && toolResultCount === 0;
-      const toolName = todoToolMode
+        : (toolMode || externalMcpToolMode || skillToolMode || slowToolMode) && toolResultCount === 0;
+      const toolName = slowToolMode ? 'bash' : todoToolMode
         ? toolResultCount === 0
           ? 'todowrite'
           : 'todoread'
@@ -131,7 +145,7 @@ beforeEach(() => {
           : externalMcpToolMode
             ? 'mcp__Fixture__echo_value'
             : 'mcp__nanoclaw__send_message';
-      const toolArguments = todoToolMode
+      const toolArguments = slowToolMode ? '{"command":"sleep 30"}' : todoToolMode
         ? toolResultCount === 0
           ? '{"todos":[{"id":"inspect","content":"turn-one-secret","status":"in_progress"}]}'
           : '{}'
@@ -178,6 +192,110 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it('aborts a waiting model stream without retrying and closes its query', async () => {
+    holdModelResponse = true;
+    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'waiting request', cwd: root });
+    const events: ProviderEvent[] = [];
+    const consume = (async () => { for await (const event of query.events) events.push(event); })();
+    try {
+      for (let i = 0; requests.length === 0 && i < 100; i++) await Bun.sleep(5);
+      expect(requests).toHaveLength(1);
+      query.abort();
+      await consume;
+      expect(requests).toHaveLength(1);
+      expect(events.some((event) => event.type === 'checkpoint')).toBe(true);
+      expect(events.some((event) => event.type === 'result')).toBe(false);
+      expect(events.some((event) => event.type === 'usage_call')).toBe(false);
+      expect(query.push('must not run')).toBe(false);
+    } finally { query.abort(); await consume; }
+  });
+
+  it.each(['openai-compatible', 'anthropic'] as const)('reports %s model usage exactly once when stopped during an unfinished tool', async (protocol) => {
+    slowToolMode = true;
+    if (protocol === 'anthropic') {
+      process.env.NATIVE_PROTOCOL = 'anthropic-messages';
+      anthropicToolMode = true;
+    }
+    const query = new NativeProvider({ model: 'local/test-model', modelParams: { max_tokens: 8192 } })
+      .query({ prompt: 'wait then stop', cwd: root });
+    const events: ProviderEvent[] = [];
+    const timeout = setTimeout(() => query.abort(), 2000);
+    try {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'progress' && event.step.kind === 'tool' && event.step.status === 'running') {
+          await Bun.sleep(50);
+          query.abort();
+        }
+      }
+      expect(events.filter((event) => event.type === 'error')).toEqual([]);
+      expect(events.filter((event) => event.type === 'usage_call')).toEqual([
+        { type: 'usage_call', data: expect.objectContaining({
+          input_tokens: protocol === 'anthropic' ? 4 : 11,
+          output_tokens: protocol === 'anthropic' ? 10 : 2,
+          model: 'local/test-model',
+        }) },
+      ]);
+      expect(events.some((event) => event.type === 'result')).toBe(false);
+      expect(events.some((event) => event.type === 'progress' && event.step.kind === 'tool' &&
+        event.step.status === 'completed')).toBe(false);
+      expect(requests).toHaveLength(1);
+    } finally {
+      clearTimeout(timeout);
+      query.abort();
+    }
+  });
+
+  it('settles cancellation before preparation without calling the model and preserves cancelled input', async () => {
+    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'do not replay', cwd: root });
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'init') query.abort();
+    }
+    const init = events.find((event) => event.type === 'init');
+    expect(init?.type).toBe('init');
+    expect(events.some((event) => event.type === 'checkpoint')).toBe(true);
+    expect(requests).toHaveLength(0);
+    expect(query.push('closed')).toBe(false);
+    const store = new NativeStore();
+    try {
+      const history = store.messages(init!.type === 'init' ? init!.continuation : '');
+      expect(history[0].content).toBe('do not replay');
+      expect(history.at(-1)?.content).toContain('cancelled, not pending');
+    } finally { store.close(); }
+  });
+
+  it('keeps completed tool results when stopped and resumes without reexecuting them', async () => {
+    toolMode = true;
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'send once then stop', cwd: root });
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'progress' && event.step.kind === 'tool' && event.step.status === 'completed') query.abort();
+    }
+    const init = events.find((event) => event.type === 'init');
+    expect(init?.type).toBe('init');
+    expect(events.some((event) => event.type === 'checkpoint')).toBe(true);
+    const continuation = init!.type === 'init' ? init!.continuation : '';
+    const store = new NativeStore();
+    try {
+      const history = JSON.stringify(store.messages(continuation));
+      expect(history).toContain('tool-result');
+      expect(history).toContain('cancelled, not pending');
+      const checkpoint = [...events].reverse().find((event) => event.type === 'checkpoint');
+      const fork = store.fork(continuation, checkpoint!.type === 'checkpoint' ? checkpoint!.ref : '');
+      expect(fork).not.toBeNull();
+      expect(store.messages(fork!)).toEqual(store.messages(continuation));
+    } finally { store.close(); }
+    await collect(provider, continuation);
+    expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out').get()).toEqual({ n: 1 });
+    const replay = JSON.stringify(requests.at(-1)?.messages);
+    expect(replay).toContain('tool');
+    expect(replay).toContain('cancelled, not pending');
+  });
+
   it('formats canonical native tool activity with safe resource details', () => {
     expect(formatNativeToolStep(
       { toolCallId: 'read-1', toolName: 'read', input: { path: 'src/index.ts' } },

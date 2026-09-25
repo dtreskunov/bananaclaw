@@ -1,7 +1,7 @@
 import type { ActivityLine } from './channels/adapter.js';
 
 export type ActivityStep =
-  | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error'; detail?: string; title?: string; error?: string; durationMs?: number; rejectedBeforeExecution?: boolean }
+  | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; title?: string; error?: string; durationMs?: number; rejectedBeforeExecution?: boolean }
   | { kind: 'internal'; id: string; text: string }
   | { kind: 'file'; id: string; path?: string; name?: string; mime?: string }
   | { kind: 'patch'; id: string; files: string[] }
@@ -44,7 +44,7 @@ export function reduceActivityLines(lines: ActivityLine[]): ActivityLine[] {
     let merged = { ...prior.step, ...step } as ActivityStep;
     if (
       merged.kind === 'tool' &&
-      (merged.status === 'completed' || merged.status === 'error')
+      ['completed', 'error', 'interrupted', 'unknown'].includes(merged.status)
     ) {
       const startedAt = Number(prior.ts);
       const endedAt = Number(line.ts);
@@ -94,6 +94,11 @@ const COMMAND_TOOLS = new Set(['bash', 'shell', 'run', 'run_in_terminal']);
 export function activityLabel(step: ActivityStep): string {
   switch (step.kind) {
       case 'tool': {
+        if (step.status === 'interrupted' || step.status === 'unknown') {
+          const status = step.status === 'interrupted' ? 'Interrupted (outcome unknown)' : 'Outcome unknown';
+          const detail = step.detail?.replace(/\s+/g, ' ').trim();
+          return `${status}: ${cleanToolName(step.tool)}${detail ? ` ${detail}` : ''}`;
+        }
         const toolName = (step.tool || '').toLowerCase();
         const finished = step.status === 'completed' || step.status === 'error';
         const fileOp = FILE_OP_VERBS[toolName];

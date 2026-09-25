@@ -121,7 +121,7 @@
 /* Last item on the meta line, pushed to the bubble's right edge. In flow
    rather than absolute: the meta line fills the bubble on short messages, so
    an overlay would sit on top of the cost and model name. */
-.chat-main .msg-fork-btn {
+.chat-main .msg-action-btn {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -137,9 +137,9 @@
   line-height: 1.2;
   cursor: pointer;
 }
-.chat-main .msg-fork-btn:hover { color: var(--surface-fg); border-color: var(--border-strong); }
-.chat-main .msg-fork-btn:focus-visible { color: var(--surface-fg); border-color: var(--border-strong); }
-.chat-main .msg-fork-btn[disabled] { cursor: default; opacity: 0.5; }
+.chat-main .msg-action-btn:hover { color: var(--surface-fg); border-color: var(--border-strong); }
+.chat-main .msg-action-btn:focus-visible { color: var(--surface-fg); border-color: var(--border-strong); }
+.chat-main .msg-action-btn[disabled] { cursor: default; opacity: 0.5; }
 .chat-main .events-group.open {
   align-self: stretch;
   display: flex;
@@ -196,7 +196,7 @@
 .chat-main .msg .inline-media video { max-height: 320px; background: #000; }
 .chat-main .msg .inline-media-name { font-size: var(--font-2xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* No group opacity here — it would cap the branch chip's contrast too. */
-.chat-main .msg .meta { font-size: var(--font-2xs); color: var(--muted); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.chat-main .msg .meta, .chat-main .typing .meta { font-size: var(--font-2xs); color: var(--muted); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .chat-main .msg .delivery-origin { font-style: italic; }
 .chat-main .message-actions { display: flex; margin-top: 8px; }
 .chat-main .message-action-btn { min-height: 32px; padding: 4px 12px; border: 1px solid var(--accent-strong); border-radius: var(--radius-md); background: var(--bg); color: var(--accent-strong); cursor: pointer; font: inherit; font-weight: 600; }
@@ -266,6 +266,9 @@
 .chat-main .typing { align-self: flex-start; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px; background: var(--wash); border-radius: var(--radius-lg); max-width: 78%; }
 .chat-main .typing-usage { color: var(--muted); font-size: var(--font-2xs); }
 .chat-main .typing .typing-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; min-width: 0; }
+.chat-main .typing .meta { width: 100%; }
+.chat-main .typing .turn-stop-error { color: var(--danger, #b42318); font-size: var(--font-xs); max-width: 44ch; }
+.chat-main .typing .turn-stop-note { color: var(--muted); font-size: var(--font-xs); }
 .chat-main .typing .typing-dots { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
 .chat-main .typing .typing-dots > span:not(.hint) { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); opacity: 0.5; animation: typing-bounce 1.2s infinite ease-in-out; }
 .chat-main .typing .typing-dots > span:nth-child(2) { animation-delay: 0.15s; }

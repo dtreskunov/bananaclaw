@@ -11,6 +11,7 @@ import {
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
   pendingWebSends,
+  activeTurn, turnConnected, stopRequest,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
 } from '../state';
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
@@ -23,6 +24,8 @@ import { requestConfirm } from './PromptModal';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia } from '../recorder';
 import { voice, voiceBrowserReason } from '../voice-audio';
 import { VoiceButton } from './VoiceButton';
+import { TurnStopButton } from './TurnStopButton';
+import { stopActiveTurn } from '../stop-turn';
 import { mergeQuestionTimeline } from '../question-timeline';
 import { showsMidTurnLabel } from '../chat-protocol';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
@@ -91,7 +94,7 @@ interface TraceStep {
   kind?: 'tool' | 'internal' | 'file' | 'patch' | 'retry' | 'compaction' | 'subtask' | 'notification';
   id?: string;
   tool?: string;
-  status?: 'pending' | 'running' | 'completed' | 'error';
+  status?: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
   detail?: string;
   title?: string;
   error?: string;
@@ -153,6 +156,13 @@ function stepHeadline(s: TraceStep): StepHeadline {
   switch (s.kind) {
     case 'tool': {
       const tool = (s.tool || '').toLowerCase();
+      if (s.status === 'interrupted' || s.status === 'unknown') {
+        return {
+          action: s.status === 'interrupted' ? 'Interrupted' : 'Outcome unknown:',
+          subject: [cleanToolName(s.tool || 'tool'), singleLine(s.detail || s.title || '')].filter(Boolean).join(' '),
+          codeSubject: true,
+        };
+      }
       const finished = s.status === 'completed' || s.status === 'error';
       const fileOp = FILE_OP_VERBS[tool];
       if (fileOp) {
@@ -243,7 +253,11 @@ function stepBody(s: TraceStep): string | null {
 
 function stepMeta(s: TraceStep, elapsedMs: number | null): string | null {
   if (s.kind !== 'tool') return null;
-  const status = s.status === 'error'
+  const status = s.status === 'interrupted'
+    ? 'Interrupted (outcome unknown)'
+    : s.status === 'unknown'
+      ? 'Outcome unknown'
+      : s.status === 'error'
     ? 'Failed'
     : s.status === 'completed'
       ? 'Completed'
@@ -278,7 +292,7 @@ function formatRecordingDuration(ms: number): string {
 function ActivityTraceRow({ line, open, live, now, onToggle }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void }) {
   const parsedStep = parseStep(line.text);
   const step = !live && parsedStep.kind === 'tool' && (parsedStep.status === 'pending' || parsedStep.status === 'running')
-    ? { ...parsedStep, status: 'completed' as const }
+    ? { ...parsedStep, status: 'unknown' as const }
     : parsedStep;
   const headline = stepHeadline(step);
   const running = live && step.kind === 'tool' && step.status === 'running';
@@ -421,11 +435,11 @@ function fmtContextLimit(tokens: number): string {
   return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
 }
 
-function UsageMeta({ u, live = false }: { u: TurnUsage; live?: boolean }) {
+function UsageMeta({ u, live = false, partial = false }: { u: TurnUsage; live?: boolean; partial?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const cost = fmtCost(u.cost_usd);
   const model = u.model ? shortModel(u.model) : '';
-  const dur = u.duration_ms ? fmtDur(u.duration_ms) : '';
+  const dur = u.duration_ms != null ? fmtDur(u.duration_ms) : '';
   const contextTokens = u.context_tokens && (!u.context_window || u.context_tokens <= u.context_window)
     ? u.context_tokens
     : undefined;
@@ -437,7 +451,9 @@ function UsageMeta({ u, live = false }: { u: TurnUsage; live?: boolean }) {
   const calls = u.num_turns ? `${u.num_turns} call${u.num_turns === 1 ? '' : 's'}` : '';
   const short = live
     ? [`${cost} est.`, `${fmtTok(u.input_tokens)} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
-    : [cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
+    : partial
+      ? [dur, model, `${fmtTok(u.input_tokens + u.output_tokens)} tokens reported`].filter(Boolean).join(' \u00b7 ')
+      : [cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
   const contextDetail = contextTokens
     ? `${fmtTok(contextTokens)}${u.context_window
       ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})`
@@ -460,7 +476,8 @@ function UsageMeta({ u, live = false }: { u: TurnUsage; live?: boolean }) {
         <>
           <span class="usage-backdrop" onClick={() => setExpanded(false)} />
           <span class="usage-popover" role="dialog" aria-label="Turn usage details">
-            <span class="usage-row"><span>Estimated cost</span><strong>{cost}</strong></span>
+            {partial ? <span class="usage-row">Usage reported before cancellation; final totals may be higher.</span> : null}
+            <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{cost}</strong></span>
             {dur ? <span class="usage-row"><span>Elapsed</span><strong>{dur}</strong></span> : null}
             {model ? <span class="usage-row"><span>Model</span><strong title={u.model}>{model}</strong></span> : null}
             {contextDetail ? <span class="usage-row"><span>{live ? 'Context after latest call' : 'Context at end'}</span><strong>{contextDetail}</strong></span> : null}
@@ -535,7 +552,7 @@ function ForkButton({ m }: { m: ChatMessage }) {
   return (
     <button
       type="button"
-      class="msg-fork-btn"
+      class="msg-action-btn msg-fork-btn"
       title="Branch a new thread from this message"
       aria-label="Branch a new thread from this message"
       disabled={busy}
@@ -771,12 +788,18 @@ function Message(
         : null}
       {m.ts ? <div class="meta">
         <RelativeTime ts={m.ts} />
-        {showsMidTurnLabel(m.deliveryOrigin, isLatest, isTyping.value)
+        {showsMidTurnLabel(m.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value)
           ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
-        {m.usage && m.direction === 'out' ? <UsageMeta u={m.usage} /> : null}
+        {m.direction === 'out' && (m.usage
+          ? <UsageMeta u={m.usage} partial={!!m.stoppedStats} />
+          : m.stoppedStats
+            ? <span title="Token usage was not reported before cancellation.">
+                {fmtDur(m.stoppedStats.durationMs)} {'\u00b7'} {m.stoppedStats.model ? shortModel(m.stoppedStats.model) : 'Model unavailable'} {'\u00b7'} Tokens unavailable
+              </span>
+            : null)}
         <ForkButton m={m} />
       </div> : null}
     </div>
@@ -1039,6 +1062,8 @@ function TaskIndicator() {
 }
 
 function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: boolean; onToggleTrace: () => void }) {
+  const turn = activeTurn.value;
+  const stop = stopRequest.value?.turnId === turn?.id ? stopRequest.value : null;
   const stableStartedAt = typingStartedAt.value;
   const fallbackStartedAt = useRef(Date.now());
   const startedAt = stableStartedAt ?? fallbackStartedAt.current;
@@ -1081,6 +1106,8 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
               : null}
         </div>
       </div>
+      {stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
+      {turn && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Disconnected. Reconnect to stop this response.</div> : null}
       <ActivityTracePanel
         lines={activityLog.value}
         expanded={traceExpanded}
@@ -1089,8 +1116,17 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
         now={now}
         openLatest={openLatestOnExpand}
       />
-      <div class="typing-meta">{metadata}</div>
-      {usage ? <div class="typing-usage"><UsageMeta u={usage} live /></div> : null}
+      <div class="meta">
+        <span class="typing-meta">{metadata}</span>
+        {usage ? <span class="typing-usage"><UsageMeta u={usage} live /></span> : null}
+        {turn && canSend.value ? <TurnStopButton
+          turn={turn}
+          connected={turnConnected.value}
+          busy={stop?.busy ?? false}
+          error={stop?.error ?? ''}
+          onStop={(id) => { void stopActiveTurn(id); }}
+        /> : null}
+      </div>
     </div>
   );
 }
@@ -1113,7 +1149,7 @@ function MessageLog() {
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
   const msgCount = timeline.length;
-  const typing = isTyping.value && !!threadId.value && !chatLoading.value;
+  const typing = (isTyping.value || !!activeTurn.value) && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
   // Subscribe to trace growth so the effect re-runs as steps stream in.

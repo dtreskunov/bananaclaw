@@ -63,6 +63,19 @@ describe('inboundAttachmentSecurityHeaders', () => {
 });
 
 describe('parseOutboundContent', () => {
+  it('preserves stopped metadata without inventing token usage', () => {
+    const stoppedStats = { durationMs: 12500, model: 'native/MiniMax-M3' };
+    expect(
+      parseOutboundContent(
+        JSON.stringify({
+          text: 'Stopped by user.',
+          stopped: true,
+          stopped_stats: stoppedStats,
+        }),
+      ),
+    ).toEqual({ text: 'Stopped by user.', files: undefined, stoppedStats });
+  });
+
   it('preserves recognized delivery provenance', () => {
     expect(parseOutboundContent(JSON.stringify({ text: 'Working on it', delivery_origin: 'send_message' }))).toEqual({
       text: 'Working on it',

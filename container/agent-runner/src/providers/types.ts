@@ -215,7 +215,7 @@ export interface AgentQuery {
   events: AsyncIterable<ProviderEvent>;
 
   /** Force-stop the query. */
-  abort(): void;
+  abort(reason?: 'user' | 'internal'): void;
 }
 
 /**
@@ -262,7 +262,7 @@ export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms' | 'duration_
 export type ActivityStep =
   | {
       kind: 'tool'; id: string; tool: string;
-      status: 'pending' | 'running' | 'completed' | 'error';
+      status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
       detail?: string; title?: string; error?: string; durationMs?: number;
       rejectedBeforeExecution?: boolean;
     }

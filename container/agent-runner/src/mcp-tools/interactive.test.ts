@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { closeSessionDb, getInboundDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
 import { askUserQuestion, sendCard } from './interactive.js';
+import { writeMessageOut } from '../db/messages-out.js';
 
 describe('ask_user_question', () => {
   beforeEach(() => {
@@ -43,11 +44,32 @@ describe('ask_user_question', () => {
     await askUserQuestion.handler({
       title: 'First', question: 'Choose', responseMode: 'choice', options: ['A'],
     });
+
     const second = await askUserQuestion.handler({
       title: 'Second', question: 'Choose again', responseMode: 'choice', options: ['B'],
     });
     expect(second.isError).toBe(true);
     expect((second.content[0] as { text: string }).text).toContain('already awaiting');
+  });
+
+  it('preserves the pending question gate after Stop until an answer arrives', async () => {
+    await askUserQuestion.handler({ title: 'Stopped', question: 'Old question', responseMode: 'text' });
+    const row = getOutboundDb().prepare('SELECT content FROM messages_out').get() as { content: string };
+    expect(JSON.parse(row.content).cancelled).toBeUndefined();
+    writeMessageOut({
+      id: 'stopped-question', kind: 'chat',
+      content: JSON.stringify({ text: 'Stopped by user.', stopped: true, turn_id: 'stopped-turn' }),
+    });
+    const next = await askUserQuestion.handler({ title: 'New', question: 'New question', responseMode: 'text' });
+    expect(next.isError).toBe(true);
+    const journal = getOutboundDb().prepare("SELECT payload FROM pending_runner_events WHERE event_type = 'message.upsert'").all();
+    expect(journal).toHaveLength(2);
+    expect(JSON.stringify(journal[0])).not.toContain('cancelled');
+    getInboundDb().prepare(`INSERT INTO messages_in (id, kind, timestamp, status, content)
+      VALUES ('answer', 'interactive_response', datetime('now'), 'pending', ?)`)
+      .run(JSON.stringify({ questionId: JSON.parse(row.content).questionId, value: 'yes' }));
+    const answered = await askUserQuestion.handler({ title: 'New', question: 'New question', responseMode: 'text' });
+    expect(answered.isError).not.toBe(true);
   });
 
   it('persists choice_or_text with normalized options', async () => {

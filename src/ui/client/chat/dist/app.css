@@ -1830,7 +1830,7 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg.event.fork-divider.event-clickable:hover {
   opacity: 1;
 }
-.chat-main .msg-fork-btn {
+.chat-main .msg-action-btn {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -1846,15 +1846,15 @@ nav.tab-bar-strip.group-strip {
   line-height: 1.2;
   cursor: pointer;
 }
-.chat-main .msg-fork-btn:hover {
+.chat-main .msg-action-btn:hover {
   color: var(--surface-fg);
   border-color: var(--border-strong);
 }
-.chat-main .msg-fork-btn:focus-visible {
+.chat-main .msg-action-btn:focus-visible {
   color: var(--surface-fg);
   border-color: var(--border-strong);
 }
-.chat-main .msg-fork-btn[disabled] {
+.chat-main .msg-action-btn[disabled] {
   cursor: default;
   opacity: 0.5;
 }
@@ -1974,7 +1974,8 @@ nav.tab-bar-strip.group-strip {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-main .msg .meta {
+.chat-main .msg .meta,
+.chat-main .typing .meta {
   font-size: var(--font-2xs);
   color: var(--muted);
   margin-top: 4px;
@@ -2178,6 +2179,18 @@ nav.tab-bar-strip.group-strip {
   gap: 4px;
   max-width: 100%;
   min-width: 0;
+}
+.chat-main .typing .meta {
+  width: 100%;
+}
+.chat-main .typing .turn-stop-error {
+  color: var(--danger, #b42318);
+  font-size: var(--font-xs);
+  max-width: 44ch;
+}
+.chat-main .typing .turn-stop-note {
+  color: var(--muted);
+  font-size: var(--font-xs);
 }
 .chat-main .typing .typing-dots {
   display: inline-flex;

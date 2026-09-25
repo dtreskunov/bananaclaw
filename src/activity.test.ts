@@ -26,6 +26,17 @@ describe('reduceActivityLines', () => {
     expect(JSON.parse(result.text)).toMatchObject({ status: 'completed', durationMs: 8040 });
   });
 
+  it.each(['interrupted', 'unknown'])('recognizes %s as terminal without claiming success', (status) => {
+    const [result] = reduceActivityLines([
+      line('1000', { kind: 'tool', id: 'call-1', tool: 'write', status: 'running' }),
+      line('1050', { kind: 'tool', id: 'call-1', tool: 'write', status }),
+    ]);
+    expect(JSON.parse(result.text)).toMatchObject({ status, durationMs: 50 });
+    expect(activityHint([result])).toBe(status === 'interrupted'
+      ? 'Interrupted (outcome unknown): write'
+      : 'Outcome unknown: write');
+  });
+
   it('keeps distinct ids and drops malformed or unidentified lines', () => {
     expect(reduceActivityLines([
       { ts: '1', text: 'Thinking…' },

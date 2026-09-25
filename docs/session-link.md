@@ -37,11 +37,23 @@ Supported live runner signals:
 - `activity.clear` and `activity`
 - `usage.clear` and `usage`
 - `turn.resume` and `turn.end`
+- `turn.state`, carrying the immutable active turn ID, `running`/`stopping`
+  status and originating channel/platform/thread, or `null` after settlement
 
 Activity is capped at 128 current steps and text fields are bounded. Usage
 numbers must be finite and non-negative. Live state is best-effort: the runner
 keeps its current snapshot in memory and replays it after reconnect, but the
 socket does not acknowledge or journal these signals.
+
+User cancellation uses a host-to-runner live `turn.stop` control carrying the
+exact turn ID. Both peers compare it with the active turn; stale controls never
+apply to a later turn. The runner replays `turn.state` on reconnect, reports
+`stopping` while cancellation is in progress, and records the stopped response,
+activity and completion before clearing the turn. The control is intentionally
+not a queued inbound message and does not discard or claim queued follow-ups.
+A disconnected or unconfirmed stop is reported to the UI rather than treated
+as success; the user can retry the same turn ID. Durable conversation mutations
+continue to use the journal/acknowledgement protocol below.
 
 Durable runner-to-host frames carry an event ID, journal sequence, type, and validated payload.
 The runner commits each mutation and event to `runner-state.db`. The host applies
@@ -92,6 +104,25 @@ container with a missing or incompatible link version. Version 3 containers
 mount only their writable projection directory (`runner-state/`, containing
 `runner-state.db` and its rollback journal), a read-only inbox, a writable
 outbox, and provider-specific state directories.
+
+### Coordinated host/runner rollout
+
+Runner source is bind-mounted at `/app/src`, not baked into the image. Newly
+started containers therefore load worktree edits immediately, even before a
+commit or an explicit deployment. The host, however, keeps its loaded compiled
+code until restarted. Develop in a separate checkout or coordinate both sides
+of a rollout; leaving a running old host against edited runner source is not an
+isolated staging environment.
+
+The Stop extension (`turn.state` / `turn.stop`) requires a matching host and
+runner. An older host rejects the new live frame even though both use the `v3`
+label. This can leave input pending while containers repeatedly connect and
+exit before processing it. Rebuild and restart the host with the matching code;
+the pending input is retained and the normal wake path resumes it. Do not
+resubmit or delete session data to recover from this mismatch.
+
+Verify a rollout with host health **and** an actual session exchange; a
+successful build or an HTTP 200 alone does not prove runner compatibility.
 
 ## Trust model
 

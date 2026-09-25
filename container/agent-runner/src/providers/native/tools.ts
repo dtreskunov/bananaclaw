@@ -73,11 +73,14 @@ interface ShellResult {
 }
 
 function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?: AbortSignal): Promise<ShellResult> {
+  abortSignal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn('/bin/sh', ['-lc', command], { cwd, detached: true, env: process.env });
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let interrupted = false;
     const append = (current: string, chunk: Buffer): string =>
       (current + chunk.toString('utf8')).slice(-MAX_PROCESS_OUTPUT);
     child.stdout.on('data', (chunk: Buffer) => {
@@ -88,12 +91,19 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
     });
 
     const stop = (): void => {
+      interrupted = true;
+      if (killTimer) return;
       if (child.pid) {
         try {
           process.kill(-child.pid, 'SIGTERM');
         } catch {
           child.kill('SIGTERM');
         }
+        killTimer = setTimeout(() => {
+          if (child.pid) {
+            try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+          }
+        }, 1000);
       }
     };
     const timer = setTimeout(stop, timeoutMs);
@@ -103,6 +113,7 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(killTimer);
       abortSignal?.removeEventListener('abort', onAbort);
       reject(error);
     });
@@ -110,6 +121,7 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(killTimer);
       abortSignal?.removeEventListener('abort', onAbort);
       const text = [
         stdout && `stdout:\n${stdout}`,
@@ -118,7 +130,8 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
       ]
         .filter(Boolean)
         .join('\n');
-      resolve({ text, exitCode: code });
+      if (interrupted) reject(new Error(`Interrupted; outcome unknown.\n${text}`));
+      else resolve({ text, exitCode: code });
     });
   });
 }

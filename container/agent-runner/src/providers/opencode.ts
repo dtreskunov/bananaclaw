@@ -727,6 +727,31 @@ async function ensureSharedRuntime(options: ProviderOptions): Promise<SharedRunt
   return sharedInit;
 }
 
+export async function settleOpenCodeAbort(
+  abortSession: (signal: AbortSignal) => Promise<{ error?: unknown }>,
+  killRuntime: () => Promise<void>,
+  timeoutMs = 2000,
+): Promise<void> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const response = await Promise.race([
+      abortSession(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('Session abort timed out'));
+        }, timeoutMs);
+      }),
+    ]);
+    if (response.error) throw new Error('Session abort failed');
+  } catch {
+    await killRuntime();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function destroySharedRuntime(): void {
   if (sharedRuntime) {
     try {
@@ -836,6 +861,30 @@ export class OpenCodeProvider implements AgentProvider {
     let waiting: (() => void) | null = null;
     let ended = false;
     let aborted = false;
+    const preparationAbort = new AbortController();
+    let runtime: SharedRuntime | undefined;
+    let stopPromise: Promise<void> | undefined;
+    const stopSession = (): Promise<void> => stopPromise ??= (async () => {
+      if (!runtime || !self.activeSessionId) return;
+      const rt = runtime;
+      const sessionId = self.activeSessionId;
+      await settleOpenCodeAbort(
+        (signal) => rt.client.session.abort({ path: { id: sessionId }, signal }),
+        async () => {
+          const proc = rt.proc;
+          destroySharedRuntime();
+          if (proc.exitCode === null && proc.signalCode === null) {
+            await new Promise<void>((resolve) => {
+              const timer = setTimeout(() => {
+                proc.kill('SIGKILL');
+                resolve();
+              }, 1000);
+              proc.once('exit', () => { clearTimeout(timer); resolve(); });
+            });
+          }
+        },
+      );
+    })();
     // Set while a turn is streaming. abort() calls it so the pending
     // `stream.next()` race settles immediately — killing the OpenCode process
     // alone does not reliably wake that await, which left an aborted turn
@@ -859,6 +908,7 @@ export class OpenCodeProvider implements AgentProvider {
     async function* gen(): AsyncGenerator<ProviderEvent> {
       let initYielded = false;
       const rt = await ensureSharedRuntime(self.options);
+      runtime = rt;
       const { client, stream } = rt;
 
       while (!aborted) {
@@ -876,7 +926,7 @@ export class OpenCodeProvider implements AgentProvider {
         let sessionId = self.activeSessionId;
 
         if (!sessionId) {
-          const created = await client.session.create();
+          const created = await client.session.create({ signal: preparationAbort.signal });
           if (created.error) {
             throw new Error(`OpenCode: failed to create session: ${JSON.stringify(created.error)}`);
           }
@@ -889,16 +939,19 @@ export class OpenCodeProvider implements AgentProvider {
           yield { type: 'init', continuation: sessionId };
           initYielded = true;
         }
+        if (aborted) return;
 
         const parts = buildOpenCodePromptParts(turn.text, turn.files);
 
         const modelSelection = resolveModelForPrompt(self.options.model);
-        const toolIds = await client.tool.ids({ query: { directory: input.cwd } });
+        const toolIds = await client.tool.ids({ query: { directory: input.cwd }, signal: preparationAbort.signal });
         if (toolIds.error || !toolIds.data) {
           throw new Error(`OpenCode: failed to enumerate tools for ${turn.tools} turn: ${JSON.stringify(toolIds.error)}`);
         }
         const toolOverrides = buildOpenCodeToolOverrides(toolIds.data, turn.tools);
+        if (aborted) return;
         const promptRes = await client.session.promptAsync({
+          signal: preparationAbort.signal,
           path: { id: sessionId },
           body: {
             parts: parts as any,
@@ -906,6 +959,11 @@ export class OpenCodeProvider implements AgentProvider {
             tools: toolOverrides,
           },
         });
+        if (aborted) {
+          stopPromise = undefined;
+          await stopSession();
+          return;
+        }
         if (promptRes.error) {
           self.activeSessionId = undefined;
           throw new Error(`OpenCode promptAsync: ${JSON.stringify(promptRes.error)}`);
@@ -1068,6 +1126,31 @@ export class OpenCodeProvider implements AgentProvider {
         } finally {
           clearInterval(timeoutCheck);
           rejectActiveTurn = undefined;
+          if (aborted) {
+            await stopSession();
+            const assistantIds = [...roleByMessageId].filter(([, role]) => role === 'assistant').map(([id]) => id);
+            const lastId = assistantIds.at(-1);
+            if (lastId) {
+              try {
+                const snapshot = await client.session.message({
+                  path: { id: sessionId, messageID: lastId },
+                  signal: AbortSignal.timeout(2000),
+                });
+                for (const part of (snapshot.data?.parts ?? []) as OpenCodePart[]) {
+                  const step = formatProgressFromPart(part);
+                  if (step?.kind === 'tool' && step.status === 'error' && /abort|cancel|interrupt/i.test(step.error ?? '')) {
+                    yield {
+                      type: 'progress',
+                      step: { ...step, status: 'interrupted', error: 'Interrupted; outcome unknown. External side effects may have occurred.' },
+                    };
+                  } else if (step) yield { type: 'progress', step };
+                }
+              } catch { /* The fallback may have killed the runtime; streamed history remains durable. */ }
+              yield { type: 'checkpoint', ref: lastId };
+            }
+            const usage = sumOpenCodeUsage(assistantIds.map((id) => usageByMessageId.get(id)));
+            if (usage) yield { type: 'usage', data: usage };
+          }
         }
 
         let resultText = '';
@@ -1188,6 +1271,7 @@ export class OpenCodeProvider implements AgentProvider {
 
     return {
       push: (message: string, files?: FileAttachment[], options?: QueryPushOptions) => {
+        if (ended || aborted) return false;
         pending.push({
           text: wrapPromptWithContext(message, systemInstructions),
           files,
@@ -1200,13 +1284,19 @@ export class OpenCodeProvider implements AgentProvider {
         ended = true;
         kick();
       },
-      events: gen(),
+      events: (async function* () {
+        try { yield* gen(); }
+        finally {
+          ended = true;
+          if (aborted) await stopSession();
+        }
+      })(),
       abort: () => {
+        if (aborted) return;
         aborted = true;
-        this.activeSessionId = undefined;
-        rejectActiveTurn?.(new Error('OpenCode query aborted'));
+        preparationAbort.abort();
         kick();
-        destroySharedRuntime();
+        void stopSession().finally(() => rejectActiveTurn?.(new Error('OpenCode query aborted')));
       },
     };
   }

@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from './db/connection.js';
 import { writeMessageOut } from './db/messages-out.js';
-import { SessionSignalClient } from './session-link.js';
+import { isAddressableTurn, onTurnStop, SessionSignalClient } from './session-link.js';
 
 const sockets: net.Socket[] = [];
 const servers: net.Server[] = [];
@@ -56,6 +56,22 @@ afterEach(async () => {
 });
 
 describe('SessionSignalClient', () => {
+  it('only advertises safely addressable turns without inventing routing for background inputs', () => {
+    const turn = {
+      id: 'f90c3a48-713b-4852-96e0-494d8279d87c',
+      status: 'running' as const,
+      channelType: 'web',
+      platformId: 'chat-1',
+      threadId: null,
+    };
+    expect(isAddressableTurn(turn)).toBe(true);
+    expect(isAddressableTurn({ ...turn, channelType: '' })).toBe(false);
+    expect(isAddressableTurn({ ...turn, platformId: 'bad\nroute' })).toBe(false);
+    expect(isAddressableTurn({ ...turn, threadId: '' })).toBe(false);
+    expect(isAddressableTurn({ ...turn, threadId: 'a'.repeat(1025) })).toBe(false);
+    expect(isAddressableTurn({ ...turn, id: 'bad:id' })).toBe(false);
+  });
+
   it('commits host events before ACK and waits for host.ready at startup', async () => {
     initTestSessionDb();
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
@@ -148,6 +164,7 @@ describe('SessionSignalClient', () => {
       model: 'test/model',
     });
     client.endTurn();
+    client.updateTurn({ id: 'turn-1', status: 'stopping', channelType: 'web', platformId: 'chat-1', threadId: null });
     await waitFor(() => firstLines.some((line) => line.includes('src/index.ts')));
 
     for (const socket of sockets.splice(0)) socket.destroy();
@@ -164,8 +181,32 @@ describe('SessionSignalClient', () => {
       'activity',
       'usage',
       'turn.end',
+      'turn.state',
     ]);
+    expect(JSON.parse(replayed.at(-1)!).turn).toMatchObject({ id: 'turn-1', status: 'stopping' });
     client.stop();
+  });
+
+  it('accepts exact stop frames and drains committed cancellation before clearing state', async () => {
+    initTestSessionDb();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-stop-link-'));
+    roots.push(root);
+    const lines: string[] = [];
+    const socketPath = path.join(root, 'runner.sock');
+    await listen(socketPath, lines, true);
+    const client = new SessionSignalClient(socketPath);
+    const ids: string[] = [];
+    const unsubscribe = onTurnStop((id) => ids.push(id));
+    try {
+      void client.start();
+      await waitFor(() => sockets.length > 0);
+      sockets[0].write('{"v":3,"type":"turn.stop","turnId":"active"}\n');
+      await waitFor(() => ids.length > 0);
+      expect(ids).toEqual(['active']);
+      writeMessageOut({ id: 'stopped', kind: 'chat', content: '{"text":"Stopped by user."}' });
+      await client.drain();
+      expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM pending_runner_events').get()).toEqual({ n: 0 });
+    } finally { unsubscribe(); client.stop(); }
   });
 
   it('replays a trigger-journaled durable row until the host acknowledges it', async () => {

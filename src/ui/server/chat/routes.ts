@@ -43,6 +43,7 @@ import {
   listAllThreadsForAgentGroup,
   listAllThreadsForUser,
   readChatHistory,
+  readChatActiveTurn,
   readTurnActivityForOutbound,
   viewerHasContent,
 } from './chat.js';
@@ -733,6 +734,8 @@ interface SyncResponse {
   threads?: ThreadSummary[];
   threadMessages?: HistoryMessage[];
   voiceInput?: ReturnType<typeof resolveVoiceInputConfig>;
+  activeTurn?: ReturnType<typeof readChatActiveTurn>['activeTurn'];
+  connected?: boolean;
 }
 
 function handleSync(ctx: Ctx, userId: string): void {
@@ -751,6 +754,17 @@ function handleSync(ctx: Ctx, userId: string): void {
     const tid = ctx.url.searchParams.get('tid') || '';
     const channel = ctx.url.searchParams.get('channel') || '';
     const mg = ctx.url.searchParams.get('mg') || '';
+    if (tid && !!channel === !!mg) {
+      Object.assign(
+        out,
+        readChatActiveTurn(
+          userId,
+          gid,
+          tid,
+          channel && mg ? { channelType: channel, messagingGroupId: mg } : undefined,
+        ),
+      );
+    }
     if (tid && channel && channel !== 'web' && mg) {
       try {
         out.threadMessages = readChatHistory(userId, gid, tid, { channelType: channel, messagingGroupId: mg });

@@ -72,6 +72,47 @@ Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visib
 
 Everything else falls back to a download link.
 
+### Stopping a response
+
+The live activity ("thinking") bubble has a small square **Stop** icon at the
+right end of its metadata footer, matching the branch button on completed
+responses. It has no visible text; its tooltip and accessible label identify
+the action. It remains available while the activity trace is collapsed and stops only that
+response, including a response waiting on a tool. The composer, Send/Enter,
+attachments, and dictation remain unchanged: you can still enqueue follow-ups.
+Queued messages are not cancelled and run afterward.
+
+Question cards are not cancelled by Stop. They remain actionable, and submitting
+an answer is ordinary new input (or a queued follow-up). You can stop the
+resulting turn after answering. If the agent has finished asking a question and
+is only waiting for your answer, there may be no active turn to stop.
+
+The icon is disabled and grayed out while stopping, without adding transient
+status text or changing the bubble's layout. A **Stopping response** tooltip
+and accessible busy state remain until the runner settles the turn; HTTP
+acceptance alone is not a completed stop. A disconnected runner, failed request,
+or missing acknowledgement is shown explicitly, with a retry affordance.
+Retries carry the same immutable turn ID, so a stale click cannot stop the next
+response. Other open tabs and reconnects receive the current turn state.
+Only users allowed to send in the conversation can stop it; a shared-session
+turn running in a different thread or channel cannot be stopped from this view.
+
+A stopped response leaves a durable history entry and its activity trace, even
+if no assistant reply was sent. Completed and failed tool calls retain their
+status; interrupted calls without a confirmed result are marked as having an
+unknown outcome, not as successfully completed. Stopping does **not** undo
+completed filesystem changes, messages, or external API effects. Provider
+continuation is retained, and the stopped input is not automatically retried.
+Already-submitted approval requests are separate workflows and are not revoked
+by stopping the response.
+
+Stopped responses retain elapsed time, the model when known, and any token usage
+already reported. Counts are labeled **tokens reported** and may exclude an
+unfinished model call; if no usage was reported, the footer says **Tokens
+unavailable** instead of showing zero. Native model-call usage is captured before
+waiting for tools to finish. This metadata is persisted for reloads, but cannot
+be reconstructed for older stopped responses that never recorded it.
+
 ### Live voice input
 
 The microphone starts live dictation directly into the composer. Speech appears

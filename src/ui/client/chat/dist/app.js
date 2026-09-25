@@ -15551,6 +15551,9 @@ var chatStatus = y3("");
 var chatLoading = y3(false);
 var chatReady = y3(false);
 var isTyping = y3(false);
+var activeTurn = y3(null);
+var turnConnected = y3(false);
+var stopRequest = y3(null);
 var pendingWebSends = y3([]);
 var typingHint = y3("");
 var typingStartedAt = y3(null);
@@ -17679,6 +17682,117 @@ function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
 
+// ../../shared/stopped-turn.ts
+function readStoppedTurnStats(content) {
+  if (!content || typeof content !== "object" || !("stopped" in content) || content.stopped !== true || !("stopped_stats" in content))
+    return void 0;
+  const stats = content.stopped_stats;
+  if (!stats || typeof stats !== "object" || !("durationMs" in stats) || typeof stats.durationMs !== "number" || !Number.isSafeInteger(stats.durationMs) || stats.durationMs < 0 || !("model" in stats) || stats.model !== null && (typeof stats.model !== "string" || stats.model.length > 256)) {
+    return void 0;
+  }
+  return { durationMs: stats.durationMs, model: stats.model };
+}
+
+// src/stop-turn.ts
+var STOP_TIMEOUT_MS = 3e4;
+var confirmationTimer = null;
+var requestController = null;
+function clearPendingStop() {
+  if (confirmationTimer) clearTimeout(confirmationTimer);
+  confirmationTimer = null;
+  requestController?.abort();
+  requestController = null;
+}
+function awaitConfirmation(turnId) {
+  if (confirmationTimer) return;
+  confirmationTimer = setTimeout(() => {
+    confirmationTimer = null;
+    requestController?.abort();
+    requestController = null;
+    if (activeTurn.value?.id !== turnId) return;
+    stopRequest.value = {
+      turnId,
+      busy: false,
+      error: "Stopping has not been confirmed. The response may still be running. Retry Stop to check again."
+    };
+  }, STOP_TIMEOUT_MS);
+}
+function applyTurnState(turn, connected) {
+  const changed = activeTurn.value?.id !== turn?.id;
+  if (changed) clearPendingStop();
+  n2(() => {
+    if (changed) stopRequest.value = null;
+    activeTurn.value = turn;
+    turnConnected.value = connected;
+    if (!connected && turn && (stopRequest.value?.busy || turn.status === "stopping")) {
+      clearPendingStop();
+      stopRequest.value = {
+        turnId: turn.id,
+        busy: false,
+        error: "Connection lost before Stop was confirmed. Reconnect to check the response."
+      };
+    }
+  });
+  if (connected && turn?.status === "stopping" && !stopRequest.value?.error) awaitConfirmation(turn.id);
+}
+function resetTurnState() {
+  clearPendingStop();
+  n2(() => {
+    activeTurn.value = null;
+    turnConnected.value = false;
+    stopRequest.value = null;
+  });
+}
+async function stopActiveTurn(turnId) {
+  const gid = groupId.value;
+  const tid = threadId.value;
+  if (!gid || !tid || !canSend.value || !turnConnected.value || activeTurn.value?.id !== turnId || stopRequest.value?.busy)
+    return;
+  const generation2 = refs.chatGeneration;
+  const isCurrent = () => generation2 === refs.chatGeneration && groupId.value === gid && threadId.value === tid && activeTurn.value?.id === turnId;
+  clearPendingStop();
+  stopRequest.value = { turnId, busy: true, error: "" };
+  const controller = new AbortController();
+  requestController = controller;
+  awaitConfirmation(turnId);
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/stop`;
+  if (channelType.value !== "web" && messagingGroupId.value) {
+    url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
+  }
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ turnId }),
+      signal: controller.signal
+    });
+    if (!isCurrent()) return;
+    if (!response.ok) {
+      const detail = await response.text();
+      let message = `Stop request failed (HTTP ${response.status}).`;
+      try {
+        const body = JSON.parse(detail);
+        if (body && typeof body === "object" && "error" in body && typeof body.error === "string") message = body.error;
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+      }
+      throw new Error(message);
+    }
+  } catch (error) {
+    if (!isCurrent() || controller.signal.aborted) return;
+    clearPendingStop();
+    console.error("Stop request failed", error);
+    stopRequest.value = {
+      turnId,
+      busy: false,
+      error: error instanceof Error ? error.message : "Stop request failed. Try again."
+    };
+  } finally {
+    if (requestController === controller) requestController = null;
+  }
+}
+
 // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
@@ -18309,6 +18423,7 @@ function clearSearch() {
   });
 }
 function clearChat() {
+  resetTurnState();
   voice.detach();
   cancelRecording();
   voiceInput.value = { backend: "disabled", ready: false, reason: "Waiting for chat configuration." };
@@ -18362,6 +18477,7 @@ function startSyncPoll() {
 }
 async function runSync(options = {}) {
   const requestId = ++refs.syncRequestId;
+  const generation2 = refs.chatGeneration;
   const gid = groupId.value;
   const tid = threadId.value;
   const ct = channelType.value;
@@ -18382,9 +18498,15 @@ async function runSync(options = {}) {
       options.forceRefresh ? { cache: "no-store" } : void 0
     );
   } catch {
+    if (generation2 === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct !== "web") {
+      applyTurnState(activeTurn.value, false);
+    }
     return false;
   }
   if (requestId !== refs.syncRequestId) return false;
+  if (generation2 === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct === channelType.value && mg === messagingGroupId.value && ct !== "web") {
+    applyTurnState(res.activeTurn ?? null, res.connected === true);
+  }
   if (gid && groupId.value === gid && tid === threadId.value && res.voiceInput) {
     voiceInput.value = res.voiceInput;
     if (!res.voiceInput.ready)
@@ -18427,6 +18549,7 @@ function toChatMessage(m6) {
     ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
     ...m6.suggestedAction ? { suggestedAction: m6.suggestedAction } : {},
     ...m6.usage ? { usage: m6.usage } : {},
+    ...m6.stoppedStats ? { stoppedStats: m6.stoppedStats } : {},
     ...m6.activity ? { activity: m6.activity } : {},
     ...m6.event ? { event: m6.event } : {},
     ...m6.reactions ? { reactions: m6.reactions } : {}
@@ -18460,6 +18583,7 @@ function mergeIncomingMessages(messages) {
       ...m6.deliveryOrigin ? { deliveryOrigin: m6.deliveryOrigin } : {},
       ...m6.suggestedAction ? { suggestedAction: m6.suggestedAction } : {},
       ...m6.usage ? { usage: m6.usage } : {},
+      ...m6.stoppedStats ? { stoppedStats: m6.stoppedStats } : {},
       ...m6.activity ? { activity: m6.activity } : {},
       ...m6.event ? { event: m6.event } : {},
       ...m6.reactions ? { reactions: m6.reactions } : {}
@@ -18490,7 +18614,7 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author, suggestedAction) {
+function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author, suggestedAction, stoppedStats) {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
   if (key) refs.seenIds.add(key);
@@ -18504,6 +18628,7 @@ function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigi
     ...author ? { author } : {},
     ...deliveryOrigin ? { deliveryOrigin } : {},
     ...suggestedAction ? { suggestedAction } : {},
+    ...stoppedStats ? { stoppedStats } : {},
     ...activity && activity.length ? { activity } : {}
   });
 }
@@ -18524,6 +18649,7 @@ function applyReaction(targetId, emoji, ts) {
 async function openChat(gid, resumeTid, opts) {
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
   if (!resumeTid && refs.newChatInFlight) return;
+  resetTurnState();
   voice.detach();
   cancelRecording();
   voiceInput.value = { backend: "disabled", ready: false, reason: "Waiting for chat configuration." };
@@ -18708,6 +18834,7 @@ function connectChatWs(ctx2) {
       refs.wsConnectCancel = null;
     }
     chatReady.value = false;
+    applyTurnState(activeTurn.value, false);
     if (refs.wsPingTimer) {
       clearInterval(refs.wsPingTimer);
       refs.wsPingTimer = null;
@@ -18738,6 +18865,7 @@ function connectChatWs(ctx2) {
   ws.onerror = () => {
     if (refs.ws !== ws || generation2 !== refs.chatGeneration) return;
     chatReady.value = false;
+    applyTurnState(activeTurn.value, false);
     chatStatus.value = "connection error";
   };
   ws.onmessage = (ev) => {
@@ -18757,6 +18885,11 @@ function connectChatWs(ctx2) {
         reason: "Live voice input is not configured."
       };
       canSend.value = payload.canSend === true;
+      applyTurnState(payload.activeTurn ?? null, payload.connected === true);
+      return;
+    }
+    if (payload.kind === "turn") {
+      applyTurnState(payload.turn ?? null, payload.connected === true);
       return;
     }
     if (payload.kind === "ready") {
@@ -18888,7 +19021,8 @@ function connectChatWs(ctx2) {
         void 0,
         deliveryOrigin,
         void 0,
-        suggestedAction
+        suggestedAction,
+        readStoppedTurnStats(c4)
       );
       bumpActiveThread();
       if (dir === "out") maybeNotify(text, payload.files || []);
@@ -20745,6 +20879,25 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
   );
 }
 
+// src/components/TurnStopButton.tsx
+function TurnStopButton({ turn, connected, busy, error, onStop }) {
+  const stopping = !error && (busy || turn.status === "stopping");
+  const label = stopping ? "Stopping response" : error ? "Retry stopping response" : "Stop response";
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg-action-btn turn-stop",
+      "aria-label": label,
+      "aria-busy": stopping,
+      title: connected ? `${label}. Queued follow-ups will still run; completed actions are not undone.` : "Reconnect to stop this response.",
+      disabled: !connected || stopping,
+      onClick: () => onStop(turn.id),
+      children: /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: "\u25A0" })
+    }
+  );
+}
+
 // src/question-timeline.ts
 function timestampMs(timestamp) {
   const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
@@ -21203,6 +21356,13 @@ function stepHeadline(s5) {
   switch (s5.kind) {
     case "tool": {
       const tool = (s5.tool || "").toLowerCase();
+      if (s5.status === "interrupted" || s5.status === "unknown") {
+        return {
+          action: s5.status === "interrupted" ? "Interrupted" : "Outcome unknown:",
+          subject: [cleanToolName(s5.tool || "tool"), singleLine(s5.detail || s5.title || "")].filter(Boolean).join(" "),
+          codeSubject: true
+        };
+      }
       const finished = s5.status === "completed" || s5.status === "error";
       const fileOp = FILE_OP_VERBS[tool];
       if (fileOp) {
@@ -21286,7 +21446,7 @@ function stepBody(s5) {
 }
 function stepMeta(s5, elapsedMs) {
   if (s5.kind !== "tool") return null;
-  const status = s5.status === "error" ? "Failed" : s5.status === "completed" ? "Completed" : s5.status === "running" ? "Running" : "Pending";
+  const status = s5.status === "interrupted" ? "Interrupted (outcome unknown)" : s5.status === "unknown" ? "Outcome unknown" : s5.status === "error" ? "Failed" : s5.status === "completed" ? "Completed" : s5.status === "running" ? "Running" : "Pending";
   const duration = s5.status === "running" ? elapsedMs : s5.durationMs;
   const formattedDuration = typeof duration !== "number" ? "" : s5.status === "running" ? `${Math.floor(duration / 1e3)}s` : formatDuration(duration);
   return `${status}${formattedDuration ? ` \xB7 ${formattedDuration}` : ""}`;
@@ -21303,7 +21463,7 @@ function formatRecordingDuration(ms) {
 }
 function ActivityTraceRow({ line, open, live, now, onToggle }) {
   const parsedStep = parseStep(line.text);
-  const step = !live && parsedStep.kind === "tool" && (parsedStep.status === "pending" || parsedStep.status === "running") ? { ...parsedStep, status: "completed" } : parsedStep;
+  const step = !live && parsedStep.kind === "tool" && (parsedStep.status === "pending" || parsedStep.status === "running") ? { ...parsedStep, status: "unknown" } : parsedStep;
   const headline = stepHeadline(step);
   const running = live && step.kind === "tool" && step.status === "running";
   const startedAt2 = Number(line.ts);
@@ -21418,15 +21578,15 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ u: u5, live = false }) {
+function UsageMeta({ u: u5, live = false, partial = false }) {
   const [expanded, setExpanded] = h2(false);
   const cost = fmtCost(u5.cost_usd);
   const model = u5.model ? shortModel(u5.model) : "";
-  const dur = u5.duration_ms ? fmtDur(u5.duration_ms) : "";
+  const dur = u5.duration_ms != null ? fmtDur(u5.duration_ms) : "";
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
   const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
   const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
-  const short = live ? [`${cost} est.`, `${fmtTok(u5.input_tokens)} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : [cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
+  const short = live ? [`${cost} est.`, `${fmtTok(u5.input_tokens)} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [dur, model, `${fmtTok(u5.input_tokens + u5.output_tokens)} tokens reported`].filter(Boolean).join(" \xB7 ") : [cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
   const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
@@ -21450,8 +21610,9 @@ function UsageMeta({ u: u5, live = false }) {
     expanded ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4("span", { class: "usage-backdrop", onClick: () => setExpanded(false) }),
       /* @__PURE__ */ u4("span", { class: "usage-popover", role: "dialog", "aria-label": "Turn usage details", children: [
+        partial ? /* @__PURE__ */ u4("span", { class: "usage-row", children: "Usage reported before cancellation; final totals may be higher." }) : null,
         /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Estimated cost" }),
+          /* @__PURE__ */ u4("span", { children: partial ? "Reported cost" : "Estimated cost" }),
           /* @__PURE__ */ u4("strong", { children: cost })
         ] }),
         dur ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
@@ -21535,7 +21696,7 @@ function ForkButton({ m: m6 }) {
     "button",
     {
       type: "button",
-      class: "msg-fork-btn",
+      class: "msg-action-btn msg-fork-btn",
       title: "Branch a new thread from this message",
       "aria-label": "Branch a new thread from this message",
       disabled: busy,
@@ -21747,8 +21908,17 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
     m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
     m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-      showsMidTurnLabel(m6.deliveryOrigin, isLatest, isTyping.value) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-      m6.usage && m6.direction === "out" ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage }) : null,
+      showsMidTurnLabel(m6.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
+      m6.direction === "out" && (m6.usage ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage, partial: !!m6.stoppedStats }) : m6.stoppedStats ? /* @__PURE__ */ u4("span", { title: "Token usage was not reported before cancellation.", children: [
+        fmtDur(m6.stoppedStats.durationMs),
+        " ",
+        "\xB7",
+        " ",
+        m6.stoppedStats.model ? shortModel(m6.stoppedStats.model) : "Model unavailable",
+        " ",
+        "\xB7",
+        " Tokens unavailable"
+      ] }) : null),
       /* @__PURE__ */ u4(ForkButton, { m: m6 })
     ] }) : null
   ] });
@@ -21964,6 +22134,8 @@ function TaskIndicator() {
   }) });
 }
 function TypingIndicator({ traceExpanded, onToggleTrace }) {
+  const turn = activeTurn.value;
+  const stop = stopRequest.value?.turnId === turn?.id ? stopRequest.value : null;
   const stableStartedAt = typingStartedAt.value;
   const fallbackStartedAt = A2(Date.now());
   const startedAt2 = stableStartedAt ?? fallbackStartedAt.current;
@@ -22005,6 +22177,8 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
         }
       ) : !traceExpanded && typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null
     ] }) }),
+    stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
+    turn && !turnConnected.value && !stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: "Disconnected. Reconnect to stop this response." }) : null,
     /* @__PURE__ */ u4(
       ActivityTracePanel,
       {
@@ -22016,8 +22190,22 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
         openLatest: openLatestOnExpand
       }
     ),
-    /* @__PURE__ */ u4("div", { class: "typing-meta", children: metadata }),
-    usage ? /* @__PURE__ */ u4("div", { class: "typing-usage", children: /* @__PURE__ */ u4(UsageMeta, { u: usage, live: true }) }) : null
+    /* @__PURE__ */ u4("div", { class: "meta", children: [
+      /* @__PURE__ */ u4("span", { class: "typing-meta", children: metadata }),
+      usage ? /* @__PURE__ */ u4("span", { class: "typing-usage", children: /* @__PURE__ */ u4(UsageMeta, { u: usage, live: true }) }) : null,
+      turn && canSend.value ? /* @__PURE__ */ u4(
+        TurnStopButton,
+        {
+          turn,
+          connected: turnConnected.value,
+          busy: stop?.busy ?? false,
+          error: stop?.error ?? "",
+          onStop: (id) => {
+            void stopActiveTurn(id);
+          }
+        }
+      ) : null
+    ] })
   ] });
 }
 function MessageLog() {
@@ -22035,7 +22223,7 @@ function MessageLog() {
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
   const msgCount = timeline.length;
-  const typing = isTyping.value && !!threadId.value && !chatLoading.value;
+  const typing = (isTyping.value || !!activeTurn.value) && !!threadId.value && !chatLoading.value;
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
   const traceLen = activityLog.value.length;

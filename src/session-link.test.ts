@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./config.js')>()),
-  DATA_DIR: '/tmp/nanoclaw-session-link-test',
+  DATA_DIR: path.resolve('.test-sl'),
 }));
 
 import {
@@ -18,6 +19,9 @@ import {
   stopAllSessionSignalServers,
   stopSessionSignalServer,
   notifySessionHostState,
+  getSessionActiveTurn,
+  requestSessionTurnStop,
+  onSessionSignal,
 } from './session-link.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath } from './session-manager.js';
 import { insertMessage } from './db/session-db.js';
@@ -54,7 +58,7 @@ function parsedFrames(value: string): Array<Record<string, unknown>> {
 }
 
 beforeEach(async () => {
-  fs.rmSync('/tmp/nanoclaw-session-link-test', { recursive: true, force: true });
+  fs.rmSync(path.resolve('.test-sl'), { recursive: true, force: true });
   initSessionFolder(AGENT_GROUP_ID, SESSION_ID);
   await startSessionSignalServer(SESSION_ID, AGENT_GROUP_ID);
 });
@@ -62,10 +66,164 @@ beforeEach(async () => {
 afterEach(async () => {
   await stopAllSessionSignalServers();
   await stopSessionSignalServer(SESSION_ID, true);
-  fs.rmSync('/tmp/nanoclaw-session-link-test', { recursive: true, force: true });
+  fs.rmSync(path.resolve('.test-sl'), { recursive: true, force: true });
+});
+
+const ACTIVE_TURN = {
+  id: 'turn-1',
+  status: 'running',
+  channelType: 'web',
+  platformId: 'group:agent-a',
+  threadId: 'thread-1',
+};
+
+describe('current turn control', () => {
+  it('sends one exact control for duplicate requests and never clears on telemetry', async () => {
+    const socket = await connect();
+    let received = '';
+    socket.on('data', (chunk) => {
+      received += String(chunk);
+    });
+    socket.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).turn?.id === ACTIVE_TURN.id);
+    const [first, duplicate] = await Promise.all([
+      requestSessionTurnStop(SESSION_ID, ACTIVE_TURN.id),
+      requestSessionTurnStop(SESSION_ID, ACTIVE_TURN.id),
+    ]);
+    expect(first).toEqual({ accepted: true, turn: { ...ACTIVE_TURN, status: 'stopping' } });
+    expect(duplicate).toEqual(first);
+    await waitFor(() => received.includes('turn.stop'));
+    expect(parsedFrames(received).filter((frame) => frame.type === 'turn.stop')).toEqual([
+      { v: 3, type: 'turn.stop', turnId: ACTIVE_TURN.id },
+    ]);
+    for (const type of ['heartbeat', 'activity.clear', 'turn.end', 'turn.resume']) {
+      socket.write(`${JSON.stringify({ v: 3, type })}\n`);
+    }
+    socket.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getSessionActiveTurn(SESSION_ID).turn?.status).toBe('stopping');
+    socket.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn: null })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).turn === null);
+    expect(await requestSessionTurnStop(SESSION_ID, ACTIVE_TURN.id)).toEqual({ accepted: false, error: 'not_active' });
+    socket.destroy();
+  });
+
+  it('rejects invalid and stale ids and requires explicit replay after reconnect', async () => {
+    expect(await requestSessionTurnStop(SESSION_ID, 'bad id')).toEqual({ accepted: false, error: 'invalid_turn_id' });
+    expect(await requestSessionTurnStop(SESSION_ID, 'x'.repeat(129))).toEqual({
+      accepted: false,
+      error: 'invalid_turn_id',
+    });
+    expect(await requestSessionTurnStop(SESSION_ID, 'turn-1')).toEqual({ accepted: false, error: 'disconnected' });
+    const socket = await connect();
+    socket.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).connected);
+    expect(await requestSessionTurnStop(SESSION_ID, 'old-turn')).toEqual({ accepted: false, error: 'not_active' });
+    const emitted: string[] = [];
+    const unsubscribe = onSessionSignal((_id, kind) => emitted.push(kind));
+    socket.destroy();
+    await waitFor(() => !getSessionActiveTurn(SESSION_ID).connected);
+    expect(getSessionActiveTurn(SESSION_ID).turn?.id).toBe('turn-1');
+    expect(emitted).toContain('disconnected');
+    const next = await connect();
+    next.write(`${JSON.stringify({ v: 3, type: 'heartbeat' })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(await requestSessionTurnStop(SESSION_ID, 'turn-1')).toEqual({ accepted: false, error: 'disconnected' });
+    next.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn: { ...ACTIVE_TURN, id: 'turn-2' } })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).connected);
+    expect(await requestSessionTurnStop(SESSION_ID, 'turn-1')).toEqual({ accepted: false, error: 'not_active' });
+    expect(await requestSessionTurnStop(SESSION_ID, 'turn-2')).toMatchObject({ accepted: true });
+    unsubscribe();
+    next.destroy();
+  });
+
+  it('accepts null replay and rehydrates an active turn after host state loss', async () => {
+    await stopSessionSignalServer(SESSION_ID, true);
+    await startSessionSignalServer(SESSION_ID, AGENT_GROUP_ID);
+    const socket = await connect();
+    socket.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn: null })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).connected);
+    expect(await requestSessionTurnStop(SESSION_ID, 'turn-1')).toEqual({ accepted: false, error: 'not_active' });
+    socket.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).turn?.id === ACTIVE_TURN.id);
+    const snapshot = getSessionActiveTurn(SESSION_ID);
+    snapshot.turn!.status = 'stopping';
+    expect(getSessionActiveTurn(SESSION_ID).turn?.status).toBe('running');
+    socket.destroy();
+  });
+
+  it.each(['completion', 'replacement', 'write-error'] as const)(
+    'does not accept a stop after %s races the control write',
+    async (race) => {
+      const socket = await connect();
+      socket.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
+      await waitFor(() => getSessionActiveTurn(SESSION_ID).connected);
+      const originalWrite = net.Socket.prototype.write;
+      let completeWrite: ((error?: Error | null) => void) | undefined;
+      const spy = vi.spyOn(net.Socket.prototype, 'write').mockImplementation(function (
+        this: net.Socket,
+        ...args: Parameters<net.Socket['write']>
+      ) {
+        if (typeof args[0] === 'string' && args[0].includes('"type":"turn.stop"')) {
+          completeWrite = args[1] as unknown as (error?: Error | null) => void;
+          return true;
+        }
+        return Reflect.apply(originalWrite, this, args);
+      });
+      const request = requestSessionTurnStop(SESSION_ID, ACTIVE_TURN.id);
+      expect(completeWrite).toBeTypeOf('function');
+      if (race !== 'write-error') {
+        socket.write(
+          `${JSON.stringify({
+            v: 3,
+            type: 'turn.state',
+            turn: race === 'completion' ? null : { ...ACTIVE_TURN, id: 'turn-2' },
+          })}\n`,
+        );
+        await waitFor(() => getSessionActiveTurn(SESSION_ID).turn?.id !== ACTIVE_TURN.id);
+      }
+      completeWrite!(race === 'write-error' ? new Error('broken pipe') : undefined);
+      expect(await request).toEqual({ accepted: false, error: race === 'write-error' ? 'disconnected' : 'not_active' });
+      if (race === 'replacement') expect(getSessionActiveTurn(SESSION_ID).turn?.status).toBe('running');
+      spy.mockRestore();
+      socket.destroy();
+    },
+  );
+
+  it.each([
+    { ...ACTIVE_TURN, id: '' },
+    { ...ACTIVE_TURN, id: 'a'.repeat(129) },
+    { ...ACTIVE_TURN, status: 'done' },
+    { ...ACTIVE_TURN, channelType: '' },
+    { ...ACTIVE_TURN, platformId: 'a\nb' },
+    { ...ACTIVE_TURN, threadId: 7 },
+    { ...ACTIVE_TURN, channelType: 'x'.repeat(1025) },
+    { ...ACTIVE_TURN, sessionId: 'forged' },
+    [],
+    undefined,
+  ])('rejects malformed turn state %j', async (turn) => {
+    const socket = await connect();
+    socket.write(`${JSON.stringify({ v: 3, type: 'turn.state', turn })}\n`);
+    await waitFor(() => socket.destroyed);
+    expect(getSessionActiveTurn(SESSION_ID)).toEqual({ turn: null, connected: false });
+  });
 });
 
 describe('session signal link', () => {
+  it.each(['interrupted', 'unknown'])('accepts truthful terminal tool status %s', async (status) => {
+    const socket = await connect();
+    socket.write(
+      `${JSON.stringify({
+        v: 3,
+        type: 'activity',
+        step: { kind: 'tool', id: 'stopped-tool', tool: 'write', status },
+      })}\n`,
+    );
+    await waitFor(() => getSessionSignalActivity(SESSION_ID).length > 0);
+    expect(JSON.parse(getSessionSignalActivity(SESSION_ID)[0].text).status).toBe(status);
+    socket.destroy();
+  });
+
   it('accepts bounded live state for only the mounted session', async () => {
     const socket = await connect();
     socket.write(`${JSON.stringify({ v: 3, type: 'activity.clear' })}\n`);
@@ -515,10 +673,9 @@ describe('session signal link', () => {
     const message = parsedFrames(secondResponse).filter((frame) => frame.type === 'host.event')[1];
     expect(message).toMatchObject({ sequence: 2, event: { type: 'message.upsert' } });
     expect(
-      Buffer.from(
-        ((message.event as { payload: { content_base64: string } }).payload.content_base64),
-        'base64',
-      ).toString('utf8'),
+      Buffer.from((message.event as { payload: { content_base64: string } }).payload.content_base64, 'base64').toString(
+        'utf8',
+      ),
     ).toBe('{"text":"hello"}');
     second.write(`${JSON.stringify({ v: 3, type: 'host.ack', eventId: message.eventId })}\n`);
     await waitFor(() => {

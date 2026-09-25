@@ -16,6 +16,7 @@ const INITIAL_RECONNECT_MS = 100;
 const MAX_RECONNECT_MS = 5_000;
 
 type SignalFrame =
+  | { v: 3; type: 'turn.state'; turn: ActiveTurn | null }
   | { v: 3; type: 'heartbeat' }
   | { v: 3; type: 'activity.clear' }
   | { v: 3; type: 'activity'; step: ActivityStep }
@@ -23,6 +24,32 @@ type SignalFrame =
   | { v: 3; type: 'usage'; usage: TurnUsage }
   | { v: 3; type: 'turn.resume' }
   | { v: 3; type: 'turn.end' };
+
+export interface ActiveTurn {
+  id: string;
+  status: 'running' | 'stopping';
+  channelType: string;
+  platformId: string;
+  threadId: string | null;
+}
+
+export function isAddressableTurn(turn: ActiveTurn): boolean {
+  const routePart = (value: string): boolean =>
+    value.length >= 1 && value.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(value);
+  return /^[A-Za-z0-9_-]{1,128}$/.test(turn.id) &&
+    routePart(turn.channelType) && routePart(turn.platformId) &&
+    (turn.threadId === null || routePart(turn.threadId));
+}
+
+const stopListeners = new Set<(turnId: string) => void>();
+export function onTurnStop(listener: (turnId: string) => void): () => void {
+  stopListeners.add(listener);
+  return () => stopListeners.delete(listener);
+}
+
+export function requestTurnStop(turnId: string): void {
+  for (const listener of stopListeners) listener(turnId);
+}
 
 interface DurableFrame {
   v: 3;
@@ -95,6 +122,7 @@ export class SessionSignalClient {
   private activity: ActivityStep[] = [];
   private usage: TurnUsage | null = null;
   private turnEnded = false;
+  private turn: ActiveTurn | null = null;
   private durableBlocked = false;
   private readyPromise: Promise<void> | null = null;
   private resolveReady: (() => void) | null = null;
@@ -172,6 +200,21 @@ export class SessionSignalClient {
     this.send({ v: PROTOCOL_VERSION, type: 'turn.end' });
   }
 
+  updateTurn(turn: ActiveTurn | null): void {
+    // Unrouted background inputs must not borrow another viewer's route.
+    this.turn = turn && isAddressableTurn(turn) ? turn : null;
+    this.send({ v: PROTOCOL_VERSION, type: 'turn.state', turn: this.turn });
+  }
+
+  async drain(timeoutMs = 2000): Promise<void> {
+    if (!this.running) return;
+    const deadline = Date.now() + timeoutMs;
+    while (this.running && listPendingRunnerEvents(getOutboundDb(), 1).length && Date.now() < deadline) {
+      this.flushDurable();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
   private connect(): void {
     if (!this.running || this.socket) return;
     const socket = net.createConnection(this.socketPath);
@@ -202,7 +245,11 @@ export class SessionSignalClient {
             socket.destroy();
             return;
           }
-          if (frame.type === 'host.ready' && Object.keys(frame).every((key) => ['v', 'type'].includes(key))) {
+          if (frame.type === 'turn.stop' && typeof frame.turnId === 'string' &&
+              frame.turnId.length > 0 && frame.turnId.length <= 128 &&
+              Object.keys(frame).every((key) => ['v', 'type', 'turnId'].includes(key))) {
+            requestTurnStop(frame.turnId);
+          } else if (frame.type === 'host.ready' && Object.keys(frame).every((key) => ['v', 'type'].includes(key))) {
             this.resolveReady?.();
             this.resolveReady = null;
           } else if (
@@ -298,6 +345,7 @@ export class SessionSignalClient {
         : { v: PROTOCOL_VERSION, type: 'usage.clear' },
     );
     this.send({ v: PROTOCOL_VERSION, type: this.turnEnded ? 'turn.end' : 'turn.resume' });
+    this.send({ v: PROTOCOL_VERSION, type: 'turn.state', turn: this.turn });
   }
 
   private send(frame: SignalFrame): void {
@@ -371,6 +419,16 @@ export class SessionSignalClient {
 }
 
 const client = new SessionSignalClient();
+
+export function signalTurnState(turn: ActiveTurn | null): void {
+  client.updateTurn(turn);
+}
+
+export function drainSessionJournal(): Promise<void> {
+  // Keep the turn stopping across disconnects until its durable outcome is
+  // acknowledged. A timeout would let null race ahead of persisted history.
+  return client.drain(Number.POSITIVE_INFINITY);
+}
 
 export function startSessionSignalClient(): Promise<void> {
   return client.start();

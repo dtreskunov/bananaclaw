@@ -4,6 +4,7 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **Stop an active response from the chat activity bubble.** The composer still queues follow-ups. Stops are scoped to an immutable turn ID, retain completed actions and provider continuation, and leave a durable stopped activity record. Interrupted tools with no confirmed result are explicitly marked as unknown-outcome; completed side effects are not undone.
 - [BREAKING] **Removed the fx agent backend**, including its gateway bridge, model picker, install skill, and image binary. Existing groups must explicitly select another installed provider; no automatic provider or credential migration occurs. **Migration:** [Retired providers](docs/provider-migration.md#retired-providers).
 - [BREAKING] **`@onecli-sh/sdk` 0.5.0 -> 2.2.1 — requires a OneCLI server with the `/v1` API** (older servers 404 every SDK call). The sanctioned gateway and CLI versions are pinned in `versions.json`; the `onecli` setup step enforces them. **Migration:** [docs/onecli-upgrades.md](docs/onecli-upgrades.md).
 - **New agent provider: Codex (OpenAI) — run `/add-codex`.** Full runtime via `codex app-server` (planning, MCP tools, server-side history, resume). Trunk ships the seams and the skill; the payload installs from the `providers` branch (the skill, the setup picker, or `--step provider-auth codex`). Auth is vault-only — no credential ever enters a container.

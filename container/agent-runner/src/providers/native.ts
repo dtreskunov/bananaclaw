@@ -23,6 +23,7 @@ export { prepareNativeUserMessage as userMessage } from './native/attachments.js
 import { loadNativeInstructions } from './native/instructions.js';
 import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
+import { NativeTurnJournal } from './native/turn-journal.js';
 import { createNativeTools } from './native/tools.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
 
@@ -234,6 +235,7 @@ export class NativeProvider implements AgentProvider {
     const pending: Pending[] = [{ text: input.prompt, files: input.files }];
     let wake: (() => void) | null = null;
     let ended = false;
+    let stoppedByUser = false;
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
@@ -250,7 +252,9 @@ export class NativeProvider implements AgentProvider {
           continuation ??= store.createConversation();
           yield { type: 'init', continuation };
 
-          while (!abortController.signal.aborted) {
+          let initialPending = true;
+          while (initialPending || !abortController.signal.aborted) {
+            initialPending = false;
             if (pending.length === 0) {
               if (ended) break;
               await new Promise<void>((resolve) => {
@@ -262,23 +266,33 @@ export class NativeProvider implements AgentProvider {
 
             const turn = pending.shift()!;
             const startedAt = Date.now();
+            let journal: NativeTurnJournal | undefined;
+            const callUsages: CallUsage[] = [];
+            function* flushCallUsage(): Generator<ProviderEvent> {
+              for (const data of callUsages.splice(0)) yield { type: 'usage_call', data };
+            }
             try {
               const todoState = new NativeTodoState();
               const configuredModel = options.model ?? process.env.NATIVE_MODEL;
               if (!configuredModel) throw new Error('native requires a canonical model setting');
-              const resolved = await resolveNativeModel(configuredModel);
               const prior = portableHistory(store.messages(continuation));
+              journal = new NativeTurnJournal(store, continuation, { role: 'user', content: turn.text });
+              abortController.signal.throwIfAborted();
+              const resolved = await resolveNativeModel(configuredModel);
+              abortController.signal.throwIfAborted();
               const incoming = await prepareNativeUserMessage(turn.text, turn.files, resolved, {
                 signal: abortController.signal,
                 maxInlineBytes: MAX_INLINE_BYTES - inlineHistoryBytes(prior),
               });
-              if (abortController.signal.aborted) return;
+              journal.updateInput(incoming);
+              abortController.signal.throwIfAborted();
               const tools = turn.toolsDisabled
                 ? {}
                 : {
                     ...createNativeTools(input.cwd, options.additionalDirectories, skills, todoState),
                     ...(await mcpManager.tools(abortController.signal)),
                   };
+              abortController.signal.throwIfAborted();
               const configuredMaxOutput =
                 typeof options.modelParams?.max_tokens === 'number'
                   ? Math.floor(options.modelParams.max_tokens)
@@ -291,7 +305,7 @@ export class NativeProvider implements AgentProvider {
                   turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
                 ),
                 messages: [...prior, incoming],
-                tools,
+                tools: journal.wrap(tools, abortController.signal),
                 stopWhen: isStepCount(20),
                 ...(!turn.toolsDisabled && shouldRequireTodos(turn.text)
                   ? {
@@ -309,6 +323,13 @@ export class NativeProvider implements AgentProvider {
                   : {}),
                 maxRetries: 2,
                 abortSignal: abortController.signal,
+                // A model call can finish before its tool does. Retain its
+                // usage even if cancellation prevents finish-step.
+                onLanguageModelCallEnd: ({ usage }) => {
+                  if (usage.inputTokens !== undefined || usage.outputTokens !== undefined) {
+                    callUsages.push(callUsageFor(resolved, usage));
+                  }
+                },
                 ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
                 ...(typeof options.modelParams?.temperature === 'number'
                   ? { temperature: options.modelParams.temperature }
@@ -317,23 +338,25 @@ export class NativeProvider implements AgentProvider {
               });
 
               for await (const rawPart of result.stream) {
+                yield* flushCallUsage();
                 yield { type: 'activity' };
                 const part = rawPart as unknown as Record<string, unknown>;
                 if (part.type === 'tool-call') yield { type: 'progress', step: formatNativeToolStep(part, 'running') };
                 else if (part.type === 'tool-result') yield { type: 'progress', step: formatNativeToolStep(part, 'completed') };
                 else if (part.type === 'tool-error') yield { type: 'progress', step: formatNativeToolStep(part, 'error') };
                 else if (part.type === 'error') throw part.error;
+                else if (part.type === 'text-delta') journal.appendText(String(part.text ?? ''));
                 else if (part.type === 'finish-step') {
-                  yield {
-                    type: 'usage_call',
-                    data: callUsageFor(resolved, part.usage),
-                  };
+                  journal.save();
                   yield { type: 'assistant_message' };
                 }
               }
 
               const responseMessages = (await result.responseMessages) as ModelMessage[];
-              const checkpoint = store.append(continuation, [incoming, ...portableHistory(responseMessages)]);
+              await journal.settle();
+              yield* flushCallUsage();
+              if (abortController.signal.aborted) throw new Error('Turn stopped');
+              const checkpoint = journal.finish(portableHistory(responseMessages));
               const [usage, steps] = await Promise.all([result.usage, result.steps]);
               yield {
                 type: 'usage',
@@ -346,7 +369,15 @@ export class NativeProvider implements AgentProvider {
                 finishReason: String(await result.finishReason),
               };
             } catch (error) {
-              if (abortController.signal.aborted) break;
+              if (abortController.signal.aborted) {
+                if (journal) {
+                  await journal.settle();
+                  yield* flushCallUsage();
+                  for (const step of journal.activity()) yield { type: 'progress', step };
+                  yield { type: 'checkpoint', ref: journal.save(true, stoppedByUser) };
+                }
+                break;
+              }
               yield {
                 type: 'error',
                 message: errorMessage(error),
@@ -355,6 +386,7 @@ export class NativeProvider implements AgentProvider {
             }
           }
         } finally {
+          ended = true;
           await mcpManager.close();
         }
       },
@@ -371,7 +403,8 @@ export class NativeProvider implements AgentProvider {
         ended = true;
         wake?.();
       },
-      abort(): void {
+      abort(reason): void {
+        stoppedByUser = reason === 'user';
         abortController.abort();
         void mcpManager.close();
         wake?.();

@@ -15,6 +15,7 @@ import {
   chatLoading,
   chatReady,
   isTyping,
+  activeTurn,
   pendingWebSends,
   typingHint,
   typingStartedAt,
@@ -59,6 +60,8 @@ import {
 import { api, postJson } from './api';
 import { writeHash } from './hash';
 import { isFinalResponse, publicWebMessageId } from './chat-protocol';
+import { readStoppedTurnStats, type StoppedTurnStats } from '../../../shared/stopped-turn';
+import { applyTurnState, resetTurnState } from './stop-turn';
 import { maybeNotify } from './notify';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { playProgressTick, playCompletionChime } from './sound';
@@ -79,9 +82,11 @@ import type {
   WsPayload,
   SearchResult,
   SuggestedAction,
+  ActiveTurn,
 } from './types';
 
 interface ServerMessage {
+  stoppedStats?: StoppedTurnStats;
   id?: string;
   direction: string;
   text: string;
@@ -353,6 +358,7 @@ export function clearSearch(): void {
 
 // ── chat ────────────────────────────────────────────────────────────
 export function clearChat(): void {
+  resetTurnState();
   voice.detach();
   cancelRecording();
   voiceInput.value = { backend: 'disabled', ready: false, reason: 'Waiting for chat configuration.' };
@@ -426,6 +432,8 @@ interface SyncResponse {
   threads?: Thread[];
   threadMessages?: ServerMessage[];
   voiceInput?: VoiceInputCapability;
+  activeTurn?: ActiveTurn | null;
+  connected?: boolean;
 }
 
 /** Returns whether `threads` now holds a fresh server list for the current group. */
@@ -433,6 +441,7 @@ export async function runSync(
   options: { replaceThreadMessages?: boolean; forceRefresh?: boolean } = {},
 ): Promise<boolean> {
   const requestId = ++refs.syncRequestId;
+  const generation = refs.chatGeneration;
   const gid = groupId.value;
   const tid = threadId.value;
   const ct = channelType.value;
@@ -453,9 +462,22 @@ export async function runSync(
       options.forceRefresh ? { cache: 'no-store' } : undefined,
     );
   } catch {
+    if (generation === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct !== 'web') {
+      applyTurnState(activeTurn.value, false);
+    }
     return false;
   }
   if (requestId !== refs.syncRequestId) return false;
+  if (
+    generation === refs.chatGeneration &&
+    gid === groupId.value &&
+    tid === threadId.value &&
+    ct === channelType.value &&
+    mg === messagingGroupId.value &&
+    ct !== 'web'
+  ) {
+    applyTurnState(res.activeTurn ?? null, res.connected === true);
+  }
   if (gid && groupId.value === gid && tid === threadId.value && res.voiceInput) {
     voiceInput.value = res.voiceInput;
     if (!res.voiceInput.ready)
@@ -517,6 +539,7 @@ function toChatMessage(m: ServerMessage): ChatMessage {
     ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
     ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
     ...(m.usage ? { usage: m.usage } : {}),
+    ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
     ...(m.activity ? { activity: m.activity } : {}),
     ...(m.event ? { event: m.event } : {}),
     ...(m.reactions ? { reactions: m.reactions } : {}),
@@ -552,6 +575,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
       ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
+      ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
       ...(m.reactions ? { reactions: m.reactions } : {}),
@@ -602,6 +626,7 @@ function appendMsg(
   deliveryOrigin?: 'send_message' | 'send_file' | 'response',
   author?: { userId: string; displayName: string },
   suggestedAction?: SuggestedAction,
+  stoppedStats?: StoppedTurnStats,
 ): void {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) return;
@@ -616,6 +641,7 @@ function appendMsg(
     ...(author ? { author } : {}),
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
     ...(suggestedAction ? { suggestedAction } : {}),
+    ...(stoppedStats ? { stoppedStats } : {}),
     ...(activity && activity.length ? { activity } : {}),
   });
 }
@@ -652,6 +678,7 @@ interface ChatStartResponse {
 export async function openChat(gid: string, resumeTid: string | null, opts: ThreadCtx | null): Promise<void> {
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
   if (!resumeTid && refs.newChatInFlight) return;
+  resetTurnState();
   voice.detach();
   cancelRecording();
   voiceInput.value = { backend: 'disabled', ready: false, reason: 'Waiting for chat configuration.' };
@@ -863,6 +890,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
       refs.wsConnectCancel = null;
     }
     chatReady.value = false;
+    applyTurnState(activeTurn.value, false);
     if (refs.wsPingTimer) {
       clearInterval(refs.wsPingTimer);
       refs.wsPingTimer = null;
@@ -893,6 +921,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
   ws.onerror = () => {
     if (refs.ws !== ws || generation !== refs.chatGeneration) return;
     chatReady.value = false;
+    applyTurnState(activeTurn.value, false);
     chatStatus.value = 'connection error';
   };
   ws.onmessage = (ev: MessageEvent) => {
@@ -912,6 +941,11 @@ function connectChatWs(ctx: ChatSocketContext): void {
         reason: 'Live voice input is not configured.',
       };
       canSend.value = payload.canSend === true;
+      applyTurnState(payload.activeTurn ?? null, payload.connected === true);
+      return;
+    }
+    if (payload.kind === 'turn') {
+      applyTurnState(payload.turn ?? null, payload.connected === true);
       return;
     }
     if (payload.kind === 'ready') {
@@ -1075,6 +1109,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
         deliveryOrigin,
         undefined,
         suggestedAction,
+        readStoppedTurnStats(c),
       );
       bumpActiveThread();
       if (dir === 'out') maybeNotify(text, payload.files || []);
