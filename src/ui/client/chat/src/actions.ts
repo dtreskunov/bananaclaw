@@ -120,14 +120,34 @@ export function returnToUserMenu(source: Signal<boolean>): void {
  * No-op on mobile unless the caller is opening a blank thread. Existing
  * threads may be opened for reading, while a blank thread is ready for input.
  */
-function focusComposerSoon(options: { mobile?: boolean } = {}): void {
+function focusComposerSoon(
+  options: {
+    mobile?: boolean;
+    draft?: string;
+    expected?: { groupId: string; threadId: string };
+  } = {},
+): void {
   if (isMobile.value && !options.mobile) return;
   let tries = 0;
+  let draftApplied = false;
   const attempt = (): void => {
-    const el = document.getElementById('chat-input') as HTMLTextAreaElement | null;
-    if (el && !el.disabled && el.offsetParent !== null) {
-      el.focus();
+    if (
+      options.expected &&
+      (groupId.value !== options.expected.groupId || threadId.value !== options.expected.threadId)
+    )
       return;
+    const el = document.getElementById('chat-input') as HTMLTextAreaElement | null;
+    if (el) {
+      if (options.draft !== undefined && !draftApplied) {
+        el.value = options.draft;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.setSelectionRange(options.draft.length, options.draft.length);
+        draftApplied = true;
+      }
+      if (!el.disabled && el.offsetParent !== null) {
+        el.focus();
+        return;
+      }
     }
     if (++tries < 180) requestAnimationFrame(attempt);
   };
@@ -228,6 +248,7 @@ export async function deleteThread(
 export async function forkThreadAt(
   thread: Pick<Thread, 'threadId' | 'channelType' | 'messagingGroupId'>,
   atMessageId: string,
+  options: { composerDraft?: string } = {},
 ): Promise<boolean> {
   if (!groupId.value) return false;
   const params = new URLSearchParams();
@@ -264,6 +285,37 @@ export async function forkThreadAt(
   await loadThreads(gid);
   const branch = threads.value.find((x) => x.threadId === created!.threadId) ?? null;
   await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
+  if (options.composerDraft !== undefined) {
+    focusComposerSoon({
+      mobile: true,
+      draft: options.composerDraft,
+      expected: { groupId: gid, threadId: created.threadId },
+    });
+  }
+  return true;
+}
+
+/**
+ * Start a branch immediately before a user message and move its text into the
+ * composer. The first conversational message has no valid fork anchor, so it
+ * starts a blank web thread instead.
+ */
+export async function editMessageInBranch(
+  thread: Pick<Thread, 'threadId' | 'channelType' | 'messagingGroupId'>,
+  previousMessageId: string | null,
+  draft: string,
+): Promise<boolean> {
+  if (previousMessageId) return forkThreadAt(thread, previousMessageId, { composerDraft: draft });
+  const gid = groupId.value;
+  if (!gid) return false;
+  await openChat(gid, null, null);
+  const targetThreadId = threadId.value;
+  if (!targetThreadId || targetThreadId === thread.threadId) return false;
+  focusComposerSoon({
+    mobile: true,
+    draft,
+    expected: { groupId: gid, threadId: targetThreadId },
+  });
   return true;
 }
 

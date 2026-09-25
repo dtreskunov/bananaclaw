@@ -60,6 +60,16 @@ members can list, read, and send messages in every web thread; only owners and
 admins (global or scoped to the group) can delete a thread. Human messages keep
 their sender attribution in both history and live updates.
 
+Human message bubbles include an icon-only **Edit** action for starting a new
+branch with that message copied into the composer. It is not restricted to the
+original author, so another participant with access to the agent group may use
+it; the newly sent revision is attributed to the editor. The client branches
+after the preceding conversational message so the original remains only in the
+source thread. Editing the first message starts a blank web thread instead.
+Historical attachments remain in the source thread and are not copied into the
+composer. Read-only channel threads offer Edit only for that first-message
+blank-thread case.
+
 Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visible only to admins. `.git`, `node_modules`, `.claude-fragments`, dotfiles, and the composed `CLAUDE.md` are always hidden. `CLAUDE.local.md` is visible read-only.
 
 **Inline preview** in-browser:

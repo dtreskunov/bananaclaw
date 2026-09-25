@@ -18,7 +18,7 @@ import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNo
 import {
   sendChat, addPendingFiles, removePending,
   navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
-  openChat, openTaskPanel, reconnectChatNow, forkThreadAt,
+  openChat, openTaskPanel, reconnectChatNow, forkThreadAt, editMessageInBranch,
 } from '../actions';
 import { requestConfirm } from './PromptModal';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia } from '../recorder';
@@ -29,6 +29,7 @@ import { stopActiveTurn } from '../stop-turn';
 import { mergeQuestionTimeline } from '../question-timeline';
 import { showsMidTurnLabel } from '../chat-protocol';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
+import { findEditBranchAnchorId } from '../edit-message';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
@@ -561,6 +562,33 @@ function ForkButton({ m }: { m: ChatMessage }) {
   );
 }
 
+function EditMessageButton({ m }: { m: ChatMessage }) {
+  const [busy, setBusy] = useState(false);
+  const thread = activeThread();
+  if (!thread || m.direction !== 'in' || !m.id || !m.text.trim()) return null;
+  const anchorId = findEditBranchAnchorId(chatMessages.value, m.id);
+  if (anchorId && (!canFork(thread) || !canSend.value)) return null;
+  const onEdit = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await editMessageInBranch(thread, anchorId, m.text);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      class="msg-action-btn msg-edit-btn"
+      title="Edit this message in a new branch"
+      aria-label="Edit this message in a new branch"
+      disabled={busy}
+      onClick={() => { onEdit().catch(console.error); }}
+    >{'\u270e'}</button>
+  );
+}
+
 /**
  * Divider closing the region a branch inherited from its parent. Everything
  * above it was copied in at fork time — the user saw it in the other thread,
@@ -800,6 +828,7 @@ function Message(
                 {fmtDur(m.stoppedStats.durationMs)} {'\u00b7'} {m.stoppedStats.model ? shortModel(m.stoppedStats.model) : 'Model unavailable'} {'\u00b7'} Tokens unavailable
               </span>
             : null)}
+        <EditMessageButton m={m} />
         <ForkButton m={m} />
       </div> : null}
     </div>

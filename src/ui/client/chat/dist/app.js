@@ -18235,11 +18235,21 @@ function returnToUserMenu(source) {
 function focusComposerSoon(options = {}) {
   if (isMobile.value && !options.mobile) return;
   let tries = 0;
+  let draftApplied = false;
   const attempt = () => {
+    if (options.expected && (groupId.value !== options.expected.groupId || threadId.value !== options.expected.threadId)) return;
     const el = document.getElementById("chat-input");
-    if (el && !el.disabled && el.offsetParent !== null) {
-      el.focus();
-      return;
+    if (el) {
+      if (options.draft !== void 0 && !draftApplied) {
+        el.value = options.draft;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.setSelectionRange(options.draft.length, options.draft.length);
+        draftApplied = true;
+      }
+      if (!el.disabled && el.offsetParent !== null) {
+        el.focus();
+        return;
+      }
     }
     if (++tries < 180) requestAnimationFrame(attempt);
   };
@@ -18307,7 +18317,7 @@ async function deleteThread(thread, cascade = false) {
     else clearChat();
   }
 }
-async function forkThreadAt(thread, atMessageId) {
+async function forkThreadAt(thread, atMessageId, options = {}) {
   if (!groupId.value) return false;
   const params = new URLSearchParams();
   if (thread.channelType && thread.channelType !== "web" && thread.messagingGroupId) {
@@ -18341,6 +18351,27 @@ async function forkThreadAt(thread, atMessageId) {
   await loadThreads(gid);
   const branch = threads.value.find((x6) => x6.threadId === created.threadId) ?? null;
   await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
+  if (options.composerDraft !== void 0) {
+    focusComposerSoon({
+      mobile: true,
+      draft: options.composerDraft,
+      expected: { groupId: gid, threadId: created.threadId }
+    });
+  }
+  return true;
+}
+async function editMessageInBranch(thread, previousMessageId, draft) {
+  if (previousMessageId) return forkThreadAt(thread, previousMessageId, { composerDraft: draft });
+  const gid = groupId.value;
+  if (!gid) return false;
+  await openChat(gid, null, null);
+  const targetThreadId = threadId.value;
+  if (!targetThreadId || targetThreadId === thread.threadId) return false;
+  focusComposerSoon({
+    mobile: true,
+    draft,
+    expected: { groupId: gid, threadId: targetThreadId }
+  });
   return true;
 }
 function threadCtxOf(t4) {
@@ -20953,6 +20984,18 @@ function isFutureWorkMessage(body) {
   return !observationPreface.test(body) && !negatedAction.test(body) && !completedStatus.test(body) && !completedAction.test(body) && (directedProgress.test(body) || executionProgress.test(body) || futureClause.test(body));
 }
 
+// src/edit-message.ts
+function findEditBranchAnchorId(messages, targetMessageId) {
+  let previousId = null;
+  for (const message of messages) {
+    if (message.id === targetMessageId) return previousId;
+    if ((message.direction === "in" || message.direction === "out") && message.id) {
+      previousId = message.id;
+    }
+  }
+  return null;
+}
+
 // src/components/ComposerPlusMenu.tsx
 function ComposerPlusMenu({
   disabled,
@@ -21705,6 +21748,36 @@ function ForkButton({ m: m6 }) {
     }
   );
 }
+function EditMessageButton({ m: m6 }) {
+  const [busy, setBusy] = h2(false);
+  const thread = activeThread();
+  if (!thread || m6.direction !== "in" || !m6.id || !m6.text.trim()) return null;
+  const anchorId = findEditBranchAnchorId(chatMessages.value, m6.id);
+  if (anchorId && (!canFork(thread) || !canSend.value)) return null;
+  const onEdit = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await editMessageInBranch(thread, anchorId, m6.text);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg-action-btn msg-edit-btn",
+      title: "Edit this message in a new branch",
+      "aria-label": "Edit this message in a new branch",
+      disabled: busy,
+      onClick: () => {
+        onEdit().catch(console.error);
+      },
+      children: "\u270E"
+    }
+  );
+}
 function InheritedDivider({ origin }) {
   const fidelityNote = origin.fidelity === "native" ? "Copied at the branch point. The agent kept its full context from the original." : "Copied at the branch point. The agent was given a text summary of it rather than its original context.";
   const suffix = origin.fidelity === "native" ? "" : " \xB7 replayed as a transcript";
@@ -21919,6 +21992,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
         "\xB7",
         " Tokens unavailable"
       ] }) : null),
+      /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
       /* @__PURE__ */ u4(ForkButton, { m: m6 })
     ] }) : null
   ] });

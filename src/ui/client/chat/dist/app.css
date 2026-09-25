@@ -1837,8 +1837,8 @@ nav.tab-bar-strip.group-strip {
   justify-content: center;
   min-width: 26px;
   padding: 3px 8px;
-  background: var(--surface);
-  border: 1px solid var(--border, var(--muted));
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
   color: var(--muted);
   font: inherit;
@@ -1847,10 +1847,11 @@ nav.tab-bar-strip.group-strip {
   cursor: pointer;
 }
 .chat-main .msg-action-btn:hover {
+  background: rgba(127, 127, 127, 0.12);
   color: var(--surface-fg);
-  border-color: var(--border-strong);
 }
 .chat-main .msg-action-btn:focus-visible {
+  background: rgba(127, 127, 127, 0.12);
   color: var(--surface-fg);
   border-color: var(--border-strong);
 }

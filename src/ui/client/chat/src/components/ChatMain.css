@@ -128,8 +128,8 @@
   justify-content: center;
   min-width: 26px;
   padding: 3px 8px;
-  background: var(--surface);
-  border: 1px solid var(--border, var(--muted));
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
   color: var(--muted);
   font: inherit;
@@ -137,8 +137,8 @@
   line-height: 1.2;
   cursor: pointer;
 }
-.chat-main .msg-action-btn:hover { color: var(--surface-fg); border-color: var(--border-strong); }
-.chat-main .msg-action-btn:focus-visible { color: var(--surface-fg); border-color: var(--border-strong); }
+.chat-main .msg-action-btn:hover { background: rgba(127, 127, 127, 0.12); color: var(--surface-fg); }
+.chat-main .msg-action-btn:focus-visible { background: rgba(127, 127, 127, 0.12); color: var(--surface-fg); border-color: var(--border-strong); }
 .chat-main .msg-action-btn[disabled] { cursor: default; opacity: 0.5; }
 .chat-main .events-group.open {
   align-self: stretch;
