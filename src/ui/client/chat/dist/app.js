@@ -18237,7 +18237,8 @@ function focusComposerSoon(options = {}) {
   let tries = 0;
   let draftApplied = false;
   const attempt = () => {
-    if (options.expected && (groupId.value !== options.expected.groupId || threadId.value !== options.expected.threadId)) return;
+    if (options.expected && (groupId.value !== options.expected.groupId || threadId.value !== options.expected.threadId))
+      return;
     const el = document.getElementById("chat-input");
     if (el) {
       if (options.draft !== void 0 && !draftApplied) {
@@ -18264,30 +18265,32 @@ async function loadThreads(_gid) {
 async function deleteThread(thread, cascade = false) {
   if (!groupId.value) return;
   const tid = thread.threadId;
-  const params = new URLSearchParams();
-  if (thread.channelType && thread.channelType !== "web" && thread.messagingGroupId) {
-    params.set("channel", thread.channelType);
-    params.set("mg", thread.messagingGroupId);
-  }
-  if (cascade) params.set("cascade", "1");
-  const query = params.toString();
-  try {
-    const r4 = await fetch(
-      `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ""}`,
-      {
-        method: "DELETE",
-        credentials: "same-origin"
+  if (thread.sessionId != null) {
+    const params = new URLSearchParams();
+    if (thread.channelType && thread.channelType !== "web" && thread.messagingGroupId) {
+      params.set("channel", thread.channelType);
+      params.set("mg", thread.messagingGroupId);
+    }
+    if (cascade) params.set("cascade", "1");
+    const query = params.toString();
+    try {
+      const r4 = await fetch(
+        `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ""}`,
+        {
+          method: "DELETE",
+          credentials: "same-origin"
+        }
+      );
+      if (!r4.ok) {
+        showToast("Delete failed (HTTP " + r4.status + ")", "err");
+        return;
       }
-    );
-    if (!r4.ok) {
-      chatStatus.value = "delete failed (HTTP " + r4.status + ")";
+    } catch (err) {
+      console.error("delete failed", err);
+      const m6 = err instanceof Error ? err.message : "network error";
+      showToast("Delete failed: " + m6, "err");
       return;
     }
-  } catch (err) {
-    console.error("delete failed", err);
-    const m6 = err instanceof Error ? err.message : "network error";
-    chatStatus.value = "delete failed: " + m6;
-    return;
   }
   const gone = /* @__PURE__ */ new Set([tid]);
   if (cascade) {
@@ -18338,14 +18341,14 @@ async function forkThreadAt(thread, atMessageId, options = {}) {
       }
     );
     if (!r4.ok) {
-      chatStatus.value = "fork failed (HTTP " + r4.status + ")";
+      showToast("Fork failed (HTTP " + r4.status + ")", "err");
       return false;
     }
     created = await r4.json();
   } catch (err) {
     console.error("fork failed", err);
     const m6 = err instanceof Error ? err.message : "network error";
-    chatStatus.value = "fork failed: " + m6;
+    showToast("Fork failed: " + m6, "err");
     return false;
   }
   await loadThreads(gid);
@@ -18787,7 +18790,11 @@ async function openChat(gid, resumeTid, opts) {
     started = await r4.json();
   } catch (err) {
     const m6 = err instanceof Error ? err.message : String(err);
-    if (generation2 === refs.chatGeneration) chatStatus.value = "failed to start chat: " + m6;
+    if (generation2 === refs.chatGeneration) {
+      chatLoading.value = false;
+      chatStatus.value = "";
+      showToast("Failed to start chat: " + m6, "err");
+    }
     refs.newChatInFlight = false;
     return;
   }
@@ -18800,7 +18807,7 @@ async function openChat(gid, resumeTid, opts) {
   threads.value = [
     {
       threadId: started.threadId,
-      sessionId: started.sessionId || null,
+      sessionId: null,
       channelType: "web",
       messagingGroupId: started.messagingGroupId || null,
       sessionMode: started.sessionMode || "per-thread",
@@ -19185,7 +19192,7 @@ async function sendChat(text, files) {
         if (j6 && j6.error) detail = j6.error + (j6.detail ? ` (${j6.detail})` : "");
       } catch {
       }
-      chatStatus.value = `send failed: ${detail}`;
+      showToast(`Send failed: ${detail}`, "err");
       return false;
     } else if (!isWeb) {
       try {
@@ -19199,7 +19206,7 @@ async function sendChat(text, files) {
     pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     if (generation2 !== refs.chatGeneration) return false;
     const m6 = err instanceof Error ? err.message : "network error";
-    chatStatus.value = `send failed: ${m6}`;
+    showToast(`Send failed: ${m6}`, "err");
     return false;
   }
 }
@@ -19220,7 +19227,7 @@ async function selectGroup(gid) {
   } else if (threadsFresh) {
     openChat(gid, null, null).catch((err) => console.error("auto-start chat failed", err));
   } else {
-    chatStatus.value = "could not load threads";
+    showToast("Could not load threads", "err");
   }
 }
 var fileSearchGeneration = 0;
@@ -19590,23 +19597,25 @@ function addPendingFiles(fileList, max, maxSize, maxTotal) {
   if (!fileList || fileList.length === 0) return;
   const next = pending.value.slice();
   let totalBytes = next.reduce((n3, f5) => n3 + f5.size, 0);
+  let validationError = "";
   for (const f5 of Array.from(fileList)) {
     if (next.length >= max) {
-      chatStatus.value = `max ${max} files per message`;
+      validationError = `Max ${max} files per message`;
       break;
     }
     if (f5.size > maxSize) {
-      chatStatus.value = `${f5.name} too large (max ${(maxSize / 1024 / 1024).toFixed(0)} MB)`;
+      validationError = `${f5.name} too large (max ${(maxSize / 1024 / 1024).toFixed(0)} MB)`;
       continue;
     }
     if (totalBytes + f5.size > maxTotal) {
-      chatStatus.value = `total upload too large (max ${(maxTotal / 1024 / 1024).toFixed(0)} MB)`;
+      validationError = `Total upload too large (max ${(maxTotal / 1024 / 1024).toFixed(0)} MB)`;
       break;
     }
     next.push({ name: f5.name, size: f5.size, file: f5 });
     totalBytes += f5.size;
   }
   pending.value = next;
+  if (validationError) showToast(validationError, "err");
 }
 function removePending(i5) {
   const next = pending.value.slice();
@@ -19665,7 +19674,8 @@ async function respondApproval(approvalId, value) {
     }, 4e3);
   } catch (err) {
     console.error("approval respond failed", err);
-    chatStatus.value = "approval failed: " + (err instanceof Error ? err.message : String(err));
+    chatStatus.value = "";
+    showToast("Approval failed: " + (err instanceof Error ? err.message : String(err)), "err");
     runSync().catch(() => {
     });
   } finally {
@@ -19691,10 +19701,7 @@ async function respondQuestion(questionId, value) {
     return true;
   } catch (err) {
     console.error("question respond failed", err);
-    chatStatus.value = "response failed: " + (err instanceof Error ? err.message : String(err));
-    setTimeout(() => {
-      if (chatStatus.value.startsWith("response failed")) chatStatus.value = "";
-    }, 4e3);
+    showToast("Response failed: " + (err instanceof Error ? err.message : String(err)), "err");
     runSync().catch(() => {
     });
     return false;
@@ -22751,7 +22758,7 @@ function Composer() {
     if (isRecording.value || voice.state.value.sending || !["idle", "error"].includes(voice.state.value.phase)) return;
     const ok = await startRecording();
     if (!ok) {
-      chatStatus.value = "microphone unavailable";
+      showToast("Microphone unavailable", "err");
     }
   };
   const stopAttachRecording = () => {

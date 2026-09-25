@@ -66,6 +66,7 @@ import { maybeNotify } from './notify';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
+import { showToast } from './components/Toast';
 import type {
   Thread,
   ThreadCtx,
@@ -173,35 +174,37 @@ export async function loadThreads(_gid: string): Promise<boolean> {
 }
 
 export async function deleteThread(
-  thread: Pick<Thread, 'threadId' | 'channelType' | 'messagingGroupId'>,
+  thread: Pick<Thread, 'threadId' | 'sessionId' | 'channelType' | 'messagingGroupId'>,
   cascade = false,
 ): Promise<void> {
   if (!groupId.value) return;
   const tid = thread.threadId;
-  const params = new URLSearchParams();
-  if (thread.channelType && thread.channelType !== 'web' && thread.messagingGroupId) {
-    params.set('channel', thread.channelType);
-    params.set('mg', thread.messagingGroupId);
-  }
-  if (cascade) params.set('cascade', '1');
-  const query = params.toString();
-  try {
-    const r = await fetch(
-      `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ''}`,
-      {
-        method: 'DELETE',
-        credentials: 'same-origin',
-      },
-    );
-    if (!r.ok) {
-      chatStatus.value = 'delete failed (HTTP ' + r.status + ')';
+  if (thread.sessionId != null) {
+    const params = new URLSearchParams();
+    if (thread.channelType && thread.channelType !== 'web' && thread.messagingGroupId) {
+      params.set('channel', thread.channelType);
+      params.set('mg', thread.messagingGroupId);
+    }
+    if (cascade) params.set('cascade', '1');
+    const query = params.toString();
+    try {
+      const r = await fetch(
+        `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ''}`,
+        {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        },
+      );
+      if (!r.ok) {
+        showToast('Delete failed (HTTP ' + r.status + ')', 'err');
+        return;
+      }
+    } catch (err) {
+      console.error('delete failed', err);
+      const m = err instanceof Error ? err.message : 'network error';
+      showToast('Delete failed: ' + m, 'err');
       return;
     }
-  } catch (err) {
-    console.error('delete failed', err);
-    const m = err instanceof Error ? err.message : 'network error';
-    chatStatus.value = 'delete failed: ' + m;
-    return;
   }
   // A cascade took descendants the client can't enumerate locally, so drop
   // anything whose lineage leads back to the deleted thread too.
@@ -270,14 +273,14 @@ export async function forkThreadAt(
       },
     );
     if (!r.ok) {
-      chatStatus.value = 'fork failed (HTTP ' + r.status + ')';
+      showToast('Fork failed (HTTP ' + r.status + ')', 'err');
       return false;
     }
     created = (await r.json()) as { threadId: string };
   } catch (err) {
     console.error('fork failed', err);
     const m = err instanceof Error ? err.message : 'network error';
-    chatStatus.value = 'fork failed: ' + m;
+    showToast('Fork failed: ' + m, 'err');
     return false;
   }
   // Refresh before opening so the rail already knows the branch exists and
@@ -722,7 +725,6 @@ function applyReaction(targetId: string, emoji: string, ts: string): void {
 
 interface ChatStartResponse {
   threadId: string;
-  sessionId?: string | null;
   messagingGroupId?: string | null;
   sessionMode?: string;
 }
@@ -850,7 +852,11 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     started = (await r.json()) as ChatStartResponse;
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
-    if (generation === refs.chatGeneration) chatStatus.value = 'failed to start chat: ' + m;
+    if (generation === refs.chatGeneration) {
+      chatLoading.value = false;
+      chatStatus.value = '';
+      showToast('Failed to start chat: ' + m, 'err');
+    }
     refs.newChatInFlight = false;
     return;
   }
@@ -863,7 +869,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
   threads.value = [
     {
       threadId: started.threadId,
-      sessionId: started.sessionId || null,
+      sessionId: null,
       channelType: 'web',
       messagingGroupId: started.messagingGroupId || null,
       sessionMode: started.sessionMode || 'per-thread',
@@ -1312,7 +1318,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
       } catch {
         /* ignore */
       }
-      chatStatus.value = `send failed: ${detail}`;
+      showToast(`Send failed: ${detail}`, 'err');
       return false;
     } else if (!isWeb) {
       try {
@@ -1327,7 +1333,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
     pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     if (generation !== refs.chatGeneration) return false;
     const m = err instanceof Error ? err.message : 'network error';
-    chatStatus.value = `send failed: ${m}`;
+    showToast(`Send failed: ${m}`, 'err');
     return false;
   }
 }
@@ -1370,7 +1376,7 @@ export async function selectGroup(gid: string): Promise<void> {
     // composer ("Reconnecting…") and wondering what to click.
     openChat(gid, null, null).catch((err) => console.error('auto-start chat failed', err));
   } else {
-    chatStatus.value = 'could not load threads';
+    showToast('Could not load threads', 'err');
   }
 }
 
@@ -1803,23 +1809,25 @@ export function addPendingFiles(
   if (!fileList || fileList.length === 0) return;
   const next: PendingFile[] = pending.value.slice();
   let totalBytes = next.reduce((n, f) => n + f.size, 0);
+  let validationError = '';
   for (const f of Array.from(fileList)) {
     if (next.length >= max) {
-      chatStatus.value = `max ${max} files per message`;
+      validationError = `Max ${max} files per message`;
       break;
     }
     if (f.size > maxSize) {
-      chatStatus.value = `${f.name} too large (max ${(maxSize / 1024 / 1024).toFixed(0)} MB)`;
+      validationError = `${f.name} too large (max ${(maxSize / 1024 / 1024).toFixed(0)} MB)`;
       continue;
     }
     if (totalBytes + f.size > maxTotal) {
-      chatStatus.value = `total upload too large (max ${(maxTotal / 1024 / 1024).toFixed(0)} MB)`;
+      validationError = `Total upload too large (max ${(maxTotal / 1024 / 1024).toFixed(0)} MB)`;
       break;
     }
     next.push({ name: f.name, size: f.size, file: f });
     totalBytes += f.size;
   }
   pending.value = next;
+  if (validationError) showToast(validationError, 'err');
 }
 
 export function removePending(i: number): void {
@@ -1896,7 +1904,8 @@ export async function respondApproval(approvalId: string, value: string): Promis
     }, 4000);
   } catch (err) {
     console.error('approval respond failed', err);
-    chatStatus.value = 'approval failed: ' + (err instanceof Error ? err.message : String(err));
+    chatStatus.value = '';
+    showToast('Approval failed: ' + (err instanceof Error ? err.message : String(err)), 'err');
     // Restore canonical state from the server.
     runSync().catch(() => {
       /* ignore */
@@ -1929,10 +1938,7 @@ export async function respondQuestion(questionId: string, value: string): Promis
     return true;
   } catch (err) {
     console.error('question respond failed', err);
-    chatStatus.value = 'response failed: ' + (err instanceof Error ? err.message : String(err));
-    setTimeout(() => {
-      if (chatStatus.value.startsWith('response failed')) chatStatus.value = '';
-    }, 4000);
+    showToast('Response failed: ' + (err instanceof Error ? err.message : String(err)), 'err');
     runSync().catch(() => {
       /* ignore */
     });

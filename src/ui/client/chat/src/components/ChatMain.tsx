@@ -35,6 +35,7 @@ import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
 import { MobileDialog } from './MobileDialog';
 import { ZoomableImage } from './ZoomableImage';
+import { showToast } from './Toast';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
 
@@ -1687,7 +1688,7 @@ function Composer() {
     if (isRecording.value || voice.state.value.sending || !['idle', 'error'].includes(voice.state.value.phase)) return;
     const ok = await startRecording();
     if (!ok) {
-      chatStatus.value = 'microphone unavailable';
+      showToast('Microphone unavailable', 'err');
     }
   };
   const stopAttachRecording = (): void => {
