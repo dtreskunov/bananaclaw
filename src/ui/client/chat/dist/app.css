@@ -1727,6 +1727,12 @@ nav.tab-bar-strip.group-strip {
   word-break: break-word;
   font-size: var(--font-base);
 }
+.chat-main .msg.transcript-copyable {
+  -webkit-touch-callout: none;
+}
+.chat-main .transcript-copy-content {
+  min-width: 0;
+}
 .chat-main .msg.in {
   align-self: flex-end;
   background: var(--accent);

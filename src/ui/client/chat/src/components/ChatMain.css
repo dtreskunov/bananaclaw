@@ -67,6 +67,8 @@
 .chat-main .log .task-indicator.msg.event .event-meta { margin-left: 4px; }
 .chat-main .log .task-indicator.paused .event-icon { opacity: 0.55; }
 .chat-main .msg { position: relative; padding: 6px 10px; border-radius: var(--radius-lg); max-width: 78%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
+.chat-main .msg.transcript-copyable { -webkit-touch-callout: none; }
+.chat-main .transcript-copy-content { min-width: 0; }
 .chat-main .msg.in { align-self: flex-end; background: var(--accent); }
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }
 .chat-main .msg.out { align-self: flex-start; background: var(--wash-strong); }

@@ -36,10 +36,13 @@ import { RelativeTime } from './RelativeTime';
 import { MobileDialog } from './MobileDialog';
 import { ZoomableImage } from './ZoomableImage';
 import { showToast } from './Toast';
+import { copyTranscriptContent } from '../transcript-clipboard';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
 
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
+const TRANSCRIPT_LONG_PRESS_MS = 500;
+const TRANSCRIPT_LONG_PRESS_MOVE_PX = 10;
 
 function imageFileName(src: string): string {
   try {
@@ -650,7 +653,13 @@ function Message(
 ) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const longPressTriggeredRef = useRef(false);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  useEffect(() => () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+  }, []);
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
@@ -734,15 +743,69 @@ function Message(
   const showContinue = isWebChannel && allowContinue && m.direction === 'out' &&
     !hasPendingSend &&
     !m.files?.length && action != null;
+  const cancelLongPress = (): void => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+    longPressStartRef.current = null;
+  };
+  const onPointerDown = (event: JSX.TargetedPointerEvent<HTMLDivElement>): void => {
+    if (!event.isPrimary || event.button !== 0) return;
+    cancelLongPress();
+    longPressTriggeredRef.current = false;
+    longPressStartRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressTriggeredRef.current = true;
+      const content = mdRef.current;
+      if (!content) return;
+      copyTranscriptContent(content)
+        .then(() => showToast('Copied message'))
+        .catch((error: unknown) => {
+          console.error('Failed to copy transcript message:', error);
+          showToast('Could not copy message', 'err');
+        });
+    }, TRANSCRIPT_LONG_PRESS_MS);
+  };
+  const onPointerMove = (event: JSX.TargetedPointerEvent<HTMLDivElement>): void => {
+    const start = longPressStartRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    if (
+      Math.abs(event.clientX - start.x) > TRANSCRIPT_LONG_PRESS_MOVE_PX ||
+      Math.abs(event.clientY - start.y) > TRANSCRIPT_LONG_PRESS_MOVE_PX
+    ) {
+      cancelLongPress();
+    }
+  };
   return (
-    <div class={cls} data-msg-id={m.id} ref={ref}>
+    <div
+      class={`${cls} transcript-copyable`}
+      data-msg-id={m.id}
+      ref={ref}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={cancelLongPress}
+      onPointerCancel={cancelLongPress}
+      onContextMenu={(event) => {
+        if (longPressStartRef.current || longPressTriggeredRef.current) event.preventDefault();
+      }}
+      onClickCapture={(event) => {
+        if (!longPressTriggeredRef.current) return;
+        longPressTriggeredRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
       {m.direction === 'internal' ? <div class="internal-label">internal</div> : null}
       {m.direction === 'in' && m.author && m.author.userId !== currentUserId.value
         ? <div class="message-author">{m.author.displayName}</div>
         : null}
       {md != null
-        ? <div ref={mdRef} dangerouslySetInnerHTML={{ __html: md }} />
-        : (m.text || '')}
+        ? <div class="transcript-copy-content" ref={mdRef} dangerouslySetInnerHTML={{ __html: md }} />
+        : <div class="transcript-copy-content" ref={mdRef}>{m.text || ''}</div>}
       {singleFile && singleMediaKind
         ? (
           <div class="inline-media">

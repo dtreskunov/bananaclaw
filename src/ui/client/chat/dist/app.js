@@ -21329,8 +21329,37 @@ function ZoomableImage({ src, alt, className = "", autoFocus = false }) {
   );
 }
 
+// src/transcript-clipboard.ts
+function transcriptClipboardPayload(element) {
+  return {
+    html: `<div>${element.innerHTML}</div>`,
+    text: element.innerText || element.textContent || ""
+  };
+}
+async function copyTranscriptContent(element) {
+  const payload = transcriptClipboardPayload(element);
+  const clipboard = navigator.clipboard;
+  if (!clipboard) throw new Error("Clipboard access is unavailable in this browser.");
+  if (typeof ClipboardItem !== "undefined" && typeof clipboard.write === "function") {
+    await clipboard.write([
+      new ClipboardItem({
+        "text/html": new Blob([payload.html], { type: "text/html" }),
+        "text/plain": new Blob([payload.text], { type: "text/plain" })
+      })
+    ]);
+    return "rich";
+  }
+  if (typeof clipboard.writeText !== "function") {
+    throw new Error("Clipboard writing is unavailable in this browser.");
+  }
+  await clipboard.writeText(payload.text);
+  return "plain";
+}
+
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
+var TRANSCRIPT_LONG_PRESS_MS = 500;
+var TRANSCRIPT_LONG_PRESS_MOVE_PX = 10;
 function imageFileName(src) {
   try {
     const name = new URL(src, window.location.href).pathname.split("/").filter(Boolean).pop();
@@ -21842,7 +21871,13 @@ function openThreadAt(targetThreadId, messageId) {
 function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
+  const longPressTimerRef = A2(null);
+  const longPressStartRef = A2(null);
+  const longPressTriggeredRef = A2(false);
   const [continueState, setContinueState] = h2("idle");
+  y2(() => () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+  }, []);
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -21929,80 +21964,133 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const suggestedAction = m6.suggestedAction ?? (isFutureWorkMessage(m6.text) ? "continue" : void 0);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && action != null;
-  return /* @__PURE__ */ u4("div", { class: cls, "data-msg-id": m6.id, ref, children: [
-    m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
-    m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
-    md != null ? /* @__PURE__ */ u4("div", { ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : m6.text || "",
-    singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
-      singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
-      /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
-    ] }) : null,
-    m6.files && m6.files.length && !singleMediaKind ? /* @__PURE__ */ u4("div", { class: "files", children: m6.files.map((f5) => f5.path ? /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "file-chip",
-        title: displayWorkspacePath(f5.path),
-        onClick: () => navFile({ path: f5.path, name: f5.filename, size: f5.size }).catch(console.error),
-        children: [
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+    longPressStartRef.current = null;
+  };
+  const onPointerDown = (event) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    cancelLongPress();
+    longPressTriggeredRef.current = false;
+    longPressStartRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY
+    };
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressTriggeredRef.current = true;
+      const content = mdRef.current;
+      if (!content) return;
+      copyTranscriptContent(content).then(() => showToast("Copied message")).catch((error) => {
+        console.error("Failed to copy transcript message:", error);
+        showToast("Could not copy message", "err");
+      });
+    }, TRANSCRIPT_LONG_PRESS_MS);
+  };
+  const onPointerMove = (event) => {
+    const start = longPressStartRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    if (Math.abs(event.clientX - start.x) > TRANSCRIPT_LONG_PRESS_MOVE_PX || Math.abs(event.clientY - start.y) > TRANSCRIPT_LONG_PRESS_MOVE_PX) {
+      cancelLongPress();
+    }
+  };
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: `${cls} transcript-copyable`,
+      "data-msg-id": m6.id,
+      ref,
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: cancelLongPress,
+      onPointerCancel: cancelLongPress,
+      onContextMenu: (event) => {
+        if (longPressStartRef.current || longPressTriggeredRef.current) event.preventDefault();
+      },
+      onClickCapture: (event) => {
+        if (!longPressTriggeredRef.current) return;
+        longPressTriggeredRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+      },
+      children: [
+        m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
+        m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
+        md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, children: m6.text || "" }),
+        singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
+          singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
+          /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
+        ] }) : null,
+        m6.files && m6.files.length && !singleMediaKind ? /* @__PURE__ */ u4("div", { class: "files", children: m6.files.map((f5) => f5.path ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "file-chip",
+            title: displayWorkspacePath(f5.path),
+            onClick: () => navFile({ path: f5.path, name: f5.filename, size: f5.size }).catch(console.error),
+            children: [
+              "\u{1F4CE} ",
+              f5.filename
+            ]
+          },
+          f5.path
+        ) : f5.url ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "file-chip",
+            title: `Preview ${f5.filename}`,
+            onClick: () => {
+              previewAttachment(f5).catch(console.error);
+            },
+            children: [
+              "\u{1F4CE} ",
+              f5.filename
+            ]
+          },
+          f5.url
+        ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: [
           "\u{1F4CE} ",
           f5.filename
-        ]
-      },
-      f5.path
-    ) : f5.url ? /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "file-chip",
-        title: `Preview ${f5.filename}`,
-        onClick: () => {
-          previewAttachment(f5).catch(console.error);
-        },
-        children: [
-          "\u{1F4CE} ",
-          f5.filename
-        ]
-      },
-      f5.url
-    ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: [
-      "\u{1F4CE} ",
-      f5.filename
-    ] }, f5.filename)) }) : null,
-    showContinue ? /* @__PURE__ */ u4("div", { class: "message-actions", children: /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "message-action-btn",
-        disabled: continueState !== "idle" || !canSend.value || isTyping.value,
-        onClick: async () => {
-          if (continueState !== "idle") return;
-          setContinueState("sending");
-          const sent = await sendChat(action.prompt, null);
-          setContinueState(sent ? "sent" : "idle");
-        },
-        children: continueState === "sent" ? "Sent" : continueState === "sending" ? action.sendingLabel : action.label
-      }
-    ) }) : null,
-    m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,
-    m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
-    m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
-      /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-      showsMidTurnLabel(m6.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-      m6.direction === "out" && (m6.usage ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage, partial: !!m6.stoppedStats }) : m6.stoppedStats ? /* @__PURE__ */ u4("span", { title: "Token usage was not reported before cancellation.", children: [
-        fmtDur(m6.stoppedStats.durationMs),
-        " ",
-        "\xB7",
-        " ",
-        m6.stoppedStats.model ? shortModel(m6.stoppedStats.model) : "Model unavailable",
-        " ",
-        "\xB7",
-        " Tokens unavailable"
-      ] }) : null),
-      /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
-      /* @__PURE__ */ u4(ForkButton, { m: m6 })
-    ] }) : null
-  ] });
+        ] }, f5.filename)) }) : null,
+        showContinue ? /* @__PURE__ */ u4("div", { class: "message-actions", children: /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "message-action-btn",
+            disabled: continueState !== "idle" || !canSend.value || isTyping.value,
+            onClick: async () => {
+              if (continueState !== "idle") return;
+              setContinueState("sending");
+              const sent = await sendChat(action.prompt, null);
+              setContinueState(sent ? "sent" : "idle");
+            },
+            children: continueState === "sent" ? "Sent" : continueState === "sending" ? action.sendingLabel : action.label
+          }
+        ) }) : null,
+        m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,
+        m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
+        m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+          /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+          showsMidTurnLabel(m6.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
+          m6.direction === "out" && (m6.usage ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage, partial: !!m6.stoppedStats }) : m6.stoppedStats ? /* @__PURE__ */ u4("span", { title: "Token usage was not reported before cancellation.", children: [
+            fmtDur(m6.stoppedStats.durationMs),
+            " ",
+            "\xB7",
+            " ",
+            m6.stoppedStats.model ? shortModel(m6.stoppedStats.model) : "Model unavailable",
+            " ",
+            "\xB7",
+            " Tokens unavailable"
+          ] }) : null),
+          /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
+          /* @__PURE__ */ u4(ForkButton, { m: m6 })
+        ] }) : null
+      ]
+    }
+  );
 }
 function DisplayCardMessage({ message, card }) {
   return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message.id, children: [
