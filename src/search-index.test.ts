@@ -80,6 +80,27 @@ describe('search conversation authorization', () => {
 });
 
 describe('search index rebuild', () => {
+  it('replaces only the edited message text and updates full-text matches', () => {
+    addMessage('editable:agent', 'session-a', 'thread-a', 'web', 'oldword');
+    addMessage('untouched', 'session-b', 'thread-b', 'web', 'oldword');
+    indexMessage(
+      {
+        id: 'editable:agent',
+        sessionId: 'session-a',
+        agentGroupId: 'agent',
+        messagingGroupId: 'shared-inbox',
+        channelType: 'web',
+        threadId: 'thread-a',
+        direction: 'in',
+        timestamp: '2026-07-22T00:00:00.000Z',
+        text: 'newword',
+      },
+      { replaceText: true },
+    );
+    expect(searchMessages('newword', { agentGroupId: 'agent' }).map((row) => row.messageId)).toEqual(['editable']);
+    expect(searchMessages('oldword', { agentGroupId: 'agent' }).map((row) => row.messageId)).toEqual(['untouched']);
+  });
+
   it('refreshes migrated metadata for an existing message ID', () => {
     addMessage('migrated', 'session-a', 'thread-a', 'web', 'shared needle', 'legacy-web-group');
 
@@ -92,8 +113,6 @@ describe('search index rebuild', () => {
     });
     expect(results).toHaveLength(1);
     expect(results[0]?.messagingGroupId).toBe('current-shared-web-group');
-    expect(
-      searchMessages('needle', { agentGroupId: 'agent', messagingGroupIds: ['legacy-web-group'] }),
-    ).toEqual([]);
+    expect(searchMessages('needle', { agentGroupId: 'agent', messagingGroupIds: ['legacy-web-group'] })).toEqual([]);
   });
 });

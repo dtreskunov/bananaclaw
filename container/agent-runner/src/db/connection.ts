@@ -99,7 +99,13 @@ export function clearContainerToolInFlight(): void {
  * Clearing them lets the new container re-process those messages.
  */
 export function clearStaleProcessingAcks(): void {
-  getOutboundDb().prepare("DELETE FROM processing_ack WHERE status = 'processing'").run();
+  const db = getOutboundDb();
+  db.transaction(() => {
+    // Older runners did not retain claims. Preserve them before retry cleanup
+    // so delayed edits cannot rewrite input that a crashed provider consumed.
+    db.prepare('INSERT OR IGNORE INTO claimed_inputs (message_id) SELECT message_id FROM processing_ack').run();
+    db.prepare("DELETE FROM processing_ack WHERE status = 'processing'").run();
+  })();
 }
 
 /** For tests — creates in-memory DBs with the session schemas. */

@@ -352,6 +352,24 @@ turn's completion batch; acceptance alone never completes the message.
 See [session-link.md](session-link.md#steering-native-provider) for durability,
 recovery, exclusions, and rollout requirements.
 
+**Editing pending web input:** Native also advertises `supportsInputEditing`.
+Durable system `edit_input` requests bypass the prompt cap and are processed
+synchronously before either initial claiming or follow-up/steering selection;
+they never enter model prompts. The runner checks the original sender/routing,
+pending status, processing acknowledgements, native ingestion journal and
+expected text. Only `content.text` changes; attachments, IDs, ordering and
+queue/steer intent remain intact. Buffered steering uses synchronous
+`query.replaceSteering`; IDs are locked before attachment preparation yields,
+so edits lose the race once preparation or ingestion starts. Receipts live in
+`session_state` under `input-edit:<requestId>` and use the existing durable
+`state.upsert` journal. Replayed requests return their original receipt without
+reapplying text. The host projects accepted edits from its original request,
+not arbitrary text supplied by the runner.
+Runner-private `claimed_inputs` records are committed with processing claims
+and never removed by retry cleanup; startup also retains legacy acknowledgements
+before clearing them. Thus delayed edits cannot rewrite previously claimed
+ordinary input after a crash, even when it is pending for retry.
+
 **Idle behavior:** When no messages are pending, the runner waits for a host
 event or the next scheduled due time. The container stays warm until the host
 kills it (idle timeout).

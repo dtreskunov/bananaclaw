@@ -1,7 +1,99 @@
 import { createHash } from 'node:crypto';
-import { getOutboundDb } from './db/connection.js';
-import type { MessageInRow } from './db/messages-in.js';
-import { isRunnerCommand, type RoutingContext } from './formatter.js';
+import { getInboundDb, getOutboundDb } from './db/connection.js';
+import { getMessageIn, getPendingInputEdits, markCompleted, type MessageInRow } from './db/messages-in.js';
+import { extractFileAttachments, formatMessages, isRunnerCommand, type RoutingContext } from './formatter.js';
+import type { AgentProvider, AgentQuery } from './providers/types.js';
+
+export interface InputEditReceipt {
+  requestId: string;
+  messageId: string;
+  status: 'accepted' | 'conflict';
+  reason?: 'not_pending' | 'text_changed' | 'steering_consumed' | 'unsupported';
+}
+
+export function readInputEditReceipt(requestId: string): InputEditReceipt | undefined {
+  const row = getOutboundDb().prepare('SELECT value FROM session_state WHERE key = ?')
+    .get(`input-edit:${requestId}`) as { value: string } | null;
+  return row ? JSON.parse(row.value) as InputEditReceipt : undefined;
+}
+
+/** No awaits: CAS, provider buffer replacement and projection commit share one JS turn. */
+export function processPendingInputEdits(
+  provider: AgentProvider,
+  continuation?: string,
+  active?: { query: AgentQuery; steeringInputs: Map<string, MessageInRow> },
+): void {
+  for (const request of getPendingInputEdits()) {
+    const input = JSON.parse(request.content) as {
+      requestId?: unknown; messageId?: unknown; expectedText?: unknown; replacementText?: unknown;
+    };
+    // A malformed control row must fail visibly rather than enter the model prompt.
+    if (typeof input.requestId !== 'string' || typeof input.messageId !== 'string') {
+      throw new Error(`Malformed input edit request ${request.id}`);
+    }
+    const requestId = input.requestId;
+    const messageId = input.messageId;
+    const db = getOutboundDb();
+    let replaced = false;
+    let updated: MessageInRow | undefined;
+    try {
+      db.transaction(() => {
+        if (readInputEditReceipt(requestId)) {
+          markCompleted([request.id]);
+          return;
+        }
+        const receipt: InputEditReceipt = { requestId, messageId, status: 'conflict' };
+        const target = getMessageIn(messageId);
+        const inputState = readInputState(messageId);
+        const sameAuthor = target &&
+          (target.sender_user_id || target.sender_identity) &&
+          (target.sender_user_id ?? null) === (request.sender_user_id ?? null) &&
+          (target.sender_identity ?? null) === (request.sender_identity ?? null);
+        if (provider.supportsInputEditing !== true || request.id !== `edit-${requestId}` ||
+          typeof input.expectedText !== 'string' || typeof input.replacementText !== 'string') {
+          receipt.reason = 'unsupported';
+        } else if (!target || !['chat', 'chat-sdk'].includes(target.kind) || target.channel_type !== 'web' ||
+          request.channel_type !== target.channel_type || request.platform_id !== target.platform_id ||
+          request.thread_id !== target.thread_id || !sameAuthor || target.source_session_id != null ||
+          target.status !== 'pending' || target.trigger !== 1 ||
+          inputState?.status === 'processing' || inputState?.status === 'applied' ||
+          db.prepare('SELECT 1 FROM claimed_inputs WHERE message_id = ?').get(messageId) ||
+          db.prepare('SELECT 1 FROM processing_ack WHERE message_id = ?').get(messageId) ||
+          (continuation && provider.appliedSteering?.(continuation, [messageId]).includes(messageId))) {
+          receipt.reason = 'not_pending';
+        } else {
+          const content = JSON.parse(target.content) as Record<string, unknown>;
+          if (content.text !== input.expectedText) {
+            receipt.reason = 'text_changed';
+          } else {
+            const candidate = { ...target, content: JSON.stringify({ ...content, text: input.replacementText }) };
+            if (active?.steeringInputs.has(messageId)) {
+              const files = extractFileAttachments([candidate]);
+              replaced = active.query.replaceSteering?.({
+                id: messageId, prompt: formatMessages([candidate]), ...(files.length ? { files } : {}),
+              }) === true;
+              if (!replaced) receipt.reason = 'steering_consumed';
+            }
+            if (!receipt.reason) {
+              getInboundDb().prepare('UPDATE messages_in SET content = ? WHERE id = ?')
+                .run(candidate.content, messageId);
+              receipt.status = 'accepted';
+              updated = candidate;
+            }
+          }
+        }
+        db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)')
+          .run(`input-edit:${requestId}`, JSON.stringify(receipt), new Date().toISOString());
+        markCompleted([request.id]);
+      })();
+    } catch (error) {
+      // A failed durable commit cannot leave a provider consuming an uncommitted edit.
+      if (replaced) active?.query.abort();
+      throw error;
+    }
+    if (updated && active?.steeringInputs.has(messageId)) active.steeringInputs.set(messageId, updated);
+  }
+}
 
 export interface InputState {
   messageId: string;

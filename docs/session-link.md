@@ -126,6 +126,38 @@ follow-ups use the same event signal with dirty reruns. `inbound.db` and
 container. Attachments remain file-backed: `inbox/` is mounted read-only and
 `outbox/` read-write.
 
+## Pending web-input edits
+
+Only native currently advertises `supportsInputEditing` on its active turn.
+The web endpoint accepts text-only edits to the viewer's own pending web inputs;
+attachments, routing, ID, sequence and steering intent are unchanged. A stale
+host `processing_ack` is not sufficient to authorize an edit.
+
+The host journals a non-triggering `system` message (`edit-<request UUID>`) with
+`action: "edit_input"`, the target ID, expected text and replacement text. It
+does **not** change the target yet. The runner processes edit commands before
+claiming ordinary inputs and compares the original text against its authoritative
+projection. It rejects already claimed/applied inputs. Native additionally
+allows replacement only while guidance remains buffered, locking it before
+asynchronous attachment preparation starts.
+
+The runner commits the changed projection and an immutable
+`input-edit:<request UUID>` receipt together. The host validates the receipt
+against the original authorized request and uses an attached-DB transaction
+(both host journals use `DELETE` mode) to commit the receipt and inbound text
+together. The ordinary inbound update trigger journals the changed text back
+to the runner. This avoids falsely acknowledging a save across either
+edit-versus-consume races or a host crash between two independent DB writes.
+Search and scoped websocket input-state frames are refreshed after projection.
+
+HTTP success means the receipt has committed, not merely that a request was
+sent. A five-second timeout reports `edit_pending`; the UI retains its draft
+and request UUID and retries that same command rather than submitting another.
+A timed-out command can still be applied on reconnect. Different outstanding
+edits to one input are rejected until the first has a receipt. Receipt replay
+never reverts a later edit. System edit commands are never model input, history
+bubbles, or a reason to wake a cold container.
+
 ## Lifecycle
 
 The host creates the listener before spawning a container and before adopting
@@ -160,6 +192,11 @@ optional `supportsSteering` field on `turn.state`. Deploy matching host, runner,
 and chat assets together. There is no host-message schema migration: steering
 intent uses the existing inbound content journal, and dispositions use the
 existing durable session-state projection.
+
+Pending editing adds the optional `supportsInputEditing` live field and the
+`input-edit:` receipt semantics. Update the host before recycling runners and
+serving the rebuilt editing UI; old runners do not advertise the editing
+capability and must not receive edit requests.
 
 Verify a rollout with host health **and** an actual session exchange; a
 successful build or an HTTP 200 alone does not prove runner compatibility.

@@ -91,6 +91,7 @@ import type {
 } from './types';
 
 interface ServerMessage {
+  canEditPending?: boolean;
   inputState?: InputState;
   stoppedStats?: StoppedTurnStats;
   id?: string;
@@ -602,6 +603,7 @@ function toChatMessage(m: ServerMessage): ChatMessage {
     ...(m.usage ? { usage: m.usage } : {}),
     ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
     ...(m.inputState ? { inputState: m.inputState } : {}),
+    canEditPending: m.canEditPending === true,
     ...(m.activity ? { activity: m.activity } : {}),
     ...(m.event ? { event: m.event } : {}),
     ...(m.reactions ? { reactions: m.reactions } : {}),
@@ -620,13 +622,16 @@ function replaceIncomingMessages(messages: ServerMessage[]): void {
 
 function mergeIncomingMessages(messages: ServerMessage[]): void {
   const inboundStates = new Map(
-    messages
-      .filter((message) => message.direction === 'in' && message.id)
-      .map((message) => [message.id, message.inputState]),
+    messages.filter((message) => message.direction === 'in' && message.id).map((message) => [message.id, message]),
   );
   chatMessages.value = chatMessages.value.map((message) =>
     message.direction === 'in' && inboundStates.has(message.id)
-      ? { ...message, inputState: inboundStates.get(message.id) }
+      ? {
+          ...message,
+          text: inboundStates.get(message.id)!.text,
+          inputState: inboundStates.get(message.id)!.inputState,
+          canEditPending: inboundStates.get(message.id)!.canEditPending === true,
+        }
       : message,
   );
   let maxTs = '';
@@ -649,6 +654,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
       ...(m.inputState ? { inputState: m.inputState } : {}),
+      canEditPending: m.canEditPending === true,
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
       ...(m.reactions ? { reactions: m.reactions } : {}),
@@ -1025,10 +1031,17 @@ function connectChatWs(ctx: ChatSocketContext): void {
       return;
     }
     if (payload.kind === 'input-state') {
-      const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry.inputState]));
+      const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry]));
       chatMessages.value = chatMessages.value.map((message) =>
         message.direction === 'in' && message.id && states.has(message.id)
-          ? { ...message, inputState: states.get(message.id) ?? undefined }
+          ? {
+              ...message,
+              inputState: states.get(message.id)!.inputState ?? undefined,
+              ...(typeof states.get(message.id)!.text === 'string' ? { text: states.get(message.id)!.text! } : {}),
+              ...(typeof states.get(message.id)!.canEditPending === 'boolean'
+                ? { canEditPending: states.get(message.id)!.canEditPending }
+                : {}),
+            }
           : message,
       );
       return;
@@ -1097,6 +1110,18 @@ function connectChatWs(ctx: ChatSocketContext): void {
                   status: 'queued',
                   ...(handling.turnId ? { turnId: handling.turnId } : {}),
                 },
+              }
+            : message,
+        );
+      }
+      if (payload.id) {
+        chatMessages.value = chatMessages.value.map((message) =>
+          message.direction === 'in' && message.id === payload.id
+            ? {
+                ...message,
+                text: payload.text ?? message.text,
+                ...(typeof payload.canEditPending === 'boolean' ? { canEditPending: payload.canEditPending } : {}),
+                ...(payload.inputState ? { inputState: payload.inputState } : {}),
               }
             : message,
         );

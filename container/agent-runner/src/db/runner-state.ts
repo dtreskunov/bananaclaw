@@ -96,6 +96,9 @@ export function ensureRunnerStateSchema(db: Database): void {
       status TEXT NOT NULL,
       status_changed TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS claimed_inputs (
+      message_id TEXT PRIMARY KEY
+    );
     CREATE TABLE IF NOT EXISTS session_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,

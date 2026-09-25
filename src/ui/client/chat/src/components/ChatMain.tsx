@@ -25,6 +25,8 @@ import { isRecording, recordingDuration, startRecording, stopRecording, cancelRe
 import { voice, voiceBrowserReason } from '../voice-audio';
 import { VoiceButton } from './VoiceButton';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
+import { PendingMessageEditor } from './PendingMessageEditor';
+import { canEditMessageInBranch } from '../pending-edit';
 import { mergeQuestionTimeline } from '../question-timeline';
 import { showsMidTurnLabel, showsTurnActivity } from '../chat-protocol';
 import { inputStatePresentation } from '../input-state';
@@ -569,8 +571,8 @@ function ForkButton({ m }: { m: ChatMessage }) {
 function EditMessageButton({ m }: { m: ChatMessage }) {
   const [busy, setBusy] = useState(false);
   const thread = activeThread();
-  if (!thread || m.direction !== 'in' || !m.id || !m.text.trim()) return null;
-  const anchorId = findEditBranchAnchorId(chatMessages.value, m.id);
+  if (!thread || !canEditMessageInBranch(m)) return null;
+  const anchorId = findEditBranchAnchorId(chatMessages.value, m.id!);
   if (anchorId && (!canFork(thread) || !canSend.value)) return null;
   const onEdit = async (): Promise<void> => {
     if (busy) return;
@@ -880,6 +882,7 @@ function Message(
           </div>
         )
         : null}
+      <PendingMessageEditor message={m} thread={activeThread() ?? null} gid={groupId.value} />
       {m.ts ? <div class="meta">
         <RelativeTime ts={m.ts} />
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}

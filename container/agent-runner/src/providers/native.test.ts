@@ -203,6 +203,90 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it('replaces buffered steering in place before consuming it, preserving order and attachments', async () => {
+    holdModelResponse = true;
+    const started = new Promise<void>((resolve) => { modelRequestStarted = resolve; });
+    const image = path.join(root, 'edit.png');
+    fs.writeFileSync(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB', 'base64'));
+    const files = [{ path: image, mime: 'image/png', filename: 'edit.png' }];
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    expect(provider.supportsInputEditing).toBe(true);
+    const query = provider.query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    const consume = (async () => {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'result') query.end();
+      }
+    })();
+    try {
+      await started;
+      expect(query.steer!({ id: 'first', prompt: 'old guidance', files })).toBe(true);
+      expect(query.steer!({ id: 'second', prompt: 'later guidance' })).toBe(true);
+      expect(query.replaceSteering!({ id: 'first', prompt: 'replacement guidance', files })).toBe(true);
+      expect(query.replaceSteering!({ id: 'absent', prompt: 'not queued' })).toBe(false);
+      holdModelResponse = false;
+      releaseModelResponse!();
+      releaseModelResponse = undefined;
+      await consume;
+      const body = JSON.stringify(requests[1].messages);
+      expect(body).toContain('replacement guidance');
+      expect(body).toContain('image_url');
+      expect(body).not.toContain('old guidance');
+      expect(body.indexOf('replacement guidance')).toBeLessThan(body.indexOf('later guidance'));
+      expect(events.filter((event) => event.type === 'steering_applied').map((event) => event.id))
+        .toEqual(['first', 'second']);
+      expect(query.replaceSteering!({ id: 'first', prompt: 'too late' })).toBe(false);
+    } finally {
+      releaseModelResponse?.();
+      query.abort();
+      await consume;
+    }
+  });
+
+  it('locks steering before asynchronous preparation and rejects edits after Stop', async () => {
+    let releasePreparation!: () => void;
+    let preparationStarted!: () => void;
+    const started = new Promise<void>((resolve) => { preparationStarted = resolve; });
+    const release = new Promise<void>((resolve) => { releasePreparation = resolve; });
+    const prepare = nativeAttachments.prepareNativeUserMessage;
+    const prepareSpy = spyOn(nativeAttachments, 'prepareNativeUserMessage').mockImplementation(async (...args) => {
+      if (args[0] === 'old guidance') {
+        preparationStarted();
+        await release;
+      }
+      return prepare(...args);
+    });
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    const consume = (async () => {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'assistant_message') {
+          expect(query.steer!({ id: 'guidance', prompt: 'old guidance' })).toBe(true);
+        }
+      }
+    })();
+    try {
+      await started;
+      expect(query.replaceSteering!({ id: 'guidance', prompt: 'racing edit' })).toBe(false);
+      query.abort('user');
+      expect(query.replaceSteering!({ id: 'guidance', prompt: 'edit after stop' })).toBe(false);
+      releasePreparation();
+      await consume;
+      expect(requests).toHaveLength(1);
+      expect(events.some((event) => event.type === 'steering_applied')).toBe(false);
+      const continuation = events.find((event) => event.type === 'init')!.continuation;
+      expect(provider.appliedSteering(continuation, ['guidance'])).toEqual([]);
+    } finally {
+      releasePreparation();
+      query.abort();
+      await consume;
+      prepareSpy.mockRestore();
+    }
+  });
+
   it('lets a blocked model call finish before applying guidance to its final-text continuation', async () => {
     holdModelResponse = true;
     const started = new Promise<void>((resolve) => { modelRequestStarted = resolve; });

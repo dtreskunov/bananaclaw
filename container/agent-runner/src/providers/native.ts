@@ -215,6 +215,7 @@ export function portableHistory(messages: ModelMessage[]): ModelMessage[] {
 export class NativeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = false;
   readonly supportsSteering = true;
+  readonly supportsInputEditing = true;
   private readonly options: ProviderOptions;
   private readonly store: NativeStore;
 
@@ -245,6 +246,7 @@ export class NativeProvider implements AgentProvider {
     let active = false;
     const steering: SteeringInput[] = [];
     const acceptedSteering = new Set<string>();
+    const preparingSteering = new Set<string>();
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
@@ -403,6 +405,9 @@ export class NativeProvider implements AgentProvider {
                 let inlineBytes = inlineHistoryBytes(messages);
                 while (!ended && stepsCompleted < 20 && prepared.length < steering.length) {
                   const guidance = steering[prepared.length];
+                  // Lock before preparation can yield: an edit must never change
+                  // the buffer while an attachment is being prepared for ingestion.
+                  preparingSteering.add(guidance.id);
                   if (store.appliedSteering(continuation, [guidance.id]).length > 0) {
                     steering.splice(prepared.length, 1);
                     yield { type: 'steering_applied', id: guidance.id };
@@ -466,6 +471,7 @@ export class NativeProvider implements AgentProvider {
               active = false;
               steering.length = 0;
               acceptedSteering.clear();
+              preparingSteering.clear();
             }
           }
         } finally {
@@ -476,6 +482,13 @@ export class NativeProvider implements AgentProvider {
     };
 
     return {
+      replaceSteering(guidance: SteeringInput): boolean {
+        if (!active || ended || abortController.signal.aborted || preparingSteering.has(guidance.id)) return false;
+        const index = steering.findIndex((input) => input.id === guidance.id);
+        if (index < 0) return false;
+        steering[index] = guidance;
+        return true;
+      },
       steer(guidance: SteeringInput): boolean {
         if (!active || ended || abortController.signal.aborted) return false;
         if (!acceptedSteering.has(guidance.id)) {

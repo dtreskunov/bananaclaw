@@ -54,7 +54,7 @@ import {
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
-import { startInputProcessing, steeringDisposition, writeInputState } from './steering.js';
+import { processPendingInputEdits, startInputProcessing, steeringDisposition, writeInputState } from './steering.js';
 import { drainSessionJournal, getHostEventGeneration, onHostEvent, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
 
 const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
@@ -231,6 +231,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   while (true) {
     if (config.signal?.aborted) return;
     const hostGeneration = getHostEventGeneration();
+    processPendingInputEdits(config.provider, getContinuation(config.providerName));
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
     let messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
     isFirstPoll = false;
@@ -1013,6 +1014,7 @@ async function processQuery(
 
     void (async () => {
       try {
+        processPendingInputEdits(provider, getContinuation(providerName), { query, steeringInputs });
         const pending = getPendingMessages();
 
         // Slash commands need a fresh query: /clear resets the SDK's
@@ -1280,6 +1282,8 @@ async function processQuery(
       platformId: activeTurnRouting.platformId ?? '',
       threadId: activeTurnRouting.threadId,
       ...(supportsSteering ? { supportsSteering: true } : {}),
+      ...(supportsSteering && provider.supportsInputEditing === true && query.replaceSteering
+        ? { supportsInputEditing: true } : {}),
     });
   };
   const unsubscribeStop = onTurnStop((requestedId) => {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import { closeSessionDb, getInboundDb, getOutboundDb, initTestSessionDb } from './db/connection.js';
 import { getPendingMessages, getSteeringCandidates, markProcessing, type MessageInRow } from './db/messages-in.js';
 import { getContinuation, setContinuation } from './db/session-state.js';
@@ -6,7 +7,7 @@ import { loadConfig, setConfigForTest } from './config.js';
 import { runPollLoop } from './poll-loop.js';
 import type { AgentProvider, ProviderEvent, QueryInput, SteeringInput } from './providers/types.js';
 import * as link from './session-link.js';
-import { inputHandling, readInputState, steeringDisposition, writeInputState } from './steering.js';
+import { inputHandling, readInputEditReceipt, readInputState, steeringDisposition, writeInputState } from './steering.js';
 
 let sequence = 0;
 beforeEach(() => {
@@ -119,6 +120,7 @@ function harness(supportsSteering = true) {
   const provider: AgentProvider = {
     supportsNativeSlashCommands: false,
     supportsSteering,
+    supportsInputEditing: supportsSteering,
     isSessionInvalid: () => false,
     query(input) {
       prompts.push(input);
@@ -314,5 +316,46 @@ it('recovers already-persisted steering without appending the same guidance agai
     expect(readInputState('already-applied')?.status).toBe('applied');
     expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('already-applied'))
       .toEqual({ status: 'completed' });
+  } finally { await h.stop(loop); }
+});
+
+it('processes startup edit requests before claiming and formatting the initial batch', async () => {
+  insert('target', { text: 'original text', inputHandling: { mode: 'queue' } });
+  getInboundDb().prepare("UPDATE messages_in SET sender_identity = 'web:owner' WHERE id = 'target'").run();
+  const requestId = randomUUID();
+  insert(`edit-${requestId}`, {
+    action: 'edit_input', requestId, messageId: 'target', expectedText: 'original text', replacementText: 'new text',
+  }, { kind: 'system', trigger: 0 });
+  getInboundDb().prepare("UPDATE messages_in SET sender_identity = 'web:owner' WHERE id = ?").run(`edit-${requestId}`);
+  const h = harness();
+  const loop = h.start();
+  try {
+    await until(() => h.prompts.length === 1);
+    expect(h.prompts[0].prompt).toContain('new text');
+    expect(h.prompts[0].prompt).not.toContain('original text');
+    expect(h.prompts[0].prompt).not.toContain('edit_input');
+    expect(readInputEditReceipt(requestId)?.status).toBe('accepted');
+  } finally { await h.stop(loop); }
+});
+
+it('rejects pending startup edits to durably applied guidance before recovery acknowledges it', async () => {
+  insert('already-applied', { text: 'original text' });
+  insert('new-input');
+  getInboundDb().prepare("UPDATE messages_in SET sender_identity = 'web:owner' WHERE id = 'already-applied'").run();
+  const requestId = randomUUID();
+  insert(`edit-${requestId}`, {
+    action: 'edit_input', requestId, messageId: 'already-applied', expectedText: 'original text', replacementText: 'corruption',
+  }, { kind: 'system', trigger: 0 });
+  getInboundDb().prepare("UPDATE messages_in SET sender_identity = 'web:owner' WHERE id = ?").run(`edit-${requestId}`);
+  setContinuation('steering-test', 'steering-session');
+  const h = harness();
+  h.provider.appliedSteering = (_continuation, ids) => ids.filter((id) => id === 'already-applied');
+  const loop = h.start();
+  try {
+    await until(() => h.prompts.length === 1);
+    expect(h.prompts[0].prompt).not.toContain('corruption');
+    expect(h.prompts[0].prompt).not.toContain('original text');
+    expect(readInputEditReceipt(requestId)).toMatchObject({ status: 'conflict', reason: 'not_pending' });
+    expect(readInputState('already-applied')?.status).toBe('applied');
   } finally { await h.stop(loop); }
 });

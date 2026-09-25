@@ -15,6 +15,7 @@ const signal = vi.hoisted(() => ({
     platformId: string;
     threadId: string | null;
     supportsSteering?: boolean;
+    supportsInputEditing?: boolean;
   },
   connected: true,
   listeners: new Set<(sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat' | 'input.state') => void>(),
@@ -54,7 +55,8 @@ vi.mock('../../../container-runner.js', () => ({
 }));
 
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { initSessionFolder, openInboundDb, openOutboundDbRw } from '../../../session-manager.js';
+import { initSessionFolder, openInboundDb, openOutboundDbRw, writeSessionMessage } from '../../../session-manager.js';
+import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { COOKIE_NAME } from '../auth.js';
 import { handleChatRequest, handleChatUpgrade, matchChatPath, readChatActiveTurn, readChatHistory } from './chat.js';
@@ -130,7 +132,7 @@ async function stop(
     query?: string;
     user?: string;
     method?: string;
-    kind?: 'send' | 'stop';
+    kind?: 'send' | 'stop' | 'messages/pending';
     multipart?: string;
   } = {},
 ) {
@@ -318,7 +320,7 @@ describe('durable input state history', () => {
       "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('pending:agent', 'processing', ?)",
     ).run(NOW);
     db.close();
-    expect(history()[0].inputState).toBeUndefined();
+    expect(history()[0].inputState?.status).toBe('processing');
     receipt('pending', 'applied');
     expect(history()[0].inputState?.status).toBe('applied');
   });
@@ -357,7 +359,7 @@ describe('durable input state history', () => {
     );
     db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run('input:broken', '{', NOW);
     db.close();
-    expect(history()[0].inputState).toBeUndefined();
+    expect(history()[0].inputState?.status).toBe('queued');
   });
 
   it('pushes only visible message receipts on input.state and clears claimed queue status', () => {
@@ -387,15 +389,166 @@ describe('durable input state history', () => {
     ).run(NOW);
     db.close();
     for (const listener of signal.listeners) listener('session-1', 'input.state');
-    expect(frames.at(-1)).toEqual({ kind: 'input-state', states: [{ messageId: 'visible', inputState: null }] });
+    expect(frames.at(-1)).toMatchObject({
+      kind: 'input-state',
+      states: [{ messageId: 'visible', inputState: { status: 'processing' }, canEditPending: false }],
+    });
     receipt('visible', 'applied');
     for (const listener of signal.listeners) listener('session-1', 'input.state');
-    expect(frames.at(-1)).toEqual({
+    expect(frames.at(-1)).toMatchObject({
       kind: 'input-state',
       states: [{ messageId: 'visible', inputState: { messageId: 'visible', status: 'applied', turnId: TURN.id } }],
     });
+
     ws.emit('close');
     expect(signal.listeners.size).toBe(0);
+  });
+});
+
+describe('pending web input editing', () => {
+  const userId = 'b6f435da-4cd5-4e64-8ad8-1da9b3b244b0';
+  const requestId = 'f965e0be-d447-4795-bfd4-1a4bd2b2807b';
+  const body = { requestId, expectedText: 'original', text: 'revised' };
+  const edit = (options: Parameters<typeof stop>[0] = {}) =>
+    stop({ kind: 'messages/pending', method: 'PATCH', user: userId, body, ...options });
+  const target = () => {
+    const db = openInboundDb('agent', 'session-1');
+    try {
+      return db.prepare('SELECT id, seq, timestamp, content FROM messages_in WHERE id = ?').get('pending:agent') as {
+        id: string;
+        seq: number;
+        timestamp: string;
+        content: string;
+      };
+    } finally {
+      db.close();
+    }
+  };
+  const acknowledge = (status: 'accepted' | 'conflict', reason?: string) => {
+    applyDurableRunnerEvent('agent', 'session-1', {
+      eventId: 'edit-result',
+      sequence: 1,
+      event: {
+        type: 'state.upsert',
+        payload: {
+          key: `input-edit:${requestId}`,
+          value: JSON.stringify({ requestId, messageId: 'pending:agent', status, ...(reason ? { reason } : {}) }),
+          updated_at: NOW,
+        },
+      },
+    });
+    for (const listener of signal.listeners) listener('session-1', 'input.state');
+  };
+  beforeEach(() => {
+    const db = getDb();
+    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(userId, NOW);
+    db.prepare('INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)').run(
+      userId,
+      'agent',
+      userId,
+      NOW,
+    );
+    signal.turn = { ...TURN, supportsSteering: true, supportsInputEditing: true };
+    writeSessionMessage('agent', 'session-1', {
+      id: 'pending:agent',
+      kind: 'chat',
+      timestamp: NOW,
+      channelType: 'web',
+      platformId: 'group:agent',
+      threadId: 'thread-1',
+      senderUserId: userId,
+      content: JSON.stringify({
+        text: 'original',
+        inputHandling: { mode: 'queue' },
+        attachments: [{ name: 'keep.txt', localPath: 'inbox/keep.txt', mimeType: 'text/plain' }],
+      }),
+    });
+  });
+
+  it('waits for durable runner acceptance before changing text and preserves identity, metadata and ordering', async () => {
+    const before = target();
+    let done = false;
+    const pending = edit().then((result) => {
+      done = true;
+      return result;
+    });
+    await vi.waitFor(() => expect(signal.listeners.size).toBe(1));
+    expect(done).toBe(false);
+    expect(target()).toEqual(before);
+    const visible = readChatHistory(userId, 'agent', 'thread-1', OVERRIDE);
+    expect(visible).toHaveLength(1);
+    expect(visible[0].canEditPending).toBe(true);
+    acknowledge('accepted');
+    expect(await pending).toEqual({ status: 200, body: { ok: true, id: 'pending', text: 'revised' } });
+    const after = target();
+    expect({ ...after, content: before.content }).toEqual(before);
+    expect(JSON.parse(after.content)).toEqual({ ...JSON.parse(before.content), text: 'revised' });
+    expect(signal.listeners.size).toBe(0);
+    signal.connected = false;
+    signal.turn = null;
+    expect((await edit()).status).toBe(200);
+    expect((await edit({ body: { ...body, text: 'different' } })).body.error).toBe('request_id_conflict');
+  });
+
+  it('rejects stale text, other authors, other conversations, external channels and invalid requests', async () => {
+    expect((await edit({ body: { ...body, expectedText: 'stale' } })).body.error).toBe('text_changed');
+    expect((await edit({ user: 'web:other' })).status).toBe(404);
+    expect((await edit({ user: 'web:owner' })).status).toBe(404);
+    expect((await edit({ thread: 'thread-2' })).status).toBe(404);
+    expect((await edit({ group: 'other' })).status).toBe(403);
+    expect((await edit({ user: 'web:owner', query: '?channel=resend&mg=mail-mg' })).status).toBe(403);
+    expect((await edit({ query: '?channel=web' })).status).toBe(400);
+    expect((await edit({ method: 'POST' })).status).toBe(405);
+    expect((await edit({ body: { ...body, text: ' ' } })).status).toBe(400);
+    expect((await edit({ body: { ...body, requestId: 'not-a-uuid' } })).status).toBe(400);
+    expect((await edit({ body: { ...body, attachments: [] } })).status).toBe(400);
+    expect(readChatHistory('web:other', 'agent', 'thread-1', OVERRIDE)[0].canEditPending).toBe(false);
+  });
+
+  it('requires a connected editing-capable runner and blocks known processing inputs', async () => {
+    signal.connected = false;
+    expect((await edit()).body.error).toBe('runner_disconnected');
+    signal.connected = true;
+    signal.turn = { ...TURN, supportsSteering: true };
+    expect((await edit()).body.error).toBe('editing_unsupported');
+    signal.turn = { ...TURN, supportsInputEditing: true, status: 'stopping' };
+    expect((await edit()).status).toBe(409);
+    signal.turn = { ...TURN, supportsInputEditing: true };
+    const db = openOutboundDbRw('agent', 'session-1');
+    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('pending:agent', NOW);
+    db.close();
+    expect((await edit()).body.error).toBe('input_not_pending');
+    const message = readChatHistory(userId, 'agent', 'thread-1', OVERRIDE)[0];
+    expect(message.canEditPending).toBe(false);
+    expect(message.inputState?.status).toBe('processing');
+  });
+
+  it('returns conflict when consumption wins despite lagging host status', async () => {
+    const pending = edit();
+    await vi.waitFor(() => expect(signal.listeners.size).toBe(1));
+    acknowledge('conflict', 'steering_consumed');
+    expect(await pending).toEqual({ status: 409, body: { error: 'steering_consumed' } });
+    expect(JSON.parse(target().content).text).toBe('original');
+  });
+
+  it('serializes concurrent edits and allows an ambiguous timeout to be retried with the same request ID', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = edit();
+      await vi.advanceTimersByTimeAsync(1);
+      const second = edit({ body: { ...body, requestId: 'f965e0be-d447-4795-bfd4-1a4bd2b2807c' } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await second).body.error).toBe('edit_in_progress');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await pending).toEqual({ status: 503, body: { error: 'edit_pending' } });
+      expect(signal.listeners.size).toBe(0);
+      acknowledge('accepted');
+      const retry = edit();
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await retry).status).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

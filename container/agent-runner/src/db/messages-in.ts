@@ -69,6 +69,8 @@ export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
          WHERE status = 'pending'
            AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
            AND (on_wake = 0 OR ?1 = 1)
+           AND NOT (kind = 'system' AND COALESCE(
+             CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END, '') = 'edit_input')
          ORDER BY seq DESC
          LIMIT ?2`,
       )
@@ -90,6 +92,23 @@ export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
     inbound.close();
   }
 
+}
+
+/** Control requests bypass the prompt cap and never become model input. */
+export function getPendingInputEdits(): MessageInRow[] {
+  const inbound = openInboundDb();
+  try {
+    const rows = inbound.prepare(
+      `SELECT * FROM messages_in WHERE status = 'pending' AND kind = 'system'
+       AND CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END = 'edit_input'
+       ORDER BY seq ASC`,
+    ).all() as MessageInRow[];
+    const acknowledged = getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[];
+    const ids = new Set(acknowledged.map((row) => row.message_id));
+    return rows.filter((row) => !ids.has(row.id));
+  } finally {
+    inbound.close();
+  }
 }
 
 /** Select steering candidates before applying the prompt cap, so queued input cannot hide them. */
@@ -144,8 +163,12 @@ export function markProcessing(ids: string[]): void {
   const stmt = db.prepare(
     "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'processing', datetime('now'))",
   );
+  const claim = db.prepare('INSERT OR IGNORE INTO claimed_inputs (message_id) VALUES (?)');
   db.transaction(() => {
-    for (const id of ids) stmt.run(id);
+    for (const id of ids) {
+      claim.run(id);
+      stmt.run(id);
+    }
   })();
 }
 

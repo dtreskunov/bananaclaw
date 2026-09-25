@@ -87,6 +87,8 @@ import { uiBaseUrl } from '../server.js';
 import fs from 'fs';
 import { readStoppedTurnStats, type StoppedTurnStats } from '../../shared/stopped-turn.js';
 import { parseInputState, type InputHandling, type InputState } from '../../shared/input-state.js';
+import { INPUT_EDIT_ID } from '../../../pending-input-edit.js';
+import { editPendingInput } from './pending-input-edit.js';
 
 /** Map an agent group to its shared web platform_id. */
 function platformIdFor(agentGroupId: string): string {
@@ -170,6 +172,7 @@ export function matchChatPath(pathname: string):
   | { kind: 'start'; groupId: string }
   | { kind: 'send'; groupId: string; threadId: string }
   | { kind: 'stop'; groupId: string; threadId: string }
+  | { kind: 'edit-input'; groupId: string; threadId: string; messageId: string }
   | { kind: 'threads'; groupId: string }
   | { kind: 'search'; groupId: string }
   | { kind: 'tasks'; groupId: string; threadId: string }
@@ -203,6 +206,14 @@ export function matchChatPath(pathname: string):
   if (send) return { kind: 'send', groupId: decodeURIComponent(send[1]), threadId: decodeURIComponent(send[2]) };
   const stop = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/stop$/);
   if (stop) return { kind: 'stop', groupId: decodeURIComponent(stop[1]), threadId: decodeURIComponent(stop[2]) };
+  const editInput = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/messages\/([^/]+)$/);
+  if (editInput)
+    return {
+      kind: 'edit-input',
+      groupId: decodeURIComponent(editInput[1]),
+      threadId: decodeURIComponent(editInput[2]),
+      messageId: decodeURIComponent(editInput[3]),
+    };
   const fork = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/fork$/);
   if (fork) return { kind: 'fork', groupId: decodeURIComponent(fork[1]), threadId: decodeURIComponent(fork[2]) };
   const tasksList = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/tasks$/);
@@ -387,6 +398,75 @@ export async function handleChatRequest(
     const messagingGroupId = ensureWebMessagingGroup(m.groupId);
     const threadId = crypto.randomUUID();
     writeJson(res, 200, { threadId, messagingGroupId, platformId: platformIdFor(m.groupId) });
+    return true;
+  }
+
+  if (m.kind === 'edit-input') {
+    if (req.method !== 'PATCH') {
+      writeJson(res, 405, { error: 'method_not_allowed' });
+      return true;
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(req, 256 * 1024);
+    } catch {
+      writeJson(res, 400, { error: 'invalid_body' });
+      return true;
+    }
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      Object.keys(body).length !== 3 ||
+      !('requestId' in body) ||
+      typeof body.requestId !== 'string' ||
+      !INPUT_EDIT_ID.test(body.requestId) ||
+      !('expectedText' in body) ||
+      typeof body.expectedText !== 'string' ||
+      Buffer.byteLength(body.expectedText) > 64 * 1024 ||
+      !('text' in body) ||
+      typeof body.text !== 'string' ||
+      !body.text.trim() ||
+      Buffer.byteLength(body.text) > 64 * 1024
+    ) {
+      writeJson(res, 400, { error: 'invalid_body' });
+      return true;
+    }
+    const query = new URLSearchParams((req.url || '').split('?')[1] || '');
+    if (
+      query.has('channel') !== query.has('mg') ||
+      query.has('sessionId') ||
+      (query.has('channel') && (!query.get('channel') || !query.get('mg')))
+    ) {
+      writeJson(res, 400, { error: 'invalid_context' });
+      return true;
+    }
+    const context = resolveTurnContext(userId, m.groupId, m.threadId, taskOverride(req));
+    if (!context?.canSend || context.channelType !== WEB_CHANNEL_TYPE) {
+      writeJson(res, 403, { error: 'forbidden' });
+      return true;
+    }
+    if (!context.sessionId) {
+      writeJson(res, 404, { error: 'message_not_found' });
+      return true;
+    }
+    try {
+      const result = await editPendingInput({
+        groupId: m.groupId,
+        sessionId: context.sessionId,
+        userId,
+        platformIds: context.platformIds,
+        threadId: context.threadId,
+        messageId: m.messageId,
+        requestId: body.requestId,
+        expectedText: body.expectedText,
+        text: body.text,
+      });
+      writeJson(res, result.status, result.body);
+    } catch (err) {
+      log.warn('Pending input edit failed', { groupId: m.groupId, messageId: m.messageId, err });
+      writeJson(res, 500, { error: 'input_edit_failed' });
+    }
     return true;
   }
 
@@ -895,6 +975,7 @@ type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface HistoryMessage {
   inputState?: InputState;
+  canEditPending?: boolean;
   stoppedStats?: StoppedTurnStats;
   /** Human sender attribution for inbound messages. */
   author?: { userId: string; displayName: string };
@@ -951,12 +1032,11 @@ function readVisibleInputStates(
     if (!isWeb || row.status !== 'pending') continue;
     try {
       const handling = parseInputHandling(JSON.parse(row.content).inputHandling);
-      if (handling)
-        states.set(row.id, {
-          messageId: publicInboundMessageId(row.id, groupId),
-          status: 'queued',
-          ...(handling.turnId ? { turnId: handling.turnId } : {}),
-        });
+      states.set(row.id, {
+        messageId: publicInboundMessageId(row.id, groupId),
+        status: 'queued',
+        ...(handling?.turnId ? { turnId: handling.turnId } : {}),
+      });
     } catch {
       /* Legacy/non-JSON content has no submission intent. */
     }
@@ -994,7 +1074,7 @@ function readVisibleInputStates(
       for (const [id, state] of states) {
         const status = acknowledgements.get(id) ?? visible.get(id)?.status;
         if (state.status !== 'applied' && (status === 'processing' || status === 'completed' || status === 'failed')) {
-          if (state.reason) states.set(id, { ...state, status: 'processing' });
+          if (status === 'processing' || state.reason) states.set(id, { ...state, status: 'processing' });
           else states.delete(id);
         }
       }
@@ -1184,6 +1264,10 @@ export function readChatHistory(
             text,
             files: parsed.files,
             author,
+            canEditPending:
+              target.channelType === WEB_CHANNEL_TYPE &&
+              r.sender_user_id === userId &&
+              ['queued', 'steering'].includes(inputStates.get(r.id)?.status ?? ''),
             ...(inputStates.has(r.id) ? { inputState: inputStates.get(r.id) } : {}),
           });
         }
@@ -1570,10 +1654,15 @@ interface TurnContext {
   canSend: boolean;
 }
 
-export type ChatActiveTurn = Pick<SessionActiveTurn, 'id' | 'status' | 'supportsSteering'>;
+export type ChatActiveTurn = Pick<SessionActiveTurn, 'id' | 'status' | 'supportsSteering' | 'supportsInputEditing'>;
 
 function publicActiveTurn(turn: SessionActiveTurn): ChatActiveTurn {
-  return { id: turn.id, status: turn.status, ...(turn.supportsSteering ? { supportsSteering: true } : {}) };
+  return {
+    id: turn.id,
+    status: turn.status,
+    ...(turn.supportsSteering ? { supportsSteering: true } : {}),
+    ...(turn.supportsInputEditing ? { supportsInputEditing: true } : {}),
+  };
 }
 
 function resolveTurnContext(
@@ -3657,7 +3746,12 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
         kind: 'input-state',
         states: messages
           .filter((message) => message.direction === 'in')
-          .map((message) => ({ messageId: message.id, inputState: message.inputState ?? null })),
+          .map((message) => ({
+            messageId: message.id,
+            inputState: message.inputState ?? null,
+            text: message.text,
+            canEditPending: message.canEditPending ?? false,
+          })),
       });
       return;
     }

@@ -18839,6 +18839,7 @@ function toChatMessage(m6) {
     ...m6.usage ? { usage: m6.usage } : {},
     ...m6.stoppedStats ? { stoppedStats: m6.stoppedStats } : {},
     ...m6.inputState ? { inputState: m6.inputState } : {},
+    canEditPending: m6.canEditPending === true,
     ...m6.activity ? { activity: m6.activity } : {},
     ...m6.event ? { event: m6.event } : {},
     ...m6.reactions ? { reactions: m6.reactions } : {}
@@ -18855,10 +18856,15 @@ function replaceIncomingMessages(messages) {
 }
 function mergeIncomingMessages(messages) {
   const inboundStates = new Map(
-    messages.filter((message) => message.direction === "in" && message.id).map((message) => [message.id, message.inputState])
+    messages.filter((message) => message.direction === "in" && message.id).map((message) => [message.id, message])
   );
   chatMessages.value = chatMessages.value.map(
-    (message) => message.direction === "in" && inboundStates.has(message.id) ? { ...message, inputState: inboundStates.get(message.id) } : message
+    (message) => message.direction === "in" && inboundStates.has(message.id) ? {
+      ...message,
+      text: inboundStates.get(message.id).text,
+      inputState: inboundStates.get(message.id).inputState,
+      canEditPending: inboundStates.get(message.id).canEditPending === true
+    } : message
   );
   let maxTs = "";
   const additions = [];
@@ -18880,6 +18886,7 @@ function mergeIncomingMessages(messages) {
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.stoppedStats ? { stoppedStats: m6.stoppedStats } : {},
       ...m6.inputState ? { inputState: m6.inputState } : {},
+      canEditPending: m6.canEditPending === true,
       ...m6.activity ? { activity: m6.activity } : {},
       ...m6.event ? { event: m6.event } : {},
       ...m6.reactions ? { reactions: m6.reactions } : {}
@@ -19193,9 +19200,14 @@ function connectChatWs(ctx2) {
       return;
     }
     if (payload.kind === "input-state") {
-      const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry.inputState]));
+      const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry]));
       chatMessages.value = chatMessages.value.map(
-        (message) => message.direction === "in" && message.id && states.has(message.id) ? { ...message, inputState: states.get(message.id) ?? void 0 } : message
+        (message) => message.direction === "in" && message.id && states.has(message.id) ? {
+          ...message,
+          inputState: states.get(message.id).inputState ?? void 0,
+          ...typeof states.get(message.id).text === "string" ? { text: states.get(message.id).text } : {},
+          ...typeof states.get(message.id).canEditPending === "boolean" ? { canEditPending: states.get(message.id).canEditPending } : {}
+        } : message
       );
       return;
     }
@@ -19259,6 +19271,16 @@ function connectChatWs(ctx2) {
               status: "queued",
               ...handling.turnId ? { turnId: handling.turnId } : {}
             }
+          } : message
+        );
+      }
+      if (payload.id) {
+        chatMessages.value = chatMessages.value.map(
+          (message) => message.direction === "in" && message.id === payload.id ? {
+            ...message,
+            text: payload.text ?? message.text,
+            ...typeof payload.canEditPending === "boolean" ? { canEditPending: payload.canEditPending } : {},
+            ...payload.inputState ? { inputState: payload.inputState } : {}
           } : message
         );
       }
@@ -21016,6 +21038,158 @@ function ActiveTurnStopButton() {
   );
 }
 
+// src/pending-edit.ts
+function canEditPendingMessage(message, thread, turn, connected) {
+  return !!thread && (thread.channelType || "web") === "web" && message.direction === "in" && !!message.id && message.canEditPending === true && (message.inputState?.status === "queued" || message.inputState?.status === "steering") && connected && turn?.supportsInputEditing === true;
+}
+function canEditMessageInBranch(message) {
+  return message.direction === "in" && !!message.id && !!message.text.trim() && !message.inputState;
+}
+async function savePendingMessage(gid, thread, messageId, body) {
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/messages/${encodeURIComponent(messageId)}`;
+  const params = new URLSearchParams();
+  if (thread.messagingGroupId) {
+    params.set("channel", thread.channelType || "web");
+    params.set("mg", thread.messagingGroupId);
+  }
+  if (params.size) url += `?${params}`;
+  const result = await patchJson(url, body);
+  if (result.ok && (result.data.ok !== true || result.data.id !== messageId || typeof result.data.text !== "string")) {
+    return { ok: false, status: 502, data: { error: "invalid_confirmation" } };
+  }
+  if (result.ok && result.data.ok === true && result.data.id === messageId && typeof result.data.text === "string" && groupId.value === gid && threadId.value === thread.threadId && channelType.value === (thread.channelType || "web") && messagingGroupId.value === (thread.messagingGroupId ?? null)) {
+    chatMessages.value = chatMessages.value.map(
+      (message) => message.direction === "in" && message.id === messageId ? { ...message, text: result.data.text } : message
+    );
+  }
+  return result;
+}
+var ERRORS = {
+  input_not_pending: "This message is no longer pending. Your draft has been kept.",
+  text_changed: "The saved text changed elsewhere. Your draft has been kept; cancel and reopen to edit the latest text.",
+  steering_consumed: "This steering message has already been consumed. Your draft has been kept.",
+  runner_disconnected: "The runner is disconnected. Your draft has been kept. Retry when connected.",
+  editing_unsupported: "The running agent does not support pending edits. Your draft has been kept.",
+  edit_pending: "Save is still awaiting confirmation. Retry save to check the same request.",
+  edit_in_progress: "Another edit is still awaiting confirmation. Your draft has been kept. Retry after that edit finishes."
+};
+var PendingEditDraft = class {
+  constructor(originalText, submit) {
+    this.originalText = originalText;
+    this.submit = submit;
+    this.state = y3({ text: originalText, busy: false, error: "", unresolved: false, retry: false });
+  }
+  state;
+  request = null;
+  setText(text) {
+    if (this.state.value.busy || this.state.value.unresolved) return;
+    if (text !== this.state.value.text) this.request = null;
+    this.state.value = { ...this.state.value, text, error: "", retry: !!this.request };
+  }
+  async save() {
+    if (this.state.value.busy) return false;
+    const body = this.request ??= {
+      requestId: crypto.randomUUID(),
+      expectedText: this.originalText,
+      text: this.state.value.text
+    };
+    this.state.value = { ...this.state.value, busy: true, error: "" };
+    try {
+      const result = await this.submit(body);
+      if (result.ok && result.data.ok === true && typeof result.data.text === "string") {
+        this.state.value = { ...this.state.value, busy: false, unresolved: false, retry: false };
+        return true;
+      }
+      const code = result.data.error || `HTTP ${result.status}`;
+      this.state.value = {
+        ...this.state.value,
+        busy: false,
+        retry: true,
+        unresolved: code === "edit_pending" || result.status >= 500 && !["runner_disconnected", "editing_unsupported"].includes(code),
+        error: ERRORS[code] || `Could not save (${code}). Your draft has been kept.`
+      };
+    } catch {
+      this.state.value = {
+        ...this.state.value,
+        busy: false,
+        unresolved: true,
+        retry: true,
+        error: "Save could not be confirmed. Your draft has been kept. Retry save to check the same request."
+      };
+    }
+    return false;
+  }
+};
+
+// src/components/PendingMessageEditor.tsx
+function PendingMessageEditor({ message, thread, gid }) {
+  const [draft, setDraft] = h2(null);
+  const [open, setOpen] = h2(false);
+  const eligible = canEditPendingMessage(message, thread, activeTurn.value, turnConnected.value);
+  if (!open || !draft) {
+    const unresolved = draft && (draft.state.value.unresolved || draft.state.value.busy);
+    if (!eligible && !unresolved || !gid || !thread) return null;
+    return /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "msg-action-btn msg-edit-btn",
+        title: "Edit pending message",
+        "aria-label": "Edit pending message",
+        onClick: () => {
+          setOpen(true);
+          if (unresolved) return;
+          const targetThread = { ...thread };
+          const messageId = message.id;
+          setDraft(new PendingEditDraft(message.text, (body) => savePendingMessage(gid, targetThread, messageId, body)));
+        },
+        children: "\u270E"
+      }
+    );
+  }
+  const state = draft.state.value;
+  const changed = message.text !== draft.originalText;
+  const stateError = !eligible ? "This message is no longer editable or the runner is unavailable. Your draft has been kept." : changed ? "The saved text changed while you were editing. Your draft has been kept." : "";
+  return /* @__PURE__ */ u4("form", { class: "pending-message-editor", onPointerDown: (event) => event.stopPropagation(), onSubmit: (event) => {
+    event.preventDefault();
+    if (!state.retry && (!eligible || changed)) return;
+    void draft.save().then((saved) => {
+      if (saved) {
+        setDraft(null);
+        setOpen(false);
+      }
+    });
+  }, children: [
+    /* @__PURE__ */ u4("label", { children: [
+      "Edit pending message (text only)",
+      /* @__PURE__ */ u4(
+        "textarea",
+        {
+          autoFocus: true,
+          "aria-label": "Pending message text",
+          value: state.text,
+          disabled: state.busy || state.unresolved,
+          onInput: (event) => draft.setText(event.currentTarget.value)
+        }
+      )
+    ] }),
+    (state.error || stateError) && /* @__PURE__ */ u4("p", { role: "alert", children: state.error || stateError }),
+    (state.unresolved || state.busy) && /* @__PURE__ */ u4("p", { role: "status", children: "This request may still apply. Cancel only closes the editor; it cannot withdraw a submitted save." }),
+    /* @__PURE__ */ u4("div", { class: "pending-edit-actions", children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "submit",
+          disabled: state.busy || !state.retry && (!eligible || changed || !state.text.trim() || state.text === draft.originalText),
+          "aria-busy": state.busy,
+          children: state.busy ? "Saving\u2026" : state.retry ? "Retry save" : "Save"
+        }
+      ),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => setOpen(false), children: "Cancel" })
+    ] })
+  ] });
+}
+
 // src/question-timeline.ts
 function timestampMs(timestamp) {
   const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
@@ -21887,7 +22061,7 @@ function ForkButton({ m: m6 }) {
 function EditMessageButton({ m: m6 }) {
   const [busy, setBusy] = h2(false);
   const thread = activeThread();
-  if (!thread || m6.direction !== "in" || !m6.id || !m6.text.trim()) return null;
+  if (!thread || !canEditMessageInBranch(m6)) return null;
   const anchorId = findEditBranchAnchorId(chatMessages.value, m6.id);
   if (anchorId && (!canFork(thread) || !canSend.value)) return null;
   const onEdit = async () => {
@@ -22173,6 +22347,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
         ) }) : null,
         m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
+        /* @__PURE__ */ u4(PendingMessageEditor, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
         m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
           /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,

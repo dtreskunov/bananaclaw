@@ -8,7 +8,7 @@ vi.mock('./config.js', async (importOriginal) => ({
   DATA_DIR: '/tmp/nanoclaw-durable-link-test',
 }));
 
-import { initSessionFolder, outboundDbPath } from './session-manager.js';
+import { initSessionFolder, outboundDbPath, openInboundDb } from './session-manager.js';
 import { applyDurableRunnerEvent } from './session-link-durable.js';
 
 const ROOT = '/tmp/nanoclaw-durable-link-test';
@@ -39,6 +39,148 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 describe('applyDurableRunnerEvent', () => {
+  const editId = '64192f5f-2016-4a4b-8a10-f215f780275e';
+  function seedEdit() {
+    const db = openInboundDb(AGENT_GROUP_ID, SESSION_ID);
+    db.prepare(
+      `INSERT INTO messages_in
+        (id, seq, kind, timestamp, content, sender_user_id, channel_type, platform_id, thread_id)
+        VALUES (?, ?, ?, 'now', ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
+    ).run('in-1', 2, 'chat', JSON.stringify({ text: 'before', files: [{ filename: 'keep.txt' }] }));
+    db.prepare(
+      `INSERT INTO messages_in
+        (id, seq, kind, timestamp, content, sender_user_id, channel_type, platform_id, thread_id)
+        VALUES (?, 4, 'system', 'now', ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
+    ).run(
+      `edit-${editId}`,
+      JSON.stringify({
+        action: 'edit_input',
+        requestId: editId,
+        messageId: 'in-1',
+        expectedText: 'before',
+        replacementText: 'after',
+      }),
+    );
+    db.close();
+  }
+  function editFrame(status = 'accepted') {
+    return {
+      eventId: 'edit-result',
+      sequence: 1,
+      event: {
+        type: 'state.upsert',
+        payload: {
+          key: `input-edit:${editId}`,
+          value: JSON.stringify({ requestId: editId, messageId: 'in-1', status }),
+          updated_at: 'now',
+        },
+      },
+    };
+  }
+
+  it('commits edited host text, receipt and host replay event atomically and ignores duplicate delivery', () => {
+    seedEdit();
+    const frame = editFrame();
+    expect(applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, frame).editedInput?.text).toBe('after');
+    expect(applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, frame).editedInput?.text).toBe('after');
+    const inDb = openInboundDb(AGENT_GROUP_ID, SESSION_ID);
+    try {
+      const row = inDb.prepare("SELECT seq, content FROM messages_in WHERE id = 'in-1'").get() as {
+        seq: number;
+        content: string;
+      };
+      expect(row.seq).toBe(2);
+      expect(JSON.parse(row.content)).toEqual({ text: 'after', files: [{ filename: 'keep.txt' }] });
+      expect(
+        inDb
+          .prepare(
+            "SELECT COUNT(*) FROM pending_host_events WHERE event_type = 'message.upsert' AND json_extract(payload, '$.id') = 'in-1'",
+          )
+          .pluck()
+          .get(),
+      ).toBe(2);
+    } finally {
+      inDb.close();
+    }
+  });
+
+  it('rejects invented editing receipts without advancing the ledger', () => {
+    expect(() => applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, editFrame())).toThrow('no host request');
+    const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID));
+    expect(db.prepare('SELECT COUNT(*) FROM session_state').pluck().get()).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) FROM applied_runner_events').pluck().get()).toBe(0);
+    db.close();
+  });
+
+  it('rolls back the receipt if the host target no longer matches the authorized request', () => {
+    seedEdit();
+    const inDb = openInboundDb(AGENT_GROUP_ID, SESSION_ID);
+    inDb
+      .prepare("UPDATE messages_in SET sender_user_id = '22222222-2222-4222-8222-222222222222' WHERE id = 'in-1'")
+      .run();
+    inDb.close();
+    expect(() => applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, editFrame())).toThrow('target mismatches');
+    const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID));
+    expect(db.prepare('SELECT COUNT(*) FROM session_state').pluck().get()).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) FROM applied_runner_events').pluck().get()).toBe(0);
+    db.close();
+  });
+
+  it('persists a conflict without updating the pending message', () => {
+    seedEdit();
+    applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, editFrame('conflict'));
+    const db = openInboundDb(AGENT_GROUP_ID, SESSION_ID);
+    expect(db.prepare("SELECT json_extract(content, '$.text') FROM messages_in WHERE id = 'in-1'").pluck().get()).toBe(
+      'before',
+    );
+    db.close();
+  });
+
+  it('never reverts a later edit when an earlier receipt is replayed', () => {
+    seedEdit();
+    const first = editFrame();
+    applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, first);
+    const secondId = '64192f5f-2016-4a4b-8a10-f215f780275f';
+    const inDb = openInboundDb(AGENT_GROUP_ID, SESSION_ID);
+    inDb
+      .prepare(
+        `INSERT INTO messages_in
+        (id, seq, kind, timestamp, content, sender_user_id, channel_type, platform_id, thread_id)
+        VALUES (?, 6, 'system', 'now', ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
+      )
+      .run(
+        `edit-${secondId}`,
+        JSON.stringify({
+          action: 'edit_input',
+          requestId: secondId,
+          messageId: 'in-1',
+          expectedText: 'after',
+          replacementText: 'latest',
+        }),
+      );
+    inDb.close();
+    applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+      eventId: 'second-edit',
+      sequence: 2,
+      event: {
+        type: 'state.upsert',
+        payload: {
+          key: `input-edit:${secondId}`,
+          value: JSON.stringify({ requestId: secondId, messageId: 'in-1', status: 'accepted' }),
+          updated_at: 'now',
+        },
+      },
+    });
+    expect(applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, first).editedInput?.text).toBe('latest');
+    expect(() =>
+      applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+        ...editFrame('conflict'),
+        eventId: 'overwrite-receipt',
+        sequence: 3,
+      }),
+    ).toThrow('conflicting input edit receipt');
+  });
+
   it('applies the complete durable event vocabulary in journal order', () => {
     let sequence = 0;
     const apply = (type: string, payload: Record<string, unknown>) =>
@@ -178,9 +320,17 @@ describe('applyDurableRunnerEvent', () => {
   });
 
   it.each([
-    ['too many files', { files: Array.from({ length: 33 }, (_, index) => `file-${index}.txt`) }, 'invalid outbound files'],
+    [
+      'too many files',
+      { files: Array.from({ length: 33 }, (_, index) => `file-${index}.txt`) },
+      'invalid outbound files',
+    ],
     ['unsafe file name', { files: ['../secret.txt'] }, 'invalid outbound files'],
-    ['too many question options', { options: Array.from({ length: 51 }, (_, index) => `option-${index}`) }, 'invalid question options'],
+    [
+      'too many question options',
+      { options: Array.from({ length: 51 }, (_, index) => `option-${index}`) },
+      'invalid question options',
+    ],
   ])('rejects message content with %s', (_label, content, error) => {
     expect(() =>
       applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {

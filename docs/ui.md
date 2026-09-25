@@ -60,7 +60,7 @@ members can list, read, and send messages in every web thread; only owners and
 admins (global or scoped to the group) can delete a thread. Human messages keep
 their sender attribution in both history and live updates.
 
-Human message bubbles include an icon-only **Edit** action for starting a new
+Historical normal human message bubbles include an icon-only **Edit** action for starting a new
 branch with that message copied into the composer. It is not restricted to the
 original author, so another participant with access to the agent group may use
 it; the newly sent revision is attributed to the editor. The client branches
@@ -69,6 +69,22 @@ source thread. Editing the first message starts a blank web thread instead.
 Historical attachments remain in the source thread and are not copied into the
 composer. Read-only channel threads offer Edit only for that first-message
 blank-thread case.
+
+Your own pending native web-chat messages instead offer **Edit pending message**
+while the connected runner advertises input editing. This changes text in place,
+preserving attachments, ordering, message identity, and steering/queue intent;
+it never changes the composer or creates a branch. Other authors' messages and
+external-channel pending messages cannot be edited in place. Queued, steering,
+processing, and applied inputs never offer historical branch-edit, including
+applied steering after the response finishes.
+
+Save waits for durable runner confirmation. Conflicts, consumed inputs, and
+disconnects show an inline error and retain the draft even if its pending status
+changes. **Retry save** reuses the request identity for the same text. If a save
+is still pending or its outcome is unknown, the draft is locked until that
+request is resolved: retry checks the existing request rather than starting
+another edit. **Cancel** closes the editor without changing unsent text; it
+cannot withdraw a save already submitted, which may still apply.
 
 Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visible only to admins. `.git`, `node_modules`, `.claude-fragments`, dotfiles, and the composed `CLAUDE.md` are always hidden. `CLAUDE.local.md` is visible read-only.
 

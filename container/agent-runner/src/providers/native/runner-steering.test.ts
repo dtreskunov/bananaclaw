@@ -1,6 +1,7 @@
 import { expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import { NativeProvider } from '../native.js';
 import * as attachments from './attachments.js';
@@ -10,7 +11,7 @@ import { getPendingMessages } from '../../db/messages-in.js';
 import { getContinuation } from '../../db/session-state.js';
 import { runPollLoop } from '../../poll-loop.js';
 import * as link from '../../session-link.js';
-import { readInputState } from '../../steering.js';
+import { readInputEditReceipt, readInputState } from '../../steering.js';
 import type { ProviderEvent } from '../types.js';
 
 function gate() {
@@ -92,8 +93,8 @@ it('runs real native steering through runPollLoop as one durable batch and one l
   ).run();
   const insert = (id: string, seq: number, turnId?: string) => {
     getInboundDb().prepare(
-      `INSERT INTO messages_in (id, seq, kind, timestamp, status, channel_type, platform_id, thread_id, trigger, content)
-       VALUES (?, ?, 'chat', datetime('now'), 'pending', 'web', 'room', 'thread', 1, ?)`,
+      `INSERT INTO messages_in (id, seq, kind, timestamp, status, channel_type, platform_id, thread_id, trigger, sender_identity, content)
+       VALUES (?, ?, 'chat', datetime('now'), 'pending', 'web', 'room', 'thread', 1, 'web:owner', ?)`,
     ).run(id, seq, JSON.stringify({
       text: id,
       ...(turnId ? { inputHandling: { mode: 'steer', turnId } } : {}),
@@ -116,10 +117,12 @@ it('runs real native steering through runPollLoop as one durable batch and one l
     };
   });
   const loop = runPollLoop({ provider, providerName: 'native', cwd: root, signal: controller.signal });
+  const editRequestId = randomUUID();
   try {
     await preparationStarted.promise;
     const turn = active as link.ActiveTurn | null;
     expect(turn?.supportsSteering).toBe(true);
+    expect(turn?.supportsInputEditing).toBe(true);
     insert('guidance', 4, turn!.id);
     await until(() => readInputState('guidance')?.status === 'steering');
     expect(requests).toHaveLength(0);
@@ -127,13 +130,24 @@ it('runs real native steering through runPollLoop as one durable batch and one l
     expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('guidance'))
       .toBeNull();
 
+    getInboundDb().prepare(
+      `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id, trigger, sender_identity, content)
+       VALUES (?, 6, 'system', datetime('now'), 'web', 'room', 'thread', 0, 'web:owner', ?)`,
+    ).run(`edit-${editRequestId}`, JSON.stringify({
+      action: 'edit_input', requestId: editRequestId, messageId: 'guidance',
+      expectedText: 'guidance', replacementText: 'edited direction',
+    }));
+    link.emitHostEventForTesting();
+    await until(() => readInputEditReceipt(editRequestId)?.status === 'accepted');
     preparationRelease.resolve();
     await until(() => requests.length === 1);
     expect(JSON.stringify(requests[0].messages)).not.toContain('guidance');
     firstRelease.resolve();
     await until(() => requests.length === 2 && readInputState('guidance')?.status === 'applied');
     expect(active?.id).toBe(turn!.id);
-    expect(JSON.stringify(requests[1].messages)).toContain('guidance');
+    expect(JSON.stringify(requests[1].messages)).toContain('edited direction');
+    expect(JSON.stringify(requests[1].messages)).not.toContain('edit_input');
+    expect(JSON.stringify(requests[1].messages)).not.toContain('>guidance<');
     expect(JSON.stringify(requests[1].messages)).toContain('original draft');
     expect(getPendingMessages()).toEqual([]);
     expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('guidance'))
@@ -146,7 +160,10 @@ it('runs real native steering through runPollLoop as one durable batch and one l
       (getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('guidance') as
         { status: string } | null)?.status === 'completed');
     expect(getOutboundDb().prepare('SELECT message_id, status FROM processing_ack ORDER BY message_id').all())
-      .toEqual([{ message_id: 'guidance', status: 'completed' }, { message_id: 'initial', status: 'completed' }]);
+      .toEqual([
+        { message_id: `edit-${editRequestId}`, status: 'completed' },
+        { message_id: 'guidance', status: 'completed' }, { message_id: 'initial', status: 'completed' },
+      ]);
     expect(getOutboundDb().prepare('SELECT platform_id, thread_id FROM messages_out').all())
       .toEqual([{ platform_id: 'room', thread_id: 'thread' }]);
     expect(getOutboundDb().prepare('SELECT input_tokens, output_tokens, num_turns FROM turn_usage').all())

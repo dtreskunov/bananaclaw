@@ -212,7 +212,7 @@ export function reassignIndexedMessages(
  * Index a single message. Idempotent (INSERT OR IGNORE).
  * Designed to be called fire-and-forget from the routing/delivery hot path.
  */
-export function indexMessage(msg: IndexableMessage): void {
+export function indexMessage(msg: IndexableMessage, options: { replaceText?: boolean } = {}): void {
   if (!db) return; // search index not initialised — skip silently
   if (!msg.text.trim()) return; // no text to index
 
@@ -244,6 +244,11 @@ export function indexMessage(msg: IndexableMessage): void {
         text: msg.text,
         senderUserId: msg.senderUserId ?? null,
       });
+    if (options.replaceText) {
+      getSearchDb().prepare(
+        'UPDATE message_index SET text = ? WHERE id = ? AND session_id = ? AND agent_group_id = ? AND direction = ?',
+      ).run(msg.text, id, msg.sessionId, msg.agentGroupId, msg.direction);
+    }
   } catch (err) {
     log.warn('Search index: failed to index message', { messageId: msg.id, err });
   }

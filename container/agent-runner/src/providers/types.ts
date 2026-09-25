@@ -12,6 +12,7 @@ export interface AgentProvider {
    */
   readonly supportsNativeSlashCommands: boolean;
   readonly supportsSteering?: boolean;
+  readonly supportsInputEditing?: boolean;
 
   /** IDs durably incorporated into this continuation, for runner ack recovery. */
   appliedSteering?(continuation: string, ids: string[]): string[];
@@ -209,6 +210,8 @@ export interface AgentQuery {
    * Acceptance is not ingestion: only steering_applied acknowledges ingestion.
    */
   steer?(input: SteeringInput): boolean;
+  /** Synchronously replace an accepted input only while it is still buffered. */
+  replaceSteering?(input: SteeringInput): boolean;
 
   /** Push a follow-up message into the active query. */
   push(

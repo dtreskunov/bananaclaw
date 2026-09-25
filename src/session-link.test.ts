@@ -81,10 +81,12 @@ describe('current turn control', () => {
   it('accepts an optional native steering capability and replays it with the active turn', async () => {
     const socket = await connect();
     socket.write(`${JSON.stringify({
-      v: 3, type: 'turn.state', turn: { ...ACTIVE_TURN, supportsSteering: true },
+      v: 3, type: 'turn.state', turn: { ...ACTIVE_TURN, supportsSteering: true, supportsInputEditing: true },
     })}\n`);
     await waitFor(() => getSessionActiveTurn(SESSION_ID).turn?.supportsSteering === true);
-    expect(getSessionActiveTurn(SESSION_ID).turn).toEqual({ ...ACTIVE_TURN, supportsSteering: true });
+    expect(getSessionActiveTurn(SESSION_ID).turn).toEqual({
+      ...ACTIVE_TURN, supportsSteering: true, supportsInputEditing: true,
+    });
     socket.destroy();
   });
 
@@ -210,6 +212,7 @@ describe('current turn control', () => {
     { ...ACTIVE_TURN, channelType: 'x'.repeat(1025) },
     { ...ACTIVE_TURN, sessionId: 'forged' },
     { ...ACTIVE_TURN, supportsSteering: 'true' },
+    { ...ACTIVE_TURN, supportsInputEditing: 'true' },
     [],
     undefined,
   ])('rejects malformed turn state %j', async (turn) => {

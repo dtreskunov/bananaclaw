@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
+import { INPUT_EDIT_PREFIX, projectInputEditResult, type EditedInput } from './pending-input-edit.js';
 
 const MAX_ID_CHARS = 256;
 const MAX_STATE_CHARS = 1024 * 1024;
@@ -24,6 +25,7 @@ export interface DurableRunnerFrame {
 export interface DurableApplyResult {
   deliveryReady: boolean;
   processingReady: boolean;
+  editedInput?: EditedInput;
 }
 
 function dbPath(agentGroupId: string, sessionId: string, name: 'inbound.db' | 'outbound.db'): string {
@@ -363,6 +365,9 @@ export function applyDurableRunnerEvent(
   db.pragma('busy_timeout = 5000');
   let deliveryReady = false;
   let processingReady = false;
+  let editedInput: EditedInput | undefined;
+  const isInputEdit = frame.event.type === 'state.upsert' &&
+    typeof payload.key === 'string' && payload.key.startsWith(INPUT_EDIT_PREFIX);
   const digest = crypto
     .createHash('sha256')
     .update(JSON.stringify({ type: frame.event.type, payload }))
@@ -379,6 +384,8 @@ export function applyDurableRunnerEvent(
     }
   }
   try {
+    // DELETE journals make the receipt and host text one atomic multi-DB commit.
+    if (isInputEdit) db.prepare('ATTACH DATABASE ? AS input_edit_host').run(dbPath(agentGroupId, sessionId, 'inbound.db'));
     db.transaction(() => {
       const existing = db
         .prepare('SELECT sequence, event_type, event_digest FROM applied_runner_events WHERE event_id = ?')
@@ -392,6 +399,7 @@ export function applyDurableRunnerEvent(
           throw new Error('conflicting durable event replay');
         deliveryReady = frame.event.type === 'turn.persisted';
         processingReady = frame.event.type === 'batch.persisted';
+        if (isInputEdit) editedInput = projectInputEditResult(db, String(payload.key), String(payload.value), true);
         return;
       }
       const lastSequence = (
@@ -411,11 +419,18 @@ export function applyDurableRunnerEvent(
             throw new Error('invalid processing.delete payload');
           db.prepare('DELETE FROM processing_ack WHERE message_id = ?').run(payload.message_id);
           break;
-        case 'state.upsert':
+        case 'state.upsert': {
+          const priorEdit = isInputEdit
+            ? db.prepare('SELECT value FROM session_state WHERE key = ?').get(payload.key) as { value: string } | undefined
+            : undefined;
+          if (priorEdit && priorEdit.value !== payload.value) throw new Error('conflicting input edit receipt');
           applyState(db, payload);
+          if (isInputEdit) editedInput = projectInputEditResult(db, String(payload.key), String(payload.value), !!priorEdit);
           break;
+        }
         case 'state.delete':
           if (!exactKeys(payload, ['key']) || !text(payload.key)) throw new Error('invalid state.delete payload');
+          if (payload.key.startsWith(INPUT_EDIT_PREFIX)) throw new Error('input edit receipts are immutable');
           db.prepare('DELETE FROM session_state WHERE key = ?').run(payload.key);
           break;
         case 'container.upsert':
@@ -454,5 +469,5 @@ export function applyDurableRunnerEvent(
     db.close();
   }
 
-  return { deliveryReady, processingReady };
+  return { deliveryReady, processingReady, ...(editedInput ? { editedInput } : {}) };
 }

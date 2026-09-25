@@ -288,7 +288,7 @@ describe('durable receipt rendering', () => {
       kind: 'history',
       threadId: 'thread',
       canSend: true,
-      activeTurn: { id: 'captured-turn', status: 'running', supportsSteering: true },
+      activeTurn: { id: 'captured-turn', status: 'running', supportsSteering: true, supportsInputEditing: true },
       connected: true,
       messages: [
         {
@@ -297,14 +297,38 @@ describe('durable receipt rendering', () => {
           text: 'Update',
           timestamp: '2026-09-25T00:00:00Z',
           inputState: { messageId: 'message', status: 'queued' },
+          canEditPending: true,
         },
       ],
     });
     expect(chatMessages.value[0].inputState?.status).toBe('queued');
     expect(activeTurn.value?.supportsSteering).toBe(true);
+    expect(activeTurn.value?.supportsInputEditing).toBe(true);
+    expect(chatMessages.value[0].canEditPending).toBe(true);
     receive({
       kind: 'input-state',
-      states: [{ messageId: 'message', inputState: { messageId: 'message', status: 'applied' } }],
+      states: [
+        {
+          messageId: 'message',
+          text: 'Edited update',
+          canEditPending: true,
+          inputState: { messageId: 'message', status: 'steering' },
+        },
+      ],
+    });
+    expect(chatMessages.value[0].text).toBe('Edited update');
+    expect(chatMessages.value[0].canEditPending).toBe(true);
+    receive({
+      kind: 'input-state',
+      states: [{ messageId: 'message', inputState: { messageId: 'message', status: 'queued' } }],
+    });
+    expect(chatMessages.value[0].text).toBe('Edited update');
+    expect(chatMessages.value[0].canEditPending).toBe(true);
+    receive({
+      kind: 'input-state',
+      states: [
+        { messageId: 'message', canEditPending: false, inputState: { messageId: 'message', status: 'applied' } },
+      ],
     });
     receive({
       kind: 'inbound',
@@ -314,6 +338,7 @@ describe('durable receipt rendering', () => {
     });
     expect(chatMessages.value).toHaveLength(1);
     expect(chatMessages.value[0].inputState?.status).toBe('applied');
+    expect(chatMessages.value[0].canEditPending).toBe(false);
     receive({ kind: 'input-state', states: [{ messageId: 'message', inputState: null }] });
     expect(chatMessages.value[0].inputState).toBeUndefined();
     const activity = [{ ts: '1', text: 'Current turn trace waiting for its result' }];

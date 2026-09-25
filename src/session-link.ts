@@ -9,6 +9,9 @@ import type { ActivityLine, UsageSnapshot } from './channels/adapter.js';
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
 import { applyDurableRunnerEvent } from './session-link-durable.js';
+import { getSession } from './db/sessions.js';
+import { indexMessage } from './search-index.js';
+import { INPUT_EDIT_PREFIX } from './pending-input-edit.js';
 
 const PROTOCOL_VERSION = 3;
 export const SESSION_LINK_VERSION = 'v3';
@@ -33,6 +36,7 @@ export interface SessionActiveTurn {
   platformId: string;
   threadId: string | null;
   supportsSteering?: boolean;
+  supportsInputEditing?: boolean;
 }
 
 export type SessionTurnStopResult =
@@ -521,10 +525,25 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
     if (result.processingReady) {
       for (const listener of durableProcessingListeners) listener(sessionId);
     }
+    if (result.editedInput) {
+      const input = result.editedInput;
+      try {
+        indexMessage({
+          id: input.id, sessionId, agentGroupId: entry.agentGroupId,
+          messagingGroupId: getSession(sessionId)?.messaging_group_id ?? null,
+          channelType: input.channel_type, threadId: input.thread_id, direction: 'in',
+          timestamp: input.timestamp, text: input.text, senderUserId: input.sender_user_id,
+        }, { replaceText: true });
+      } catch (err) {
+        log.warn('Failed to index edited input', { sessionId, messageId: input.id, err });
+      }
+      flushHostEvents(sessionId, entry);
+    }
     const stateKey = payload && typeof payload === 'object' && 'key' in payload ? payload.key : undefined;
     if (
       event.type === 'processing.upsert' || event.type === 'processing.delete' ||
-      (event.type === 'state.upsert' && typeof stateKey === 'string' && stateKey.startsWith('input:'))
+      (event.type === 'state.upsert' && typeof stateKey === 'string' &&
+        (stateKey.startsWith('input:') || stateKey.startsWith(INPUT_EDIT_PREFIX)))
     ) emit(sessionId, 'input.state');
     return true;
   }
@@ -543,8 +562,10 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
           !hasOnlyKeys(turn, [
             'id', 'status', 'channelType', 'platformId', 'threadId',
             ...('supportsSteering' in turn ? ['supportsSteering'] : []),
+            ...('supportsInputEditing' in turn ? ['supportsInputEditing'] : []),
           ]) ||
           (turn.supportsSteering !== undefined && typeof turn.supportsSteering !== 'boolean') ||
+          (turn.supportsInputEditing !== undefined && typeof turn.supportsInputEditing !== 'boolean') ||
           !isSessionTurnId(turn.id) ||
           (turn.status !== 'running' && turn.status !== 'stopping') ||
           !isTurnRoutingText(turn.channelType) ||
