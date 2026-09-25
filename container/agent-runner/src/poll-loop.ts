@@ -1350,9 +1350,7 @@ async function processQuery(
         // counting there would give every call to the same tool an identical
         // signature — eight ordinary consecutive bash calls would trip the
         // streak guard. Wait for the first event that carries the detail, or
-        // for the call to finish: fx only reports what a tool was invoked
-        // with on the terminal event, so counting at `running` would collapse
-        // its calls the same way.
+        // for the call to finish if no arguments are reported.
         const detailKnown =
           event.step.detail !== undefined || event.step.status === 'completed' || event.step.status === 'error';
         if (detailKnown && !countedToolCallIds.has(event.step.id)) {

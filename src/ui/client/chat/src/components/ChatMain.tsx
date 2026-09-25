@@ -184,8 +184,7 @@ function stepHeadline(s: TraceStep): StepHeadline {
         };
       }
       if (s.title) {
-        // fx names tools by action verb ("Running"), so none of the sets above
-        // match and the argument would otherwise never reach the headline.
+        // Preserve provider-supplied titles and details for unrecognized tools.
         return {
           action: s.title,
           ...(s.detail ? { subject: singleLine(s.detail), codeSubject: true } : {}),

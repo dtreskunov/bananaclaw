@@ -164,7 +164,7 @@ See [audio preparation limits](build-and-runtime.md#audio-attachment-preparation
 Unknown or text-only model capabilities, unsupported adapters, invalid media,
 and processing limits or failures retain the original file reference, with an
 explicit reason in the model prompt and runner logs. Anthropic Messages,
-OpenCode's current file-part adapter, Claude, and fx do not embed native audio.
+OpenCode's current file-part adapter and Claude do not embed native audio.
 These agents can still access the original file through their tools. Catalog
 audio support does **not** promise every endpoint accepts every audio format;
 provider rejection is surfaced rather than retried with a different attachment

@@ -733,13 +733,9 @@ function resolveEnv(name: string): string | undefined {
 /**
  * Sync skills in .claude-shared/skills/ to match the container.json selection.
  *
- * By default each entry is a symlink to a container path (/app/skills/<name>
+ * Each entry is a symlink to a container path (/app/skills/<name>
  * for built-ins, /app/skills-installed/<name> for marketplace installs),
- * dangling on the host but valid inside the container. fx's skill discovery
- * refuses to follow symlinked candidates — it reports every one as "SKILL.md is
- * unreadable or not a regular file" and loads no skills at all — so for fx we
- * copy the real directories out instead. The copy is refreshed on every spawn
- * so upstream skill edits still propagate.
+ * dangling on the host but valid inside the container.
  */
 export function syncSkillSymlinks(
   claudeDir: string,
@@ -766,7 +762,6 @@ export function syncSkillSymlinks(
       (skill.origin !== 'builtin' || selection === 'all' || selection.includes(skill.slug)),
   );
   const bySlug = new Map(desired.map((skill) => [skill.slug, skill]));
-  const materialize = containerConfig.provider === 'fx';
 
   // Keep this effective shared-skill surface selection-exact. Group-local and
   // user-installed skills live under /workspace/agent/skills instead.
@@ -778,24 +773,14 @@ export function syncSkillSymlinks(
     } catch {
       continue;
     }
-    if (!bySlug.has(entry) || (materialize && isSymlink) || (!materialize && !isSymlink)) {
+    if (!bySlug.has(entry) || !isSymlink) {
       fs.rmSync(entryPath, { recursive: true, force: true });
     }
   }
 
-  // Create desired skills: real copies for fx, container-path symlinks otherwise.
+  // Create container-path symlinks for the desired skills.
   for (const skill of desired) {
     const linkPath = path.join(skillsDir, skill.slug);
-    if (materialize) {
-      // Refresh unconditionally — skills are small text files and this keeps
-      // the copy from drifting behind the source. `dereference` matters: a
-      // skill dir may itself be a symlink into a checkout outside the repo,
-      // and copying it as a symlink would reproduce a host path the container
-      // cannot resolve.
-      fs.rmSync(linkPath, { recursive: true, force: true });
-      fs.cpSync(skill.hostPath, linkPath, { recursive: true, dereference: true });
-      continue;
-    }
     let currentTarget: string | null = null;
     try {
       currentTarget = fs.readlinkSync(linkPath);

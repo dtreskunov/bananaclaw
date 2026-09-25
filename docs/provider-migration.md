@@ -42,3 +42,37 @@ ncl groups restart --id <group-id>
 ```
 
 Rollback is lossless by construction: the per-provider continuation slot means Claude resumes its previous session (subject to normal transcript-rotation age limits), and `CLAUDE.local.md` was never modified by the switch. Memory written **while on the other provider** lives in that provider's store — run `/migrate-memory` again if you want it carried back.
+
+## Retired providers
+
+The fx backend has been removed, including its install skill, gateway/MCP
+bridges, model catalog, state-fork adapter, and container binary. It is no
+longer offered or accepted by the admin UI, and the runner rejects its provider
+name rather than silently using a different model or credential.
+
+Before upgrading an installation that used it:
+
+1. **Detect:** query explicit group selections:
+   ```bash
+   pnpm exec tsx scripts/q.ts data/v2.db "SELECT agent_group_id FROM container_configs WHERE provider = 'fx'"
+   ```
+   Also check whether `DEFAULT_PROVIDER` selects the retired backend.
+2. **Switch:** choose an installed provider and a model from that provider's
+   catalog, using `ncl groups config update --id <group-id> --provider <provider>
+   --model <model-id>`. Change the fleet default if necessary. The old model ID
+   is not assumed to be valid on the replacement endpoint.
+3. **Rebuild:** rebuild the base image and any configured derivative images,
+   rebuild the host/UI, restart the host service, and recycle affected agent
+   containers. Already-built images still contain any previously installed
+   binary until rebuilt.
+4. **Verify:** the admin provider picker no longer offers the retired backend,
+   the rebuilt image's `command -v fx` returns no path, and affected groups can
+   respond using the replacement provider.
+
+`INSTALL_FX`, `FX_*`, and `DEFAULT_MODEL_FX` settings are obsolete and can be
+removed from local configuration. A Vercel gateway credential may be used by
+other clients, so credential revocation is a separate operator decision.
+Historical transcripts, continuation slots, and per-session state directories
+are not deleted; they remain available for manual memory migration or rollback.
+Rollback requires restoring the previous code and images before selecting the
+retired provider again.

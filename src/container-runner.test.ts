@@ -89,7 +89,7 @@ describe('runnerStateStoreMount', () => {
 });
 
 describe('syncSkillSymlinks', () => {
-  it('converts selected fx copies back to symlinks and removes unselected shared copies', () => {
+  it('converts selected copied skills to symlinks and removes unselected shared copies', () => {
     const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
     const claudeDir = path.join(root, 'claude');
     const shared = path.join(root, 'shared');
@@ -97,7 +97,7 @@ describe('syncSkillSymlinks', () => {
       fs.mkdirSync(path.join(shared, name), { recursive: true });
       fs.writeFileSync(path.join(shared, name, 'SKILL.md'), `---\nname: ${name}\ndescription: test\n---\n`);
       fs.mkdirSync(path.join(claudeDir, 'skills', name), { recursive: true });
-      fs.writeFileSync(path.join(claudeDir, 'skills', name, 'SKILL.md'), 'old fx copy');
+      fs.writeFileSync(path.join(claudeDir, 'skills', name, 'SKILL.md'), 'old copy');
     }
     fs.mkdirSync(path.join(claudeDir, 'skills', 'custom'), { recursive: true });
 

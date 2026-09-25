@@ -15,7 +15,7 @@
 import { recordSkippedProvider } from './provider-registry.js';
 
 const REQUIRED_PROVIDER_MODULES = ['./claude.js', './mock.js'] as const;
-const OPTIONAL_PROVIDER_MODULES = ['./opencode.js', './fx.js', './native.js'] as const;
+const OPTIONAL_PROVIDER_MODULES = ['./opencode.js', './native.js'] as const;
 
 /** './opencode.js' -> 'opencode' — module basenames are the provider names. */
 function moduleName(mod: string): string {

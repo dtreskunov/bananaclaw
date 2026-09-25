@@ -2,12 +2,8 @@
  * Shared model-limit catalog for providers that have to look their own limits
  * up.
  *
- * Each provider resolves models against a different catalog — OpenCode against
- * models.dev, fx against the Vercel AI Gateway — and the two disagree about
- * the same model (minimax-m3: 128k vs 1M output). So the *source* stays
- * per-provider; only the caching, lookup and normalization are shared, because
- * that is where the two implementations had already drifted into recording
- * different things from the same data.
+ * Catalog sources stay per-provider (OpenCode uses models.dev); only caching,
+ * lookup and normalization are shared.
  *
  * Claude needs none of this: its SDK reports limits with the usage itself.
  */
@@ -23,8 +19,7 @@ export interface RawLimits {
 /**
  * An output cap equal to (or above) the whole context window is the absence of
  * a cap, not a cap — recording it renders a budget bar that can never move.
- * Both catalogs do this: 47 of the gateway's 226 models and 1309 of
- * models.dev's 6652 report `output >= context`.
+ * Catalogs can report `output >= context` when no separate output cap exists.
  */
 export function normalizeLimits(raw: RawLimits | undefined): ModelLimits {
   if (!raw) return {};

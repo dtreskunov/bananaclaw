@@ -15,9 +15,7 @@
  *                one known prefix peeled off, because the Claude provider
  *                passes the model straight to the Anthropic Messages API,
  *                which wants a bare id (e.g. "claude-sonnet-4-5-20250929").
- *   - fx       → the Vercel AI Gateway's own coding-agent catalog
- *                (./models-gateway-catalog.ts), which is the list fx resolves
- *                against. Ids are `<upstream>/<model-id>` and stored verbatim.
+ *   - native   → models.dev restricted to directly supported transports.
  *   - mock     → no UI catalog; not exposed by the admin endpoint.
  *
  * `claude` used to be served from OpenRouter's /api/v1/models filtered to
@@ -40,7 +38,6 @@
 import { log } from '../../../log.js';
 import { proxyFetch } from './onecli-proxy.js';
 import { listNativeModels, listOpenCodeModels } from './models-dev-catalog.js';
-import { listFxModels } from './models-gateway-catalog.js';
 
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -182,7 +179,7 @@ function mapModel(m: OpenRouterModel, bareId: string): ModelSuggestion {
 
 export interface ModelCatalogResult {
   models: ModelSuggestion[];
-  source: 'openrouter' | 'models.dev' | 'vercel-gateway' | 'unavailable';
+  source: 'openrouter' | 'models.dev' | 'unavailable';
   /** Label for the upstream catalog (e.g. "openrouter", "anthropic"). */
   upstream: string | null;
 }
@@ -220,15 +217,6 @@ export async function listModelsForProvider(
     const models = await listNativeModels(filter);
     if (!models) return { models: [], source: 'unavailable', upstream: null };
     return { models, source: 'models.dev', upstream: filter?.upstream ?? null };
-  }
-
-  // fx resolves models from the Vercel AI Gateway, so the picker is backed by
-  // the gateway's own catalog rather than models.dev — the ids there are the
-  // literal values fx puts in its `ai-language-model-id` header.
-  if (agentProvider === 'fx') {
-    const models = await listFxModels(filter);
-    if (!models) return { models: [], source: 'unavailable', upstream: null };
-    return { models, source: 'vercel-gateway', upstream: filter?.upstream ?? null };
   }
 
   // claude is the same catalog pinned to one upstream. Peeling the prefix is

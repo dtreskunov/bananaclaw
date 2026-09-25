@@ -47,7 +47,7 @@ describe('resolveDefaultModel', () => {
     process.env.DEFAULT_PROVIDER = 'opencode';
     process.env.DEFAULT_MODEL = 'minimax/MiniMax-M3';
     expect(resolveDefaultModel('claude')).toBeUndefined();
-    expect(resolveDefaultModel('fx')).toBeUndefined();
+    expect(resolveDefaultModel('uninstalled-provider')).toBeUndefined();
   });
 
   it('gives each provider its own scoped default', () => {

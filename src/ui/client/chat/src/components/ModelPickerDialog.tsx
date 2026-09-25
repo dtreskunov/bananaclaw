@@ -36,7 +36,7 @@ interface ModelSuggestion {
 
 interface ModelsResponse {
   models: ModelSuggestion[];
-  source: 'openrouter' | 'models.dev' | 'vercel-gateway' | 'unavailable';
+  source: 'openrouter' | 'models.dev' | 'unavailable';
   upstream: string | null;
 }
 
@@ -180,7 +180,7 @@ export function ModelPickerDialog({
 }: ModelPickerDialogProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelSuggestion[]>([]);
-  const [source, setSource] = useState<'openrouter' | 'models.dev' | 'vercel-gateway' | 'unavailable'>('unavailable');
+  const [source, setSource] = useState<ModelsResponse['source']>('unavailable');
   const [loading, setLoading] = useState(false);
 
   // Filters

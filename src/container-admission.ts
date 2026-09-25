@@ -68,15 +68,13 @@ const EXTRA_MCP_SERVER_MB = 100;
 
 /**
  * The provider's own inference process. `claude` and `opencode` shell out to a
- * Node CLI that holds the conversation and streams the model; `fx` is a
- * statically linked binary with a much smaller floor. `native` has no
+ * Node CLI that holds the conversation and streams the model. `native` has no
  * subprocess at all — it streams in-process via the ai SDK — but is still
  * charged for that work happening inside the runner.
  */
 const PROVIDER_SUBPROCESS_MB: Record<string, number> = {
   claude: 350,
   opencode: 300,
-  fx: 200,
   native: 100,
   mock: 0,
 };
