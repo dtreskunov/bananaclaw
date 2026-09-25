@@ -17681,6 +17681,9 @@ function showsMidTurnLabel(deliveryOrigin, isLatest, turnActive) {
 function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
+function showsTurnActivity(turn, typing, threadId2, loading) {
+  return (!!turn || typing) && !!threadId2 && !loading;
+}
 
 // ../../shared/stopped-turn.ts
 function readStoppedTurnStats(content) {
@@ -17720,6 +17723,7 @@ function awaitConfirmation(turnId) {
 function applyTurnState(turn, connected) {
   const changed = activeTurn.value?.id !== turn?.id;
   if (changed) clearPendingStop();
+  if (changed && turn) refs.carryActivity = [];
   n2(() => {
     if (changed) stopRequest.value = null;
     activeTurn.value = turn;
@@ -18225,6 +18229,255 @@ function playCompletionChime() {
   setTimeout(() => tone(880, 180, 0.05), 110);
 }
 
+// src/components/MobileDialog.tsx
+function MobileDialog(props) {
+  const {
+    title,
+    ariaLabel,
+    onClose,
+    onBack,
+    backLabel = "Back",
+    actions,
+    children,
+    className,
+    backdropClassName,
+    maxWidth,
+    closeDisabled,
+    role = "dialog",
+    onKeyDown
+  } = props;
+  const onBackdrop = (event) => {
+    if (event.target === event.currentTarget && !closeDisabled) onClose();
+  };
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: `mobile-dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`,
+      onClick: onBackdrop,
+      onKeyDown,
+      tabIndex: onKeyDown ? -1 : void 0,
+      children: /* @__PURE__ */ u4(
+        "div",
+        {
+          class: `mobile-dialog${className ? ` ${className}` : ""}`,
+          role,
+          "aria-modal": "true",
+          "aria-label": ariaLabel ?? title,
+          style: maxWidth ? `max-width:${maxWidth}` : void 0,
+          children: [
+            /* @__PURE__ */ u4("header", { class: "mobile-dialog-head", children: [
+              onBack ? /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": backLabel, onClick: onBack, children: "\u2039" }) : null,
+              /* @__PURE__ */ u4("span", { class: "mobile-dialog-title", children: title }),
+              actions ? /* @__PURE__ */ u4("div", { class: "mobile-dialog-actions", children: actions }) : null,
+              /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Close", disabled: closeDisabled, onClick: onClose, children: "\u2715" })
+            ] }),
+            children
+          ]
+        }
+      )
+    }
+  );
+}
+function MobileDialogList({ children, className }) {
+  return /* @__PURE__ */ u4("div", { class: `mobile-dialog-list${className ? ` ${className}` : ""}`, children });
+}
+function MobileDialogItem(props) {
+  const { label, sublabel, onClick, type = "button", active, chevron, title, className } = props;
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type,
+      class: `mobile-dialog-item${active ? " active" : ""}${className ? ` ${className}` : ""}`,
+      "aria-current": active ? "true" : void 0,
+      title,
+      onClick,
+      children: [
+        /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-label", children: label }),
+        sublabel ? /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-sublabel", children: sublabel }) : null,
+        chevron ? /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-chevron", "aria-hidden": "true", children: "\u203A" }) : null
+      ]
+    }
+  );
+}
+function MobileDialogDivider() {
+  return /* @__PURE__ */ u4("div", { class: "mobile-dialog-divider", "aria-hidden": "true" });
+}
+function MobileDialogFooter({ children, className }) {
+  return /* @__PURE__ */ u4("footer", { class: `mobile-dialog-footer${className ? ` ${className}` : ""}`, children });
+}
+
+// src/components/PromptModal.tsx
+var promptRequest = y3(null);
+function BasePathBreadcrumb({ path }) {
+  return /* @__PURE__ */ u4("nav", { class: "prompt-path-breadcrumb path-breadcrumb", "aria-label": "Base path", children: /* @__PURE__ */ u4("div", { class: "path-breadcrumb-track", children: [
+    /* @__PURE__ */ u4("span", { class: "path-breadcrumb-segment root", children: "~" }),
+    path.split("/").filter(Boolean).map((segment, index) => /* @__PURE__ */ u4("span", { class: "path-breadcrumb-node", children: [
+      /* @__PURE__ */ u4("span", { class: "path-breadcrumb-separator", "aria-hidden": "true", children: "\u203A" }),
+      /* @__PURE__ */ u4("span", { class: "path-breadcrumb-segment", children: segment })
+    ] }, `${segment}-${index}`))
+  ] }) });
+}
+function requestInput(opts) {
+  return new Promise((resolve) => {
+    promptRequest.value = { ...opts, resolve };
+  });
+}
+function PromptModal() {
+  const req = promptRequest.value;
+  const [value, setValue] = h2("");
+  const [error, setError] = h2(null);
+  const inputRef = A2(null);
+  y2(() => {
+    if (!req) return;
+    setValue(req.initialValue || "");
+    setError(null);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [req]);
+  if (!req) return null;
+  function close(result) {
+    const r4 = promptRequest.value;
+    promptRequest.value = null;
+    r4?.resolve(result);
+  }
+  function onSubmit(e4) {
+    e4.preventDefault();
+    const trimmed = value.trim();
+    const validationError = trimmed ? promptRequest.peek()?.validate?.(trimmed) : null;
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    close(trimmed ? trimmed : null);
+  }
+  function onKey(e4) {
+    if (e4.key === "Escape") close(null);
+  }
+  return /* @__PURE__ */ u4(MobileDialog, { title: req.title, onClose: () => close(null), maxWidth: "420px", children: /* @__PURE__ */ u4("form", { class: "mobile-dialog-form", onSubmit, children: [
+    /* @__PURE__ */ u4("div", { class: "settings-body", children: [
+      req.label ? /* @__PURE__ */ u4("label", { style: "display:block;margin-bottom:6px;font-size:12px;color:var(--muted)", children: req.label }) : null,
+      req.basePath !== void 0 ? /* @__PURE__ */ u4(BasePathBreadcrumb, { path: req.basePath }) : null,
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          ref: inputRef,
+          type: "text",
+          class: "rail-search-input prompt-input",
+          value,
+          placeholder: req.placeholder || "",
+          "aria-invalid": !!error,
+          "aria-describedby": error ? "prompt-input-error" : void 0,
+          onInput: (e4) => {
+            setValue(e4.currentTarget.value);
+            setError(null);
+          },
+          onKeyDown: onKey
+        }
+      ),
+      error ? /* @__PURE__ */ u4("div", { id: "prompt-input-error", style: "margin-top:6px;color:var(--danger);font-size:12px", children: error }) : null
+    ] }),
+    /* @__PURE__ */ u4(MobileDialogFooter, { children: [
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(null), children: "Cancel" }),
+      /* @__PURE__ */ u4("button", { type: "submit", class: "primary", children: req.okLabel || "OK" })
+    ] })
+  ] }) });
+}
+var confirmRequest = y3(null);
+function requestConfirm(opts) {
+  return new Promise((resolve) => {
+    confirmRequest.value = { ...opts, resolve };
+  });
+}
+function ConfirmModal() {
+  const req = confirmRequest.value;
+  const okRef = A2(null);
+  y2(() => {
+    if (!req) return;
+    requestAnimationFrame(() => okRef.current?.focus());
+  }, [req]);
+  if (!req) return null;
+  function close(result) {
+    const r4 = confirmRequest.value;
+    confirmRequest.value = null;
+    r4?.resolve(result);
+  }
+  function onKey(e4) {
+    if (e4.key === "Escape") close(false);
+    else if (e4.key === "Enter") close(true);
+  }
+  return /* @__PURE__ */ u4(
+    MobileDialog,
+    {
+      title: req.title,
+      onClose: () => close(false),
+      maxWidth: "420px",
+      role: "alertdialog",
+      onKeyDown: onKey,
+      children: [
+        /* @__PURE__ */ u4("div", { class: "settings-body", style: "white-space:pre-wrap", children: req.message }),
+        /* @__PURE__ */ u4(MobileDialogFooter, { children: [
+          /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(false), children: req.cancelLabel || "Cancel" }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              ref: okRef,
+              type: "button",
+              class: req.danger ? "danger" : "primary",
+              onClick: () => close(true),
+              children: req.okLabel || "OK"
+            }
+          )
+        ] })
+      ]
+    }
+  );
+}
+var choiceRequest = y3(null);
+function requestChoice(opts) {
+  return new Promise((resolve) => {
+    choiceRequest.value = { ...opts, resolve };
+  });
+}
+function ChoiceModal() {
+  const req = choiceRequest.value;
+  const preferredRef = A2(null);
+  y2(() => {
+    if (!req) return;
+    requestAnimationFrame(() => preferredRef.current?.focus());
+  }, [req]);
+  if (!req) return null;
+  function close(value) {
+    const current = choiceRequest.value;
+    choiceRequest.value = null;
+    current?.resolve(value);
+  }
+  return /* @__PURE__ */ u4(
+    MobileDialog,
+    {
+      title: req.title,
+      onClose: () => close(null),
+      maxWidth: "480px",
+      role: "alertdialog",
+      onKeyDown: (event) => {
+        if (event.key === "Escape") close(null);
+      },
+      children: [
+        /* @__PURE__ */ u4("div", { class: "settings-body", style: "white-space:pre-wrap", children: req.message }),
+        /* @__PURE__ */ u4(MobileDialogFooter, { className: "choice-dialog-footer", children: req.options.map((option) => /* @__PURE__ */ u4(
+          "button",
+          {
+            ref: option.tone === "primary" ? preferredRef : void 0,
+            type: "button",
+            class: option.tone,
+            onClick: () => close(option.value),
+            children: option.label
+          },
+          option.value
+        )) })
+      ]
+    }
+  );
+}
+
 // src/actions.ts
 function returnToUserMenu(source) {
   n2(() => {
@@ -18457,6 +18710,7 @@ function clearSearch() {
   });
 }
 function clearChat() {
+  retryWebSend = null;
   resetTurnState();
   voice.detach();
   cancelRecording();
@@ -18584,6 +18838,7 @@ function toChatMessage(m6) {
     ...m6.suggestedAction ? { suggestedAction: m6.suggestedAction } : {},
     ...m6.usage ? { usage: m6.usage } : {},
     ...m6.stoppedStats ? { stoppedStats: m6.stoppedStats } : {},
+    ...m6.inputState ? { inputState: m6.inputState } : {},
     ...m6.activity ? { activity: m6.activity } : {},
     ...m6.event ? { event: m6.event } : {},
     ...m6.reactions ? { reactions: m6.reactions } : {}
@@ -18599,6 +18854,12 @@ function replaceIncomingMessages(messages) {
   );
 }
 function mergeIncomingMessages(messages) {
+  const inboundStates = new Map(
+    messages.filter((message) => message.direction === "in" && message.id).map((message) => [message.id, message.inputState])
+  );
+  chatMessages.value = chatMessages.value.map(
+    (message) => message.direction === "in" && inboundStates.has(message.id) ? { ...message, inputState: inboundStates.get(message.id) } : message
+  );
   let maxTs = "";
   const additions = [];
   for (const m6 of messages) {
@@ -18618,6 +18879,7 @@ function mergeIncomingMessages(messages) {
       ...m6.suggestedAction ? { suggestedAction: m6.suggestedAction } : {},
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.stoppedStats ? { stoppedStats: m6.stoppedStats } : {},
+      ...m6.inputState ? { inputState: m6.inputState } : {},
       ...m6.activity ? { activity: m6.activity } : {},
       ...m6.event ? { event: m6.event } : {},
       ...m6.reactions ? { reactions: m6.reactions } : {}
@@ -18930,6 +19192,13 @@ function connectChatWs(ctx2) {
       applyTurnState(payload.turn ?? null, payload.connected === true);
       return;
     }
+    if (payload.kind === "input-state") {
+      const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry.inputState]));
+      chatMessages.value = chatMessages.value.map(
+        (message) => message.direction === "in" && message.id && states.has(message.id) ? { ...message, inputState: states.get(message.id) ?? void 0 } : message
+      );
+      return;
+    }
     if (payload.kind === "ready") {
       if (payload.threadId !== tid) return;
       refs.reconnectAttempt = 0;
@@ -18964,7 +19233,8 @@ function connectChatWs(ctx2) {
       return;
     }
     if (payload.kind === "inbound") {
-      refs.carryActivity = [];
+      const seen = payload.id && refs.seenIds.has(`in:${payload.id}`);
+      if (!activeTurn.value) refs.carryActivity = [];
       if (payload.id) {
         pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== payload.id);
       }
@@ -18979,6 +19249,19 @@ function connectChatWs(ctx2) {
         void 0,
         payload.author
       );
+      if (!seen && payload.id && payload.inputHandling) {
+        const handling = payload.inputHandling;
+        chatMessages.value = chatMessages.value.map(
+          (message) => message.direction === "in" && message.id === payload.id ? {
+            ...message,
+            inputState: {
+              messageId: payload.id,
+              status: "queued",
+              ...handling.turnId ? { turnId: handling.turnId } : {}
+            }
+          } : message
+        );
+      }
       updateActiveThreadTitleFromFirstMessage(payload.text || "");
       bumpActiveThread();
       return;
@@ -19139,19 +19422,43 @@ function connectChatWs(ctx2) {
     }
   };
 }
+var retryWebSend = null;
 async function sendChat(text, files) {
   if (!groupId.value || !threadId.value) return false;
   const generation2 = refs.chatGeneration;
   const gid = groupId.value;
   const tid = threadId.value;
-  const clientMessageId = crypto.randomUUID();
+  const ct = channelType.value;
+  const mg = messagingGroupId.value;
+  const isWeb = !ct || ct === "web";
+  if (!canSend.value || isWeb && !chatReady.value) return false;
+  const retry = isWeb && retryWebSend?.generation === generation2 && retryWebSend.gid === gid && retryWebSend.tid === tid && retryWebSend.text === text && retryWebSend.files.length === (files?.length ?? 0) && retryWebSend.files.every((file, index) => file === files?.[index]) ? retryWebSend : null;
+  let inputHandling = retry?.inputHandling;
+  const turn = activeTurn.value;
+  if (!retry && isWeb && turnConnected.value && turn?.status === "running" && turn.supportsSteering === true) {
+    const choice = await requestChoice({
+      title: "Send while the agent is working",
+      message: "Steer the current turn with this message, or queue it for later.",
+      options: [
+        { value: "cancel", label: "Cancel" },
+        { value: "queue", label: "Queue for later" },
+        { value: "steer", label: "Steer current turn", tone: "primary" }
+      ]
+    });
+    if (choice !== "steer" && choice !== "queue") return false;
+    inputHandling = { mode: choice, turnId: turn.id };
+  }
+  if (generation2 !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid || channelType.value !== ct || messagingGroupId.value !== mg || !canSend.value || isWeb && !chatReady.value)
+    return false;
+  const clientMessageId = retry?.clientMessageId ?? crypto.randomUUID();
   const messageId = publicWebMessageId(clientMessageId);
-  refs.carryActivity = [];
+  if (!activeTurn.value) refs.carryActivity = [];
   requestScrollToBottom();
-  const isWeb = !channelType.value || channelType.value === "web";
-  if (isWeb && !chatReady.value) return false;
   if (isWeb) {
-    pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, messageId });
+    retryWebSend = { generation: generation2, gid, tid, text, files: files?.slice() ?? [], clientMessageId, inputHandling };
+    if (!pendingWebSends.value.some((send) => send.messageId === messageId)) {
+      pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, messageId });
+    }
   }
   const hasFiles = Array.isArray(files) && files.length > 0;
   if (!isWeb) {
@@ -19169,6 +19476,7 @@ async function sendChat(text, files) {
       const fd = new FormData();
       fd.append("text", text || "");
       fd.append("clientMessageId", clientMessageId);
+      if (inputHandling) fd.append("inputHandling", JSON.stringify(inputHandling));
       for (const f5 of files) {
         if (f5.file) fd.append("file", f5.file, f5.name);
       }
@@ -19178,10 +19486,11 @@ async function sendChat(text, files) {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, clientMessageId })
+        body: JSON.stringify({ text, clientMessageId, ...inputHandling ? { inputHandling } : {} })
       });
     }
     if (!res.ok) {
+      if (res.status < 500 && retryWebSend?.clientMessageId === clientMessageId) retryWebSend = null;
       pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     }
     if (generation2 !== refs.chatGeneration) return false;
@@ -19200,6 +19509,7 @@ async function sendChat(text, files) {
       } catch {
       }
     }
+    if (retryWebSend?.clientMessageId === clientMessageId) retryWebSend = null;
     return true;
   } catch (err) {
     console.error("send failed", err);
@@ -19712,83 +20022,6 @@ async function respondQuestion(questionId, value) {
   }
 }
 
-// src/components/MobileDialog.tsx
-function MobileDialog(props) {
-  const {
-    title,
-    ariaLabel,
-    onClose,
-    onBack,
-    backLabel = "Back",
-    actions,
-    children,
-    className,
-    backdropClassName,
-    maxWidth,
-    closeDisabled,
-    role = "dialog",
-    onKeyDown
-  } = props;
-  const onBackdrop = (event) => {
-    if (event.target === event.currentTarget && !closeDisabled) onClose();
-  };
-  return /* @__PURE__ */ u4(
-    "div",
-    {
-      class: `mobile-dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`,
-      onClick: onBackdrop,
-      onKeyDown,
-      tabIndex: onKeyDown ? -1 : void 0,
-      children: /* @__PURE__ */ u4(
-        "div",
-        {
-          class: `mobile-dialog${className ? ` ${className}` : ""}`,
-          role,
-          "aria-modal": "true",
-          "aria-label": ariaLabel ?? title,
-          style: maxWidth ? `max-width:${maxWidth}` : void 0,
-          children: [
-            /* @__PURE__ */ u4("header", { class: "mobile-dialog-head", children: [
-              onBack ? /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": backLabel, onClick: onBack, children: "\u2039" }) : null,
-              /* @__PURE__ */ u4("span", { class: "mobile-dialog-title", children: title }),
-              actions ? /* @__PURE__ */ u4("div", { class: "mobile-dialog-actions", children: actions }) : null,
-              /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Close", disabled: closeDisabled, onClick: onClose, children: "\u2715" })
-            ] }),
-            children
-          ]
-        }
-      )
-    }
-  );
-}
-function MobileDialogList({ children, className }) {
-  return /* @__PURE__ */ u4("div", { class: `mobile-dialog-list${className ? ` ${className}` : ""}`, children });
-}
-function MobileDialogItem(props) {
-  const { label, sublabel, onClick, type = "button", active, chevron, title, className } = props;
-  return /* @__PURE__ */ u4(
-    "button",
-    {
-      type,
-      class: `mobile-dialog-item${active ? " active" : ""}${className ? ` ${className}` : ""}`,
-      "aria-current": active ? "true" : void 0,
-      title,
-      onClick,
-      children: [
-        /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-label", children: label }),
-        sublabel ? /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-sublabel", children: sublabel }) : null,
-        chevron ? /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-chevron", "aria-hidden": "true", children: "\u203A" }) : null
-      ]
-    }
-  );
-}
-function MobileDialogDivider() {
-  return /* @__PURE__ */ u4("div", { class: "mobile-dialog-divider", "aria-hidden": "true" });
-}
-function MobileDialogFooter({ children, className }) {
-  return /* @__PURE__ */ u4("footer", { class: `mobile-dialog-footer${className ? ` ${className}` : ""}`, children });
-}
-
 // src/components/CreateGroupModal.tsx
 var createGroupOpen = y3(false);
 function errMsg(data, fallback) {
@@ -20278,178 +20511,6 @@ function Header() {
   ] });
 }
 
-// src/components/PromptModal.tsx
-var promptRequest = y3(null);
-function BasePathBreadcrumb({ path }) {
-  return /* @__PURE__ */ u4("nav", { class: "prompt-path-breadcrumb path-breadcrumb", "aria-label": "Base path", children: /* @__PURE__ */ u4("div", { class: "path-breadcrumb-track", children: [
-    /* @__PURE__ */ u4("span", { class: "path-breadcrumb-segment root", children: "~" }),
-    path.split("/").filter(Boolean).map((segment, index) => /* @__PURE__ */ u4("span", { class: "path-breadcrumb-node", children: [
-      /* @__PURE__ */ u4("span", { class: "path-breadcrumb-separator", "aria-hidden": "true", children: "\u203A" }),
-      /* @__PURE__ */ u4("span", { class: "path-breadcrumb-segment", children: segment })
-    ] }, `${segment}-${index}`))
-  ] }) });
-}
-function requestInput(opts) {
-  return new Promise((resolve) => {
-    promptRequest.value = { ...opts, resolve };
-  });
-}
-function PromptModal() {
-  const req = promptRequest.value;
-  const [value, setValue] = h2("");
-  const [error, setError] = h2(null);
-  const inputRef = A2(null);
-  y2(() => {
-    if (!req) return;
-    setValue(req.initialValue || "");
-    setError(null);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, [req]);
-  if (!req) return null;
-  function close(result) {
-    const r4 = promptRequest.value;
-    promptRequest.value = null;
-    r4?.resolve(result);
-  }
-  function onSubmit(e4) {
-    e4.preventDefault();
-    const trimmed = value.trim();
-    const validationError = trimmed ? promptRequest.peek()?.validate?.(trimmed) : null;
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    close(trimmed ? trimmed : null);
-  }
-  function onKey(e4) {
-    if (e4.key === "Escape") close(null);
-  }
-  return /* @__PURE__ */ u4(MobileDialog, { title: req.title, onClose: () => close(null), maxWidth: "420px", children: /* @__PURE__ */ u4("form", { class: "mobile-dialog-form", onSubmit, children: [
-    /* @__PURE__ */ u4("div", { class: "settings-body", children: [
-      req.label ? /* @__PURE__ */ u4("label", { style: "display:block;margin-bottom:6px;font-size:12px;color:var(--muted)", children: req.label }) : null,
-      req.basePath !== void 0 ? /* @__PURE__ */ u4(BasePathBreadcrumb, { path: req.basePath }) : null,
-      /* @__PURE__ */ u4(
-        "input",
-        {
-          ref: inputRef,
-          type: "text",
-          class: "rail-search-input prompt-input",
-          value,
-          placeholder: req.placeholder || "",
-          "aria-invalid": !!error,
-          "aria-describedby": error ? "prompt-input-error" : void 0,
-          onInput: (e4) => {
-            setValue(e4.currentTarget.value);
-            setError(null);
-          },
-          onKeyDown: onKey
-        }
-      ),
-      error ? /* @__PURE__ */ u4("div", { id: "prompt-input-error", style: "margin-top:6px;color:var(--danger);font-size:12px", children: error }) : null
-    ] }),
-    /* @__PURE__ */ u4(MobileDialogFooter, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(null), children: "Cancel" }),
-      /* @__PURE__ */ u4("button", { type: "submit", class: "primary", children: req.okLabel || "OK" })
-    ] })
-  ] }) });
-}
-var confirmRequest = y3(null);
-function requestConfirm(opts) {
-  return new Promise((resolve) => {
-    confirmRequest.value = { ...opts, resolve };
-  });
-}
-function ConfirmModal() {
-  const req = confirmRequest.value;
-  const okRef = A2(null);
-  y2(() => {
-    if (!req) return;
-    requestAnimationFrame(() => okRef.current?.focus());
-  }, [req]);
-  if (!req) return null;
-  function close(result) {
-    const r4 = confirmRequest.value;
-    confirmRequest.value = null;
-    r4?.resolve(result);
-  }
-  function onKey(e4) {
-    if (e4.key === "Escape") close(false);
-    else if (e4.key === "Enter") close(true);
-  }
-  return /* @__PURE__ */ u4(
-    MobileDialog,
-    {
-      title: req.title,
-      onClose: () => close(false),
-      maxWidth: "420px",
-      role: "alertdialog",
-      onKeyDown: onKey,
-      children: [
-        /* @__PURE__ */ u4("div", { class: "settings-body", style: "white-space:pre-wrap", children: req.message }),
-        /* @__PURE__ */ u4(MobileDialogFooter, { children: [
-          /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(false), children: req.cancelLabel || "Cancel" }),
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              ref: okRef,
-              type: "button",
-              class: req.danger ? "danger" : "primary",
-              onClick: () => close(true),
-              children: req.okLabel || "OK"
-            }
-          )
-        ] })
-      ]
-    }
-  );
-}
-var choiceRequest = y3(null);
-function requestChoice(opts) {
-  return new Promise((resolve) => {
-    choiceRequest.value = { ...opts, resolve };
-  });
-}
-function ChoiceModal() {
-  const req = choiceRequest.value;
-  const preferredRef = A2(null);
-  y2(() => {
-    if (!req) return;
-    requestAnimationFrame(() => preferredRef.current?.focus());
-  }, [req]);
-  if (!req) return null;
-  function close(value) {
-    const current = choiceRequest.value;
-    choiceRequest.value = null;
-    current?.resolve(value);
-  }
-  return /* @__PURE__ */ u4(
-    MobileDialog,
-    {
-      title: req.title,
-      onClose: () => close(null),
-      maxWidth: "480px",
-      role: "alertdialog",
-      onKeyDown: (event) => {
-        if (event.key === "Escape") close(null);
-      },
-      children: [
-        /* @__PURE__ */ u4("div", { class: "settings-body", style: "white-space:pre-wrap", children: req.message }),
-        /* @__PURE__ */ u4(MobileDialogFooter, { className: "choice-dialog-footer", children: req.options.map((option) => /* @__PURE__ */ u4(
-          "button",
-          {
-            ref: option.tone === "primary" ? preferredRef : void 0,
-            type: "button",
-            class: option.tone,
-            onClick: () => close(option.value),
-            children: option.label
-          },
-          option.value
-        )) })
-      ]
-    }
-  );
-}
-
 // src/components/Pane.tsx
 function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions, children }) {
   const mobile = isMobile.value;
@@ -20928,10 +20989,29 @@ function TurnStopButton({ turn, connected, busy, error, onStop }) {
       class: "msg-action-btn turn-stop",
       "aria-label": label,
       "aria-busy": stopping,
-      title: connected ? `${label}. Queued follow-ups will still run; completed actions are not undone.` : "Reconnect to stop this response.",
+      title: connected ? `${label}. Queued follow-ups will still run, including steering not yet applied; completed actions are not undone.` : "Reconnect to stop this response.",
       disabled: !connected || stopping,
       onClick: () => onStop(turn.id),
       children: /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: "\u25A0" })
+    }
+  );
+}
+
+// src/components/ActiveTurnStopButton.tsx
+function ActiveTurnStopButton() {
+  const turn = activeTurn.value;
+  if (!turn || !canSend.value) return null;
+  const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
+  return /* @__PURE__ */ u4(
+    TurnStopButton,
+    {
+      turn,
+      connected: turnConnected.value,
+      busy: stop?.busy ?? false,
+      error: stop?.error ?? "",
+      onStop: (id) => {
+        void stopActiveTurn(id);
+      }
     }
   );
 }
@@ -20958,6 +21038,26 @@ function mergeQuestionTimeline(messages, questions, currentThreadId) {
     if (byTime !== 0) return byTime;
     return left.direction === "question" ? 1 : right.direction === "question" ? -1 : 0;
   });
+}
+
+// src/input-state.ts
+function inputStatePresentation(state) {
+  if (!state) return null;
+  if (state.status === "applied") return { className: "input-applied", caption: "Applied to current turn" };
+  if (state.reason) {
+    const reason = {
+      turn_finished: "the target turn finished",
+      different_conversation: "the active turn belongs to another conversation",
+      unsupported: "steering is unavailable"
+    }[state.reason];
+    return {
+      className: state.status === "queued" ? "input-queued" : "input-follow-up",
+      caption: `${state.status === "queued" ? "Queued for follow-up" : "Handled as follow-up"} \u2014 ${reason}`
+    };
+  }
+  if (state.status === "queued") return { className: "input-queued", caption: "Queued" };
+  if (state.status === "steering") return { className: "input-steering", caption: "Waiting to steer" };
+  return null;
 }
 
 // src/future-work.ts
@@ -21956,7 +22056,8 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
     if (q5 && ref.current) highlightTextNodes(ref.current, q5);
   }, [m6.text, md != null, q5]);
   const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
-  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "");
+  const inputPresentation = m6.direction === "in" ? inputStatePresentation(m6.inputState) : null;
+  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (inputPresentation ? ` ${inputPresentation.className}` : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === "web";
@@ -22074,6 +22175,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
         m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
           /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+          inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
           showsMidTurnLabel(m6.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
           m6.direction === "out" && (m6.usage ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage, partial: !!m6.stoppedStats }) : m6.stoppedStats ? /* @__PURE__ */ u4("span", { title: "Token usage was not reported before cancellation.", children: [
             fmtDur(m6.stoppedStats.durationMs),
@@ -22362,18 +22464,7 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
     /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4("span", { class: "typing-meta", children: metadata }),
       usage ? /* @__PURE__ */ u4("span", { class: "typing-usage", children: /* @__PURE__ */ u4(UsageMeta, { u: usage, live: true }) }) : null,
-      turn && canSend.value ? /* @__PURE__ */ u4(
-        TurnStopButton,
-        {
-          turn,
-          connected: turnConnected.value,
-          busy: stop?.busy ?? false,
-          error: stop?.error ?? "",
-          onStop: (id) => {
-            void stopActiveTurn(id);
-          }
-        }
-      ) : null
+      /* @__PURE__ */ u4(ActiveTurnStopButton, {})
     ] })
   ] });
 }
@@ -22392,7 +22483,7 @@ function MessageLog() {
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
   const msgCount = timeline.length;
-  const typing = (isTyping.value || !!activeTurn.value) && !!threadId.value && !chatLoading.value;
+  const typing = showsTurnActivity(activeTurn.value, isTyping.value, threadId.value, chatLoading.value);
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
   const traceLen = activityLog.value.length;

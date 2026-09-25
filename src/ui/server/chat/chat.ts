@@ -86,6 +86,7 @@ import { handleVoiceUpgrade } from './voice-stream.js';
 import { uiBaseUrl } from '../server.js';
 import fs from 'fs';
 import { readStoppedTurnStats, type StoppedTurnStats } from '../../shared/stopped-turn.js';
+import { parseInputState, type InputHandling, type InputState } from '../../shared/input-state.js';
 
 /** Map an agent group to its shared web platform_id. */
 function platformIdFor(agentGroupId: string): string {
@@ -263,6 +264,7 @@ const UPLOAD_MAX_FILENAME = 255;
 interface ParsedUpload {
   text: string;
   clientMessageId?: string;
+  inputHandling?: unknown;
   files: { filename: string; contentType: string; buffer: Buffer }[];
 }
 
@@ -303,6 +305,13 @@ function readMultipartBody(req: http.IncomingMessage): Promise<ParsedUpload> {
     bb.on('field', (name, value) => {
       if (name === 'text' && typeof value === 'string') out.text = value;
       if (name === 'clientMessageId' && typeof value === 'string') out.clientMessageId = value;
+      if (name === 'inputHandling') {
+        try {
+          out.inputHandling = JSON.parse(value);
+        } catch {
+          fail('invalid_input_handling');
+        }
+      }
     });
     bb.on('file', (_name, stream, info) => {
       const rawName = info.filename || 'upload';
@@ -317,6 +326,7 @@ function readMultipartBody(req: http.IncomingMessage): Promise<ParsedUpload> {
           fail('total_too_large');
           return;
         }
+
         chunks.push(chunk);
       });
       stream.on('limit', () => fail('file_too_large', `file=${filename}`));
@@ -333,6 +343,20 @@ function readMultipartBody(req: http.IncomingMessage): Promise<ParsedUpload> {
     });
     req.pipe(bb);
   });
+}
+
+export function parseInputHandling(value: unknown): InputHandling | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_input_handling');
+  const v = value as Record<string, unknown>;
+  if (
+    Object.keys(v).some((key) => key !== 'mode' && key !== 'turnId') ||
+    (v.mode !== 'queue' && v.mode !== 'steer') ||
+    (v.turnId !== undefined && !isSessionTurnId(v.turnId)) ||
+    (v.mode === 'steer' && !isSessionTurnId(v.turnId))
+  )
+    throw new Error('invalid_input_handling');
+  return { mode: v.mode, ...(typeof v.turnId === 'string' ? { turnId: v.turnId } : {}) };
 }
 
 /** REST handlers. Returns true if the path was a chat route. */
@@ -431,12 +455,14 @@ export async function handleChatRequest(
     const ctype = (req.headers['content-type'] || '').toLowerCase();
     let text = '';
     let clientMessageId: unknown;
+    let rawInputHandling: unknown;
     let attachments: { filename: string; contentType: string; data: string; size: number }[] = [];
     if (ctype.startsWith('multipart/form-data')) {
       try {
         const parsed = await readMultipartBody(req);
         text = parsed.text;
         clientMessageId = parsed.clientMessageId;
+        rawInputHandling = parsed.inputHandling;
         attachments = parsed.files.map((f) => ({
           filename: f.filename,
           contentType: f.contentType,
@@ -461,6 +487,14 @@ export async function handleChatRequest(
       const t = (body as { text?: unknown })?.text;
       if (typeof t === 'string') text = t;
       clientMessageId = (body as { clientMessageId?: unknown })?.clientMessageId;
+      rawInputHandling = (body as { inputHandling?: unknown })?.inputHandling;
+    }
+    let inputHandling: InputHandling | undefined;
+    try {
+      inputHandling = parseInputHandling(rawInputHandling);
+    } catch {
+      writeJson(res, 400, { error: 'invalid_input_handling' });
+      return true;
     }
     if (
       clientMessageId !== undefined &&
@@ -481,8 +515,16 @@ export async function handleChatRequest(
     const q = new URLSearchParams((req.url || '').split('?')[1] || '');
     const qChannel = q.get('channel') || undefined;
     const qMg = q.get('mg') || undefined;
+    if (q.has('channel') !== q.has('mg') || q.has('sessionId') || (q.has('channel') && (!qChannel || !qMg))) {
+      writeJson(res, 400, { error: 'invalid_context' });
+      return true;
+    }
 
     if (qChannel && qMg && qChannel !== WEB_CHANNEL_TYPE) {
+      if (inputHandling) {
+        writeJson(res, 400, { error: 'invalid_input_handling_context' });
+        return true;
+      }
       try {
         const id = await sendViaChannelAdapter({
           userId,
@@ -507,7 +549,30 @@ export async function handleChatRequest(
     }
 
     ensureWebMessagingGroup(m.groupId);
-    const platformId = platformIdFor(m.groupId);
+    const context = resolveTurnContext(userId, m.groupId, m.threadId, taskOverride(req));
+    if (!context?.canSend || context.channelType !== WEB_CHANNEL_TYPE) {
+      writeJson(res, 403, { error: 'forbidden' });
+      return true;
+    }
+    if (inputHandling?.mode === 'steer' && context.sessionId) {
+      const current = getSessionActiveTurn(context.sessionId);
+      // A stale captured target remains a follow-up, never a steer of its successor.
+      if (current.turn && current.turn.id === inputHandling.turnId) {
+        if (!turnMatchesContext(current.turn, context)) {
+          writeJson(res, 409, { error: 'different_conversation' });
+          return true;
+        }
+        if (!current.turn.supportsSteering) {
+          writeJson(res, 409, { error: 'unsupported' });
+          return true;
+        }
+        if (!current.connected || current.turn.status !== 'running') {
+          writeJson(res, 409, { error: current.connected ? 'not_running' : 'disconnected' });
+          return true;
+        }
+      }
+    }
+    const platformId = context.platformIds[0];
     try {
       const id = await submitWebInbound({
         userId,
@@ -516,6 +581,7 @@ export async function handleChatRequest(
         threadId: m.threadId,
         text,
         clientMessageId: clientMessageId as string | undefined,
+        inputHandling,
         attachments: attachments.length > 0 ? attachments : undefined,
       });
       writeJson(res, 200, { id });
@@ -828,6 +894,7 @@ export interface TurnUsageDto {
 type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface HistoryMessage {
+  inputState?: InputState;
   stoppedStats?: StoppedTurnStats;
   /** Human sender attribution for inbound messages. */
   author?: { userId: string; displayName: string };
@@ -869,6 +936,75 @@ export interface HistoryMessage {
 export function publicInboundMessageId(id: string, groupId: string): string {
   const suffix = `:${groupId}`;
   return id.endsWith(suffix) ? id.slice(0, -suffix.length) : id;
+}
+
+/** Only project receipts for inbound rows already authorized by the history query. */
+function readVisibleInputStates(
+  groupId: string,
+  sessionId: string,
+  rows: Array<{ id: string; status: string; content: string }>,
+  isWeb: boolean,
+): Map<string, InputState> {
+  const states = new Map<string, InputState>();
+  const visible = new Map(rows.map((row) => [row.id, row]));
+  for (const row of rows) {
+    if (!isWeb || row.status !== 'pending') continue;
+    try {
+      const handling = parseInputHandling(JSON.parse(row.content).inputHandling);
+      if (handling)
+        states.set(row.id, {
+          messageId: publicInboundMessageId(row.id, groupId),
+          status: 'queued',
+          ...(handling.turnId ? { turnId: handling.turnId } : {}),
+        });
+    } catch {
+      /* Legacy/non-JSON content has no submission intent. */
+    }
+  }
+  try {
+    const outDb = openOutboundDb(groupId, sessionId);
+    try {
+      const acknowledgements = new Map(
+        (
+          outDb.prepare('SELECT message_id, status FROM processing_ack').all() as Array<{
+            message_id: string;
+            status: string;
+          }>
+        )
+          .filter((ack) => visible.has(ack.message_id))
+          .map((ack) => [ack.message_id, ack.status]),
+      );
+      const receipts = outDb.prepare("SELECT key, value FROM session_state WHERE key LIKE 'input:%'").all() as Array<{
+        key: string;
+        value: string;
+      }>;
+      for (const receipt of receipts) {
+        let state: InputState | undefined;
+        try {
+          state = parseInputState(JSON.parse(receipt.value));
+        } catch {
+          continue;
+        }
+        if (!state || receipt.key !== `input:${crypto.createHash('sha256').update(state.messageId).digest('hex')}`)
+          continue;
+        const row = visible.get(state.messageId);
+        if (!row) continue;
+        states.set(row.id, { ...state, messageId: publicInboundMessageId(row.id, groupId) });
+      }
+      for (const [id, state] of states) {
+        const status = acknowledgements.get(id) ?? visible.get(id)?.status;
+        if (state.status !== 'applied' && (status === 'processing' || status === 'completed' || status === 'failed')) {
+          if (state.reason) states.set(id, { ...state, status: 'processing' });
+          else states.delete(id);
+        }
+      }
+    } finally {
+      outDb.close();
+    }
+  } catch {
+    /* The outbound projection may not exist yet. */
+  }
+  return states;
 }
 
 /**
@@ -994,17 +1130,17 @@ export function readChatHistory(
   try {
     const inDb = openInboundDb(groupId, session.id);
     try {
-      let rows: { id: string; timestamp: string; content: string; sender_user_id: string | null }[];
+      let rows: { id: string; timestamp: string; content: string; status: string; sender_user_id: string | null }[];
       if (isDm && elevated) {
         rows = inDb
           .prepare(
-            'SELECT id, timestamp, content, sender_user_id FROM messages_in WHERE channel_type = ? AND thread_id IS NULL ORDER BY seq',
+            'SELECT id, timestamp, content, status, sender_user_id FROM messages_in WHERE channel_type = ? AND thread_id IS NULL ORDER BY seq',
           )
           .all(target.channelType) as typeof rows;
       } else if (isDm) {
         rows = inDb
           .prepare(
-            `SELECT id, timestamp, content, sender_user_id FROM messages_in
+            `SELECT id, timestamp, content, status, sender_user_id FROM messages_in
               WHERE channel_type = ? AND thread_id IS NULL
                 AND platform_id IN (${viewerHandles.map(() => '?').join(',')})
               ORDER BY seq`,
@@ -1013,10 +1149,11 @@ export function readChatHistory(
       } else {
         rows = inDb
           .prepare(
-            'SELECT id, timestamp, content, sender_user_id FROM messages_in WHERE channel_type = ? AND thread_id = ? ORDER BY seq',
+            'SELECT id, timestamp, content, status, sender_user_id FROM messages_in WHERE channel_type = ? AND thread_id = ? AND platform_id = ? ORDER BY seq',
           )
-          .all(target.channelType, threadId) as typeof rows;
+          .all(target.channelType, threadId, getMessagingGroup(target.messagingGroupId)?.platform_id) as typeof rows;
       }
+      const inputStates = readVisibleInputStates(groupId, session.id, rows, target.channelType === WEB_CHANNEL_TYPE);
       // Router namespaces ids as `<rawId>:<agentGroupId>` when writing
       // into per-agent session DBs (router.ts messageIdForAgent), but the
       // live WS echo from submitWebInbound sends the raw `<rawId>`. If we
@@ -1040,7 +1177,15 @@ export function readChatHistory(
           const author = r.sender_user_id
             ? { userId: r.sender_user_id, displayName: sender?.display_name?.trim() || r.sender_user_id }
             : undefined;
-          messages.push({ direction: 'in', id, timestamp: r.timestamp, text, files: parsed.files, author });
+          messages.push({
+            direction: 'in',
+            id,
+            timestamp: r.timestamp,
+            text,
+            files: parsed.files,
+            author,
+            ...(inputStates.has(r.id) ? { inputState: inputStates.get(r.id) } : {}),
+          });
         }
       }
     } finally {
@@ -1425,10 +1570,10 @@ interface TurnContext {
   canSend: boolean;
 }
 
-export type ChatActiveTurn = Pick<SessionActiveTurn, 'id' | 'status'>;
+export type ChatActiveTurn = Pick<SessionActiveTurn, 'id' | 'status' | 'supportsSteering'>;
 
 function publicActiveTurn(turn: SessionActiveTurn): ChatActiveTurn {
-  return { id: turn.id, status: turn.status };
+  return { id: turn.id, status: turn.status, ...(turn.supportsSteering ? { supportsSteering: true } : {}) };
 }
 
 function resolveTurnContext(
@@ -3434,7 +3579,7 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
         pushActivityFrame(message.id, 0);
       }
     },
-    onInboundEcho(id, text, author, files) {
+    onInboundEcho(id, text, author, files, inputHandling) {
       try {
         // Live echo files arrive with just {filename, size}. Enrich them
         // with the same attachment `url` + `contentType` that socket snapshots
@@ -3453,6 +3598,7 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
           id: publicInboundMessageId(id, ctx.groupId),
           text,
           author,
+          ...(inputHandling ? { inputHandling } : {}),
           files: enriched,
           timestamp: new Date().toISOString(),
         });
@@ -3501,6 +3647,20 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
     });
   let lastTurn = JSON.stringify(readTurn());
   const unsubscribeTurn = onSessionSignal((sessionId, kind) => {
+    if (kind === 'input.state') {
+      if (sessionId !== resolveSessionIdForUsage()) return;
+      const messages = readChatHistory(ctx.userId, ctx.groupId, ctx.threadId, {
+        channelType: WEB_CHANNEL_TYPE,
+        messagingGroupId: ctx.messagingGroupId,
+      });
+      sendFrame({
+        kind: 'input-state',
+        states: messages
+          .filter((message) => message.direction === 'in')
+          .map((message) => ({ messageId: message.id, inputState: message.inputState ?? null })),
+      });
+      return;
+    }
     if (kind !== 'turn.state' && kind !== 'disconnected') return;
     if (sessionId !== resolveSessionIdForUsage()) return;
     const state = readTurn();

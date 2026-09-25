@@ -1,4 +1,4 @@
-import type { Direction } from './types';
+import type { ActiveTurn, Direction } from './types';
 
 export type DeliveryOrigin = 'send_message' | 'send_file' | 'response' | undefined;
 
@@ -22,4 +22,13 @@ export function showsMidTurnLabel(deliveryOrigin: DeliveryOrigin, isLatest: bool
 
 export function publicWebMessageId(clientMessageId: string): string {
   return `web-${clientMessageId}`;
+}
+
+export function showsTurnActivity(
+  turn: ActiveTurn | null,
+  typing: boolean,
+  threadId: string | null,
+  loading: boolean,
+): boolean {
+  return (!!turn || typing) && !!threadId && !loading;
 }

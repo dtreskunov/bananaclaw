@@ -31,6 +31,12 @@ export class NativeStore {
       );
       CREATE INDEX IF NOT EXISTS idx_native_messages_conversation
         ON messages(conversation_id, id);
+      CREATE TABLE IF NOT EXISTS applied_steering (
+        conversation_id TEXT NOT NULL,
+        steering_id TEXT NOT NULL,
+        message_id INTEGER NOT NULL,
+        PRIMARY KEY (conversation_id, steering_id)
+      );
     `);
   }
 
@@ -82,20 +88,45 @@ export class NativeStore {
       .get(conversationId, anchor);
     if (!belongs) return null;
 
-    const child = this.createConversation();
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO messages (conversation_id, content_json, created_at)
-       SELECT ?, content_json, ? FROM messages
-       WHERE conversation_id = ? AND id <= ? ORDER BY id`,
-      )
-      .run(child, now, conversationId, anchor);
-    return child;
+    return this.db.transaction(() => {
+      const child = this.createConversation();
+      const rows = this.db.prepare(
+        'SELECT id, content_json FROM messages WHERE conversation_id = ? AND id <= ? ORDER BY id',
+      ).all(conversationId, anchor) as StoredMessageRow[];
+      for (const row of rows) {
+        const copiedId = this.append(child, [JSON.parse(row.content_json) as ModelMessage]);
+        this.db.prepare(
+          `INSERT INTO applied_steering (conversation_id, steering_id, message_id)
+           SELECT ?, steering_id, ? FROM applied_steering
+           WHERE conversation_id = ? AND message_id = ?`,
+        ).run(child, Number(copiedId), conversationId, row.id);
+      }
+      return child;
+    })();
+  }
+
+  appliedSteering(conversationId: string, ids: string[]): string[] {
+    const lookup = this.db.prepare(
+      'SELECT 1 FROM applied_steering WHERE conversation_id = ? AND steering_id = ?',
+    );
+    return ids.filter((id) => lookup.get(conversationId, id) != null);
+  }
+
+  appendSteering(conversationId: string, id: string, message: ModelMessage): string | null {
+    return this.db.transaction(() => {
+      if (this.appliedSteering(conversationId, [id]).length > 0) return null;
+      const ref = this.append(conversationId, [message]);
+      this.db.prepare(
+        'INSERT INTO applied_steering (conversation_id, steering_id, message_id) VALUES (?, ?, ?)',
+      ).run(conversationId, id, Number(ref));
+      return ref;
+    })();
   }
 
   replaceAfter(conversationId: string, anchorRef: string, messages: ModelMessage[]): string {
     return this.db.transaction(() => {
+      this.db.prepare('DELETE FROM applied_steering WHERE conversation_id = ? AND message_id > ?')
+        .run(conversationId, Number(anchorRef));
       this.db.prepare('DELETE FROM messages WHERE conversation_id = ? AND id > ?')
         .run(conversationId, Number(anchorRef));
       return this.append(conversationId, messages);

@@ -73,6 +73,9 @@
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }
 .chat-main .msg.out { align-self: flex-start; background: var(--wash-strong); }
 .chat-main .msg.agent-action { box-shadow: inset 2px 0 var(--accent-strong); }
+.chat-main .msg.input-queued { box-shadow: inset 2px 0 var(--input-queued-accent); }
+.chat-main .msg.input-steering { box-shadow: inset 2px 0 var(--input-steering-accent); }
+.chat-main .input-state-caption { color: var(--surface-fg); opacity: 0.75; }
 .chat-main .msg.internal { align-self: flex-start; background: transparent !important; border: 1px dashed var(--muted); color: var(--muted); opacity: 0.85; max-width: 92%; }
 .chat-main .msg.internal, .chat-main .msg.internal * { font-style: italic; }
 .chat-main .msg.internal .internal-label { font-size: var(--font-2xs); font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; opacity: 0.7; }

@@ -6,6 +6,34 @@ import { INTERRUPTED_TOOL, NativeTurnJournal } from './turn-journal.js';
 const options = (toolCallId: string): ToolExecutionOptions => ({ toolCallId, messages: [] });
 
 describe('incremental native turn journal', () => {
+  it('keeps steering and earlier completed actions across later saves, stops and forks', async () => {
+    const store = new NativeStore(':memory:');
+    try {
+      const conversation = store.createConversation();
+      const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'original' });
+      const tools = journal.wrap({
+        send: tool({ inputSchema: jsonSchema({ type: 'object' }), execute: async () => 'delivered' }),
+      }, new AbortController().signal);
+      await tools.send.execute!({}, options('sent'));
+      const complete = store.messages(conversation).slice(1);
+      journal.finishSegment(complete);
+      expect(journal.applySteering('first', { role: 'user', content: 'change direction' })).toBe(true);
+      expect(journal.applySteering('first', { role: 'user', content: 'duplicate' })).toBe(false);
+      journal.appendText('new response');
+      journal.save();
+      journal.save(true);
+      const history = store.messages(conversation);
+      expect(JSON.stringify(history).match(/change direction/g)).toHaveLength(1);
+      expect(JSON.stringify(history).match(/delivered/g)).toHaveLength(1);
+      expect(journal.activity()).toEqual([{ kind: 'tool', id: 'sent', tool: 'send', status: 'completed' }]);
+      const child = store.fork(conversation, journal.checkpoint)!;
+      expect(store.appliedSteering(child, ['first'])).toEqual(['first']);
+      expect(store.messages(child)).toEqual(history);
+    } finally {
+      store.close();
+    }
+  });
+
   it('persists completed actions and unknown in-flight results as valid pairs without replay duplicates', async () => {
     const store = new NativeStore(':memory:');
     const conversation = store.createConversation();

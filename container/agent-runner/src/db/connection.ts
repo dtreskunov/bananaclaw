@@ -127,6 +127,7 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
       thread_id      TEXT,
       content        TEXT NOT NULL,
       on_wake        INTEGER NOT NULL DEFAULT 0,
+      source_session_id TEXT,
       sender_user_id TEXT CHECK (sender_user_id IS NULL OR (
         length(sender_user_id) = 36
         AND substr(sender_user_id, 9, 1) = '-'

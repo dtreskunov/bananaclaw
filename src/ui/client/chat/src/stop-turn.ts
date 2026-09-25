@@ -41,6 +41,7 @@ function awaitConfirmation(turnId: string): void {
 export function applyTurnState(turn: ActiveTurn | null, connected: boolean): void {
   const changed = activeTurn.value?.id !== turn?.id;
   if (changed) clearPendingStop();
+  if (changed && turn) refs.carryActivity = [];
   batch(() => {
     if (changed) stopRequest.value = null;
     activeTurn.value = turn;

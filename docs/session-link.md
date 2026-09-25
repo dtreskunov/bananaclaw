@@ -55,6 +55,40 @@ A disconnected or unconfirmed stop is reported to the UI rather than treated
 as success; the user can retry the same turn ID. Durable conversation mutations
 continue to use the journal/acknowledgement protocol below.
 
+### Steering (native provider)
+
+Native conversational turns advertise `supportsSteering: true` on `turn.state`.
+The absence of this optional capability means ordinary queued follow-ups; it
+must not be inferred from a group's saved provider setting while another
+container is running.
+
+Steering is durable input, not a `turn.stop` control. Web submissions may carry
+`inputHandling: { mode: "steer" | "queue", turnId }` in their inbound content.
+The runner only steers an explicitly targeted web message into that turn.
+Eligible external-channel chat messages steer automatically, but only when
+channel, platform/chat and thread match the active turn. Other conversations in
+a shared session remain queued. Commands, scheduled tasks, interactive answers,
+agent-to-agent messages and passive accumulated context do not steer.
+
+The native provider lets the current model step and its tools finish, persists
+their results, then incorporates guidance before generating again. Steering
+keeps the logical turn ID, reply address and usage/activity accounting. It does
+not cancel tools, reset the step budget, or undo already-delivered updates.
+Explicit Stop still cancels; accepted but unapplied guidance remains pending.
+
+The runner journals message dispositions in `session_state`, under
+`input:<sha256(internal-message-id)>`. Values include the message ID, status
+(`queued`, `steering`, `applied`, `processing`), and optionally the target turn
+and a fallback reason. A queued HTTP request or inbound echo is not proof of
+application. `applied` is written only after the provider persists the guidance;
+the native store records input IDs with their history entries for replay
+deduplication. The host publishes input-state changes after committing these
+durable events, and history reconstructs them on reconnect.
+
+If a target turn finishes before application, the input is retained as a
+follow-up, with an explicit outcome in chat. The current turn never consumes
+another conversation's steering or a stale target intended for an earlier turn.
+
 Durable runner-to-host frames carry an event ID, journal sequence, type, and validated payload.
 The runner commits each mutation and event to `runner-state.db`. The host applies
 events in order to its own `outbound.db`, records an event digest in
@@ -120,6 +154,12 @@ label. This can leave input pending while containers repeatedly connect and
 exit before processing it. Rebuild and restart the host with the matching code;
 the pending input is retained and the normal wake path resumes it. Do not
 resubmit or delete session data to recover from this mismatch.
+
+The native steering capability similarly requires a host that recognizes the
+optional `supportsSteering` field on `turn.state`. Deploy matching host, runner,
+and chat assets together. There is no host-message schema migration: steering
+intent uses the existing inbound content journal, and dispositions use the
+existing durable session-state projection.
 
 Verify a rollout with host health **and** an actual session exchange; a
 successful build or an HTTP 200 alone does not prove runner compatibility.

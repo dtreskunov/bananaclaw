@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { jsonSchema, tool } from 'ai';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
 import { resetTurnSendTracking } from '../current-batch.js';
 import { formatNativeToolStep, NativeProvider, portableHistory, userMessage } from './native.js';
 import * as nativeCatalog from './native/catalog.js';
 import * as nativeAudio from './native/audio.js';
+import * as nativeTools from './native/tools.js';
+import * as nativeAttachments from './native/attachments.js';
 import { NativeStore } from './native/store.js';
 import type { ProviderEvent } from './types.js';
 
@@ -23,6 +25,8 @@ let skillToolMode: boolean;
 let todoToolMode: boolean;
 let rejectAudio: boolean;
 let holdModelResponse: boolean;
+let releaseModelResponse: (() => void) | undefined;
+let modelRequestStarted: (() => void) | undefined;
 let slowToolMode: boolean;
 let catalogFetch: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 let catalogModels: Record<string, unknown>;
@@ -46,7 +50,7 @@ beforeEach(() => {
   const realFetch = globalThis.fetch;
   catalogFetch = spyOn(globalThis, 'fetch').mockImplementation((input, init) =>
     String(input) === 'https://models.dev/api.json' ? Promise.resolve(Response.json(catalogModels)) : realFetch(input, init));
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-provider-'));
+  root = fs.mkdtempSync(path.join(process.cwd(), '.native-provider-'));
   requests = [];
   requestUrls = [];
   requestHeaders = [];
@@ -57,6 +61,8 @@ beforeEach(() => {
   todoToolMode = false;
   rejectAudio = false;
   holdModelResponse = false;
+  releaseModelResponse = undefined;
+  modelRequestStarted = undefined;
   slowToolMode = false;
   const { inbound } = initTestSessionDb();
   inbound
@@ -75,6 +81,11 @@ beforeEach(() => {
         return new Response(new ReadableStream({
           start(controller) {
             controller.enqueue(new TextEncoder().encode('data: {"id":"waiting","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'));
+            releaseModelResponse = () => {
+              controller.enqueue(new TextEncoder().encode('data: {"id":"waiting","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"content":"original answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}\n\ndata: [DONE]\n\n'));
+              controller.close();
+            };
+            modelRequestStarted?.();
           },
         }), { headers: { 'content-type': 'text/event-stream' } });
       }
@@ -192,6 +203,285 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it('lets a blocked model call finish before applying guidance to its final-text continuation', async () => {
+    holdModelResponse = true;
+    const started = new Promise<void>((resolve) => { modelRequestStarted = resolve; });
+    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    const consume = (async () => {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'result') query.end();
+      }
+    })();
+    try {
+      await started;
+      expect(query.steer!({ id: 'model-guidance', prompt: 'follow the new direction' })).toBe(true);
+      expect(requests).toHaveLength(1);
+      expect(events.some((event) => event.type === 'steering_applied')).toBe(false);
+      holdModelResponse = false;
+      releaseModelResponse!();
+      await consume;
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[1].messages)).toContain('original answer');
+      expect(JSON.stringify(requests[1].messages)).toContain('follow the new direction');
+      expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'usage_call')).toHaveLength(2);
+    } finally {
+      query.abort();
+      await consume;
+    }
+  });
+
+  it('finishes an in-flight tool, then steers the same turn without aborting or duplicating usage', async () => {
+    slowToolMode = true;
+    let release!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => { started = resolve; });
+    let toolSignal: AbortSignal | undefined;
+    const toolSpy = spyOn(nativeTools, 'createNativeTools').mockReturnValue({
+      bash: tool({
+        inputSchema: jsonSchema({ type: 'object' }),
+        execute: async (_args, options) => {
+          toolSignal = options.abortSignal;
+          started();
+          await new Promise<void>((resolve) => { release = resolve; });
+          return 'completed original action';
+        },
+      }),
+    });
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'original', cwd: root });
+    expect(query.steer!({ id: 'inactive', prompt: 'too early' })).toBe(false);
+    const events: ProviderEvent[] = [];
+    const consume = (async () => {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'result') query.end();
+      }
+    })();
+    try {
+      await running;
+      expect(query.steer!({ id: 's1', prompt: 'new direction' })).toBe(true);
+      expect(query.steer!({ id: 's1', prompt: 'duplicate must not appear' })).toBe(true);
+      expect(requests).toHaveLength(1);
+      expect(toolSignal?.aborted).toBe(false);
+      expect(events.some((event) => event.type === 'steering_applied')).toBe(false);
+      release();
+      await consume;
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[1].messages)).toContain('completed original action');
+      expect(JSON.stringify(requests[1].messages)).toContain('new direction');
+      expect(JSON.stringify(requests[1].messages)).not.toContain('duplicate must not appear');
+      expect(toolSignal?.aborted).toBe(false);
+      expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'steering_applied')).toEqual([{ type: 'steering_applied', id: 's1' }]);
+      expect(events.filter((event) => event.type === 'usage_call')).toHaveLength(2);
+      expect(events.find((event) => event.type === 'usage')).toMatchObject({
+        data: { input_tokens: 15, output_tokens: 5, num_turns: 2, context_tokens: 7 },
+      });
+      expect(query.steer!({ id: 'late', prompt: 'too late' })).toBe(false);
+      const continuation = events.find((event) => event.type === 'init')!.continuation;
+      expect(provider.appliedSteering(continuation, ['s1', 'late'])).toEqual(['s1']);
+    } finally {
+      release?.();
+      query.abort();
+      await consume;
+      toolSpy.mockRestore();
+    }
+  });
+
+  it('resumes text-only final steps for multiple guidance inputs with attachments, keeping push queued', async () => {
+    const image = path.join(root, 'guidance.png');
+    fs.writeFileSync(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB', 'base64'));
+    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    let boundary = 0;
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'assistant_message' && ++boundary === 1) {
+        expect(query.push('queued normal message')).toBe(true);
+        expect(query.steer!({ id: 'one', prompt: 'first guidance',
+          files: [{ path: image, mime: 'image/png', filename: 'guidance.png' }] })).toBe(true);
+        expect(query.steer!({ id: 'two', prompt: 'second guidance' })).toBe(true);
+      } else if (event.type === 'assistant_message' && boundary === 2) {
+        expect(query.steer!({ id: 'three', prompt: 'third guidance' })).toBe(true);
+      } else if (event.type === 'result') {
+        query.end();
+      }
+    }
+    expect(requests).toHaveLength(4);
+    expect(JSON.stringify(requests[1].messages)).toContain('first guidance');
+    expect(JSON.stringify(requests[1].messages)).toContain('image_url');
+    expect(JSON.stringify(requests[1].messages)).toContain('second guidance');
+    expect(JSON.stringify(requests[1].messages)).not.toContain('queued normal message');
+    expect(JSON.stringify(requests[2].messages)).toContain('third guidance');
+    expect(JSON.stringify(requests[3].messages)).toContain('queued normal message');
+    expect(events.filter((event) => event.type === 'steering_applied').map((event) => event.id)).toEqual(['one', 'two', 'three']);
+    expect(events.filter((event) => event.type === 'result')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'usage')[0]).toMatchObject({
+      data: { input_tokens: 12, output_tokens: 9, num_turns: 3 },
+    });
+  });
+
+  it('keeps already-delivered sends and todo state while steering', async () => {
+    todoToolMode = true;
+    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'hello', cwd: root });
+    let steered = false;
+    for await (const event of query.events) {
+      if (event.type === 'assistant_message' && !steered) {
+        steered = true;
+        query.steer!({ id: 'todo-guidance', prompt: 'continue with existing checklist' });
+      }
+      if (event.type === 'result') query.end();
+    }
+    expect(JSON.stringify(requests[2].messages)).toContain('turn-one-secret');
+    todoToolMode = false;
+    toolMode = true;
+    const sendQuery = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'send', cwd: root });
+    steered = false;
+    for await (const event of sendQuery.events) {
+      if (event.type === 'assistant_message' && !steered) {
+        steered = true;
+        sendQuery.steer!({ id: 'after-send', prompt: 'do not send again' });
+      }
+      if (event.type === 'result') sendQuery.end();
+    }
+    expect(getOutboundDb().prepare('SELECT COUNT(*) AS count FROM messages_out').get()).toMatchObject({ count: 1 });
+  });
+
+  it('leaves guidance at the total 20-step limit unapplied instead of running another turn', async () => {
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    let boundary = 0;
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'assistant_message') {
+        query.steer!({ id: `s${++boundary}`, prompt: `guidance ${boundary}` });
+      }
+      if (event.type === 'result') query.end();
+    }
+    expect(requests).toHaveLength(20);
+    expect(events.filter((event) => event.type === 'steering_applied')).toHaveLength(19);
+    expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
+    expect(events.find((event) => event.type === 'usage')).toMatchObject({ data: { num_turns: 20, input_tokens: 80 } });
+    const continuation = events.find((event) => event.type === 'init')!.continuation;
+    expect(provider.appliedSteering(continuation, ['s19', 's20'])).toEqual(['s19']);
+  });
+
+  it.each(['end', 'abort'] as const)('does not consume queued guidance after %s at a boundary', async (action) => {
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'assistant_message') {
+        expect(query.steer!({ id: 'unapplied', prompt: 'must remain pending' })).toBe(true);
+        if (action === 'end') query.end();
+        else query.abort('user');
+      }
+    }
+    expect(requests).toHaveLength(1);
+    expect(events.some((event) => event.type === 'steering_applied')).toBe(false);
+    const continuation = events.find((event) => event.type === 'init')!.continuation;
+    expect(provider.appliedSteering(continuation, ['unapplied'])).toEqual([]);
+    expect(query.steer!({ id: 'late', prompt: 'rejected' })).toBe(false);
+  });
+
+  it('does not acknowledge input if steering preparation fails', async () => {
+    const prepare = nativeAttachments.prepareNativeUserMessage;
+    const prepareSpy = spyOn(nativeAttachments, 'prepareNativeUserMessage').mockImplementation(async (...args) => {
+      if (args[0] === 'bad guidance') throw new Error('preparation failed');
+      return prepare(...args);
+    });
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    try {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'assistant_message') query.steer!({ id: 'bad', prompt: 'bad guidance' });
+        if (event.type === 'error') query.end();
+      }
+      expect(requests).toHaveLength(1);
+      expect(events.some((event) => event.type === 'steering_applied')).toBe(false);
+      const continuation = events.find((event) => event.type === 'init')!.continuation;
+      expect(provider.appliedSteering(continuation, ['bad'])).toEqual([]);
+    } finally { prepareSpy.mockRestore(); }
+  });
+
+  it('keeps accepted steering pending when Stop interrupts an already-running tool', async () => {
+    slowToolMode = true;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => { started = resolve; });
+    const toolSpy = spyOn(nativeTools, 'createNativeTools').mockReturnValue({
+      bash: tool({
+        inputSchema: jsonSchema({ type: 'object' }),
+        execute: async (_args, options) => {
+          started();
+          return new Promise<string>((_resolve, reject) => {
+            options.abortSignal!.addEventListener('abort', () => reject(new Error('stopped')), { once: true });
+          });
+        },
+      }),
+    });
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    const consume = (async () => { for await (const event of query.events) events.push(event); })();
+    try {
+      await running;
+      expect(query.steer!({ id: 'pending', prompt: 'next direction' })).toBe(true);
+      query.abort('user');
+      await consume;
+      expect(events.some((event) => event.type === 'steering_applied' || event.type === 'result')).toBe(false);
+      expect(requests).toHaveLength(1);
+      const continuation = events.find((event) => event.type === 'init')!.continuation;
+      expect(provider.appliedSteering(continuation, ['pending'])).toEqual([]);
+    } finally {
+      query.abort();
+      await consume;
+      toolSpy.mockRestore();
+    }
+  });
+
+  it('deduplicates recovered steering across provider instances and continuation forks', async () => {
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'original', cwd: root });
+    let continuation = '';
+    let checkpoint = '';
+    let applied = false;
+    for await (const event of query.events) {
+      if (event.type === 'init') continuation = event.continuation;
+      if (event.type === 'assistant_message' && !applied) {
+        applied = true;
+        query.steer!({ id: 'persisted', prompt: 'durable guidance' });
+      }
+      if (event.type === 'checkpoint') checkpoint = event.ref;
+      if (event.type === 'result') query.end();
+    }
+    const recovered = new NativeProvider({ model: 'local/test-model' });
+    expect(recovered.appliedSteering(continuation, ['persisted', 'missing'])).toEqual(['persisted']);
+    const fork = await recovered.forkContinuation({ continuation, anchorRef: checkpoint, cwd: root });
+    expect(recovered.appliedSteering(fork!, ['persisted'])).toEqual(['persisted']);
+    const retried = recovered.query({ prompt: 'follow-up', continuation: fork!, cwd: root });
+    let acknowledged = 0;
+    for await (const event of retried.events) {
+      if (event.type === 'assistant_message') retried.steer!({ id: 'persisted', prompt: 'must not be added again' });
+      if (event.type === 'steering_applied') acknowledged++;
+      if (event.type === 'result') retried.end();
+    }
+    expect(acknowledged).toBe(1);
+    expect(requests).toHaveLength(3);
+    const store = new NativeStore(process.env.NATIVE_STATE_PATH);
+    try {
+      const history = JSON.stringify(store.messages(fork!));
+      expect(history.match(/durable guidance/g)).toHaveLength(1);
+      expect(history).not.toContain('must not be added again');
+    } finally { store.close(); }
+  });
+
   it('aborts a waiting model stream without retrying and closes its query', async () => {
     holdModelResponse = true;
     const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'waiting request', cwd: root });

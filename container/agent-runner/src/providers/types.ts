@@ -11,6 +11,10 @@ export interface AgentProvider {
    * slash commands like any other chat message.
    */
   readonly supportsNativeSlashCommands: boolean;
+  readonly supportsSteering?: boolean;
+
+  /** IDs durably incorporated into this continuation, for runner ack recovery. */
+  appliedSteering?(continuation: string, ids: string[]): string[];
 
   /**
    * Optional. When true, the runner scaffolds a persistent `memory/` tree in the
@@ -201,6 +205,11 @@ export interface QueryPushOptions {
 }
 
 export interface AgentQuery {
+  /** Queue guidance for a safe boundary in the active turn, without aborting it.
+   * Acceptance is not ingestion: only steering_applied acknowledges ingestion.
+   */
+  steer?(input: SteeringInput): boolean;
+
   /** Push a follow-up message into the active query. */
   push(
     message: string,
@@ -216,6 +225,12 @@ export interface AgentQuery {
 
   /** Force-stop the query. */
   abort(reason?: 'user' | 'internal'): void;
+}
+
+export interface SteeringInput {
+  id: string;
+  prompt: string;
+  files?: FileAttachment[];
 }
 
 /**
@@ -332,6 +347,7 @@ export function pickActivityDetail(input: Record<string, unknown> | undefined): 
 
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
+  | { type: 'steering_applied'; id: string }
   /**
    * Final turn output. `strippedToEmpty` marks the case where the model's
   * assistant produced recoverable output but no deliverable text (e.g. a

@@ -19,7 +19,7 @@ export function TurnStopButton({ turn, connected, busy, error, onStop }: TurnSto
       aria-busy={stopping}
       title={
         connected
-          ? `${label}. Queued follow-ups will still run; completed actions are not undone.`
+          ? `${label}. Queued follow-ups will still run, including steering not yet applied; completed actions are not undone.`
           : 'Reconnect to stop this response.'
       }
       disabled={!connected || stopping}

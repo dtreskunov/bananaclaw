@@ -78,6 +78,16 @@ const ACTIVE_TURN = {
 };
 
 describe('current turn control', () => {
+  it('accepts an optional native steering capability and replays it with the active turn', async () => {
+    const socket = await connect();
+    socket.write(`${JSON.stringify({
+      v: 3, type: 'turn.state', turn: { ...ACTIVE_TURN, supportsSteering: true },
+    })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).turn?.supportsSteering === true);
+    expect(getSessionActiveTurn(SESSION_ID).turn).toEqual({ ...ACTIVE_TURN, supportsSteering: true });
+    socket.destroy();
+  });
+
   it('sends one exact control for duplicate requests and never clears on telemetry', async () => {
     const socket = await connect();
     let received = '';
@@ -199,6 +209,7 @@ describe('current turn control', () => {
     { ...ACTIVE_TURN, threadId: 7 },
     { ...ACTIVE_TURN, channelType: 'x'.repeat(1025) },
     { ...ACTIVE_TURN, sessionId: 'forged' },
+    { ...ACTIVE_TURN, supportsSteering: 'true' },
     [],
     undefined,
   ])('rejects malformed turn state %j', async (turn) => {
@@ -210,6 +221,31 @@ describe('current turn control', () => {
 });
 
 describe('session signal link', () => {
+  it('publishes input-state changes only after their durable state is committed', async () => {
+    const observed: string[] = [];
+    const unsubscribe = onSessionSignal((sessionId, kind) => {
+      if (sessionId !== SESSION_ID || kind !== 'input.state') return;
+      const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+      try {
+        const row = db.prepare('SELECT value FROM session_state WHERE key = ?').get('input:test') as { value: string };
+        observed.push(row.value);
+      } finally { db.close(); }
+    });
+    const socket = await connect();
+    const value = JSON.stringify({ messageId: 'message-1', status: 'applied', turnId: 'turn-1' });
+    try {
+      socket.write(`${JSON.stringify({
+        v: 3, type: 'durable', eventId: 'input-state-1', sequence: 1,
+        event: { type: 'state.upsert', payload: { key: 'input:test', value, updated_at: new Date().toISOString() } },
+      })}\n`);
+      await waitFor(() => observed.length === 1);
+      expect(observed).toEqual([value]);
+    } finally {
+      unsubscribe();
+      socket.destroy();
+    }
+  });
+
   it.each(['interrupted', 'unknown'])('accepts truthful terminal tool status %s', async (status) => {
     const socket = await connect();
     socket.write(

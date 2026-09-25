@@ -15,6 +15,7 @@ import type {
   QueryPushOptions,
   CallUsage,
   TurnUsage,
+  SteeringInput,
 } from './types.js';
 import { pickActivityDetail } from './types.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
@@ -213,6 +214,7 @@ export function portableHistory(messages: ModelMessage[]): ModelMessage[] {
 
 export class NativeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = false;
+  readonly supportsSteering = true;
   private readonly options: ProviderOptions;
   private readonly store: NativeStore;
 
@@ -230,12 +232,19 @@ export class NativeProvider implements AgentProvider {
     return this.store.fork(input.continuation, input.anchorRef);
   }
 
+  appliedSteering(continuation: string, ids: string[]): string[] {
+    return this.store.appliedSteering(continuation, ids);
+  }
+
   query(input: QueryInput): AgentQuery {
     type Pending = { text: string; files?: FileAttachment[]; toolsDisabled?: boolean };
     const pending: Pending[] = [{ text: input.prompt, files: input.files }];
     let wake: (() => void) | null = null;
     let ended = false;
     let stoppedByUser = false;
+    let active = false;
+    const steering: SteeringInput[] = [];
+    const acceptedSteering = new Set<string>();
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
@@ -265,6 +274,7 @@ export class NativeProvider implements AgentProvider {
             }
 
             const turn = pending.shift()!;
+            active = true;
             const startedAt = Date.now();
             let journal: NativeTurnJournal | undefined;
             const callUsages: CallUsage[] = [];
@@ -297,78 +307,147 @@ export class NativeProvider implements AgentProvider {
                 typeof options.modelParams?.max_tokens === 'number'
                   ? Math.floor(options.modelParams.max_tokens)
                   : resolved.maxOutputTokens;
-              const result = streamText({
-                model: await languageModel(resolved),
-                system: loadNativeInstructions(
-                  input.systemContext?.instructions,
-                  skills.instructions(),
-                  turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
-                ),
-                messages: [...prior, incoming],
-                tools: journal.wrap(tools, abortController.signal),
-                stopWhen: isStepCount(20),
-                ...(!turn.toolsDisabled && shouldRequireTodos(turn.text)
-                  ? {
-                      prepareStep: ({ stepNumber, instructions }) =>
-                        stepNumber === 0
-                          ? {
-                              activeTools: ['todowrite'] as const,
-                              toolChoice: { type: 'tool' as const, toolName: 'todowrite' as const },
-                              instructions: `${String(
-                                instructions ?? '',
-                              )}\n\nThis is a planning-only step. Call todowrite exactly once and do not call any other tool.`,
-                            }
-                          : undefined,
+              const model = await languageModel(resolved);
+              const messages: ModelMessage[] = [...prior, incoming];
+              let stepsCompleted = 0;
+              let text: string | null = null;
+              let finishReason = '';
+              let checkpoint = journal.checkpoint;
+              const appliedSteeringIds: string[] = [];
+              const totalUsage: TurnUsage = usageFor(resolved, {}, {}, 0, 0);
+              while (stepsCompleted < 20) {
+                abortController.signal.throwIfAborted();
+                const result = streamText({
+                  model,
+                  system: loadNativeInstructions(
+                    input.systemContext?.instructions,
+                    skills.instructions(),
+                    turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
+                  ),
+                  messages,
+                  tools: journal.wrap(tools, abortController.signal),
+                  // Own the boundary: SDK prepareStep cannot resume a text-only
+                  // final step and may race ahead of the consumer's event loop.
+                  stopWhen: isStepCount(1),
+                  ...(!turn.toolsDisabled && shouldRequireTodos(turn.text)
+                    ? {
+                        prepareStep: ({ instructions }) =>
+                          stepsCompleted === 0
+                            ? {
+                                activeTools: ['todowrite'] as const,
+                                toolChoice: { type: 'tool' as const, toolName: 'todowrite' as const },
+                                instructions: `${String(
+                                  instructions ?? '',
+                                )}\n\nThis is a planning-only step. Call todowrite exactly once and do not call any other tool.`,
+                              }
+                            : undefined,
+                      }
+                    : {}),
+                  maxRetries: 2,
+                  abortSignal: abortController.signal,
+                  // A model call can finish before its tool does. Retain its
+                  // usage even if cancellation prevents finish-step.
+                  onLanguageModelCallEnd: ({ usage }) => {
+                    if (usage.inputTokens !== undefined || usage.outputTokens !== undefined) {
+                      callUsages.push(callUsageFor(resolved, usage));
                     }
-                  : {}),
-                maxRetries: 2,
-                abortSignal: abortController.signal,
-                // A model call can finish before its tool does. Retain its
-                // usage even if cancellation prevents finish-step.
-                onLanguageModelCallEnd: ({ usage }) => {
-                  if (usage.inputTokens !== undefined || usage.outputTokens !== undefined) {
-                    callUsages.push(callUsageFor(resolved, usage));
+                  },
+                  ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
+                  ...(typeof options.modelParams?.temperature === 'number'
+                    ? { temperature: options.modelParams.temperature }
+                    : {}),
+                  ...(typeof options.modelParams?.top_p === 'number' ? { topP: options.modelParams.top_p } : {}),
+                });
+
+                // Start the resumed generation before yielding acknowledgements.
+                // New guidance offered in response then targets this running step.
+                for (const id of appliedSteeringIds.splice(0)) yield { type: 'steering_applied', id };
+                for await (const rawPart of result.stream) {
+                  yield* flushCallUsage();
+                  yield { type: 'activity' };
+                  const part = rawPart as unknown as Record<string, unknown>;
+                  if (part.type === 'tool-call') yield { type: 'progress', step: formatNativeToolStep(part, 'running') };
+                  else if (part.type === 'tool-result') yield { type: 'progress', step: formatNativeToolStep(part, 'completed') };
+                  else if (part.type === 'tool-error') yield { type: 'progress', step: formatNativeToolStep(part, 'error') };
+                  else if (part.type === 'error') throw part.error;
+                  else if (part.type === 'text-delta') journal.appendText(String(part.text ?? ''));
+                  else if (part.type === 'finish-step') {
+                    journal.save();
+                    yield { type: 'assistant_message' };
                   }
-                },
-                ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
-                ...(typeof options.modelParams?.temperature === 'number'
-                  ? { temperature: options.modelParams.temperature }
-                  : {}),
-                ...(typeof options.modelParams?.top_p === 'number' ? { topP: options.modelParams.top_p } : {}),
-              });
-
-              for await (const rawPart of result.stream) {
-                yield* flushCallUsage();
-                yield { type: 'activity' };
-                const part = rawPart as unknown as Record<string, unknown>;
-                if (part.type === 'tool-call') yield { type: 'progress', step: formatNativeToolStep(part, 'running') };
-                else if (part.type === 'tool-result') yield { type: 'progress', step: formatNativeToolStep(part, 'completed') };
-                else if (part.type === 'tool-error') yield { type: 'progress', step: formatNativeToolStep(part, 'error') };
-                else if (part.type === 'error') throw part.error;
-                else if (part.type === 'text-delta') journal.appendText(String(part.text ?? ''));
-                else if (part.type === 'finish-step') {
-                  journal.save();
-                  yield { type: 'assistant_message' };
                 }
-              }
 
-              const responseMessages = (await result.responseMessages) as ModelMessage[];
-              await journal.settle();
-              yield* flushCallUsage();
-              if (abortController.signal.aborted) throw new Error('Turn stopped');
-              const checkpoint = journal.finish(portableHistory(responseMessages));
-              const [usage, steps] = await Promise.all([result.usage, result.steps]);
+                const responseMessages = (await result.responseMessages) as ModelMessage[];
+                await journal.settle();
+                yield* flushCallUsage();
+                if (abortController.signal.aborted) throw new Error('Turn stopped');
+                checkpoint = journal.finishSegment(portableHistory(responseMessages));
+                messages.push(...responseMessages);
+                const [usage, steps] = await Promise.all([result.usage, result.steps]);
+                stepsCompleted += steps.length;
+                const segmentUsage = usageFor(resolved, usage, steps.at(-1)?.usage, 0, 0);
+                totalUsage.cost_usd += segmentUsage.cost_usd;
+                totalUsage.input_tokens += segmentUsage.input_tokens;
+                totalUsage.output_tokens += segmentUsage.output_tokens;
+                totalUsage.cache_read_tokens += segmentUsage.cache_read_tokens;
+                totalUsage.cache_write_tokens += segmentUsage.cache_write_tokens;
+                totalUsage.reasoning_tokens = (totalUsage.reasoning_tokens ?? 0) + (segmentUsage.reasoning_tokens ?? 0);
+                totalUsage.context_tokens = segmentUsage.context_tokens;
+                text = (await result.text).trim() || null;
+                finishReason = String(await result.finishReason);
+
+                let applied = false;
+                // Prepare all inputs before acknowledging any: preparation failures
+                // must not consume input for a generation that never starts.
+                const prepared: Array<{ input: SteeringInput; message: ModelMessage }> = [];
+                let inlineBytes = inlineHistoryBytes(messages);
+                while (!ended && stepsCompleted < 20 && prepared.length < steering.length) {
+                  const guidance = steering[prepared.length];
+                  if (store.appliedSteering(continuation, [guidance.id]).length > 0) {
+                    steering.splice(prepared.length, 1);
+                    yield { type: 'steering_applied', id: guidance.id };
+                    continue;
+                  }
+                  const message = await prepareNativeUserMessage(guidance.prompt, guidance.files, resolved, {
+                    signal: abortController.signal,
+                    maxInlineBytes: MAX_INLINE_BYTES - inlineBytes,
+                  });
+                  inlineBytes += inlineHistoryBytes([message]);
+                  prepared.push({ input: guidance, message });
+                }
+                abortController.signal.throwIfAborted();
+                if (!ended) {
+                  for (const item of prepared) {
+                    if (journal.applySteering(item.input.id, item.message)) {
+                      messages.push(item.message);
+                      applied = true;
+                    }
+                    steering.shift();
+                  }
+                  appliedSteeringIds.push(...prepared.map((item) => item.input.id));
+                }
+                const step = steps.at(-1);
+                const continueTools = step && step.toolCalls.length > 0 &&
+                  step.toolCalls.every((call) => step.content.some((part) =>
+                    (part.type === 'tool-result' || part.type === 'tool-error') &&
+                    part.toolCallId === call.toolCallId));
+                if (stepsCompleted >= 20 || (!applied && !continueTools)) break;
+              }
+              // No await or yield between closing acceptance and deciding the
+              // final result; guidance arriving after this belongs to a later turn.
+              active = false;
               yield {
                 type: 'usage',
-                data: usageFor(resolved, usage, steps.at(-1)?.usage, Date.now() - startedAt, steps.length),
+                data: { ...totalUsage, duration_ms: Date.now() - startedAt, num_turns: stepsCompleted },
               };
               yield { type: 'checkpoint', ref: checkpoint };
               yield {
                 type: 'result',
-                text: (await result.text).trim() || null,
-                finishReason: String(await result.finishReason),
+                text,
+                finishReason,
               };
             } catch (error) {
+              active = false;
               if (abortController.signal.aborted) {
                 if (journal) {
                   await journal.settle();
@@ -383,6 +462,10 @@ export class NativeProvider implements AgentProvider {
                 message: errorMessage(error),
                 retryable: /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
               };
+            } finally {
+              active = false;
+              steering.length = 0;
+              acceptedSteering.clear();
             }
           }
         } finally {
@@ -393,6 +476,14 @@ export class NativeProvider implements AgentProvider {
     };
 
     return {
+      steer(guidance: SteeringInput): boolean {
+        if (!active || ended || abortController.signal.aborted) return false;
+        if (!acceptedSteering.has(guidance.id)) {
+          acceptedSteering.add(guidance.id);
+          steering.push(guidance);
+        }
+        return true;
+      },
       push(message: string, files?: FileAttachment[], pushOptions?: QueryPushOptions): boolean {
         if (ended || abortController.signal.aborted) return false;
         pending.push({ text: message, files, toolsDisabled: pushOptions?.tools === 'disabled' });

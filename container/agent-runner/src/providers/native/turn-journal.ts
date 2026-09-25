@@ -9,6 +9,7 @@ export const INTERRUPTED_TOOL =
 export class NativeTurnJournal {
   private readonly calls = new Map<string, { name: string; input: unknown; output: unknown; failed: boolean }>();
   private readonly executions = new Set<Promise<unknown>>();
+  private readonly completedActivity: ActivityStep[] = [];
   private text = '';
   private anchor: string;
   checkpoint: string;
@@ -71,13 +72,13 @@ export class NativeTurnJournal {
   }
 
   activity(): ActivityStep[] {
-    return [...this.calls].map(([id, call]) => ({
+    return [...this.completedActivity, ...[...this.calls].map(([id, call]): ActivityStep => ({
       kind: 'tool',
       id,
       tool: call.name,
       status: call.failed ? (call.output === INTERRUPTED_TOOL ? 'interrupted' : 'error') : 'completed',
       ...(call.failed ? { error: String(call.output) } : {}),
-    }));
+    }))];
   }
 
   private messages(): ModelMessage[] {
@@ -119,5 +120,23 @@ export class NativeTurnJournal {
 
   finish(messages: ModelMessage[]): string {
     return (this.checkpoint = this.store.replaceAfter(this.conversation, this.anchor, messages));
+  }
+
+  /** Seal a completed SDK segment before appending another input. */
+  finishSegment(messages: ModelMessage[]): string {
+    this.finish(messages);
+    this.completedActivity.splice(0, this.completedActivity.length, ...this.activity());
+    this.calls.clear();
+    this.text = '';
+    this.anchor = this.checkpoint;
+    return this.checkpoint;
+  }
+
+  applySteering(id: string, message: ModelMessage): boolean {
+    const ref = this.store.appendSteering(this.conversation, id, message);
+    if (ref === null) return false;
+    // Future incremental saves may replace only output after the injected input.
+    this.anchor = this.checkpoint = ref;
+    return true;
   }
 }

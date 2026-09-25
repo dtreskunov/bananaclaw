@@ -82,6 +82,34 @@ Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visib
 
 Everything else falls back to a download link.
 
+### Steering a native response
+
+Sending text, dictation, or attachments while a native response is running in
+the same web conversation offers **Steer current turn** (focused by default)
+and **Queue for later**. Cancel, Escape, or dismissing the dialog keeps the
+draft, files, and pinned context. Other providers keep their existing send
+behavior. External-channel conversations do not show this choice; eligible
+native inputs are steered automatically by the runner.
+
+Both choices capture the active turn ID. If that turn finishes while the
+dialog is open, steering becomes a follow-up rather than targeting a new
+response. Shared sessions never steer a different conversation's response.
+Capability comes from the running turn, not the group's saved provider setting.
+
+Inbound bubbles show **Queued** with a distinct inset accent, **Waiting to
+steer**, or **Applied to current turn**. Only a durable runner receipt confirms
+application; an HTTP response or message echo does not. Queued/waiting captions
+clear when processing starts, while applied provenance and explicit follow-up
+outcomes remain in history. Receipts restore after reconnects and on external
+conversation refreshes.
+
+The web send endpoint accepts optional JSON `inputHandling: { mode:
+"queue" | "steer", turnId?: string }`; multipart sends carry the same object as
+a JSON-encoded `inputHandling` field. Steering requires a captured `turnId`.
+The host validates send access and the matching live turn's capability, and
+preserves stale targets for safe follow-up handling. A `clientMessageId` remains
+stable across retries after ambiguous network/server failures.
+
 ### Stopping a response
 
 The live activity ("thinking") bubble has a small square **Stop** icon at the
@@ -91,6 +119,10 @@ the action. It remains available while the activity trace is collapsed and stops
 response, including a response waiting on a tool. The composer, Send/Enter,
 attachments, and dictation remain unchanged: you can still enqueue follow-ups.
 Queued messages are not cancelled and run afterward.
+Sending queued or steering input does not hide or retarget Stop: it remains
+bound to the actual active response, even when the newest bubble is your input.
+Steering accepted but not yet applied is preserved as a follow-up after Stop.
+When the next queued response starts, Stop targets that new turn instead.
 
 Question cards are not cancelled by Stop. They remain actionable, and submitting
 an answer is ordinary new input (or a queued follow-up). You can stop the

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough, Readable, Writable } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -13,19 +14,27 @@ const signal = vi.hoisted(() => ({
     channelType: string;
     platformId: string;
     threadId: string | null;
+    supportsSteering?: boolean;
   },
   connected: true,
-  listeners: new Set<(sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat') => void>(),
+  listeners: new Set<(sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat' | 'input.state') => void>(),
   stop: vi.fn(),
+  submit: vi.fn(),
 }));
 vi.mock('../../../session-link.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../session-link.js')>()),
   getSessionActiveTurn: vi.fn(() => ({ turn: signal.turn, connected: signal.connected })),
   requestSessionTurnStop: signal.stop,
-  onSessionSignal: (listener: (sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat') => void) => {
+  onSessionSignal: (
+    listener: (sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat' | 'input.state') => void,
+  ) => {
     signal.listeners.add(listener);
     return () => signal.listeners.delete(listener);
   },
+}));
+vi.mock('../../../channels/web.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../channels/web.js')>()),
+  submitWebInbound: signal.submit,
 }));
 vi.mock('../../../config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../config.js')>()),
@@ -45,10 +54,10 @@ vi.mock('../../../container-runner.js', () => ({
 }));
 
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { initSessionFolder } from '../../../session-manager.js';
+import { initSessionFolder, openInboundDb, openOutboundDbRw } from '../../../session-manager.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { COOKIE_NAME } from '../auth.js';
-import { handleChatRequest, handleChatUpgrade, matchChatPath, readChatActiveTurn } from './chat.js';
+import { handleChatRequest, handleChatUpgrade, matchChatPath, readChatActiveTurn, readChatHistory } from './chat.js';
 import { handle } from './routes.js';
 
 const TURN = {
@@ -99,6 +108,7 @@ beforeEach(() => {
   signal.turn = { ...TURN };
   signal.connected = true;
   signal.listeners.clear();
+  signal.submit.mockReset().mockResolvedValue('web-client-123');
   signal.stop.mockReset().mockImplementation(async (_sessionId: string, turnId: string) => {
     if (!signal.connected) return { accepted: false, error: 'disconnected' };
     if (signal.turn?.id !== turnId) return { accepted: false, error: 'not_active' };
@@ -113,15 +123,24 @@ afterEach(() => {
 });
 
 async function stop(
-  options: { body?: unknown; group?: string; thread?: string; query?: string; user?: string; method?: string } = {},
+  options: {
+    body?: unknown;
+    group?: string;
+    thread?: string;
+    query?: string;
+    user?: string;
+    method?: string;
+    kind?: 'send' | 'stop';
+    multipart?: string;
+  } = {},
 ) {
-  const pathname = `/api/groups/${options.group ?? 'agent'}/chat/${options.thread ?? 'thread-1'}/stop`;
+  const pathname = `/api/groups/${options.group ?? 'agent'}/chat/${options.thread ?? 'thread-1'}/${options.kind ?? 'stop'}`;
   const req = Readable.from([
-    Buffer.from(JSON.stringify(options.body === undefined ? { turnId: TURN.id } : options.body)),
+    Buffer.from(options.multipart ?? JSON.stringify(options.body === undefined ? { turnId: TURN.id } : options.body)),
   ]) as http.IncomingMessage;
   req.method = options.method ?? 'POST';
   req.url = pathname + (options.query ?? '');
-  req.headers = {};
+  req.headers = options.multipart ? { 'content-type': 'multipart/form-data; boundary=test-boundary' } : {};
   const chunks: Buffer[] = [];
   let status = 0;
   const res = new Writable({
@@ -137,6 +156,248 @@ async function stop(
   await handleChatRequest(req, res, pathname, options.user ?? 'web:member');
   return { status, body: JSON.parse(Buffer.concat(chunks).toString()) };
 }
+
+describe('native steering submissions', () => {
+  const handling = { mode: 'steer', turnId: TURN.id };
+  const send = (inputHandling: unknown = handling, options: Parameters<typeof stop>[0] = {}) =>
+    stop({
+      kind: 'send',
+      body: { text: 'Change direction', clientMessageId: 'client-123', inputHandling },
+      ...options,
+    });
+
+  it('binds JSON steering to the authorized web context and exposes only the advertised capability', async () => {
+    signal.turn = { ...TURN, supportsSteering: true };
+    expect(readChatActiveTurn('web:member', 'agent', 'thread-1', OVERRIDE).activeTurn).toEqual({
+      id: TURN.id,
+      status: 'running',
+      supportsSteering: true,
+    });
+    expect((await send()).status).toBe(200);
+    expect(signal.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformId: 'group:agent',
+        threadId: 'thread-1',
+        userId: 'web:member',
+        clientMessageId: 'client-123',
+        inputHandling: handling,
+      }),
+    );
+  });
+
+  it('supports multipart intent and attachments, rejecting invalid metadata JSON', async () => {
+    signal.turn = { ...TURN, supportsSteering: true };
+    const multipart = (metadata: string) =>
+      `--test-boundary\r\nContent-Disposition: form-data; name="text"\r\n\r\nChange\r\n` +
+      `--test-boundary\r\nContent-Disposition: form-data; name="inputHandling"\r\n\r\n${metadata}\r\n` +
+      '--test-boundary\r\nContent-Disposition: form-data; name="file"; filename="note.txt"\r\nContent-Type: text/plain\r\n\r\nNotes\r\n--test-boundary--\r\n';
+    expect((await send(handling, { multipart: multipart(JSON.stringify(handling)) })).status).toBe(200);
+    expect(signal.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputHandling: handling,
+        attachments: [{ filename: 'note.txt', contentType: 'text/plain', data: 'Tm90ZXM=', size: 5 }],
+      }),
+    );
+    expect((await send(handling, { multipart: multipart('{') })).status).toBe(400);
+    expect((await send(handling, { multipart: multipart('{"mode":"invalid"}') })).status).toBe(400);
+  });
+
+  it.each([
+    null,
+    [],
+    'steer',
+    {},
+    { mode: 'steer' },
+    { mode: 'queue', turnId: 'bad id' },
+    { mode: 'steer', turnId: TURN.id, sessionId: 'forged' },
+    { mode: 'invalid' },
+  ])('rejects malformed inputHandling %j', async (value) => {
+    expect((await send(value)).status).toBe(400);
+    expect(signal.submit).not.toHaveBeenCalled();
+  });
+
+  it('does not infer support from provider settings and leaves normal and queued submissions unchanged', async () => {
+    expect((await send()).body.error).toBe('unsupported');
+    expect((await send({ mode: 'queue', turnId: TURN.id })).status).toBe(200);
+    expect((await stop({ kind: 'send', body: { text: 'Ordinary send' } })).status).toBe(200);
+    expect(signal.submit).toHaveBeenLastCalledWith(expect.objectContaining({ inputHandling: undefined }));
+  });
+
+  it('preserves stale targets as follow-ups rather than retargeting a new turn', async () => {
+    for (const turn of [null, { ...TURN, id: 'new-turn', supportsSteering: true }]) {
+      signal.turn = turn;
+      expect((await send()).status).toBe(200);
+      expect(signal.submit).toHaveBeenLastCalledWith(expect.objectContaining({ inputHandling: handling }));
+    }
+  });
+
+  it('rejects live unsupported/disconnected/stopping targets and cross-conversation targets', async () => {
+    signal.turn = { ...TURN, supportsSteering: true };
+    expect((await send(handling, { thread: 'thread-2' })).body.error).toBe('different_conversation');
+    signal.connected = false;
+    expect((await send()).body.error).toBe('disconnected');
+    signal.connected = true;
+    signal.turn.status = 'stopping';
+    expect((await send()).body.error).toBe('not_running');
+    expect(signal.submit).not.toHaveBeenCalled();
+  });
+
+  it('requires group access, rejects forged context, and does not steer through external channel sends', async () => {
+    signal.turn = { ...TURN, supportsSteering: true };
+    expect((await send(handling, { group: 'other' })).status).toBe(403);
+    expect((await send(handling, { query: '?channel=web&mg=mail-mg' })).status).toBe(403);
+    expect((await send(handling, { query: '?channel=web' })).status).toBe(400);
+    expect((await send(handling, { query: '?sessionId=forged' })).status).toBe(400);
+    expect((await send(handling, { query: '?channel=resend&mg=mail-mg' })).status).toBe(400);
+    expect(signal.submit).not.toHaveBeenCalled();
+  });
+});
+
+function inputRow(
+  id: string,
+  options: { thread?: string; platform?: string; channel?: string; handling?: object; status?: string } = {},
+) {
+  const db = openInboundDb('agent', 'session-1');
+  try {
+    db.prepare(
+      `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, thread_id, content)
+      VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 2 FROM messages_in), 'chat', ?, ?, 1, ?, ?, ?, ?)`,
+    ).run(
+      `${id}:agent`,
+      NOW,
+      options.status ?? 'pending',
+      options.platform ?? 'group:agent',
+      options.channel ?? 'web',
+      options.thread ?? 'thread-1',
+      JSON.stringify({ text: id, ...(options.handling ? { inputHandling: options.handling } : {}) }),
+    );
+  } finally {
+    db.close();
+  }
+}
+
+function receipt(id: string, status: string, reason?: string) {
+  const db = openOutboundDbRw('agent', 'session-1');
+  const messageId = `${id}:agent`;
+  try {
+    db.prepare('INSERT OR REPLACE INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+      `input:${createHash('sha256').update(messageId).digest('hex')}`,
+      JSON.stringify({ messageId, status, turnId: TURN.id, ...(reason ? { reason } : {}) }),
+      NOW,
+    );
+  } finally {
+    db.close();
+  }
+}
+
+describe('durable input state history', () => {
+  const history = () => readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE);
+
+  it('normalizes namespaced IDs, restores state, and isolates other conversations', () => {
+    inputRow('visible');
+    inputRow('other-thread', { thread: 'thread-2' });
+    inputRow('other-room', { platform: 'group:other' });
+    inputRow('other-channel', { channel: 'resend' });
+    for (const id of ['visible', 'other-thread', 'other-room', 'other-channel']) receipt(id, 'queued');
+    expect(history()).toEqual([
+      expect.objectContaining({
+        id: 'visible',
+        inputState: { messageId: 'visible', status: 'queued', turnId: TURN.id },
+      }),
+    ]);
+    receipt('visible', 'applied');
+    expect(history()[0].inputState?.status).toBe('applied');
+  });
+
+  it('uses intent only as pending status, clears claims immediately, and retains applied provenance', () => {
+    inputRow('pending', { handling: { mode: 'steer', turnId: TURN.id } });
+    expect(history()[0].inputState?.status).toBe('queued');
+    receipt('pending', 'queued');
+    const db = openOutboundDbRw('agent', 'session-1');
+    db.prepare(
+      "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('pending:agent', 'processing', ?)",
+    ).run(NOW);
+    db.close();
+    expect(history()[0].inputState).toBeUndefined();
+    receipt('pending', 'applied');
+    expect(history()[0].inputState?.status).toBe('applied');
+  });
+
+  it('retains stale follow-up outcomes after completion, without a queued caption', () => {
+    inputRow('stale', { status: 'completed' });
+    receipt('stale', 'queued', 'turn_finished');
+    expect(history()[0].inputState).toEqual({
+      messageId: 'stale',
+      status: 'processing',
+      turnId: TURN.id,
+      reason: 'turn_finished',
+    });
+  });
+
+  it('restores native external-channel receipts but ignores external submission metadata', () => {
+    inputRow('external', {
+      channel: 'resend',
+      platform: 'bot@example.com',
+      handling: { mode: 'steer', turnId: TURN.id },
+    });
+    const read = () =>
+      readChatHistory('web:owner', 'agent', 'thread-1', { channelType: 'resend', messagingGroupId: 'mail-mg' });
+    expect(read()[0].inputState).toBeUndefined();
+    receipt('external', 'steering');
+    expect(read()[0].inputState?.status).toBe('steering');
+  });
+
+  it('ignores malformed and mismatched receipt keys', () => {
+    inputRow('visible');
+    const db = openOutboundDbRw('agent', 'session-1');
+    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+      'input:forged',
+      JSON.stringify({ messageId: 'visible:agent', status: 'applied' }),
+      NOW,
+    );
+    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run('input:broken', '{', NOW);
+    db.close();
+    expect(history()[0].inputState).toBeUndefined();
+  });
+
+  it('pushes only visible message receipts on input.state and clears claimed queue status', () => {
+    inputRow('visible');
+    inputRow('hidden', { thread: 'thread-2' });
+    receipt('visible', 'queued');
+    receipt('hidden', 'applied');
+    const frames: Record<string, unknown>[] = [];
+    const ws = Object.assign(new EventEmitter(), {
+      send: (frame: string) => frames.push(JSON.parse(frame)),
+      close: vi.fn(),
+    });
+    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
+      callback(ws as unknown as WebSocket, _req);
+    });
+    const req = Readable.from([]) as unknown as http.IncomingMessage;
+    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
+    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    expect((frames[0].messages as Array<{ inputState: { status: string } }>)[0].inputState.status).toBe('queued');
+    const count = frames.length;
+    for (const listener of signal.listeners) listener('unrelated-session', 'input.state');
+    expect(frames).toHaveLength(count);
+    const db = openOutboundDbRw('agent', 'session-1');
+    db.prepare(
+      "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('visible:agent', 'processing', ?)",
+    ).run(NOW);
+    db.close();
+    for (const listener of signal.listeners) listener('session-1', 'input.state');
+    expect(frames.at(-1)).toEqual({ kind: 'input-state', states: [{ messageId: 'visible', inputState: null }] });
+    receipt('visible', 'applied');
+    for (const listener of signal.listeners) listener('session-1', 'input.state');
+    expect(frames.at(-1)).toEqual({
+      kind: 'input-state',
+      states: [{ messageId: 'visible', inputState: { messageId: 'visible', status: 'applied', turnId: TURN.id } }],
+    });
+    ws.emit('close');
+    expect(signal.listeners.size).toBe(0);
+  });
+});
 
 describe('chat stop authorization', () => {
   it('accepts the explicit current turn and preserves shared web membership semantics', async () => {

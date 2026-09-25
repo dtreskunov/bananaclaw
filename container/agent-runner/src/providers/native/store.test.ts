@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { ModelMessage } from 'ai';
 
@@ -10,7 +9,7 @@ let root: string;
 let store: NativeStore;
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-store-'));
+  root = fs.mkdtempSync(path.join(process.cwd(), '.native-store-'));
   store = new NativeStore(path.join(root, 'state.db'));
 });
 
@@ -20,6 +19,22 @@ afterEach(() => {
 });
 
 describe('NativeStore', () => {
+  it('atomically persists steering and recovers deduplication after reopening, including forks', () => {
+    const conversation = store.createConversation();
+    const before = store.append(conversation, [{ role: 'user', content: 'original' }]);
+    const applied = store.appendSteering(conversation, 'guidance', { role: 'user', content: 'new direction' })!;
+    store.close();
+    store = new NativeStore(path.join(root, 'state.db'));
+    expect(store.appliedSteering(conversation, ['guidance', 'unapplied'])).toEqual(['guidance']);
+    expect(store.appendSteering(conversation, 'guidance', { role: 'user', content: 'duplicate' })).toBeNull();
+    const early = store.fork(conversation, before)!;
+    const late = store.fork(conversation, applied)!;
+    expect(store.appliedSteering(early, ['guidance'])).toEqual([]);
+    expect(store.appliedSteering(late, ['guidance'])).toEqual(['guidance']);
+    expect(store.messages(late)).toEqual(store.messages(conversation));
+    expect(JSON.stringify(store.messages(conversation))).not.toContain('duplicate');
+  });
+
   it('persists complete model messages and forks at an exact checkpoint', () => {
     const conversation = store.createConversation();
     const first = store.append(conversation, [
@@ -46,5 +61,13 @@ describe('NativeStore', () => {
     const second = store.createConversation();
     const foreign = store.append(second, [{ role: 'user', content: 'foreign' }]);
     expect(store.fork(first, foreign)).toBeNull();
+  });
+
+  it('removes acknowledgements when the corresponding input is rolled back', () => {
+    const conversation = store.createConversation();
+    const anchor = store.append(conversation, [{ role: 'user', content: 'original' }]);
+    store.appendSteering(conversation, 'rolled-back', { role: 'user', content: 'guidance' });
+    store.replaceAfter(conversation, anchor, [{ role: 'assistant', content: 'replacement' }]);
+    expect(store.appliedSteering(conversation, ['rolled-back'])).toEqual([]);
   });
 });

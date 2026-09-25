@@ -1,4 +1,6 @@
 // Shared types used across the chat UI client.
+import type { InputHandling, InputState } from '../../../shared/input-state';
+export type { InputHandling, InputState } from '../../../shared/input-state';
 
 export type ChannelType =
   | 'web'
@@ -170,6 +172,7 @@ export interface DisplayCard {
 export type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface ChatMessage {
+  inputState?: InputState;
   id?: string;
   direction: Direction;
   text: string;
@@ -341,6 +344,7 @@ export interface RouterApi {
 export interface ActiveTurn {
   id: string;
   status: 'running' | 'stopping';
+  supportsSteering?: boolean;
 }
 
 // Value sent by the chat WS.
@@ -350,6 +354,7 @@ export interface WsPayload {
     | 'ready'
     | 'typing'
     | 'turn'
+    | 'input-state'
     | 'inbound'
     | 'outbound'
     | 'usage'
@@ -359,6 +364,8 @@ export interface WsPayload {
   turn?: ActiveTurn | null;
   activeTurn?: ActiveTurn | null;
   connected?: boolean;
+  inputHandling?: InputHandling;
+  states?: Array<{ messageId: string; inputState: InputState | null }>;
   threadId?: string;
   messages?: Array<{
     id?: string;
@@ -375,6 +382,7 @@ export interface WsPayload {
     event?: TimelineEvent;
     reactions?: MessageReaction[];
     author?: { userId: string; displayName: string };
+    inputState?: InputState;
   }>;
   author?: { userId: string; displayName: string };
   voiceInput?: VoiceInputCapability;

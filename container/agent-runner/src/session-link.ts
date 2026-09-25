@@ -31,6 +31,7 @@ export interface ActiveTurn {
   channelType: string;
   platformId: string;
   threadId: string | null;
+  supportsSteering?: boolean;
 }
 
 export function isAddressableTurn(turn: ActiveTurn): boolean {

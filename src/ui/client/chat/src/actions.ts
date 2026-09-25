@@ -16,6 +16,7 @@ import {
   chatReady,
   isTyping,
   activeTurn,
+  turnConnected,
   pendingWebSends,
   typingHint,
   typingStartedAt,
@@ -67,6 +68,7 @@ import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdow
 import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
 import { showToast } from './components/Toast';
+import { requestChoice } from './components/PromptModal';
 import type {
   Thread,
   ThreadCtx,
@@ -84,9 +86,12 @@ import type {
   SearchResult,
   SuggestedAction,
   ActiveTurn,
+  InputHandling,
+  InputState,
 } from './types';
 
 interface ServerMessage {
+  inputState?: InputState;
   stoppedStats?: StoppedTurnStats;
   id?: string;
   direction: string;
@@ -413,6 +418,7 @@ export function clearSearch(): void {
 
 // ── chat ────────────────────────────────────────────────────────────
 export function clearChat(): void {
+  retryWebSend = null;
   resetTurnState();
   voice.detach();
   cancelRecording();
@@ -595,6 +601,7 @@ function toChatMessage(m: ServerMessage): ChatMessage {
     ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
     ...(m.usage ? { usage: m.usage } : {}),
     ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
+    ...(m.inputState ? { inputState: m.inputState } : {}),
     ...(m.activity ? { activity: m.activity } : {}),
     ...(m.event ? { event: m.event } : {}),
     ...(m.reactions ? { reactions: m.reactions } : {}),
@@ -612,6 +619,16 @@ function replaceIncomingMessages(messages: ServerMessage[]): void {
 }
 
 function mergeIncomingMessages(messages: ServerMessage[]): void {
+  const inboundStates = new Map(
+    messages
+      .filter((message) => message.direction === 'in' && message.id)
+      .map((message) => [message.id, message.inputState]),
+  );
+  chatMessages.value = chatMessages.value.map((message) =>
+    message.direction === 'in' && inboundStates.has(message.id)
+      ? { ...message, inputState: inboundStates.get(message.id) }
+      : message,
+  );
   let maxTs = '';
   const additions: ChatMessage[] = [];
   for (const m of messages) {
@@ -631,6 +648,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
+      ...(m.inputState ? { inputState: m.inputState } : {}),
       ...(m.activity ? { activity: m.activity } : {}),
       ...(m.event ? { event: m.event } : {}),
       ...(m.reactions ? { reactions: m.reactions } : {}),
@@ -1006,6 +1024,15 @@ function connectChatWs(ctx: ChatSocketContext): void {
       applyTurnState(payload.turn ?? null, payload.connected === true);
       return;
     }
+    if (payload.kind === 'input-state') {
+      const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry.inputState]));
+      chatMessages.value = chatMessages.value.map((message) =>
+        message.direction === 'in' && message.id && states.has(message.id)
+          ? { ...message, inputState: states.get(message.id) ?? undefined }
+          : message,
+      );
+      return;
+    }
     if (payload.kind === 'ready') {
       if (payload.threadId !== tid) return;
       refs.reconnectAttempt = 0;
@@ -1043,7 +1070,8 @@ function connectChatWs(ctx: ChatSocketContext): void {
       return;
     }
     if (payload.kind === 'inbound') {
-      refs.carryActivity = [];
+      const seen = payload.id && refs.seenIds.has(`in:${payload.id}`);
+      if (!activeTurn.value) refs.carryActivity = [];
       if (payload.id) {
         pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== payload.id);
       }
@@ -1058,6 +1086,21 @@ function connectChatWs(ctx: ChatSocketContext): void {
         undefined,
         payload.author,
       );
+      if (!seen && payload.id && payload.inputHandling) {
+        const handling = payload.inputHandling;
+        chatMessages.value = chatMessages.value.map((message) =>
+          message.direction === 'in' && message.id === payload.id
+            ? {
+                ...message,
+                inputState: {
+                  messageId: payload.id!,
+                  status: 'queued',
+                  ...(handling.turnId ? { turnId: handling.turnId } : {}),
+                },
+              }
+            : message,
+        );
+      }
       updateActiveThreadTitleFromFirstMessage(payload.text || '');
       bumpActiveThread();
       return;
@@ -1260,21 +1303,71 @@ function connectChatWs(ctx: ChatSocketContext): void {
   };
 }
 
+let retryWebSend: {
+  generation: number;
+  gid: string;
+  tid: string;
+  text: string;
+  files: PendingFile[];
+  clientMessageId: string;
+  inputHandling?: InputHandling;
+} | null = null;
+
 export async function sendChat(text: string, files: PendingFile[] | null | undefined): Promise<boolean> {
   if (!groupId.value || !threadId.value) return false;
   const generation = refs.chatGeneration;
   const gid = groupId.value;
   const tid = threadId.value;
-  const clientMessageId = crypto.randomUUID();
+  const ct = channelType.value;
+  const mg = messagingGroupId.value;
+  const isWeb = !ct || ct === 'web';
+  if (!canSend.value || (isWeb && !chatReady.value)) return false;
+  const retry =
+    isWeb &&
+    retryWebSend?.generation === generation &&
+    retryWebSend.gid === gid &&
+    retryWebSend.tid === tid &&
+    retryWebSend.text === text &&
+    retryWebSend.files.length === (files?.length ?? 0) &&
+    retryWebSend.files.every((file, index) => file === files?.[index])
+      ? retryWebSend
+      : null;
+  let inputHandling = retry?.inputHandling;
+  const turn = activeTurn.value;
+  if (!retry && isWeb && turnConnected.value && turn?.status === 'running' && turn.supportsSteering === true) {
+    const choice = await requestChoice({
+      title: 'Send while the agent is working',
+      message: 'Steer the current turn with this message, or queue it for later.',
+      options: [
+        { value: 'cancel', label: 'Cancel' },
+        { value: 'queue', label: 'Queue for later' },
+        { value: 'steer', label: 'Steer current turn', tone: 'primary' },
+      ],
+    });
+    if (choice !== 'steer' && choice !== 'queue') return false;
+    inputHandling = { mode: choice, turnId: turn.id };
+  }
+  if (
+    generation !== refs.chatGeneration ||
+    groupId.value !== gid ||
+    threadId.value !== tid ||
+    channelType.value !== ct ||
+    messagingGroupId.value !== mg ||
+    !canSend.value ||
+    (isWeb && !chatReady.value)
+  )
+    return false;
+  const clientMessageId = retry?.clientMessageId ?? crypto.randomUUID();
   const messageId = publicWebMessageId(clientMessageId);
-  // New turn boundary — drop any trace stashed from the previous turn.
-  refs.carryActivity = [];
+  // A queued/steering send is not a new turn boundary.
+  if (!activeTurn.value) refs.carryActivity = [];
   // Scroll to bottom immediately so user sees their message area
   requestScrollToBottom();
-  const isWeb = !channelType.value || channelType.value === 'web';
-  if (isWeb && !chatReady.value) return false;
   if (isWeb) {
-    pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, messageId });
+    retryWebSend = { generation, gid, tid, text, files: files?.slice() ?? [], clientMessageId, inputHandling };
+    if (!pendingWebSends.value.some((send) => send.messageId === messageId)) {
+      pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, messageId });
+    }
   }
   const hasFiles = Array.isArray(files) && files.length > 0;
   if (!isWeb) {
@@ -1294,6 +1387,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
       const fd = new FormData();
       fd.append('text', text || '');
       fd.append('clientMessageId', clientMessageId);
+      if (inputHandling) fd.append('inputHandling', JSON.stringify(inputHandling));
       for (const f of files!) {
         if (f.file) fd.append('file', f.file, f.name);
       }
@@ -1303,10 +1397,11 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, clientMessageId }),
+        body: JSON.stringify({ text, clientMessageId, ...(inputHandling ? { inputHandling } : {}) }),
       });
     }
     if (!res.ok) {
+      if (res.status < 500 && retryWebSend?.clientMessageId === clientMessageId) retryWebSend = null;
       pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
     }
     if (generation !== refs.chatGeneration) return false;
@@ -1327,6 +1422,7 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
         /* ignore */
       }
     }
+    if (retryWebSend?.clientMessageId === clientMessageId) retryWebSend = null;
     return true;
   } catch (err) {
     console.error('send failed', err);

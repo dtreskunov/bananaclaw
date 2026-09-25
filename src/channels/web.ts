@@ -30,6 +30,7 @@ import { log } from '../log.js';
 import { sendToUser as sendPushToUser } from '../modules/push/sender.js';
 import { getMembers } from '../modules/permissions/db/agent-group-members.js';
 import { onTaskRun as onTaskRunNotice, type TaskRunNotice } from '../task-events.js';
+import type { InputHandling } from '../ui/shared/input-state.js';
 
 export const WEB_CHANNEL_TYPE = 'web';
 
@@ -62,6 +63,7 @@ export interface WebSubscriber {
     text: string,
     author: { userId: string; displayName: string },
     files?: { filename: string; size: number }[],
+    inputHandling?: InputHandling,
   ): void;
   /** Called when the typing indicator should turn on or off. The web channel
    *  uses explicit start/stop signals (no client-side timeout). `hint` is
@@ -159,6 +161,7 @@ export async function submitWebInbound(args: {
   threadId: string;
   text: string;
   clientMessageId?: string;
+  inputHandling?: InputHandling;
   attachments?: { filename: string; contentType?: string; data: string /* base64 */; size: number }[];
 }): Promise<string> {
   if (!setupCallbacks) throw new Error('web channel not initialized');
@@ -170,6 +173,7 @@ export async function submitWebInbound(args: {
     sender: args.senderDisplayName,
     senderId: args.userId,
   };
+  if (args.inputHandling) contentPayload.inputHandling = args.inputHandling;
   if (args.attachments && args.attachments.length > 0) {
     // Shape matches what `extractAttachmentFiles` / `deriveAttachmentName`
     // expects: `name` (filename), `mimeType`, `data` (base64).
@@ -200,7 +204,13 @@ export async function submitWebInbound(args: {
     const echoFiles = args.attachments?.map((a) => ({ filename: a.filename, size: a.size }));
     for (const sub of echoSet) {
       try {
-        sub.onInboundEcho(id, args.text, { userId: args.userId, displayName: args.senderDisplayName }, echoFiles);
+        sub.onInboundEcho(
+          id,
+          args.text,
+          { userId: args.userId, displayName: args.senderDisplayName },
+          echoFiles,
+          args.inputHandling,
+        );
       } catch (err) {
         log.warn('web subscriber onInboundEcho threw', { err });
       }

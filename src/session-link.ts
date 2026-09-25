@@ -24,7 +24,7 @@ const MAX_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 2_000;
 const HOST_ACK_TIMEOUT_MS = 10_000;
 
-type SignalKind = 'disconnected' | 'heartbeat' | 'activity' | 'usage' | 'turn.end' | 'turn.state';
+type SignalKind = 'disconnected' | 'heartbeat' | 'activity' | 'usage' | 'turn.end' | 'turn.state' | 'input.state';
 
 export interface SessionActiveTurn {
   id: string;
@@ -32,6 +32,7 @@ export interface SessionActiveTurn {
   channelType: string;
   platformId: string;
   threadId: string | null;
+  supportsSteering?: boolean;
 }
 
 export type SessionTurnStopResult =
@@ -520,6 +521,11 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
     if (result.processingReady) {
       for (const listener of durableProcessingListeners) listener(sessionId);
     }
+    const stateKey = payload && typeof payload === 'object' && 'key' in payload ? payload.key : undefined;
+    if (
+      event.type === 'processing.upsert' || event.type === 'processing.delete' ||
+      (event.type === 'state.upsert' && typeof stateKey === 'string' && stateKey.startsWith('input:'))
+    ) emit(sessionId, 'input.state');
     return true;
   }
 
@@ -534,7 +540,11 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
         (!turn ||
           typeof turn !== 'object' ||
           Array.isArray(turn) ||
-          !hasOnlyKeys(turn, ['id', 'status', 'channelType', 'platformId', 'threadId']) ||
+          !hasOnlyKeys(turn, [
+            'id', 'status', 'channelType', 'platformId', 'threadId',
+            ...('supportsSteering' in turn ? ['supportsSteering'] : []),
+          ]) ||
+          (turn.supportsSteering !== undefined && typeof turn.supportsSteering !== 'boolean') ||
           !isSessionTurnId(turn.id) ||
           (turn.status !== 'running' && turn.status !== 'stopping') ||
           !isTurnRoutingText(turn.channelType) ||

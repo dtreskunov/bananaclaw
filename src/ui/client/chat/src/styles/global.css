@@ -41,6 +41,8 @@
   --error-soft: #e66;
   --warning:    #e90;
   --success:    #6c6;
+  --input-queued-accent: color-mix(in srgb, var(--warning) 70%, var(--surface));
+  --input-steering-accent: color-mix(in srgb, var(--approve) 70%, var(--surface));
 
   /* Border-radius scale. */
   --radius-sm: 3px;

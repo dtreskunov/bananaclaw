@@ -68,8 +68,20 @@ describe('shared web chat', () => {
     });
 
     const expectedAuthor = { userId: 'user-priya', displayName: 'Priya' };
-    expect(firstEcho).toHaveBeenCalledWith('web-client_msg_1', 'Run the tests first', expectedAuthor, undefined);
-    expect(secondEcho).toHaveBeenCalledWith('web-client_msg_1', 'Run the tests first', expectedAuthor, undefined);
+    expect(firstEcho).toHaveBeenCalledWith(
+      'web-client_msg_1',
+      'Run the tests first',
+      expectedAuthor,
+      undefined,
+      undefined,
+    );
+    expect(secondEcho).toHaveBeenCalledWith(
+      'web-client_msg_1',
+      'Run the tests first',
+      expectedAuthor,
+      undefined,
+      undefined,
+    );
     expect(onInboundEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         platformId: 'group:ag-team',
@@ -83,5 +95,34 @@ describe('shared web chat', () => {
         }),
       }),
     );
+  });
+
+  it('persists and echoes submission intent without claiming it was applied', async () => {
+    const onInboundEvent = vi.fn();
+    await adapter.setup({ onInbound: vi.fn(), onInboundEvent, onMetadata: vi.fn(), onAction: vi.fn() });
+    const echo = vi.fn();
+    subscribeWeb('group:agent', 'thread', { onOutbound: vi.fn(), onInboundEcho: echo });
+    const inputHandling = { mode: 'steer' as const, turnId: 'captured-turn' };
+    const args = {
+      userId: 'member',
+      senderDisplayName: 'Member',
+      platformId: 'group:agent',
+      threadId: 'thread',
+      text: 'Use the new requirement',
+      clientMessageId: 'stable-client-id',
+      inputHandling,
+    };
+    expect(await submitWebInbound(args)).toBe('web-stable-client-id');
+    expect(await submitWebInbound(args)).toBe('web-stable-client-id');
+    expect(JSON.parse(onInboundEvent.mock.calls[0][0].message.content)).toMatchObject({ inputHandling });
+    expect(onInboundEvent.mock.calls[0][0].message.idempotent).toBe(true);
+    expect(echo).toHaveBeenCalledWith(
+      'web-stable-client-id',
+      args.text,
+      { userId: 'member', displayName: 'Member' },
+      undefined,
+      inputHandling,
+    );
+    expect(JSON.stringify(echo.mock.calls)).not.toContain('applied');
   });
 });

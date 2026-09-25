@@ -24,10 +24,10 @@ import { requestConfirm } from './PromptModal';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia } from '../recorder';
 import { voice, voiceBrowserReason } from '../voice-audio';
 import { VoiceButton } from './VoiceButton';
-import { TurnStopButton } from './TurnStopButton';
-import { stopActiveTurn } from '../stop-turn';
+import { ActiveTurnStopButton } from './ActiveTurnStopButton';
 import { mergeQuestionTimeline } from '../question-timeline';
-import { showsMidTurnLabel } from '../chat-protocol';
+import { showsMidTurnLabel, showsTurnActivity } from '../chat-protocol';
+import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
@@ -733,7 +733,9 @@ function Message(
     if (q && ref.current) highlightTextNodes(ref.current, q);
   }, [m.text, md != null, q]);
   const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
-  const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '');
+  const inputPresentation = m.direction === 'in' ? inputStatePresentation(m.inputState) : null;
+  const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '')
+    + (inputPresentation ? ` ${inputPresentation.className}` : '');
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === 'web';
@@ -880,6 +882,7 @@ function Message(
         : null}
       {m.ts ? <div class="meta">
         <RelativeTime ts={m.ts} />
+        {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
         {showsMidTurnLabel(m.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value)
           ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
           : m.deliveryOrigin === 'send_file'
@@ -1212,13 +1215,7 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
       <div class="meta">
         <span class="typing-meta">{metadata}</span>
         {usage ? <span class="typing-usage"><UsageMeta u={usage} live /></span> : null}
-        {turn && canSend.value ? <TurnStopButton
-          turn={turn}
-          connected={turnConnected.value}
-          busy={stop?.busy ?? false}
-          error={stop?.error ?? ''}
-          onStop={(id) => { void stopActiveTurn(id); }}
-        /> : null}
+        <ActiveTurnStopButton />
       </div>
     </div>
   );
@@ -1242,7 +1239,7 @@ function MessageLog() {
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
   const msgCount = timeline.length;
-  const typing = (isTyping.value || !!activeTurn.value) && !!threadId.value && !chatLoading.value;
+  const typing = showsTurnActivity(activeTurn.value, isTyping.value, threadId.value, chatLoading.value);
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
   // Subscribe to trace growth so the effect re-runs as steps stream in.

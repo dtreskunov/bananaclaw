@@ -33,6 +33,7 @@ export interface MessageInRow {
   sender_user_id?: string | null;
   /** Namespaced channel identity retained when canonical attribution is unavailable. */
   sender_identity?: string | null;
+  source_session_id?: string | null;
 }
 
 // Cap on how many messages reach the agent in one prompt. Read from
@@ -87,6 +88,34 @@ export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
     return pending.filter((m) => !ackedIds.has(m.id)).reverse();
   } finally {
     inbound.close();
+  }
+
+}
+
+/** Select steering candidates before applying the prompt cap, so queued input cannot hide them. */
+export function getSteeringCandidates(
+  routing: { channelType: string | null; platformId: string | null; threadId: string | null },
+  excludedIds: string[],
+): MessageInRow[] {
+  const acknowledged = getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[];
+  const exclude = JSON.stringify([...excludedIds, ...acknowledged.map((row) => row.message_id)]);
+  const db = openInboundDb();
+  try {
+    return db.prepare(
+      `SELECT m.* FROM messages_in m
+       WHERE m.status = 'pending' AND m.trigger = 1 AND m.on_wake = 0
+         AND m.kind IN ('chat', 'chat-sdk') AND m.source_session_id IS NULL
+         AND (m.process_after IS NULL OR datetime(m.process_after) <= datetime('now'))
+         AND m.channel_type = ? AND m.platform_id = ? AND COALESCE(m.thread_id, '') = ?
+         AND m.id NOT IN (SELECT value FROM json_each(?))
+         AND (m.channel_type != 'web' OR
+           CASE WHEN json_valid(m.content) THEN json_extract(m.content, '$.inputHandling.mode') END = 'steer')
+       ORDER BY m.seq ASC LIMIT ?`,
+    ).all(
+      routing.channelType, routing.platformId, routing.threadId || '', exclude, getMaxMessagesPerPrompt(),
+    ) as MessageInRow[];
+  } finally {
+    db.close();
   }
 }
 

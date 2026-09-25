@@ -3,6 +3,7 @@ import { loadConfig } from './config.js';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
+  getSteeringCandidates,
   markProcessing,
   releaseProcessing,
   markCompleted,
@@ -53,6 +54,7 @@ import {
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
+import { startInputProcessing, steeringDisposition, writeInputState } from './steering.js';
 import { drainSessionJournal, getHostEventGeneration, onHostEvent, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
 
 const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
@@ -230,9 +232,21 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     if (config.signal?.aborted) return;
     const hostGeneration = getHostEventGeneration();
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
-    const messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
+    let messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
     isFirstPoll = false;
     pollCount++;
+
+    const recoveryContinuation = getContinuation(config.providerName);
+    if (recoveryContinuation && config.provider.appliedSteering && messages.length > 0) {
+      const recovered = new Set(config.provider.appliedSteering(recoveryContinuation, messages.map((m) => m.id)));
+      if (recovered.size > 0) {
+        for (const messageId of recovered) writeInputState({ messageId, status: 'applied' });
+        markCompleted([...recovered]);
+        markBatchPersisted(getOutboundDb());
+        messages = messages.filter((message) => !recovered.has(message.id));
+        if (messages.length === 0) continue;
+      }
+    }
 
     // Periodic heartbeat so we know the loop is alive
     if (pollCount % 30 === 0) {
@@ -268,6 +282,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     const ids = messages.map((m) => m.id);
     markProcessing(ids);
+    startInputProcessing(messages);
 
     // Resync continuation from session_state at the top of each batch.
     // The local variable only gets updated on processQuery's success
@@ -883,6 +898,17 @@ async function processQuery(
   // looked "done" to the host but no reply was ever dispatched.
   type QueuedBatch = { ids: string[]; routing: RoutingContext };
   const turnBatchQueue: QueuedBatch[] = [{ ids: initialBatchIds, routing }];
+  const steeringInputs = new Map<string, MessageInRow>();
+  const declinedSteering = new Set<string>();
+  const supportsSteering = persistContinuation && provider.supportsSteering === true && query.steer !== undefined;
+
+  const releaseUnappliedSteering = (): void => {
+    for (const messageId of steeringInputs.keys()) {
+      writeInputState({ messageId, status: 'queued', reason: 'turn_finished' });
+    }
+    steeringInputs.clear();
+    declinedSteering.clear();
+  };
 
   // Snapshot the outbound seq so the result handler can detect whether MCP
   // tools wrote anything this turn. Without this, an agent that calls
@@ -1033,6 +1059,46 @@ async function processQuery(
         // initial batch and follow-ups had mismatched thread_ids (e.g. a
         // host-generated welcome trigger with null thread vs a Discord DM reply).
         const newMessages = pending.filter((m) => m.kind !== 'system');
+        if (turnActive) {
+          for (const message of newMessages) {
+            if (!['chat', 'chat-sdk'].includes(message.kind) || message.trigger !== 1 ||
+              steeringInputs.has(message.id)) continue;
+            const disposition = steeringDisposition(message, activeTurnRouting, turnId, supportsSteering);
+            // "Waiting to steer" means the provider has accepted the input.
+            writeInputState({ ...disposition, status: 'queued' });
+          }
+          if (supportsSteering) {
+            let accepted = false;
+            while (!accepted) {
+              const candidates = getSteeringCandidates(activeTurnRouting, [
+                ...steeringInputs.keys(), ...declinedSteering,
+              ]);
+              if (candidates.length === 0) break;
+              for (const message of candidates) {
+                const disposition = steeringDisposition(message, activeTurnRouting, turnId, true);
+                if (disposition.status !== 'steering') {
+                  declinedSteering.add(message.id);
+                  writeInputState(disposition);
+                  continue;
+                }
+                const files = extractFileAttachments([message]);
+                if (!query.steer!({
+                  id: message.id,
+                  prompt: formatMessages([message]),
+                  ...(files.length ? { files } : {}),
+                })) {
+                  declinedSteering.add(message.id);
+                  writeInputState({ ...disposition, status: 'queued', reason: 'turn_finished' });
+                  continue;
+                }
+                accepted = true;
+                steeringInputs.set(message.id, message);
+                writeInputState(disposition);
+              }
+            }
+          }
+          return;
+        }
         if (newMessages.length === 0) return;
 
         // A user can answer as soon as the card is delivered, before the
@@ -1041,13 +1107,9 @@ async function processQuery(
         // turn. The next poll after the result resumes it as a distinct turn.
         if (shouldDeferInteractiveResponse(newMessages, turnActive)) return;
 
-        // Never interleave a user prompt with an unresolved provider turn.
-        // Apart from preserving FIFO order, this keeps native-tool activity
-        // attached to the result that decides whether recovery may rerun it.
-        if (turnActive) return;
-
         const newIds = newMessages.map((m) => m.id);
         markProcessing(newIds);
+        startInputProcessing(newMessages);
 
         // Run pre-task scripts on follow-ups too — without this, a task that
         // arrives during an active query (e.g. a */10 monitoring cron) bypasses
@@ -1217,6 +1279,7 @@ async function processQuery(
       channelType: activeTurnRouting.channelType ?? '',
       platformId: activeTurnRouting.platformId ?? '',
       threadId: activeTurnRouting.threadId,
+      ...(supportsSteering ? { supportsSteering: true } : {}),
     });
   };
   const unsubscribeStop = onTurnStop((requestedId) => {
@@ -1382,10 +1445,26 @@ async function processQuery(
   try {
     for await (const event of query.events) {
       signalHeartbeat();
-      if (userStopped && !['init', 'progress', 'usage', 'usage_call', 'checkpoint'].includes(event.type)) continue;
+      if (userStopped && !['init', 'progress', 'usage', 'usage_call', 'checkpoint', 'steering_applied'].includes(event.type)) continue;
       handleEvent(event, routing);
 
-      if (event.type === 'progress' && event.step.kind === 'tool') {
+      if (event.type === 'steering_applied') {
+        const message = steeringInputs.get(event.id);
+        if (!message) throw new Error(`Provider applied unaccepted steering input: ${event.id}`);
+        const batch = turnBatchQueue[0];
+        if (!batch) throw new Error(`Provider applied steering without an active batch: ${event.id}`);
+        getOutboundDb().transaction(() => {
+          writeInputState({ messageId: event.id, status: 'applied', turnId });
+          if (userStopped) markCompleted([event.id]);
+          else markProcessing([event.id]);
+        })();
+        batch.ids.push(event.id);
+        steeringInputs.delete(event.id);
+        const guidance = formatMessages([message]);
+        archivePrompts[0] = `${archivePrompts[0] ?? initialPrompt}\n\n${guidance}`;
+        if (promptTracker) promptTracker.latest += `\n\n${guidance}`;
+        queueMicrotask(wakeFollowUpWatcher);
+      } else if (event.type === 'progress' && event.step.kind === 'tool') {
         // A call's arguments aren't resolved yet on its `pending` event, so
         // counting there would give every call to the same tool an identical
         // signature — eight ordinary consecutive bash calls would trip the
@@ -1503,6 +1582,7 @@ async function processQuery(
       } else if (event.type === 'checkpoint') {
         pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {
+        releaseUnappliedSteering();
         resultSeen = true;
         const recoveryMode = malformedToolRecoveryMode;
         const isMalformedToolRecoveryResult = recoveryMode !== null;
@@ -1811,6 +1891,7 @@ async function processQuery(
     }
   } finally {
     done = true;
+    releaseUnappliedSteering();
     unsubscribeStop();
     stopFollowUpWatcher();
     clearInterval(liveHandle);
