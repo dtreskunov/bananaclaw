@@ -282,7 +282,6 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     }
 
     const ids = messages.map((m) => m.id);
-    markProcessing(ids);
     startInputProcessing(messages);
 
     // Resync continuation from session_state at the top of each batch.
@@ -905,7 +904,7 @@ async function processQuery(
 
   const releaseUnappliedSteering = (): void => {
     for (const messageId of steeringInputs.keys()) {
-      writeInputState({ messageId, status: 'queued', reason: 'turn_finished' });
+      writeInputState({ messageId, status: 'queued', reason: 'turn_finished', queuedForNextTurn: true });
     }
     steeringInputs.clear();
     declinedSteering.clear();
@@ -1062,12 +1061,13 @@ async function processQuery(
         // host-generated welcome trigger with null thread vs a Discord DM reply).
         const newMessages = pending.filter((m) => m.kind !== 'system');
         if (turnActive) {
-          for (const message of newMessages) {
+          // Queue visibility must not depend on which inputs fit the next prompt.
+          for (const message of getPendingMessages(false, { uncapped: true })) {
             if (!['chat', 'chat-sdk'].includes(message.kind) || message.trigger !== 1 ||
               steeringInputs.has(message.id)) continue;
             const disposition = steeringDisposition(message, activeTurnRouting, turnId, supportsSteering);
             // "Waiting to steer" means the provider has accepted the input.
-            writeInputState({ ...disposition, status: 'queued' });
+            writeInputState({ ...disposition, status: 'queued', queuedForNextTurn: true });
           }
           if (supportsSteering) {
             let accepted = false;
@@ -1080,7 +1080,7 @@ async function processQuery(
                 const disposition = steeringDisposition(message, activeTurnRouting, turnId, true);
                 if (disposition.status !== 'steering') {
                   declinedSteering.add(message.id);
-                  writeInputState(disposition);
+                  writeInputState({ ...disposition, queuedForNextTurn: true });
                   continue;
                 }
                 const files = extractFileAttachments([message]);
@@ -1090,7 +1090,7 @@ async function processQuery(
                   ...(files.length ? { files } : {}),
                 })) {
                   declinedSteering.add(message.id);
-                  writeInputState({ ...disposition, status: 'queued', reason: 'turn_finished' });
+                  writeInputState({ ...disposition, status: 'queued', reason: 'turn_finished', queuedForNextTurn: true });
                   continue;
                 }
                 accepted = true;
@@ -1109,8 +1109,8 @@ async function processQuery(
         // turn. The next poll after the result resumes it as a distinct turn.
         if (shouldDeferInteractiveResponse(newMessages, turnActive)) return;
 
-        const newIds = newMessages.map((m) => m.id);
-        markProcessing(newIds);
+        // All providers wait for the prior result boundary; push acceptance
+        // alone must never promote input while the preceding turn is active.
         startInputProcessing(newMessages);
 
         // Run pre-task scripts on follow-ups too — without this, a task that
@@ -1284,6 +1284,8 @@ async function processQuery(
       ...(supportsSteering ? { supportsSteering: true } : {}),
       ...(supportsSteering && provider.supportsInputEditing === true && query.replaceSteering
         ? { supportsInputEditing: true } : {}),
+      ...(supportsSteering && provider.supportsInputCancellation === true && query.cancelSteering
+        ? { supportsInputCancellation: true } : {}),
     });
   };
   const unsubscribeStop = onTurnStop((requestedId) => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearChat, openChat, runSync, sendChat } from './actions';
+import { clearChat, openChat, reconnectChatNow, runSync, sendChat } from './actions';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState } from './stop-turn';
 import {
@@ -18,7 +18,10 @@ import {
   threadId,
 } from './state';
 import { inputStatePresentation } from './input-state';
+import { cancelledInputs, PendingCancellation } from './pending-cancel';
 import { showsTurnActivity } from './chat-protocol';
+import { mergeQuestionTimeline } from './question-timeline';
+import { splitQueuedFollowups } from './queued-followups';
 import { ActiveTurnStopButton } from './components/ActiveTurnStopButton';
 import { TurnStopButton } from './components/TurnStopButton';
 import type { InputState, PendingFile } from './types';
@@ -30,6 +33,7 @@ vi.mock('./components/PromptModal', () => ({ requestChoice: vi.fn() }));
 vi.mock('./hash', () => ({ writeHash: vi.fn() }));
 
 beforeEach(() => {
+  cancelledInputs.clear();
   groupId.value = 'group';
   threadId.value = 'thread';
   chatReady.value = true;
@@ -49,6 +53,269 @@ afterEach(() => {
 });
 
 describe('native web send choice', () => {
+  it('keeps confirmed cancellation tombstones through late duplicate echoes/history without clearing unrelated drafts or sends', async () => {
+    const sockets: Array<{ onmessage?: (event: { data: string }) => void }> = [];
+    vi.stubGlobal('location', { protocol: 'https:', host: 'example.test' });
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        constructor() {
+          sockets.push(this);
+        }
+        onmessage?: (event: { data: string }) => void;
+        close() {}
+      },
+    );
+    threadId.value = null;
+    highlightMessageId.value = 'skip-focus';
+    await openChat('group', 'thread', null);
+    const receive = (payload: object) => sockets[0].onmessage?.({ data: JSON.stringify(payload) });
+    const cancelled = {
+      id: 'confirmed-cancellation',
+      direction: 'in',
+      text: 'Never revive',
+      timestamp: '1',
+      inputState: { messageId: 'confirmed-cancellation', status: 'queued', queuedForNextTurn: true },
+    };
+    receive({ kind: 'history', threadId: 'thread', messages: [cancelled] });
+    pendingWebSends.value = [
+      { threadId: 'thread', messageId: cancelled.id },
+      { threadId: 'thread', messageId: 'unrelated-optimistic-send' },
+      { threadId: 'another-thread', messageId: 'another-send' },
+    ];
+    const files = [{ name: 'unsent.txt', size: 3, file: new File(['new'], 'unsent.txt') }];
+    const pins = ['docs/unsent-context.md'];
+    pending.value = files;
+    pinnedContext.value = pins;
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, id: cancelled.id }),
+    } as Response);
+    const request = new PendingCancellation(
+      'group',
+      { threadId: 'thread', channelType: 'web', title: '', lastActivityAt: '' },
+      cancelled.id,
+    );
+    expect(await request.cancel()).toBe(true);
+    expect(chatMessages.value).toEqual([]);
+    expect(pendingWebSends.value).toEqual([
+      { threadId: 'thread', messageId: 'unrelated-optimistic-send' },
+      { threadId: 'another-thread', messageId: 'another-send' },
+    ]);
+    receive({ ...cancelled, kind: 'inbound' });
+    receive({ kind: 'history', threadId: 'thread', messages: [cancelled] });
+    receive({ ...cancelled, kind: 'inbound' });
+    expect(chatMessages.value).toEqual([]);
+    expect(pending.value).toBe(files);
+    expect(pinnedContext.value).toBe(pins);
+    expect(pendingWebSends.value.map((send) => send.messageId)).toEqual(['unrelated-optimistic-send', 'another-send']);
+    // The same ID in another conversation is not this tombstone's target.
+    await openChat('group', 'another-thread', null);
+    sockets[1].onmessage?.({
+      data: JSON.stringify({ kind: 'history', threadId: 'another-thread', messages: [cancelled] }),
+    });
+    expect(chatMessages.value.map((message) => message.id)).toEqual([cancelled.id]);
+  });
+
+  it.each([false, true])(
+    'reconciles a cancellation missed while offline on reconnect (redacted tombstone=%s)',
+    async (tombstone) => {
+      const sockets: Array<{ onmessage?: (event: { data: string }) => void; onclose?: () => void }> = [];
+      vi.stubGlobal('location', { protocol: 'https:', host: 'example.test' });
+      vi.stubGlobal(
+        'WebSocket',
+        class {
+          constructor() {
+            sockets.push(this);
+          }
+          onmessage?: (event: { data: string }) => void;
+          onclose?: () => void;
+          close() {}
+        },
+      );
+      threadId.value = null;
+      highlightMessageId.value = 'skip-focus';
+      await openChat('group', 'thread', null);
+      const receive = (index: number, payload: object) => sockets[index].onmessage?.({ data: JSON.stringify(payload) });
+      const cancelled = {
+        id: 'missed-cancellation',
+        direction: 'in',
+        text: 'Must disappear',
+        timestamp: '1',
+        files: [{ filename: 'private-attachment.txt' }],
+        inputState: { messageId: 'missed-cancellation', status: 'queued', queuedForNextTurn: true },
+      };
+      const answer = { id: 'answer', direction: 'out', text: 'Still running', timestamp: '2' };
+      receive(0, { kind: 'history', threadId: 'thread', messages: [cancelled, answer] });
+      expect(chatMessages.value).toHaveLength(2);
+      sockets[0].onclose?.();
+      // No live tombstone or successful DELETE is delivered to this tab.
+      expect(cancelledInputs.size).toBe(0);
+      reconnectChatNow();
+      expect(sockets).toHaveLength(2);
+      const messages = tombstone
+        ? [
+            { ...cancelled, text: '', files: null, inputState: { messageId: cancelled.id, status: 'cancelled' } },
+            answer,
+          ]
+        : [answer];
+      receive(1, { kind: 'history', threadId: 'thread', messages });
+      expect(chatMessages.value.map((message) => message.id)).toEqual(['answer']);
+      receive(0, { ...cancelled, kind: 'inbound' });
+      expect(chatMessages.value.map((message) => message.id)).toEqual(['answer']);
+      if (tombstone) {
+        receive(1, { ...cancelled, kind: 'inbound' });
+        receive(1, { kind: 'history', threadId: 'thread', messages: [cancelled, answer] });
+        expect(chatMessages.value.map((message) => message.id)).toEqual(['answer']);
+      }
+    },
+  );
+
+  it('removes cancelled inputs in live states and history without reviving them on a stale echo', async () => {
+    const sockets: Array<{ onmessage?: (event: { data: string }) => void }> = [];
+    vi.stubGlobal('location', { protocol: 'https:', host: 'example.test' });
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        constructor() {
+          sockets.push(this);
+        }
+        onmessage?: (event: { data: string }) => void;
+        close() {}
+      },
+    );
+    threadId.value = null;
+    highlightMessageId.value = 'skip-focus';
+    await openChat('group', 'thread', null);
+    const receive = (payload: object) => sockets[0].onmessage?.({ data: JSON.stringify(payload) });
+    const input = {
+      id: 'cancel-me',
+      direction: 'in',
+      text: 'Draft',
+      timestamp: '1',
+      inputState: { messageId: 'cancel-me', status: 'queued' },
+    };
+    receive({
+      kind: 'history',
+      threadId: 'thread',
+      messages: [input, { ...input, id: 'answer', direction: 'out', inputState: undefined }],
+    });
+    receive({
+      kind: 'input-state',
+      states: [{ messageId: 'cancel-me', inputState: { messageId: 'cancel-me', status: 'cancelled' } }],
+    });
+    expect(chatMessages.value.map((message) => message.id)).toEqual(['answer']);
+    receive({ ...input, kind: 'inbound' });
+    expect(chatMessages.value.map((message) => message.id)).toEqual(['answer']);
+    receive({
+      kind: 'history',
+      threadId: 'thread',
+      messages: [
+        {
+          ...input,
+          id: 'cancelled-in-history',
+          inputState: { messageId: 'cancelled-in-history', status: 'cancelled' },
+        },
+        input,
+      ],
+    });
+    expect(chatMessages.value).toEqual([]);
+  });
+  it('queues echoed follow-ups below the turn and restores durable consumption order on reload', async () => {
+    const sockets: Array<{ onmessage?: (event: { data: string }) => void }> = [];
+    vi.stubGlobal('location', { protocol: 'https:', host: 'example.test' });
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        constructor() {
+          sockets.push(this);
+        }
+        onmessage?: (event: { data: string }) => void;
+        close() {}
+      },
+    );
+    threadId.value = null;
+    highlightMessageId.value = 'skip-focus';
+    await openChat('group', 'thread', null);
+    const receive = (payload: object) => sockets[0].onmessage?.({ data: JSON.stringify(payload) });
+    const timestamp = '2026-09-26T00:00:00Z';
+    const position = Date.parse(timestamp) * 1000;
+    const layout = () => splitQueuedFollowups(mergeQuestionTimeline(chatMessages.value, [], 'thread'));
+    receive({
+      kind: 'history',
+      threadId: 'thread',
+      messages: [{ id: 'initial', direction: 'in', text: 'Initial', timestamp, timelinePosition: position + 1 }],
+    });
+    receive({
+      kind: 'inbound',
+      id: 'later',
+      text: 'Follow up',
+      timestamp,
+      files: [{ filename: 'keep.txt' }],
+      inputHandling: { mode: 'queue', turnId: 'turn' },
+    });
+    expect(layout().queued.map((m) => m.id)).toEqual(['later']);
+    receive({
+      kind: 'outbound',
+      id: 'prior-answer',
+      content: { text: 'Prior answer' },
+      timestamp,
+      timelinePosition: position + 2,
+    });
+    expect(layout().transcript.map((m) => m.id)).toEqual(['initial', 'prior-answer']);
+    const count = chatMessages.value.length;
+    receive({
+      kind: 'input-state',
+      states: [
+        {
+          messageId: 'later',
+          canEditPending: false,
+          inputState: { messageId: 'later', status: 'processing', queuedForNextTurn: true },
+        },
+      ],
+    });
+    expect(layout().queued.map((m) => m.id)).toEqual(['later']);
+    expect(layout().transcript.map((m) => m.id)).toEqual(['initial', 'prior-answer']);
+    receive({
+      kind: 'input-state',
+      states: [
+        {
+          messageId: 'later',
+          text: 'Follow up',
+          canEditPending: false,
+          timelinePosition: position + 3,
+          inputState: {
+            messageId: 'later',
+            status: 'processing',
+            queuedForNextTurn: true,
+            timelinePosition: position + 3,
+          },
+        },
+      ],
+    });
+    expect(chatMessages.value).toHaveLength(count);
+    expect(layout().queued).toEqual([]);
+    expect(layout().transcript.map((m) => m.id)).toEqual(['initial', 'prior-answer', 'later']);
+    receive({
+      kind: 'outbound',
+      id: 'own-answer',
+      content: { text: 'Next answer' },
+      timestamp,
+      timelinePosition: position + 4,
+    });
+    receive({ kind: 'input-state', states: [{ messageId: 'later', inputState: null }] });
+    expect(chatMessages.value.find((m) => m.id === 'later')?.timelinePosition).toBe(position + 3);
+    const expected = layout();
+    const history = chatMessages.value.map(({ ts, ...message }) => ({ ...message, timestamp: ts }));
+    receive({ kind: 'history', threadId: 'thread', messages: history.reverse() });
+    const placement = (messages: typeof chatMessages.value) =>
+      messages.map(({ id, timelinePosition, text, files, ts }) => ({ id, timelinePosition, text, files, ts }));
+    expect(placement(layout().transcript)).toEqual(placement(expected.transcript));
+    expect(layout().queued).toEqual(expected.queued);
+    expect(layout().transcript.map((m) => m.id)).toEqual(['initial', 'prior-answer', 'later', 'own-answer']);
+    expect(layout().transcript.find((m) => m.id === 'later')?.files).toEqual([{ filename: 'keep.txt' }]);
+  });
   it.each(['steer', 'queue'] as const)(
     'sends %s with the captured turn and focuses steering by default',
     async (mode) => {
@@ -240,6 +507,107 @@ describe('durable receipt rendering', () => {
     expect(inputStatePresentation({ ...state, status: 'processing', reason: 'turn_finished' })?.caption).toBe(
       'Handled as follow-up — the target turn finished',
     );
+  });
+
+  it.each([false, true])(
+    'applies explicit cancellation tombstones from scoped sync (replace=%s)',
+    async (replaceThreadMessages) => {
+      channelType.value = 'telegram';
+      messagingGroupId.value = 'external-group';
+      const input = {
+        id: 'missed-cancellation',
+        direction: 'in',
+        text: 'Must disappear',
+        timestamp: '1',
+        files: [{ filename: 'private-attachment.txt' }],
+        inputState: { messageId: 'missed-cancellation', status: 'steering' },
+      };
+      const answer = { id: 'answer', direction: 'out', text: 'Keep answer', timestamp: '2' };
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ approvals: [], threadMessages: [input, answer] }),
+      } as Response);
+      await runSync({ replaceThreadMessages });
+      expect(chatMessages.value).toHaveLength(2);
+      expect(cancelledInputs.size).toBe(0);
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          approvals: [],
+          threadMessages: [
+            { ...input, text: '', files: null, inputState: { messageId: input.id, status: 'cancelled' } },
+            answer,
+          ],
+        }),
+      } as Response);
+      await runSync({ replaceThreadMessages });
+      expect(chatMessages.value.map((message) => message.id)).toEqual(['answer']);
+      await runSync({ replaceThreadMessages });
+      expect(chatMessages.value.map((message) => message.id)).toEqual(['answer']);
+    },
+  );
+
+  it('retains other absent optimistic inputs when merging a cancellation tombstone', async () => {
+    channelType.value = 'telegram';
+    messagingGroupId.value = 'external-group';
+    chatMessages.value = [
+      {
+        id: 'cancelled',
+        direction: 'in',
+        text: 'Remove me',
+        ts: '1',
+        files: null,
+        inputState: { messageId: 'cancelled', status: 'queued' },
+      },
+      {
+        id: 'unrelated',
+        direction: 'in',
+        text: 'Keep me',
+        ts: '2',
+        files: null,
+        inputState: { messageId: 'unrelated', status: 'queued' },
+      },
+      { direction: 'in', text: 'Unconfirmed local echo', ts: '3', files: null },
+    ];
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        approvals: [],
+        threadMessages: [
+          {
+            id: 'cancelled',
+            direction: 'in',
+            text: '',
+            timestamp: '1',
+            files: null,
+            inputState: { messageId: 'cancelled', status: 'cancelled' },
+          },
+        ],
+      }),
+    } as Response);
+    await runSync();
+    expect(chatMessages.value.map((message) => message.text)).toEqual(['Keep me', 'Unconfirmed local echo']);
+  });
+
+  it('does not reconcile a sync snapshot into a different messaging group after navigation', async () => {
+    channelType.value = 'telegram';
+    messagingGroupId.value = 'original-group';
+    chatMessages.value = [
+      {
+        id: 'keep',
+        direction: 'in',
+        text: 'New conversation',
+        files: null,
+        ts: '1',
+        inputState: { messageId: 'keep', status: 'queued' },
+      },
+    ];
+    vi.mocked(fetch).mockImplementation(async () => {
+      messagingGroupId.value = 'other-group';
+      return { ok: true, json: async () => ({ approvals: [], threadMessages: [] }) } as Response;
+    });
+    await runSync();
+    expect(chatMessages.value.map((message) => message.id)).toEqual(['keep']);
   });
 
   it.each([false, true])(

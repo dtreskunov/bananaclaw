@@ -203,6 +203,43 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it('removes buffered guidance before consumption without stopping the active reply', async () => {
+    holdModelResponse = true;
+    const started = new Promise<void>((resolve) => { modelRequestStarted = resolve; });
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    expect(provider.supportsInputCancellation).toBe(true);
+    const query = provider.query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    const consume = (async () => {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'result') query.end();
+      }
+    })();
+    try {
+      await started;
+      expect(query.steer!({ id: 'cancelled', prompt: 'do not consume this' })).toBe(true);
+      expect(query.steer!({ id: 'kept', prompt: 'retained guidance' })).toBe(true);
+      expect(query.cancelSteering!('cancelled')).toBe(true);
+      expect(query.cancelSteering!('cancelled')).toBe(false);
+      expect(query.steer!({ id: 'cancelled', prompt: 'duplicate delivery' })).toBe(true);
+      holdModelResponse = false;
+      releaseModelResponse!();
+      releaseModelResponse = undefined;
+      await consume;
+      expect(JSON.stringify(requests)).not.toContain('do not consume this');
+      expect(JSON.stringify(requests)).not.toContain('duplicate delivery');
+      expect(JSON.stringify(requests)).toContain('retained guidance');
+      expect(events.filter((event) => event.type === 'steering_applied').map((event) => event.id)).toEqual(['kept']);
+      expect(events.some((event) => event.type === 'result')).toBe(true);
+      expect(query.cancelSteering!('kept')).toBe(false);
+    } finally {
+      releaseModelResponse?.();
+      query.abort();
+      await consume;
+    }
+  });
+
   it('replaces buffered steering in place before consuming it, preserving order and attachments', async () => {
     holdModelResponse = true;
     const started = new Promise<void>((resolve) => { modelRequestStarted = resolve; });
@@ -271,7 +308,9 @@ describe('NativeProvider', () => {
     try {
       await started;
       expect(query.replaceSteering!({ id: 'guidance', prompt: 'racing edit' })).toBe(false);
+      expect(query.cancelSteering!('guidance')).toBe(false);
       query.abort('user');
+      expect(query.cancelSteering!('guidance')).toBe(false);
       expect(query.replaceSteering!({ id: 'guidance', prompt: 'edit after stop' })).toBe(false);
       releasePreparation();
       await consume;

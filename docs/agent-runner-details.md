@@ -352,6 +352,25 @@ turn's completion batch; acceptance alone never completes the message.
 See [session-link.md](session-link.md#steering-native-provider) for durability,
 recovery, exclusions, and rollout requirements.
 
+**Pending queue and transcript order:** Active-turn follow-ups that remain queued
+carry `queuedForNextTurn: true` in their durable input state, including inputs
+released by Stop. Ordinary first, unclaimed inputs do not receive this flag.
+Queued and accepted-but-unapplied steering inputs have no transcript position.
+At the first processing claim (or `steering_applied` event), the runner assigns
+an immutable `timelinePosition`; retries and recovery preserve it. Consumption
+clears the queue flag; already-consumed retries never regain pending controls.
+All outbound content, including tool sends and Stop
+notices, receives a position from the same runner-private `timeline_clock`.
+The clock allocates `max(Date.now() * 1000, previous + 1)`, preserving order
+within a millisecond and across backwards wall-clock changes or restarts.
+Schema initialization raises the clock floor to inherited input/output positions
+when loading a fork or imported history, without lowering an existing clock.
+Input positions are committed with their claims before provider execution;
+thus a queued follow-up appears after the preceding final response but before
+its own output. Actual message timestamps and sequence IDs remain unchanged.
+The follow-up watcher enforces the result boundary for every provider, even
+those whose `push()` accepts in-flight work; acceptance alone is not consumption.
+
 **Editing pending web input:** Native also advertises `supportsInputEditing`.
 Durable system `edit_input` requests bypass the prompt cap and are processed
 synchronously before either initial claiming or follow-up/steering selection;
@@ -369,6 +388,17 @@ Runner-private `claimed_inputs` records are committed with processing claims
 and never removed by retry cleanup; startup also retains legacy acknowledgements
 before clearing them. Thus delayed edits cannot rewrite previously claimed
 ordinary input after a crash, even when it is pending for retry.
+
+**Canceling pending web input:** Native advertises `supportsInputCancellation`.
+System `cancel_input` commands share the edit-control lane and never enter model
+prompts. The same author, routing, claim and ingestion guards apply. Buffered
+guidance is removed with `query.cancelSteering` only before preparation starts;
+the active query is not aborted. The runner commits a terminal `cancelled` input
+disposition and completed acknowledgement alongside an immutable
+`input-cancel:<requestId>` receipt. No timeline position is allocated. A failed
+commit after changing the provider buffer aborts the query rather than allowing
+in-memory state to diverge silently. Replayed commands retain the original result,
+and cancellation cannot be undone by retry cleanup or a subsequent edit.
 
 **Idle behavior:** When no messages are pending, the runner waits for a host
 event or the next scheduled due time. The container stays warm until the host

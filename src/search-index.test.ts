@@ -10,7 +10,7 @@ vi.mock('./config.js', async () => {
   return { ...actual, DATA_DIR: TEST_DATA_DIR };
 });
 
-import { clearSearchIndex, closeSearchDb, indexMessage, initSearchDb, searchMessages } from './search-index.js';
+import { clearSearchIndex, closeSearchDb, deleteMessageFromIndex, extractInboundText, indexMessage, initSearchDb, searchMessages } from './search-index.js';
 
 function addMessage(
   id: string,
@@ -80,6 +80,17 @@ describe('search conversation authorization', () => {
 });
 
 describe('search index rebuild', () => {
+  it('removes cancelled input from search and excludes it from rebuild text extraction', () => {
+    addMessage('cancelled:agent', 'session-a', 'thread-a');
+    addMessage('kept', 'session-b', 'thread-b');
+    deleteMessageFromIndex('cancelled:agent', 'agent', 'wrong-session');
+    expect(searchMessages('needle', { agentGroupId: 'agent' })).toHaveLength(2);
+    deleteMessageFromIndex('cancelled:agent', 'agent', 'session-a');
+    expect(searchMessages('needle', { agentGroupId: 'agent' }).map((row) => row.messageId)).toEqual(['kept']);
+    expect(extractInboundText(JSON.stringify({ text: 'needle', cancelled: true }))).toBe('');
+    expect(extractInboundText('legacy plain text')).toBe('legacy plain text');
+  });
+
   it('replaces only the edited message text and updates full-text matches', () => {
     addMessage('editable:agent', 'session-a', 'thread-a', 'web', 'oldword');
     addMessage('untouched', 'session-b', 'thread-b', 'web', 'oldword');

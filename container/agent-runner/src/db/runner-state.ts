@@ -99,11 +99,25 @@ export function ensureRunnerStateSchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS claimed_inputs (
       message_id TEXT PRIMARY KEY
     );
+    CREATE TABLE IF NOT EXISTS timeline_clock (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      position INTEGER NOT NULL CHECK (position >= 0 AND position <= 9007199254740991)
+    );
     CREATE TABLE IF NOT EXISTS session_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    INSERT INTO timeline_clock (id, position)
+    SELECT 1, COALESCE(MAX(position), 0) FROM (
+      SELECT CASE WHEN json_valid(content) THEN json_extract(content, '$.timelinePosition') END AS position
+      FROM messages_out
+      UNION ALL
+      SELECT CASE WHEN json_valid(value) THEN json_extract(value, '$.timelinePosition') END AS position
+      FROM session_state WHERE key LIKE 'input:%'
+    )
+    WHERE typeof(position) = 'integer' AND position BETWEEN 1 AND 9007199254740991
+    ON CONFLICT(id) DO UPDATE SET position = MAX(timeline_clock.position, excluded.position);
     CREATE TABLE IF NOT EXISTS container_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       current_tool TEXT,

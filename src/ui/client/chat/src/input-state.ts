@@ -2,6 +2,7 @@ import type { InputState } from './types';
 
 export function inputStatePresentation(state?: InputState): { className: string; caption: string } | null {
   if (!state) return null;
+  if (state.status === 'cancelled') return null;
   if (state.status === 'applied') return { className: 'input-applied', caption: 'Applied to current turn' };
   if (state.reason) {
     const reason = {

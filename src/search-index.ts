@@ -144,6 +144,15 @@ export function clearSearchIndex(): void {
   getSearchDb().exec('DELETE FROM message_index');
 }
 
+export function deleteMessageFromIndex(messageId: string, agentGroupId: string, sessionId: string): void {
+  if (!db) return;
+  const suffix = `:${agentGroupId}`;
+  const id = messageId.endsWith(suffix) ? messageId.slice(0, -suffix.length) : messageId;
+  getSearchDb().prepare(
+    'DELETE FROM message_index WHERE id = ? AND agent_group_id = ? AND session_id = ?',
+  ).run(id, agentGroupId, sessionId);
+}
+
 /**
  * Drop every indexed message for a session. Called when a thread is deleted —
  * without it the rows outlive the session and search returns hits that
@@ -396,6 +405,7 @@ function likeFallback(query: string, opts: SearchOptions, limit: number): Search
 export function extractInboundText(content: string): string {
   try {
     const o = JSON.parse(content);
+    if (o?.cancelled === true) return '';
     if (typeof o === 'string') return o;
     const parts: string[] = [];
     if (typeof o?.subject === 'string') parts.push(o.subject);

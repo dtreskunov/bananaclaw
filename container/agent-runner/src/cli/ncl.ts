@@ -61,6 +61,9 @@ function writeRequest(req: RequestFrame): void {
     const maxIn = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
     const max = Math.max(maxOut, maxHostOut, maxIn);
     const nextSeq = max % 2 === 0 ? max + 1 : max + 2;
+    const { position: timelinePosition } = db.prepare(
+      'UPDATE timeline_clock SET position = MAX(?, position + 1) WHERE id = 1 RETURNING position',
+    ).get(Date.now() * 1000) as { position: number };
 
     db.prepare(
       `INSERT INTO messages_out (id, seq, timestamp, kind, content)
@@ -73,6 +76,7 @@ function writeRequest(req: RequestFrame): void {
         requestId: req.id,
         command: req.command,
         args: req.args,
+        timelinePosition,
       }),
     });
     db.exec('COMMIT');

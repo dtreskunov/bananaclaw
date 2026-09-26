@@ -66,6 +66,7 @@ describe('pending edit eligibility', () => {
     );
     expect(canEditPendingMessage(message, { ...thread, channelType: 'telegram' }, activeTurn.value, true)).toBe(false);
     expect(canEditPendingMessage(message, thread, activeTurn.value, false)).toBe(false);
+    expect(canEditPendingMessage(message, thread, { ...activeTurn.value!, status: 'stopping' }, true)).toBe(false);
     expect(canEditPendingMessage(message, thread, { id: 'old', status: 'running', supportsSteering: true }, true)).toBe(
       false,
     );

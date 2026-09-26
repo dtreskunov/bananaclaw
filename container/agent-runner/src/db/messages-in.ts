@@ -58,7 +58,7 @@ function getMaxMessagesPerPrompt(): number {
  * sees the prior context it missed. Host's countDueMessages gates waking on
  * trigger=1 separately (see src/db/session-db.ts).
  */
-export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
+export function getPendingMessages(isFirstPoll = false, options: { uncapped?: boolean } = {}): MessageInRow[] {
   const inbound = openInboundDb();
   const outbound = getOutboundDb();
 
@@ -70,11 +70,11 @@ export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
            AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
            AND (on_wake = 0 OR ?1 = 1)
            AND NOT (kind = 'system' AND COALESCE(
-             CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END, '') = 'edit_input')
+             CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END, '') IN ('edit_input', 'cancel_input'))
          ORDER BY seq DESC
          LIMIT ?2`,
       )
-      .all(isFirstPoll ? 1 : 0, getMaxMessagesPerPrompt()) as MessageInRow[];
+      .all(isFirstPoll ? 1 : 0, options.uncapped ? -1 : getMaxMessagesPerPrompt()) as MessageInRow[];
 
     if (pending.length === 0) return [];
 
@@ -100,7 +100,7 @@ export function getPendingInputEdits(): MessageInRow[] {
   try {
     const rows = inbound.prepare(
       `SELECT * FROM messages_in WHERE status = 'pending' AND kind = 'system'
-       AND CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END = 'edit_input'
+       AND CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END IN ('edit_input', 'cancel_input')
        ORDER BY seq ASC`,
     ).all() as MessageInRow[];
     const acknowledged = getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[];

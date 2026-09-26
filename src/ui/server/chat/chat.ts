@@ -88,7 +88,9 @@ import fs from 'fs';
 import { readStoppedTurnStats, type StoppedTurnStats } from '../../shared/stopped-turn.js';
 import { parseInputState, type InputHandling, type InputState } from '../../shared/input-state.js';
 import { INPUT_EDIT_ID } from '../../../pending-input-edit.js';
-import { editPendingInput } from './pending-input-edit.js';
+import { cancelPendingInput, editPendingInput } from './pending-input-edit.js';
+import { parseTimelinePosition, timelineSortKey } from '../../shared/timeline.js';
+import { inputStateKey, isCancelledInputContent } from '../../../input-timeline.js';
 
 /** Map an agent group to its shared web platform_id. */
 function platformIdFor(agentGroupId: string): string {
@@ -402,7 +404,7 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'edit-input') {
-    if (req.method !== 'PATCH') {
+    if (req.method !== 'PATCH' && req.method !== 'DELETE') {
       writeJson(res, 405, { error: 'method_not_allowed' });
       return true;
     }
@@ -413,21 +415,23 @@ export async function handleChatRequest(
       writeJson(res, 400, { error: 'invalid_body' });
       return true;
     }
+    const cancelling = req.method === 'DELETE';
     if (
       !body ||
       typeof body !== 'object' ||
       Array.isArray(body) ||
-      Object.keys(body).length !== 3 ||
+      Object.keys(body).length !== (cancelling ? 1 : 3) ||
       !('requestId' in body) ||
       typeof body.requestId !== 'string' ||
       !INPUT_EDIT_ID.test(body.requestId) ||
-      !('expectedText' in body) ||
-      typeof body.expectedText !== 'string' ||
-      Buffer.byteLength(body.expectedText) > 64 * 1024 ||
-      !('text' in body) ||
-      typeof body.text !== 'string' ||
-      !body.text.trim() ||
-      Buffer.byteLength(body.text) > 64 * 1024
+      (!cancelling &&
+        (!('expectedText' in body) ||
+          typeof body.expectedText !== 'string' ||
+          Buffer.byteLength(body.expectedText) > 64 * 1024 ||
+          !('text' in body) ||
+          typeof body.text !== 'string' ||
+          !body.text.trim() ||
+          Buffer.byteLength(body.text) > 64 * 1024))
     ) {
       writeJson(res, 400, { error: 'invalid_body' });
       return true;
@@ -451,7 +455,7 @@ export async function handleChatRequest(
       return true;
     }
     try {
-      const result = await editPendingInput({
+      const mutationContext = {
         groupId: m.groupId,
         sessionId: context.sessionId,
         userId,
@@ -459,13 +463,19 @@ export async function handleChatRequest(
         threadId: context.threadId,
         messageId: m.messageId,
         requestId: body.requestId,
-        expectedText: body.expectedText,
-        text: body.text,
-      });
+      };
+      const result = cancelling
+        ? await cancelPendingInput(mutationContext)
+        : 'expectedText' in body &&
+            typeof body.expectedText === 'string' &&
+            'text' in body &&
+            typeof body.text === 'string'
+          ? await editPendingInput({ ...mutationContext, expectedText: body.expectedText, text: body.text })
+          : { status: 400, body: { error: 'invalid_body' } };
       writeJson(res, result.status, result.body);
     } catch (err) {
-      log.warn('Pending input edit failed', { groupId: m.groupId, messageId: m.messageId, err });
-      writeJson(res, 500, { error: 'input_edit_failed' });
+      log.warn('Pending input mutation failed', { groupId: m.groupId, messageId: m.messageId, err });
+      writeJson(res, 500, { error: cancelling ? 'input_cancel_failed' : 'input_edit_failed' });
     }
     return true;
   }
@@ -976,6 +986,7 @@ type SuggestedAction = 'continue' | 'retry' | 'report';
 export interface HistoryMessage {
   inputState?: InputState;
   canEditPending?: boolean;
+  timelinePosition?: number;
   stoppedStats?: StoppedTurnStats;
   /** Human sender attribution for inbound messages. */
   author?: { userId: string; displayName: string };
@@ -1025,8 +1036,9 @@ function readVisibleInputStates(
   sessionId: string,
   rows: Array<{ id: string; status: string; content: string }>,
   isWeb: boolean,
-): Map<string, InputState> {
+): { states: Map<string, InputState>; positions: Map<string, number> } {
   const states = new Map<string, InputState>();
+  const positions = new Map<string, number>();
   const visible = new Map(rows.map((row) => [row.id, row]));
   for (const row of rows) {
     if (!isWeb || row.status !== 'pending') continue;
@@ -1036,6 +1048,7 @@ function readVisibleInputStates(
         messageId: publicInboundMessageId(row.id, groupId),
         status: 'queued',
         ...(handling?.turnId ? { turnId: handling.turnId } : {}),
+        ...(handling?.mode === 'queue' ? { queuedForNextTurn: true } : {}),
       });
     } catch {
       /* Legacy/non-JSON content has no submission intent. */
@@ -1065,15 +1078,19 @@ function readVisibleInputStates(
         } catch {
           continue;
         }
-        if (!state || receipt.key !== `input:${crypto.createHash('sha256').update(state.messageId).digest('hex')}`)
-          continue;
+        if (!state || receipt.key !== inputStateKey(state.messageId)) continue;
         const row = visible.get(state.messageId);
         if (!row) continue;
+        if (state.timelinePosition !== undefined) positions.set(row.id, state.timelinePosition);
         states.set(row.id, { ...state, messageId: publicInboundMessageId(row.id, groupId) });
       }
       for (const [id, state] of states) {
         const status = acknowledgements.get(id) ?? visible.get(id)?.status;
-        if (state.status !== 'applied' && (status === 'processing' || status === 'completed' || status === 'failed')) {
+        if (
+          state.status !== 'applied' &&
+          state.status !== 'cancelled' &&
+          (status === 'processing' || status === 'completed' || status === 'failed')
+        ) {
           if (status === 'processing' || state.reason) states.set(id, { ...state, status: 'processing' });
           else states.delete(id);
         }
@@ -1084,7 +1101,7 @@ function readVisibleInputStates(
   } catch {
     /* The outbound projection may not exist yet. */
   }
-  return states;
+  return { states, positions };
 }
 
 /**
@@ -1190,6 +1207,7 @@ export function readChatHistory(
   groupId: string,
   threadId: string,
   override?: { channelType: string; messagingGroupId: string },
+  options: { includeCancelled?: boolean } = {},
 ): HistoryMessage[] {
   const elevated = isElevated(userId);
   const target = resolveTargetMessagingGroup(userId, groupId, override, elevated);
@@ -1233,7 +1251,12 @@ export function readChatHistory(
           )
           .all(target.channelType, threadId, getMessagingGroup(target.messagingGroupId)?.platform_id) as typeof rows;
       }
-      const inputStates = readVisibleInputStates(groupId, session.id, rows, target.channelType === WEB_CHANNEL_TYPE);
+      const { states: inputStates, positions: inputPositions } = readVisibleInputStates(
+        groupId,
+        session.id,
+        rows,
+        target.channelType === WEB_CHANNEL_TYPE,
+      );
       // Router namespaces ids as `<rawId>:<agentGroupId>` when writing
       // into per-agent session DBs (router.ts messageIdForAgent), but the
       // live WS echo from submitWebInbound sends the raw `<rawId>`. If we
@@ -1241,6 +1264,20 @@ export function readChatHistory(
       // mismatches and the user's own message paints twice on visibility
       // resume. Strip the suffix here so history matches the echo.
       for (const r of rows) {
+        const cancelled = inputStates.get(r.id)?.status === 'cancelled' || isCancelledInputContent(r.content);
+        if (cancelled) {
+          if (options.includeCancelled) {
+            const id = publicInboundMessageId(r.id, groupId);
+            messages.push({
+              direction: 'in',
+              id,
+              timestamp: r.timestamp,
+              text: '',
+              inputState: { messageId: id, status: 'cancelled' },
+            });
+          }
+          continue;
+        }
         const parsed = parseInboundContent(
           r.content,
           groupId,
@@ -1269,6 +1306,7 @@ export function readChatHistory(
               r.sender_user_id === userId &&
               ['queued', 'steering'].includes(inputStates.get(r.id)?.status ?? ''),
             ...(inputStates.has(r.id) ? { inputState: inputStates.get(r.id) } : {}),
+            ...(inputPositions.has(r.id) ? { timelinePosition: inputPositions.get(r.id) } : {}),
           });
         }
       }
@@ -1376,6 +1414,7 @@ export function readChatHistory(
             timestamp: r.timestamp,
             text: parsed.text,
             files: parsed.files,
+            ...(parsed.timelinePosition !== undefined ? { timelinePosition: parsed.timelinePosition } : {}),
           });
           continue;
         }
@@ -1387,11 +1426,13 @@ export function readChatHistory(
           if (content) {
             const rawActivity = activityMap.get(r.id);
             const activity = rawActivity ? reduceActivityLines(rawActivity) : undefined;
+            const timelinePosition = parseOutboundContent(r.content).timelinePosition;
             messages.push({
               direction: 'out',
               id: r.id,
               timestamp: r.timestamp,
               text: content.text,
+              ...(timelinePosition !== undefined ? { timelinePosition } : {}),
               ...(content.card ? { card: content.card } : {}),
               files: undefined,
               ...(activity && activity.length > 0 ? { activity } : {}),
@@ -1430,6 +1471,7 @@ export function readChatHistory(
           ...(parsed.deliveryOrigin ? { deliveryOrigin: parsed.deliveryOrigin } : {}),
           ...(parsed.suggestedAction ? { suggestedAction: parsed.suggestedAction } : {}),
           ...(parsed.stoppedStats ? { stoppedStats: parsed.stoppedStats } : {}),
+          ...(parsed.timelinePosition !== undefined ? { timelinePosition: parsed.timelinePosition } : {}),
           ...(usage ? { usage } : {}),
           ...(activity && activity.length > 0 ? { activity } : {}),
         });
@@ -1548,7 +1590,9 @@ export function readChatHistory(
     // inbound DB may not exist
   }
 
-  messages.sort((a, b) => Date.parse(normTs(a.timestamp)) - Date.parse(normTs(b.timestamp)));
+  messages.sort(
+    (a, b) => timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition),
+  );
   return messages;
 }
 
@@ -1654,7 +1698,10 @@ interface TurnContext {
   canSend: boolean;
 }
 
-export type ChatActiveTurn = Pick<SessionActiveTurn, 'id' | 'status' | 'supportsSteering' | 'supportsInputEditing'>;
+export type ChatActiveTurn = Pick<
+  SessionActiveTurn,
+  'id' | 'status' | 'supportsSteering' | 'supportsInputEditing' | 'supportsInputCancellation'
+>;
 
 function publicActiveTurn(turn: SessionActiveTurn): ChatActiveTurn {
   return {
@@ -1662,6 +1709,7 @@ function publicActiveTurn(turn: SessionActiveTurn): ChatActiveTurn {
     status: turn.status,
     ...(turn.supportsSteering ? { supportsSteering: true } : {}),
     ...(turn.supportsInputEditing ? { supportsInputEditing: true } : {}),
+    ...(turn.supportsInputCancellation ? { supportsInputCancellation: true } : {}),
   };
 }
 
@@ -1894,6 +1942,7 @@ function parseInboundContent(
 } | null {
   try {
     const o = JSON.parse(content);
+    if (o?.cancelled === true) return null;
     if (typeof o === 'string') return { text: o };
     if (typeof o?.text === 'string' || Array.isArray(o?.attachments) || Array.isArray(o?.files)) {
       const text = typeof o?.text === 'string' ? o.text : '';
@@ -2129,8 +2178,10 @@ export function parseOutboundContent(content: string): {
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   suggestedAction?: SuggestedAction;
   stoppedStats?: StoppedTurnStats;
+  timelinePosition?: number;
 } {
   const o = JSON.parse(content);
+  const timelinePosition = parseTimelinePosition(o?.timelinePosition);
   const stoppedStats = readStoppedTurnStats(o);
   const text = typeof o?.text === 'string' ? o.text : '';
   const deliveryOrigin =
@@ -2169,6 +2220,7 @@ export function parseOutboundContent(content: string): {
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
     ...(suggestedAction ? { suggestedAction } : {}),
     ...(stoppedStats ? { stoppedStats } : {}),
+    ...(timelinePosition !== undefined ? { timelinePosition } : {}),
   };
 }
 
@@ -3600,8 +3652,11 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
         // workspace-relative source paths so the chat UI can link the
         // attachment chip into the FILES panel. Fish it out of the
         // parsed content (delivery.ts has already JSON.parsed it).
-        const c = (typeof message.content === 'object' && message.content) as { file_paths?: unknown } | undefined;
+        const c = (typeof message.content === 'object' && message.content) as
+          | { file_paths?: unknown; timelinePosition?: unknown }
+          | undefined;
         const filePaths: unknown[] = Array.isArray(c?.file_paths) ? c!.file_paths! : [];
+        const timelinePosition = parseTimelinePosition(c?.timelinePosition);
 
         // For chat-sdk messages (ask_question, send_card), include the
         // structured content so the client can render interactive cards
@@ -3659,6 +3714,7 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
             })) ?? [],
           timestamp: new Date().toISOString(),
           ...(question ? { question } : {}),
+          ...(timelinePosition !== undefined ? { timelinePosition } : {}),
         });
       } catch (err) {
         log.warn('web chat ws send failed', { err });
@@ -3738,10 +3794,16 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
   const unsubscribeTurn = onSessionSignal((sessionId, kind) => {
     if (kind === 'input.state') {
       if (sessionId !== resolveSessionIdForUsage()) return;
-      const messages = readChatHistory(ctx.userId, ctx.groupId, ctx.threadId, {
-        channelType: WEB_CHANNEL_TYPE,
-        messagingGroupId: ctx.messagingGroupId,
-      });
+      const messages = readChatHistory(
+        ctx.userId,
+        ctx.groupId,
+        ctx.threadId,
+        {
+          channelType: WEB_CHANNEL_TYPE,
+          messagingGroupId: ctx.messagingGroupId,
+        },
+        { includeCancelled: true },
+      );
       sendFrame({
         kind: 'input-state',
         states: messages
@@ -3751,6 +3813,7 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
             inputState: message.inputState ?? null,
             text: message.text,
             canEditPending: message.canEditPending ?? false,
+            ...(message.timelinePosition !== undefined ? { timelinePosition: message.timelinePosition } : {}),
           })),
       });
       return;
@@ -3782,10 +3845,16 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
   ws.on('error', (err) => log.warn('web chat ws error', { err }));
 
   try {
-    const messages = readChatHistory(ctx.userId, ctx.groupId, ctx.threadId, {
-      channelType: WEB_CHANNEL_TYPE,
-      messagingGroupId: ctx.messagingGroupId,
-    });
+    const messages = readChatHistory(
+      ctx.userId,
+      ctx.groupId,
+      ctx.threadId,
+      {
+        channelType: WEB_CHANNEL_TYPE,
+        messagingGroupId: ctx.messagingGroupId,
+      },
+      { includeCancelled: true },
+    );
     frameSender.finish(
       {
         kind: 'history',

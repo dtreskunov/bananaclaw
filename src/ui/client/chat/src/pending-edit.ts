@@ -1,7 +1,81 @@
 import { signal } from '@preact/signals';
 import { patchJson } from './api';
-import { chatMessages, groupId, threadId, channelType, messagingGroupId } from './state';
+import { chatMessages, groupId, threadId, channelType, messagingGroupId, activeTurn, turnConnected } from './state';
 import type { ActiveTurn, ChatMessage, Thread } from './types';
+
+interface PendingEditorSession {
+  draft: PendingEditDraft;
+  open: boolean;
+  gid: string;
+  thread: Thread;
+  messageId: string;
+}
+
+// Consumption may reposition or unmount a bubble. Keep its editor state keyed
+// by conversation/message rather than by its current mounted position.
+export const pendingEditorSessions = signal(new Map<string, PendingEditorSession>());
+export const composerSendInFlight = signal(false);
+
+export function pendingEditorKey(gid: string | null, thread: Thread | null, messageId?: string): string {
+  return JSON.stringify([
+    gid,
+    thread?.channelType || 'web',
+    thread?.messagingGroupId ?? null,
+    thread?.threadId,
+    messageId,
+  ]);
+}
+
+export function setPendingEditorSession(key: string, session: PendingEditorSession | null): void {
+  const next = new Map(pendingEditorSessions.value);
+  if (session) next.set(key, session);
+  else next.delete(key);
+  pendingEditorSessions.value = next;
+}
+
+export function currentPendingEditor(): [string, PendingEditorSession] | undefined {
+  return [...pendingEditorSessions.value].find(
+    ([, session]) => session.open && isCurrentConversation(session.gid, session.thread),
+  );
+}
+
+export function isCurrentConversation(gid: string, thread: Thread): boolean {
+  return (
+    groupId.value === gid &&
+    threadId.value === thread.threadId &&
+    channelType.value === (thread.channelType || 'web') &&
+    messagingGroupId.value === (thread.messagingGroupId ?? null)
+  );
+}
+
+export function openPendingEditor(gid: string, thread: Thread, message: ChatMessage): void {
+  if (composerSendInFlight.value) return;
+  const key = pendingEditorKey(gid, thread, message.id);
+  const previous = pendingEditorSessions.value.get(key);
+  if (!previous && !canEditPendingMessage(message, thread, activeTurn.value, turnConnected.value)) return;
+  const next = new Map(pendingEditorSessions.value);
+  for (const [otherKey, session] of next) {
+    if (isCurrentConversation(session.gid, session.thread)) next.set(otherKey, { ...session, open: false });
+  }
+  next.set(
+    key,
+    previous
+      ? { ...previous, open: true }
+      : {
+          gid,
+          thread: { ...thread },
+          messageId: message.id!,
+          open: true,
+          draft: new PendingEditDraft(message.text, (body) => savePendingMessage(gid, thread, message.id!, body)),
+        },
+  );
+  pendingEditorSessions.value = next;
+}
+
+export function exitPendingEditor(key: string): void {
+  const session = pendingEditorSessions.value.get(key);
+  if (session) setPendingEditorSession(key, { ...session, open: false });
+}
 
 export function canEditPendingMessage(
   message: ChatMessage,
@@ -17,6 +91,7 @@ export function canEditPendingMessage(
     message.canEditPending === true &&
     (message.inputState?.status === 'queued' || message.inputState?.status === 'steering') &&
     connected &&
+    turn?.status === 'running' &&
     turn?.supportsInputEditing === true
   );
 }
@@ -43,27 +118,11 @@ export async function savePendingMessage(
   messageId: string,
   body: PendingEditBody,
 ): Promise<PendingEditResult> {
-  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/messages/${encodeURIComponent(messageId)}`;
-  const params = new URLSearchParams();
-  if (thread.messagingGroupId) {
-    params.set('channel', thread.channelType || 'web');
-    params.set('mg', thread.messagingGroupId);
-  }
-  if (params.size) url += `?${params}`;
-  const result = await patchJson<PendingEditResult['data']>(url, body);
+  const result = await patchJson<PendingEditResult['data']>(pendingMessageUrl(gid, thread, messageId), body);
   if (result.ok && (result.data.ok !== true || result.data.id !== messageId || typeof result.data.text !== 'string')) {
     return { ok: false, status: 502, data: { error: 'invalid_confirmation' } };
   }
-  if (
-    result.ok &&
-    result.data.ok === true &&
-    result.data.id === messageId &&
-    typeof result.data.text === 'string' &&
-    groupId.value === gid &&
-    threadId.value === thread.threadId &&
-    channelType.value === (thread.channelType || 'web') &&
-    messagingGroupId.value === (thread.messagingGroupId ?? null)
-  ) {
+  if (result.ok && isCurrentConversation(gid, thread)) {
     chatMessages.value = chatMessages.value.map((message) =>
       message.direction === 'in' && message.id === messageId ? { ...message, text: result.data.text! } : message,
     );
@@ -71,10 +130,20 @@ export async function savePendingMessage(
   return result;
 }
 
+export function pendingMessageUrl(gid: string, thread: Thread, messageId: string): string {
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/messages/${encodeURIComponent(messageId)}`;
+  const params = new URLSearchParams();
+  if (thread.messagingGroupId) {
+    params.set('channel', thread.channelType || 'web');
+    params.set('mg', thread.messagingGroupId);
+  }
+  if (params.size) url += `?${params}`;
+  return url;
+}
+
 const ERRORS: Record<string, string> = {
   input_not_pending: 'This message is no longer pending. Your draft has been kept.',
-  text_changed:
-    'The saved text changed elsewhere. Your draft has been kept; cancel and reopen to edit the latest text.',
+  text_changed: 'The saved text changed elsewhere. Your draft has been kept.',
   steering_consumed: 'This steering message has already been consumed. Your draft has been kept.',
   runner_disconnected: 'The runner is disconnected. Your draft has been kept. Retry when connected.',
   editing_unsupported: 'The running agent does not support pending edits. Your draft has been kept.',

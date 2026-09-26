@@ -78,7 +78,7 @@ Explicit Stop still cancels; accepted but unapplied guidance remains pending.
 
 The runner journals message dispositions in `session_state`, under
 `input:<sha256(internal-message-id)>`. Values include the message ID, status
-(`queued`, `steering`, `applied`, `processing`), and optionally the target turn
+(`queued`, `steering`, `applied`, `processing`, `cancelled`), and optionally the target turn
 and a fallback reason. A queued HTTP request or inbound echo is not proof of
 application. `applied` is written only after the provider persists the guidance;
 the native store records input IDs with their history entries for replay
@@ -126,6 +126,33 @@ follow-ups use the same event signal with dirty reruns. `inbound.db` and
 container. Attachments remain file-backed: `inbox/` is mounted read-only and
 `outbox/` read-write.
 
+## Transcript order and the pending queue
+
+Queued follow-ups are not part of the consumed transcript yet. The runner marks
+them with `queuedForNextTurn: true` in their durable input receipt; the web UI
+shows those still in `queued` status as ordinary bubbles below the active turn,
+with a subtle footer status rather than a separate queue section. A first input
+awaiting cold startup is not automatically a follow-up.
+
+On first consumption, an input receives an immutable `timelinePosition`.
+Outbound content receives a position from the same runner-local logical clock
+when written. Positions are positive safe integers in epoch-microsecond units,
+allocated as `max(now * 1000, previous + 1)` in SQLite transactions. This
+distinguishes same-millisecond events and remains monotonic across clock
+adjustments and restarts. Positions travel as JSON numbers, serialized with
+`JSON.stringify`, without modifying the messages' original timestamps.
+
+History and live frames expose these positions independently of pending-state
+badges. Completion can remove a badge without losing placement. Editing,
+recovery and retry never replace an existing consumption position. Applied
+steering is placed at its application boundary within the current turn; a
+queued follow-up is placed only when its successor turn consumes it.
+
+History, client rendering, and branch cutoffs/digests use the same ordering
+rule. Forks inherit the selected inputs' positions and never copy a known
+still-queued follow-up into the consumed history. Old records without positions
+retain timestamp ordering; historical consumption times are not guessed.
+
 ## Pending web-input edits
 
 Only native currently advertises `supportsInputEditing` on its active turn.
@@ -157,6 +184,38 @@ A timed-out command can still be applied on reconnect. Different outstanding
 edits to one input are rejected until the first has a receipt. Receipt replay
 never reverts a later edit. System edit commands are never model input, history
 bubbles, or a reason to wake a cold container.
+
+## Pending web-input cancellation
+
+Native advertises `supportsInputCancellation` independently of editing. The
+viewer can cancel their own unconsumed web input with
+`DELETE /ui/chat/api/groups/:group/chat/:thread/messages/:message`, passing
+`{ "requestId": "<UUID>" }` and the same conversation scope as editing.
+New requests require the connected, running native turn; older runners do not
+advertise the capability. Cancellation affects only the selected input, never
+the active reply. Already claimed input and steering whose attachment preparation
+has begun return a conflict.
+
+The host journals a non-triggering `cancel-<UUID>` system command with
+`action: "cancel_input"` and a target message ID. The runner handles edit and
+cancel commands together, in sequence, before claiming model input. It removes
+buffered native guidance synchronously with `cancelSteering` and commits the
+completed target, a `cancelled` input disposition, and an immutable
+`input-cancel:<UUID>` receipt. Cancellation does not allocate a consumption
+position. The host validates the original authorized request and atomically
+projects the receipt plus the target's completed status and cancellation marker.
+Retained message/receipt rows prevent replay or retry from reviving canceled
+input; this is not a content-purge operation.
+
+History and search omit canceled messages, and forks neither copy them nor
+accept them as anchors. Scoped live input-state frames and websocket history
+snapshots carry an empty-text `cancelled` tombstone so other open tabs, including
+tabs reconnecting after a missed cancellation, remove the same bubble. The composer
+is used for text edits; cancellation is a separate bubble action. A successful
+HTTP response means durable confirmation. A five-second timeout returns
+`cancel_pending`, retaining the same request UUID for retry. Different outstanding
+edit/cancel commands for one message are serialized. Consumed inputs cannot be
+retracted by cancellation; use Stop to interrupt the current turn instead.
 
 ## Lifecycle
 

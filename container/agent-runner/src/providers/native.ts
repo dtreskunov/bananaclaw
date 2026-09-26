@@ -216,6 +216,7 @@ export class NativeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = false;
   readonly supportsSteering = true;
   readonly supportsInputEditing = true;
+  readonly supportsInputCancellation = true;
   private readonly options: ProviderOptions;
   private readonly store: NativeStore;
 
@@ -482,6 +483,14 @@ export class NativeProvider implements AgentProvider {
     };
 
     return {
+      cancelSteering(id: string): boolean {
+        if (!active || ended || abortController.signal.aborted || preparingSteering.has(id)) return false;
+        const index = steering.findIndex((input) => input.id === id);
+        if (index < 0) return false;
+        steering.splice(index, 1);
+        // Keep acceptedSteering as a tombstone against duplicate acceptance.
+        return true;
+      },
       replaceSteering(guidance: SteeringInput): boolean {
         if (!active || ended || abortController.signal.aborted || preparingSteering.has(guidance.id)) return false;
         const index = steering.findIndex((input) => input.id === guidance.id);

@@ -45,6 +45,27 @@ describe('mergeQuestionTimeline', () => {
     expect(result.map((entry) => entry.id)).toEqual(['message-1', 'question-1']);
   });
 
+  it('keeps questions after precise input positions in their millisecond without losing normal ordering', () => {
+    const timestamp = '2026-07-15T05:34:20.000Z';
+    const position = Date.parse(timestamp) * 1000;
+    const result = mergeQuestionTimeline(
+      [
+        { ...message('later-in-bucket', timestamp), timelinePosition: position + 9 },
+        { ...message('triggering-input', timestamp), direction: 'in', timelinePosition: position + 1 },
+        { ...message('later-output', timestamp), timelinePosition: position + 1001 },
+      ],
+      [question({ createdAt: timestamp })],
+      'thread-1',
+    );
+    expect(result.map((entry) => entry.id)).toEqual([
+      'triggering-input',
+      'later-in-bucket',
+      'question-1',
+      'later-output',
+    ]);
+    expect(result[0].ts).toBe(timestamp);
+  });
+
   it('places an answered question at its answer time', () => {
     const result = mergeQuestionTimeline(
       [message('before', '2026-07-15T05:52:30.000Z'), message('after', '2026-07-15T05:53:20.000Z')],

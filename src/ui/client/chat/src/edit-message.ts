@@ -1,4 +1,6 @@
 import type { ChatMessage } from './types';
+import { mergeQuestionTimeline } from './question-timeline';
+import { splitQueuedFollowups } from './queued-followups';
 
 /**
  * Return the message after which an edit branch should be cut. Non-conversation
@@ -7,7 +9,8 @@ import type { ChatMessage } from './types';
  */
 export function findEditBranchAnchorId(messages: ChatMessage[], targetMessageId: string): string | null {
   let previousId: string | null = null;
-  for (const message of messages) {
+  const { transcript } = splitQueuedFollowups(mergeQuestionTimeline(messages, [], null));
+  for (const message of transcript) {
     if (message.id === targetMessageId) return previousId;
     if ((message.direction === 'in' || message.direction === 'out') && message.id) {
       previousId = message.id;

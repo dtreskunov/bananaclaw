@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
-import { INPUT_EDIT_PREFIX, projectInputEditResult, type EditedInput } from './pending-input-edit.js';
+import { INPUT_EDIT_PREFIX, INPUT_CANCEL_PREFIX, projectInputEditResult, type EditedInput } from './pending-input-edit.js';
 
 const MAX_ID_CHARS = 256;
 const MAX_STATE_CHARS = 1024 * 1024;
@@ -367,7 +367,8 @@ export function applyDurableRunnerEvent(
   let processingReady = false;
   let editedInput: EditedInput | undefined;
   const isInputEdit = frame.event.type === 'state.upsert' &&
-    typeof payload.key === 'string' && payload.key.startsWith(INPUT_EDIT_PREFIX);
+    typeof payload.key === 'string' &&
+    (payload.key.startsWith(INPUT_EDIT_PREFIX) || payload.key.startsWith(INPUT_CANCEL_PREFIX));
   const digest = crypto
     .createHash('sha256')
     .update(JSON.stringify({ type: frame.event.type, payload }))
@@ -430,7 +431,8 @@ export function applyDurableRunnerEvent(
         }
         case 'state.delete':
           if (!exactKeys(payload, ['key']) || !text(payload.key)) throw new Error('invalid state.delete payload');
-          if (payload.key.startsWith(INPUT_EDIT_PREFIX)) throw new Error('input edit receipts are immutable');
+          if (payload.key.startsWith(INPUT_EDIT_PREFIX) || payload.key.startsWith(INPUT_CANCEL_PREFIX))
+            throw new Error('input mutation receipts are immutable');
           db.prepare('DELETE FROM session_state WHERE key = ?').run(payload.key);
           break;
         case 'container.upsert':

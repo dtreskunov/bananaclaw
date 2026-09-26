@@ -33,6 +33,7 @@ export interface ActiveTurn {
   threadId: string | null;
   supportsSteering?: boolean;
   supportsInputEditing?: boolean;
+  supportsInputCancellation?: boolean;
 }
 
 export function isAddressableTurn(turn: ActiveTurn): boolean {

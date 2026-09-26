@@ -1,12 +1,5 @@
 import type { ChatMessage, PendingQuestionDto } from './types';
-
-function timestampMs(timestamp: string): number {
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp)
-    ? timestamp.replace(' ', 'T') + 'Z'
-    : timestamp;
-  const value = Date.parse(normalized);
-  return Number.isNaN(value) ? 0 : value;
-}
+import { timelineSortKey } from '../../../shared/timeline';
 
 export function mergeQuestionTimeline(
   messages: ChatMessage[],
@@ -27,8 +20,11 @@ export function mergeQuestionTimeline(
     );
 
   return [...messages, ...questionMessages].sort((left, right) => {
-    const byTime = timestampMs(left.ts) - timestampMs(right.ts);
-    if (byTime !== 0) return byTime;
-    return left.direction === 'question' ? 1 : right.direction === 'question' ? -1 : 0;
+    const leftKey = timelineSortKey(left.ts, left.timelinePosition);
+    const rightKey = timelineSortKey(right.ts, right.timelinePosition);
+    const byMillisecond = Math.floor(leftKey / 1000) - Math.floor(rightKey / 1000);
+    if (byMillisecond !== 0) return byMillisecond;
+    const byQuestion = Number(left.direction === 'question') - Number(right.direction === 'question');
+    return byQuestion || leftKey - rightKey;
   });
 }

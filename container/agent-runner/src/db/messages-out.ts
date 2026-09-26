@@ -7,6 +7,7 @@
 import { getInboundDb, getOutboundDb } from './connection.js';
 import type { Database } from 'bun:sqlite';
 import { isSafeAttachmentName } from '../attachment-safety.js';
+import { allocateTimelinePosition } from './timeline.js';
 
 const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
 const MAX_CONTENT_ARRAY_ITEMS = 100;
@@ -112,6 +113,11 @@ export function writeMessageOutWithConnections(
   validateMessageContent(msg.content);
   outbound.exec('BEGIN IMMEDIATE');
   try {
+    const content = JSON.stringify({
+      ...JSON.parse(msg.content),
+      timelinePosition: allocateTimelinePosition(outbound),
+    });
+    validateMessageContent(content);
     // Read max seq from both host stores and the runner projection while
     // holding the runner-state write lock. A sidecar writer must wait and
     // then recompute after this row commits.
@@ -141,7 +147,7 @@ export function writeMessageOutWithConnections(
         $platform_id: msg.platform_id ?? null,
         $channel_type: msg.channel_type ?? null,
         $thread_id: msg.thread_id ?? null,
-        $content: msg.content,
+        $content: content,
       });
 
     outbound.exec('COMMIT');

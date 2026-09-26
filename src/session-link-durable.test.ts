@@ -112,6 +112,42 @@ describe('applyDurableRunnerEvent', () => {
     db.close();
   });
 
+  it('atomically projects cancellation and replays it without resurrecting a message', () => {
+    seedEdit();
+    const db = openInboundDb(AGENT_GROUP_ID, SESSION_ID);
+    db.prepare('UPDATE messages_in SET id = ?, content = ? WHERE id = ?').run(
+      `cancel-${editId}`, JSON.stringify({ action: 'cancel_input', requestId: editId, messageId: 'in-1' }),
+      `edit-${editId}`,
+    );
+    db.close();
+    const frame = editFrame();
+    frame.event.payload.key = `input-cancel:${editId}`;
+    expect(applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, frame).editedInput?.cancelled).toBe(true);
+    expect(applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, frame).editedInput?.cancelled).toBe(true);
+    const inbound = openInboundDb(AGENT_GROUP_ID, SESSION_ID);
+    expect(inbound.prepare("SELECT status FROM messages_in WHERE id = 'in-1'").pluck().get()).toBe('completed');
+    expect(JSON.parse(inbound.prepare("SELECT content FROM messages_in WHERE id = 'in-1'").pluck().get() as string))
+      .toEqual({ text: 'before', files: [{ filename: 'keep.txt' }], cancelled: true });
+    inbound.close();
+    expect(() => applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+      ...frame, eventId: 'forged-update', sequence: 2,
+      event: { ...frame.event, payload: { ...frame.event.payload,
+        value: JSON.stringify({ requestId: editId, messageId: 'in-1', status: 'conflict' }),
+      } },
+    })).toThrow('conflicting input edit receipt');
+    expect(() => applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+      eventId: 'delete-cancel', sequence: 2,
+      event: { type: 'state.delete', payload: { key: `input-cancel:${editId}` } },
+    })).toThrow('immutable');
+  });
+
+  it('rejects cancellation receipts without a matching authorized host cancellation command', () => {
+    seedEdit();
+    const frame = editFrame();
+    frame.event.payload.key = `input-cancel:${editId}`;
+    expect(() => applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, frame)).toThrow('no host request');
+  });
+
   it('rolls back the receipt if the host target no longer matches the authorized request', () => {
     seedEdit();
     const inDb = openInboundDb(AGENT_GROUP_ID, SESSION_ID);

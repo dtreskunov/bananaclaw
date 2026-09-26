@@ -63,6 +63,20 @@ describe('inboundAttachmentSecurityHeaders', () => {
 });
 
 describe('parseOutboundContent', () => {
+  it('projects a stable logical position for live and reloaded responses', () => {
+    const timelinePosition = Date.parse('2026-09-26T00:00:00.000Z') * 1000 + 1;
+    expect(parseOutboundContent(JSON.stringify({ text: 'Done', timelinePosition }))).toEqual({
+      text: 'Done',
+      files: undefined,
+      timelinePosition,
+    });
+    for (const invalid of [-1, 1.5, '12', Number.MAX_SAFE_INTEGER + 1]) {
+      expect(
+        parseOutboundContent(JSON.stringify({ text: 'Legacy', timelinePosition: invalid })).timelinePosition,
+      ).toBeUndefined();
+    }
+  });
+
   it('preserves stopped metadata without inventing token usage', () => {
     const stoppedStats = { durationMs: 12500, model: 'native/MiniMax-M3' };
     expect(

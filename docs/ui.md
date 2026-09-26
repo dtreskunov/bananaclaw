@@ -70,10 +70,13 @@ Historical attachments remain in the source thread and are not copied into the
 composer. Read-only channel threads offer Edit only for that first-message
 blank-thread case.
 
-Your own pending native web-chat messages instead offer **Edit pending message**
+Your own pending native web-chat messages instead offer **Edit**
 while the connected runner advertises input editing. This changes text in place,
 preserving attachments, ordering, message identity, and steering/queue intent;
-it never changes the composer or creates a branch. Other authors' messages and
+it uses the main composer without creating a branch. The composer shows a
+checkmark save button and an explicit **Exit edit** action. Your unsent composer
+text and attachments are parked and restored after save or exit. Attachment
+changes, uploads, and recording are disabled during editing. Other authors' messages and
 external-channel pending messages cannot be edited in place. Queued, steering,
 processing, and applied inputs never offer historical branch-edit, including
 applied steering after the response finishes.
@@ -83,8 +86,26 @@ disconnects show an inline error and retain the draft even if its pending status
 changes. **Retry save** reuses the request identity for the same text. If a save
 is still pending or its outcome is unknown, the draft is locked until that
 request is resolved: retry checks the existing request rather than starting
-another edit. **Cancel** closes the editor without changing unsent text; it
-cannot withdraw a save already submitted, which may still apply.
+another edit. **Exit edit** restores the unsent composer draft and keeps the
+pending edit draft available on reopening; it cannot withdraw a save already
+submitted, which may still apply. Drafts and requests remain scoped to their
+original conversation across navigation.
+
+The bubble's **Cancel** action removes only your own queued or waiting-to-steer
+input, and only when the connected native runner advertises cancellation.
+It never stops the active response. Cancel waits for authoritative confirmation
+or a live `cancelled` state before hiding the bubble. An ambiguous response or
+network failure leaves it visible with **Retry cancel**, reusing the same request
+ID. Consumed-input conflicts keep the bubble visible. An unresolved edit blocks
+cancel, and an unresolved cancel blocks edit, until the original request resolves.
+Reconnect history replaces the visible web transcript, so a cancellation missed
+while offline still removes its bubble. Redacted cancellation tombstones in
+history and scoped sync are authoritative: their matching bubbles are removed,
+while merging a snapshot does not discard unrelated absent optimistic inputs.
+Confirmed cancellations also leave conversation-scoped client tombstones, so
+late duplicate inbound echoes or stale history cannot resurrect the input.
+Only the matching send acknowledgement is cleared; unrelated optimistic sends
+and unsent composer drafts/attachments are retained.
 
 Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visible only to admins. `.git`, `node_modules`, `.claude-fragments`, dotfiles, and the composed `CLAUDE.md` are always hidden. `CLAUDE.local.md` is visible read-only.
 
@@ -99,6 +120,24 @@ Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visib
 Everything else falls back to a download link.
 
 ### Steering a native response
+
+Queued follow-ups appear as ordinary input bubbles at the bottom of the
+conversation, below the active response and its Stop control. There is no
+separate queue area: a subtle bubble footer shows status and **Edit** / **Cancel**
+when available. They remain there through Stop until the runner consumes them.
+At consumption each input moves into the transcript after the preceding
+response and before its own response, once its durable position arrives.
+A processing acknowledgement arriving before that position leaves it in the
+bottom position with editing disabled. Durable logical positions preserve this
+ordering on refresh, even when sent timestamps are identical; timestamp labels
+still show the original send time. Older messages retain chronological ordering.
+An initial idle message is not a follow-up merely because it briefly has queued
+status. Waiting-to-steer input also appears at the bottom; applied steering
+returns to its position in the current transcript.
+
+Promoting an input preserves its attachments and pending editor: unsaved drafts,
+in-flight saves, retry identities, and composer conflicts survive movement within
+the conversation.
 
 Sending text, dictation, or attachments while a native response is running in
 the same web conversation offers **Steer current turn** (focused by default)

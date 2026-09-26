@@ -6,6 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { ensureRunnerStateSchema } from './runner-state.js';
+import { allocateTimelinePosition } from './timeline.js';
 
 const roots: string[] = [];
 
@@ -73,12 +74,13 @@ describe('writeMessageOut', () => {
     ensureRunnerStateSchema(runner);
 
     runner.exec('BEGIN IMMEDIATE');
+    const mainPosition = allocateTimelinePosition(runner);
     runner
       .prepare(
         `INSERT INTO messages_out (id, seq, timestamp, kind, content)
-         VALUES ('main-writer', 1, datetime('now'), 'chat', '{}')`,
+         VALUES ('main-writer', 1, datetime('now'), 'chat', ?)`,
       )
-      .run();
+      .run(JSON.stringify({ timelinePosition: mainPosition }));
 
     const moduleUrl = pathToFileURL(path.join(import.meta.dir, 'messages-out.ts')).href;
     const childScript = `
@@ -112,6 +114,8 @@ describe('writeMessageOut', () => {
         { id: 'main-writer', seq: 1 },
         { id: 'sidecar-writer', seq: 3 },
       ]);
+      const row = runner.prepare("SELECT content FROM messages_out WHERE id = 'sidecar-writer'").get() as { content: string };
+      expect(JSON.parse(row.content).timelinePosition).toBeGreaterThan(mainPosition);
     } finally {
       if (runner.inTransaction) runner.exec('ROLLBACK');
       child.kill();

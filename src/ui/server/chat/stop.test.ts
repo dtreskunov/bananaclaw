@@ -16,6 +16,7 @@ const signal = vi.hoisted(() => ({
     threadId: string | null;
     supportsSteering?: boolean;
     supportsInputEditing?: boolean;
+    supportsInputCancellation?: boolean;
   },
   connected: true,
   listeners: new Set<(sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat' | 'input.state') => void>(),
@@ -57,6 +58,7 @@ vi.mock('../../../container-runner.js', () => ({
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
 import { initSessionFolder, openInboundDb, openOutboundDbRw, writeSessionMessage } from '../../../session-manager.js';
 import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
+import { createWebAdapter } from '../../../channels/web.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { COOKIE_NAME } from '../auth.js';
 import { handleChatRequest, handleChatUpgrade, matchChatPath, readChatActiveTurn, readChatHistory } from './chat.js';
@@ -278,13 +280,18 @@ function inputRow(
   }
 }
 
-function receipt(id: string, status: string, reason?: string) {
+function receipt(
+  id: string,
+  status: string,
+  reason?: string,
+  placement: { timelinePosition?: number; queuedForNextTurn?: boolean } = {},
+) {
   const db = openOutboundDbRw('agent', 'session-1');
   const messageId = `${id}:agent`;
   try {
     db.prepare('INSERT OR REPLACE INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
       `input:${createHash('sha256').update(messageId).digest('hex')}`,
-      JSON.stringify({ messageId, status, turnId: TURN.id, ...(reason ? { reason } : {}) }),
+      JSON.stringify({ messageId, status, turnId: TURN.id, ...(reason ? { reason } : {}), ...placement }),
       NOW,
     );
   } finally {
@@ -294,6 +301,109 @@ function receipt(id: string, status: string, reason?: string) {
 
 describe('durable input state history', () => {
   const history = () => readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE);
+
+  it('uses the same outbound placement in a live frame and reloaded history despite delivery latency', async () => {
+    const timelinePosition = Date.parse(NOW) * 1000 + 1;
+    const content = { text: 'Progress', timelinePosition };
+    const db = openOutboundDbRw('agent', 'session-1');
+    db.prepare(
+      `INSERT INTO messages_out (id, seq, kind, timestamp, channel_type, platform_id, thread_id, content)
+       VALUES ('out-test', 1, 'internal', ?, 'web', 'group:agent', 'thread-1', ?)`,
+    ).run(NOW, JSON.stringify(content));
+    db.close();
+    const frames: Record<string, unknown>[] = [];
+    const ws = Object.assign(new EventEmitter(), {
+      send: (frame: string) => frames.push(JSON.parse(frame)),
+      close: vi.fn(),
+    });
+    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
+      callback(ws as unknown as WebSocket, _req);
+    });
+    const req = Readable.from([]) as unknown as http.IncomingMessage;
+    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
+    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    try {
+      expect((frames[0].messages as Array<{ timelinePosition: number }>)[0].timelinePosition).toBe(timelinePosition);
+      await createWebAdapter().deliver('group:agent', 'thread-1', { id: 'out-test', kind: 'internal', content });
+      const frame = frames.find((value) => value.kind === 'outbound');
+      expect(frame).toMatchObject({ id: 'out-test', timelinePosition });
+      expect(frame?.timestamp).not.toBe(NOW);
+      expect(history()[0].timelinePosition).toBe(timelinePosition);
+    } finally {
+      ws.emit('close');
+    }
+  });
+
+  it('keeps consumed follow-ups after the prior response on reload without altering sent timestamps', () => {
+    const base = Date.parse(NOW) * 1000;
+    inputRow('a', { status: 'completed' });
+    inputRow('b', { status: 'completed', handling: { mode: 'queue' } });
+    receipt('a', 'processing', undefined, { timelinePosition: base + 1 });
+    receipt('b', 'processing', undefined, { timelinePosition: base + 3, queuedForNextTurn: true });
+    const outDb = openOutboundDbRw('agent', 'session-1');
+    const insert = outDb.prepare(
+      `INSERT INTO messages_out (id, seq, kind, timestamp, platform_id, channel_type, thread_id, content)
+       VALUES (?, ?, 'chat', ?, 'group:agent', 'web', 'thread-1', ?)`,
+    );
+    insert.run('out-a', 1, NOW, JSON.stringify({ text: 'answer A', timelinePosition: base + 2 }));
+    insert.run('out-b', 3, NOW, JSON.stringify({ text: 'answer B', timelinePosition: base + 4 }));
+    outDb.close();
+    for (let reload = 0; reload < 2; reload++) {
+      const messages = history();
+      expect(messages.map((message) => message.id)).toEqual(['a', 'out-a', 'b', 'out-b']);
+      expect(messages.find((message) => message.id === 'b')).toMatchObject({
+        timestamp: NOW,
+        timelinePosition: base + 3,
+        canEditPending: false,
+      });
+      expect(messages.find((message) => message.id === 'b')?.inputState).toBeUndefined();
+    }
+  });
+
+  it('distinguishes genuine queued follow-ups from the first message awaiting runner startup', () => {
+    inputRow('initial');
+    inputRow('explicit', { handling: { mode: 'queue' } });
+    inputRow('fallback', { handling: { mode: 'steer', turnId: TURN.id } });
+    receipt('fallback', 'queued', 'turn_finished', { queuedForNextTurn: true });
+    const messages = history();
+    expect(messages.find((message) => message.id === 'initial')?.inputState?.queuedForNextTurn).toBeUndefined();
+    for (const id of ['explicit', 'fallback']) {
+      expect(messages.find((message) => message.id === id)?.inputState?.queuedForNextTurn).toBe(true);
+      expect(messages.find((message) => message.id === id)?.timelinePosition).toBeUndefined();
+    }
+  });
+
+  it('preserves applied steering placement and ignores another conversation placement', () => {
+    const base = Date.parse(NOW) * 1000;
+    inputRow('steer', { status: 'completed' });
+    inputRow('hidden', { thread: 'thread-2' });
+    receipt('steer', 'applied', undefined, { timelinePosition: base + 3 });
+    receipt('hidden', 'processing', undefined, { timelinePosition: base + 2 });
+    expect(history()).toEqual([
+      expect.objectContaining({
+        id: 'steer',
+        timelinePosition: base + 3,
+        inputState: expect.objectContaining({ status: 'applied', timelinePosition: base + 3 }),
+      }),
+    ]);
+  });
+
+  it('retains the queue flag during the claim-before-placement acknowledgement gap', () => {
+    inputRow('waiting', { handling: { mode: 'queue' } });
+    receipt('waiting', 'queued', undefined, { queuedForNextTurn: true });
+    const db = openOutboundDbRw('agent', 'session-1');
+    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('waiting:agent', NOW);
+    db.close();
+    expect(history()[0]).toMatchObject({
+      canEditPending: false,
+      inputState: { status: 'processing', queuedForNextTurn: true },
+    });
+    expect(history()[0].timelinePosition).toBeUndefined();
+    const timelinePosition = Date.parse(NOW) * 1000 + 1;
+    receipt('waiting', 'processing', undefined, { queuedForNextTurn: true, timelinePosition });
+    expect(history()[0].timelinePosition).toBe(timelinePosition);
+  });
 
   it('normalizes namespaced IDs, restores state, and isolates other conversations', () => {
     inputRow('visible');
@@ -399,6 +509,13 @@ describe('durable input state history', () => {
       kind: 'input-state',
       states: [{ messageId: 'visible', inputState: { messageId: 'visible', status: 'applied', turnId: TURN.id } }],
     });
+    const position = Date.parse(NOW) * 1000 + 1;
+    receipt('visible', 'processing', undefined, { timelinePosition: position });
+    for (const listener of signal.listeners) listener('session-1', 'input.state');
+    expect(frames.at(-1)).toMatchObject({
+      kind: 'input-state',
+      states: [{ messageId: 'visible', timelinePosition: position }],
+    });
 
     ws.emit('close');
     expect(signal.listeners.size).toBe(0);
@@ -448,7 +565,7 @@ describe('pending web input editing', () => {
       userId,
       NOW,
     );
-    signal.turn = { ...TURN, supportsSteering: true, supportsInputEditing: true };
+    signal.turn = { ...TURN, supportsSteering: true, supportsInputEditing: true, supportsInputCancellation: true };
     writeSessionMessage('agent', 'session-1', {
       id: 'pending:agent',
       kind: 'chat',
@@ -488,6 +605,125 @@ describe('pending web input editing', () => {
     signal.turn = null;
     expect((await edit()).status).toBe(200);
     expect((await edit({ body: { ...body, text: 'different' } })).body.error).toBe('request_id_conflict');
+  });
+
+  const cancel = (options: Parameters<typeof stop>[0] = {}) =>
+    stop({ kind: 'messages/pending', method: 'DELETE', user: userId, body: { requestId }, ...options });
+  const acknowledgeCancel = (status: 'accepted' | 'conflict', reason?: string) => {
+    applyDurableRunnerEvent('agent', 'session-1', {
+      eventId: 'cancel-result',
+      sequence: 1,
+      event: {
+        type: 'state.upsert',
+        payload: {
+          key: `input-cancel:${requestId}`,
+          value: JSON.stringify({ requestId, messageId: 'pending:agent', status, ...(reason ? { reason } : {}) }),
+          updated_at: NOW,
+        },
+      },
+    });
+    for (const listener of signal.listeners) listener('session-1', 'input.state');
+  };
+
+  it('removes a cancelled input only after durable confirmation and returns idempotent success after disconnect', async () => {
+    const pending = cancel();
+    await vi.waitFor(() => expect(signal.listeners.size).toBe(1));
+    expect(readChatHistory(userId, 'agent', 'thread-1', OVERRIDE)).toHaveLength(1);
+    acknowledgeCancel('accepted');
+    expect(await pending).toEqual({ status: 200, body: { ok: true, id: 'pending' } });
+    expect(readChatHistory(userId, 'agent', 'thread-1', OVERRIDE)).toEqual([]);
+    expect(readChatHistory(userId, 'agent', 'thread-1', OVERRIDE, { includeCancelled: true })).toEqual([
+      expect.objectContaining({
+        id: 'pending',
+        text: '',
+        inputState: { messageId: 'pending', status: 'cancelled' },
+      }),
+    ]);
+    const db = openInboundDb('agent', 'session-1');
+    expect(db.prepare('SELECT status FROM messages_in WHERE id = ?').pluck().get('pending:agent')).toBe('completed');
+    db.close();
+    expect(signal.stop).not.toHaveBeenCalled();
+    signal.connected = false;
+    signal.turn = null;
+    expect(await cancel()).toEqual({ status: 200, body: { ok: true, id: 'pending' } });
+  });
+
+  it('authorizes cancellation against the message author and exact conversation, with strict body validation', async () => {
+    expect((await cancel({ user: 'web:other' })).status).toBe(404);
+    expect((await cancel({ user: 'web:owner' })).status).toBe(404);
+    expect((await cancel({ thread: 'thread-2' })).status).toBe(404);
+    expect((await cancel({ group: 'other' })).status).toBe(403);
+    expect((await cancel({ query: '?channel=web' })).status).toBe(400);
+    expect((await cancel({ body: { requestId, text: 'unexpected' } })).status).toBe(400);
+    expect((await cancel({ body: { requestId: 'invalid' } })).status).toBe(400);
+    signal.turn = { ...TURN, supportsInputEditing: true };
+    expect((await cancel()).body.error).toBe('cancellation_unsupported');
+    signal.connected = false;
+    expect((await cancel()).body.error).toBe('runner_disconnected');
+  });
+
+  it('keeps the input visible when authoritative consumption wins cancellation', async () => {
+    const pending = cancel();
+    await vi.waitFor(() => expect(signal.listeners.size).toBe(1));
+    acknowledgeCancel('conflict', 'steering_consumed');
+    expect(await pending).toEqual({ status: 409, body: { error: 'steering_consumed' } });
+    expect(readChatHistory(userId, 'agent', 'thread-1', OVERRIDE)).toHaveLength(1);
+  });
+
+  it('broadcasts only scoped empty cancellation tombstones to other connected tabs', async () => {
+    const frames: Record<string, unknown>[] = [];
+    const ws = Object.assign(new EventEmitter(), {
+      send: (frame: string) => frames.push(JSON.parse(frame)),
+      close: vi.fn(),
+    });
+    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
+      callback(ws as unknown as WebSocket, _req);
+    });
+    const req = Readable.from([]) as unknown as http.IncomingMessage;
+    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
+    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    try {
+      const pending = cancel();
+      await vi.waitFor(() => expect(signal.listeners.size).toBe(2));
+      acknowledgeCancel('accepted');
+      expect((await pending).status).toBe(200);
+      const tombstone = [...frames].reverse().find((frame) => frame.kind === 'input-state');
+      expect(tombstone?.states).toEqual([
+        {
+          messageId: 'pending',
+          inputState: { messageId: 'pending', status: 'cancelled' },
+          text: '',
+          canEditPending: false,
+        },
+      ]);
+      ws.emit('close');
+      frames.length = 0;
+      handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+      expect(frames.find((frame) => frame.kind === 'history')?.messages).toEqual([
+        expect.objectContaining({ id: 'pending', text: '', inputState: { messageId: 'pending', status: 'cancelled' } }),
+      ]);
+    } finally {
+      ws.emit('close');
+    }
+  });
+
+  it('serializes cancellation with edits and keeps cancellation timeout retries idempotent', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = cancel();
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await edit()).body.error).toBe('cancel_in_progress');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await pending).toEqual({ status: 503, body: { error: 'cancel_pending' } });
+      acknowledgeCancel('accepted');
+      expect((await cancel()).status).toBe(200);
+      const db = openInboundDb('agent', 'session-1');
+      expect(db.prepare('SELECT COUNT(*) FROM messages_in WHERE id = ?').pluck().get(`cancel-${requestId}`)).toBe(1);
+      db.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects stale text, other authors, other conversations, external channels and invalid requests', async () => {

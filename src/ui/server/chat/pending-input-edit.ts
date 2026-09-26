@@ -1,13 +1,13 @@
 import {
-  INPUT_EDIT_PREFIX,
   parseInputEditResult,
   type InputEditRequest,
+  type InputCancelRequest,
   type InputEditResult,
 } from '../../../pending-input-edit.js';
 import { getSessionActiveTurn, onSessionSignal } from '../../../session-link.js';
 import { openInboundDb, openOutboundDb, writeSessionMessage } from '../../../session-manager.js';
 
-interface EditContext {
+interface InputContext {
   groupId: string;
   sessionId: string;
   userId: string;
@@ -15,19 +15,28 @@ interface EditContext {
   threadId: string | null;
   messageId: string;
   requestId: string;
+}
+
+interface EditContext extends InputContext {
   expectedText: string;
   text: string;
 }
 
+type MutationContext = (EditContext & { operation: 'edit' }) | (InputContext & { operation: 'cancel' });
+
 interface EditResponse {
   status: number;
-  body: { ok: true; id: string; text: string } | { error: string };
+  body: { ok: true; id: string; text?: string } | { error: string };
 }
 
-function readResult(ctx: EditContext, requestId = ctx.requestId): InputEditResult | undefined {
+function readResult(
+  ctx: MutationContext,
+  requestId = ctx.requestId,
+  operation = ctx.operation,
+): InputEditResult | undefined {
   const db = openOutboundDb(ctx.groupId, ctx.sessionId);
   try {
-    const row = db.prepare('SELECT value FROM session_state WHERE key = ?').get(`${INPUT_EDIT_PREFIX}${requestId}`) as
+    const row = db.prepare('SELECT value FROM session_state WHERE key = ?').get(`input-${operation}:${requestId}`) as
       | { value: string }
       | undefined;
     return row ? parseInputEditResult(row.value) : undefined;
@@ -36,13 +45,14 @@ function readResult(ctx: EditContext, requestId = ctx.requestId): InputEditResul
   }
 }
 
-function response(ctx: EditContext, result: InputEditResult): EditResponse {
+function response(ctx: MutationContext, result: InputEditResult): EditResponse {
   if (result.status === 'conflict') {
     return {
       status: 409,
       body: { error: result.reason === 'not_pending' ? 'input_not_pending' : (result.reason ?? 'input_not_pending') },
     };
   }
+  if (ctx.operation === 'cancel') return { status: 200, body: { ok: true, id: ctx.messageId } };
   const db = openInboundDb(ctx.groupId, ctx.sessionId);
   try {
     const row = db.prepare('SELECT content FROM messages_in WHERE id = ?').get(result.messageId) as
@@ -52,18 +62,21 @@ function response(ctx: EditContext, result: InputEditResult): EditResponse {
     if (!content || typeof content !== 'object' || !('text' in content) || typeof content.text !== 'string') {
       throw new Error('Accepted input edit target is missing');
     }
+    if ('cancelled' in content && content.cancelled === true) {
+      return { status: 409, body: { error: 'input_not_pending' } };
+    }
     return { status: 200, body: { ok: true, id: ctx.messageId, text: content.text } };
   } finally {
     db.close();
   }
 }
 
-function awaitResult(ctx: EditContext): Promise<EditResponse> {
+function awaitResult(ctx: MutationContext): Promise<EditResponse> {
   return new Promise((resolve, reject) => {
     let unsubscribe = () => {};
     const timer = setTimeout(() => {
       unsubscribe();
-      resolve({ status: 503, body: { error: 'edit_pending' } });
+      resolve({ status: 503, body: { error: `${ctx.operation}_pending` } });
     }, 5_000);
     const check = () => {
       try {
@@ -85,7 +98,15 @@ function awaitResult(ctx: EditContext): Promise<EditResponse> {
   });
 }
 
-export async function editPendingInput(ctx: EditContext): Promise<EditResponse> {
+export function editPendingInput(ctx: EditContext): Promise<EditResponse> {
+  return mutatePendingInput({ ...ctx, operation: 'edit' });
+}
+
+export function cancelPendingInput(ctx: InputContext): Promise<EditResponse> {
+  return mutatePendingInput({ ...ctx, operation: 'cancel' });
+}
+
+async function mutatePendingInput(ctx: MutationContext): Promise<EditResponse> {
   const inDb = openInboundDb(ctx.groupId, ctx.sessionId);
   try {
     const rows = inDb
@@ -105,16 +126,23 @@ export async function editPendingInput(ctx: EditContext): Promise<EditResponse> 
     }>;
     if (rows.length !== 1) return { status: 404, body: { error: 'message_not_found' } };
     const target = rows[0];
-    const request: InputEditRequest = {
-      action: 'edit_input',
-      requestId: ctx.requestId,
-      messageId: target.id,
-      expectedText: ctx.expectedText,
-      replacementText: ctx.text,
-    };
+    const request: InputEditRequest | InputCancelRequest =
+      ctx.operation === 'cancel'
+        ? {
+            action: 'cancel_input',
+            requestId: ctx.requestId,
+            messageId: target.id,
+          }
+        : {
+            action: 'edit_input',
+            requestId: ctx.requestId,
+            messageId: target.id,
+            expectedText: ctx.expectedText,
+            replacementText: ctx.text,
+          };
     const existing = inDb
       .prepare('SELECT content, sender_user_id FROM messages_in WHERE id = ?')
-      .get(`edit-${ctx.requestId}`) as { content: string; sender_user_id: string | null } | undefined;
+      .get(`${ctx.operation}-${ctx.requestId}`) as { content: string; sender_user_id: string | null } | undefined;
     if (existing) {
       if (existing.content !== JSON.stringify(request) || existing.sender_user_id !== ctx.userId) {
         return { status: 409, body: { error: 'request_id_conflict' } };
@@ -124,9 +152,14 @@ export async function editPendingInput(ctx: EditContext): Promise<EditResponse> 
     } else {
       const current = getSessionActiveTurn(ctx.sessionId);
       if (!current.connected) return { status: 503, body: { error: 'runner_disconnected' } };
-      if (!current.turn?.supportsInputEditing) return { status: 503, body: { error: 'editing_unsupported' } };
+      if (ctx.operation === 'cancel' ? !current.turn?.supportsInputCancellation : !current.turn?.supportsInputEditing) {
+        return {
+          status: 503,
+          body: { error: ctx.operation === 'cancel' ? 'cancellation_unsupported' : 'editing_unsupported' },
+        };
+      }
       if (
-        current.turn.status !== 'running' ||
+        current.turn?.status !== 'running' ||
         current.turn.channelType !== 'web' ||
         !ctx.platformIds.includes(current.turn.platformId) ||
         current.turn.threadId !== ctx.threadId
@@ -135,7 +168,10 @@ export async function editPendingInput(ctx: EditContext): Promise<EditResponse> 
       }
       if (target.status !== 'pending') return { status: 409, body: { error: 'input_not_pending' } };
       const original: unknown = JSON.parse(target.content);
-      if (!original || typeof original !== 'object' || !('text' in original) || original.text !== ctx.expectedText) {
+      if (
+        ctx.operation === 'edit' &&
+        (!original || typeof original !== 'object' || !('text' in original) || original.text !== ctx.expectedText)
+      ) {
         return { status: 409, body: { error: 'text_changed' } };
       }
       const outDb = openOutboundDb(ctx.groupId, ctx.sessionId);
@@ -148,17 +184,24 @@ export async function editPendingInput(ctx: EditContext): Promise<EditResponse> 
       }
       const prior = inDb
         .prepare(
-          `SELECT json_extract(content, '$.requestId') AS requestId FROM messages_in
+          `SELECT json_extract(content, '$.requestId') AS requestId,
+            json_extract(content, '$.action') AS action FROM messages_in
           WHERE kind = 'system' AND json_valid(content)
-            AND json_extract(content, '$.action') = 'edit_input'
+            AND json_extract(content, '$.action') IN ('edit_input', 'cancel_input')
             AND json_extract(content, '$.messageId') = ?`,
         )
-        .all(target.id) as Array<{ requestId: string }>;
-      if (prior.some((row) => !readResult(ctx, row.requestId))) {
-        return { status: 409, body: { error: 'edit_in_progress' } };
+        .all(target.id) as Array<{ requestId: string; action: 'edit_input' | 'cancel_input' }>;
+      const outstanding = prior.find(
+        (row) => !readResult(ctx, row.requestId, row.action === 'cancel_input' ? 'cancel' : 'edit'),
+      );
+      if (outstanding) {
+        return {
+          status: 409,
+          body: { error: outstanding.action === 'cancel_input' ? 'cancel_in_progress' : 'edit_in_progress' },
+        };
       }
       writeSessionMessage(ctx.groupId, ctx.sessionId, {
-        id: `edit-${ctx.requestId}`,
+        id: `${ctx.operation}-${ctx.requestId}`,
         kind: 'system',
         timestamp: new Date().toISOString(),
         channelType: 'web',

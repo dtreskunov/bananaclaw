@@ -30,6 +30,7 @@ import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrati
 import { createSession, getSession } from './db/sessions.js';
 import { getThreadFork } from './db/thread-forks.js';
 import { ForkError, forkThread } from './fork-session.js';
+import { inputStateKey, readInputTimeline } from './input-timeline.js';
 // container-runner is mocked above, so the provider barrel it normally pulls
 // in never loads — import it directly for the registrations forking consults.
 import './providers/index.js';
@@ -196,6 +197,85 @@ afterEach(() => {
 });
 
 describe('forkThread', () => {
+  it.each(['content', 'receipt'] as const)('excludes %s cancellation tombstones and refuses them as branch anchors', (source) => {
+    if (source === 'content') {
+      const db = new Database(inboundDbPath(AG, PARENT_SESSION));
+      db.prepare("UPDATE messages_in SET content = ? WHERE id = 'u2'")
+        .run(JSON.stringify({ text: 'second', cancelled: true }));
+      db.close();
+    } else {
+      const db = new Database(outboundDbPath(AG, PARENT_SESSION));
+      db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+        inputStateKey('u2'), JSON.stringify({ messageId: 'u2', status: 'cancelled' }), ts(4),
+      );
+      db.close();
+    }
+    expect(() => fork('u2')).toThrow('anchor_not_found');
+    const result = fork('a2');
+    const db = new Database(inboundDbPath(AG, result.sessionId));
+    expect(db.prepare('SELECT id FROM messages_in').all()).toEqual([{ id: 'u1' }]);
+    db.close();
+  });
+
+  function seedTimeline(queued = false) {
+    const base = Date.parse(ts(2)) * 1000;
+    const input = new Database(inboundDbPath(AG, PARENT_SESSION));
+    input.prepare("UPDATE messages_in SET timestamp = ? WHERE id = 'u2'").run(ts(1));
+    input.close();
+    const output = new Database(outboundDbPath(AG, PARENT_SESSION));
+    output
+      .prepare("UPDATE messages_out SET content = ? WHERE id = 'a1'")
+      .run(JSON.stringify({ text: 'answer one', timelinePosition: base + 1 }));
+    output
+      .prepare("UPDATE messages_out SET content = ? WHERE id = 'a2'")
+      .run(JSON.stringify({ text: 'answer two', timelinePosition: base + 3 }));
+    output.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+      inputStateKey('u2'),
+      JSON.stringify({
+        messageId: 'u2',
+        status: queued ? 'queued' : 'processing',
+        queuedForNextTurn: true,
+        ...(!queued ? { timelinePosition: base + 2 } : {}),
+      }),
+      ts(4),
+    );
+    output.close();
+    return base;
+  }
+
+  it('cuts at visible consumption order instead of a queued input original send time', () => {
+    seedTimeline();
+    const result = fork('a1');
+    expect(result.copiedIn).toBe(1);
+    const db = new Database(inboundDbPath(AG, result.sessionId));
+    expect(db.prepare('SELECT id FROM messages_in').all()).toEqual([{ id: 'u1' }]);
+    db.close();
+  });
+
+  it('retains predecessor responses and placements when branching at a consumed follow-up', () => {
+    const base = seedTimeline();
+    const result = fork('u2');
+    expect(result.copiedOut).toBe(1);
+    const input = new Database(inboundDbPath(AG, result.sessionId));
+    const output = new Database(outboundDbPath(AG, result.sessionId));
+    expect(output.prepare('SELECT id FROM messages_out').all()).toEqual([{ id: 'a1' }]);
+    expect(readInputTimeline(output, 'u2')?.timelinePosition).toBe(base + 2);
+    const digest = input.prepare('SELECT digest FROM fork_origin').pluck().get() as string;
+    expect(digest.indexOf('answer one')).toBeLessThan(digest.indexOf('second'));
+    expect(digest).not.toContain('answer two');
+    input.close();
+    output.close();
+  });
+
+  it('never inherits a still-queued input or allows it as a branch anchor', () => {
+    seedTimeline(true);
+    expect(() => fork('u2')).toThrow('anchor_pending');
+    const result = fork('a2');
+    const input = new Database(inboundDbPath(AG, result.sessionId));
+    expect(input.prepare('SELECT id FROM messages_in').all()).toEqual([{ id: 'u1' }]);
+    input.close();
+  });
+
   it('copies history up to the anchor and stops there', () => {
     const result = fork('a1');
 
@@ -320,7 +400,10 @@ describe('forkThread', () => {
     const inDb = new Database(inboundDbPath(AG, result.sessionId), { readonly: true });
     try {
       expect(
-        runnerDb.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_in'").pluck().get(),
+        runnerDb
+          .prepare("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_in'")
+          .pluck()
+          .get(),
       ).toBe(0);
       expect(inDb.prepare('SELECT sequence FROM pending_host_events ORDER BY sequence').pluck().all()).toEqual(
         Array.from(

@@ -1633,6 +1633,42 @@ nav.tab-bar-strip.group-strip {
 }
 
 /* src/components/ChatMain.css */
+.chat-main .pending-input-action {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.chat-main .pending-input-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chat-main .pending-input-error {
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+.chat-main .composer-edit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.chat-main .composer-edit-header,
+.chat-main .composer-edit-notice {
+  font-size: var(--font-sm);
+  color: var(--muted);
+}
+.chat-main #chat-form:has(.composer-edit-header) {
+  flex-wrap: wrap;
+}
+.chat-main #chat-form > .composer-edit-header,
+.chat-main #chat-form > .pending-input-error,
+.chat-main #chat-form > .composer-edit-notice {
+  width: 100%;
+  margin: 0;
+}
 .chat-main {
   display: grid;
   grid-template-rows: 1fr auto auto auto auto;
@@ -1751,12 +1787,6 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .msg.agent-action {
   box-shadow: inset 2px 0 var(--accent-strong);
-}
-.chat-main .msg.input-queued {
-  box-shadow: inset 2px 0 var(--input-queued-accent);
-}
-.chat-main .msg.input-steering {
-  box-shadow: inset 2px 0 var(--input-steering-accent);
 }
 .chat-main .input-state-caption {
   color: var(--surface-fg);
@@ -3217,57 +3247,6 @@ nav.tab-bar-strip.group-strip {
 }
 .qcap-spacer {
   flex: 0 0 120px;
-}
-
-/* src/components/PendingMessageEditor.css */
-.chat-main .pending-message-editor {
-  display: block;
-  padding: 0;
-  border: 0;
-  min-height: 0;
-  margin-top: 8px;
-}
-.chat-main .pending-message-editor label,
-.chat-main .pending-message-editor textarea {
-  display: block;
-  width: 100%;
-}
-.chat-main .pending-message-editor textarea {
-  box-sizing: border-box;
-  min-height: 5em;
-  margin: 6px 0;
-  padding: 8px;
-  font: inherit;
-  color: inherit;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  resize: vertical;
-}
-.chat-main .pending-message-editor p {
-  margin: 6px 0;
-  font-size: 0.85em;
-}
-.pending-edit-actions {
-  display: flex;
-  gap: 8px;
-}
-.pending-edit-actions button {
-  min-height: 36px;
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.pending-edit-actions button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-.chat-main .pending-message-editor textarea:focus-visible {
-  outline: 2px solid var(--accent-strong);
 }
 
 /* src/components/ZoomableImage.css */

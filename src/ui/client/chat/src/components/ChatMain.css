@@ -1,6 +1,32 @@
 /* Chat main: message log, message bubbles, status, context chips,
    pending uploads tray, composer form, and the typing indicator. */
 
+.chat-main .pending-input-action {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.chat-main .pending-input-action:disabled { opacity: 0.45; cursor: default; }
+.chat-main .pending-input-error { color: var(--muted); font-size: var(--font-sm); }
+.chat-main .composer-edit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.chat-main .composer-edit-header,
+.chat-main .composer-edit-notice {
+  font-size: var(--font-sm);
+  color: var(--muted);
+}
+.chat-main #chat-form:has(.composer-edit-header) { flex-wrap: wrap; }
+.chat-main #chat-form > .composer-edit-header,
+.chat-main #chat-form > .pending-input-error,
+.chat-main #chat-form > .composer-edit-notice { width: 100%; margin: 0; }
+
 .chat-main {
   display: grid;
   grid-template-rows: 1fr auto auto auto auto;
@@ -73,8 +99,6 @@
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }
 .chat-main .msg.out { align-self: flex-start; background: var(--wash-strong); }
 .chat-main .msg.agent-action { box-shadow: inset 2px 0 var(--accent-strong); }
-.chat-main .msg.input-queued { box-shadow: inset 2px 0 var(--input-queued-accent); }
-.chat-main .msg.input-steering { box-shadow: inset 2px 0 var(--input-steering-accent); }
 .chat-main .input-state-caption { color: var(--surface-fg); opacity: 0.75; }
 .chat-main .msg.internal { align-self: flex-start; background: transparent !important; border: 1px dashed var(--muted); color: var(--muted); opacity: 0.85; max-width: 92%; }
 .chat-main .msg.internal, .chat-main .msg.internal * { font-style: italic; }

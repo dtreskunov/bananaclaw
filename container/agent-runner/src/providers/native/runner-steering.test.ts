@@ -41,7 +41,7 @@ function response(text: string): Response {
   );
 }
 
-it('runs real native steering through runPollLoop as one durable batch and one logical turn', async () => {
+it('runs real native editing and cancellation through runPollLoop without stopping the logical turn', async () => {
   const root = fs.mkdtempSync(path.join(process.cwd(), '.native-runner-'));
   const previousBase = process.env.NATIVE_BASE_URL;
   const previousState = process.env.NATIVE_STATE_PATH;
@@ -91,13 +91,13 @@ it('runs real native steering through runPollLoop as one durable batch and one l
   getInboundDb().prepare(
     "INSERT INTO destinations (name, type, channel_type, platform_id) VALUES ('web-test', 'channel', 'web', 'room')",
   ).run();
-  const insert = (id: string, seq: number, turnId?: string) => {
+  const insert = (id: string, seq: number, turnId?: string, mode: 'steer' | 'queue' = 'steer') => {
     getInboundDb().prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, channel_type, platform_id, thread_id, trigger, sender_identity, content)
        VALUES (?, ?, 'chat', datetime('now'), 'pending', 'web', 'room', 'thread', 1, 'web:owner', ?)`,
     ).run(id, seq, JSON.stringify({
       text: id,
-      ...(turnId ? { inputHandling: { mode: 'steer', turnId } } : {}),
+      ...(turnId ? { inputHandling: { mode, turnId } } : {}),
     }));
     link.emitHostEventForTesting();
   };
@@ -118,11 +118,15 @@ it('runs real native steering through runPollLoop as one durable batch and one l
   });
   const loop = runPollLoop({ provider, providerName: 'native', cwd: root, signal: controller.signal });
   const editRequestId = randomUUID();
+  const cancelRequests = ['cancelled-guidance', 'cancelled-followup'].map((messageId) => ({
+    action: 'cancel_input', requestId: randomUUID(), messageId,
+  }));
   try {
     await preparationStarted.promise;
     const turn = active as link.ActiveTurn | null;
     expect(turn?.supportsSteering).toBe(true);
     expect(turn?.supportsInputEditing).toBe(true);
+    expect(turn?.supportsInputCancellation).toBe(true);
     insert('guidance', 4, turn!.id);
     await until(() => readInputState('guidance')?.status === 'steering');
     expect(requests).toHaveLength(0);
@@ -139,6 +143,22 @@ it('runs real native steering through runPollLoop as one durable batch and one l
     }));
     link.emitHostEventForTesting();
     await until(() => readInputEditReceipt(editRequestId)?.status === 'accepted');
+    insert('cancelled-guidance', 8, turn!.id);
+    insert('cancelled-followup', 10, turn!.id, 'queue');
+    await until(() => readInputState('cancelled-guidance')?.status === 'steering' &&
+      readInputState('cancelled-followup')?.status === 'queued');
+    for (const [index, request] of cancelRequests.entries()) {
+      getInboundDb().prepare(
+        `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id, trigger, sender_identity, content)
+         VALUES (?, ?, 'system', datetime('now'), 'web', 'room', 'thread', 0, 'web:owner', ?)`,
+      ).run(`cancel-${request.requestId}`, 12 + index * 2, JSON.stringify(request));
+    }
+    link.emitHostEventForTesting();
+    await until(() => cancelRequests.every((request) => readInputEditReceipt(request.requestId, 'cancel')?.status === 'accepted'));
+    expect(active?.id).toBe(turn!.id);
+    for (const request of cancelRequests) {
+      expect(readInputState(request.messageId)).toEqual({ messageId: request.messageId, status: 'cancelled' });
+    }
     preparationRelease.resolve();
     await until(() => requests.length === 1);
     expect(JSON.stringify(requests[0].messages)).not.toContain('guidance');
@@ -147,6 +167,9 @@ it('runs real native steering through runPollLoop as one durable batch and one l
     expect(active?.id).toBe(turn!.id);
     expect(JSON.stringify(requests[1].messages)).toContain('edited direction');
     expect(JSON.stringify(requests[1].messages)).not.toContain('edit_input');
+    expect(JSON.stringify(requests)).not.toContain('cancelled-guidance');
+    expect(JSON.stringify(requests)).not.toContain('cancelled-followup');
+    expect(JSON.stringify(requests)).not.toContain('cancel_input');
     expect(JSON.stringify(requests[1].messages)).not.toContain('>guidance<');
     expect(JSON.stringify(requests[1].messages)).toContain('original draft');
     expect(getPendingMessages()).toEqual([]);
@@ -161,9 +184,11 @@ it('runs real native steering through runPollLoop as one durable batch and one l
         { status: string } | null)?.status === 'completed');
     expect(getOutboundDb().prepare('SELECT message_id, status FROM processing_ack ORDER BY message_id').all())
       .toEqual([
+        ...cancelRequests.map((request) => ({ message_id: `cancel-${request.requestId}`, status: 'completed' })),
+        ...cancelRequests.map((request) => ({ message_id: request.messageId, status: 'completed' })),
         { message_id: `edit-${editRequestId}`, status: 'completed' },
         { message_id: 'guidance', status: 'completed' }, { message_id: 'initial', status: 'completed' },
-      ]);
+      ].sort((a, b) => a.message_id.localeCompare(b.message_id)));
     expect(getOutboundDb().prepare('SELECT platform_id, thread_id FROM messages_out').all())
       .toEqual([{ platform_id: 'room', thread_id: 'thread' }]);
     expect(getOutboundDb().prepare('SELECT input_tokens, output_tokens, num_turns FROM turn_usage').all())

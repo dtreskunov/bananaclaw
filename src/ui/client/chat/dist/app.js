@@ -14794,6 +14794,10 @@ function y2(n3, u5) {
   var i5 = d2(t2++, 3);
   !c2.__s && C2(i5.__H, u5) && (i5.__ = n3, i5.i = u5, r2.__H.__h.push(i5));
 }
+function _2(n3, u5) {
+  var i5 = d2(t2++, 4);
+  !c2.__s && C2(i5.__H, u5) && (i5.__ = n3, i5.i = u5, r2.__h.push(i5));
+}
 function A2(n3) {
   return o2 = 5, T2(function() {
     return { current: n3 };
@@ -15074,7 +15078,7 @@ function w3(i5) {
   for (var t4 = i5.s; void 0 !== t4; t4 = t4.n) if (t4.S.i !== t4.i || !t4.S.h() || t4.S.i !== t4.i) return true;
   return false;
 }
-function _2(i5) {
+function _3(i5) {
   for (var t4 = i5.s; void 0 !== t4; t4 = t4.n) {
     var n3 = t4.S.n;
     if (void 0 !== n3) t4.r = n3;
@@ -15126,7 +15130,7 @@ p3.prototype.h = function() {
   }
   var i5 = r3;
   try {
-    _2(this);
+    _3(this);
     r3 = this;
     var t4 = this.x();
     if (16 & this.f || this.v !== t4 || 0 === this.i) {
@@ -15236,7 +15240,7 @@ E.prototype.S = function() {
   this.f |= 1;
   this.f &= -9;
   S2(this);
-  _2(this);
+  _3(this);
   s3++;
   var i5 = r3;
   r3 = this;
@@ -15277,7 +15281,7 @@ var p4 = [];
 j3(function() {
   s4 = this.N;
 })();
-function _3(i5, r4) {
+function _4(i5, r4) {
   l[i5] = r4.bind(null, l[i5] || function() {
   });
 }
@@ -15318,7 +15322,7 @@ g3.displayName = "_st";
 Object.defineProperties(l3.prototype, { constructor: { configurable: true, value: void 0 }, type: { configurable: true, value: g3 }, props: { configurable: true, get: function() {
   return { data: this };
 } }, __b: { configurable: true, value: 1 } });
-_3("__b", function(i5, n3) {
+_4("__b", function(i5, n3) {
   if ("string" == typeof n3.type) {
     var r4, t4 = n3.props;
     for (var f5 in t4) if ("children" !== f5) {
@@ -15332,7 +15336,7 @@ _3("__b", function(i5, n3) {
   }
   i5(n3);
 });
-_3("__r", function(i5, n3) {
+_4("__r", function(i5, n3) {
   m4();
   var r4, t4 = n3.__c;
   if (t4) {
@@ -15353,12 +15357,12 @@ _3("__r", function(i5, n3) {
   m4(r4);
   i5(n3);
 });
-_3("__e", function(i5, n3, r4, t4) {
+_4("__e", function(i5, n3, r4, t4) {
   m4();
   h4 = void 0;
   i5(n3, r4, t4);
 });
-_3("diffed", function(i5, n3) {
+_4("diffed", function(i5, n3) {
   m4();
   h4 = void 0;
   var r4;
@@ -15404,7 +15408,7 @@ function b2(i5, n3, r4, t4) {
     }
   }) };
 }
-_3("unmount", function(i5, n3) {
+_4("unmount", function(i5, n3) {
   if ("string" == typeof n3.type) {
     var r4 = n3.__e;
     if (r4) {
@@ -15429,7 +15433,7 @@ _3("unmount", function(i5, n3) {
   }
   i5(n3);
 });
-_3("__h", function(i5, n3, r4, t4) {
+_4("__h", function(i5, n3, r4, t4) {
   if (t4 < 3 || 9 === t4) n3.__$f |= 2;
   i5(n3, r4, t4);
 });
@@ -15645,6 +15649,217 @@ var BRAND = {
   description: g4.description || "",
   themeColor: g4.themeColor || "#151515",
   backgroundColor: g4.backgroundColor || "#0d1117"
+};
+
+// src/pending-edit.ts
+var pendingEditorSessions = y3(/* @__PURE__ */ new Map());
+var composerSendInFlight = y3(false);
+function pendingEditorKey(gid, thread, messageId) {
+  return JSON.stringify([gid, thread?.channelType || "web", thread?.messagingGroupId ?? null, thread?.threadId, messageId]);
+}
+function setPendingEditorSession(key, session) {
+  const next = new Map(pendingEditorSessions.value);
+  if (session) next.set(key, session);
+  else next.delete(key);
+  pendingEditorSessions.value = next;
+}
+function currentPendingEditor() {
+  return [...pendingEditorSessions.value].find(([, session]) => session.open && isCurrentConversation(session.gid, session.thread));
+}
+function isCurrentConversation(gid, thread) {
+  return groupId.value === gid && threadId.value === thread.threadId && channelType.value === (thread.channelType || "web") && messagingGroupId.value === (thread.messagingGroupId ?? null);
+}
+function openPendingEditor(gid, thread, message) {
+  if (composerSendInFlight.value) return;
+  const key = pendingEditorKey(gid, thread, message.id);
+  const previous = pendingEditorSessions.value.get(key);
+  if (!previous && !canEditPendingMessage(message, thread, activeTurn.value, turnConnected.value)) return;
+  const next = new Map(pendingEditorSessions.value);
+  for (const [otherKey, session] of next) {
+    if (isCurrentConversation(session.gid, session.thread)) next.set(otherKey, { ...session, open: false });
+  }
+  next.set(key, previous ? { ...previous, open: true } : {
+    gid,
+    thread: { ...thread },
+    messageId: message.id,
+    open: true,
+    draft: new PendingEditDraft(message.text, (body) => savePendingMessage(gid, thread, message.id, body))
+  });
+  pendingEditorSessions.value = next;
+}
+function exitPendingEditor(key) {
+  const session = pendingEditorSessions.value.get(key);
+  if (session) setPendingEditorSession(key, { ...session, open: false });
+}
+function canEditPendingMessage(message, thread, turn, connected) {
+  return !!thread && (thread.channelType || "web") === "web" && message.direction === "in" && !!message.id && message.canEditPending === true && (message.inputState?.status === "queued" || message.inputState?.status === "steering") && connected && turn?.status === "running" && turn?.supportsInputEditing === true;
+}
+function canEditMessageInBranch(message) {
+  return message.direction === "in" && !!message.id && !!message.text.trim() && !message.inputState;
+}
+async function savePendingMessage(gid, thread, messageId, body) {
+  const result = await patchJson(pendingMessageUrl(gid, thread, messageId), body);
+  if (result.ok && (result.data.ok !== true || result.data.id !== messageId || typeof result.data.text !== "string")) {
+    return { ok: false, status: 502, data: { error: "invalid_confirmation" } };
+  }
+  if (result.ok && isCurrentConversation(gid, thread)) {
+    chatMessages.value = chatMessages.value.map(
+      (message) => message.direction === "in" && message.id === messageId ? { ...message, text: result.data.text } : message
+    );
+  }
+  return result;
+}
+function pendingMessageUrl(gid, thread, messageId) {
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/messages/${encodeURIComponent(messageId)}`;
+  const params = new URLSearchParams();
+  if (thread.messagingGroupId) {
+    params.set("channel", thread.channelType || "web");
+    params.set("mg", thread.messagingGroupId);
+  }
+  if (params.size) url += `?${params}`;
+  return url;
+}
+var ERRORS = {
+  input_not_pending: "This message is no longer pending. Your draft has been kept.",
+  text_changed: "The saved text changed elsewhere. Your draft has been kept.",
+  steering_consumed: "This steering message has already been consumed. Your draft has been kept.",
+  runner_disconnected: "The runner is disconnected. Your draft has been kept. Retry when connected.",
+  editing_unsupported: "The running agent does not support pending edits. Your draft has been kept.",
+  edit_pending: "Save is still awaiting confirmation. Retry save to check the same request.",
+  edit_in_progress: "Another edit is still awaiting confirmation. Your draft has been kept. Retry after that edit finishes."
+};
+var PendingEditDraft = class {
+  constructor(originalText, submit) {
+    this.originalText = originalText;
+    this.submit = submit;
+    this.state = y3({ text: originalText, busy: false, error: "", unresolved: false, retry: false });
+  }
+  state;
+  request = null;
+  setText(text) {
+    if (this.state.value.busy || this.state.value.unresolved) return;
+    if (text !== this.state.value.text) this.request = null;
+    this.state.value = { ...this.state.value, text, error: "", retry: !!this.request };
+  }
+  async save() {
+    if (this.state.value.busy) return false;
+    const body = this.request ??= {
+      requestId: crypto.randomUUID(),
+      expectedText: this.originalText,
+      text: this.state.value.text
+    };
+    this.state.value = { ...this.state.value, busy: true, error: "" };
+    try {
+      const result = await this.submit(body);
+      if (result.ok && result.data.ok === true && typeof result.data.text === "string") {
+        this.state.value = { ...this.state.value, busy: false, unresolved: false, retry: false };
+        return true;
+      }
+      const code = result.data.error || `HTTP ${result.status}`;
+      this.state.value = {
+        ...this.state.value,
+        busy: false,
+        retry: true,
+        unresolved: code === "edit_pending" || result.status >= 500 && !["runner_disconnected", "editing_unsupported"].includes(code),
+        error: ERRORS[code] || `Could not save (${code}). Your draft has been kept.`
+      };
+    } catch {
+      this.state.value = {
+        ...this.state.value,
+        busy: false,
+        unresolved: true,
+        retry: true,
+        error: "Save could not be confirmed. Your draft has been kept. Retry save to check the same request."
+      };
+    }
+    return false;
+  }
+};
+
+// src/pending-cancel.ts
+function canCancelPendingMessage(message, thread, turn, connected) {
+  return turn?.supportsInputCancellation === true && canEditPendingMessage(message, thread, { ...turn, supportsInputEditing: true }, connected);
+}
+var pendingCancellations = y3(/* @__PURE__ */ new Map());
+var cancelledInputs = /* @__PURE__ */ new Set();
+function currentInputKey(id) {
+  return pendingEditorKey(groupId.value, {
+    threadId: threadId.value,
+    channelType: channelType.value,
+    messagingGroupId: messagingGroupId.value ?? void 0,
+    title: "",
+    lastActivityAt: ""
+  }, id);
+}
+function isCancelledInput(id) {
+  return !!id && cancelledInputs.has(currentInputKey(id));
+}
+function confirmCancelledInput(id, key = currentInputKey(id)) {
+  cancelledInputs.add(key);
+  if (key === currentInputKey(id)) {
+    pendingWebSends.value = pendingWebSends.value.filter(
+      (send) => send.threadId !== threadId.value || send.messageId !== id
+    );
+  }
+  const request = pendingCancellations.value.get(key);
+  if (request) request.state.value = { busy: false, unresolved: false, error: "", confirmed: true };
+  exitPendingEditor(key);
+}
+function editRequestOutstanding(key) {
+  const state = pendingEditorSessions.value.get(key)?.draft.state.value;
+  return !!(state?.busy || state?.unresolved);
+}
+function cancellationOutstanding(key) {
+  const state = pendingCancellations.value.get(key)?.state.value;
+  return !!(state?.busy || state?.unresolved);
+}
+var PendingCancellation = class {
+  constructor(gid, thread, messageId) {
+    this.gid = gid;
+    this.thread = thread;
+    this.messageId = messageId;
+  }
+  state = y3({ busy: false, unresolved: false, error: "", confirmed: false });
+  requestId = crypto.randomUUID();
+  async cancel() {
+    if (this.state.value.confirmed) return true;
+    if (this.state.value.busy || editRequestOutstanding(pendingEditorKey(this.gid, this.thread, this.messageId))) return false;
+    this.state.value = { ...this.state.value, busy: true, error: "" };
+    try {
+      const response = await fetch(pendingMessageUrl(this.gid, this.thread, this.messageId), {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: this.requestId })
+      });
+      const data = await response.json();
+      if (response.status === 200 && data.ok === true && data.id === this.messageId) {
+        confirmCancelledInput(this.messageId, pendingEditorKey(this.gid, this.thread, this.messageId));
+        this.state.value = { busy: false, unresolved: false, error: "", confirmed: true };
+        if (isCurrentConversation(this.gid, this.thread)) {
+          chatMessages.value = chatMessages.value.filter((message) => message.direction !== "in" || message.id !== this.messageId);
+        }
+        if (this.state.value.confirmed) return true;
+        return true;
+      }
+      const conflict = ["input_not_pending", "steering_consumed"].includes(data.error);
+      this.state.value = {
+        busy: false,
+        confirmed: false,
+        unresolved: data.error === "cancel_pending" || response.status >= 500 && !["runner_disconnected", "cancellation_unsupported"].includes(data.error) || response.ok,
+        error: conflict ? "This message has already been consumed or is no longer pending. It was not cancelled." : data.error === "edit_in_progress" ? "An edit is still awaiting confirmation. Retry cancel after that edit finishes." : data.error === "cancel_in_progress" ? "Another cancellation is still awaiting confirmation. Retry cancel after it finishes." : data.error === "runner_disconnected" ? "The runner is disconnected. The message was not cancelled. Retry when connected." : data.error === "cancellation_unsupported" ? "The running agent does not support cancellation. The message was not cancelled." : "Cancellation could not be confirmed. Retry cancel to check the same request."
+      };
+    } catch {
+      if (this.state.value.confirmed) return true;
+      this.state.value = {
+        busy: false,
+        confirmed: false,
+        unresolved: true,
+        error: "Cancellation could not be confirmed. Retry cancel to check the same request."
+      };
+    }
+    return false;
+  }
 };
 
 // src/voice.ts
@@ -16101,7 +16316,7 @@ var T3 = M2();
 function N2(l7) {
   T3 = l7;
 }
-var _4 = { exec: () => null };
+var _5 = { exec: () => null };
 function E2(l7) {
   let e4 = [];
   return (t4) => {
@@ -16143,10 +16358,10 @@ var K = /<!--(?:-?>|[\s\S]*?(?:-->|$))/;
 var ze = d4("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n+|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>\\n*|$)|<![A-Z][\\s\\S]*?(?:>\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$))", "i").replace("comment", K).replace("tag", H2).replace("attribute", / +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex();
 var le = d4(F2).replace("hr", B3).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("|table", "").replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", H2).getRegex();
 var Me = d4(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph", le).getRegex();
-var W = { blockquote: Me, code: we, def: Le, fences: ye, heading: Pe, hr: B3, html: ze, lheading: ae, list: _e, newline: Oe, paragraph: le, table: _4, text: $e };
+var W = { blockquote: Me, code: we, def: Le, fences: ye, heading: Pe, hr: B3, html: ze, lheading: ae, list: _e, newline: Oe, paragraph: le, table: _5, text: $e };
 var se = d4("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr", B3).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("blockquote", " {0,3}>").replace("code", "(?: {4}| {0,3}	)[^\\n]").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", H2).getRegex();
 var Ee = { ...W, lheading: Se, table: se, paragraph: d4(F2).replace("hr", B3).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("table", se).replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", H2).getRegex() };
-var Ie = { ...W, html: d4(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment", K).replace(/tag/g, "(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(), def: /^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/, heading: /^(#{1,6})(.*)(?:\n+|$)/, fences: _4, lheading: /^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/, paragraph: d4(F2).replace("hr", B3).replace("heading", ` *#{1,6} *[^
+var Ie = { ...W, html: d4(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment", K).replace(/tag/g, "(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(), def: /^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/, heading: /^(#{1,6})(.*)(?:\n+|$)/, fences: _5, lheading: /^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/, paragraph: d4(F2).replace("hr", B3).replace("heading", ` *#{1,6} *[^
 ]`).replace("lheading", ae).replace("|table", "").replace("blockquote", " {0,3}>").replace("|fences", "").replace("|list", "").replace("|html", "").replace("|tag", "").getRegex() };
 var Ae = /^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/;
 var Ce = /^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/;
@@ -16180,7 +16395,7 @@ var ke = d4(/^!?\[(label)\]\[(ref)\]/).replace("label", v4).replace("ref", U).ge
 var de = d4(/^!?\[(ref)\](?:\[\])?/).replace("ref", U).getRegex();
 var et = d4("reflink|nolink(?!\\()", "g").replace("reflink", ke).replace("nolink", de).getRegex();
 var ie = /[hH][tT][tT][pP][sS]?|[fF][tT][pP]/;
-var J = { _backpedal: _4, anyPunctuation: We, autolink: Xe, blockSkip: He, br: ue, code: Ce, del: _4, delLDelim: _4, delRDelim: _4, emStrongLDelim: Ze, emStrongRDelimAst: Ne, emStrongRDelimUnd: je, escape: Ae, link: Ye, nolink: de, punctuation: De, reflink: ke, reflinkSearch: et, tag: Ve, text: Be, url: _4 };
+var J = { _backpedal: _5, anyPunctuation: We, autolink: Xe, blockSkip: He, br: ue, code: Ce, del: _5, delLDelim: _5, delRDelim: _5, emStrongLDelim: Ze, emStrongRDelimAst: Ne, emStrongRDelimUnd: je, escape: Ae, link: Ye, nolink: de, punctuation: De, reflink: ke, reflinkSearch: et, tag: Ve, text: Be, url: _5 };
 var tt = { ...J, link: d4(/^!?\[(label)\]\((.*?)\)/).replace("label", v4).getRegex(), reflink: d4(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label", v4).getRegex() };
 var Q = { ...J, emStrongRDelimAst: Qe, emStrongLDelim: Ge, delLDelim: Fe, delRDelim: Ke, url: d4(/^((?:protocol):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/).replace("protocol", ie).replace("email", /[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(), _backpedal: /(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/, del: /^(~~?)(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))\1(?=[^~]|$)/, text: d4(/^([`~]+|[^`~])(?:(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|protocol:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/).replace("protocol", ie).getRegex() };
 var nt = { ...Q, br: d4(ue).replace("{2,}", "*").getRegex(), text: d4(Q.text).replace("\\b_", "\\b_| {2,}\\n").replace(/\{2,\}/g, "*").getRegex() };
@@ -18819,7 +19034,7 @@ async function runSync(options = {}) {
     );
     threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
   }
-  if (gid && groupId.value === gid && tid && threadId.value === tid && ct === channelType.value && ct !== "web" && Array.isArray(res.threadMessages)) {
+  if (generation2 === refs.chatGeneration && gid && groupId.value === gid && tid && threadId.value === tid && ct === channelType.value && mg === messagingGroupId.value && ct !== "web" && Array.isArray(res.threadMessages)) {
     if (options.replaceThreadMessages) replaceIncomingMessages(res.threadMessages);
     else mergeIncomingMessages(res.threadMessages);
   }
@@ -18827,6 +19042,7 @@ async function runSync(options = {}) {
 }
 function toChatMessage(m6) {
   return {
+    timelinePosition: m6.timelinePosition ?? m6.inputState?.timelinePosition,
     id: m6.id,
     direction: normDirection(m6.direction),
     text: m6.text,
@@ -18845,27 +19061,41 @@ function toChatMessage(m6) {
     ...m6.reactions ? { reactions: m6.reactions } : {}
   };
 }
+function visibleIncomingMessages(messages) {
+  for (const message of messages) {
+    if (message.direction === "in" && message.id && message.inputState?.status === "cancelled") confirmCancelledInput(message.id);
+  }
+  return messages.filter((message) => message.direction !== "in" || message.inputState?.status !== "cancelled" && !isCancelledInput(message.id));
+}
 function replaceIncomingMessages(messages) {
+  const echoedIds = messages.filter((m6) => normDirection(m6.direction) === "in" && m6.id).map((m6) => m6.id);
+  messages = visibleIncomingMessages(messages);
   chatMessages.value = messages.map(toChatMessage);
   refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
-  const echoedIds = messages.filter((m6) => normDirection(m6.direction) === "in" && m6.id).map((m6) => m6.id);
   const tid = threadId.value;
   pendingWebSends.value = pendingWebSends.value.filter(
-    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.includes(pendingSend.messageId)
+    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.includes(pendingSend.messageId) && !isCancelledInput(pendingSend.messageId)
   );
 }
 function mergeIncomingMessages(messages) {
-  const inboundStates = new Map(
-    messages.filter((message) => message.direction === "in" && message.id).map((message) => [message.id, message])
+  messages = visibleIncomingMessages(messages);
+  chatMessages.value = chatMessages.value.filter((message) => message.direction !== "in" || !isCancelledInput(message.id));
+  const updates = new Map(
+    messages.filter((message) => message.id).map((message) => [`${normDirection(message.direction)}:${message.id}`, message])
   );
-  chatMessages.value = chatMessages.value.map(
-    (message) => message.direction === "in" && inboundStates.has(message.id) ? {
+  chatMessages.value = chatMessages.value.map((message) => {
+    const update = updates.get(`${message.direction}:${message.id}`);
+    if (!update) return message;
+    return {
       ...message,
-      text: inboundStates.get(message.id).text,
-      inputState: inboundStates.get(message.id).inputState,
-      canEditPending: inboundStates.get(message.id).canEditPending === true
-    } : message
-  );
+      timelinePosition: update.timelinePosition ?? update.inputState?.timelinePosition ?? message.timelinePosition,
+      ...message.direction === "in" ? {
+        text: update.text,
+        inputState: update.inputState,
+        canEditPending: update.canEditPending === true
+      } : {}
+    };
+  });
   let maxTs = "";
   const additions = [];
   for (const m6 of messages) {
@@ -18874,6 +19104,7 @@ function mergeIncomingMessages(messages) {
     if (key && refs.seenIds.has(key)) continue;
     const ts = m6.timestamp || "";
     additions.push({
+      timelinePosition: m6.timelinePosition ?? m6.inputState?.timelinePosition,
       id: m6.id,
       direction,
       text: m6.text,
@@ -18917,9 +19148,16 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author, suggestedAction, stoppedStats) {
+function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author, suggestedAction, stoppedStats, timelinePosition) {
   const key = id ? `${direction}:${id}` : null;
-  if (key && refs.seenIds.has(key)) return;
+  if (key && refs.seenIds.has(key)) {
+    if (timelinePosition !== void 0) {
+      chatMessages.value = chatMessages.value.map(
+        (message) => message.direction === direction && message.id === id ? { ...message, timelinePosition } : message
+      );
+    }
+    return;
+  }
   if (key) refs.seenIds.add(key);
   chatMessages.value = chatMessages.value.concat({
     id,
@@ -18928,6 +19166,7 @@ function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigi
     ...card ? { card } : {},
     files: files || null,
     ts,
+    timelinePosition,
     ...author ? { author } : {},
     ...deliveryOrigin ? { deliveryOrigin } : {},
     ...suggestedAction ? { suggestedAction } : {},
@@ -19201,14 +19440,18 @@ function connectChatWs(ctx2) {
     }
     if (payload.kind === "input-state") {
       const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry]));
+      for (const entry of states.values()) {
+        if (entry.inputState?.status === "cancelled") confirmCancelledInput(entry.messageId);
+      }
       chatMessages.value = chatMessages.value.map(
         (message) => message.direction === "in" && message.id && states.has(message.id) ? {
           ...message,
           inputState: states.get(message.id).inputState ?? void 0,
+          timelinePosition: states.get(message.id).timelinePosition ?? states.get(message.id).inputState?.timelinePosition ?? message.timelinePosition,
           ...typeof states.get(message.id).text === "string" ? { text: states.get(message.id).text } : {},
           ...typeof states.get(message.id).canEditPending === "boolean" ? { canEditPending: states.get(message.id).canEditPending } : {}
         } : message
-      );
+      ).filter((message) => message.direction !== "in" || !isCancelledInput(message.id));
       return;
     }
     if (payload.kind === "ready") {
@@ -19245,6 +19488,12 @@ function connectChatWs(ctx2) {
       return;
     }
     if (payload.kind === "inbound") {
+      if (payload.id && payload.inputState?.status === "cancelled") confirmCancelledInput(payload.id);
+      if (payload.inputState?.status === "cancelled" || isCancelledInput(payload.id)) {
+        chatMessages.value = chatMessages.value.filter((message) => message.direction !== "in" || message.id !== payload.id);
+        pendingWebSends.value = pendingWebSends.value.filter((send) => send.messageId !== payload.id);
+        return;
+      }
       const seen = payload.id && refs.seenIds.has(`in:${payload.id}`);
       if (!activeTurn.value) refs.carryActivity = [];
       if (payload.id) {
@@ -19269,6 +19518,7 @@ function connectChatWs(ctx2) {
             inputState: {
               messageId: payload.id,
               status: "queued",
+              ...handling.mode === "queue" ? { queuedForNextTurn: true } : {},
               ...handling.turnId ? { turnId: handling.turnId } : {}
             }
           } : message
@@ -19280,7 +19530,13 @@ function connectChatWs(ctx2) {
             ...message,
             text: payload.text ?? message.text,
             ...typeof payload.canEditPending === "boolean" ? { canEditPending: payload.canEditPending } : {},
-            ...payload.inputState ? { inputState: payload.inputState } : {}
+            ...payload.inputState ? {
+              inputState: {
+                ...payload.inputState,
+                ...payload.inputState.status === "queued" && payload.inputHandling?.mode === "queue" ? { queuedForNextTurn: true } : {}
+              }
+            } : {},
+            timelinePosition: payload.timelinePosition ?? payload.inputState?.timelinePosition ?? message.timelinePosition
           } : message
         );
       }
@@ -19333,7 +19589,12 @@ function connectChatWs(ctx2) {
               payload.timestamp || "",
               payload.id,
               cardActivity,
-              payload.card
+              payload.card,
+              void 0,
+              void 0,
+              void 0,
+              void 0,
+              payload.timelinePosition
             );
             bumpActiveThread();
           }
@@ -19365,7 +19626,8 @@ function connectChatWs(ctx2) {
         deliveryOrigin,
         void 0,
         suggestedAction,
-        readStoppedTurnStats(c4)
+        readStoppedTurnStats(c4),
+        payload.timelinePosition
       );
       bumpActiveThread();
       if (dir === "out") maybeNotify(text, payload.files || []);
@@ -21038,164 +21300,130 @@ function ActiveTurnStopButton() {
   );
 }
 
-// src/pending-edit.ts
-function canEditPendingMessage(message, thread, turn, connected) {
-  return !!thread && (thread.channelType || "web") === "web" && message.direction === "in" && !!message.id && message.canEditPending === true && (message.inputState?.status === "queued" || message.inputState?.status === "steering") && connected && turn?.supportsInputEditing === true;
-}
-function canEditMessageInBranch(message) {
-  return message.direction === "in" && !!message.id && !!message.text.trim() && !message.inputState;
-}
-async function savePendingMessage(gid, thread, messageId, body) {
-  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/messages/${encodeURIComponent(messageId)}`;
-  const params = new URLSearchParams();
-  if (thread.messagingGroupId) {
-    params.set("channel", thread.channelType || "web");
-    params.set("mg", thread.messagingGroupId);
-  }
-  if (params.size) url += `?${params}`;
-  const result = await patchJson(url, body);
-  if (result.ok && (result.data.ok !== true || result.data.id !== messageId || typeof result.data.text !== "string")) {
-    return { ok: false, status: 502, data: { error: "invalid_confirmation" } };
-  }
-  if (result.ok && result.data.ok === true && result.data.id === messageId && typeof result.data.text === "string" && groupId.value === gid && threadId.value === thread.threadId && channelType.value === (thread.channelType || "web") && messagingGroupId.value === (thread.messagingGroupId ?? null)) {
-    chatMessages.value = chatMessages.value.map(
-      (message) => message.direction === "in" && message.id === messageId ? { ...message, text: result.data.text } : message
-    );
-  }
-  return result;
-}
-var ERRORS = {
-  input_not_pending: "This message is no longer pending. Your draft has been kept.",
-  text_changed: "The saved text changed elsewhere. Your draft has been kept; cancel and reopen to edit the latest text.",
-  steering_consumed: "This steering message has already been consumed. Your draft has been kept.",
-  runner_disconnected: "The runner is disconnected. Your draft has been kept. Retry when connected.",
-  editing_unsupported: "The running agent does not support pending edits. Your draft has been kept.",
-  edit_pending: "Save is still awaiting confirmation. Retry save to check the same request.",
-  edit_in_progress: "Another edit is still awaiting confirmation. Your draft has been kept. Retry after that edit finishes."
-};
-var PendingEditDraft = class {
-  constructor(originalText, submit) {
-    this.originalText = originalText;
-    this.submit = submit;
-    this.state = y3({ text: originalText, busy: false, error: "", unresolved: false, retry: false });
-  }
-  state;
-  request = null;
-  setText(text) {
-    if (this.state.value.busy || this.state.value.unresolved) return;
-    if (text !== this.state.value.text) this.request = null;
-    this.state.value = { ...this.state.value, text, error: "", retry: !!this.request };
-  }
-  async save() {
-    if (this.state.value.busy) return false;
-    const body = this.request ??= {
-      requestId: crypto.randomUUID(),
-      expectedText: this.originalText,
-      text: this.state.value.text
-    };
-    this.state.value = { ...this.state.value, busy: true, error: "" };
-    try {
-      const result = await this.submit(body);
-      if (result.ok && result.data.ok === true && typeof result.data.text === "string") {
-        this.state.value = { ...this.state.value, busy: false, unresolved: false, retry: false };
-        return true;
-      }
-      const code = result.data.error || `HTTP ${result.status}`;
-      this.state.value = {
-        ...this.state.value,
-        busy: false,
-        retry: true,
-        unresolved: code === "edit_pending" || result.status >= 500 && !["runner_disconnected", "editing_unsupported"].includes(code),
-        error: ERRORS[code] || `Could not save (${code}). Your draft has been kept.`
-      };
-    } catch {
-      this.state.value = {
-        ...this.state.value,
-        busy: false,
-        unresolved: true,
-        retry: true,
-        error: "Save could not be confirmed. Your draft has been kept. Retry save to check the same request."
-      };
-    }
-    return false;
-  }
-};
-
-// src/components/PendingMessageEditor.tsx
-function PendingMessageEditor({ message, thread, gid }) {
-  const [draft, setDraft] = h2(null);
-  const [open, setOpen] = h2(false);
-  const eligible = canEditPendingMessage(message, thread, activeTurn.value, turnConnected.value);
-  if (!open || !draft) {
-    const unresolved = draft && (draft.state.value.unresolved || draft.state.value.busy);
-    if (!eligible && !unresolved || !gid || !thread) return null;
-    return /* @__PURE__ */ u4(
+// src/components/PendingMessageActions.tsx
+function PendingMessageActions({ message, thread, gid }) {
+  if (!gid || !thread || !message.id || message.direction !== "in") return null;
+  const key = pendingEditorKey(gid, thread, message.id);
+  const editor = pendingEditorSessions.value.get(key);
+  const cancellation = pendingCancellations.value.get(key);
+  const cancelState = cancellation?.state.value;
+  const editAllowed = canEditPendingMessage(message, thread, activeTurn.value, turnConnected.value);
+  const cancelAllowed = canCancelPendingMessage(message, thread, activeTurn.value, turnConnected.value);
+  const recording = isRecording.value || !["idle", "error"].includes(voice.state.value.phase) || voice.state.value.sending;
+  return /* @__PURE__ */ u4(k, { children: [
+    (editAllowed || editor) && /* @__PURE__ */ u4(
       "button",
       {
         type: "button",
-        class: "msg-action-btn msg-edit-btn",
-        title: "Edit pending message",
-        "aria-label": "Edit pending message",
+        class: "pending-input-action",
+        disabled: cancellationOutstanding(key) || recording || composerSendInFlight.value,
         onClick: () => {
-          setOpen(true);
-          if (unresolved) return;
-          const targetThread = { ...thread };
-          const messageId = message.id;
-          setDraft(new PendingEditDraft(message.text, (body) => savePendingMessage(gid, targetThread, messageId, body)));
+          if (!cancellationOutstanding(key) && !recording) openPendingEditor(gid, thread, message);
         },
-        children: "\u270E"
+        "aria-label": "Edit pending message",
+        children: "Edit"
       }
-    );
-  }
-  const state = draft.state.value;
-  const changed = message.text !== draft.originalText;
-  const stateError = !eligible ? "This message is no longer editable or the runner is unavailable. Your draft has been kept." : changed ? "The saved text changed while you were editing. Your draft has been kept." : "";
-  return /* @__PURE__ */ u4("form", { class: "pending-message-editor", onPointerDown: (event) => event.stopPropagation(), onSubmit: (event) => {
-    event.preventDefault();
-    if (!state.retry && (!eligible || changed)) return;
-    void draft.save().then((saved) => {
-      if (saved) {
-        setDraft(null);
-        setOpen(false);
+    ),
+    (cancelAllowed || cancelState?.unresolved) && /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "pending-input-action",
+        disabled: cancelState?.busy || editRequestOutstanding(key),
+        "aria-busy": cancelState?.busy,
+        onClick: () => {
+          const request = cancellation ?? new PendingCancellation(gid, { ...thread }, message.id);
+          if (!cancellation) pendingCancellations.value = new Map(pendingCancellations.value).set(key, request);
+          void request.cancel();
+        },
+        children: cancelState?.busy ? "Cancelling\u2026" : cancelState?.unresolved ? "Retry cancel" : "Cancel"
       }
-    });
-  }, children: [
-    /* @__PURE__ */ u4("label", { children: [
-      "Edit pending message (text only)",
-      /* @__PURE__ */ u4(
-        "textarea",
-        {
-          autoFocus: true,
-          "aria-label": "Pending message text",
-          value: state.text,
-          disabled: state.busy || state.unresolved,
-          onInput: (event) => draft.setText(event.currentTarget.value)
-        }
-      )
-    ] }),
-    (state.error || stateError) && /* @__PURE__ */ u4("p", { role: "alert", children: state.error || stateError }),
-    (state.unresolved || state.busy) && /* @__PURE__ */ u4("p", { role: "status", children: "This request may still apply. Cancel only closes the editor; it cannot withdraw a submitted save." }),
-    /* @__PURE__ */ u4("div", { class: "pending-edit-actions", children: [
-      /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "submit",
-          disabled: state.busy || !state.retry && (!eligible || changed || !state.text.trim() || state.text === draft.originalText),
-          "aria-busy": state.busy,
-          children: state.busy ? "Saving\u2026" : state.retry ? "Retry save" : "Save"
-        }
-      ),
-      /* @__PURE__ */ u4("button", { type: "button", onClick: () => setOpen(false), children: "Cancel" })
-    ] })
+    ),
+    cancelState?.error && /* @__PURE__ */ u4("span", { class: "pending-input-error", role: "alert", children: cancelState.error })
   ] });
 }
 
-// src/question-timeline.ts
-function timestampMs(timestamp) {
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
-  const value = Date.parse(normalized);
-  return Number.isNaN(value) ? 0 : value;
+// src/pending-composer.ts
+var pendingComposerBackups = /* @__PURE__ */ new Map();
+function composerConversationKey() {
+  return JSON.stringify([groupId.value, channelType.value, messagingGroupId.value, threadId.value]);
 }
+function usePendingComposer(inputRef, autosize) {
+  const conversation = composerConversationKey();
+  const editing = currentPendingEditor();
+  const key = editing?.[0];
+  const session = editing?.[1];
+  const state = session?.draft.state.value;
+  const previousKey = A2(void 0);
+  const previousConversation = A2(conversation);
+  const message = session && chatMessages.value.find((message2) => message2.direction === "in" && message2.id === session.messageId);
+  const eligible = !!(message && canEditPendingMessage(message, session.thread, activeTurn.value, turnConnected.value));
+  const changed = !!message && message.text !== session?.draft.originalText;
+  const cancellation = !!key && cancellationOutstanding(key);
+  const error = state?.error || session && (!eligible ? "This message is no longer editable or the runner is unavailable. Your draft has been kept." : changed ? "The saved text changed while you were editing. Your draft has been kept." : "");
+  const disabled = !!state && (state.busy || cancellation || !state.retry && (!eligible || changed || !state.text.trim() || state.text === session?.draft.originalText));
+  _2(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    if (previousConversation.current !== conversation) {
+      if (!previousKey.current) {
+        pendingComposerBackups.set(previousConversation.current, { text: input.value, files: pending.value });
+      }
+      input.value = "";
+      pending.value = [];
+      previousConversation.current = conversation;
+    }
+    if (session) {
+      if (!pendingComposerBackups.has(conversation)) {
+        pendingComposerBackups.set(conversation, { text: input.value, files: pending.value });
+      }
+      pending.value = [];
+      input.value = session.draft.state.value.text;
+      if (key !== previousKey.current) input.focus();
+    } else {
+      const backup = pendingComposerBackups.get(conversation);
+      if (backup) {
+        input.value = backup.text;
+        pending.value = backup.files;
+        pendingComposerBackups.delete(conversation);
+      }
+    }
+    previousKey.current = key;
+    autosize();
+  }, [conversation, key, state?.text]);
+  return {
+    editing: !!session,
+    state,
+    error,
+    disabled,
+    input(text) {
+      session?.draft.setText(text);
+    },
+    exit() {
+      if (key) exitPendingEditor(key);
+    },
+    async save() {
+      if (!session || !key || disabled) return;
+      if (await session.draft.save()) {
+        if (pendingEditorSessions.value.get(key)?.draft === session.draft) setPendingEditorSession(key, null);
+      }
+    }
+  };
+}
+
+// ../../shared/timeline.ts
+function parseTimelinePosition(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
+}
+function timelineSortKey(timestamp, timelinePosition) {
+  const position = parseTimelinePosition(timelinePosition);
+  if (position !== void 0) return position;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
+  const milliseconds = Date.parse(normalized);
+  return Number.isFinite(milliseconds) ? milliseconds * 1e3 : 0;
+}
+
+// src/question-timeline.ts
 function mergeQuestionTimeline(messages, questions, currentThreadId) {
   const questionMessages = questions.filter((question) => !question.threadId || question.threadId === currentThreadId).map(
     (question) => ({
@@ -21208,15 +21436,50 @@ function mergeQuestionTimeline(messages, questions, currentThreadId) {
     })
   );
   return [...messages, ...questionMessages].sort((left, right) => {
-    const byTime = timestampMs(left.ts) - timestampMs(right.ts);
-    if (byTime !== 0) return byTime;
-    return left.direction === "question" ? 1 : right.direction === "question" ? -1 : 0;
+    const leftKey = timelineSortKey(left.ts, left.timelinePosition);
+    const rightKey = timelineSortKey(right.ts, right.timelinePosition);
+    const byMillisecond = Math.floor(leftKey / 1e3) - Math.floor(rightKey / 1e3);
+    if (byMillisecond !== 0) return byMillisecond;
+    const byQuestion = Number(left.direction === "question") - Number(right.direction === "question");
+    return byQuestion || leftKey - rightKey;
   });
+}
+
+// src/queued-followups.ts
+function isQueuedFollowup(message) {
+  const state = message.inputState;
+  const positioned = parseTimelinePosition(message.timelinePosition) !== void 0 || parseTimelinePosition(state?.timelinePosition) !== void 0;
+  return message.direction === "in" && state?.queuedForNextTurn === true && (state.status === "queued" || state.status === "processing" && !positioned);
+}
+function splitQueuedFollowups(messages) {
+  const transcript = [];
+  const queued = [];
+  for (const message of messages) (isQueuedFollowup(message) ? queued : transcript).push(message);
+  return { transcript, queued };
+}
+function splitPendingInputs(messages) {
+  const transcript = [];
+  const queued = [];
+  for (const message of messages) {
+    const waiting = isQueuedFollowup(message) || message.direction === "in" && message.inputState?.status === "steering";
+    (waiting ? queued : transcript).push(message);
+  }
+  return { transcript, queued };
+}
+function timelineLayoutKey(messages) {
+  return JSON.stringify(messages.map((message) => [
+    message.id,
+    message.direction,
+    message.timelinePosition,
+    isQueuedFollowup(message),
+    message.inputState?.status === "steering"
+  ]));
 }
 
 // src/input-state.ts
 function inputStatePresentation(state) {
   if (!state) return null;
+  if (state.status === "cancelled") return null;
   if (state.status === "applied") return { className: "input-applied", caption: "Applied to current turn" };
   if (state.reason) {
     const reason = {
@@ -21268,7 +21531,8 @@ function isFutureWorkMessage(body) {
 // src/edit-message.ts
 function findEditBranchAnchorId(messages, targetMessageId) {
   let previousId = null;
-  for (const message of messages) {
+  const { transcript } = splitQueuedFollowups(mergeQuestionTimeline(messages, [], null));
+  for (const message of transcript) {
     if (message.id === targetMessageId) return previousId;
     if ((message.direction === "in" || message.direction === "out") && message.id) {
       previousId = message.id;
@@ -22347,10 +22611,10 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
         ) }) : null,
         m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
-        /* @__PURE__ */ u4(PendingMessageEditor, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
-        m6.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
-          /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+        m6.ts || m6.inputState ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+          m6.ts && /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
+          /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
           showsMidTurnLabel(m6.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
           m6.direction === "out" && (m6.usage ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage, partial: !!m6.stoppedStats }) : m6.stoppedStats ? /* @__PURE__ */ u4("span", { title: "Token usage was not reported before cancellation.", children: [
             fmtDur(m6.stoppedStats.durationMs),
@@ -22647,6 +22911,7 @@ function MessageLog() {
   const ref = A2(null);
   const appliedHighlightRef = A2(null);
   const prevMsgCountRef = A2(0);
+  const prevLayoutRef = A2("");
   const wasTypingRef = A2(false);
   const prevScrollTickRef = A2(scrollToBottomTick.value);
   const prevTraceLenRef = A2(0);
@@ -22657,6 +22922,8 @@ function MessageLog() {
   const [newMessageBelow, setNewMessageBelow] = h2(false);
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
+  const { transcript, queued } = splitPendingInputs(timeline);
+  const layoutKey = timelineLayoutKey(timeline);
   const msgCount = timeline.length;
   const typing = showsTurnActivity(activeTurn.value, isTyping.value, threadId.value, chatLoading.value);
   const scrollTick = scrollToBottomTick.value;
@@ -22713,6 +22980,7 @@ function MessageLog() {
   }, [typing, activeThreadId]);
   y2(() => {
     prevMsgCountRef.current = 0;
+    prevLayoutRef.current = "";
     atBottomRef.current = true;
     followingBottomRef.current = true;
     setAtBottom(true);
@@ -22731,7 +22999,7 @@ function MessageLog() {
         appliedHighlightRef.current = null;
       }
       const el = ref.current.querySelector(`[data-msg-id="${CSS.escape(highlight)}"]`);
-      if (el && appliedHighlightRef.current !== highlight) {
+      if (el && (appliedHighlightRef.current !== highlight || prevLayoutRef.current !== layoutKey)) {
         appliedHighlightRef.current = highlight;
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         el.classList.add("highlight-pulse");
@@ -22742,6 +23010,7 @@ function MessageLog() {
       const wasAtBottom = atBottomRef.current;
       const currentlyAtBottom = measureScroll();
       const newMessages = msgCount > prevMsgCountRef.current;
+      const repositioned = prevLayoutRef.current !== layoutKey;
       const typingJustStarted = typing && !wasTypingRef.current;
       const traceGrew = traceLen > prevTraceLenRef.current;
       const justExpanded = traceExpanded && !prevExpandedRef.current;
@@ -22749,8 +23018,8 @@ function MessageLog() {
         const ul = ref.current.querySelector(".activity-trace");
         if (ul) ul.scrollTop = ul.scrollHeight;
       }
-      const shouldFollow = wasAtBottom && (newMessages || typingJustStarted || justExpanded || traceExpanded && traceGrew);
-      if (newMessages && !currentlyAtBottom) setNewMessageBelow(true);
+      const shouldFollow = wasAtBottom && (newMessages || repositioned || typingJustStarted || justExpanded || traceExpanded && traceGrew);
+      if ((newMessages || repositioned) && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {
         scrollToBottom();
         requestAnimationFrame(() => scrollToBottom());
@@ -22761,9 +23030,10 @@ function MessageLog() {
       prevTraceLenRef.current = traceLen;
     }
     wasTypingRef.current = !!typing;
+    prevLayoutRef.current = layoutKey;
     prevExpandedRef.current = traceExpanded;
   });
-  const list = timeline;
+  const list = transcript;
   const groups2 = groupMessages(list);
   const thread = activeThread();
   const forkOrigin = thread?.forkedFrom;
@@ -22784,7 +23054,7 @@ function MessageLog() {
   }
   return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
     /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
-      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
+      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
         const key = `${threadId.value}:${groupKey(g8)}`;
         const body = g8.kind === "thoughts" ? /* @__PURE__ */ u4(
           ThoughtGroup,
@@ -22814,6 +23084,7 @@ function MessageLog() {
         ] });
       }),
       typing ? /* @__PURE__ */ u4(TypingIndicator, { traceExpanded, onToggleTrace: () => setTraceExpanded((v5) => !v5) }) : null,
+      !chatLoading.value && queued.map((message) => /* @__PURE__ */ u4(Message, { m: message }, `${threadId.value}:${messageKey(message)}`)),
       /* @__PURE__ */ u4(TaskIndicator, {})
     ] }),
     /* @__PURE__ */ u4(
@@ -23028,6 +23299,7 @@ function Composer() {
     el.style.overflowY = h5 >= 200 ? "auto" : "hidden";
     setMultiLine(h5 > 44);
   };
+  const edit = usePendingComposer(inputRef, autosize);
   y2(() => {
     autosize();
     const el = inputRef.current;
@@ -23038,6 +23310,10 @@ function Composer() {
   }, []);
   const onSubmit = (ev) => {
     ev.preventDefault();
+    if (edit.editing) {
+      void edit.save();
+      return;
+    }
     if (composerDisabled) return;
     if (activeVoice) voice.send();
     else doSubmit().catch(console.error);
@@ -23051,6 +23327,7 @@ function Composer() {
     const prefix = pins.length > 0 ? "> Context (file browser):\n" + pins.map((p5) => `> - \`${p5}\``).join("\n") + "\n\n" : "";
     const fullText = prefix + text;
     sendBusyRef.current = true;
+    composerSendInFlight.value = true;
     try {
       const sent = await sendChat(fullText, files);
       if (!sent || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return false;
@@ -23065,6 +23342,7 @@ function Composer() {
       return true;
     } finally {
       sendBusyRef.current = false;
+      composerSendInFlight.value = false;
     }
   };
   const onKey = (ev) => {
@@ -23075,6 +23353,7 @@ function Composer() {
   };
   const onAttachClick = () => fileRef.current?.click();
   const addFiles = (files) => {
+    if (currentPendingEditor()) return;
     if (files.length === 0) return;
     addPendingFiles(files, UPLOAD_MAX_FILES, UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE);
   };
@@ -23091,6 +23370,7 @@ function Composer() {
   };
   const attachRecording = isRecording.value;
   const startVoice = () => {
+    if (currentPendingEditor()) return;
     if (!gid || !tid || unavailable || composerDisabled || isRecording.value) return;
     const el = inputRef.current;
     voice.start({
@@ -23109,6 +23389,7 @@ function Composer() {
     }, el?.selectionStart ?? el?.value.length);
   };
   const startAudioAttachRecording = async () => {
+    if (currentPendingEditor()) return;
     if (isRecording.value || voice.state.value.sending || !["idle", "error"].includes(voice.state.value.phase)) return;
     const ok = await startRecording();
     if (!ok) {
@@ -23145,10 +23426,14 @@ function Composer() {
       {
         id: "chat-form",
         onSubmit,
-        style: showComposer ? "" : "display:none",
+        style: showComposer || edit.editing ? "" : "display:none",
         class: composerDisabled ? "ws-down" : "",
         children: [
-          /* @__PURE__ */ u4("input", { type: "file", id: "chat-file", multiple: true, hidden: true, ref: fileRef, onChange: onFileChange }),
+          edit.editing && /* @__PURE__ */ u4("div", { class: "composer-edit-header", children: [
+            /* @__PURE__ */ u4("span", { children: "Editing pending message \xB7 text only" }),
+            /* @__PURE__ */ u4("button", { type: "button", onClick: edit.exit, children: "Exit edit" })
+          ] }),
+          /* @__PURE__ */ u4("input", { type: "file", id: "chat-file", multiple: true, hidden: true, ref: fileRef, onChange: onFileChange, disabled: edit.editing }),
           attachRecording && /* @__PURE__ */ u4(
             "button",
             {
@@ -23170,20 +23455,24 @@ function Composer() {
               {
                 id: "chat-input",
                 rows: 1,
-                placeholder: hasQuestion ? "Answer the question above to continue\u2026" : wsDown ? "Reconnecting\u2026" : "Message the agent\u2026",
+                placeholder: edit.editing ? "Edit pending message\u2026" : hasQuestion ? "Answer the question above to continue\u2026" : wsDown ? "Reconnecting\u2026" : "Message the agent\u2026",
                 ref: inputRef,
-                onInput: autosize,
+                "aria-label": edit.editing ? "Pending message text" : "Message",
+                onInput: (event) => {
+                  edit.input(event.currentTarget.value);
+                  autosize();
+                },
                 onKeyDown: onKey,
                 onPaste,
                 autocomplete: "off",
-                disabled: hasQuestion,
-                readOnly: voiceLocked
+                disabled: !edit.editing && hasQuestion,
+                readOnly: voiceLocked || !!edit.state?.busy || !!edit.state?.unresolved
               }
             ),
             /* @__PURE__ */ u4(
               ComposerPlusMenu,
               {
-                disabled: composerDisabled || voiceState.sending || !["idle", "error"].includes(voiceState.phase),
+                disabled: edit.editing || composerDisabled || voiceState.sending || !["idle", "error"].includes(voiceState.phase),
                 title: composerDisabled ? hasQuestion ? "Answer the question above" : "Disconnected" : "Add\u2026",
                 showRecordAudio: hasGetUserMedia(),
                 showQuickCapture: hasGetUserMedia(),
@@ -23203,7 +23492,7 @@ function Composer() {
                 id: "chat-mic",
                 configured: voiceInput.value.ready,
                 unavailable,
-                disabled: composerDisabled || isRecording.value
+                disabled: edit.editing || composerDisabled || isRecording.value
               }
             ),
             /* @__PURE__ */ u4(
@@ -23212,14 +23501,17 @@ function Composer() {
                 type: "submit",
                 id: "chat-send",
                 class: "accent-icon-btn",
-                "aria-label": "Send",
-                title: activeVoice && voiceState.phase === "listening" ? "Finalize and send" : "Send",
-                disabled: composerDisabled || activeVoice && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)),
+                "aria-label": edit.editing ? edit.state?.busy ? "Saving\u2026" : edit.state?.retry ? "Retry save" : "Save edit" : "Send",
+                "aria-busy": edit.state?.busy,
+                title: edit.editing ? "Save edit" : activeVoice && voiceState.phase === "listening" ? "Finalize and send" : "Send",
+                disabled: edit.editing ? edit.disabled : composerDisabled || activeVoice && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)),
                 onMouseDown: (e4) => e4.preventDefault(),
-                children: "\u2191"
+                children: edit.editing ? "\u2713" : "\u2191"
               }
             )
-          ] })
+          ] }),
+          edit.editing && edit.error && /* @__PURE__ */ u4("p", { class: "pending-input-error", role: "alert", children: edit.error }),
+          edit.editing && (edit.state?.busy || edit.state?.unresolved) && /* @__PURE__ */ u4("p", { class: "composer-edit-notice", role: "status", children: "This save may still apply. Exit edit only closes the editor; retry checks the same request." })
         ]
       }
     ),
@@ -23290,6 +23582,7 @@ function ChatMain() {
       ev.preventDefault();
       depth = 0;
       el.classList.remove("drag-active");
+      if (currentPendingEditor()) return;
       const files = Array.from(ev.dataTransfer.files || []);
       if (files.length > 0) addPendingFiles(files, UPLOAD_MAX_FILES, UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE);
     };

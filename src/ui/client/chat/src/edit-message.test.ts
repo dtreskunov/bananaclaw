@@ -7,6 +7,33 @@ function message(id: string, direction: ChatMessage['direction']): ChatMessage {
 }
 
 describe('findEditBranchAnchorId', () => {
+  it('anchors a completed follow-up after the prior response, not its original send-time predecessor', () => {
+    const base = Date.parse('2026-01-01T00:00:00.000Z') * 1000;
+    const messages = [
+      { ...message('olderresponse', 'out'), timelinePosition: base + 1 },
+      { ...message('inputA', 'in'), timelinePosition: base + 2 },
+      // Sent before responseA, but consumed afterward and now completed.
+      { ...message('inputB', 'in'), timelinePosition: base + 4 },
+      { ...message('responseA', 'out'), timelinePosition: base + 3 },
+      { ...message('responseB', 'out'), timelinePosition: base + 5 },
+    ];
+    expect(findEditBranchAnchorId(messages, 'inputB')).toBe('responseA');
+  });
+  it('never uses a queued or awaiting-position shelf input as a branch anchor', () => {
+    const messages = [
+      message('responseA', 'out'),
+      {
+        ...message('queued', 'in'),
+        inputState: { messageId: 'queued', status: 'queued' as const, queuedForNextTurn: true },
+      },
+      {
+        ...message('consuming', 'in'),
+        inputState: { messageId: 'consuming', status: 'processing' as const, queuedForNextTurn: true },
+      },
+      message('inputB', 'in'),
+    ];
+    expect(findEditBranchAnchorId(messages, 'inputB')).toBe('responseA');
+  });
   it('uses the preceding conversational message', () => {
     const messages = [message('u1', 'in'), message('a1', 'out'), message('u2', 'in')];
 

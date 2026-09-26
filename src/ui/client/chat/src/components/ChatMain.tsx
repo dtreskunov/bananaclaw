@@ -25,9 +25,11 @@ import { isRecording, recordingDuration, startRecording, stopRecording, cancelRe
 import { voice, voiceBrowserReason } from '../voice-audio';
 import { VoiceButton } from './VoiceButton';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
-import { PendingMessageEditor } from './PendingMessageEditor';
-import { canEditMessageInBranch } from '../pending-edit';
+import { PendingMessageActions } from './PendingMessageActions';
+import { canEditMessageInBranch, composerSendInFlight, currentPendingEditor } from '../pending-edit';
+import { usePendingComposer } from '../pending-composer';
 import { mergeQuestionTimeline } from '../question-timeline';
+import { splitPendingInputs, timelineLayoutKey } from '../queued-followups';
 import { showsMidTurnLabel, showsTurnActivity } from '../chat-protocol';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
@@ -882,10 +884,10 @@ function Message(
           </div>
         )
         : null}
-      <PendingMessageEditor message={m} thread={activeThread() ?? null} gid={groupId.value} />
-      {m.ts ? <div class="meta">
-        <RelativeTime ts={m.ts} />
+      {m.ts || m.inputState ? <div class="meta">
+        {m.ts && <RelativeTime ts={m.ts} />}
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
+        <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} />
         {showsMidTurnLabel(m.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value)
           ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
           : m.deliveryOrigin === 'send_file'
@@ -1228,6 +1230,7 @@ function MessageLog() {
   const ref = useRef<HTMLDivElement | null>(null);
   const appliedHighlightRef = useRef<string | null>(null);
   const prevMsgCountRef = useRef<number>(0);
+  const prevLayoutRef = useRef('');
   const wasTypingRef = useRef<boolean>(false);
   const prevScrollTickRef = useRef<number>(scrollToBottomTick.value);
   const prevTraceLenRef = useRef<number>(0);
@@ -1241,6 +1244,8 @@ function MessageLog() {
   const [newMessageBelow, setNewMessageBelow] = useState(false);
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
+  const { transcript, queued } = splitPendingInputs(timeline);
+  const layoutKey = timelineLayoutKey(timeline);
   const msgCount = timeline.length;
   const typing = showsTurnActivity(activeTurn.value, isTyping.value, threadId.value, chatLoading.value);
   const scrollTick = scrollToBottomTick.value;
@@ -1306,6 +1311,7 @@ function MessageLog() {
 
   useEffect(() => {
     prevMsgCountRef.current = 0;
+    prevLayoutRef.current = '';
     atBottomRef.current = true;
     followingBottomRef.current = true;
     setAtBottom(true);
@@ -1327,7 +1333,7 @@ function MessageLog() {
         appliedHighlightRef.current = null;
       }
       const el = ref.current.querySelector(`[data-msg-id="${CSS.escape(highlight)}"]`);
-      if (el && appliedHighlightRef.current !== highlight) {
+      if (el && (appliedHighlightRef.current !== highlight || prevLayoutRef.current !== layoutKey)) {
         appliedHighlightRef.current = highlight;
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('highlight-pulse');
@@ -1341,6 +1347,7 @@ function MessageLog() {
       const wasAtBottom = atBottomRef.current;
       const currentlyAtBottom = measureScroll();
       const newMessages = msgCount > prevMsgCountRef.current;
+      const repositioned = prevLayoutRef.current !== layoutKey;
       const typingJustStarted = typing && !wasTypingRef.current;
       const traceGrew = traceLen > prevTraceLenRef.current;
       const justExpanded = traceExpanded && !prevExpandedRef.current;
@@ -1357,8 +1364,8 @@ function MessageLog() {
       // the user is pinned to the bottom, so we never yank them down if
       // they've scrolled up to read earlier messages.
       const shouldFollow = wasAtBottom
-        && (newMessages || typingJustStarted || justExpanded || (traceExpanded && traceGrew));
-      if (newMessages && !currentlyAtBottom) setNewMessageBelow(true);
+        && (newMessages || repositioned || typingJustStarted || justExpanded || (traceExpanded && traceGrew));
+      if ((newMessages || repositioned) && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {
         scrollToBottom();
         requestAnimationFrame(() => scrollToBottom());
@@ -1369,9 +1376,10 @@ function MessageLog() {
       prevTraceLenRef.current = traceLen;
     }
     wasTypingRef.current = !!typing;
+    prevLayoutRef.current = layoutKey;
     prevExpandedRef.current = traceExpanded;
   });
-  const list = timeline;
+  const list = transcript;
   const groups = groupMessages(list);
   // The branch point, if this thread is a fork and the anchor is still in
   // view. Messages up to it were inherited; the divider closes that region.
@@ -1402,7 +1410,7 @@ function MessageLog() {
           ? null
           : !threadId.value
             ? <div class="empty">Pick or start a chat.</div>
-            : list.length === 0
+            : list.length === 0 && queued.length === 0
               ? <div class="empty">No messages yet.</div>
               : groups.map((g) => {
                   const key = `${threadId.value}:${groupKey(g)}`;
@@ -1436,6 +1444,7 @@ function MessageLog() {
         {typing
           ? <TypingIndicator traceExpanded={traceExpanded} onToggleTrace={() => setTraceExpanded((v) => !v)} />
           : null}
+        {!chatLoading.value && queued.map((message) => <Message key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
         <TaskIndicator />
       </div>
       <button
@@ -1609,7 +1618,7 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
   );
 }
 
-function Composer() {
+export function Composer() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [quickCapture, setQuickCapture] = useState(false);
@@ -1658,6 +1667,7 @@ function Composer() {
     // with padding:5px + 1.4 line-height). Two lines push it past ~50.
     setMultiLine(h > 44);
   };
+  const edit = usePendingComposer(inputRef, autosize);
   // Mount + width-change observer. The empty-value early return inside
   // autosize() means we don't need to re-run on focus or on wsDown
   // placeholder changes — only the value and the available width can
@@ -1676,6 +1686,10 @@ function Composer() {
   }, []);
   const onSubmit = (ev: JSX.TargetedEvent<HTMLFormElement>): void => {
     ev.preventDefault();
+    if (edit.editing) {
+      void edit.save();
+      return;
+    }
     if (composerDisabled) return;
     if (activeVoice) voice.send();
     else doSubmit().catch(console.error);
@@ -1694,6 +1708,7 @@ function Composer() {
       : '';
     const fullText = prefix + text;
     sendBusyRef.current = true;
+    composerSendInFlight.value = true;
     try {
       const sent = await sendChat(fullText, files);
       if (!sent || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return false;
@@ -1706,7 +1721,10 @@ function Composer() {
       if (pinnedContext.value === pins) clearPinnedContext();
       if (isMobile.value) document.getElementById('chat-log')?.focus({ preventScroll: true });
       return true;
-    } finally { sendBusyRef.current = false; }
+    } finally {
+      sendBusyRef.current = false;
+      composerSendInFlight.value = false;
+    }
   };
   const onKey = (ev: JSX.TargetedKeyboardEvent<HTMLTextAreaElement>): void => {
     // On mobile, Enter inserts a newline (matches platform keyboard
@@ -1719,6 +1737,7 @@ function Composer() {
   };
   const onAttachClick = (): void => fileRef.current?.click();
   const addFiles = (files: File[]): void => {
+    if (currentPendingEditor()) return;
     if (files.length === 0) return;
     addPendingFiles(files, UPLOAD_MAX_FILES, UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE);
   };
@@ -1736,6 +1755,7 @@ function Composer() {
 
   const attachRecording = isRecording.value;
   const startVoice = (): void => {
+    if (currentPendingEditor()) return;
     if (!gid || !tid || unavailable || composerDisabled || isRecording.value) return;
     const el = inputRef.current;
     voice.start({
@@ -1748,6 +1768,7 @@ function Composer() {
     }, el?.selectionStart ?? el?.value.length);
   };
   const startAudioAttachRecording = async (): Promise<void> => {
+    if (currentPendingEditor()) return;
     if (isRecording.value || voice.state.value.sending || !['idle', 'error'].includes(voice.state.value.phase)) return;
     const ok = await startRecording();
     if (!ok) {
@@ -1783,10 +1804,14 @@ function Composer() {
     <form
       id="chat-form"
       onSubmit={onSubmit}
-      style={showComposer ? '' : 'display:none'}
+      style={showComposer || edit.editing ? '' : 'display:none'}
       class={composerDisabled ? 'ws-down' : ''}
     >
-      <input type="file" id="chat-file" multiple hidden ref={fileRef} onChange={onFileChange} />
+      {edit.editing && <div class="composer-edit-header">
+        <span>Editing pending message · text only</span>
+        <button type="button" onClick={edit.exit}>Exit edit</button>
+      </div>}
+      <input type="file" id="chat-file" multiple hidden ref={fileRef} onChange={onFileChange} disabled={edit.editing} />
       {attachRecording && (
         <button
           type="button"
@@ -1806,17 +1831,18 @@ function Composer() {
           <textarea
             id="chat-input"
             rows={1}
-            placeholder={hasQuestion ? 'Answer the question above to continue\u2026' : wsDown ? 'Reconnecting\u2026' : 'Message the agent\u2026'}
+            placeholder={edit.editing ? 'Edit pending message\u2026' : hasQuestion ? 'Answer the question above to continue\u2026' : wsDown ? 'Reconnecting\u2026' : 'Message the agent\u2026'}
             ref={inputRef}
-            onInput={autosize}
+            aria-label={edit.editing ? 'Pending message text' : 'Message'}
+            onInput={(event) => { edit.input(event.currentTarget.value); autosize(); }}
             onKeyDown={onKey}
             onPaste={onPaste as unknown as JSX.ClipboardEventHandler<HTMLTextAreaElement>}
             autocomplete="off"
-            disabled={hasQuestion}
-            readOnly={voiceLocked}
+            disabled={!edit.editing && hasQuestion}
+            readOnly={voiceLocked || !!edit.state?.busy || !!edit.state?.unresolved}
           ></textarea>
           <ComposerPlusMenu
-            disabled={composerDisabled || voiceState.sending || !['idle', 'error'].includes(voiceState.phase)}
+            disabled={edit.editing || composerDisabled || voiceState.sending || !['idle', 'error'].includes(voiceState.phase)}
             title={composerDisabled ? (hasQuestion ? 'Answer the question above' : 'Disconnected') : 'Add\u2026'}
             showRecordAudio={hasGetUserMedia()}
             showQuickCapture={hasGetUserMedia()}
@@ -1826,17 +1852,22 @@ function Composer() {
           />
           <VoiceButton target={target} controller={voice} onStart={startVoice} id="chat-mic"
             configured={voiceInput.value.ready} unavailable={unavailable}
-            disabled={composerDisabled || isRecording.value} />
+            disabled={edit.editing || composerDisabled || isRecording.value} />
           <button
             type="submit"
             id="chat-send"
             class="accent-icon-btn"
-            aria-label="Send"
-            title={activeVoice && voiceState.phase === 'listening' ? 'Finalize and send' : 'Send'}
-            disabled={composerDisabled || (activeVoice && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase)))}
+            aria-label={edit.editing ? edit.state?.busy ? 'Saving…' : edit.state?.retry ? 'Retry save' : 'Save edit' : 'Send'}
+            aria-busy={edit.state?.busy}
+            title={edit.editing ? 'Save edit' : activeVoice && voiceState.phase === 'listening' ? 'Finalize and send' : 'Send'}
+            disabled={edit.editing ? edit.disabled : composerDisabled || (activeVoice && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase)))}
             onMouseDown={(e) => e.preventDefault()}
-          >{'\u2191'}</button>
+          >{edit.editing ? '\u2713' : '\u2191'}</button>
         </div>
+      {edit.editing && edit.error && <p class="pending-input-error" role="alert">{edit.error}</p>}
+      {edit.editing && (edit.state?.busy || edit.state?.unresolved) && <p class="composer-edit-notice" role="status">
+        This save may still apply. Exit edit only closes the editor; retry checks the same request.
+      </p>}
     </form>
     {activeVoice && voiceState.error && <p class="voice-error" role="alert">{voiceState.error} Nothing is sent automatically.</p>}
     {quickCapture ? (
@@ -1881,6 +1912,7 @@ export function ChatMain() {
       ev.preventDefault();
       depth = 0;
       el.classList.remove('drag-active');
+      if (currentPendingEditor()) return;
       const files = Array.from(ev.dataTransfer.files || []);
       if (files.length > 0) addPendingFiles(files, UPLOAD_MAX_FILES, UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE);
     };

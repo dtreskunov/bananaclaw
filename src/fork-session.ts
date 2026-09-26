@@ -22,6 +22,8 @@ import { createSession } from './db/sessions.js';
 import { createThreadFork } from './db/thread-forks.js';
 import { readEnvFile } from './env.js';
 import { log } from './log.js';
+import { inputStateKey, isCancelledInputContent, outboundTimelinePosition, readInputTimeline } from './input-timeline.js';
+import { timelineSortKey } from './ui/shared/timeline.js';
 import { getProviderForkSessionState } from './providers/provider-container-registry.js';
 import { extractInboundText, extractOutboundText } from './search-index.js';
 import {
@@ -85,9 +87,8 @@ function tsMs(s: string): number {
 }
 
 /**
- * Locate the anchor and return its timestamp. History is merged from both DBs
- * and ordered by timestamp (readChatHistory), so timestamp — not seq — is the
- * cut that matches what the user saw when they picked the message.
+ * Use the same consumption order as the transcript, falling back to timestamps
+ * for messages written before timeline metadata was available.
  */
 function findAnchor(
   inDb: Database.Database,
@@ -96,21 +97,28 @@ function findAnchor(
   channelType: string,
   threadId: string,
   anchorMessageId: string,
-): { timestamp: string; direction: 'in' | 'out' } {
+): { timestamp: string; direction: 'in' | 'out'; timelinePosition?: number } {
   // The router namespaces inbound ids as `<rawId>:<agentGroupId>`; the UI
   // renders the raw form. Accept either.
   const namespaced = `${anchorMessageId}:${agentGroupId}`;
   const inRow = inDb
     .prepare(
-      'SELECT timestamp FROM messages_in WHERE (id = ? OR id = ?) AND channel_type = ? AND thread_id = ? LIMIT 1',
+      'SELECT id, timestamp, content FROM messages_in WHERE (id = ? OR id = ?) AND channel_type = ? AND thread_id = ? LIMIT 1',
     )
-    .get(anchorMessageId, namespaced, channelType, threadId) as { timestamp: string } | undefined;
-  if (inRow) return { timestamp: inRow.timestamp, direction: 'in' };
+    .get(anchorMessageId, namespaced, channelType, threadId) as { id: string; timestamp: string; content: string } | undefined;
+  if (inRow) {
+    const state = readInputTimeline(outDb, inRow.id);
+    if (state?.status === 'cancelled' || isCancelledInputContent(inRow.content)) throw new ForkError('anchor_not_found');
+    if (state?.queuedForNextTurn && state.status === 'queued') throw new ForkError('anchor_pending');
+    return { timestamp: inRow.timestamp, direction: 'in', timelinePosition: state?.timelinePosition };
+  }
 
   const outRow = outDb
-    .prepare('SELECT timestamp FROM messages_out WHERE id = ? AND channel_type = ? AND thread_id = ? LIMIT 1')
-    .get(anchorMessageId, channelType, threadId) as { timestamp: string } | undefined;
-  if (outRow) return { timestamp: outRow.timestamp, direction: 'out' };
+    .prepare('SELECT timestamp, content FROM messages_out WHERE id = ? AND channel_type = ? AND thread_id = ? LIMIT 1')
+    .get(anchorMessageId, channelType, threadId) as { timestamp: string; content: string } | undefined;
+  if (outRow) return {
+    timestamp: outRow.timestamp, direction: 'out', timelinePosition: outboundTimelinePosition(outRow.content),
+  };
 
   throw new ForkError('anchor_not_found');
 }
@@ -216,7 +224,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
   let parentContinuation: string | null = null;
   let anchorRef: string | null = null;
   let cutTs = '';
-  const digestParts: { direction: 'in' | 'out'; timestamp: string; text: string }[] = [];
+  const digestParts: { direction: 'in' | 'out'; timestamp: string; text: string; timelinePosition?: number }[] = [];
 
   const srcIn = openInboundDb(agentGroupId, parentSession.id);
   const srcOut = openOutboundDb(agentGroupId, parentSession.id);
@@ -224,11 +232,16 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
     const anchor = findAnchor(srcIn, srcOut, agentGroupId, channelType, parentThreadId, anchorMessageId);
     cutTs = anchor.timestamp;
     const cutMs = tsMs(cutTs);
+    const cutPosition = timelineSortKey(cutTs, anchor.timelinePosition);
     // Outbound timestamps have whole-second resolution, so a reply written in
     // the same second as the inbound message it answers looks simultaneous.
     // When the user branches at their own message, resolve that ambiguity the
     // only way that can be right: the reply came after.
     const keepOut = (r: Row): boolean => {
+      const position = outboundTimelinePosition(String(r.content));
+      if (anchor.timelinePosition !== undefined || position !== undefined) {
+        return timelineSortKey(String(r.timestamp), position) <= cutPosition;
+      }
       const ms = tsMs(String(r.timestamp));
       return anchor.direction === 'in' && Math.floor(cutMs / 1000) === Math.floor(ms / 1000) ? false : ms <= cutMs;
     };
@@ -241,7 +254,13 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
             ORDER BY seq`,
         )
         .all(channelType, parentThreadId) as Row[]
-    ).filter((r) => !EXCLUDED_INBOUND_KINDS.has(String(r.kind)) && tsMs(String(r.timestamp)) <= cutMs);
+    ).filter((r) => {
+      if (EXCLUDED_INBOUND_KINDS.has(String(r.kind))) return false;
+      const state = readInputTimeline(srcOut, String(r.id));
+      if (state?.status === 'cancelled' || isCancelledInputContent(String(r.content))) return false;
+      if (state?.queuedForNextTurn && state.status === 'queued') return false;
+      return timelineSortKey(String(r.timestamp), state?.timelinePosition) <= cutPosition;
+    });
 
     outRows = (
       srcOut
@@ -260,6 +279,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
         direction: 'in',
         timestamp: String(r.timestamp),
         text: extractInboundText(String(r.content)),
+        timelinePosition: readInputTimeline(srcOut, String(r.id))?.timelinePosition,
       });
     }
     for (const r of outRows) {
@@ -268,9 +288,11 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
         direction: 'out',
         timestamp: String(r.timestamp),
         text: extractOutboundText(String(r.content)),
+        timelinePosition: outboundTimelinePosition(String(r.content)),
       });
     }
-    digestParts.sort((a, b) => tsMs(a.timestamp) - tsMs(b.timestamp));
+    digestParts.sort((a, b) =>
+      timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition));
 
     // A fork inherits the parent's title. The container only requests a title
     // when the thread's first chat message is in the batch it is processing,
@@ -469,6 +491,13 @@ function populateForkSession(args: {
   const dstOut = openOutboundDbRw(agentGroupId, sessionId);
   try {
     insertRows(dstOut, 'messages_out', rethread(outRows));
+    for (const row of inRows) {
+      const state = readInputTimeline(srcOut, String(row.id));
+      if (state?.timelinePosition === undefined) continue;
+      insertRows(dstOut, 'session_state', [{
+        key: inputStateKey(String(row.id)), value: JSON.stringify(state), updated_at: args.createdAt,
+      }]);
+    }
 
     // Mark inherited inbound rows as already handled so the fork's first
     // container doesn't replay the whole history as fresh work.

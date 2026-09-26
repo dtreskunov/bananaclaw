@@ -172,6 +172,7 @@ export interface DisplayCard {
 export type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface ChatMessage {
+  timelinePosition?: number;
   canEditPending?: boolean;
   inputState?: InputState;
   id?: string;
@@ -347,6 +348,7 @@ export interface ActiveTurn {
   status: 'running' | 'stopping';
   supportsSteering?: boolean;
   supportsInputEditing?: boolean;
+  supportsInputCancellation?: boolean;
 }
 
 // Value sent by the chat WS.
@@ -367,11 +369,19 @@ export interface WsPayload {
   activeTurn?: ActiveTurn | null;
   connected?: boolean;
   inputHandling?: InputHandling;
-  states?: Array<{ messageId: string; inputState: InputState | null; text?: string; canEditPending?: boolean }>;
+  states?: Array<{
+    messageId: string;
+    inputState: InputState | null;
+    text?: string;
+    canEditPending?: boolean;
+    timelinePosition?: number;
+  }>;
+  timelinePosition?: number;
   canEditPending?: boolean;
   inputState?: InputState;
   threadId?: string;
   messages?: Array<{
+    timelinePosition?: number;
     id?: string;
     direction: string;
     text: string;

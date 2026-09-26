@@ -1,5 +1,6 @@
 // Action orchestrators. Mutate signals + perform IO.
 import { batch, type Signal } from '@preact/signals';
+import { confirmCancelledInput, isCancelledInput } from './pending-cancel';
 import { voice } from './voice-audio';
 import { cancelRecording } from './recorder';
 import {
@@ -91,6 +92,7 @@ import type {
 } from './types';
 
 interface ServerMessage {
+  timelinePosition?: number;
   canEditPending?: boolean;
   inputState?: InputState;
   stoppedStats?: StoppedTurnStats;
@@ -575,11 +577,13 @@ export async function runSync(
     threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
   }
   if (
+    generation === refs.chatGeneration &&
     gid &&
     groupId.value === gid &&
     tid &&
     threadId.value === tid &&
     ct === channelType.value &&
+    mg === messagingGroupId.value &&
     ct !== 'web' &&
     Array.isArray(res.threadMessages)
   ) {
@@ -591,6 +595,7 @@ export async function runSync(
 
 function toChatMessage(m: ServerMessage): ChatMessage {
   return {
+    timelinePosition: m.timelinePosition ?? m.inputState?.timelinePosition,
     id: m.id,
     direction: normDirection(m.direction),
     text: m.text,
@@ -610,30 +615,55 @@ function toChatMessage(m: ServerMessage): ChatMessage {
   };
 }
 
+function visibleIncomingMessages(messages: ServerMessage[]): ServerMessage[] {
+  for (const message of messages) {
+    if (message.direction === 'in' && message.id && message.inputState?.status === 'cancelled')
+      confirmCancelledInput(message.id);
+  }
+  return messages.filter(
+    (message) =>
+      message.direction !== 'in' || (message.inputState?.status !== 'cancelled' && !isCancelledInput(message.id)),
+  );
+}
+
 function replaceIncomingMessages(messages: ServerMessage[]): void {
+  const echoedIds = messages.filter((m) => normDirection(m.direction) === 'in' && m.id).map((m) => m.id!);
+  messages = visibleIncomingMessages(messages);
   chatMessages.value = messages.map(toChatMessage);
   refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
-  const echoedIds = messages.filter((m) => normDirection(m.direction) === 'in' && m.id).map((m) => m.id!);
   const tid = threadId.value;
   pendingWebSends.value = pendingWebSends.value.filter(
-    (pendingSend) => pendingSend.threadId !== tid || !echoedIds.includes(pendingSend.messageId),
+    (pendingSend) =>
+      pendingSend.threadId !== tid ||
+      (!echoedIds.includes(pendingSend.messageId) && !isCancelledInput(pendingSend.messageId)),
   );
 }
 
 function mergeIncomingMessages(messages: ServerMessage[]): void {
-  const inboundStates = new Map(
-    messages.filter((message) => message.direction === 'in' && message.id).map((message) => [message.id, message]),
+  messages = visibleIncomingMessages(messages);
+  chatMessages.value = chatMessages.value.filter(
+    (message) => message.direction !== 'in' || !isCancelledInput(message.id),
   );
-  chatMessages.value = chatMessages.value.map((message) =>
-    message.direction === 'in' && inboundStates.has(message.id)
-      ? {
-          ...message,
-          text: inboundStates.get(message.id)!.text,
-          inputState: inboundStates.get(message.id)!.inputState,
-          canEditPending: inboundStates.get(message.id)!.canEditPending === true,
-        }
-      : message,
+  const updates = new Map(
+    messages
+      .filter((message) => message.id)
+      .map((message) => [`${normDirection(message.direction)}:${message.id}`, message]),
   );
+  chatMessages.value = chatMessages.value.map((message) => {
+    const update = updates.get(`${message.direction}:${message.id}`);
+    if (!update) return message;
+    return {
+      ...message,
+      timelinePosition: update.timelinePosition ?? update.inputState?.timelinePosition ?? message.timelinePosition,
+      ...(message.direction === 'in'
+        ? {
+            text: update.text,
+            inputState: update.inputState,
+            canEditPending: update.canEditPending === true,
+          }
+        : {}),
+    };
+  });
   let maxTs = '';
   const additions: ChatMessage[] = [];
   for (const m of messages) {
@@ -642,6 +672,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
     if (key && refs.seenIds.has(key)) continue;
     const ts = m.timestamp || '';
     additions.push({
+      timelinePosition: m.timelinePosition ?? m.inputState?.timelinePosition,
       id: m.id,
       direction,
       text: m.text,
@@ -706,9 +737,17 @@ function appendMsg(
   author?: { userId: string; displayName: string },
   suggestedAction?: SuggestedAction,
   stoppedStats?: StoppedTurnStats,
+  timelinePosition?: number,
 ): void {
   const key = id ? `${direction}:${id}` : null;
-  if (key && refs.seenIds.has(key)) return;
+  if (key && refs.seenIds.has(key)) {
+    if (timelinePosition !== undefined) {
+      chatMessages.value = chatMessages.value.map((message) =>
+        message.direction === direction && message.id === id ? { ...message, timelinePosition } : message,
+      );
+    }
+    return;
+  }
   if (key) refs.seenIds.add(key);
   chatMessages.value = chatMessages.value.concat({
     id,
@@ -717,6 +756,7 @@ function appendMsg(
     ...(card ? { card } : {}),
     files: files || null,
     ts,
+    timelinePosition,
     ...(author ? { author } : {}),
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
     ...(suggestedAction ? { suggestedAction } : {}),
@@ -1032,18 +1072,27 @@ function connectChatWs(ctx: ChatSocketContext): void {
     }
     if (payload.kind === 'input-state') {
       const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry]));
-      chatMessages.value = chatMessages.value.map((message) =>
-        message.direction === 'in' && message.id && states.has(message.id)
-          ? {
-              ...message,
-              inputState: states.get(message.id)!.inputState ?? undefined,
-              ...(typeof states.get(message.id)!.text === 'string' ? { text: states.get(message.id)!.text! } : {}),
-              ...(typeof states.get(message.id)!.canEditPending === 'boolean'
-                ? { canEditPending: states.get(message.id)!.canEditPending }
-                : {}),
-            }
-          : message,
-      );
+      for (const entry of states.values()) {
+        if (entry.inputState?.status === 'cancelled') confirmCancelledInput(entry.messageId);
+      }
+      chatMessages.value = chatMessages.value
+        .map((message) =>
+          message.direction === 'in' && message.id && states.has(message.id)
+            ? {
+                ...message,
+                inputState: states.get(message.id)!.inputState ?? undefined,
+                timelinePosition:
+                  states.get(message.id)!.timelinePosition ??
+                  states.get(message.id)!.inputState?.timelinePosition ??
+                  message.timelinePosition,
+                ...(typeof states.get(message.id)!.text === 'string' ? { text: states.get(message.id)!.text! } : {}),
+                ...(typeof states.get(message.id)!.canEditPending === 'boolean'
+                  ? { canEditPending: states.get(message.id)!.canEditPending }
+                  : {}),
+              }
+            : message,
+        )
+        .filter((message) => message.direction !== 'in' || !isCancelledInput(message.id));
       return;
     }
     if (payload.kind === 'ready') {
@@ -1083,6 +1132,14 @@ function connectChatWs(ctx: ChatSocketContext): void {
       return;
     }
     if (payload.kind === 'inbound') {
+      if (payload.id && payload.inputState?.status === 'cancelled') confirmCancelledInput(payload.id);
+      if (payload.inputState?.status === 'cancelled' || isCancelledInput(payload.id)) {
+        chatMessages.value = chatMessages.value.filter(
+          (message) => message.direction !== 'in' || message.id !== payload.id,
+        );
+        pendingWebSends.value = pendingWebSends.value.filter((send) => send.messageId !== payload.id);
+        return;
+      }
       const seen = payload.id && refs.seenIds.has(`in:${payload.id}`);
       if (!activeTurn.value) refs.carryActivity = [];
       if (payload.id) {
@@ -1108,6 +1165,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
                 inputState: {
                   messageId: payload.id!,
                   status: 'queued',
+                  ...(handling.mode === 'queue' ? { queuedForNextTurn: true } : {}),
                   ...(handling.turnId ? { turnId: handling.turnId } : {}),
                 },
               }
@@ -1121,7 +1179,18 @@ function connectChatWs(ctx: ChatSocketContext): void {
                 ...message,
                 text: payload.text ?? message.text,
                 ...(typeof payload.canEditPending === 'boolean' ? { canEditPending: payload.canEditPending } : {}),
-                ...(payload.inputState ? { inputState: payload.inputState } : {}),
+                ...(payload.inputState
+                  ? {
+                      inputState: {
+                        ...payload.inputState,
+                        ...(payload.inputState.status === 'queued' && payload.inputHandling?.mode === 'queue'
+                          ? { queuedForNextTurn: true }
+                          : {}),
+                      },
+                    }
+                  : {}),
+                timelinePosition:
+                  payload.timelinePosition ?? payload.inputState?.timelinePosition ?? message.timelinePosition,
               }
             : message,
         );
@@ -1182,6 +1251,11 @@ function connectChatWs(ctx: ChatSocketContext): void {
               payload.id,
               cardActivity,
               payload.card,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              payload.timelinePosition,
             );
             bumpActiveThread();
           }
@@ -1236,6 +1310,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
         undefined,
         suggestedAction,
         readStoppedTurnStats(c),
+        payload.timelinePosition,
       );
       bumpActiveThread();
       if (dir === 'out') maybeNotify(text, payload.files || []);

@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 
 export const INPUT_EDIT_PREFIX = 'input-edit:';
+export const INPUT_CANCEL_PREFIX = 'input-cancel:';
 export const INPUT_EDIT_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
 export interface InputEditRequest {
@@ -9,6 +10,12 @@ export interface InputEditRequest {
   messageId: string;
   expectedText: string;
   replacementText: string;
+}
+
+export interface InputCancelRequest {
+  action: 'cancel_input';
+  requestId: string;
+  messageId: string;
 }
 
 export interface InputEditResult {
@@ -49,6 +56,7 @@ export interface EditedInput {
   thread_id: string | null;
   sender_user_id: string;
   text: string;
+  cancelled?: boolean;
 }
 
 /** Called inside the outbound transaction with the host's inbound DB attached. */
@@ -59,13 +67,15 @@ export function projectInputEditResult(
   replay = false,
 ): EditedInput | undefined {
   const result = parseInputEditResult(value);
-  if (key !== `${INPUT_EDIT_PREFIX}${result.requestId}`) throw new Error('invalid input edit result key');
+  const cancelling = key.startsWith(INPUT_CANCEL_PREFIX);
+  const operation = cancelling ? 'cancel' : 'edit';
+  if (key !== `input-${operation}:${result.requestId}`) throw new Error('invalid input edit result key');
   const request = db
     .prepare(
       `SELECT content, sender_user_id, channel_type, platform_id, thread_id
        FROM input_edit_host.messages_in WHERE id = ? AND kind = 'system'`,
     )
-    .get(`edit-${result.requestId}`) as
+    .get(`${operation}-${result.requestId}`) as
     | {
         content: string;
         sender_user_id: string;
@@ -75,13 +85,13 @@ export function projectInputEditResult(
       }
     | undefined;
   if (!request) throw new Error('input edit result has no host request');
-  const content = JSON.parse(request.content) as InputEditRequest;
+  const content = JSON.parse(request.content) as InputEditRequest | InputCancelRequest;
   if (
-    content.action !== 'edit_input' ||
+    content.action !== `${operation}_input` ||
     content.requestId !== result.requestId ||
     content.messageId !== result.messageId ||
-    typeof content.expectedText !== 'string' ||
-    typeof content.replacementText !== 'string'
+    (content.action === 'edit_input' &&
+      (typeof content.expectedText !== 'string' || typeof content.replacementText !== 'string'))
   )
     throw new Error('input edit result mismatches host request');
   if (result.status === 'conflict') return undefined;
@@ -104,15 +114,21 @@ export function projectInputEditResult(
     Array.isArray(original) ||
     !('text' in original) ||
     typeof original.text !== 'string' ||
-    (!replay && original.text !== content.expectedText)
+    (!replay && content.action === 'edit_input' && (original.text !== content.expectedText ||
+      ('cancelled' in original && original.cancelled === true)))
   ) {
     throw new Error('input edit target changed before projection');
   }
   if (!replay) {
-    db.prepare('UPDATE input_edit_host.messages_in SET content = ? WHERE id = ?').run(
-      JSON.stringify({ ...original, text: content.replacementText }),
-      target.id,
-    );
+    if (content.action === 'cancel_input') {
+      db.prepare("UPDATE input_edit_host.messages_in SET content = ?, status = 'completed' WHERE id = ?").run(
+        JSON.stringify({ ...original, cancelled: true }), target.id,
+      );
+    } else {
+      db.prepare('UPDATE input_edit_host.messages_in SET content = ? WHERE id = ?').run(
+        JSON.stringify({ ...original, text: content.replacementText }), target.id,
+      );
+    }
   }
   return {
     id: target.id,
@@ -120,6 +136,7 @@ export function projectInputEditResult(
     channel_type: target.channel_type,
     thread_id: target.thread_id,
     sender_user_id: target.sender_user_id,
-    text: replay ? original.text : content.replacementText,
+    text: replay || content.action === 'cancel_input' ? original.text : content.replacementText,
+    ...(cancelling || ('cancelled' in original && original.cancelled === true) ? { cancelled: true } : {}),
   };
 }

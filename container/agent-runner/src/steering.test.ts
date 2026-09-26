@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { closeSessionDb, getInboundDb, getOutboundDb, initTestSessionDb } from './db/connection.js';
 import { getPendingMessages, getSteeringCandidates, markProcessing, type MessageInRow } from './db/messages-in.js';
+import { writeMessageOut } from './db/messages-out.js';
 import { getContinuation, setContinuation } from './db/session-state.js';
 import { loadConfig, setConfigForTest } from './config.js';
 import { runPollLoop } from './poll-loop.js';
@@ -104,7 +105,7 @@ describe('steering selection', () => {
   });
 });
 
-function harness(supportsSteering = true) {
+function harness(supportsSteering = true, onPush?: (prompt: string) => boolean) {
   const controller = new AbortController();
   const prompts: QueryInput[] = [];
   const steering: SteeringInput[] = [];
@@ -127,7 +128,7 @@ function harness(supportsSteering = true) {
       ended = false;
       events = [];
       return {
-        push: () => false,
+        push: (prompt) => onPush?.(prompt) ?? false,
         steer(input) { steering.push(input); return !ended; },
         end() { ended = true; wake?.(); },
         abort() { ended = true; wake?.(); },
@@ -203,6 +204,74 @@ it('does not steer a provider that lacks the capability', async () => {
     expect(h.active?.supportsSteering).toBeUndefined();
     expect(readInputState('guidance')?.reason).toBe('unsupported');
   } finally { await h.stop(loop); }
+});
+
+it('claims a queued follow-up after the prior final reply and before synchronous next-turn output', async () => {
+  const now = spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+  getInboundDb().prepare(
+    "INSERT INTO destinations (name, type, channel_type, platform_id) VALUES ('web-test', 'channel', 'web', 'room')",
+  ).run();
+  insert('A');
+  let consumedPosition: number | undefined;
+  const h = harness(false, (prompt) => {
+    expect(prompt).toContain('B');
+    consumedPosition = readInputState('B')?.timelinePosition;
+    expect(consumedPosition).toBeDefined();
+    writeMessageOut({
+      id: 'B-progress', kind: 'chat', channel_type: 'web', platform_id: 'room', thread_id: 'thread',
+      content: JSON.stringify({ text: 'B progress' }),
+    });
+    return true;
+  });
+  const loop = h.start();
+  try {
+    await until(() => h.active !== null);
+    insert('B', { inputHandling: { mode: 'queue', turnId: h.active!.id } });
+    await until(() => readInputState('B')?.queuedForNextTurn === true);
+    expect(readInputState('B')?.timelinePosition).toBeUndefined();
+    expect(consumedPosition).toBeUndefined();
+    expect(getOutboundDb().prepare("SELECT 1 FROM processing_ack WHERE message_id = 'B'").get()).toBeNull();
+    expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out').get()).toEqual({ n: 0 });
+    h.emit({ type: 'result', text: '<message to="web-test">A final reply</message>' });
+    await until(() => consumedPosition !== undefined);
+    h.emit({ type: 'result', text: '<message to="web-test">B final reply</message>' });
+    await until(() => getOutboundDb().prepare("SELECT 1 FROM processing_ack WHERE message_id = 'B' AND status = 'completed'").get() !== null);
+    const rows = getOutboundDb().prepare('SELECT content FROM messages_out ORDER BY seq').all() as { content: string }[];
+    const messages = rows.map((row) => JSON.parse(row.content) as { text: string; timelinePosition: number });
+    expect(messages.map((message) => message.text)).toEqual(['A final reply', 'B progress', 'B final reply']);
+    expect(readInputState('A')!.timelinePosition!).toBeLessThan(messages[0].timelinePosition);
+    expect(messages[0].timelinePosition).toBeLessThan(consumedPosition!);
+    expect(consumedPosition!).toBeLessThan(messages[1].timelinePosition);
+    expect(messages[1].timelinePosition).toBeLessThan(messages[2].timelinePosition);
+    expect(readInputState('B')?.queuedForNextTurn).toBeUndefined();
+  } finally {
+    await h.stop(loop);
+    now.mockRestore();
+  }
+});
+
+it('marks all active queued inputs beyond the prompt cap without assigning timeline positions', async () => {
+  const config = loadConfig();
+  setConfigForTest({ maxMessagesPerPrompt: 2 });
+  insert('initial');
+  const h = harness(false);
+  const loop = h.start();
+  try {
+    await until(() => h.active !== null);
+    const wake = spyOn(link, 'emitHostEventForTesting').mockImplementation(() => {});
+    try {
+      for (let index = 0; index < 5; index++) insert(`queued-${index}`, { inputHandling: { mode: 'queue' } });
+    } finally { wake.mockRestore(); }
+    link.emitHostEventForTesting();
+    await until(() => readInputState('queued-0')?.queuedForNextTurn === true);
+    for (let index = 0; index < 5; index++) {
+      expect(readInputState(`queued-${index}`)).toMatchObject({ status: 'queued', queuedForNextTurn: true });
+      expect(readInputState(`queued-${index}`)?.timelinePosition).toBeUndefined();
+    }
+  } finally {
+    await h.stop(loop);
+    setConfigForTest(config);
+  }
 });
 
 it('automatically steers external messages without redirecting cross-conversation work', async () => {
@@ -285,10 +354,18 @@ it('Stop completes applied steering but preserves queued and not-yet-applied mes
     await until(() => (getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out').get() as { n: number }).n > 0);
     expect(h.active).toMatchObject({ id: turnId, status: 'stopping' });
     expect(getPendingMessages().map((m) => m.id)).toEqual(['waiting-guidance', 'queued-next']);
+    expect(readInputState('waiting-guidance')).toMatchObject({ status: 'queued', queuedForNextTurn: true });
+    expect(readInputState('queued-next')).toMatchObject({ status: 'queued', queuedForNextTurn: true });
+    expect(readInputState('waiting-guidance')?.timelinePosition).toBeUndefined();
+    expect(readInputState('queued-next')?.timelinePosition).toBeUndefined();
+    const stopped = getOutboundDb().prepare('SELECT content FROM messages_out ORDER BY seq DESC LIMIT 1').get() as { content: string };
+    const stoppedPosition = JSON.parse(stopped.content).timelinePosition as number;
     expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('applied-guidance'))
       .toEqual({ status: 'completed' });
     release();
     await until(() => h.prompts.length > 1);
+    expect(readInputState('waiting-guidance')!.timelinePosition!).toBeGreaterThan(stoppedPosition);
+    expect(readInputState('queued-next')!.timelinePosition!).toBeGreaterThan(readInputState('waiting-guidance')!.timelinePosition!);
     expect(h.prompts[1].prompt).toContain('waiting-guidance');
     expect(h.prompts[1].prompt).toContain('queued-next');
     expect(h.prompts[1].prompt).not.toContain('applied-guidance');
