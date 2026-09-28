@@ -2,7 +2,7 @@ import type http from 'node:http';
 import type { Duplex } from 'node:stream';
 
 import { createElevenLabs, type ElevenLabsProviderSettings } from '@ai-sdk/elevenlabs';
-import { experimental_streamTranscribe, type TranscriptionStreamPart } from 'ai';
+import { experimental_streamTranscribe, NoTranscriptGeneratedError, type TranscriptionStreamPart } from 'ai';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 
 import { getAgentGroup } from '../../../db/agent-groups.js';
@@ -18,6 +18,21 @@ const MAX_BUFFER_BYTES = BYTES_PER_SECOND * 4;
 const MAX_SESSION_MS = 5 * 60_000;
 const FINALIZE_TIMEOUT_MS = 10_000;
 const MAX_SESSIONS = 8;
+const PROVIDER_ERROR_EVENT_TYPES = new Set([
+  'auth_error',
+  'chunk_size_exceeded',
+  'commit_throttled',
+  'error',
+  'input_error',
+  'insufficient_audio_activity',
+  'queue_overflow',
+  'quota_exceeded',
+  'rate_limited',
+  'resource_exhausted',
+  'session_time_limit_exceeded',
+  'transcriber_error',
+  'unaccepted_terms',
+]);
 
 export interface VoiceTranscript {
   type: 'transcript';
@@ -55,6 +70,17 @@ export class VoiceTranscriptNormalizer {
   hasProvisionalText(): boolean {
     return [...this.segments.values()].some((segment) => !segment.final && segment.text.trim().length > 0);
   }
+
+  finalizeProvisionalText(): VoiceTranscript[] {
+    const finalized: VoiceTranscript[] = [];
+    for (const [key, segment] of this.segments) {
+      if (segment.final || segment.text.trim().length === 0) continue;
+      const next = { ...segment, sequence: ++this.sequence, final: true };
+      this.segments.set(key, next);
+      finalized.push(next);
+    }
+    return finalized;
+  }
 }
 
 export type VoiceTranscriber = (
@@ -84,9 +110,31 @@ export class VoiceProviderSocket implements InstanceType<ProviderSocketConstruct
       perMessageDeflate: false,
     });
     this.socket.on('open', () => this.onopen?.({}));
-    this.socket.on('message', (data) => this.onmessage?.({ data: rawBuffer(data).toString('utf8') }));
-    this.socket.on('error', (error) => this.onerror?.(error));
-    this.socket.on('close', (code) => this.onclose?.({ code }));
+    this.socket.on('message', (data) => {
+      const text = rawBuffer(data).toString('utf8');
+      try {
+        const event = JSON.parse(text) as { message_type?: unknown };
+        if (typeof event.message_type === 'string' && PROVIDER_ERROR_EVENT_TYPES.has(event.message_type)) {
+          log.warn('ElevenLabs voice stream error event', { eventType: event.message_type });
+        }
+      } catch {
+        log.warn('ElevenLabs voice stream returned invalid JSON');
+      }
+      this.onmessage?.({ data: text });
+    });
+    this.socket.on('error', (error: Error & { code?: unknown }) => {
+      const code = typeof error.code === 'string' ? error.code : undefined;
+      const statusMatch = error.message.match(/^Unexpected server response: (\d{3})$/);
+      log.warn('ElevenLabs voice socket error', {
+        ...(code ? { code } : {}),
+        ...(statusMatch ? { httpStatus: Number(statusMatch[1]) } : {}),
+      });
+      this.onerror?.(error);
+    });
+    this.socket.on('close', (code) => {
+      if (code !== 1000) log.warn('ElevenLabs voice socket closed abnormally', { code });
+      this.onclose?.({ code });
+    });
   }
 
   get readyState(): number {
@@ -122,6 +170,15 @@ function rawBuffer(data: RawData): Buffer {
   return Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data);
 }
 
+function transcriptionFailureKind(error: unknown): string {
+  if (NoTranscriptGeneratedError.isInstance(error)) return 'no_transcript';
+  if (!(error instanceof Error)) return 'unknown';
+  if (error.message === 'ElevenLabs realtime transcription stream closed before completion.') return 'stream_closed';
+  if (error.message.startsWith('ElevenLabs realtime transcription error.')) return 'socket_error';
+  if (error.message === 'WebSocket is not connected.') return 'socket_not_connected';
+  return 'provider_error';
+}
+
 export function attachVoiceStream(
   ws: WebSocket,
   transcribe: VoiceTranscriber,
@@ -134,6 +191,7 @@ export function attachVoiceStream(
   let inputEnded = false;
   let closed = false;
   let inputBytes = 0;
+  let peakPcm = 0;
   let lastInput = Date.now();
   let allowance = BYTES_PER_SECOND * 2;
   let allowanceAt = Date.now();
@@ -166,6 +224,24 @@ export function attachVoiceStream(
     cleanup();
     ws.close(1008, code);
   };
+  const finish = (): void => {
+    if (closed) return;
+    if (ws.bufferedAmount > MAX_BUFFER_BYTES) {
+      fail('client_backpressure', 'Voice connection cannot keep up. Review your current text.');
+      return;
+    }
+    const finalized = transcript.finalizeProvisionalText();
+    if (finalized.length > 0) {
+      log.warn('Voice input finalized provisional text without a provider final', {
+        ...context,
+        segmentCount: finalized.length,
+      });
+    }
+    for (const segment of finalized) send(segment);
+    send({ type: 'finished' });
+    cleanup();
+    ws.close(1000);
+  };
   const sessionTimer = setTimeout(
     () =>
       fail(
@@ -195,6 +271,9 @@ export function attachVoiceStream(
       allowance -= data.byteLength;
       if (allowance < 0) return fail('audio_rate_limit', 'Audio arrived faster than real time.');
       inputBytes += data.byteLength;
+      for (let offset = 0; offset < data.byteLength; offset += 2) {
+        peakPcm = Math.max(peakPcm, Math.abs(data.readInt16LE(offset)));
+      }
       lastInput = now;
       if (inputBytes > (BYTES_PER_SECOND * MAX_SESSION_MS) / 1000)
         return fail('audio_limit', 'Voice audio limit reached.');
@@ -247,14 +326,32 @@ export function attachVoiceStream(
         if (normalized) send(normalized);
       }
       if (closed) return;
-      if (!inputEnded || transcript.hasProvisionalText()) {
+      if (!inputEnded) {
         fail('incomplete_transcript', 'Transcription ended before all speech was finalized. Review your current text.');
         return;
       }
-      send({ type: 'finished' });
-      cleanup();
-      ws.close(1000);
-    } catch {
+      finish();
+    } catch (error) {
+      if (closed) return;
+      if (inputEnded && transcript.hasProvisionalText() && NoTranscriptGeneratedError.isInstance(error)) {
+        finish();
+        return;
+      }
+      log.warn('Voice transcription provider failed', {
+        ...context,
+        failureKind: transcriptionFailureKind(error),
+        inputBytes,
+        peakPcm,
+      });
+      if (NoTranscriptGeneratedError.isInstance(error)) {
+        fail(
+          'no_speech',
+          peakPcm === 0
+            ? 'The microphone produced silent audio. Check the selected microphone and try again.'
+            : 'No speech was recognized. Speak clearly and try again.',
+        );
+        return;
+      }
       // Provider errors may contain authenticated request headers or audio.
       fail(
         'transcription_failed',

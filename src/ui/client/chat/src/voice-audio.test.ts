@@ -10,7 +10,7 @@ class FakeContext {
   destination = {};
   source = { connect: vi.fn(), disconnect: vi.fn() };
   createMediaStreamSource = vi.fn(() => this.source);
-  constructor(public options: { sampleRate: number }) {
+  constructor(public options?: AudioContextOptions) {
     contexts.push(this);
   }
 }
@@ -46,13 +46,13 @@ afterEach(() => {
 });
 
 describe('browser voice capture', () => {
-  it('uses the static worklet at 16kHz and flushes final PCM before releasing hardware', async () => {
+  it('uses the native capture rate and flushes resampled PCM before releasing hardware', async () => {
     const chunks = vi.fn();
     const capture = await captureVoice(chunks, vi.fn());
-    expect(contexts[0].options).toEqual({ sampleRate: 16000 });
+    expect(contexts[0].options).toBeUndefined();
     expect(contexts[0].audioWorklet.addModule).toHaveBeenCalledWith('/ui/chat/voice-worklet.js');
     expect(getUserMedia).toHaveBeenCalledWith({
-      audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     });
     const stopping = capture.stop();
     expect(nodes[0].port.postMessage).toHaveBeenCalledWith('finish');

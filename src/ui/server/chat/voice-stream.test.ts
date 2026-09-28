@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { TranscriptionStreamPart } from 'ai';
+import { NoTranscriptGeneratedError, type TranscriptionStreamPart } from 'ai';
 
 vi.mock('./voice-input-config.js', () => ({
   VOICE_INPUT_MODEL: 'scribe_v2_realtime',
@@ -19,6 +19,7 @@ vi.mock('../../../modules/permissions/access.js', () => ({
 vi.mock('../../../log.js', () => ({ log: { warn: vi.fn() } }));
 
 import { authenticate } from '../auth.js';
+import { log } from '../../../log.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import { resolveVoiceInputConfig } from './voice-input-config.js';
 import {
@@ -95,6 +96,26 @@ describe('voice transcript normalization', () => {
     expect(transcript.accept({ type: 'transcript-partial', id: 'one', text: 'late' })).toBeUndefined();
   });
 
+  it('promotes provisional text when a committed stream ends without a final event', () => {
+    const transcript = new VoiceTranscriptNormalizer();
+    const partial = transcript.accept({ type: 'transcript-partial', id: 'one', text: 'Complete thought' });
+    expect(transcript.finalizeProvisionalText()).toEqual([{ ...partial, sequence: 2, final: true }]);
+    expect(transcript.hasProvisionalText()).toBe(false);
+    expect(transcript.finalizeProvisionalText()).toEqual([]);
+  });
+
+  it('only promotes nonempty provisional segments, keeping their IDs and genuine repeated speech', () => {
+    const transcript = new VoiceTranscriptNormalizer();
+    const first = transcript.accept({ type: 'transcript-final', id: 'one', text: 'Hello.' });
+    const repeated = transcript.accept({ type: 'transcript-partial', id: 'two', text: 'Hello.' });
+    transcript.accept({ type: 'transcript-partial', id: 'three', text: '   ' });
+    expect(first?.id).not.toBe(repeated?.id);
+    expect(transcript.finalizeProvisionalText()).toEqual([{ ...repeated, sequence: 4, final: true }]);
+    expect(transcript.hasProvisionalText()).toBe(false);
+    expect(transcript.finalizeProvisionalText()).toEqual([]);
+    expect(transcript.accept({ type: 'transcript-partial', id: 'two', text: 'late' })).toBeUndefined();
+  });
+
   it('accumulates deltas, accepts replacement finals, and assigns anonymous segments', () => {
     const transcript = new VoiceTranscriptNormalizer();
     transcript.accept({ type: 'transcript-delta', delta: 'hel' });
@@ -129,12 +150,81 @@ describe('voice stream lifecycle', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
-  it('does not claim success for unfinalized speech', async () => {
+  it('finalizes the latest provisional text after a clean user-requested finish', async () => {
     const { ws } = connect(async function* (audio) {
       yield { type: 'transcript-partial', text: 'unfinished' };
       await consume(audio);
     });
     ws.receive({ type: 'finish' });
+    await vi.waitFor(() => expect(ws.readyState).toBe(WebSocket.CLOSED));
+    expect(ws.sent.slice(-2)).toEqual([
+      expect.objectContaining({ type: 'transcript', text: 'unfinished', final: true }),
+      { type: 'finished' },
+    ]);
+  });
+
+  it('keeps provisional text when the provider commits an empty final transcript', async () => {
+    const { ws } = connect(async function* (audio) {
+      yield { type: 'transcript-partial', text: 'recognized speech' };
+      await consume(audio);
+      throw new NoTranscriptGeneratedError({ responses: [] });
+    });
+    ws.receive({ type: 'finish' });
+    await vi.waitFor(() => expect(ws.readyState).toBe(WebSocket.CLOSED));
+    expect(ws.sent.slice(-2)).toEqual([
+      expect.objectContaining({ type: 'transcript', text: 'recognized speech', final: true }),
+      { type: 'finished' },
+    ]);
+    expect(log.warn).toHaveBeenCalledWith('Voice input finalized provisional text without a provider final', {
+      userId: 'user',
+      groupId: 'group',
+      segmentCount: 1,
+    });
+    expect(JSON.stringify(vi.mocked(log.warn).mock.calls)).not.toContain('recognized speech');
+  });
+
+  it.each([0, -32768])('distinguishes silent PCM from unrecognized audio (sample: %i)', async (sample) => {
+    const { ws } = connect(async function* (audio) {
+      await consume(audio);
+      yield* [];
+      throw new NoTranscriptGeneratedError({ responses: [] });
+    });
+    const pcm = Buffer.alloc(3200);
+    pcm.writeInt16LE(sample);
+    ws.receive(pcm);
+    ws.receive({ type: 'finish' });
+    await vi.waitFor(() => expect(ws.readyState).toBe(WebSocket.CLOSED));
+    expect(ws.sent.at(-1)).toMatchObject({
+      type: 'error',
+      code: 'no_speech',
+      message:
+        sample === 0
+          ? 'The microphone produced silent audio. Check the selected microphone and try again.'
+          : 'No speech was recognized. Speak clearly and try again.',
+    });
+    expect(log.warn).toHaveBeenCalledWith(
+      'Voice transcription provider failed',
+      expect.objectContaining({ failureKind: 'no_transcript', inputBytes: 3200, peakPcm: Math.abs(sample) }),
+    );
+    expect(ws.sent.some((event) => event.type === 'finished')).toBe(false);
+  });
+
+  it('does not promote provisional text on a provider failure other than an empty result', async () => {
+    const { ws } = connect(async function* (audio) {
+      yield { type: 'transcript-partial', text: 'Keep this draft' };
+      await consume(audio);
+      throw new Error('Network disconnected');
+    });
+    ws.receive({ type: 'finish' });
+    await vi.waitFor(() => expect(ws.readyState).toBe(WebSocket.CLOSED));
+    expect(ws.sent.at(-1)).toMatchObject({ type: 'error', code: 'transcription_failed' });
+    expect(ws.sent.some((event) => event.type === 'finished' || event.final === true)).toBe(false);
+  });
+
+  it('does not claim success when the provider ends before the user finishes', async () => {
+    const { ws } = connect(async function* () {
+      yield { type: 'transcript-partial', text: 'unfinished' };
+    });
     await vi.waitFor(() => expect(ws.readyState).toBe(WebSocket.CLOSED));
     expect(ws.sent.at(-1)).toMatchObject({ type: 'error', code: 'incomplete_transcript' });
     expect(ws.sent.some((event) => event.type === 'finished')).toBe(false);
@@ -142,13 +232,59 @@ describe('voice stream lifecycle', () => {
 
   it('surfaces provider errors without leaking headers or audio', async () => {
     const { ws } = connect(async function* () {
-      yield { type: 'error', error: new Error('xi-api-key: secret; audio: private') };
+      const error = new Error('xi-api-key: secret; audio: private');
+      error.name = 'ProviderError: private';
+      yield { type: 'error', error };
     });
     await vi.waitFor(() => expect(ws.readyState).toBe(WebSocket.CLOSED));
     expect(ws.sent.at(-1)).toMatchObject({ type: 'error', code: 'transcription_failed' });
     expect(JSON.stringify(ws.sent)).not.toContain('secret');
     expect(JSON.stringify(ws.sent)).not.toContain('private');
+    expect(JSON.stringify(vi.mocked(log.warn).mock.calls)).not.toContain('secret');
+    expect(JSON.stringify(vi.mocked(log.warn).mock.calls)).not.toContain('private');
+    expect(log.warn).toHaveBeenCalledWith(
+      'Voice transcription provider failed',
+      expect.objectContaining({ failureKind: 'provider_error' }),
+    );
   });
+
+  it.each(['cancel', 'timeout', 'disconnect'])('ignores a late empty-result rejection after %s', async (ending) => {
+    vi.useFakeTimers();
+    const { ws, release } = connect(async function* (_audio, signal) {
+      yield { type: 'transcript-partial', text: 'Keep this draft' };
+      await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+      throw new NoTranscriptGeneratedError({ responses: [] });
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ws.sent.at(-1)).toMatchObject({ type: 'transcript', final: false });
+    const close = vi.spyOn(ws, 'close');
+    ws.receive({ type: 'finish' });
+    if (ending === 'timeout') await vi.advanceTimersByTimeAsync(10_000);
+    else if (ending === 'disconnect') ws.close();
+    else ws.receive({ type: 'cancel' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(close).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+    expect(ws.sent.some((event) => event.type === 'finished' || event.final === true)).toBe(false);
+    expect(log.warn).not.toHaveBeenCalledWith('Voice transcription provider failed', expect.anything());
+  });
+
+  it.each([false, true])(
+    'checks browser backpressure before promoting provisional text (empty result: %s)',
+    async (emptyResult) => {
+      const { ws } = connect(async function* (audio) {
+        yield { type: 'transcript-partial', text: 'Keep this draft' };
+        await consume(audio);
+        if (emptyResult) throw new NoTranscriptGeneratedError({ responses: [] });
+      });
+      await vi.waitFor(() => expect(ws.sent.at(-1)).toMatchObject({ type: 'transcript', final: false }));
+      ws.bufferedAmount = 128_001;
+      ws.receive({ type: 'finish' });
+      await vi.waitFor(() => expect(ws.readyState).toBe(WebSocket.CLOSED));
+      expect(ws.sent.at(-1)).toMatchObject({ type: 'error', code: 'client_backpressure' });
+      expect(ws.sent.some((event) => event.type === 'finished' || event.final === true)).toBe(false);
+    },
+  );
 
   it('cancels the provider and releases the slot once on disconnect', async () => {
     let signal: AbortSignal | undefined;

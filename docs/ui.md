@@ -251,11 +251,18 @@ Agent Settings retains the detailed availability reason.
 Microphone capture requires HTTPS (or localhost) and browser permission. Set
 `UI_BASE_URL` to the actual external UI URL: the voice WebSocket checks the
 browser Origin against it. Reverse proxies must forward WebSocket upgrades.
-The host accepts 16 kHz mono PCM over an authenticated, group-authorized
+The browser captures at its native audio rate; the audio worklet resamples to
+16 kHz mono PCM before sending over an authenticated, group-authorized
 connection. Limits are one active session per user, eight globally, five
 minutes per capture, and bounded audio queues. Stopping and starting dictation
-creates a fresh stream. Finalization times out after ten seconds instead of sending incomplete
-text.
+creates a fresh stream. After an explicit Stop or Send, a clean provider stream
+ending can finalize the latest provisional text even without a provider final
+event. The same recovery applies to an SDK empty-transcript error when
+provisional text exists. Revisions retain their segment IDs rather than being
+appended again. Recovery is logged with a segment count, never transcript text.
+Other provider failures, a stream ending before Stop/Send, cancellation, and a
+ten-second finalization timeout do not promote provisional text or submit it.
+Silent audio and unrecognized speech have distinct error messages.
 
 Hiding the page or leaving a conversation releases the microphone. Provider
 errors, disconnects, and quota exhaustion preserve recovered, editable text and

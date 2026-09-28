@@ -15,7 +15,7 @@ export async function captureVoice(
 ): Promise<VoiceCapture> {
   const reason = voiceBrowserReason();
   if (reason) throw new Error(reason);
-  const context = new AudioContext({ sampleRate: 16000 });
+  const context = new AudioContext();
   let stream: MediaStream | null = null;
   let node: AudioWorkletNode | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
@@ -67,7 +67,7 @@ export async function captureVoice(
     await context.audioWorklet.addModule('/ui/chat/voice-worklet.js');
     checkCancelled();
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     });
     checkCancelled();
     node = new AudioWorkletNode(context, 'voice-pcm');

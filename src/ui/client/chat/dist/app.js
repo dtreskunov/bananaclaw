@@ -16135,7 +16135,7 @@ function voiceBrowserReason() {
 async function captureVoice(onChunk, onError, signal) {
   const reason = voiceBrowserReason();
   if (reason) throw new Error(reason);
-  const context = new AudioContext({ sampleRate: 16e3 });
+  const context = new AudioContext();
   let stream2 = null;
   let node = null;
   let source = null;
@@ -16182,7 +16182,7 @@ async function captureVoice(onChunk, onError, signal) {
     await context.audioWorklet.addModule("/ui/chat/voice-worklet.js");
     checkCancelled();
     stream2 = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, sampleRate: 16e3, echoCancellation: true, noiseSuppression: true }
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
     });
     checkCancelled();
     node = new AudioWorkletNode(context, "voice-pcm");
