@@ -9,7 +9,7 @@ import { appendActivity } from '../db/session-state.js';
 import { registerProvider } from './provider-registry.js';
 import { audioReferencePrompt } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
-import { pickActivityDetail } from './types.js';
+import { fingerprintToolInput, pickActivityDetail } from './types.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
@@ -584,7 +584,13 @@ export class ClaudeProvider implements AgentProvider {
             for (const b of blocks) {
               const blk = b as { type?: string; id?: string; name?: string; input?: Record<string, unknown> };
               if (blk.type === 'tool_use' && blk.id && blk.name) {
-                yield { type: 'progress', step: formatClaudeToolUse(blk.id, blk.name, blk.input ?? {}) };
+                const input = blk.input ?? {};
+                const toolInputFingerprint = fingerprintToolInput(input);
+                yield {
+                  type: 'progress',
+                  step: formatClaudeToolUse(blk.id, blk.name, input),
+                  ...(toolInputFingerprint ? { toolInputFingerprint } : {}),
+                };
               }
             }
           }

@@ -6,7 +6,7 @@ import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 import { registerProvider } from './provider-registry.js';
 import { audioReferencePrompt, isAudioAttachment } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, CallUsage, FileAttachment, ForkContinuationInput, ModelLimits, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions, TurnUsage } from './types.js';
-import { pickActivityDetail } from './types.js';
+import { fingerprintToolInput, pickActivityDetail } from './types.js';
 import { accumulateCallUsage } from './usage.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { createModelCatalog, type RawLimits } from './model-catalog.js';
@@ -1068,7 +1068,17 @@ export class OpenCodeProvider implements AgentProvider {
                 }
                 const step = formatProgressFromPart(part);
                 if (step) {
-                  yield { type: 'progress', step };
+                  const toolInputFingerprint =
+                    step.kind === 'tool' &&
+                    !['pending', 'running'].includes(step.status) &&
+                    part?.state?.input !== undefined
+                      ? fingerprintToolInput(part.state.input)
+                      : undefined;
+                  yield {
+                    type: 'progress',
+                    step,
+                    ...(toolInputFingerprint ? { toolInputFingerprint } : {}),
+                  };
                 }
                 break;
               }
@@ -1139,11 +1149,26 @@ export class OpenCodeProvider implements AgentProvider {
                 for (const part of (snapshot.data?.parts ?? []) as OpenCodePart[]) {
                   const step = formatProgressFromPart(part);
                   if (step?.kind === 'tool' && step.status === 'error' && /abort|cancel|interrupt/i.test(step.error ?? '')) {
+                    const toolInputFingerprint =
+                      part.state?.input === undefined ? undefined : fingerprintToolInput(part.state.input);
                     yield {
                       type: 'progress',
                       step: { ...step, status: 'interrupted', error: 'Interrupted; outcome unknown. External side effects may have occurred.' },
+                      ...(toolInputFingerprint ? { toolInputFingerprint } : {}),
                     };
-                  } else if (step) yield { type: 'progress', step };
+                  } else if (step) {
+                    const toolInputFingerprint =
+                      step.kind === 'tool' &&
+                      !['pending', 'running'].includes(step.status) &&
+                      part.state?.input !== undefined
+                        ? fingerprintToolInput(part.state.input)
+                        : undefined;
+                    yield {
+                      type: 'progress',
+                      step,
+                      ...(toolInputFingerprint ? { toolInputFingerprint } : {}),
+                    };
+                  }
                 }
               } catch { /* The fallback may have killed the runtime; streamed history remains durable. */ }
               yield { type: 'checkpoint', ref: lastId };

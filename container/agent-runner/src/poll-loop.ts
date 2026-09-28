@@ -1489,19 +1489,24 @@ async function processQuery(
         if (promptTracker) promptTracker.latest += `\n\n${guidance}`;
         queueMicrotask(wakeFollowUpWatcher);
       } else if (event.type === 'progress' && event.step.kind === 'tool') {
-        // A call's arguments aren't resolved yet on its `pending` event, so
-        // counting there would give every call to the same tool an identical
-        // signature — eight ordinary consecutive bash calls would trip the
-        // streak guard. Wait for the first event that carries the detail, or
-        // for the call to finish if no arguments are reported.
-        const detailKnown =
-          event.step.detail !== undefined || !['pending', 'running'].includes(event.step.status);
-        if (detailKnown && !countedToolCallIds.has(event.step.id)) {
+        // Display detail intentionally omits arbitrary MCP arguments. Providers
+        // supply a private fingerprint once complete arguments are available.
+        // A terminal event without one still counts as a tool call, but it
+        // breaks the identical-call streak rather than assuming empty input.
+        const callResolved =
+          event.toolInputFingerprint !== undefined ||
+          !['pending', 'running'].includes(event.step.status);
+        if (callResolved && !countedToolCallIds.has(event.step.id)) {
           countedToolCallIds.add(event.step.id);
           consecutiveTextSteps = 0;
-          const signature = `${event.step.tool}\u0000${event.step.detail ?? ''}`;
-          identicalToolStreak = signature === lastToolSignature ? identicalToolStreak + 1 : 1;
-          lastToolSignature = signature;
+          if (event.toolInputFingerprint !== undefined) {
+            const signature = `${event.step.tool}\u0000${event.toolInputFingerprint}`;
+            identicalToolStreak = signature === lastToolSignature ? identicalToolStreak + 1 : 1;
+            lastToolSignature = signature;
+          } else {
+            identicalToolStreak = 0;
+            lastToolSignature = null;
+          }
         }
         const runawayReason =
           getDuplicateSendCount() >= MAX_DUPLICATE_SENDS_PER_TURN

@@ -6,7 +6,14 @@ import { getPendingMessages } from './db/messages-in.js';
 import { getActivityBuffer, getContinuation, setContinuation } from './db/session-state.js';
 import { getCurrentInReplyTo } from './current-batch.js';
 import { MockProvider } from './providers/mock.js';
-import type { FileAttachment, ProviderEvent, ProviderExchange, QueryInput, QueryPushOptions } from './providers/types.js';
+import {
+  fingerprintToolInput,
+  type FileAttachment,
+  type ProviderEvent,
+  type ProviderExchange,
+  type QueryInput,
+  type QueryPushOptions,
+} from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
 import { loadConfig } from './config.js';
 import { emitHostEventForTesting, resetHostEventsForTesting } from './session-link.js';
@@ -2055,6 +2062,49 @@ class TextLoopProvider {
   }
 }
 
+class ToolLoopProvider {
+  readonly supportsNativeSlashCommands = false;
+  aborts = 0;
+
+  constructor(private readonly inputs: Array<Record<string, unknown>>) {}
+
+  isSessionInvalid(): boolean {
+    return false;
+  }
+
+  query() {
+    const owner = this;
+    let aborted = false;
+    return {
+      push: () => true,
+      end: () => {},
+      abort: () => {
+        aborted = true;
+        owner.aborts++;
+      },
+      events: (async function* () {
+        yield { type: 'init' as const, continuation: 'tool-loop-session' };
+        for (const [index, input] of owner.inputs.entries()) {
+          if (aborted) break;
+          yield {
+            type: 'progress' as const,
+            step: {
+              kind: 'tool' as const,
+              id: `tool-${index}`,
+              tool: 'mcp__budget__actual_transactions_get',
+              status: 'completed' as const,
+            },
+            toolInputFingerprint: fingerprintToolInput(input),
+          };
+        }
+        if (!aborted) {
+          yield { type: 'result' as const, text: '<message to="discord-test">done</message>' };
+        }
+      })(),
+    };
+  }
+}
+
 describe('poll loop — text-only runaway', () => {
   it('aborts a turn that keeps replying without ever calling a tool', async () => {
     insertMessage('m-loop', { sender: 'Alice', text: 'do the thing' }, { platformId: 'chan-1', channelType: 'discord' });
@@ -2087,6 +2137,53 @@ describe('poll loop — text-only runaway', () => {
     expect(provider.aborts).toBe(0);
     expect(JSON.parse(getUndeliveredMessages()[0]!.content).text).toBe('done');
 
+    await loopPromise.catch(() => {});
+  });
+});
+
+describe('poll loop — identical tool-call runaway', () => {
+  it('allows consecutive calls to the same tool with different arguments', async () => {
+    insertMessage('m-distinct-tools', { sender: 'Alice', text: 'check every account' }, {
+      platformId: 'chan-1',
+      channelType: 'discord',
+    });
+    const provider = new ToolLoopProvider(
+      Array.from({ length: 8 }, (_, index) => ({
+        accountId: `account-${index}`,
+        startDate: '2026-09-20',
+        endDate: '2026-09-28',
+      })),
+    );
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 3000);
+    controller.abort();
+
+    expect(provider.aborts).toBe(0);
+    expect(JSON.parse(getUndeliveredMessages()[0]!.content).text).toBe('done');
+    await loopPromise.catch(() => {});
+  });
+
+  it('aborts consecutive calls with the same normalized arguments', async () => {
+    insertMessage('m-identical-tools', { sender: 'Alice', text: 'repeat forever' }, {
+      platformId: 'chan-1',
+      channelType: 'discord',
+    });
+    const provider = new ToolLoopProvider(
+      Array.from({ length: 8 }, (_, index) => index % 2 === 0
+        ? { accountId: 'account-1', startDate: '2026-09-20', endDate: '2026-09-28' }
+        : { endDate: '2026-09-28', accountId: 'account-1', startDate: '2026-09-20' }),
+    );
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+
+    await waitFor(() => getUndeliveredMessages().length > 0, 3000);
+    controller.abort();
+
+    expect(provider.aborts).toBe(1);
+    expect(JSON.parse(getUndeliveredMessages()[0]!.content).text)
+      .toContain('8 identical consecutive "mcp__budget__actual_transactions_get" calls');
     await loopPromise.catch(() => {});
   });
 });

@@ -17,7 +17,7 @@ import type {
   TurnUsage,
   SteeringInput,
 } from './types.js';
-import { pickActivityDetail } from './types.js';
+import { fingerprintToolInput, pickActivityDetail } from './types.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
 import { inlineHistoryBytes, MAX_INLINE_BYTES, prepareNativeUserMessage } from './native/attachments.js';
 export { prepareNativeUserMessage as userMessage } from './native/attachments.js';
@@ -369,7 +369,14 @@ export class NativeProvider implements AgentProvider {
                   yield* flushCallUsage();
                   yield { type: 'activity' };
                   const part = rawPart as unknown as Record<string, unknown>;
-                  if (part.type === 'tool-call') yield { type: 'progress', step: formatNativeToolStep(part, 'running') };
+                  if (part.type === 'tool-call') {
+                    const toolInputFingerprint = fingerprintToolInput(part.input);
+                    yield {
+                      type: 'progress',
+                      step: formatNativeToolStep(part, 'running'),
+                      ...(toolInputFingerprint ? { toolInputFingerprint } : {}),
+                    };
+                  }
                   else if (part.type === 'tool-result') yield { type: 'progress', step: formatNativeToolStep(part, 'completed') };
                   else if (part.type === 'tool-error') yield { type: 'progress', step: formatNativeToolStep(part, 'error') };
                   else if (part.type === 'error') throw part.error;

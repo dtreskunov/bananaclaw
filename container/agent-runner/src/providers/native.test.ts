@@ -11,7 +11,7 @@ import * as nativeAudio from './native/audio.js';
 import * as nativeTools from './native/tools.js';
 import * as nativeAttachments from './native/attachments.js';
 import { NativeStore } from './native/store.js';
-import type { ProviderEvent } from './types.js';
+import { fingerprintToolInput, type ProviderEvent } from './types.js';
 
 let root: string;
 let server: ReturnType<typeof Bun.serve>;
@@ -732,6 +732,27 @@ describe('NativeProvider', () => {
     )).not.toHaveProperty('detail');
   });
 
+  it('fingerprints complete tool input with stable object key ordering', () => {
+    const first = fingerprintToolInput({
+      accountId: 'account-1',
+      startDate: '2026-09-20',
+      endDate: '2026-09-28',
+    });
+    const reordered = fingerprintToolInput({
+      endDate: '2026-09-28',
+      accountId: 'account-1',
+      startDate: '2026-09-20',
+    });
+
+    expect(first).toBe(reordered);
+    expect(first).not.toBe(fingerprintToolInput({
+      accountId: 'account-2',
+      startDate: '2026-09-20',
+      endDate: '2026-09-28',
+    }));
+    expect(first).not.toContain('account-1');
+  });
+
   it('stores supported image attachments as replayable base64 message parts', async () => {
     const imagePath = path.join(root, 'pixel.png');
     fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -912,6 +933,13 @@ describe('NativeProvider', () => {
       expect.objectContaining({
         type: 'progress',
         step: expect.objectContaining({ tool: 'mcp__Fixture__echo_value', status: 'completed' }),
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'progress',
+        toolInputFingerprint: fingerprintToolInput({ value: 'from-model' }),
+        step: expect.objectContaining({ tool: 'mcp__Fixture__echo_value', status: 'running' }),
       }),
     );
     expect(requests).toHaveLength(2);

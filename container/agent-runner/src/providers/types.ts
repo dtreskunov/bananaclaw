@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /** A model's token budgets. Absent means "not known", never "unlimited". */
 export interface ModelLimits {
   context_window?: number;
@@ -351,6 +353,38 @@ export function pickActivityDetail(input: Record<string, unknown> | undefined): 
   return formatTodoActivityDetail(input);
 }
 
+function stableJson(value: unknown, seen: Set<object>): string | undefined {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'number') return JSON.stringify(Number.isFinite(value) ? value : null);
+  if (typeof value !== 'object') return undefined;
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => stableJson(item, seen) ?? 'null').join(',')}]`;
+    }
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .flatMap((key) => {
+        const encoded = stableJson((value as Record<string, unknown>)[key], seen);
+        return encoded === undefined ? [] : [`${JSON.stringify(key)}:${encoded}`];
+      });
+    return `{${entries.join(',')}}`;
+  } finally {
+    seen.delete(value);
+  }
+}
+
+/** Hash complete tool input for internal loop detection without exposing arguments. */
+export function fingerprintToolInput(input: unknown): string | undefined {
+  const normalized = stableJson(input, new Set());
+  return normalized === undefined
+    ? undefined
+    : createHash('sha256').update(normalized).digest('hex');
+}
+
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   | { type: 'steering_applied'; id: string }
@@ -372,7 +406,7 @@ export type ProviderEvent =
       recoveredFromUnclosedThink?: boolean;
     }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
-  | { type: 'progress'; step: ActivityStep }
+  | { type: 'progress'; step: ActivityStep; toolInputFingerprint?: string }
   /**
    * One assistant message finished within the current turn. Emitted purely so
    * the runner can bound degenerate loops: a model that keeps emitting text
