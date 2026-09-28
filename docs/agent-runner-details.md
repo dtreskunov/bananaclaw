@@ -416,7 +416,24 @@ accepted signal timestamp for typing freshness and stuck-container detection.
 
 The agent-runner transforms messages_in rows into a prompt string. The provider receives a ready-to-send string — it doesn't know about message kinds or routing.
 
-**Routing field stripping:** `platform_id`, `channel_type`, `thread_id` are never included in the prompt. They're stored as context for writing messages_out.
+**Routing context:** Channel routing fields and thread IDs stay in the runner.
+Peer-agent inputs expose the source group ID as `sender_agent_id` (identity,
+not a destination). A configured peer reply destination is named in `from`.
+Without one, `from` is omitted and `reply_allowed="false"` marks the message
+as one-way. A per-batch routing hint forbids inventing a reply address or
+substituting the session's human channel. This does not grant reverse access.
+Host-origin system messages retain their existing no-`from` formatting.
+
+**Final-response recovery:** Bare final text remains scratchpad, not an
+automatic channel delivery. If a tool sent content elsewhere but the final
+confirmation is unwrapped (or was stripped as reasoning), the runner requests
+a reporting-only correction with tools disabled and cross-destination message
+blocks rejected during that correction. Only content on the same
+channel, platform, and thread counts as an already-emitted reply for this
+recovery decision. Completed actions are not repeated; unsupported or
+exhausted recovery surfaces a report-failure notice. Same-route sends,
+destination-aware duplicate suppression, and intentionally silent off-route
+sends retain their existing behavior.
 
 **Sender attribution:** The formatter uses `sender_user_id` when canonical attribution is available, otherwise `sender_identity`, otherwise an unknown sender. It does not infer identity from `content.senderId`, `content.author.userId`, or display names.
 

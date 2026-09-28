@@ -233,7 +233,10 @@ describe('origin attribute', () => {
       )
       .run();
     insertRouted('m1', 'agent', 'ag-peer');
-    expect(formatMessages(getPendingMessages())).toContain('from="peer"');
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('from="peer"');
+    expect(result).toContain('sender_agent_id="ag-peer"');
+    expect(result).not.toContain('reply_allowed="false"');
   });
 
   it('omits the origin for host-written messages instead of calling them unknown', () => {
@@ -242,12 +245,38 @@ describe('origin attribute', () => {
     const result = formatMessages(getPendingMessages());
     expect(result).not.toContain('unknown:');
     expect(result).not.toContain('from=');
+    expect(result).not.toContain('sender_agent_id=');
+    expect(result).not.toContain('reply_allowed=');
   });
 
-  it('still flags an unresolvable peer as unknown', () => {
+  it('separates one-way peer identity from reply capability without granting a destination', () => {
     setConfigForTest({ agentGroupId: 'ag-self' });
     insertRouted('m1', 'agent', 'ag-other');
-    expect(formatMessages(getPendingMessages())).toContain('from="unknown:agent:ag-other"');
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('sender_agent_id="ag-other" reply_allowed="false"');
+    expect(result).not.toContain('from=');
+    expect(result).not.toContain('unknown:');
+    expect(result).toContain('No authorized reply destination exists');
+    expect(result).toContain('Do not invent a to address or substitute');
+    expect(getInboundDb().prepare('SELECT * FROM destinations').all()).toEqual([]);
+  });
+
+  it('escapes one-way peer identity metadata', () => {
+    setConfigForTest({ agentGroupId: 'ag-self' });
+    insertRouted('m1', 'agent', 'ag-"<&');
+    expect(formatMessages(getPendingMessages())).toContain('sender_agent_id="ag-&quot;&lt;&amp;"');
+  });
+
+  it('keeps human routing in a mixed batch containing a one-way peer message', () => {
+    getInboundDb().prepare(
+      `INSERT INTO destinations (name, display_name, type, channel_type, platform_id)
+       VALUES ('web', 'Web', 'channel', 'web', 'web-1')`,
+    ).run();
+    insertRouted('peer', 'agent', 'ag-other');
+    insertRouted('human', 'web', 'web-1');
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('sender_agent_id="ag-other" reply_allowed="false"');
+    expect(result).toContain('from="web"');
   });
 });
 

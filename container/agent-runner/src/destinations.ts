@@ -136,12 +136,12 @@ function buildDestinationsSection(): string {
   );
   lines.push('');
   lines.push(
-    '**Routing rule:** every inbound `<message>` tag carries a `from="name"` attribute. Default to addressing the destination it came `from` — a human channel message gets a human-channel reply; a peer-agent message gets a peer-agent reply. Cross-routing (forwarding a human request to a peer agent, or relaying a peer\'s answer back to the human) is fine when the request explicitly asks for it, but never silently swap destinations.',
+    '**Routing rule:** inbound messages with an authorized reply destination carry a `from="name"` attribute. Default to addressing the destination it came `from` — a human channel message gets a human-channel reply; a peer-agent message gets a peer-agent reply. A peer message with `reply_allowed="false"` is one-way: `sender_agent_id` is identity only, not an address. Do not invent a destination or substitute a human channel for an unavailable peer reply. Cross-routing (forwarding a human request to a peer agent, or relaying a peer\'s answer back to the human) is fine when the request explicitly asks for it, but never silently swap destinations.',
   );
   if (origin && all.length > 1) {
     lines.push('');
     lines.push(
-      `**This conversation lives on \`${origin.name}\`.** Unless a request explicitly tells you to send elsewhere, reply there — addressing a different destination means the human waiting here sees nothing.`,
+      `**This conversation lives on \`${origin.name}\`.** For human messages here, reply there unless explicitly asked to send elsewhere. Peer messages follow their own routing rule above; this channel is not a fallback for an unavailable peer reply.`,
     );
   }
   if (all.some((d) => d.type === 'agent') && all.some((d) => d.type === 'channel')) {

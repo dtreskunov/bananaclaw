@@ -166,7 +166,13 @@ function formatChatMessages(messages: MessageInRow[]): string {
   // requested."`) instead of calling the API — see #2555 for the full trace.
   // The fix is simply to drop the wrapper; the single-message path (which
   // already worked) is now just the N=1 case of the same code.
-  const formatted = messages.map(formatSingleChat).join('\n');
+  const oneWayHint = messages.some((m) =>
+    m.channel_type === 'agent' && m.platform_id && !isHostOrigin(m) &&
+    !findByRouting(m.channel_type, m.platform_id),
+  )
+    ? '<routing_hint>Peer messages with reply_allowed="false" are one-way: sender_agent_id identifies the sender, not a destination. No authorized reply destination exists. Do not invent a to address or substitute this session\'s human channel for a peer reply.</routing_hint>\n'
+    : '';
+  const formatted = oneWayHint + messages.map(formatSingleChat).join('\n');
   const hasWeb = messages.some((m) => m.channel_type === 'web');
   if (!hasWeb) return formatted;
   // For the NanoClaw web/file-browser channel, tell the agent how to make
@@ -195,12 +201,17 @@ function formatSingleChat(msg: MessageInRow): string {
 }
 
 /**
- * Build a ` from="destination_name"` attribute string from a message's routing
- * fields. Shared by all formatters so the agent always knows where a message
- * originated — critical for explicit addressing.
+ * Keep peer identity separate from an authorized reply destination.
+ * Shared by all formatters that expose message origin metadata.
  */
 function originAttr(msg: MessageInRow): string {
   const fromDest = findByRouting(msg.channel_type, msg.platform_id);
+  if (msg.channel_type === 'agent' && msg.platform_id && !isHostOrigin(msg)) {
+    const identity = ` sender_agent_id="${escapeXml(msg.platform_id)}"`;
+    return fromDest
+      ? `${identity} from="${escapeXml(fromDest.name)}"`
+      : `${identity} reply_allowed="false"`;
+  }
   if (fromDest) return ` from="${escapeXml(fromDest.name)}"`;
   if (isHostOrigin(msg)) return '';
   if (msg.channel_type || msg.platform_id) {

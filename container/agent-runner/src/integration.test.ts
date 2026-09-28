@@ -754,6 +754,7 @@ describe('poll loop — /clear command', () => {
 });
 
 type ScriptedTurn = {
+  mcpRoute?: { platformId: string; channelType: string; threadId: string | null };
   text: string;
   mcpMessage?: string;
   strippedToEmpty?: boolean;
@@ -1723,6 +1724,168 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
 });
 
 describe('poll loop - future-work announcements', () => {
+  it.each([
+    { platformId: 'ag-peer', channelType: 'agent', threadId: null },
+    { platformId: 'chan-2', channelType: 'discord', threadId: 'thread-1' },
+    { platformId: 'chan-1', channelType: 'discord', threadId: 'thread-2' },
+    { platformId: 'chan-1', channelType: 'web', threadId: 'thread-1' },
+  ])('recovers an unwrapped confirmation after an off-route send: %j', async (mcpRoute) => {
+    insertMessage('m-relay', { sender: 'Alice', text: 'Tell the peer' }, {
+      platformId: 'chan-1', channelType: 'discord', threadId: 'thread-1',
+    });
+    const provider = new ScriptedProvider([
+      { mcpMessage: 'Instructions for the peer', mcpRoute, text: 'Done. Relayed the instructions.' },
+      { text: '<message to="discord-test">Done. Relayed the instructions.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+    try {
+      await waitFor(() => provider.exchanges.length === 2, 2000);
+      const out = getUndeliveredMessages();
+      expect(out).toHaveLength(2);
+      expect(JSON.parse(out[0].content).text).toBe('Instructions for the peer');
+      expect(out[1]).toMatchObject({
+        channel_type: 'discord', platform_id: 'chan-1', thread_id: 'thread-1', in_reply_to: 'm-relay',
+      });
+      expect(JSON.parse(out[1].content).text).toBe('Done. Relayed the instructions.');
+      expect(provider.pushOptions).toEqual([{ tools: 'disabled' }]);
+      expect(provider.pushes[0]).toContain('Report to <message to="discord-test">');
+      expect(provider.pushes[0]).toContain('Do NOT repeat');
+      expect(provider.exchanges.map((e) => e.status)).toEqual(['undelivered', 'completed']);
+      expect(provider.exchanges[1].prompt).toBe(provider.exchanges[0].prompt);
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
+
+  it('recovers a stripped confirmation after a peer send without repeating tools', async () => {
+    insertMessage('m-relay', { text: 'Tell the peer' }, { platformId: 'chan-1', channelType: 'discord' });
+    const provider = new ScriptedProvider([
+      {
+        mcpMessage: 'Instructions for the peer',
+        mcpRoute: { platformId: 'ag-peer', channelType: 'agent', threadId: null },
+        strippedToEmpty: true,
+      },
+      { text: '<message to="discord-test">Relayed.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+    try {
+      await waitFor(() => provider.exchanges.length === 1, 2000);
+      expect(getUndeliveredMessages()).toHaveLength(2);
+      expect(provider.pushOptions).toEqual([{ tools: 'disabled' }]);
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
+
+  it('blocks cross-destination message blocks during reporting-only recovery', async () => {
+    getInboundDb().prepare(
+      `INSERT INTO destinations (name, display_name, type, agent_group_id)
+       VALUES ('peer', 'Peer', 'agent', 'ag-peer')`,
+    ).run();
+    insertMessage('m-relay', { text: 'Tell the peer' }, { platformId: 'chan-1', channelType: 'discord' });
+    const provider = new ScriptedProvider([
+      {
+        mcpMessage: 'Instructions for the peer',
+        mcpRoute: { platformId: 'ag-peer', channelType: 'agent', threadId: null },
+        text: 'Relayed.',
+      },
+      { text: '<message to="peer">Instructions for the peer, again.</message>' },
+      { text: '<message to="discord-test">Relayed.</message>' },
+    ]);
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+    try {
+      await waitFor(() => provider.exchanges.length === 3, 2000);
+      const out = getUndeliveredMessages();
+      expect(out).toHaveLength(2);
+      expect(out.filter((m) => m.channel_type === 'agent')).toHaveLength(1);
+      expect(JSON.parse(out[1].content).text).toBe('Relayed.');
+      expect(out[1].channel_type).toBe('discord');
+      expect(provider.pushOptions).toEqual([{ tools: 'disabled' }, { tools: 'disabled' }]);
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
+
+  it.each([true, false])('surfaces report failure after a peer send (tools-disabled support: %s)', async (supported) => {
+    insertMessage('m-relay', { text: 'Tell the peer' }, {
+      platformId: 'chan-1', channelType: 'discord', threadId: 'thread-1',
+    });
+    const provider = new ScriptedProvider([
+      {
+        mcpMessage: 'Instructions for the peer',
+        mcpRoute: { platformId: 'ag-peer', channelType: 'agent', threadId: null },
+        text: 'Relayed.',
+      },
+    ], supported);
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+    try {
+      await waitFor(() => getUndeliveredMessages().some((m) => JSON.parse(m.content).suggested_action === 'report'), 2000);
+      const out = getUndeliveredMessages();
+      expect(out).toHaveLength(2);
+      expect(out[1]).toMatchObject({
+        channel_type: 'discord', platform_id: 'chan-1', thread_id: 'thread-1', in_reply_to: 'm-relay',
+      });
+      expect(JSON.parse(out[1].content).text).toContain('The action was not retried');
+      expect([...provider.pushOptions, ...provider.rejectedPushOptions].every((o) => o?.tools === 'disabled')).toBe(true);
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
+
+  it.each(['', '<internal>No additional reply needed.</internal>'])('preserves intentional silence after a peer send: %s', async (text) => {
+    insertMessage('m-relay', { text: 'Tell the peer; no need to reply here' }, { platformId: 'chan-1', channelType: 'discord' });
+    const provider = new ScriptedProvider([{
+      mcpMessage: 'Instructions for the peer',
+      mcpRoute: { platformId: 'ag-peer', channelType: 'agent', threadId: null },
+      text,
+    }]);
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+    try {
+      await waitFor(() => provider.exchanges.length === 1, 2000);
+      expect(getUndeliveredMessages()).toHaveLength(1);
+      expect(provider.pushes).toHaveLength(0);
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
+
+  it('does not recover bare final text after a same-route send', async () => {
+    insertMessage('m-local', { text: 'Say hello' }, { platformId: 'chan-1', channelType: 'discord' });
+    const provider = new ScriptedProvider([{ mcpMessage: 'Hello!', text: 'Already sent hello.' }]);
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+    try {
+      await waitFor(() => provider.exchanges.length === 1, 2000);
+      expect(getUndeliveredMessages()).toHaveLength(1);
+      expect(provider.pushes).toHaveLength(0);
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
+
   it('delivers send_message announcements without an automatic recovery push', async () => {
     insertMessage('m-progress-only', { sender: 'Alice', text: 'update all issues' }, { platformId: 'chan-1', channelType: 'discord' });
 
@@ -1966,9 +2129,9 @@ class ScriptedProvider {
         writeMessageOut({
           id: `mcp-${turnIndex}`,
           kind: 'chat',
-          platform_id: 'chan-1',
-          channel_type: 'discord',
-          thread_id: null,
+          platform_id: turn.mcpRoute?.platformId ?? 'chan-1',
+          channel_type: turn.mcpRoute?.channelType ?? 'discord',
+          thread_id: turn.mcpRoute?.threadId ?? null,
           content: JSON.stringify({ text: turn.mcpMessage, delivery_origin: 'send_message' }),
           in_reply_to: getCurrentInReplyTo(),
         });

@@ -51,6 +51,9 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
     expect(prompt).toContain('<message to="name">');
     expect(prompt).toContain('show in the activity trace');
     expect(prompt).toContain('`casa`');
+    expect(prompt).toContain('`reply_allowed="false"` is one-way');
+    expect(prompt).toContain('`sender_agent_id` is identity only, not an address');
+    expect(prompt).toContain('Do not invent a destination or substitute a human channel');
   });
 
   it('flags the session-origin destination so the agent replies to the right channel', () => {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { loadConfig } from './config.js';
-import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
+import { findByName, findByRouting, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
   getSteeringCandidates,
@@ -818,6 +818,7 @@ async function processQuery(
   let malformedToolRecoveryRouting: RoutingContext | null = null;
   let malformedToolRecoveryHadNativeTool = false;
   let postToolDeliveryRecoveryAttempts = 0;
+  let recoveringOffRouteReply = false;
   const executedToolCalls = new Map<
     string,
     {
@@ -927,13 +928,23 @@ async function processQuery(
    * agent only reacts and then leaves its final-result text unwrapped, the
    * nudge path must still fire so the answer isn't silently dropped.
    */
-  const countTurnContentMessages = (since: number): number => {
-    const rows = getOutboundDb().prepare('SELECT kind, content FROM messages_out WHERE seq > ?').all(since) as {
+  const countTurnContentMessages = (since: number, replyRoute?: RoutingContext): number => {
+    const rows = getOutboundDb()
+      .prepare('SELECT kind, content, channel_type, platform_id, thread_id FROM messages_out WHERE seq > ?')
+      .all(since) as {
       kind: string;
       content: string;
+      channel_type: string | null;
+      platform_id: string | null;
+      thread_id: string | null;
     }[];
     let n = 0;
     for (const r of rows) {
+      if (replyRoute && (
+        r.channel_type !== replyRoute.channelType ||
+        r.platform_id !== replyRoute.platformId ||
+        r.thread_id !== replyRoute.threadId
+      )) continue;
       // kind='internal' is the web thought-bubble surfaced by dispatchResultText
       // from <internal>...</internal> blocks — not a reply.
       if (r.kind === 'internal' || r.kind === 'system') continue;
@@ -981,6 +992,7 @@ async function processQuery(
     malformedToolRecoveryRouting = null;
     malformedToolRecoveryHadNativeTool = false;
     postToolDeliveryRecoveryAttempts = 0;
+    recoveringOffRouteReply = false;
     executedToolCalls.clear();
   };
   const exhaustMalformedToolRecovery = (failedRouting: RoutingContext): void => {
@@ -1363,14 +1375,15 @@ async function processQuery(
         `<message to="name">...</message> block.</system>`,
     );
   };
-  const pushPostToolDeliveryNudge = (failedRouting: RoutingContext): boolean => {
+  const pushPostToolDeliveryNudge = (failedRouting: RoutingContext, replyOnly = false): boolean => {
+    recoveringOffRouteReply ||= replyOnly;
     postToolDeliveryRecoveryAttempts++;
     nudgedForDelivery = true;
     malformedToolRecoveryHadNativeTool = true;
     malformedToolRecoveryMode = 'delivery';
     malformedToolRecoveryRouting = failedRouting;
     log(
-      `Recovery nudge: malformed final output followed native tool activity - requesting delivery only ` +
+      `Recovery nudge: undelivered final output followed native tool activity - requesting delivery only ` +
         `(attempt ${postToolDeliveryRecoveryAttempts}/${MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS})`,
     );
     beginCorrectiveTurn(
@@ -1379,6 +1392,11 @@ async function processQuery(
     const names = getAllDestinations()
       .map((d) => d.name)
       .join(', ');
+    const replyDestination = findByRouting(failedRouting.channelType, failedRouting.platformId);
+    const replyInstruction = replyDestination
+      ? `Report to <message to="${replyDestination.name}"> in the originating conversation. ` +
+        `Messages already sent to other destinations are not a reply here. `
+      : '';
     const summarizeCall = ({ tool, detail }: { tool: string; detail?: string }): string => {
       const safeDetail = detail
         ? JSON.stringify(detail.slice(0, 240))
@@ -1412,11 +1430,11 @@ async function processQuery(
         : '';
     const accepted = query.push(
       `<system>At least one native tool already ran in the previous turn, but the final reply ` +
-        `was malformed. Here is the execution record:\n${callSummary || 'One or more native tools may have executed.'}\n` +
+        `was not delivered. Here is the execution record:\n${callSummary || 'One or more native tools may have executed.'}\n` +
         `Do NOT repeat any of those calls or make equivalent requests through other tools. ` +
         `Tools are disabled for this recovery turn. ${retryInstruction}Use the existing native results above and report ` +
         `the actual result in ` +
-        `a <message to="name">...</message> block. Your destinations: ${names}.</system>`,
+        `a <message to="name">...</message> block. ${replyInstruction}Your destinations: ${names}.</system>`,
       undefined,
       { tools: 'disabled' },
     );
@@ -1633,7 +1651,7 @@ async function processQuery(
         // below, or a still-queued follow-up that arrived in the gap).
         setCurrentInReplyTo(resultRouting.inReplyTo);
         if (event.text) {
-          const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
+          const mcpWroteContent = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
           if (drainedIds.length > 0) markCompleted(drainedIds);
           const wasRecoveringDelivery = nudgedForDelivery;
           const { sent, hasUnwrapped, internalCount } = dispatchResultText(
@@ -1641,7 +1659,15 @@ async function processQuery(
             resultRouting,
             isPostToolDeliveryRecovery,
             outboundMaxAtTurnStart,
+            undefined,
+            recoveringOffRouteReply,
           );
+          // Off-route sends are completed actions, not delivery of an unwrapped
+          // answer to this conversation. Recover only the report, never the action.
+          const mcpWroteReply = mcpWroteContent && (
+            !hasUnwrapped || countTurnContentMessages(outboundMaxAtTurnStart, resultRouting) > 0
+          );
+          const needsPostToolReport = malformedToolRecoveryHadNativeTool || mcpWroteContent;
           if (sent > 0) sentAny = true;
           // A post-nudge retry that delivers nothing but writes an <internal>
           // note is the model taking the escape hatch — confirming it meant to
@@ -1664,9 +1690,9 @@ async function processQuery(
             resetMalformedToolRecovery();
           }
           const willRetryWrapping =
-            !mcpWroteReply && hasUnwrapped && !malformedToolRecoveryHadNativeTool && !nudgedForDelivery;
+            !mcpWroteReply && hasUnwrapped && !needsPostToolReport && !nudgedForDelivery;
           const willRecoverPostToolDelivery =
-            !mcpWroteReply && hasUnwrapped && malformedToolRecoveryHadNativeTool && !nudgedForDelivery;
+            !mcpWroteReply && hasUnwrapped && needsPostToolReport && !nudgedForDelivery;
           notifyExchangeComplete(onExchangeComplete, {
             prompt: archivePrompts[0] ?? initialPrompt,
             result: event.text,
@@ -1676,7 +1702,7 @@ async function processQuery(
           if (mcpWroteReply) {
             sentAny = true;
           } else if (willRecoverPostToolDelivery) {
-            pushPostToolDeliveryNudge(resultRouting);
+            pushPostToolDeliveryNudge(resultRouting, mcpWroteContent);
           } else if (willRetryWrapping) {
             log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
             pushDeliveryNudge(resultRouting);
@@ -1714,7 +1740,11 @@ async function processQuery(
           //      recover. This is the shape of a legitimately silent
           //      autonomous/task turn, so it is NOT nudged; it falls through
           //      to the terminal empty-result notice.
-          const mcpWroteReply = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
+          const mcpWroteContent = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
+          const mcpWroteReply = mcpWroteContent && (
+            !event.strippedToEmpty || countTurnContentMessages(outboundMaxAtTurnStart, resultRouting) > 0
+          );
+          const needsPostToolReport = malformedToolRecoveryHadNativeTool || mcpWroteContent;
           let continuedPostToolDeliveryRecovery = false;
           if (isPostToolDeliveryRecovery && !mcpWroteReply) {
             if (postToolDeliveryRecoveryAttempts < MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS) {
@@ -1730,20 +1760,21 @@ async function processQuery(
           if (drainedIds.length > 0) markCompleted(drainedIds);
           const willNudge =
             !mcpWroteReply &&
+            !needsPostToolReport &&
             event.strippedToEmpty === true &&
             event.malformedToolCall !== true &&
             !nudgedForDelivery &&
             !lastProviderError;
           const willRetryMalformedTool =
             !mcpWroteReply &&
-            !malformedToolRecoveryHadNativeTool &&
+            !needsPostToolReport &&
             event.malformedToolCall === true &&
             malformedToolRecoveryAttempts < MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS &&
             !nudgedForDelivery &&
             !lastProviderError;
           const willRecoverPostToolDelivery =
             !mcpWroteReply &&
-            malformedToolRecoveryHadNativeTool &&
+            needsPostToolReport &&
             event.strippedToEmpty === true &&
             !nudgedForDelivery &&
             !lastProviderError;
@@ -1754,7 +1785,7 @@ async function processQuery(
             pushMalformedToolNudge(resultRouting);
             // Keep the prompt queued: the retry continues the same work.
           } else if (willRecoverPostToolDelivery) {
-            pushPostToolDeliveryNudge(resultRouting);
+            pushPostToolDeliveryNudge(resultRouting, mcpWroteContent);
             // Keep the prompt queued: the retry only reports prior results.
           } else if (event.malformedToolCall && !mcpWroteReply) {
             exhaustMalformedToolRecovery(malformedToolRecoveryRouting ?? resultRouting);
@@ -2012,6 +2043,7 @@ async function processQuery(
     try {
       writeMessageOut({
         id: generateId(),
+        in_reply_to: noticeRouting.inReplyTo,
         kind: 'chat',
         platform_id: noticeRouting.platformId,
         channel_type: noticeRouting.channelType,
@@ -2165,6 +2197,7 @@ function dispatchResultText(
   deliverUnwrappedToCurrentRoute = false,
   duplicateSince?: number,
   suggestedAction?: SuggestedAction,
+  replyOnly = false,
 ): { sent: number; hasUnwrapped: boolean; internalCount: number } {
   const parsed = parseAssistantOutput(text);
   if (parsed.diagnostics.length > 0) {
@@ -2225,6 +2258,17 @@ function dispatchResultText(
       log(`Unknown destination in <message to="${toName}">, dropping block`);
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
       continue;
+    }
+    if (replyOnly) {
+      const resolved = resolveDeliveryRouting(dest, routing);
+      if (
+        resolved.channelType !== routing.channelType ||
+        resolved.platformId !== routing.platformId ||
+        resolved.threadId !== routing.threadId
+      ) {
+        log(`Reporting-only recovery cannot send to "${toName}" outside the originating conversation, dropping block`);
+        continue;
+      }
     }
     if (duplicateSince !== undefined && isDuplicateSendMessage(dest, body, routing, duplicateSince)) {
       log(`Duplicate final response to "${toName}" already sent via send_message, dropping block`);
