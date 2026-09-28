@@ -43,4 +43,34 @@ describe('transcript clipboard', () => {
     await expect(copyTranscriptContent(transcriptElement())).resolves.toBe('plain');
     expect(writeText).toHaveBeenCalledWith('Hello world');
   });
+
+  it('falls back to plain text when a supported rich write is rejected', async () => {
+    class FakeClipboardItem {
+      constructor(readonly data: Record<string, Blob>) {}
+    }
+    const write = vi.fn().mockRejectedValue(new DOMException('Rich formats denied', 'NotAllowedError'));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('ClipboardItem', FakeClipboardItem);
+    vi.stubGlobal('navigator', { clipboard: { write, writeText } });
+
+    await expect(copyTranscriptContent(transcriptElement())).resolves.toBe('plain');
+    expect(writeText).toHaveBeenCalledWith('Hello world');
+  });
+
+  it('reports both failures when rich and plain clipboard writes are rejected', async () => {
+    class FakeClipboardItem {
+      constructor(readonly data: Record<string, Blob>) {}
+    }
+    vi.stubGlobal('ClipboardItem', FakeClipboardItem);
+    vi.stubGlobal('navigator', {
+      clipboard: {
+        write: vi.fn().mockRejectedValue(new DOMException('Rich formats denied', 'NotAllowedError')),
+        writeText: vi.fn().mockRejectedValue(new DOMException('Clipboard denied', 'NotAllowedError')),
+      },
+    });
+
+    await expect(copyTranscriptContent(transcriptElement())).rejects.toThrow(
+      'Rich and plain-text clipboard writes failed.',
+    );
+  });
 });

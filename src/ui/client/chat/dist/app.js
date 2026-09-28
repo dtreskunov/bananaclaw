@@ -15655,7 +15655,13 @@ var BRAND = {
 var pendingEditorSessions = y3(/* @__PURE__ */ new Map());
 var composerSendInFlight = y3(false);
 function pendingEditorKey(gid, thread, messageId) {
-  return JSON.stringify([gid, thread?.channelType || "web", thread?.messagingGroupId ?? null, thread?.threadId, messageId]);
+  return JSON.stringify([
+    gid,
+    thread?.channelType || "web",
+    thread?.messagingGroupId ?? null,
+    thread?.threadId,
+    messageId
+  ]);
 }
 function setPendingEditorSession(key, session) {
   const next = new Map(pendingEditorSessions.value);
@@ -15664,7 +15670,9 @@ function setPendingEditorSession(key, session) {
   pendingEditorSessions.value = next;
 }
 function currentPendingEditor() {
-  return [...pendingEditorSessions.value].find(([, session]) => session.open && isCurrentConversation(session.gid, session.thread));
+  return [...pendingEditorSessions.value].find(
+    ([, session]) => session.open && isCurrentConversation(session.gid, session.thread)
+  );
 }
 function isCurrentConversation(gid, thread) {
   return groupId.value === gid && threadId.value === thread.threadId && channelType.value === (thread.channelType || "web") && messagingGroupId.value === (thread.messagingGroupId ?? null);
@@ -15678,13 +15686,16 @@ function openPendingEditor(gid, thread, message) {
   for (const [otherKey, session] of next) {
     if (isCurrentConversation(session.gid, session.thread)) next.set(otherKey, { ...session, open: false });
   }
-  next.set(key, previous ? { ...previous, open: true } : {
-    gid,
-    thread: { ...thread },
-    messageId: message.id,
-    open: true,
-    draft: new PendingEditDraft(message.text, (body) => savePendingMessage(gid, thread, message.id, body))
-  });
+  next.set(
+    key,
+    previous ? { ...previous, open: true } : {
+      gid,
+      thread: { ...thread },
+      messageId: message.id,
+      open: true,
+      draft: new PendingEditDraft(message.text, (body) => savePendingMessage(gid, thread, message.id, body))
+    }
+  );
   pendingEditorSessions.value = next;
 }
 function exitPendingEditor(key) {
@@ -15783,13 +15794,17 @@ function canCancelPendingMessage(message, thread, turn, connected) {
 var pendingCancellations = y3(/* @__PURE__ */ new Map());
 var cancelledInputs = /* @__PURE__ */ new Set();
 function currentInputKey(id) {
-  return pendingEditorKey(groupId.value, {
-    threadId: threadId.value,
-    channelType: channelType.value,
-    messagingGroupId: messagingGroupId.value ?? void 0,
-    title: "",
-    lastActivityAt: ""
-  }, id);
+  return pendingEditorKey(
+    groupId.value,
+    {
+      threadId: threadId.value,
+      channelType: channelType.value,
+      messagingGroupId: messagingGroupId.value ?? void 0,
+      title: "",
+      lastActivityAt: ""
+    },
+    id
+  );
 }
 function isCancelledInput(id) {
   return !!id && cancelledInputs.has(currentInputKey(id));
@@ -15823,7 +15838,8 @@ var PendingCancellation = class {
   requestId = crypto.randomUUID();
   async cancel() {
     if (this.state.value.confirmed) return true;
-    if (this.state.value.busy || editRequestOutstanding(pendingEditorKey(this.gid, this.thread, this.messageId))) return false;
+    if (this.state.value.busy || editRequestOutstanding(pendingEditorKey(this.gid, this.thread, this.messageId)))
+      return false;
     this.state.value = { ...this.state.value, busy: true, error: "" };
     try {
       const response = await fetch(pendingMessageUrl(this.gid, this.thread, this.messageId), {
@@ -15837,7 +15853,9 @@ var PendingCancellation = class {
         confirmCancelledInput(this.messageId, pendingEditorKey(this.gid, this.thread, this.messageId));
         this.state.value = { busy: false, unresolved: false, error: "", confirmed: true };
         if (isCurrentConversation(this.gid, this.thread)) {
-          chatMessages.value = chatMessages.value.filter((message) => message.direction !== "in" || message.id !== this.messageId);
+          chatMessages.value = chatMessages.value.filter(
+            (message) => message.direction !== "in" || message.id !== this.messageId
+          );
         }
         if (this.state.value.confirmed) return true;
         return true;
@@ -19063,9 +19081,12 @@ function toChatMessage(m6) {
 }
 function visibleIncomingMessages(messages) {
   for (const message of messages) {
-    if (message.direction === "in" && message.id && message.inputState?.status === "cancelled") confirmCancelledInput(message.id);
+    if (message.direction === "in" && message.id && message.inputState?.status === "cancelled")
+      confirmCancelledInput(message.id);
   }
-  return messages.filter((message) => message.direction !== "in" || message.inputState?.status !== "cancelled" && !isCancelledInput(message.id));
+  return messages.filter(
+    (message) => message.direction !== "in" || message.inputState?.status !== "cancelled" && !isCancelledInput(message.id)
+  );
 }
 function replaceIncomingMessages(messages) {
   const echoedIds = messages.filter((m6) => normDirection(m6.direction) === "in" && m6.id).map((m6) => m6.id);
@@ -19079,7 +19100,9 @@ function replaceIncomingMessages(messages) {
 }
 function mergeIncomingMessages(messages) {
   messages = visibleIncomingMessages(messages);
-  chatMessages.value = chatMessages.value.filter((message) => message.direction !== "in" || !isCancelledInput(message.id));
+  chatMessages.value = chatMessages.value.filter(
+    (message) => message.direction !== "in" || !isCancelledInput(message.id)
+  );
   const updates = new Map(
     messages.filter((message) => message.id).map((message) => [`${normDirection(message.direction)}:${message.id}`, message])
   );
@@ -19490,7 +19513,9 @@ function connectChatWs(ctx2) {
     if (payload.kind === "inbound") {
       if (payload.id && payload.inputState?.status === "cancelled") confirmCancelledInput(payload.id);
       if (payload.inputState?.status === "cancelled" || isCancelledInput(payload.id)) {
-        chatMessages.value = chatMessages.value.filter((message) => message.direction !== "in" || message.id !== payload.id);
+        chatMessages.value = chatMessages.value.filter(
+          (message) => message.direction !== "in" || message.id !== payload.id
+        );
         pendingWebSends.value = pendingWebSends.value.filter((send) => send.messageId !== payload.id);
         return;
       }
@@ -21467,13 +21492,15 @@ function splitPendingInputs(messages) {
   return { transcript, queued };
 }
 function timelineLayoutKey(messages) {
-  return JSON.stringify(messages.map((message) => [
-    message.id,
-    message.direction,
-    message.timelinePosition,
-    isQueuedFollowup(message),
-    message.inputState?.status === "steering"
-  ]));
+  return JSON.stringify(
+    messages.map((message) => [
+      message.id,
+      message.direction,
+      message.timelinePosition,
+      isQueuedFollowup(message),
+      message.inputState?.status === "steering"
+    ])
+  );
 }
 
 // src/input-state.ts
@@ -21879,13 +21906,23 @@ async function copyTranscriptContent(element) {
   const clipboard = navigator.clipboard;
   if (!clipboard) throw new Error("Clipboard access is unavailable in this browser.");
   if (typeof ClipboardItem !== "undefined" && typeof clipboard.write === "function") {
-    await clipboard.write([
-      new ClipboardItem({
-        "text/html": new Blob([payload.html], { type: "text/html" }),
-        "text/plain": new Blob([payload.text], { type: "text/plain" })
-      })
-    ]);
-    return "rich";
+    try {
+      await clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([payload.html], { type: "text/html" }),
+          "text/plain": new Blob([payload.text], { type: "text/plain" })
+        })
+      ]);
+      return "rich";
+    } catch (richError) {
+      if (typeof clipboard.writeText !== "function") throw richError;
+      try {
+        await clipboard.writeText(payload.text);
+        return "plain";
+      } catch (plainError) {
+        throw new AggregateError([richError, plainError], "Rich and plain-text clipboard writes failed.");
+      }
+    }
   }
   if (typeof clipboard.writeText !== "function") {
     throw new Error("Clipboard writing is unavailable in this browser.");
@@ -21894,10 +21931,41 @@ async function copyTranscriptContent(element) {
   return "plain";
 }
 
+// src/components/CopyTranscriptButton.tsx
+function CopyTranscriptButton({ getContent }) {
+  const copy = async () => {
+    const content = getContent();
+    if (!content) {
+      console.error("Failed to copy transcript message: message content is unavailable.");
+      showToast("Could not copy message");
+      return;
+    }
+    try {
+      await copyTranscriptContent(content);
+      showToast("Copied message");
+    } catch (error) {
+      console.error("Failed to copy transcript message:", error);
+      showToast("Could not copy message");
+    }
+  };
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg-action-btn msg-copy-btn",
+      title: "Copy this message",
+      "aria-label": "Copy this message",
+      onClick: copy,
+      children: /* @__PURE__ */ u4("svg", { class: "msg-copy-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: [
+        /* @__PURE__ */ u4("rect", { x: "5.5", y: "5.5", width: "8", height: "8", rx: "1.5" }),
+        /* @__PURE__ */ u4("path", { d: "M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" })
+      ] })
+    }
+  );
+}
+
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
-var TRANSCRIPT_LONG_PRESS_MS = 500;
-var TRANSCRIPT_LONG_PRESS_MOVE_PX = 10;
 function imageFileName(src) {
   try {
     const name = new URL(src, window.location.href).pathname.split("/").filter(Boolean).pop();
@@ -22409,13 +22477,7 @@ function openThreadAt(targetThreadId, messageId) {
 function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
-  const longPressTimerRef = A2(null);
-  const longPressStartRef = A2(null);
-  const longPressTriggeredRef = A2(false);
   const [continueState, setContinueState] = h2("idle");
-  y2(() => () => {
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-  }, []);
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -22503,57 +22565,12 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const suggestedAction = m6.suggestedAction ?? (isFutureWorkMessage(m6.text) ? "continue" : void 0);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && action != null;
-  const cancelLongPress = () => {
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    longPressTimerRef.current = null;
-    longPressStartRef.current = null;
-  };
-  const onPointerDown = (event) => {
-    if (!event.isPrimary || event.button !== 0) return;
-    cancelLongPress();
-    longPressTriggeredRef.current = false;
-    longPressStartRef.current = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY
-    };
-    longPressTimerRef.current = setTimeout(() => {
-      longPressTimerRef.current = null;
-      longPressTriggeredRef.current = true;
-      const content = mdRef.current;
-      if (!content) return;
-      copyTranscriptContent(content).then(() => showToast("Copied message")).catch((error) => {
-        console.error("Failed to copy transcript message:", error);
-        showToast("Could not copy message", "err");
-      });
-    }, TRANSCRIPT_LONG_PRESS_MS);
-  };
-  const onPointerMove = (event) => {
-    const start = longPressStartRef.current;
-    if (!start || start.pointerId !== event.pointerId) return;
-    if (Math.abs(event.clientX - start.x) > TRANSCRIPT_LONG_PRESS_MOVE_PX || Math.abs(event.clientY - start.y) > TRANSCRIPT_LONG_PRESS_MOVE_PX) {
-      cancelLongPress();
-    }
-  };
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: `${cls} transcript-copyable`,
+      class: cls,
       "data-msg-id": m6.id,
       ref,
-      onPointerDown,
-      onPointerMove,
-      onPointerUp: cancelLongPress,
-      onPointerCancel: cancelLongPress,
-      onContextMenu: (event) => {
-        if (longPressStartRef.current || longPressTriggeredRef.current) event.preventDefault();
-      },
-      onClickCapture: (event) => {
-        if (!longPressTriggeredRef.current) return;
-        longPressTriggeredRef.current = false;
-        event.preventDefault();
-        event.stopPropagation();
-      },
       children: [
         m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
         m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
@@ -22626,8 +22643,11 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             "\xB7",
             " Tokens unavailable"
           ] }) : null),
-          /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
-          /* @__PURE__ */ u4(ForkButton, { m: m6 })
+          /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
+            /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current }),
+            /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
+            /* @__PURE__ */ u4(ForkButton, { m: m6 })
+          ] })
         ] }) : null
       ]
     }

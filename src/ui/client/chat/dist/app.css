@@ -1765,9 +1765,6 @@ nav.tab-bar-strip.group-strip {
   word-break: break-word;
   font-size: var(--font-base);
 }
-.chat-main .msg.transcript-copyable {
-  -webkit-touch-callout: none;
-}
 .chat-main .transcript-copy-content {
   min-width: 0;
 }
@@ -1878,8 +1875,13 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg.event.fork-divider.event-clickable:hover {
   opacity: 1;
 }
-.chat-main .msg-action-btn {
+.chat-main .msg-inline-actions {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.chat-main .msg-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1906,6 +1908,13 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg-action-btn[disabled] {
   cursor: default;
   opacity: 0.5;
+}
+.chat-main .msg-copy-icon {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
 }
 .chat-main .events-group.open {
   align-self: stretch;

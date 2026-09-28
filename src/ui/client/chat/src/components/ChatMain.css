@@ -93,7 +93,6 @@
 .chat-main .log .task-indicator.msg.event .event-meta { margin-left: 4px; }
 .chat-main .log .task-indicator.paused .event-icon { opacity: 0.55; }
 .chat-main .msg { position: relative; padding: 6px 10px; border-radius: var(--radius-lg); max-width: 78%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
-.chat-main .msg.transcript-copyable { -webkit-touch-callout: none; }
 .chat-main .transcript-copy-content { min-width: 0; }
 .chat-main .msg.in { align-self: flex-end; background: var(--accent); }
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }
@@ -147,11 +146,14 @@
 .chat-main .msg.event.fork-divider .fork-divider-glyph { opacity: 0.8; }
 .chat-main .msg.event.fork-divider .fork-divider-text { white-space: normal; }
 .chat-main .msg.event.fork-divider.event-clickable:hover { opacity: 1; }
-/* Last item on the meta line, pushed to the bubble's right edge. In flow
-   rather than absolute: the meta line fills the bubble on short messages, so
-   an overlay would sit on top of the cost and model name. */
-.chat-main .msg-action-btn {
+/* Message actions stay in flow so they never cover cost or model metadata. */
+.chat-main .msg-inline-actions {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.chat-main .msg-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -169,6 +171,13 @@
 .chat-main .msg-action-btn:hover { background: rgba(127, 127, 127, 0.12); color: var(--surface-fg); }
 .chat-main .msg-action-btn:focus-visible { background: rgba(127, 127, 127, 0.12); color: var(--surface-fg); border-color: var(--border-strong); }
 .chat-main .msg-action-btn[disabled] { cursor: default; opacity: 0.5; }
+.chat-main .msg-copy-icon {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
 .chat-main .events-group.open {
   align-self: stretch;
   display: flex;
