@@ -6,11 +6,13 @@ import {
   groupId,
   messagingGroupId,
   refs,
+  responseReceived,
   stopRequest,
   threadId,
   turnConnected,
 } from './state';
 import type { ActiveTurn } from './types';
+import { resetTurnPresentation } from './turn-presentation';
 
 const STOP_TIMEOUT_MS = 30_000;
 let confirmationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -41,8 +43,13 @@ function awaitConfirmation(turnId: string): void {
 export function applyTurnState(turn: ActiveTurn | null, connected: boolean): void {
   const changed = activeTurn.value?.id !== turn?.id;
   if (changed) clearPendingStop();
-  if (changed && turn) refs.carryActivity = [];
   batch(() => {
+    if (turn && refs.presentationTurnId !== turn.id) {
+      // The first turn frame may follow its initial typing snapshot.
+      if (refs.presentationTurnId !== null || responseReceived.value) resetTurnPresentation();
+      refs.presentationTurnId = turn.id;
+      refs.carryActivity = [];
+    }
     if (changed) stopRequest.value = null;
     activeTurn.value = turn;
     turnConnected.value = connected;
@@ -61,6 +68,8 @@ export function applyTurnState(turn: ActiveTurn | null, connected: boolean): voi
 export function resetTurnState(): void {
   clearPendingStop();
   batch(() => {
+    resetTurnPresentation();
+    refs.presentationTurnId = null;
     activeTurn.value = null;
     turnConnected.value = false;
     stopRequest.value = null;

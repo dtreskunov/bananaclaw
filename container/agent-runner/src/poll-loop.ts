@@ -866,6 +866,8 @@ async function processQuery(
   // Live usage is an overwrite snapshot, so it must never receive call deltas.
   let liveUsage: import('./providers/types.js').TurnUsage | null = null;
   let latestUsage: import('./providers/types.js').TurnUsage | null = null;
+  let unlinkedUsage: { id: string; data: import('./providers/types.js').TurnUsage } | null = null;
+  let activityStartedAt = Date.now();
   // Captured from the provider's `checkpoint` event; flushed with the usage so
   // it lands on the same outbound row.
   let pendingCheckpoint: string | null = null;
@@ -888,6 +890,8 @@ async function processQuery(
     }
     liveUsage = null;
     latestUsage = null;
+    unlinkedUsage = null;
+    activityStartedAt = Date.now();
     activityFlushedCount = 0;
   };
 
@@ -1868,7 +1872,9 @@ async function processQuery(
               log(`Failed to resolve model limits: ${e instanceof Error ? e.message : String(e)}`);
             }
             try {
-              writeTurnUsage(`tu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, lastOutId, pendingUsage);
+              const usageId = `tu-${randomUUID()}`;
+              writeTurnUsage(usageId, lastOutId, pendingUsage);
+              unlinkedUsage = lastOutId ? null : { id: usageId, data: pendingUsage };
             } catch (e) {
               log(`Failed to write turn_usage: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -2046,8 +2052,10 @@ async function processQuery(
     suggestedAction?: SuggestedAction,
   ): void => {
     try {
+      const id = generateId();
+      const durationMs = Math.max(0, Date.now() - activityStartedAt);
       writeMessageOut({
-        id: generateId(),
+        id,
         in_reply_to: noticeRouting.inReplyTo,
         kind: 'chat',
         platform_id: noticeRouting.platformId,
@@ -2055,9 +2063,18 @@ async function processQuery(
         thread_id: noticeRouting.threadId,
         content: JSON.stringify({
           text,
+          delivery_origin: 'response',
+          turn_stats: { durationMs, model: latestUsage?.model || loadConfig().model || null },
           ...(suggestedAction ? { suggested_action: suggestedAction } : {}),
         }),
       });
+      writeTurnActivity(id, getActivityBuffer());
+      const noticeUsage = unlinkedUsage?.data ?? latestUsage;
+      if (noticeUsage) {
+        // Re-link an empty result's usage rather than billing it a second time.
+        writeTurnUsage(unlinkedUsage?.id ?? `tu-${randomUUID()}`, id, { ...noticeUsage, duration_ms: durationMs });
+      }
+      markTurnPersisted(getOutboundDb());
     } catch (e) {
       log(`Failed to write ${failureLabel}: ${e instanceof Error ? e.message : String(e)}`);
     }

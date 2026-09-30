@@ -1,7 +1,9 @@
-export interface StoppedTurnStats {
+export interface TurnStats {
   durationMs: number;
   model: string | null;
 }
+
+export type StoppedTurnStats = TurnStats;
 
 export function readStoppedTurnStats(content: unknown): StoppedTurnStats | undefined {
   if (
@@ -12,7 +14,16 @@ export function readStoppedTurnStats(content: unknown): StoppedTurnStats | undef
     !('stopped_stats' in content)
   )
     return undefined;
-  const stats = content.stopped_stats;
+  return parseTurnStats(content.stopped_stats);
+}
+
+export function readTurnStats(content: unknown): TurnStats | undefined {
+  return content && typeof content === 'object' && 'turn_stats' in content
+    ? parseTurnStats(content.turn_stats)
+    : undefined;
+}
+
+function parseTurnStats(stats: unknown): TurnStats | undefined {
   if (
     !stats ||
     typeof stats !== 'object' ||

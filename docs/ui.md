@@ -210,6 +210,23 @@ unavailable** instead of showing zero. Native model-call usage is captured befor
 waiting for tools to finish. This metadata is persisted for reloads, but cannot
 be reconstructed for older stopped responses that never recorded it.
 
+### Activity and metadata handoff
+
+Steering and queued input do not reset the active response's activity, model,
+usage snapshot, or elapsed-time boundary. Retargeting a shared session resends
+its current activity snapshot to the new destination.
+
+When typing ends, the UI freezes elapsed time and retains the trace until the
+final response or warning arrives, without a timeout. The response inherits the
+live trace and provisional metadata in the same update that removes the live
+bubble, even if the active-turn state has not caught up. Final usage replaces
+the provisional estimate when available; missing usage is not shown as zero.
+
+Empty-result and exhausted-recovery warnings persist their activity, timing,
+model, and any reported usage so those details survive reload. Intentional
+silence does not generate a warning; the live view keeps a non-animated finished
+summary until the next turn or navigation.
+
 ### Live voice input
 
 The microphone starts live dictation directly into the composer. Speech appears

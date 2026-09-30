@@ -171,6 +171,12 @@ export interface DisplayCard {
 
 export type SuggestedAction = 'continue' | 'retry' | 'report';
 
+export interface ProvisionalTurnMetadata {
+  usage?: TurnUsage;
+  model?: string;
+  durationMs?: number;
+}
+
 export interface ChatMessage {
   timelinePosition?: number;
   canEditPending?: boolean;
@@ -186,7 +192,10 @@ export interface ChatMessage {
   /** Safe next-turn action suggested by the agent runner. */
   suggestedAction?: SuggestedAction;
   usage?: TurnUsage;
+  /** Live estimates retained until finalized usage arrives. Never fabricates token counts. */
+  provisionalTurn?: ProvisionalTurnMetadata;
   stoppedStats?: import('../../../shared/stopped-turn').StoppedTurnStats;
+  turnStats?: import('../../../shared/stopped-turn').TurnStats;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
   /** Persisted activity trace for an outbound turn, in emit order. */
@@ -392,6 +401,7 @@ export interface WsPayload {
     suggestedAction?: SuggestedAction;
     usage?: TurnUsage;
     stoppedStats?: import('../../../shared/stopped-turn').StoppedTurnStats;
+    turnStats?: import('../../../shared/stopped-turn').TurnStats;
     activity?: ActivityLine[];
     event?: TimelineEvent;
     reactions?: MessageReaction[];
@@ -427,6 +437,7 @@ export interface WsPayload {
         suggested_action?: SuggestedAction;
         stopped?: boolean;
         stopped_stats?: unknown;
+        turn_stats?: unknown;
       };
   card?: DisplayCard;
   files?: ChatMessageFile[] | null;

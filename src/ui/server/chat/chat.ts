@@ -85,7 +85,12 @@ import { resolveVoiceInputConfig } from './voice-input-config.js';
 import { handleVoiceUpgrade } from './voice-stream.js';
 import { uiBaseUrl } from '../server.js';
 import fs from 'fs';
-import { readStoppedTurnStats, type StoppedTurnStats } from '../../shared/stopped-turn.js';
+import {
+  readStoppedTurnStats,
+  readTurnStats,
+  type StoppedTurnStats,
+  type TurnStats,
+} from '../../shared/stopped-turn.js';
 import { parseInputState, type InputHandling, type InputState } from '../../shared/input-state.js';
 import { INPUT_EDIT_ID } from '../../../pending-input-edit.js';
 import { cancelPendingInput, editPendingInput } from './pending-input-edit.js';
@@ -988,6 +993,7 @@ export interface HistoryMessage {
   canEditPending?: boolean;
   timelinePosition?: number;
   stoppedStats?: StoppedTurnStats;
+  turnStats?: TurnStats;
   /** Human sender attribution for inbound messages. */
   author?: { userId: string; displayName: string };
   direction: 'in' | 'out' | 'internal' | 'event';
@@ -1471,6 +1477,7 @@ export function readChatHistory(
           ...(parsed.deliveryOrigin ? { deliveryOrigin: parsed.deliveryOrigin } : {}),
           ...(parsed.suggestedAction ? { suggestedAction: parsed.suggestedAction } : {}),
           ...(parsed.stoppedStats ? { stoppedStats: parsed.stoppedStats } : {}),
+          ...(parsed.turnStats ? { turnStats: parsed.turnStats } : {}),
           ...(parsed.timelinePosition !== undefined ? { timelinePosition: parsed.timelinePosition } : {}),
           ...(usage ? { usage } : {}),
           ...(activity && activity.length > 0 ? { activity } : {}),
@@ -2178,11 +2185,13 @@ export function parseOutboundContent(content: string): {
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   suggestedAction?: SuggestedAction;
   stoppedStats?: StoppedTurnStats;
+  turnStats?: TurnStats;
   timelinePosition?: number;
 } {
   const o = JSON.parse(content);
   const timelinePosition = parseTimelinePosition(o?.timelinePosition);
   const stoppedStats = readStoppedTurnStats(o);
+  const turnStats = readTurnStats(o);
   const text = typeof o?.text === 'string' ? o.text : '';
   const deliveryOrigin =
     o?.delivery_origin === 'send_message' || o?.delivery_origin === 'send_file' || o?.delivery_origin === 'response'
@@ -2220,6 +2229,7 @@ export function parseOutboundContent(content: string): {
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
     ...(suggestedAction ? { suggestedAction } : {}),
     ...(stoppedStats ? { stoppedStats } : {}),
+    ...(turnStats ? { turnStats } : {}),
     ...(timelinePosition !== undefined ? { timelinePosition } : {}),
   };
 }

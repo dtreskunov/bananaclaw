@@ -15563,6 +15563,8 @@ var typingHint = y3("");
 var typingStartedAt = y3(null);
 var typingModel = y3("");
 var typingUsage = y3(null);
+var typingEndedAt = y3(null);
+var responseReceived = y3(false);
 var activityLog = y3([]);
 var pending = y3([]);
 var searchQuery = y3("");
@@ -15611,6 +15613,7 @@ var refs = {
   syncTimer: null,
   wsConnectCancel: null,
   wsPingTimer: null,
+  presentationTurnId: null,
   seenIds: /* @__PURE__ */ new Set(),
   suppressHashCount: 0,
   uploadDragDepth: 0,
@@ -17914,19 +17917,67 @@ function showsMidTurnLabel(deliveryOrigin, isLatest, turnActive) {
 function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
-function showsTurnActivity(turn, typing, threadId2, loading) {
-  return (!!turn || typing) && !!threadId2 && !loading;
+function showsTurnActivity(turn, typing, threadId2, loading, responseReceived2 = false, awaitingResponse = false) {
+  return !responseReceived2 && (!!turn || typing || awaitingResponse) && !!threadId2 && !loading;
 }
 
 // ../../shared/stopped-turn.ts
 function readStoppedTurnStats(content) {
   if (!content || typeof content !== "object" || !("stopped" in content) || content.stopped !== true || !("stopped_stats" in content))
     return void 0;
-  const stats = content.stopped_stats;
+  return parseTurnStats(content.stopped_stats);
+}
+function readTurnStats(content) {
+  return content && typeof content === "object" && "turn_stats" in content ? parseTurnStats(content.turn_stats) : void 0;
+}
+function parseTurnStats(stats) {
   if (!stats || typeof stats !== "object" || !("durationMs" in stats) || typeof stats.durationMs !== "number" || !Number.isSafeInteger(stats.durationMs) || stats.durationMs < 0 || !("model" in stats) || stats.model !== null && (typeof stats.model !== "string" || stats.model.length > 256)) {
     return void 0;
   }
   return { durationMs: stats.durationMs, model: stats.model };
+}
+
+// src/turn-presentation.ts
+function clearTypingPresentation() {
+  n2(() => {
+    isTyping.value = false;
+    typingHint.value = "";
+    typingStartedAt.value = null;
+    typingModel.value = "";
+    typingUsage.value = null;
+    typingEndedAt.value = null;
+    activityLog.value = [];
+  });
+}
+function resetTurnPresentation() {
+  n2(() => {
+    clearTypingPresentation();
+    responseReceived.value = false;
+    refs.carryActivity = [];
+  });
+}
+function finishTypingPresentation() {
+  if (responseReceived.value) return;
+  n2(() => {
+    if (isTyping.value || typingStartedAt.value !== null || activityLog.value.length || typingUsage.value) {
+      typingEndedAt.value ??= Date.now();
+    }
+    isTyping.value = false;
+    if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
+  });
+}
+function provisionalTurnMetadata() {
+  const model = typingUsage.value?.model || typingModel.value;
+  const durationMs = typingStartedAt.value === null ? void 0 : Math.max(0, (typingEndedAt.value ?? Date.now()) - typingStartedAt.value);
+  const usage = typingUsage.value ? { ...typingUsage.value, ...durationMs !== void 0 ? { duration_ms: durationMs } : {} } : void 0;
+  return usage || model || durationMs !== void 0 ? { ...usage ? { usage } : {}, ...model ? { model } : {}, ...durationMs !== void 0 ? { durationMs } : {} } : void 0;
+}
+function completeTurnPresentation() {
+  n2(() => {
+    responseReceived.value = true;
+    clearTypingPresentation();
+    refs.carryActivity = [];
+  });
 }
 
 // src/stop-turn.ts
@@ -17956,8 +18007,12 @@ function awaitConfirmation(turnId) {
 function applyTurnState(turn, connected) {
   const changed = activeTurn.value?.id !== turn?.id;
   if (changed) clearPendingStop();
-  if (changed && turn) refs.carryActivity = [];
   n2(() => {
+    if (turn && refs.presentationTurnId !== turn.id) {
+      if (refs.presentationTurnId !== null || responseReceived.value) resetTurnPresentation();
+      refs.presentationTurnId = turn.id;
+      refs.carryActivity = [];
+    }
     if (changed) stopRequest.value = null;
     activeTurn.value = turn;
     turnConnected.value = connected;
@@ -17975,6 +18030,8 @@ function applyTurnState(turn, connected) {
 function resetTurnState() {
   clearPendingStop();
   n2(() => {
+    resetTurnPresentation();
+    refs.presentationTurnId = null;
     activeTurn.value = null;
     turnConnected.value = false;
     stopRequest.value = null;
@@ -19072,6 +19129,7 @@ function toChatMessage(m6) {
     ...m6.suggestedAction ? { suggestedAction: m6.suggestedAction } : {},
     ...m6.usage ? { usage: m6.usage } : {},
     ...m6.stoppedStats ? { stoppedStats: m6.stoppedStats } : {},
+    ...m6.turnStats ? { turnStats: m6.turnStats } : {},
     ...m6.inputState ? { inputState: m6.inputState } : {},
     canEditPending: m6.canEditPending === true,
     ...m6.activity ? { activity: m6.activity } : {},
@@ -19091,7 +19149,16 @@ function visibleIncomingMessages(messages) {
 function replaceIncomingMessages(messages) {
   const echoedIds = messages.filter((m6) => normDirection(m6.direction) === "in" && m6.id).map((m6) => m6.id);
   messages = visibleIncomingMessages(messages);
-  chatMessages.value = messages.map(toChatMessage);
+  const previous = new Map(chatMessages.value.map((message) => [`${message.direction}:${message.id}`, message]));
+  chatMessages.value = messages.map((message) => {
+    const next = toChatMessage(message);
+    const prior = previous.get(`${next.direction}:${next.id}`);
+    return {
+      ...next,
+      ...!next.usage && prior?.provisionalTurn ? { provisionalTurn: prior.provisionalTurn } : {},
+      ...!next.activity && prior?.activity ? { activity: prior.activity } : {}
+    };
+  });
   refs.seenIds = new Set(messages.filter((m6) => m6.id).map((m6) => `${normDirection(m6.direction)}:${m6.id}`));
   const tid = threadId.value;
   pendingWebSends.value = pendingWebSends.value.filter(
@@ -19112,6 +19179,9 @@ function mergeIncomingMessages(messages) {
     return {
       ...message,
       timelinePosition: update.timelinePosition ?? update.inputState?.timelinePosition ?? message.timelinePosition,
+      ...update.usage ? { usage: update.usage, provisionalTurn: void 0 } : {},
+      ...update.activity ? { activity: update.activity } : {},
+      ...update.turnStats ? { turnStats: update.turnStats } : {},
       ...message.direction === "in" ? {
         text: update.text,
         inputState: update.inputState,
@@ -19139,6 +19209,7 @@ function mergeIncomingMessages(messages) {
       ...m6.suggestedAction ? { suggestedAction: m6.suggestedAction } : {},
       ...m6.usage ? { usage: m6.usage } : {},
       ...m6.stoppedStats ? { stoppedStats: m6.stoppedStats } : {},
+      ...m6.turnStats ? { turnStats: m6.turnStats } : {},
       ...m6.inputState ? { inputState: m6.inputState } : {},
       canEditPending: m6.canEditPending === true,
       ...m6.activity ? { activity: m6.activity } : {},
@@ -19171,14 +19242,17 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author, suggestedAction, stoppedStats, timelinePosition) {
+function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigin, author, suggestedAction, stoppedStats, timelinePosition, provisionalTurn, turnStats) {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) {
-    if (timelinePosition !== void 0) {
-      chatMessages.value = chatMessages.value.map(
-        (message) => message.direction === direction && message.id === id ? { ...message, timelinePosition } : message
-      );
-    }
+    chatMessages.value = chatMessages.value.map(
+      (message) => message.direction === direction && message.id === id ? {
+        ...message,
+        ...timelinePosition !== void 0 ? { timelinePosition } : {},
+        ...!message.activity && activity?.length ? { activity } : {},
+        ...!message.usage && provisionalTurn ? { provisionalTurn } : {}
+      } : message
+    );
     return;
   }
   if (key) refs.seenIds.add(key);
@@ -19194,7 +19268,9 @@ function appendMsg(direction, text, files, ts, id, activity, card, deliveryOrigi
     ...deliveryOrigin ? { deliveryOrigin } : {},
     ...suggestedAction ? { suggestedAction } : {},
     ...stoppedStats ? { stoppedStats } : {},
-    ...activity && activity.length ? { activity } : {}
+    ...activity && activity.length ? { activity } : {},
+    ...provisionalTurn ? { provisionalTurn } : {},
+    ...turnStats ? { turnStats } : {}
   });
 }
 function normDirection(d5) {
@@ -19408,12 +19484,7 @@ function connectChatWs(ctx2) {
       clearInterval(refs.wsPingTimer);
       refs.wsPingTimer = null;
     }
-    isTyping.value = false;
-    typingHint.value = "";
-    typingStartedAt.value = null;
-    typingModel.value = "";
-    typingUsage.value = null;
-    activityLog.value = [];
+    clearTypingPresentation();
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
     const delay = Math.min(15e3, 500 * Math.pow(2, attempt - 1));
@@ -19487,27 +19558,25 @@ function connectChatWs(ctx2) {
     }
     if (payload.kind === "typing") {
       const priorStartedAt = typingStartedAt.value;
-      isTyping.value = !!payload.on;
-      typingHint.value = payload.hint || "";
       if (!payload.on) {
-        typingStartedAt.value = null;
-        typingModel.value = "";
-        typingUsage.value = null;
-        if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
-        activityLog.value = [];
-      } else if (payload.items !== null && payload.items !== void 0) {
+        finishTypingPresentation();
+        return;
+      }
+      if (responseReceived.value) return;
+      typingEndedAt.value = null;
+      isTyping.value = true;
+      typingHint.value = payload.hint || "";
+      if (payload.items !== null && payload.items !== void 0) {
         const changed = JSON.stringify(activityLog.value) !== JSON.stringify(payload.items);
         activityLog.value = payload.items;
         if (changed && payload.items.length) playProgressTick();
       }
-      if (payload.on) {
-        if (typeof payload.startedAt === "number" && Number.isFinite(payload.startedAt)) {
-          if (priorStartedAt !== null && priorStartedAt !== payload.startedAt) typingUsage.value = null;
-          typingStartedAt.value = payload.startedAt;
-        }
-        if (typeof payload.model === "string") typingModel.value = payload.model;
-        if (payload.usage) typingUsage.value = payload.usage;
+      if (typeof payload.startedAt === "number" && Number.isFinite(payload.startedAt)) {
+        if (priorStartedAt !== null && priorStartedAt !== payload.startedAt) typingUsage.value = null;
+        typingStartedAt.value = payload.startedAt;
       }
+      if (typeof payload.model === "string") typingModel.value = payload.model;
+      if (payload.usage) typingUsage.value = payload.usage;
       return;
     }
     if (payload.kind === "inbound") {
@@ -19596,12 +19665,7 @@ function connectChatWs(ctx2) {
           if (!existing.some((e4) => e4.questionId === q5.questionId)) {
             pendingQuestions.value = [...existing, q5];
           }
-          isTyping.value = false;
-          typingHint.value = "";
-          typingStartedAt.value = null;
-          typingModel.value = "";
-          typingUsage.value = null;
-          activityLog.value = [];
+          clearTypingPresentation();
         } else {
           const c5 = payload.content || {};
           const text2 = typeof c5 === "string" ? c5 : c5.fallbackText || "";
@@ -19640,26 +19704,28 @@ function connectChatWs(ctx2) {
       const suggestedAction = typeof c4 === "object" && (c4.suggested_action === "continue" || c4.suggested_action === "retry" || c4.suggested_action === "report") ? c4.suggested_action : void 0;
       const finalResponse = isFinalResponse(dir, deliveryOrigin);
       const carriedActivity = finalResponse ? activityLog.value.length ? activityLog.value.slice() : refs.carryActivity : null;
-      appendMsg(
-        dir,
-        text,
-        payload.files || [],
-        payload.timestamp || "",
-        payload.id,
-        carriedActivity,
-        void 0,
-        deliveryOrigin,
-        void 0,
-        suggestedAction,
-        readStoppedTurnStats(c4),
-        payload.timelinePosition
-      );
+      n2(() => {
+        appendMsg(
+          dir,
+          text,
+          payload.files || [],
+          payload.timestamp || "",
+          payload.id,
+          carriedActivity,
+          void 0,
+          deliveryOrigin,
+          void 0,
+          suggestedAction,
+          readStoppedTurnStats(c4),
+          payload.timelinePosition,
+          finalResponse ? provisionalTurnMetadata() : void 0,
+          readTurnStats(c4)
+        );
+        if (finalResponse) completeTurnPresentation();
+      });
       bumpActiveThread();
       if (dir === "out") maybeNotify(text, payload.files || []);
       if (finalResponse) {
-        activityLog.value = [];
-        typingUsage.value = null;
-        refs.carryActivity = [];
         playCompletionChime();
       }
       return;
@@ -19673,7 +19739,7 @@ function connectChatWs(ctx2) {
       const next = list.map((m6) => {
         if (m6.id === mid && m6.direction === "out") {
           changed = true;
-          return { ...m6, usage };
+          return { ...m6, usage, provisionalTurn: void 0 };
         }
         return m6;
       });
@@ -22263,7 +22329,7 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ u: u5, live = false, partial = false }) {
+function UsageMeta({ u: u5, live = false, partial = false, provisional = false }) {
   const [expanded, setExpanded] = h2(false);
   const cost = fmtCost(u5.cost_usd);
   const model = u5.model ? shortModel(u5.model) : "";
@@ -22271,7 +22337,7 @@ function UsageMeta({ u: u5, live = false, partial = false }) {
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
   const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
   const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
-  const short = live ? [`${cost} est.`, `${fmtTok(u5.input_tokens)} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [dur, model, `${fmtTok(u5.input_tokens + u5.output_tokens)} tokens reported`].filter(Boolean).join(" \xB7 ") : [cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
+  const short = live ? [`${cost} est.`, `${fmtTok(u5.input_tokens)} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [dur, model, `${fmtTok(u5.input_tokens + u5.output_tokens)} tokens reported`].filter(Boolean).join(" \xB7 ") : [provisional ? `${cost} est.` : cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
   const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
@@ -22296,6 +22362,7 @@ function UsageMeta({ u: u5, live = false, partial = false }) {
       /* @__PURE__ */ u4("span", { class: "usage-backdrop", onClick: () => setExpanded(false) }),
       /* @__PURE__ */ u4("span", { class: "usage-popover", role: "dialog", "aria-label": "Turn usage details", children: [
         partial ? /* @__PURE__ */ u4("span", { class: "usage-row", children: "Usage reported before cancellation; final totals may be higher." }) : null,
+        provisional ? /* @__PURE__ */ u4("span", { class: "usage-row", children: "Usage reported so far; awaiting final totals." }) : null,
         /* @__PURE__ */ u4("span", { class: "usage-row", children: [
           /* @__PURE__ */ u4("span", { children: partial ? "Reported cost" : "Estimated cost" }),
           /* @__PURE__ */ u4("strong", { children: cost })
@@ -22345,6 +22412,28 @@ function UsageMeta({ u: u5, live = false, partial = false }) {
 }
 function AgentActionLabel({ label, title }) {
   return /* @__PURE__ */ u4("span", { class: "delivery-origin", title, children: label });
+}
+function MessageTurnMetadata({ message }) {
+  const usage = message.usage ?? message.provisionalTurn?.usage;
+  if (usage) return /* @__PURE__ */ u4(UsageMeta, { u: usage, partial: !!message.stoppedStats, provisional: !message.usage });
+  if (message.stoppedStats) {
+    const stats2 = message.stoppedStats;
+    return /* @__PURE__ */ u4("span", { title: "Token usage was not reported before cancellation.", children: [
+      fmtDur(stats2.durationMs),
+      " ",
+      "\xB7",
+      " ",
+      stats2.model ? shortModel(stats2.model) : "Model unavailable",
+      " ",
+      "\xB7",
+      " Tokens unavailable"
+    ] });
+  }
+  const stats = message.turnStats ?? message.provisionalTurn;
+  return stats ? /* @__PURE__ */ u4("span", { children: [
+    stats.durationMs !== void 0 ? fmtDur(stats.durationMs) : "",
+    stats.model ? shortModel(stats.model) : ""
+  ].filter(Boolean).join(" \xB7 ") }) : null;
 }
 function activeThread() {
   return threads.value.find((x6) => x6.threadId === threadId.value);
@@ -22633,16 +22722,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
           showsMidTurnLabel(m6.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-          m6.direction === "out" && (m6.usage ? /* @__PURE__ */ u4(UsageMeta, { u: m6.usage, partial: !!m6.stoppedStats }) : m6.stoppedStats ? /* @__PURE__ */ u4("span", { title: "Token usage was not reported before cancellation.", children: [
-            fmtDur(m6.stoppedStats.durationMs),
-            " ",
-            "\xB7",
-            " ",
-            m6.stoppedStats.model ? shortModel(m6.stoppedStats.model) : "Model unavailable",
-            " ",
-            "\xB7",
-            " Tokens unavailable"
-          ] }) : null),
+          m6.direction === "out" ? /* @__PURE__ */ u4(MessageTurnMetadata, { message: m6 }) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
             /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current }),
             /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
@@ -22869,14 +22949,16 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
   const stableStartedAt = typingStartedAt.value;
   const fallbackStartedAt = A2(Date.now());
   const startedAt2 = stableStartedAt ?? fallbackStartedAt.current;
+  const endedAt = typingEndedAt.value;
   const [now, setNow] = h2(() => Date.now());
   y2(() => {
     setNow(Date.now());
+    if (endedAt !== null) return;
     const timer2 = window.setInterval(() => setNow(Date.now()), 1e3);
     return () => window.clearInterval(timer2);
-  }, [startedAt2]);
+  }, [startedAt2, endedAt]);
   const model = typingModel.value ? shortModel(typingModel.value) : "";
-  const elapsed = Math.max(0, now - startedAt2);
+  const elapsed = Math.max(0, (endedAt ?? now) - startedAt2);
   const metadata = [fmtDur(elapsed), model].filter(Boolean).join(" \xB7 ");
   const usage = typingUsage.value ? { ...typingUsage.value, duration_ms: elapsed } : null;
   const liveHeadline = latestActivityHeadline(activityLog.value);
@@ -22891,9 +22973,11 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
   };
   return /* @__PURE__ */ u4("div", { class: `typing${traceExpanded ? " expanded" : ""}`, "aria-live": "polite", children: [
     /* @__PURE__ */ u4("div", { class: "typing-summary", children: /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
-      /* @__PURE__ */ u4("span", {}),
-      /* @__PURE__ */ u4("span", {}),
-      /* @__PURE__ */ u4("span", {}),
+      endedAt === null ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("span", {}),
+        /* @__PURE__ */ u4("span", {}),
+        /* @__PURE__ */ u4("span", {})
+      ] }) : null,
       liveHeadline ? /* @__PURE__ */ u4(
         "button",
         {
@@ -22908,6 +22992,7 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
       ) : !traceExpanded && typingHint.value ? /* @__PURE__ */ u4("span", { class: "hint", children: typingHint.value }) : null
     ] }) }),
     stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
+    endedAt !== null ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: turn ? "Finishing response\u2026" : "Turn finished" }) : null,
     turn && !turnConnected.value && !stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: "Disconnected. Reconnect to stop this response." }) : null,
     /* @__PURE__ */ u4(
       ActivityTracePanel,
@@ -22915,8 +23000,8 @@ function TypingIndicator({ traceExpanded, onToggleTrace }) {
         lines: activityLog.value,
         expanded: traceExpanded,
         onToggle: toggleFromCount,
-        live: true,
-        now,
+        live: endedAt === null,
+        now: endedAt ?? now,
         openLatest: openLatestOnExpand
       }
     ),
@@ -22945,7 +23030,14 @@ function MessageLog() {
   const { transcript, queued } = splitPendingInputs(timeline);
   const layoutKey = timelineLayoutKey(timeline);
   const msgCount = timeline.length;
-  const typing = showsTurnActivity(activeTurn.value, isTyping.value, threadId.value, chatLoading.value);
+  const typing = showsTurnActivity(
+    activeTurn.value,
+    isTyping.value,
+    threadId.value,
+    chatLoading.value,
+    responseReceived.value,
+    typingEndedAt.value !== null
+  );
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
   const traceLen = activityLog.value.length;

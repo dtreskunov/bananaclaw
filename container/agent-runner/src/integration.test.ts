@@ -761,6 +761,7 @@ describe('poll loop — /clear command', () => {
 });
 
 type ScriptedTurn = {
+  usage?: import('./providers/types.js').TurnUsage;
   mcpRoute?: { platformId: string; channelType: string; threadId: string | null };
   text: string;
   mcpMessage?: string;
@@ -1048,7 +1049,10 @@ describe('poll loop — empty result notice', () => {
     insertMessage('m-tool-empty', { sender: 'Alice', text: 'publish it' }, { platformId: 'chan-1', channelType: 'discord' });
 
     const provider = new ScriptedProvider([
-      { text: '', toolActivity: true },
+      { text: '', toolActivity: true, usage: {
+        cost_usd: 0.25, input_tokens: 1200, output_tokens: 30,
+        cache_read_tokens: 0, cache_write_tokens: 0, model: 'test-model',
+      } },
     ]);
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
@@ -1060,6 +1064,12 @@ describe('poll loop — empty result notice', () => {
     const content = JSON.parse(getUndeliveredMessages()[0].content);
     expect(content.text).toContain('without producing a response');
     expect(content.suggested_action).toBe('report');
+    const messageId = getUndeliveredMessages()[0].id;
+    expect(content.turn_stats).toEqual({ durationMs: expect.any(Number), model: 'test-model' });
+    expect(getOutboundDb().prepare('SELECT message_out_id, input_tokens FROM turn_usage').all())
+      .toEqual([{ message_out_id: messageId, input_tokens: 1200 }]);
+    const activity = getOutboundDb().prepare('SELECT text FROM turn_activity WHERE message_out_id = ?').all(messageId) as { text: string }[];
+    expect(activity.some((line) => JSON.parse(line.text).tool === 'web_search')).toBe(true);
   });
 });
 
@@ -1130,9 +1140,13 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
   it('surfaces a generic error when the nudge retry is still undeliverable', async () => {
     insertMessage('m-broken', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
 
+    const usage = {
+      cost_usd: 0.25, input_tokens: 1200, output_tokens: 30,
+      cache_read_tokens: 0, cache_write_tokens: 0, model: 'test-model',
+    };
     const provider = new ScriptedProvider([
-      { text: '', strippedToEmpty: true },
-      { text: '', strippedToEmpty: true },
+      { text: '', strippedToEmpty: true, usage },
+      { text: '', strippedToEmpty: true, usage: { ...usage, cost_usd: 0.5 } },
     ]);
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 4000);
@@ -1151,6 +1165,11 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     // Not the truly-empty notice — this turn HAD recoverable content.
     expect(texts.some((t: string) => t?.includes('without producing a response'))).toBe(false);
     expect(provider.pushes).toHaveLength(1);
+    const rows = getOutboundDb().prepare('SELECT message_out_id, cost_usd FROM turn_usage ORDER BY cost_usd').all();
+    expect(rows).toEqual([
+      { message_out_id: '', cost_usd: 0.25 },
+      { message_out_id: getUndeliveredMessages()[0].id, cost_usd: 0.5 },
+    ]);
   });
 
   it('retries malformed pseudo-tool output twice and delivers without a user nudge', async () => {
@@ -2253,6 +2272,7 @@ class ScriptedProvider {
       if (turn.error) {
         yield { type: 'error', ...turn.error, retryable: false };
       }
+      if (turn.usage) yield { type: 'usage', data: turn.usage };
       yield {
         type: 'result',
         text: turn.text || null,

@@ -159,15 +159,10 @@ export function startTypingRefresh(
 ): void {
   const existing = typingRefreshers.get(sessionId);
   if (existing) {
-    // Already refreshing. Fire an immediate tick for the new inbound
-    // event and reset the grace window — the new message restarts
-    // the container-wake latency budget. Also clear any lingering
-    // post-delivery pause: a new inbound means the user expects
-    // typing to show immediately.
-    const startedAt = Date.now();
-    const model = configuredModel(agentGroupId);
-    existing.startedAt = startedAt;
-    existing.model = model;
+    // Already refreshing means this input joined the in-flight turn (for
+    // example, steering). Preserve the turn boundary: activity and usage
+    // readers filter by startedAt, so resetting it would make the work
+    // already performed by this turn disappear from live clients.
     existing.paused = false;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
     // a different chat address (agent-shared sessions span messaging
@@ -175,14 +170,27 @@ export function startTypingRefresh(
     // fields and the owning instance must move together — a torn entry
     // (old address + new instance) would hand e.g. a telegram platformId
     // to a Slack instance's setTyping on the next interval tick.
+    if (
+      existing.channelType !== channelType ||
+      existing.platformId !== platformId ||
+      existing.threadId !== threadId ||
+      existing.instance !== instance
+    )
+      activitySnapshotHashes.delete(sessionId);
     existing.channelType = channelType;
     existing.platformId = platformId;
     existing.threadId = threadId;
     existing.instance = instance;
-    activitySnapshotHashes.delete(sessionId);
-    triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, startedAt, model, instance).catch(
-      () => {},
-    );
+    triggerTyping(
+      sessionId,
+      agentGroupId,
+      channelType,
+      platformId,
+      threadId,
+      existing.startedAt,
+      existing.model,
+      instance,
+    ).catch(() => {});
     return;
   }
 

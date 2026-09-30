@@ -29,6 +29,8 @@ export function showsTurnActivity(
   typing: boolean,
   threadId: string | null,
   loading: boolean,
+  responseReceived = false,
+  awaitingResponse = false,
 ): boolean {
-  return (!!turn || typing) && !!threadId && !loading;
+  return !responseReceived && (!!turn || typing || awaitingResponse) && !!threadId && !loading;
 }

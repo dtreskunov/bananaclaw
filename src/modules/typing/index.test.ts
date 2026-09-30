@@ -22,7 +22,7 @@ vi.mock('../../db/container-configs.js', () => ({ getContainerConfig: () => ({ a
 
 import { setTypingAdapter, startTypingRefresh, stopTypingRefresh } from './index.js';
 import { sessionLinkSocketPath, startSessionSignalServer, stopSessionSignalServer } from '../../session-link.js';
-import type { TypingMetadata } from '../../channels/adapter.js';
+import type { ActivityLine, TypingMetadata } from '../../channels/adapter.js';
 
 type Call = {
   channelType: string;
@@ -30,13 +30,14 @@ type Call = {
   threadId: string | null;
   instance?: string;
   metadata?: TypingMetadata;
+  items?: ActivityLine[];
 };
 
 function captureAdapter() {
   const calls: Call[] = [];
   setTypingAdapter({
-    async setTyping(channelType, platformId, threadId, _hint, instance, _items, metadata) {
-      calls.push({ channelType, platformId, threadId, instance, metadata });
+    async setTyping(channelType, platformId, threadId, _hint, instance, items, metadata) {
+      calls.push({ channelType, platformId, threadId, instance, metadata, ...(items?.length ? { items } : {}) });
     },
   });
   return calls;
@@ -86,7 +87,7 @@ describe('startTypingRefresh — instance forwarding', () => {
     }
   });
 
-  it('re-trigger on an active session passes (and stores) the new instance', async () => {
+  it('re-trigger on an active turn changes routing without resetting its metadata boundary', async () => {
     const calls = captureAdapter();
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-tester');
     await vi.advanceTimersByTimeAsync(0);
@@ -99,13 +100,14 @@ describe('startTypingRefresh — instance forwarding', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toHaveLength(1);
     expect(calls[0].instance).toBe('slack-worker');
-    expect(calls[0].metadata?.startedAt).toBeGreaterThan(firstStartedAt!);
+    expect(calls[0].metadata?.startedAt).toBe(firstStartedAt);
 
-    // And the stored entry was updated — subsequent interval ticks carry it.
+    // The stored route moves, but subsequent ticks retain the same turn.
     calls.length = 0;
     await vi.advanceTimersByTimeAsync(4_500);
     expect(calls.length).toBeGreaterThanOrEqual(1);
     expect(calls[calls.length - 1].instance).toBe('slack-worker');
+    expect(calls[calls.length - 1].metadata?.startedAt).toBe(firstStartedAt);
   });
 
   it('re-trigger with a changed address updates the whole entry — interval ticks stay self-consistent', async () => {
@@ -160,6 +162,13 @@ describe('startTypingRefresh — instance forwarding', () => {
     socket.write(
       `${JSON.stringify({
         v: 3,
+        type: 'activity',
+        step: { kind: 'tool', id: 'lookup', tool: 'budget', status: 'completed' },
+      })}\n`,
+    );
+    socket.write(
+      `${JSON.stringify({
+        v: 3,
         type: 'usage',
         usage: {
           cost_usd: 0.25,
@@ -182,6 +191,36 @@ describe('startTypingRefresh — instance forwarding', () => {
         num_turns: 2,
       }),
     );
+    const turnStartedAt = calls.at(-1)?.metadata?.startedAt;
+    const items = calls.at(-1)?.items;
+    expect(items).toHaveLength(1);
+    calls.length = 0;
+    startTypingRefresh('sess-1', 'ag-1', 'web', 'web-1', 'thread-1', 'web');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.at(-1)?.metadata).toEqual(
+      expect.objectContaining({
+        startedAt: turnStartedAt,
+        usage: expect.objectContaining({
+          input_tokens: 1200,
+          output_tokens: 30,
+          num_turns: 2,
+        }),
+      }),
+    );
+    expect(calls.at(-1)?.items).toEqual(items);
+    for (const [platform, thread, instance] of [
+      ['web-2', 'thread-1', 'web'],
+      ['web-2', 'thread-2', 'web'],
+      ['web-2', 'thread-2', 'web-alt'],
+    ]) {
+      startTypingRefresh('sess-1', 'ag-1', 'web', platform, thread, instance);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls.at(-1)?.items).toEqual(items);
+      expect(calls.at(-1)?.metadata?.startedAt).toBe(turnStartedAt);
+      startTypingRefresh('sess-1', 'ag-1', 'web', platform, thread, instance);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls.at(-1)?.items).toBeUndefined();
+    }
     socket.destroy();
   });
 });

@@ -23,6 +23,8 @@ import {
   typingStartedAt,
   typingModel,
   typingUsage,
+  typingEndedAt,
+  responseReceived,
   activityLog,
   refs,
   treePath,
@@ -62,8 +64,14 @@ import {
 import { api, postJson } from './api';
 import { writeHash } from './hash';
 import { isFinalResponse, publicWebMessageId } from './chat-protocol';
-import { readStoppedTurnStats, type StoppedTurnStats } from '../../../shared/stopped-turn';
+import { readStoppedTurnStats, readTurnStats, type StoppedTurnStats } from '../../../shared/stopped-turn';
 import { applyTurnState, resetTurnState } from './stop-turn';
+import {
+  clearTypingPresentation,
+  completeTurnPresentation,
+  finishTypingPresentation,
+  provisionalTurnMetadata,
+} from './turn-presentation';
 import { maybeNotify } from './notify';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { playProgressTick, playCompletionChime } from './sound';
@@ -96,6 +104,7 @@ interface ServerMessage {
   canEditPending?: boolean;
   inputState?: InputState;
   stoppedStats?: StoppedTurnStats;
+  turnStats?: ChatMessage['turnStats'];
   id?: string;
   direction: string;
   text: string;
@@ -607,6 +616,7 @@ function toChatMessage(m: ServerMessage): ChatMessage {
     ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
     ...(m.usage ? { usage: m.usage } : {}),
     ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
+    ...(m.turnStats ? { turnStats: m.turnStats } : {}),
     ...(m.inputState ? { inputState: m.inputState } : {}),
     canEditPending: m.canEditPending === true,
     ...(m.activity ? { activity: m.activity } : {}),
@@ -629,7 +639,16 @@ function visibleIncomingMessages(messages: ServerMessage[]): ServerMessage[] {
 function replaceIncomingMessages(messages: ServerMessage[]): void {
   const echoedIds = messages.filter((m) => normDirection(m.direction) === 'in' && m.id).map((m) => m.id!);
   messages = visibleIncomingMessages(messages);
-  chatMessages.value = messages.map(toChatMessage);
+  const previous = new Map(chatMessages.value.map((message) => [`${message.direction}:${message.id}`, message]));
+  chatMessages.value = messages.map((message) => {
+    const next = toChatMessage(message);
+    const prior = previous.get(`${next.direction}:${next.id}`);
+    return {
+      ...next,
+      ...(!next.usage && prior?.provisionalTurn ? { provisionalTurn: prior.provisionalTurn } : {}),
+      ...(!next.activity && prior?.activity ? { activity: prior.activity } : {}),
+    };
+  });
   refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
   const tid = threadId.value;
   pendingWebSends.value = pendingWebSends.value.filter(
@@ -655,6 +674,9 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
     return {
       ...message,
       timelinePosition: update.timelinePosition ?? update.inputState?.timelinePosition ?? message.timelinePosition,
+      ...(update.usage ? { usage: update.usage, provisionalTurn: undefined } : {}),
+      ...(update.activity ? { activity: update.activity } : {}),
+      ...(update.turnStats ? { turnStats: update.turnStats } : {}),
       ...(message.direction === 'in'
         ? {
             text: update.text,
@@ -684,6 +706,7 @@ function mergeIncomingMessages(messages: ServerMessage[]): void {
       ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
       ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
+      ...(m.turnStats ? { turnStats: m.turnStats } : {}),
       ...(m.inputState ? { inputState: m.inputState } : {}),
       canEditPending: m.canEditPending === true,
       ...(m.activity ? { activity: m.activity } : {}),
@@ -738,14 +761,21 @@ function appendMsg(
   suggestedAction?: SuggestedAction,
   stoppedStats?: StoppedTurnStats,
   timelinePosition?: number,
+  provisionalTurn?: ChatMessage['provisionalTurn'],
+  turnStats?: ChatMessage['turnStats'],
 ): void {
   const key = id ? `${direction}:${id}` : null;
   if (key && refs.seenIds.has(key)) {
-    if (timelinePosition !== undefined) {
-      chatMessages.value = chatMessages.value.map((message) =>
-        message.direction === direction && message.id === id ? { ...message, timelinePosition } : message,
-      );
-    }
+    chatMessages.value = chatMessages.value.map((message) =>
+      message.direction === direction && message.id === id
+        ? {
+            ...message,
+            ...(timelinePosition !== undefined ? { timelinePosition } : {}),
+            ...(!message.activity && activity?.length ? { activity } : {}),
+            ...(!message.usage && provisionalTurn ? { provisionalTurn } : {}),
+          }
+        : message,
+    );
     return;
   }
   if (key) refs.seenIds.add(key);
@@ -762,6 +792,8 @@ function appendMsg(
     ...(suggestedAction ? { suggestedAction } : {}),
     ...(stoppedStats ? { stoppedStats } : {}),
     ...(activity && activity.length ? { activity } : {}),
+    ...(provisionalTurn ? { provisionalTurn } : {}),
+    ...(turnStats ? { turnStats } : {}),
   });
 }
 
@@ -1017,12 +1049,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
       clearInterval(refs.wsPingTimer);
       refs.wsPingTimer = null;
     }
-    isTyping.value = false;
-    typingHint.value = '';
-    typingStartedAt.value = null;
-    typingModel.value = '';
-    typingUsage.value = null;
-    activityLog.value = [];
+    clearTypingPresentation();
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
     const delay = Math.min(15000, 500 * Math.pow(2, attempt - 1));
@@ -1105,30 +1132,25 @@ function connectChatWs(ctx: ChatSocketContext): void {
     }
     if (payload.kind === 'typing') {
       const priorStartedAt = typingStartedAt.value;
-      isTyping.value = !!payload.on;
-      typingHint.value = payload.hint || '';
       if (!payload.on) {
-        typingStartedAt.value = null;
-        typingModel.value = '';
-        typingUsage.value = null;
-        // Turn ended. This frame can arrive before the outbound response, so
-        // stash the live trace and let the 'out' handler attach it to the
-        // bubble; then clear the live log so the typing block unmounts clean.
-        if (activityLog.value.length) refs.carryActivity = activityLog.value.slice();
-        activityLog.value = [];
-      } else if (payload.items !== null && payload.items !== undefined) {
+        finishTypingPresentation();
+        return;
+      }
+      if (responseReceived.value) return;
+      typingEndedAt.value = null;
+      isTyping.value = true;
+      typingHint.value = payload.hint || '';
+      if (payload.items !== null && payload.items !== undefined) {
         const changed = JSON.stringify(activityLog.value) !== JSON.stringify(payload.items);
         activityLog.value = payload.items;
         if (changed && payload.items.length) playProgressTick();
       }
-      if (payload.on) {
-        if (typeof payload.startedAt === 'number' && Number.isFinite(payload.startedAt)) {
-          if (priorStartedAt !== null && priorStartedAt !== payload.startedAt) typingUsage.value = null;
-          typingStartedAt.value = payload.startedAt;
-        }
-        if (typeof payload.model === 'string') typingModel.value = payload.model;
-        if (payload.usage) typingUsage.value = payload.usage;
+      if (typeof payload.startedAt === 'number' && Number.isFinite(payload.startedAt)) {
+        if (priorStartedAt !== null && priorStartedAt !== payload.startedAt) typingUsage.value = null;
+        typingStartedAt.value = payload.startedAt;
       }
+      if (typeof payload.model === 'string') typingModel.value = payload.model;
+      if (payload.usage) typingUsage.value = payload.usage;
       return;
     }
     if (payload.kind === 'inbound') {
@@ -1230,12 +1252,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
             pendingQuestions.value = [...existing, q];
           }
           // Also clear typing since the agent is now waiting for user input.
-          isTyping.value = false;
-          typingHint.value = '';
-          typingStartedAt.value = null;
-          typingModel.value = '';
-          typingUsage.value = null;
-          activityLog.value = [];
+          clearTypingPresentation();
         } else {
           // Display cards keep fallbackText for notifications/degradation while
           // rendering their normalized structure when the server supplied it.
@@ -1290,37 +1307,35 @@ function connectChatWs(ctx: ChatSocketContext): void {
       // message bubble so it stays visible immediately — the live outbound
       // frame has no activity of its own, and otherwise the trace would only
       // reappear in the next socket snapshot's persisted turn_activity.
-      // The typing:{on:false} frame usually arrives first and moves the trace
-      // into refs.carryActivity, so prefer that; fall back to the live log if
-      // the outbound raced ahead of the typing-off frame.
+      // Keep the live snapshot until the response arrives; the carry buffer
+      // also covers legacy clients' typing-off ordering.
       const carriedActivity = finalResponse
         ? activityLog.value.length
           ? activityLog.value.slice()
           : refs.carryActivity
         : null;
-      appendMsg(
-        dir,
-        text,
-        payload.files || [],
-        payload.timestamp || '',
-        payload.id,
-        carriedActivity,
-        undefined,
-        deliveryOrigin,
-        undefined,
-        suggestedAction,
-        readStoppedTurnStats(c),
-        payload.timelinePosition,
-      );
+      batch(() => {
+        appendMsg(
+          dir,
+          text,
+          payload.files || [],
+          payload.timestamp || '',
+          payload.id,
+          carriedActivity,
+          undefined,
+          deliveryOrigin,
+          undefined,
+          suggestedAction,
+          readStoppedTurnStats(c),
+          payload.timelinePosition,
+          finalResponse ? provisionalTurnMetadata() : undefined,
+          readTurnStats(c),
+        );
+        if (finalResponse) completeTurnPresentation();
+      });
       bumpActiveThread();
       if (dir === 'out') maybeNotify(text, payload.files || []);
       if (finalResponse) {
-        // Final response arrived — the live activity trace has been carried
-        // onto the message bubble above; clear the live log and carry buffer
-        // so it doesn't linger under the new bubble or leak into next turn.
-        activityLog.value = [];
-        typingUsage.value = null;
-        refs.carryActivity = [];
         playCompletionChime();
       }
       return;
@@ -1334,7 +1349,7 @@ function connectChatWs(ctx: ChatSocketContext): void {
       const next = list.map((m) => {
         if (m.id === mid && m.direction === 'out') {
           changed = true;
-          return { ...m, usage };
+          return { ...m, usage, provisionalTurn: undefined };
         }
         return m;
       });

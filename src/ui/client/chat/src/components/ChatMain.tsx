@@ -11,7 +11,7 @@ import {
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
   pendingWebSends,
-  activeTurn, turnConnected, stopRequest,
+  activeTurn, turnConnected, stopRequest, typingEndedAt, responseReceived,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
 } from '../state';
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
@@ -442,7 +442,9 @@ function fmtContextLimit(tokens: number): string {
   return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
 }
 
-function UsageMeta({ u, live = false, partial = false }: { u: TurnUsage; live?: boolean; partial?: boolean }) {
+function UsageMeta({ u, live = false, partial = false, provisional = false }: {
+  u: TurnUsage; live?: boolean; partial?: boolean; provisional?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const cost = fmtCost(u.cost_usd);
   const model = u.model ? shortModel(u.model) : '';
@@ -460,7 +462,7 @@ function UsageMeta({ u, live = false, partial = false }: { u: TurnUsage; live?: 
     ? [`${cost} est.`, `${fmtTok(u.input_tokens)} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
     : partial
       ? [dur, model, `${fmtTok(u.input_tokens + u.output_tokens)} tokens reported`].filter(Boolean).join(' \u00b7 ')
-      : [cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
+      : [provisional ? `${cost} est.` : cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
   const contextDetail = contextTokens
     ? `${fmtTok(contextTokens)}${u.context_window
       ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})`
@@ -484,6 +486,7 @@ function UsageMeta({ u, live = false, partial = false }: { u: TurnUsage; live?: 
           <span class="usage-backdrop" onClick={() => setExpanded(false)} />
           <span class="usage-popover" role="dialog" aria-label="Turn usage details">
             {partial ? <span class="usage-row">Usage reported before cancellation; final totals may be higher.</span> : null}
+            {provisional ? <span class="usage-row">Usage reported so far; awaiting final totals.</span> : null}
             <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{cost}</strong></span>
             {dur ? <span class="usage-row"><span>Elapsed</span><strong>{dur}</strong></span> : null}
             {model ? <span class="usage-row"><span>Model</span><strong title={u.model}>{model}</strong></span> : null}
@@ -502,6 +505,22 @@ function UsageMeta({ u, live = false, partial = false }: { u: TurnUsage; live?: 
 
 function AgentActionLabel({ label, title }: { label: string; title: string }) {
   return <span class="delivery-origin" title={title}>{label}</span>;
+}
+
+export function MessageTurnMetadata({ message }: { message: ChatMessage }) {
+  const usage = message.usage ?? message.provisionalTurn?.usage;
+  if (usage) return <UsageMeta u={usage} partial={!!message.stoppedStats} provisional={!message.usage} />;
+  if (message.stoppedStats) {
+    const stats = message.stoppedStats;
+    return <span title="Token usage was not reported before cancellation.">
+      {fmtDur(stats.durationMs)} {'\u00b7'} {stats.model ? shortModel(stats.model) : 'Model unavailable'} {'\u00b7'} Tokens unavailable
+    </span>;
+  }
+  const stats = message.turnStats ?? message.provisionalTurn;
+  return stats ? <span>{[
+    stats.durationMs !== undefined ? fmtDur(stats.durationMs) : '',
+    stats.model ? shortModel(stats.model) : '',
+  ].filter(Boolean).join(' \u00b7 ')}</span> : null;
 }
 
 /** The thread currently open in the log, as the rail knows it. */
@@ -835,13 +854,7 @@ function Message(
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
-        {m.direction === 'out' && (m.usage
-          ? <UsageMeta u={m.usage} partial={!!m.stoppedStats} />
-          : m.stoppedStats
-            ? <span title="Token usage was not reported before cancellation.">
-                {fmtDur(m.stoppedStats.durationMs)} {'\u00b7'} {m.stoppedStats.model ? shortModel(m.stoppedStats.model) : 'Model unavailable'} {'\u00b7'} Tokens unavailable
-              </span>
-            : null)}
+        {m.direction === 'out' ? <MessageTurnMetadata message={m} /> : null}
         <span class="msg-inline-actions">
           <CopyTranscriptButton getContent={() => mdRef.current} />
           <EditMessageButton m={m} />
@@ -1113,14 +1126,16 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
   const stableStartedAt = typingStartedAt.value;
   const fallbackStartedAt = useRef(Date.now());
   const startedAt = stableStartedAt ?? fallbackStartedAt.current;
+  const endedAt = typingEndedAt.value;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
+    if (endedAt !== null) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [startedAt]);
+  }, [startedAt, endedAt]);
   const model = typingModel.value ? shortModel(typingModel.value) : '';
-  const elapsed = Math.max(0, now - startedAt);
+  const elapsed = Math.max(0, (endedAt ?? now) - startedAt);
   const metadata = [fmtDur(elapsed), model].filter(Boolean).join(' \u00b7 ');
   const usage = typingUsage.value ? { ...typingUsage.value, duration_ms: elapsed } : null;
   const liveHeadline = latestActivityHeadline(activityLog.value);
@@ -1137,7 +1152,7 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
     <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
       <div class="typing-summary">
         <div class="typing-dots">
-          <span></span><span></span><span></span>
+          {endedAt === null ? <><span></span><span></span><span></span></> : null}
           {liveHeadline
             ? <button
                 type="button"
@@ -1153,13 +1168,14 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
         </div>
       </div>
       {stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
+      {endedAt !== null ? <div class="turn-stop-note">{turn ? 'Finishing response\u2026' : 'Turn finished'}</div> : null}
       {turn && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Disconnected. Reconnect to stop this response.</div> : null}
       <ActivityTracePanel
         lines={activityLog.value}
         expanded={traceExpanded}
         onToggle={toggleFromCount}
-        live
-        now={now}
+        live={endedAt === null}
+        now={endedAt ?? now}
         openLatest={openLatestOnExpand}
       />
       <div class="meta">
@@ -1192,7 +1208,10 @@ function MessageLog() {
   const { transcript, queued } = splitPendingInputs(timeline);
   const layoutKey = timelineLayoutKey(timeline);
   const msgCount = timeline.length;
-  const typing = showsTurnActivity(activeTurn.value, isTyping.value, threadId.value, chatLoading.value);
+  const typing = showsTurnActivity(
+    activeTurn.value, isTyping.value, threadId.value, chatLoading.value,
+    responseReceived.value, typingEndedAt.value !== null,
+  );
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
   // Subscribe to trace growth so the effect re-runs as steps stream in.

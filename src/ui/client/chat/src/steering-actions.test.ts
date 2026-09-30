@@ -4,6 +4,7 @@ import { requestChoice } from './components/PromptModal';
 import { applyTurnState } from './stop-turn';
 import {
   activeTurn,
+  activityLog,
   canSend,
   channelType,
   chatMessages,
@@ -11,11 +12,15 @@ import {
   groupId,
   highlightMessageId,
   messagingGroupId,
+  isTyping,
   pending,
   pendingWebSends,
   pinnedContext,
   refs,
   threadId,
+  typingModel,
+  typingStartedAt,
+  typingUsage,
 } from './state';
 import { inputStatePresentation } from './input-state';
 import { cancelledInputs, PendingCancellation } from './pending-cancel';
@@ -709,7 +714,23 @@ describe('durable receipt rendering', () => {
     expect(chatMessages.value[0].canEditPending).toBe(false);
     receive({ kind: 'input-state', states: [{ messageId: 'message', inputState: null }] });
     expect(chatMessages.value[0].inputState).toBeUndefined();
-    const activity = [{ ts: '1', text: 'Current turn trace waiting for its result' }];
+    const activity = [{ ts: '2026-09-25T00:00:01Z', text: 'Current turn trace waiting for its result' }];
+    const usage = {
+      cost_usd: 0.25,
+      input_tokens: 1200,
+      output_tokens: 30,
+      cache_read_tokens: 1000,
+      cache_write_tokens: 0,
+      model: 'minimax/MiniMax-M3',
+    };
+    receive({
+      kind: 'typing',
+      on: true,
+      items: activity,
+      startedAt: 1000,
+      model: 'minimax/MiniMax-M3',
+      usage,
+    });
     refs.carryActivity = activity;
     receive({
       kind: 'inbound',
@@ -724,12 +745,31 @@ describe('durable receipt rendering', () => {
       states: [{ messageId: 'new-message', inputState: { messageId: 'new-message', status: 'steering' } }],
     });
     expect(chatMessages.value[1].inputState?.status).toBe('steering');
+    expect(activityLog.value).toEqual(activity);
+    expect(typingUsage.value).toEqual(usage);
+    expect(typingStartedAt.value).toBe(1000);
+    expect(typingModel.value).toBe('minimax/MiniMax-M3');
     receive({
       kind: 'turn',
       turn: { id: 'captured-turn', status: 'running', supportsSteering: true },
       connected: true,
     });
     expect(refs.carryActivity).toBe(activity);
+    receive({ kind: 'typing', on: false });
+    expect(isTyping.value).toBe(false);
+    expect(activityLog.value).toEqual(activity);
+    expect(typingUsage.value).toEqual(usage);
+    receive({
+      kind: 'outbound',
+      id: 'current-answer',
+      content: { text: 'Done' },
+      timestamp: '2026-09-25T00:00:02Z',
+    });
+    expect(chatMessages.value.find((message) => message.id === 'current-answer')?.activity).toEqual(activity);
+    expect(isTyping.value).toBe(false);
+    expect(activityLog.value).toEqual([]);
+    expect(typingUsage.value).toBeNull();
+    refs.carryActivity = activity;
     receive({
       kind: 'turn',
       turn: { id: 'actual-next-turn', status: 'running', supportsSteering: true },
