@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat, runSync } from './actions';
 import { channelType, groupId, threadId, voiceInput } from './state';
 import { voice } from './voice-audio';
+import { testSnapshot } from './conversation-test-fixtures';
 
 vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -22,7 +23,11 @@ describe('voice capability integration', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ approvals: [], voiceInput: { backend: 'elevenlabs', ready: true } }),
+        json: async () => ({
+          approvals: [],
+          voiceInput: { backend: 'elevenlabs', ready: true },
+          conversation: testSnapshot({ threadId: 't' }),
+        }),
       }),
     );
     await runSync();

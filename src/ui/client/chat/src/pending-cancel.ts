@@ -1,9 +1,8 @@
 import { signal } from '@preact/signals';
-import { chatMessages, groupId, threadId, channelType, messagingGroupId, pendingWebSends } from './state';
+import { groupId, threadId, channelType, messagingGroupId, pendingWebSends } from './state';
 import {
   canEditPendingMessage,
   exitPendingEditor,
-  isCurrentConversation,
   pendingEditorKey,
   pendingEditorSessions,
   pendingMessageUrl,
@@ -92,12 +91,7 @@ export class PendingCancellation {
       if (response.status === 200 && data.ok === true && data.id === this.messageId) {
         confirmCancelledInput(this.messageId, pendingEditorKey(this.gid, this.thread, this.messageId));
         this.state.value = { busy: false, unresolved: false, error: '', confirmed: true };
-        if (isCurrentConversation(this.gid, this.thread)) {
-          chatMessages.value = chatMessages.value.filter(
-            (message) => message.direction !== 'in' || message.id !== this.messageId,
-          );
-        }
-        if (this.state.value.confirmed) return true;
+        // The ordered conversation stream, not HTTP arrival order, removes the bubble.
         return true;
       }
       const conflict = ['input_not_pending', 'steering_consumed'].includes(data.error);

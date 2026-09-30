@@ -93,8 +93,10 @@ original conversation across navigation.
 
 The bubble's **Cancel** action removes only your own queued or waiting-to-steer
 input, and only when the connected native runner advertises cancellation.
-It never stops the active response. Cancel waits for authoritative confirmation
-or a live `cancelled` state before hiding the bubble. An ambiguous response or
+It never stops the active response. Cancel waits for authoritative confirmation;
+the ordered conversation update removes the bubble. Command HTTP replies do not
+overwrite transcript data, so a delayed reply cannot revert a newer edit or
+cancellation. An ambiguous response or
 network failure leaves it visible with **Retry cancel**, reusing the same request
 ID. Consumed-input conflicts keep the bubble visible. An unresolved edit blocks
 cancel, and an unresolved cancel blocks edit, until the original request resolves.
@@ -102,8 +104,8 @@ Reconnect history replaces the visible web transcript, so a cancellation missed
 while offline still removes its bubble. Redacted cancellation tombstones in
 history and scoped sync are authoritative: their matching bubbles are removed,
 while merging a snapshot does not discard unrelated absent optimistic inputs.
-Confirmed cancellations also leave conversation-scoped client tombstones, so
-late duplicate inbound echoes or stale history cannot resurrect the input.
+Confirmed cancellations also leave conversation-scoped client tombstones.
+Duplicate versioned updates do not replay mutations.
 Only the matching send acknowledgement is cleared; unrelated optimistic sends
 and unsent composer drafts/attachments are retained.
 
@@ -187,8 +189,9 @@ is only waiting for your answer, there may be no active turn to stop.
 The icon is disabled and grayed out while stopping, without adding transient
 status text or changing the bubble's layout. A **Stopping response** tooltip
 and accessible busy state remain until the runner settles the turn; HTTP
-acceptance alone is not a completed stop. A disconnected runner, failed request,
-or missing acknowledgement is shown explicitly, with a retry affordance.
+acceptance alone is not a completed stop. A disconnected runner or failed HTTP
+request is shown explicitly, with a retry affordance. An accepted Stop waits for
+the authoritative turn phase; elapsed time never declares success or failure.
 Retries carry the same immutable turn ID, so a stale click cannot stop the next
 response. Other open tabs and reconnects receive the current turn state.
 Only users allowed to send in the conversation can stop it; a shared-session
@@ -210,22 +213,45 @@ unavailable** instead of showing zero. Native model-call usage is captured befor
 waiting for tools to finish. This metadata is persisted for reloads, but cannot
 be reconstructed for older stopped responses that never recorded it.
 
-### Activity and metadata handoff
+### Authoritative conversation synchronization
 
-Steering and queued input do not reset the active response's activity, model,
-usage snapshot, or elapsed-time boundary. Retargeting a shared session resends
-its current activity snapshot to the new destination.
+An active web conversation uses one versioned WebSocket subscription. Its first
+snapshot includes messages, durable input dispositions, turns, current activity,
+usage metadata, questions, runner connection state and permitted actions.
+Subsequent envelopes update that view atomically. A final response is not rendered
+until the host commits the matching turn's `settled` barrier. Platform typing
+notifications are unrelated and cannot complete a browser turn.
 
-When typing ends, the UI freezes elapsed time and retains the trace until the
-final response or warning arrives, without a timeout. The response inherits the
-live trace and provisional metadata in the same update that removes the live
-bubble, even if the active-turn state has not caught up. Final usage replaces
-the provisional estimate when available; missing usage is not shown as zero.
+Each logical turn has a stable timeline summary, keyed by turn ID. Steering,
+queued input, multiple output messages, reconnects and settlement do not transfer
+or erase its trace. Expansion state stays with that row. Silent, warning,
+stopped, failed and interrupted turns remain visible even without a response.
+Usage retains its accounting IDs and is displayed once per record, not once per
+response; metadata explicitly distinguishes provisional, partial, final and
+unavailable reports. Missing usage never becomes fabricated zero tokens.
 
-Empty-result and exhausted-recovery warnings persist their activity, timing,
-model, and any reported usage so those details survive reload. Intentional
-silence does not generate a warning; the live view keeps a non-animated finished
-summary until the next turn or navigation.
+Non-web conversations poll the same projector and replace their store using the
+same validated snapshot reducer. Sidebar lists and global approvals keep their
+existing ten-second polling. Web conversation questions are never overwritten by
+that poll. Local composer drafts, uploads and command request IDs are separate
+from the server store; HTTP acceptance does not prove a command took effect.
+
+The browser validates `protocolVersion`, `streamId`, revisions and entity shapes.
+Gaps or unknown streams show a synchronization error and reconnect for a fresh
+snapshot; incompatible protocols explicitly ask for a page reload. Progress is
+coalesced on the host with a bounded dirty flag. Slow consumers are closed rather
+than building an unlimited queue. There is no durable browser replay/ACK log.
+Every projection rechecks access and scopes channel, platform and thread, including
+shared sessions and synthetic DM IDs. Off-route sends cannot reveal their originating
+turn's trace; imported unknown origins expose only already-visible message sidecars.
+
+**Coordinated cutover:** this client and host have no legacy frame support. Build
+the checked-in bundle with `pnpm --dir src/ui/client/chat run build`, deploy host
+and assets together only after the offline turn-schema/session-link migration
+in [db-session.md](db-session.md), and reload open tabs. Verify that a reconnect
+starts with a `snapshot` and subsequent changes are revisioned `update` envelopes.
+For rollback, restore matching code/assets and the coordinated database backups;
+do not mix protocol versions. No deployment or live migration occurs during a build.
 
 ### Live voice input
 

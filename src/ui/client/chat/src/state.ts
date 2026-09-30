@@ -15,8 +15,6 @@ import type {
   PendingQuestionDto,
   ChannelMetaEntry,
   SearchResult,
-  ActivityLine,
-  TurnUsage,
   TaskPanelRequest,
   VoiceInputCapability,
   ActiveTurn,
@@ -76,21 +74,10 @@ export const chatMessages: Signal<ChatMessage[]> = signal<ChatMessage[]>([]);
 export const chatStatus: Signal<string> = signal('');
 export const chatLoading: Signal<boolean> = signal(false);
 export const chatReady: Signal<boolean> = signal(false);
-export const isTyping: Signal<boolean> = signal(false);
 export const activeTurn = signal<ActiveTurn | null>(null);
 export const turnConnected = signal(false);
 export const stopRequest = signal<{ turnId: string; busy: boolean; error: string } | null>(null);
 export const pendingWebSends: Signal<Array<{ threadId: string; messageId: string }>> = signal([]);
-export const typingHint: Signal<string> = signal('');
-export const typingStartedAt: Signal<number | null> = signal<number | null>(null);
-export const typingModel: Signal<string> = signal('');
-export const typingUsage: Signal<TurnUsage | null> = signal<TurnUsage | null>(null);
-export const typingEndedAt = signal<number | null>(null);
-export const responseReceived = signal(false);
-// Ordered activity-trace lines (tool calls / progress steps) for the
-// in-flight turn. Accumulated from WS typing frames; cleared when the
-// response arrives or a new turn starts.
-export const activityLog: Signal<ActivityLine[]> = signal<ActivityLine[]>([]);
 export const pending: Signal<PendingFile[]> = signal<PendingFile[]>([]);
 
 // Search
@@ -150,19 +137,10 @@ export interface Refs {
   syncTimer: ReturnType<typeof setInterval> | null;
   wsConnectCancel: (() => void) | null;
   wsPingTimer: ReturnType<typeof setInterval> | null;
-  presentationTurnId: string | null;
   seenIds: Set<string>;
   suppressHashCount: number;
   uploadDragDepth: number;
   newChatInFlight: boolean;
-  /**
-   * Live activity trace stashed at turn end so it can be attached to the
-   * outbound response bubble. The `typing:{on:false}` frame can arrive before
-   * the outbound message, so we preserve the trace here while the live bubble
-   * remains visible and consume it on the next final response.
-   * Reset when a different active turn is reported.
-   */
-  carryActivity: import('./types').ActivityLine[];
 }
 
 export const refs: Refs = {
@@ -174,12 +152,10 @@ export const refs: Refs = {
   syncTimer: null,
   wsConnectCancel: null,
   wsPingTimer: null,
-  presentationTurnId: null,
   seenIds: new Set<string>(),
   suppressHashCount: 0,
   uploadDragDepth: 0,
   newChatInFlight: false,
-  carryActivity: [],
 };
 
 // ── constants ───────────────────────────────────────────────────────

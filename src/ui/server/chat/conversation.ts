@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { reduceActivityLines } from '../../../activity.js';
 import type { Question } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
 import { getTurnInputs, type TurnRow } from '../../../db/turns.js';
@@ -30,6 +31,34 @@ export function routeMatches(
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
 type QuestionRow = Omit<Question, 'options'> & { options_json: string };
+
+function displayActivity(lines: ConversationTurn['activity']): ConversationTurn['activity'] {
+  const groups = new Map<string, ConversationTurn['activity']>();
+  for (const line of lines) {
+    let key = `ordinal:${line.ordinal}`;
+    try {
+      const step: unknown = JSON.parse(line.text);
+      if (
+        step &&
+        typeof step === 'object' &&
+        'kind' in step &&
+        'id' in step &&
+        typeof step.kind === 'string' &&
+        typeof step.id === 'string'
+      )
+        key = JSON.stringify([step.kind, step.id]);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    }
+    const group = groups.get(key) ?? [];
+    group.push(line);
+    groups.set(key, group);
+  }
+  return [...groups.values()].flatMap((group) => {
+    const reduced = reduceActivityLines(group);
+    return reduced.length ? reduced.map((line) => ({ ...line, ordinal: group[0].ordinal })) : group;
+  });
+}
 
 function usageValue(row: Record<string, unknown>): ConversationUsage {
   const value: Record<string, unknown> = {};
@@ -64,9 +93,22 @@ export function projectConversation(
 ): Conversation {
   const records = outDb ? (outDb.prepare('SELECT * FROM turns ORDER BY started_at, id').all() as TurnRow[]) : [];
   const byId = new Map(records.map((turn) => [turn.id, turn]));
+  for (const message of history) {
+    if (message.turnId && !byId.has(message.turnId)) throw new Error('Missing conversation turn association');
+  }
   const owns = (turn: TurnRow) =>
     routeMatches(context, turn.origin_channel_type, turn.origin_platform_id, turn.origin_thread_id);
-  const unknown = (turn: TurnRow) => turn.origin_channel_type === null && turn.origin_platform_id === null;
+  const unknown = (turn: TurnRow) =>
+    turn.provenance !== 'native' && turn.origin_channel_type === null && turn.origin_platform_id === null;
+  const visibleQuestions = questions.filter((q) => routeMatches(context, q.channel_type, q.platform_id, q.thread_id));
+  const questionAnchors = new Map(
+    visibleQuestions.map((q) => [
+      q.message_out_id,
+      outDb?.prepare('SELECT turn_id FROM messages_out WHERE id = ?').get(q.message_out_id) as
+        | { turn_id: string | null }
+        | undefined,
+    ]),
+  );
   const messages: ConversationMessage[] = history
     .filter((message) => {
       const turn = message.turnId ? byId.get(message.turnId) : undefined;
@@ -89,11 +131,15 @@ export function projectConversation(
       return { ...message };
     });
   const visibleOutputIds = new Set(messages.filter((m) => m.direction === 'out').map((m) => m.id));
+  for (const id of questionAnchors.keys()) visibleOutputIds.add(id);
   const visibleInputIds = new Set(messages.filter((m) => m.direction === 'in').map((m) => m.id));
   const turns: ConversationTurn[] = [];
   for (const turn of records) {
     const owned = owns(turn);
-    const outputs = messages.filter((m) => m.turnId === turn.id && m.direction === 'out').map((m) => m.id);
+    const outputs = [
+      ...messages.filter((m) => m.turnId === turn.id && m.direction === 'out').map((m) => m.id),
+      ...[...questionAnchors].filter(([, anchor]) => anchor?.turn_id === turn.id).map(([id]) => id),
+    ];
     if (!owned && !(unknown(turn) && outputs.length)) continue;
     const activity = outDb!
       .prepare('SELECT message_out_id, ordinal, ts, text FROM turn_activity WHERE turn_id = ? ORDER BY ordinal')
@@ -129,7 +175,7 @@ export function projectConversation(
         .map((r) => publicInboundMessageId(r.message_in_id, groupId))
         .filter((id) => visibleInputIds.has(id)),
       outputIds: outputs,
-      activity: [...trace.values()].sort((a, b) => a.ordinal - b.ordinal),
+      activity: displayActivity([...trace.values()].sort((a, b) => a.ordinal - b.ordinal)),
       usage,
       metadata: {
         status:
@@ -141,28 +187,30 @@ export function projectConversation(
     });
   }
   const turnIds = new Set(turns.map((turn) => turn.id));
-  const scopedQuestions: ConversationQuestion[] = questions
-    .filter((q) => routeMatches(context, q.channel_type, q.platform_id, q.thread_id))
-    .map((q) => {
-      const anchor = outDb?.prepare('SELECT turn_id FROM messages_out WHERE id = ?').get(q.message_out_id) as
-        | { turn_id: string | null }
-        | undefined;
-      return {
-        questionId: q.question_id,
-        title: q.title,
-        question: q.question_text,
-        responseMode: q.response_mode,
-        options: JSON.parse(q.options_json),
-        status: q.status,
-        answerValue: q.answer_value,
-        answerType: q.answer_type,
-        answeredAt: q.answered_at,
-        threadId: q.thread_id,
-        agentGroupId: groupId,
-        createdAt: q.created_at,
-        ...(anchor?.turn_id && turnIds.has(anchor.turn_id) ? { turnId: anchor.turn_id } : {}),
-      };
-    });
+  const scopedQuestions: ConversationQuestion[] = visibleQuestions.map((q) => {
+    const anchor = questionAnchors.get(q.message_out_id);
+    const activity = !anchor?.turn_id
+      ? (outDb
+          ?.prepare('SELECT ts, text FROM turn_activity WHERE message_out_id = ? ORDER BY ordinal')
+          .all(q.message_out_id) as Array<{ ts: string; text: string }> | undefined)
+      : undefined;
+    return {
+      questionId: q.question_id,
+      title: q.title,
+      question: q.question_text,
+      responseMode: q.response_mode,
+      options: JSON.parse(q.options_json),
+      status: q.status,
+      answerValue: q.answer_value,
+      answerType: q.answer_type,
+      answeredAt: q.answered_at,
+      threadId: q.thread_id,
+      agentGroupId: groupId,
+      createdAt: q.created_at,
+      ...(activity?.length ? { activity } : {}),
+      ...(anchor?.turn_id && turnIds.has(anchor.turn_id) ? { turnId: anchor.turn_id } : {}),
+    };
+  });
   const live = signals.active.turn;
   const active =
     live &&

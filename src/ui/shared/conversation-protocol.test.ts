@@ -60,6 +60,10 @@ describe('conversation protocol', () => {
       streamId: 'new',
     });
   });
+  it('does not regress on an older snapshot from the same stream', () => {
+    const current = reduceConversation(snapshot, update);
+    expect(reduceConversation(current, snapshot)).toBe(current);
+  });
   it('atomically applies removals, replacements and order changes', () => {
     const before = reduceConversation(snapshot, update);
     const after = { ...next, messages: [{ ...next.messages[1], text: 'edited' }] };

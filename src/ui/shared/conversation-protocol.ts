@@ -1,5 +1,4 @@
 import type { Conversation, ConversationMessage, ConversationQuestion, ConversationTurn } from './conversation.js';
-import { parseInputState } from './input-state.js';
 
 export const CONVERSATION_PROTOCOL_VERSION = 1;
 export interface EntityChanges<T> {
@@ -92,7 +91,16 @@ const message = shape({
   text,
   turnId: optional(id),
   timelinePosition: optional(integer),
-  inputState: optional((v) => parseInputState(v) !== undefined),
+  inputState: optional(
+    shape({
+      messageId: id,
+      status: oneOf('queued', 'steering', 'applied', 'processing', 'cancelled'),
+      turnId: optional(text),
+      timelinePosition: optional(integer),
+      queuedForNextTurn: optional(bool),
+      reason: optional(oneOf('turn_finished', 'different_conversation', 'unsupported')),
+    }),
+  ),
   canEditPending: optional(bool),
   author: optional(shape({ userId: id, displayName: text })),
   deliveryOrigin: optional(oneOf('send_message', 'send_file', 'response')),
@@ -224,6 +232,7 @@ function applyEntities<T extends { id: string } | { questionId: string }>(prior:
 /** Atomic and pure. Duplicates are idempotent; gaps and unknown streams require a snapshot. */
 export function reduceConversation(state: ConversationSnapshot | null, frame: ConversationFrame): ConversationSnapshot {
   if (frame.kind === 'snapshot') {
+    if (state?.streamId === frame.streamId && frame.revision <= state.revision) return state;
     unique(frame.conversation.messages);
     unique(frame.conversation.turns);
     unique(frame.conversation.questions);

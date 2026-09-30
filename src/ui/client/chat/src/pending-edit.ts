@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals';
 import { patchJson } from './api';
-import { chatMessages, groupId, threadId, channelType, messagingGroupId, activeTurn, turnConnected } from './state';
+import { groupId, threadId, channelType, messagingGroupId, activeTurn, turnConnected } from './state';
 import type { ActiveTurn, ChatMessage, Thread } from './types';
 
 interface PendingEditorSession {
@@ -122,11 +122,7 @@ export async function savePendingMessage(
   if (result.ok && (result.data.ok !== true || result.data.id !== messageId || typeof result.data.text !== 'string')) {
     return { ok: false, status: 502, data: { error: 'invalid_confirmation' } };
   }
-  if (result.ok && isCurrentConversation(gid, thread)) {
-    chatMessages.value = chatMessages.value.map((message) =>
-      message.direction === 'in' && message.id === messageId ? { ...message, text: result.data.text! } : message,
-    );
-  }
+  // The receipt completes the command; only a revisioned projection changes the transcript.
   return result;
 }
 

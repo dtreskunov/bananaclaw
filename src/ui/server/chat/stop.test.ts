@@ -26,6 +26,11 @@ const signal = vi.hoisted(() => ({
 vi.mock('../../../session-link.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../session-link.js')>()),
   getSessionActiveTurn: vi.fn(() => ({ turn: signal.turn, connected: signal.connected })),
+  getSessionTurnSignals: vi.fn(() => ({
+    active: { turn: signal.turn, connected: signal.connected },
+    activity: [],
+    usage: null,
+  })),
   requestSessionTurnStop: signal.stop,
   onSessionSignal: (
     listener: (sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat' | 'input.state') => void,
@@ -56,13 +61,38 @@ vi.mock('../../../container-runner.js', () => ({
 }));
 
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { initSessionFolder, openInboundDb, openOutboundDbRw, writeSessionMessage } from '../../../session-manager.js';
+import {
+  initSessionFolder,
+  openInboundDb,
+  openOutboundDbRw,
+  writeSessionMessage,
+  writeOutboundDirect,
+} from '../../../session-manager.js';
+import { createQuestion, answerQuestion } from '../../../db/sessions.js';
 import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
 import { createWebAdapter } from '../../../channels/web.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { COOKIE_NAME } from '../auth.js';
 import { handleChatRequest, handleChatUpgrade, matchChatPath, readChatActiveTurn, readChatHistory } from './chat.js';
 import { handle } from './routes.js';
+import { invalidateConversation } from '../../../conversation-events.js';
+import { putTurn } from '../../../db/turns.js';
+import {
+  parseConversationFrame,
+  reduceConversation,
+  type ConversationSnapshot,
+} from '../../shared/conversation-protocol.js';
+
+function socketView(frames: Record<string, unknown>[]) {
+  return frames.reduce<ConversationSnapshot | null>(
+    (state, frame) => reduceConversation(state, parseConversationFrame(frame)),
+    null,
+  )!.conversation;
+}
+async function flushConversation(): Promise<void> {
+  invalidateConversation('session-1');
+  await new Promise((resolve) => setTimeout(resolve, 60));
+}
 
 const TURN = {
   id: 'turn-1',
@@ -109,6 +139,22 @@ beforeEach(() => {
     "INSERT INTO sessions (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at) VALUES ('session-1', 'agent', NULL, NULL, 'active', 'stopped', ?)",
   ).run(NOW);
   initSessionFolder('agent', 'session-1');
+  const out = openOutboundDbRw('agent', 'session-1');
+  putTurn(out, {
+    id: 'turn-1',
+    phase: 'running',
+    outcome: 'pending',
+    provenance: 'native',
+    started_at: NOW,
+    ended_at: null,
+    origin_channel_type: 'web',
+    origin_platform_id: 'group:agent',
+    origin_thread_id: 'thread-1',
+    origin_source_session_id: null,
+    imported_from_session_id: null,
+    imported_from_turn_id: null,
+  });
+  out.close();
   signal.turn = { ...TURN };
   signal.connected = true;
   signal.listeners.clear();
@@ -313,6 +359,8 @@ describe('durable input state history', () => {
     db.close();
     const frames: Record<string, unknown>[] = [];
     const ws = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      bufferedAmount: 0,
       send: (frame: string) => frames.push(JSON.parse(frame)),
       close: vi.fn(),
     });
@@ -324,11 +372,10 @@ describe('durable input state history', () => {
     req.headers = { cookie: `${COOKIE_NAME}=test` };
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     try {
-      expect((frames[0].messages as Array<{ timelinePosition: number }>)[0].timelinePosition).toBe(timelinePosition);
+      expect(socketView(frames).messages[0].timelinePosition).toBe(timelinePosition);
       await createWebAdapter().deliver('group:agent', 'thread-1', { id: 'out-test', kind: 'internal', content });
-      const frame = frames.find((value) => value.kind === 'outbound');
-      expect(frame).toMatchObject({ id: 'out-test', timelinePosition });
-      expect(frame?.timestamp).not.toBe(NOW);
+      expect(frames).toHaveLength(1);
+      expect(socketView(frames).messages[0]).toMatchObject({ id: 'out-test', timelinePosition, timestamp: NOW });
       expect(history()[0].timelinePosition).toBe(timelinePosition);
     } finally {
       ws.emit('close');
@@ -472,13 +519,15 @@ describe('durable input state history', () => {
     expect(history()[0].inputState?.status).toBe('queued');
   });
 
-  it('pushes only visible message receipts on input.state and clears claimed queue status', () => {
+  it('projects only visible message receipts after commit and clears claimed queue status', async () => {
     inputRow('visible');
     inputRow('hidden', { thread: 'thread-2' });
     receipt('visible', 'queued');
     receipt('hidden', 'applied');
     const frames: Record<string, unknown>[] = [];
     const ws = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      bufferedAmount: 0,
       send: (frame: string) => frames.push(JSON.parse(frame)),
       close: vi.fn(),
     });
@@ -489,33 +538,28 @@ describe('durable input state history', () => {
     req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
     req.headers = { cookie: `${COOKIE_NAME}=test` };
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
-    expect((frames[0].messages as Array<{ inputState: { status: string } }>)[0].inputState.status).toBe('queued');
+    expect(socketView(frames).messages[0].inputState?.status).toBe('queued');
     const count = frames.length;
-    for (const listener of signal.listeners) listener('unrelated-session', 'input.state');
+    invalidateConversation('unrelated-session');
     expect(frames).toHaveLength(count);
     const db = openOutboundDbRw('agent', 'session-1');
     db.prepare(
       "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('visible:agent', 'processing', ?)",
     ).run(NOW);
     db.close();
-    for (const listener of signal.listeners) listener('session-1', 'input.state');
-    expect(frames.at(-1)).toMatchObject({
-      kind: 'input-state',
-      states: [{ messageId: 'visible', inputState: { status: 'processing' }, canEditPending: false }],
-    });
+    await flushConversation();
+    expect(socketView(frames).messages).toMatchObject([
+      { id: 'visible', inputState: { status: 'processing' }, canEditPending: false },
+    ]);
     receipt('visible', 'applied');
-    for (const listener of signal.listeners) listener('session-1', 'input.state');
-    expect(frames.at(-1)).toMatchObject({
-      kind: 'input-state',
-      states: [{ messageId: 'visible', inputState: { messageId: 'visible', status: 'applied', turnId: TURN.id } }],
-    });
+    await flushConversation();
+    expect(socketView(frames).messages).toMatchObject([
+      { id: 'visible', inputState: { messageId: 'visible', status: 'applied', turnId: TURN.id } },
+    ]);
     const position = Date.parse(NOW) * 1000 + 1;
     receipt('visible', 'processing', undefined, { timelinePosition: position });
-    for (const listener of signal.listeners) listener('session-1', 'input.state');
-    expect(frames.at(-1)).toMatchObject({
-      kind: 'input-state',
-      states: [{ messageId: 'visible', timelinePosition: position }],
-    });
+    await flushConversation();
+    expect(socketView(frames).messages).toMatchObject([{ id: 'visible', timelinePosition: position }]);
 
     ws.emit('close');
     expect(signal.listeners.size).toBe(0);
@@ -673,6 +717,8 @@ describe('pending web input editing', () => {
   it('broadcasts only scoped empty cancellation tombstones to other connected tabs', async () => {
     const frames: Record<string, unknown>[] = [];
     const ws = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      bufferedAmount: 0,
       send: (frame: string) => frames.push(JSON.parse(frame)),
       close: vi.fn(),
     });
@@ -685,22 +731,21 @@ describe('pending web input editing', () => {
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     try {
       const pending = cancel();
-      await vi.waitFor(() => expect(signal.listeners.size).toBe(2));
+      await vi.waitFor(() => expect(signal.listeners.size).toBe(1));
       acknowledgeCancel('accepted');
       expect((await pending).status).toBe(200);
-      const tombstone = [...frames].reverse().find((frame) => frame.kind === 'input-state');
-      expect(tombstone?.states).toEqual([
+      await flushConversation();
+      expect(socketView(frames).messages).toMatchObject([
         {
-          messageId: 'pending',
+          id: 'pending',
           inputState: { messageId: 'pending', status: 'cancelled' },
           text: '',
-          canEditPending: false,
         },
       ]);
       ws.emit('close');
       frames.length = 0;
       handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
-      expect(frames.find((frame) => frame.kind === 'history')?.messages).toEqual([
+      expect(socketView(frames).messages).toEqual([
         expect.objectContaining({ id: 'pending', text: '', inputState: { messageId: 'pending', status: 'cancelled' } }),
       ]);
     } finally {
@@ -870,7 +915,91 @@ describe('chat stop authorization', () => {
 });
 
 describe('chat turn snapshots and events', () => {
-  it('includes the authenticated active turn in polling snapshots', async () => {
+  it('publishes committed host inputs, outputs, reactions and questions without adapter callbacks', async () => {
+    const frames: Record<string, unknown>[] = [];
+    const ws = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: (frame: string) => frames.push(JSON.parse(frame)),
+      close: vi.fn(),
+    });
+    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
+      callback(ws as unknown as WebSocket, _req);
+    });
+    const req = Readable.from([]) as unknown as http.IncomingMessage;
+    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
+    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    try {
+      writeSessionMessage('agent', 'session-1', {
+        id: 'commit-input:agent',
+        kind: 'chat',
+        timestamp: NOW,
+        platformId: 'group:agent',
+        channelType: 'web',
+        threadId: 'thread-1',
+        content: '{"text":"Committed input"}',
+      });
+      writeOutboundDirect('agent', 'session-1', {
+        id: 'host-output',
+        kind: 'chat',
+        platformId: 'group:agent',
+        channelType: 'web',
+        threadId: 'thread-1',
+        content: '{"text":"Committed host response"}',
+      });
+      await vi.waitFor(() =>
+        expect(socketView(frames).messages.map((m) => m.id)).toEqual(['commit-input', 'host-output']),
+      );
+      writeOutboundDirect('agent', 'session-1', {
+        id: 'reaction',
+        kind: 'chat',
+        platformId: 'group:agent',
+        channelType: 'web',
+        threadId: 'thread-1',
+        content: JSON.stringify({ operation: 'reaction', messageId: 'commit-input:agent', emoji: '👍' }),
+      });
+      await vi.waitFor(() => expect(socketView(frames).messages[0].reactions?.[0].emoji).toBe('👍'));
+      createQuestion({
+        question_id: 'q',
+        session_id: 'session-1',
+        message_out_id: 'host-output',
+        in_reply_to: null,
+        channel_type: 'web',
+        platform_id: 'group:agent',
+        thread_id: 'thread-1',
+        title: 'Choose',
+        question_text: 'Continue?',
+        response_mode: 'text',
+        options: [],
+        status: 'pending',
+        answer_value: null,
+        answer_type: null,
+        answered_by: null,
+        answered_at: null,
+        cancelled_at: null,
+        created_at: NOW,
+      });
+      await vi.waitFor(() => expect(socketView(frames).questions[0]?.status).toBe('pending'));
+      answerQuestion('q', { value: 'yes', type: 'text', userId: null, answeredAt: NOW });
+      await vi.waitFor(() => expect(socketView(frames).questions[0]?.answerValue).toBe('yes'));
+      const count = frames.length;
+      getDb().prepare("DELETE FROM agent_group_members WHERE user_id = 'web:member'").run();
+      writeOutboundDirect('agent', 'session-1', {
+        id: 'after-revocation',
+        kind: 'chat',
+        platformId: 'group:agent',
+        channelType: 'web',
+        threadId: 'thread-1',
+        content: '{"text":"No longer visible"}',
+      });
+      await vi.waitFor(() => expect(ws.close).toHaveBeenCalledWith(1011, expect.any(String)));
+      expect(frames).toHaveLength(count);
+    } finally {
+      ws.emit('close');
+    }
+  });
+  it('does not send web conversation state through sidebar polling', async () => {
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.method = 'GET';
     req.url = '/ui/chat/api/sync?gid=agent&tid=thread-1&channel=web&mg=web-mg';
@@ -884,10 +1013,10 @@ describe('chat turn snapshots and events', () => {
     }) as unknown as http.ServerResponse;
     res.writeHead = (() => res) as typeof res.writeHead;
     await handle(req, res);
-    expect(JSON.parse(Buffer.concat(chunks).toString())).toMatchObject({
-      activeTurn: { id: TURN.id, status: 'running' },
-      connected: true,
-    });
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    expect(body).not.toHaveProperty('conversation');
+    expect(body).not.toHaveProperty('activeTurn');
+    expect(body).not.toHaveProperty('questions');
   });
 
   it('publishes only public fields to the authorized matching conversation', () => {
@@ -904,9 +1033,11 @@ describe('chat turn snapshots and events', () => {
     expect(readChatActiveTurn('web:member', 'agent', 'thread-1', OVERRIDE).activeTurn).toBeNull();
   });
 
-  it('bootstraps history/ready, clears the old context on turn switch, and reports disconnects', () => {
+  it('bootstraps a snapshot, isolates turn switches and reports authoritative disconnects', async () => {
     const frames: Record<string, unknown>[] = [];
     const ws = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      bufferedAmount: 0,
       send: (frame: string) => frames.push(JSON.parse(frame)),
       close: vi.fn(),
     });
@@ -917,26 +1048,25 @@ describe('chat turn snapshots and events', () => {
     req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
     req.headers = { cookie: `${COOKIE_NAME}=test` };
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
-    expect(frames.filter((frame) => frame.kind === 'history' || frame.kind === 'ready')).toEqual([
-      expect.objectContaining({ kind: 'history', activeTurn: { id: TURN.id, status: 'running' }, connected: true }),
-      expect.objectContaining({ kind: 'ready', activeTurn: { id: TURN.id, status: 'running' }, connected: true }),
-    ]);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].kind).toBe('snapshot');
+    expect(socketView(frames).connection).toEqual({ activeTurnId: TURN.id, connected: true });
     signal.turn = { ...TURN, status: 'stopping' };
-    for (const listener of signal.listeners) listener('session-1', 'turn.state');
-    expect(frames.at(-1)).toEqual({ kind: 'turn', turn: { id: TURN.id, status: 'stopping' }, connected: true });
+    await flushConversation();
+    expect(socketView(frames).connection.activeTurnId).toBe(TURN.id);
     const count = frames.length;
     for (const listener of signal.listeners) listener('session-1', 'heartbeat');
     expect(frames).toHaveLength(count);
     signal.turn = { ...TURN, id: 'turn-2', threadId: 'thread-2' };
-    for (const listener of signal.listeners) listener('session-1', 'turn.state');
-    expect(frames.at(-1)).toEqual({ kind: 'turn', turn: null, connected: true });
+    await flushConversation();
+    expect(socketView(frames).connection).toEqual({ activeTurnId: null, connected: true });
     const beforeUnrelatedTurn = frames.length;
     signal.turn = { ...TURN, id: 'turn-3', threadId: 'thread-3' };
-    for (const listener of signal.listeners) listener('session-1', 'turn.state');
+    await flushConversation();
     expect(frames).toHaveLength(beforeUnrelatedTurn);
     signal.connected = false;
-    for (const listener of signal.listeners) listener('session-1', 'disconnected');
-    expect(frames.at(-1)).toEqual({ kind: 'turn', turn: null, connected: false });
+    await flushConversation();
+    expect(socketView(frames).connection).toEqual({ activeTurnId: null, connected: false });
     ws.emit('close');
     expect(signal.listeners.size).toBe(0);
   });

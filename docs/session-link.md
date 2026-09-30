@@ -280,7 +280,7 @@ against the original authorized request and uses an attached-DB transaction
 together. The ordinary inbound update trigger journals the changed text back
 to the runner. This avoids falsely acknowledging a save across either
 edit-versus-consume races or a host crash between two independent DB writes.
-Search and scoped websocket input-state frames are refreshed after projection.
+Search and the scoped versioned conversation projection are refreshed after commit.
 
 HTTP success means the receipt has committed, not merely that a request was
 sent. A five-second timeout reports `edit_pending`; the UI retains its draft
@@ -313,7 +313,7 @@ Retained message/receipt rows prevent replay or retry from reviving canceled
 input; this is not a content-purge operation.
 
 History and search omit canceled messages, and forks neither copy them nor
-accept them as anchors. Scoped live input-state frames and websocket history
+accept them as anchors. Atomic conversation updates and initial conversation
 snapshots carry an empty-text `cancelled` tombstone so other open tabs, including
 tabs reconnecting after a missed cancellation, remove the same bubble. The composer
 is used for text edits; cancellation is a separate bubble action. A successful

@@ -1,6 +1,5 @@
 // Action orchestrators. Mutate signals + perform IO.
 import { batch, type Signal } from '@preact/signals';
-import { confirmCancelledInput, isCancelledInput } from './pending-cancel';
 import { voice } from './voice-audio';
 import { cancelRecording } from './recorder';
 import {
@@ -15,17 +14,9 @@ import {
   chatStatus,
   chatLoading,
   chatReady,
-  isTyping,
   activeTurn,
   turnConnected,
   pendingWebSends,
-  typingHint,
-  typingStartedAt,
-  typingModel,
-  typingUsage,
-  typingEndedAt,
-  responseReceived,
-  activityLog,
   refs,
   treePath,
   filePath,
@@ -63,62 +54,26 @@ import {
 } from './state';
 import { api, postJson } from './api';
 import { writeHash } from './hash';
-import { isFinalResponse, publicWebMessageId } from './chat-protocol';
-import { readStoppedTurnStats, readTurnStats, type StoppedTurnStats } from '../../../shared/stopped-turn';
+import { publicWebMessageId } from './chat-protocol';
+import { applyConversationFrame, resetConversation } from './conversation-state';
+import { ConversationProtocolError, type ConversationSnapshot } from '../../../shared/conversation-protocol';
 import { applyTurnState, resetTurnState } from './stop-turn';
-import {
-  clearTypingPresentation,
-  completeTurnPresentation,
-  finishTypingPresentation,
-  provisionalTurnMetadata,
-} from './turn-presentation';
-import { maybeNotify } from './notify';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
-import { playProgressTick, playCompletionChime } from './sound';
 import { parentPath } from './utils';
 import { showToast } from './components/Toast';
 import { requestChoice } from './components/PromptModal';
 import type {
   Thread,
   ThreadCtx,
-  Direction,
-  ChatMessage,
   ChatMessageFile,
-  DisplayCard,
   TreeEntry,
   PreviewBlock,
   PendingFile,
   PendingApprovalDto,
-  PendingQuestionDto,
   VoiceInputCapability,
-  WsPayload,
   SearchResult,
-  SuggestedAction,
-  ActiveTurn,
   InputHandling,
-  InputState,
 } from './types';
-
-interface ServerMessage {
-  timelinePosition?: number;
-  canEditPending?: boolean;
-  inputState?: InputState;
-  stoppedStats?: StoppedTurnStats;
-  turnStats?: ChatMessage['turnStats'];
-  id?: string;
-  direction: string;
-  text: string;
-  card?: DisplayCard;
-  files?: ChatMessageFile[] | null;
-  timestamp: string;
-  deliveryOrigin?: 'send_message' | 'send_file' | 'response';
-  suggestedAction?: SuggestedAction;
-  usage?: import('./types').TurnUsage;
-  activity?: import('./types').ActivityLine[];
-  event?: import('./types').TimelineEvent;
-  reactions?: import('./types').MessageReaction[];
-  author?: { userId: string; displayName: string };
-}
 
 export function returnToUserMenu(source: Signal<boolean>): void {
   batch(() => {
@@ -344,38 +299,6 @@ function threadCtxOf(t: Thread | null | undefined): ThreadCtx | null {
   return { channelType: t.channelType, messagingGroupId: t.messagingGroupId ?? null, canSend: !!t.canSend };
 }
 
-function bumpActiveThread(maxTs?: string): void {
-  if (!threadId.value) return;
-  const list = threads.value.slice();
-  const idx = list.findIndex((x) => x.threadId === threadId.value);
-  if (idx < 0) {
-    if (groupId.value) loadThreads(groupId.value);
-    return;
-  }
-  const t: Thread = { ...list[idx]! };
-  t.lastActivityAt = maxTs || new Date().toISOString();
-  t.messageCount = (t.messageCount || 0) + 1;
-  list.splice(idx, 1);
-  list.unshift(t);
-  threads.value = list;
-}
-
-function updateActiveThreadTitleFromFirstMessage(text: string): void {
-  if (!threadId.value) return;
-  const list = threads.value.slice();
-  const idx = list.findIndex((x) => x.threadId === threadId.value);
-  if (idx < 0) return;
-  const t = list[idx]!;
-  if (t.title !== '(new thread)') return;
-  const clean = String(text || '')
-    .replace(/^>\s*Context[^\n]*\n+/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!clean) return;
-  list[idx] = { ...t, title: clean.slice(0, 60) };
-  threads.value = list;
-}
-
 // ── search ──────────────────────────────────────────────────────────
 let searchGeneration = 0;
 let searchController: AbortController | null = null;
@@ -430,6 +353,7 @@ export function clearSearch(): void {
 
 // ── chat ────────────────────────────────────────────────────────────
 export function clearChat(): void {
+  resetConversation();
   retryWebSend = null;
   resetTurnState();
   voice.detach();
@@ -446,12 +370,6 @@ export function clearChat(): void {
     messagingGroupId.value = null;
     canSend.value = true;
     highlightMessageId.value = null;
-    isTyping.value = false;
-    typingHint.value = '';
-    typingStartedAt.value = null;
-    typingModel.value = '';
-    typingUsage.value = null;
-    activityLog.value = [];
   });
   if (refs.ws) {
     try {
@@ -501,12 +419,9 @@ export function startSyncPoll(): void {
 
 interface SyncResponse {
   approvals: PendingApprovalDto[];
-  questions?: PendingQuestionDto[];
   threads?: Thread[];
-  threadMessages?: ServerMessage[];
+  conversation?: ConversationSnapshot;
   voiceInput?: VoiceInputCapability;
-  activeTurn?: ActiveTurn | null;
-  connected?: boolean;
 }
 
 /** Returns whether `threads` now holds a fresh server list for the current group. */
@@ -534,22 +449,35 @@ export async function runSync(
       'api/sync' + (params.toString() ? '?' + params.toString() : ''),
       options.forceRefresh ? { cache: 'no-store' } : undefined,
     );
-  } catch {
+  } catch (error) {
     if (generation === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct !== 'web') {
       applyTurnState(activeTurn.value, false);
+      console.error('Conversation sync failed', error);
+      chatReady.value = false;
+      chatStatus.value = 'Conversation unavailable. Reconnect to retry.';
     }
     return false;
   }
   if (requestId !== refs.syncRequestId) return false;
   if (
     generation === refs.chatGeneration &&
+    tid &&
     gid === groupId.value &&
     tid === threadId.value &&
     ct === channelType.value &&
     mg === messagingGroupId.value &&
     ct !== 'web'
   ) {
-    applyTurnState(res.activeTurn ?? null, res.connected === true);
+    {
+      try {
+        applyConversationFrame(res.conversation, tid);
+      } catch (error) {
+        console.error('Conversation snapshot rejected', error);
+        chatStatus.value = error instanceof Error ? error.message : 'Invalid chat snapshot. Reload this page.';
+        chatReady.value = false;
+        return false;
+      }
+    }
   }
   if (gid && groupId.value === gid && tid === threadId.value && res.voiceInput) {
     voiceInput.value = res.voiceInput;
@@ -557,15 +485,6 @@ export async function runSync(
       voice.interrupt(res.voiceInput.reason || 'Live voice input is no longer available. Current text has been kept.');
   }
   if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
-  if (gid && groupId.value === gid && tid === threadId.value && Array.isArray(res.questions)) {
-    const serverIds = new Set(res.questions.map((question) => question.questionId));
-    const liveQuestions = pendingQuestions.value.filter((question) => {
-      if (serverIds.has(question.questionId) || question.agentGroupId !== gid) return false;
-      if (tid?.startsWith('__dm:')) return question.threadId === null;
-      return question.threadId === tid;
-    });
-    pendingQuestions.value = liveQuestions.length > 0 ? [...res.questions, ...liveQuestions] : res.questions;
-  }
   let threadsApplied = false;
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
     threadsApplied = true;
@@ -585,142 +504,7 @@ export async function runSync(
     );
     threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
   }
-  if (
-    generation === refs.chatGeneration &&
-    gid &&
-    groupId.value === gid &&
-    tid &&
-    threadId.value === tid &&
-    ct === channelType.value &&
-    mg === messagingGroupId.value &&
-    ct !== 'web' &&
-    Array.isArray(res.threadMessages)
-  ) {
-    if (options.replaceThreadMessages) replaceIncomingMessages(res.threadMessages);
-    else mergeIncomingMessages(res.threadMessages);
-  }
   return threadsApplied;
-}
-
-function toChatMessage(m: ServerMessage): ChatMessage {
-  return {
-    timelinePosition: m.timelinePosition ?? m.inputState?.timelinePosition,
-    id: m.id,
-    direction: normDirection(m.direction),
-    text: m.text,
-    ...(m.card ? { card: m.card } : {}),
-    files: m.files || null,
-    ts: m.timestamp,
-    ...(m.author ? { author: m.author } : {}),
-    ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
-    ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
-    ...(m.usage ? { usage: m.usage } : {}),
-    ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
-    ...(m.turnStats ? { turnStats: m.turnStats } : {}),
-    ...(m.inputState ? { inputState: m.inputState } : {}),
-    canEditPending: m.canEditPending === true,
-    ...(m.activity ? { activity: m.activity } : {}),
-    ...(m.event ? { event: m.event } : {}),
-    ...(m.reactions ? { reactions: m.reactions } : {}),
-  };
-}
-
-function visibleIncomingMessages(messages: ServerMessage[]): ServerMessage[] {
-  for (const message of messages) {
-    if (message.direction === 'in' && message.id && message.inputState?.status === 'cancelled')
-      confirmCancelledInput(message.id);
-  }
-  return messages.filter(
-    (message) =>
-      message.direction !== 'in' || (message.inputState?.status !== 'cancelled' && !isCancelledInput(message.id)),
-  );
-}
-
-function replaceIncomingMessages(messages: ServerMessage[]): void {
-  const echoedIds = messages.filter((m) => normDirection(m.direction) === 'in' && m.id).map((m) => m.id!);
-  messages = visibleIncomingMessages(messages);
-  const previous = new Map(chatMessages.value.map((message) => [`${message.direction}:${message.id}`, message]));
-  chatMessages.value = messages.map((message) => {
-    const next = toChatMessage(message);
-    const prior = previous.get(`${next.direction}:${next.id}`);
-    return {
-      ...next,
-      ...(!next.usage && prior?.provisionalTurn ? { provisionalTurn: prior.provisionalTurn } : {}),
-      ...(!next.activity && prior?.activity ? { activity: prior.activity } : {}),
-    };
-  });
-  refs.seenIds = new Set(messages.filter((m) => m.id).map((m) => `${normDirection(m.direction)}:${m.id}`));
-  const tid = threadId.value;
-  pendingWebSends.value = pendingWebSends.value.filter(
-    (pendingSend) =>
-      pendingSend.threadId !== tid ||
-      (!echoedIds.includes(pendingSend.messageId) && !isCancelledInput(pendingSend.messageId)),
-  );
-}
-
-function mergeIncomingMessages(messages: ServerMessage[]): void {
-  messages = visibleIncomingMessages(messages);
-  chatMessages.value = chatMessages.value.filter(
-    (message) => message.direction !== 'in' || !isCancelledInput(message.id),
-  );
-  const updates = new Map(
-    messages
-      .filter((message) => message.id)
-      .map((message) => [`${normDirection(message.direction)}:${message.id}`, message]),
-  );
-  chatMessages.value = chatMessages.value.map((message) => {
-    const update = updates.get(`${message.direction}:${message.id}`);
-    if (!update) return message;
-    return {
-      ...message,
-      timelinePosition: update.timelinePosition ?? update.inputState?.timelinePosition ?? message.timelinePosition,
-      ...(update.usage ? { usage: update.usage, provisionalTurn: undefined } : {}),
-      ...(update.activity ? { activity: update.activity } : {}),
-      ...(update.turnStats ? { turnStats: update.turnStats } : {}),
-      ...(message.direction === 'in'
-        ? {
-            text: update.text,
-            inputState: update.inputState,
-            canEditPending: update.canEditPending === true,
-          }
-        : {}),
-    };
-  });
-  let maxTs = '';
-  const additions: ChatMessage[] = [];
-  for (const m of messages) {
-    const direction = normDirection(m.direction);
-    const key = m.id ? `${direction}:${m.id}` : null;
-    if (key && refs.seenIds.has(key)) continue;
-    const ts = m.timestamp || '';
-    additions.push({
-      timelinePosition: m.timelinePosition ?? m.inputState?.timelinePosition,
-      id: m.id,
-      direction,
-      text: m.text,
-      ...(m.card ? { card: m.card } : {}),
-      files: m.files || null,
-      ts,
-      ...(m.author ? { author: m.author } : {}),
-      ...(m.deliveryOrigin ? { deliveryOrigin: m.deliveryOrigin } : {}),
-      ...(m.suggestedAction ? { suggestedAction: m.suggestedAction } : {}),
-      ...(m.usage ? { usage: m.usage } : {}),
-      ...(m.stoppedStats ? { stoppedStats: m.stoppedStats } : {}),
-      ...(m.turnStats ? { turnStats: m.turnStats } : {}),
-      ...(m.inputState ? { inputState: m.inputState } : {}),
-      canEditPending: m.canEditPending === true,
-      ...(m.activity ? { activity: m.activity } : {}),
-      ...(m.event ? { event: m.event } : {}),
-      ...(m.reactions ? { reactions: m.reactions } : {}),
-    });
-    if (key) refs.seenIds.add(key);
-    if (ts > maxTs) maxTs = ts;
-    if (direction === 'out') maybeNotify(m.text, m.files || []);
-  }
-  if (additions.length) {
-    chatMessages.value = chatMessages.value.concat(additions);
-    bumpActiveThread(maxTs);
-  }
 }
 
 /**
@@ -748,77 +532,6 @@ export function openTaskPanel(gid: string, tid: string, focusSeriesId?: string):
   taskPanelRequest.value = { gid, tid, ...(focusSeriesId ? { focusSeriesId } : {}) };
 }
 
-function appendMsg(
-  direction: Direction,
-  text: string,
-  files: ChatMessageFile[] | null | undefined,
-  ts: string,
-  id?: string,
-  activity?: import('./types').ActivityLine[] | null,
-  card?: DisplayCard,
-  deliveryOrigin?: 'send_message' | 'send_file' | 'response',
-  author?: { userId: string; displayName: string },
-  suggestedAction?: SuggestedAction,
-  stoppedStats?: StoppedTurnStats,
-  timelinePosition?: number,
-  provisionalTurn?: ChatMessage['provisionalTurn'],
-  turnStats?: ChatMessage['turnStats'],
-): void {
-  const key = id ? `${direction}:${id}` : null;
-  if (key && refs.seenIds.has(key)) {
-    chatMessages.value = chatMessages.value.map((message) =>
-      message.direction === direction && message.id === id
-        ? {
-            ...message,
-            ...(timelinePosition !== undefined ? { timelinePosition } : {}),
-            ...(!message.activity && activity?.length ? { activity } : {}),
-            ...(!message.usage && provisionalTurn ? { provisionalTurn } : {}),
-          }
-        : message,
-    );
-    return;
-  }
-  if (key) refs.seenIds.add(key);
-  chatMessages.value = chatMessages.value.concat({
-    id,
-    direction,
-    text,
-    ...(card ? { card } : {}),
-    files: files || null,
-    ts,
-    timelinePosition,
-    ...(author ? { author } : {}),
-    ...(deliveryOrigin ? { deliveryOrigin } : {}),
-    ...(suggestedAction ? { suggestedAction } : {}),
-    ...(stoppedStats ? { stoppedStats } : {}),
-    ...(activity && activity.length ? { activity } : {}),
-    ...(provisionalTurn ? { provisionalTurn } : {}),
-    ...(turnStats ? { turnStats } : {}),
-  });
-}
-
-function normDirection(d: string): Direction {
-  return d === 'in' ? 'in' : d === 'internal' ? 'internal' : d === 'event' ? 'event' : 'out';
-}
-
-/**
- * Attach an emoji reaction to the message with `targetId`, matched against
- * either an inbound or outbound bubble id. Dedupes identical emoji so a
- * live frame that races the socket snapshot doesn't double up. No-op when
- * the target isn't loaded (the next socket snapshot will surface it).
- */
-function applyReaction(targetId: string, emoji: string, ts: string): void {
-  let changed = false;
-  const next = chatMessages.value.map((m) => {
-    if (m.id !== targetId) return m;
-    const existing = m.reactions || [];
-    if (existing.some((r) => r.emoji === emoji)) return m;
-    changed = true;
-    return { ...m, reactions: [...existing, { emoji, ts }] };
-  });
-  if (changed) chatMessages.value = next;
-}
-
 interface ChatStartResponse {
   threadId: string;
   messagingGroupId?: string | null;
@@ -828,6 +541,7 @@ interface ChatStartResponse {
 export async function openChat(gid: string, resumeTid: string | null, opts: ThreadCtx | null): Promise<void> {
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
   if (!resumeTid && refs.newChatInFlight) return;
+  resetConversation();
   resetTurnState();
   voice.detach();
   cancelRecording();
@@ -879,12 +593,6 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     messagingGroupId.value = mg;
     canSend.value = ct === 'web' ? false : cs;
     pendingQuestions.value = [];
-    isTyping.value = false;
-    typingHint.value = '';
-    typingStartedAt.value = null;
-    typingModel.value = '';
-    typingUsage.value = null;
-    activityLog.value = [];
     if (resumeTid) {
       threadId.value = resumeTid;
       chatLoading.value = true;
@@ -902,7 +610,6 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
       await runSync({ replaceThreadMessages: true });
       if (generation !== refs.chatGeneration) return;
       chatLoading.value = false;
-      chatStatus.value = '';
     }
     // Don't steal focus from the search view when navigating via search result.
     if (!highlightMessageId.value) focusComposerSoon();
@@ -1049,7 +756,6 @@ function connectChatWs(ctx: ChatSocketContext): void {
       clearInterval(refs.wsPingTimer);
       refs.wsPingTimer = null;
     }
-    clearTypingPresentation();
     if (groupId.value !== gid || threadId.value !== tid) return;
     const attempt = ++refs.reconnectAttempt;
     const delay = Math.min(15000, 500 * Math.pow(2, attempt - 1));
@@ -1075,345 +781,22 @@ function connectChatWs(ctx: ChatSocketContext): void {
   };
   ws.onmessage = (ev: MessageEvent) => {
     if (refs.ws !== ws || generation !== refs.chatGeneration) return;
-    let payload: WsPayload;
     try {
-      payload = JSON.parse(ev.data) as WsPayload;
-    } catch {
-      return;
-    }
-    if (payload.kind === 'history') {
-      if (payload.threadId !== tid || !Array.isArray(payload.messages)) return;
-      replaceIncomingMessages(payload.messages);
-      voiceInput.value = payload.voiceInput || {
-        backend: 'disabled',
-        ready: false,
-        reason: 'Live voice input is not configured.',
-      };
-      canSend.value = payload.canSend === true;
-      applyTurnState(payload.activeTurn ?? null, payload.connected === true);
-      return;
-    }
-    if (payload.kind === 'turn') {
-      applyTurnState(payload.turn ?? null, payload.connected === true);
-      return;
-    }
-    if (payload.kind === 'input-state') {
-      const states = new Map((payload.states ?? []).map((entry) => [entry.messageId, entry]));
-      for (const entry of states.values()) {
-        if (entry.inputState?.status === 'cancelled') confirmCancelledInput(entry.messageId);
-      }
-      chatMessages.value = chatMessages.value
-        .map((message) =>
-          message.direction === 'in' && message.id && states.has(message.id)
-            ? {
-                ...message,
-                inputState: states.get(message.id)!.inputState ?? undefined,
-                timelinePosition:
-                  states.get(message.id)!.timelinePosition ??
-                  states.get(message.id)!.inputState?.timelinePosition ??
-                  message.timelinePosition,
-                ...(typeof states.get(message.id)!.text === 'string' ? { text: states.get(message.id)!.text! } : {}),
-                ...(typeof states.get(message.id)!.canEditPending === 'boolean'
-                  ? { canEditPending: states.get(message.id)!.canEditPending }
-                  : {}),
-              }
-            : message,
-        )
-        .filter((message) => message.direction !== 'in' || !isCancelledInput(message.id));
-      return;
-    }
-    if (payload.kind === 'ready') {
-      if (payload.threadId !== tid) return;
+      applyConversationFrame(JSON.parse(ev.data), tid);
       refs.reconnectAttempt = 0;
-      chatLoading.value = false;
-      chatReady.value = true;
-      chatStatus.value = 'connected';
-      return;
-    }
-    if (payload.kind === 'typing') {
-      const priorStartedAt = typingStartedAt.value;
-      if (!payload.on) {
-        finishTypingPresentation();
-        return;
+    } catch (error) {
+      console.error('Conversation protocol error', error);
+      chatReady.value = false;
+      applyTurnState(activeTurn.value, false);
+      chatStatus.value = error instanceof Error ? error.message : 'Invalid chat data. Reload this page.';
+      if (error instanceof ConversationProtocolError && error.code === 'protocol_mismatch') {
+        ws.onclose = null;
+        if (refs.wsPingTimer) clearInterval(refs.wsPingTimer);
+        showToast('Chat protocol changed. Reload this page.', 'err');
+      } else {
+        showToast('Chat synchronization lost. Reconnecting for a fresh snapshot.', 'err');
       }
-      if (responseReceived.value) return;
-      typingEndedAt.value = null;
-      isTyping.value = true;
-      typingHint.value = payload.hint || '';
-      if (payload.items !== null && payload.items !== undefined) {
-        const changed = JSON.stringify(activityLog.value) !== JSON.stringify(payload.items);
-        activityLog.value = payload.items;
-        if (changed && payload.items.length) playProgressTick();
-      }
-      if (typeof payload.startedAt === 'number' && Number.isFinite(payload.startedAt)) {
-        if (priorStartedAt !== null && priorStartedAt !== payload.startedAt) typingUsage.value = null;
-        typingStartedAt.value = payload.startedAt;
-      }
-      if (typeof payload.model === 'string') typingModel.value = payload.model;
-      if (payload.usage) typingUsage.value = payload.usage;
-      return;
-    }
-    if (payload.kind === 'inbound') {
-      if (payload.id && payload.inputState?.status === 'cancelled') confirmCancelledInput(payload.id);
-      if (payload.inputState?.status === 'cancelled' || isCancelledInput(payload.id)) {
-        chatMessages.value = chatMessages.value.filter(
-          (message) => message.direction !== 'in' || message.id !== payload.id,
-        );
-        pendingWebSends.value = pendingWebSends.value.filter((send) => send.messageId !== payload.id);
-        return;
-      }
-      const seen = payload.id && refs.seenIds.has(`in:${payload.id}`);
-      if (!activeTurn.value) refs.carryActivity = [];
-      if (payload.id) {
-        pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== payload.id);
-      }
-      appendMsg(
-        'in',
-        payload.text || '',
-        payload.files || null,
-        payload.timestamp || '',
-        payload.id,
-        null,
-        undefined,
-        undefined,
-        payload.author,
-      );
-      if (!seen && payload.id && payload.inputHandling) {
-        const handling = payload.inputHandling;
-        chatMessages.value = chatMessages.value.map((message) =>
-          message.direction === 'in' && message.id === payload.id
-            ? {
-                ...message,
-                inputState: {
-                  messageId: payload.id!,
-                  status: 'queued',
-                  ...(handling.mode === 'queue' ? { queuedForNextTurn: true } : {}),
-                  ...(handling.turnId ? { turnId: handling.turnId } : {}),
-                },
-              }
-            : message,
-        );
-      }
-      if (payload.id) {
-        chatMessages.value = chatMessages.value.map((message) =>
-          message.direction === 'in' && message.id === payload.id
-            ? {
-                ...message,
-                text: payload.text ?? message.text,
-                ...(typeof payload.canEditPending === 'boolean' ? { canEditPending: payload.canEditPending } : {}),
-                ...(payload.inputState
-                  ? {
-                      inputState: {
-                        ...payload.inputState,
-                        ...(payload.inputState.status === 'queued' && payload.inputHandling?.mode === 'queue'
-                          ? { queuedForNextTurn: true }
-                          : {}),
-                      },
-                    }
-                  : {}),
-                timelinePosition:
-                  payload.timelinePosition ?? payload.inputState?.timelinePosition ?? message.timelinePosition,
-              }
-            : message,
-        );
-      }
-      updateActiveThreadTitleFromFirstMessage(payload.text || '');
-      bumpActiveThread();
-      return;
-    }
-    if (payload.kind === 'reaction') {
-      const targetId = payload.targetId;
-      const emoji = payload.emoji;
-      if (targetId && emoji) applyReaction(targetId, emoji, payload.timestamp || new Date().toISOString());
-      return;
-    }
-    if (payload.kind === 'outbound') {
-      // chat-sdk messages (ask_question, send_card) need special handling.
-      if (payload.messageKind === 'chat-sdk') {
-        if (payload.question) {
-          // Directly append the question to pendingQuestions so the card
-          // renders immediately without waiting for the next sync.
-          const q: PendingQuestionDto = {
-            questionId: payload.question.questionId,
-            title: payload.question.title,
-            question: payload.question.question,
-            responseMode: payload.question.responseMode,
-            options: payload.question.options,
-            status: 'pending',
-            answerValue: null,
-            answerType: null,
-            answeredAt: null,
-            threadId: threadId.value,
-            agentGroupId: groupId.value || '',
-            createdAt: payload.timestamp || new Date().toISOString(),
-          };
-          const existing = pendingQuestions.value;
-          if (!existing.some((e) => e.questionId === q.questionId)) {
-            pendingQuestions.value = [...existing, q];
-          }
-          // Also clear typing since the agent is now waiting for user input.
-          clearTypingPresentation();
-        } else {
-          // Display cards keep fallbackText for notifications/degradation while
-          // rendering their normalized structure when the server supplied it.
-          const c = payload.content || {};
-          const text = typeof c === 'string' ? c : (c as { fallbackText?: string }).fallbackText || '';
-          if (payload.card || text) {
-            const cardActivity = activityLog.value.length ? activityLog.value.slice() : null;
-            appendMsg(
-              'out',
-              text,
-              payload.files || [],
-              payload.timestamp || '',
-              payload.id,
-              cardActivity,
-              payload.card,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              payload.timelinePosition,
-            );
-            bumpActiveThread();
-          }
-        }
-        return;
-      }
-      const c = payload.content || {};
-      // Defensive: a reaction row should arrive as a dedicated `reaction`
-      // frame, but if one slips through as `outbound`, fold it onto its
-      // target instead of rendering an empty bubble.
-      if (typeof c === 'object' && (c as { operation?: string }).operation === 'reaction') {
-        const rc = c as { messageId?: string; emoji?: string };
-        if (rc.messageId && rc.emoji) {
-          applyReaction(rc.messageId, rc.emoji, payload.timestamp || new Date().toISOString());
-        }
-        return;
-      }
-      const text = typeof c === 'string' ? c : c.text || c.markdown || '';
-      const dir: Direction = payload.messageKind === 'internal' ? 'internal' : 'out';
-      const deliveryOrigin =
-        typeof c === 'object' &&
-        (c.delivery_origin === 'send_message' || c.delivery_origin === 'send_file' || c.delivery_origin === 'response')
-          ? c.delivery_origin
-          : undefined;
-      const suggestedAction =
-        typeof c === 'object' &&
-        (c.suggested_action === 'continue' || c.suggested_action === 'retry' || c.suggested_action === 'report')
-          ? c.suggested_action
-          : undefined;
-      const finalResponse = isFinalResponse(dir, deliveryOrigin);
-      // For the final response, carry the live-accumulated trace onto the
-      // message bubble so it stays visible immediately — the live outbound
-      // frame has no activity of its own, and otherwise the trace would only
-      // reappear in the next socket snapshot's persisted turn_activity.
-      // Keep the live snapshot until the response arrives; the carry buffer
-      // also covers legacy clients' typing-off ordering.
-      const carriedActivity = finalResponse
-        ? activityLog.value.length
-          ? activityLog.value.slice()
-          : refs.carryActivity
-        : null;
-      batch(() => {
-        appendMsg(
-          dir,
-          text,
-          payload.files || [],
-          payload.timestamp || '',
-          payload.id,
-          carriedActivity,
-          undefined,
-          deliveryOrigin,
-          undefined,
-          suggestedAction,
-          readStoppedTurnStats(c),
-          payload.timelinePosition,
-          finalResponse ? provisionalTurnMetadata() : undefined,
-          readTurnStats(c),
-        );
-        if (finalResponse) completeTurnPresentation();
-      });
-      bumpActiveThread();
-      if (dir === 'out') maybeNotify(text, payload.files || []);
-      if (finalResponse) {
-        playCompletionChime();
-      }
-      return;
-    }
-    if (payload.kind === 'usage') {
-      const mid = payload.id;
-      const usage = payload.usage;
-      if (!mid || !usage) return;
-      const list = chatMessages.value;
-      let changed = false;
-      const next = list.map((m) => {
-        if (m.id === mid && m.direction === 'out') {
-          changed = true;
-          return { ...m, usage, provisionalTurn: undefined };
-        }
-        return m;
-      });
-      if (changed) chatMessages.value = next;
-      return;
-    }
-    if (payload.kind === 'activity') {
-      const mid = payload.id;
-      const activity = payload.items;
-      if (!mid || !activity) return;
-      const list = chatMessages.value;
-      let changed = false;
-      const next = list.map((m) => {
-        if (m.id === mid && m.direction === 'out') {
-          changed = true;
-          return { ...m, activity };
-        }
-        return m;
-      });
-      if (changed) chatMessages.value = next;
-      return;
-    }
-    if (payload.kind === 'task-run') {
-      // A scheduled task just fired. Drop a timeline event bubble (mirrors the
-      // socket snapshot event row) and refresh the thread list so the live-task pill's
-      // next-run label reflects the newly-cloned recurrence.
-      const id = payload.id;
-      if (id) {
-        const key = `event:${id}`;
-        if (!refs.seenIds.has(key)) {
-          refs.seenIds.add(key);
-          const summary = payload.summary || 'Scheduled task';
-          const status = payload.status || 'completed';
-          const triggerSource = payload.triggerSource === 'manual' ? 'manual' : 'scheduled';
-          const subject = triggerSource === 'manual' ? 'Manual task' : 'Scheduled task';
-          const verb =
-            status === 'timed_out'
-              ? 'timed out'
-              : status === 'failed'
-                ? 'failed'
-                : status === 'skipped'
-                  ? 'skipped'
-                  : 'completed';
-          chatMessages.value = chatMessages.value.concat({
-            id,
-            direction: 'event',
-            text: `${subject} ${verb}${payload.autoPaused ? ' and was auto-paused' : ''}: ${summary}`,
-            files: null,
-            ts: payload.timestamp || new Date().toISOString(),
-            event: {
-              kind: 'task-run',
-              summary,
-              ...(payload.taskId ? { taskId: payload.taskId } : {}),
-              ...(payload.recurrence ? { recurrence: payload.recurrence } : {}),
-              status,
-              triggerSource,
-              ...(payload.error ? { error: payload.error } : {}),
-              ...(payload.autoPaused ? { autoPaused: true } : {}),
-            },
-          });
-        }
-      }
-      if (groupId.value) void loadThreads(groupId.value);
-      return;
+      ws.close();
     }
   };
 }
@@ -1474,8 +857,6 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
     return false;
   const clientMessageId = retry?.clientMessageId ?? crypto.randomUUID();
   const messageId = publicWebMessageId(clientMessageId);
-  // A queued/steering send is not a new turn boundary.
-  if (!activeTurn.value) refs.carryActivity = [];
   // Scroll to bottom immediately so user sees their message area
   requestScrollToBottom();
   if (isWeb) {
@@ -1485,13 +866,6 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
     }
   }
   const hasFiles = Array.isArray(files) && files.length > 0;
-  if (!isWeb) {
-    const now = new Date().toISOString();
-    const fileMetas: ChatMessageFile[] | null = hasFiles
-      ? files!.map((f) => ({ filename: f.name, size: f.size }))
-      : null;
-    appendMsg('in', text || '', fileMetas, now);
-  }
   let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/send`;
   if (!isWeb && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
@@ -2133,12 +1507,6 @@ export async function respondQuestion(questionId: string, value: string): Promis
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);
   respondingQuestionIds.value = next;
-  // Keep the question visible and optimistically show its durable answer.
-  pendingQuestions.value = pendingQuestions.value.map((q) =>
-    q.questionId === questionId
-      ? { ...q, status: 'answered', answerValue: value, answeredAt: new Date().toISOString() }
-      : q,
-  );
   try {
     // Reuse the approval respond endpoint — dispatchResponse routes to both handlers.
     const res = await postJson<{ ok?: boolean; error?: string }>(
@@ -2146,6 +1514,7 @@ export async function respondQuestion(questionId: string, value: string): Promis
       { value },
     );
     if (!res.ok) throw new Error(res.data?.error || 'HTTP ' + res.status);
+    if (channelType.value !== 'web') await runSync({ forceRefresh: true });
     return true;
   } catch (err) {
     console.error('question respond failed', err);

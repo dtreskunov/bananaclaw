@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat, runSync, sendChat } from './actions';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
+import { testSnapshot, testTurn } from './conversation-test-fixtures';
 import {
   activeTurn,
   canSend,
@@ -41,15 +42,17 @@ describe('Stop integration with chat actions', () => {
           ok: true,
           json: async () => ({
             approvals: [],
-            threadMessages: [
-              {
-                id: 'stopped',
-                direction: 'out',
-                text: 'Stopped by user.',
-                timestamp: '2026-09-25T00:00:00Z',
-                stoppedStats,
-              },
-            ],
+            conversation: testSnapshot({
+              messages: [
+                {
+                  id: 'stopped',
+                  direction: 'out',
+                  text: 'Stopped by user.',
+                  timestamp: '2026-09-25T00:00:00Z',
+                  stoppedStats,
+                },
+              ],
+            }),
           }),
         }),
       );
@@ -98,11 +101,17 @@ describe('Stop integration with chat actions', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ approvals: [], activeTurn: { id: 'external-turn', status: 'running' }, connected: true }),
+        json: async () => ({
+          approvals: [],
+          conversation: testSnapshot({
+            turns: [{ ...testTurn, id: 'external-turn' }],
+            connection: { connected: true, activeTurnId: 'external-turn' },
+          }),
+        }),
       }),
     );
     await runSync();
-    expect(activeTurn.value).toEqual({ id: 'external-turn', status: 'running' });
+    expect(activeTurn.value).toMatchObject({ id: 'external-turn', status: 'running' });
     expect(turnConnected.value).toBe(true);
     expect(fetch).toHaveBeenCalledWith('api/sync?gid=group&tid=thread&channel=telegram&mg=chat', expect.anything());
   });
@@ -115,7 +124,13 @@ describe('Stop integration with chat actions', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ approvals: [], activeTurn: { id: 'stale-turn', status: 'stopping' }, connected: false }),
+        json: async () => ({
+          approvals: [],
+          conversation: testSnapshot({
+            turns: [{ ...testTurn, id: 'stale-turn', phase: 'stopping' }],
+            connection: { connected: false, activeTurnId: 'stale-turn' },
+          }),
+        }),
       }),
     );
     await runSync();

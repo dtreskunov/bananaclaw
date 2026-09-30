@@ -31,7 +31,6 @@ import {
   getSessionActiveTurn,
   isSessionTurnId,
   notifySessionHostState,
-  onSessionSignal,
   requestSessionTurnStop,
   type SessionActiveTurn,
 } from '../../../session-link.js';
@@ -76,12 +75,14 @@ import { log } from '../../../log.js';
 import { getChannelAdapter } from '../../../channels/channel-registry.js';
 import { normalizeDisplayCardPayload, type DisplayCard } from '../../../channels/display-card.js';
 import { shortcodeToEmoji } from './emoji.js';
-import { subscribeWeb, submitWebInbound, WEB_CHANNEL_TYPE, type WebSubscriber } from '../../../channels/web.js';
+import { submitWebInbound, WEB_CHANNEL_TYPE } from '../../../channels/web.js';
+import { onConversationChange } from '../../../conversation-events.js';
+import { readConversation } from './conversation.js';
+import { sendConversationFrame, startConversationStream } from './conversation-stream.js';
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from '../../../channels/homeassistant.js';
 import { setResendPendingWebOverride } from '../../../channels/resend.js';
 import type { OutboundMessage } from '../../../channels/adapter.js';
 import { authenticate, COOKIE_NAME } from '../auth.js';
-import { resolveVoiceInputConfig } from './voice-input-config.js';
 import { handleVoiceUpgrade } from './voice-stream.js';
 import { uiBaseUrl } from '../server.js';
 import fs from 'fs';
@@ -142,33 +143,13 @@ function ensureWebMessagingGroup(agentGroupId: string): string {
 }
 
 interface ChatContext {
+  request: http.IncomingMessage;
   userId: string;
   groupId: string;
   platformId: string;
   messagingGroupId: string;
   threadId: string;
   canSend: boolean;
-}
-
-export function createBufferedFrameSender(sendEncoded: (frame: string) => void): {
-  send: (frame: unknown) => void;
-  finish: (historyFrame: unknown, readyFrame: unknown) => void;
-} {
-  let initializing = true;
-  const bufferedFrames: string[] = [];
-  return {
-    send(frame) {
-      const encoded = JSON.stringify(frame);
-      if (initializing) bufferedFrames.push(encoded);
-      else sendEncoded(encoded);
-    },
-    finish(historyFrame, readyFrame) {
-      sendEncoded(JSON.stringify(historyFrame));
-      for (const frame of bufferedFrames) sendEncoded(frame);
-      sendEncoded(JSON.stringify(readyFrame));
-      initializing = false;
-    },
-  };
 }
 
 /**
@@ -1112,102 +1093,16 @@ function readVisibleInputStates(
 }
 
 /**
- * Look up `turn_usage` for a single outbound message id. Used by the live
- * WS subscriber to push usage to the client as soon as it's written —
- * without this, usage only appears after the next socket snapshot.
- */
-export function readTurnUsageForOutbound(
-  agentGroupId: string,
-  sessionId: string,
-  messageOutId: string,
-): TurnUsageDto | undefined {
-  try {
-    const outDb = openOutboundDb(agentGroupId, sessionId);
-    try {
-      const row = outDb
-        .prepare(
-          `SELECT cost_usd, input_tokens, output_tokens,
-                  cache_read_tokens, cache_write_tokens, reasoning_tokens,
-              num_turns, model, context_window, max_output_tokens, context_tokens, duration_ms
-             FROM turn_usage WHERE message_out_id = ?`,
-        )
-        .get(messageOutId) as
-        | {
-            cost_usd: number;
-            input_tokens: number;
-            output_tokens: number;
-            cache_read_tokens: number;
-            cache_write_tokens: number;
-            reasoning_tokens: number | null;
-            num_turns: number | null;
-            model: string;
-            context_window: number | null;
-            max_output_tokens: number | null;
-            context_tokens: number | null;
-            duration_ms: number | null;
-          }
-        | undefined;
-      if (!row) return undefined;
-      return {
-        cost_usd: row.cost_usd,
-        input_tokens: row.input_tokens,
-        output_tokens: row.output_tokens,
-        cache_read_tokens: row.cache_read_tokens,
-        cache_write_tokens: row.cache_write_tokens,
-        ...(row.reasoning_tokens != null ? { reasoning_tokens: row.reasoning_tokens } : {}),
-        ...(row.num_turns != null ? { num_turns: row.num_turns } : {}),
-        model: row.model,
-        ...(row.context_window != null ? { context_window: row.context_window } : {}),
-        ...(row.max_output_tokens != null ? { max_output_tokens: row.max_output_tokens } : {}),
-        ...(row.context_tokens != null ? { context_tokens: row.context_tokens } : {}),
-        ...(row.duration_ms != null ? { duration_ms: row.duration_ms } : {}),
-      };
-    } finally {
-      outDb.close();
-    }
-  } catch {
-    // outbound DB may not exist
-    return undefined;
-  }
-}
-
-/** Look up and reduce the finalized activity trace for one outbound message. */
-export function readTurnActivityForOutbound(
-  agentGroupId: string,
-  sessionId: string,
-  messageOutId: string,
-): { ts: string; text: string }[] | undefined {
-  try {
-    const outDb = openOutboundDb(agentGroupId, sessionId);
-    try {
-      const rows = outDb
-        .prepare(
-          `SELECT ts, text FROM turn_activity
-            WHERE message_out_id = ? ORDER BY ordinal`,
-        )
-        .all(messageOutId) as { ts: string; text: string }[];
-      if (rows.length === 0) return undefined;
-      return reduceActivityLines(rows);
-    } finally {
-      outDb.close();
-    }
-  } catch {
-    // outbound DB may not exist
-    return undefined;
-  }
-}
-
-/**
  * Read merged inbound + outbound history for a (user, group, thread) from
  * the session DBs. Returns [] if no session exists yet.
  *
  * `override` lets the caller target a non-web messaging group; without it
- * defaults to the per-user web messaging group (legacy behavior).
+ * defaults to the group's shared web messaging group.
  *
  * For elevated users (owner/global admin), the ownership check on the
  * target messaging group is skipped so they can read history of threads
- * they don't participate in. DM viewer-handle scoping is also skipped
- * so threadless DMs come through in full.
+ * they don't participate in. DMs and outputs remain scoped to the selected
+ * platform recipient; privileged access never means every DM in a shared session.
  */
 export function readChatHistory(
   userId: string,
@@ -1729,7 +1624,7 @@ export function resolveTurnContext(
     sessionId: session?.id,
     channelType: target.channelType,
     platformIds:
-      isDm && target.channelType !== WEB_CHANNEL_TYPE
+      isDm && target.channelType !== WEB_CHANNEL_TYPE && !isElevated(userId)
         ? viewerHandlesForChannel(userId, target.channelType)
         : [mg.platform_id],
     threadId: isDm ? null : threadId,
@@ -3557,6 +3452,7 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
 
   wss.handleUpgrade(req, socket, head, (ws) => {
     void attachChatSocket(ws, {
+      request: req,
       userId: session.userId,
       groupId: match.groupId,
       platformId: targetMg.platform_id,
@@ -3568,267 +3464,31 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
 }
 
 async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> {
-  const frameSender = createBufferedFrameSender((frame) => ws.send(frame));
-  const sendFrame = frameSender.send;
-
-  // Lazy-resolved session id for this (user, agentGroup, thread). Cached
-  // once found — used to look up `turn_usage` on each outbound message.
-  // Resolved lazily because the session may not yet exist when the WS
-  // attaches (first message in a brand-new thread creates it).
-  let cachedSessionId: string | undefined;
-  function resolveSessionIdForUsage(): string | undefined {
-    if (cachedSessionId) return cachedSessionId;
-    try {
-      const isDm = ctx.threadId.startsWith('__dm:');
-      const session = resolveSessionForMode(ctx.groupId, ctx.messagingGroupId, 'per-thread', isDm ? '' : ctx.threadId);
-      cachedSessionId = session?.id;
-      return cachedSessionId;
-    } catch {
-      return undefined;
-    }
-  }
-
-  function pushUsageFrame(messageId: string, attempt: number): void {
-    try {
-      const sid = resolveSessionIdForUsage();
-      if (sid) {
-        const usage = readTurnUsageForOutbound(ctx.groupId, sid, messageId);
-        if (usage) {
-          sendFrame({ kind: 'usage', id: messageId, usage });
-          return;
-        }
-      }
-      // Race: the host may deliver the outbound row before the container
-      // has flushed the matching `turn_usage` row. One short retry covers
-      // this; on miss the next socket snapshot still includes usage.
-      if (attempt < 1) setTimeout(() => pushUsageFrame(messageId, attempt + 1), 500);
-    } catch (err) {
-      log.warn('web chat ws usage send failed', { err });
-    }
-  }
-
-  function pushActivityFrame(messageId: string, attempt: number): void {
-    try {
-      const sid = resolveSessionIdForUsage();
-      if (sid) {
-        const activity = readTurnActivityForOutbound(ctx.groupId, sid, messageId);
-        if (activity) {
-          sendFrame({ kind: 'activity', id: messageId, items: activity });
-          return;
-        }
-      }
-      // The outbound row is normally delivered just before the container
-      // persists turn_activity. Retry briefly so the finalized trace reaches
-      // the already-rendered live bubble without requiring a page reload.
-      if (attempt < 2) setTimeout(() => pushActivityFrame(messageId, attempt + 1), 500);
-    } catch (err) {
-      log.warn('web chat ws activity send failed', { err });
-    }
-  }
-
-  const subscriber: WebSubscriber = {
-    onOutbound(message) {
-      try {
-        // Reactions are `chat` rows carrying `operation:'reaction'`. Emit a
-        // dedicated frame so the client folds the emoji onto the target
-        // bubble instead of running the empty-bubble outbound path.
-        if (typeof message.content === 'object' && message.content) {
-          const op = message.content as { operation?: string; messageId?: string; emoji?: string };
-          if (op.operation === 'reaction' && op.messageId && op.emoji) {
-            // De-namespace the target id to match the client's bubble id
-            // (inbound echoes and socket snapshots strip the `:<groupId>` suffix).
-            const targetId = publicInboundMessageId(op.messageId, ctx.groupId);
-            sendFrame({
-              kind: 'reaction',
-              targetId,
-              emoji: shortcodeToEmoji(op.emoji),
-              timestamp: new Date().toISOString(),
-            });
-            return;
-          }
-        }
-        // send_file writes a `file_paths` array parallel to `files` with
-        // workspace-relative source paths so the chat UI can link the
-        // attachment chip into the FILES panel. Fish it out of the
-        // parsed content (delivery.ts has already JSON.parsed it).
-        const c = (typeof message.content === 'object' && message.content) as
-          | { file_paths?: unknown; timelinePosition?: unknown }
-          | undefined;
-        const filePaths: unknown[] = Array.isArray(c?.file_paths) ? c!.file_paths! : [];
-        const timelinePosition = parseTimelinePosition(c?.timelinePosition);
-
-        // For chat-sdk messages (ask_question, send_card), include the
-        // structured content so the client can render interactive cards
-        // without an extra sync round-trip.
-        let question:
-          | {
-              questionId: string;
-              title: string;
-              question: string;
-              responseMode: 'choice' | 'text' | 'choice_or_text';
-              options: { label: string; selectedLabel: string; value: string }[];
-            }
-          | undefined;
-        let card: DisplayCard | undefined;
-        if (message.kind === 'chat-sdk' && typeof message.content === 'object' && message.content) {
-          const sdk = message.content as {
-            type?: string;
-            questionId?: string;
-            title?: string;
-            question?: string;
-            responseMode?: 'choice' | 'text' | 'choice_or_text';
-            options?: { label: string; selectedLabel: string; value: string }[];
-          };
-          if (
-            sdk.type === 'ask_question' &&
-            sdk.questionId &&
-            sdk.title &&
-            sdk.question &&
-            sdk.responseMode &&
-            Array.isArray(sdk.options)
-          ) {
-            question = {
-              questionId: sdk.questionId,
-              title: sdk.title,
-              question: sdk.question,
-              responseMode: sdk.responseMode,
-              options: sdk.options,
-            };
-          } else {
-            card = normalizeDisplayCardPayload(message.content)?.card ?? undefined;
-          }
-        }
-
-        sendFrame({
-          kind: 'outbound',
-          id: message.id,
-          messageKind: message.kind,
-          content: message.content,
-          card,
-          files:
-            message.files?.map((f, i) => ({
-              filename: f.filename,
-              size: f.data.length,
-              path: typeof filePaths[i] === 'string' ? (filePaths[i] as string) : undefined,
-            })) ?? [],
-          timestamp: new Date().toISOString(),
-          ...(question ? { question } : {}),
-          ...(timelinePosition !== undefined ? { timelinePosition } : {}),
-        });
-      } catch (err) {
-        log.warn('web chat ws send failed', { err });
-      }
-      if (message.id && (message.kind === 'chat' || message.kind === 'text')) {
-        pushUsageFrame(message.id, 0);
-        pushActivityFrame(message.id, 0);
-      }
+  const override = { channelType: WEB_CHANNEL_TYPE, messagingGroupId: ctx.messagingGroupId };
+  const unsubscribe = startConversationStream({
+    read: () => {
+      if (!authenticate(ctx.request)) throw new Error('Chat authentication expired');
+      return readConversation(ctx.userId, ctx.groupId, ctx.threadId, override);
     },
-    onInboundEcho(id, text, author, files, inputHandling) {
-      try {
-        // Live echo files arrive with just {filename, size}. Enrich them
-        // with the same attachment `url` + `contentType` that socket snapshots
-        // supply so inline audio/video players render immediately on send.
-        // The host namespaces the
-        // stored message id as `<id>:<agentGroupId>` and writes attachments
-        // to inbox/<namespaced-id>/<filename>; reconstruct that localPath to
-        // build the matching url.
-        const enriched = (files ?? []).map((f) => ({
-          ...f,
-          url: encodedAttachmentUrl(ctx.groupId, ctx.threadId, `inbox/${id}:${ctx.groupId}/${f.filename}`),
-          contentType: mimeFromFilename(f.filename),
-        }));
-        sendFrame({
-          kind: 'inbound',
-          id: publicInboundMessageId(id, ctx.groupId),
-          text,
-          author,
-          ...(inputHandling ? { inputHandling } : {}),
-          files: enriched,
-          timestamp: new Date().toISOString(),
-        });
-      } catch (err) {
-        log.warn('web chat ws echo failed', { err });
-      }
-    },
-    onTyping(on, hint, items, metadata) {
-      try {
-        sendFrame({
-          kind: 'typing',
-          on,
-          hint: hint ?? null,
-          items: items ?? null,
-          ...(metadata ?? {}),
-        });
-      } catch (err) {
-        log.warn('web chat ws typing send failed', { err });
-      }
-    },
-    onTaskRun(event) {
-      try {
-        const summary = summarizeTaskPrompt(event.content);
-        sendFrame({
-          kind: 'task-run',
-          id: event.id,
-          timestamp: event.timestamp,
-          summary,
-          ...(event.seriesId ? { taskId: event.seriesId } : {}),
-          ...(event.recurrence ? { recurrence: event.recurrence } : {}),
-          status: event.status,
-          triggerSource: event.triggerSource,
-          ...(event.error ? { error: event.error } : {}),
-          ...(event.autoPaused ? { autoPaused: true } : {}),
-        });
-      } catch (err) {
-        log.warn('web chat ws task-run send failed', { err });
-      }
-    },
-  };
-  const unsubscribe = subscribeWeb(ctx.platformId, ctx.threadId, subscriber);
-  const readTurn = () =>
-    readChatActiveTurn(ctx.userId, ctx.groupId, ctx.threadId, {
-      channelType: WEB_CHANNEL_TYPE,
-      messagingGroupId: ctx.messagingGroupId,
-    });
-  let lastTurn = JSON.stringify(readTurn());
-  const unsubscribeTurn = onSessionSignal((sessionId, kind) => {
-    if (kind === 'input.state') {
-      if (sessionId !== resolveSessionIdForUsage()) return;
-      const messages = readChatHistory(
-        ctx.userId,
-        ctx.groupId,
-        ctx.threadId,
-        {
-          channelType: WEB_CHANNEL_TYPE,
-          messagingGroupId: ctx.messagingGroupId,
-        },
-        { includeCancelled: true },
-      );
-      sendFrame({
-        kind: 'input-state',
-        states: messages
-          .filter((message) => message.direction === 'in')
-          .map((message) => ({
-            messageId: message.id,
-            inputState: message.inputState ?? null,
-            text: message.text,
-            canEditPending: message.canEditPending ?? false,
-            ...(message.timelinePosition !== undefined ? { timelinePosition: message.timelinePosition } : {}),
-          })),
+    subscribe: (invalidate) => {
+      const off = onConversationChange((sessionId) => {
+        const context = resolveTurnContext(ctx.userId, ctx.groupId, ctx.threadId, override);
+        if (!context || !context.sessionId || sessionId === null || sessionId === context.sessionId) invalidate();
       });
-      return;
-    }
-    if (kind !== 'turn.state' && kind !== 'disconnected') return;
-    if (sessionId !== resolveSessionIdForUsage()) return;
-    const state = readTurn();
-    const snapshot = JSON.stringify(state);
-    if (snapshot === lastTurn) return;
-    lastTurn = snapshot;
-    sendFrame({ kind: 'turn', turn: state.activeTurn, connected: state.connected });
+      const authCheck = setInterval(invalidate, 30_000);
+      authCheck.unref();
+      return () => {
+        off();
+        clearInterval(authCheck);
+      };
+    },
+    send: (frame) => sendConversationFrame(ws, frame),
+    fail: (err) => {
+      log.error('Conversation synchronization failed', { userId: ctx.userId, groupId: ctx.groupId, err });
+      ws.close(1011, 'Conversation unavailable; reconnect or reload');
+    },
   });
-
-  // Mark socket alive and refresh liveness on any inbound frame (pong from
-  // the auto-response to our ping, or an app-level ping from the client).
-  const keepalive = ws as WebSocket & { isAlive?: boolean };
+  const keepalive = ws as KeepaliveWs;
   keepalive.isAlive = true;
   ws.on('pong', () => {
     keepalive.isAlive = true;
@@ -3836,39 +3496,6 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
   ws.on('message', () => {
     keepalive.isAlive = true;
   });
-
-  ws.on('close', () => {
-    unsubscribe();
-    unsubscribeTurn();
-  });
+  ws.on('close', unsubscribe);
   ws.on('error', (err) => log.warn('web chat ws error', { err }));
-
-  try {
-    const messages = readChatHistory(
-      ctx.userId,
-      ctx.groupId,
-      ctx.threadId,
-      {
-        channelType: WEB_CHANNEL_TYPE,
-        messagingGroupId: ctx.messagingGroupId,
-      },
-      { includeCancelled: true },
-    );
-    frameSender.finish(
-      {
-        kind: 'history',
-        threadId: ctx.threadId,
-        messages,
-        voiceInput: resolveVoiceInputConfig(ctx.groupId),
-        canSend: ctx.canSend,
-        ...readTurn(),
-      },
-      { kind: 'ready', threadId: ctx.threadId, ...readTurn() },
-    );
-  } catch (err) {
-    unsubscribe();
-    unsubscribeTurn();
-    log.warn('web chat ws initialization failed', { err });
-    ws.close(1011, 'initialization failed');
-  }
 }

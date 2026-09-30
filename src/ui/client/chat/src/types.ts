@@ -1,5 +1,5 @@
 // Shared types used across the chat UI client.
-import type { InputHandling, InputState } from '../../../shared/input-state';
+import type { InputState } from '../../../shared/input-state';
 export type { InputHandling, InputState } from '../../../shared/input-state';
 
 export type ChannelType =
@@ -128,7 +128,7 @@ export interface ThreadCtx {
   canSend: boolean;
 }
 
-export type Direction = 'in' | 'out' | 'internal' | 'event' | 'question';
+export type Direction = 'in' | 'out' | 'internal' | 'event' | 'question' | 'turn';
 
 export interface ChatMessageFile {
   filename: string;
@@ -171,13 +171,9 @@ export interface DisplayCard {
 
 export type SuggestedAction = 'continue' | 'retry' | 'report';
 
-export interface ProvisionalTurnMetadata {
-  usage?: TurnUsage;
-  model?: string;
-  durationMs?: number;
-}
-
 export interface ChatMessage {
+  turnId?: string;
+  turn?: import('../../../shared/conversation').ConversationTurn;
   timelinePosition?: number;
   canEditPending?: boolean;
   inputState?: InputState;
@@ -192,8 +188,6 @@ export interface ChatMessage {
   /** Safe next-turn action suggested by the agent runner. */
   suggestedAction?: SuggestedAction;
   usage?: TurnUsage;
-  /** Live estimates retained until finalized usage arrives. Never fabricates token counts. */
-  provisionalTurn?: ProvisionalTurnMetadata;
   stoppedStats?: import('../../../shared/stopped-turn').StoppedTurnStats;
   turnStats?: import('../../../shared/stopped-turn').TurnStats;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
@@ -230,6 +224,7 @@ export interface TimelineEvent {
 /** One step of a turn's activity trace: emit-time timestamp (epoch ms as a
  *  string) plus the whole progress text. */
 export interface ActivityLine {
+  ordinal?: number;
   ts: string;
   text: string;
 }
@@ -360,106 +355,6 @@ export interface ActiveTurn {
   supportsInputCancellation?: boolean;
 }
 
-// Value sent by the chat WS.
-export interface WsPayload {
-  kind:
-    | 'history'
-    | 'ready'
-    | 'typing'
-    | 'turn'
-    | 'input-state'
-    | 'inbound'
-    | 'outbound'
-    | 'usage'
-    | 'activity'
-    | 'task-run'
-    | 'reaction';
-  turn?: ActiveTurn | null;
-  activeTurn?: ActiveTurn | null;
-  connected?: boolean;
-  inputHandling?: InputHandling;
-  states?: Array<{
-    messageId: string;
-    inputState: InputState | null;
-    text?: string;
-    canEditPending?: boolean;
-    timelinePosition?: number;
-  }>;
-  timelinePosition?: number;
-  canEditPending?: boolean;
-  inputState?: InputState;
-  threadId?: string;
-  messages?: Array<{
-    timelinePosition?: number;
-    id?: string;
-    direction: string;
-    text: string;
-    card?: DisplayCard;
-    files?: ChatMessageFile[] | null;
-    timestamp: string;
-    deliveryOrigin?: 'send_message' | 'send_file' | 'response';
-    suggestedAction?: SuggestedAction;
-    usage?: TurnUsage;
-    stoppedStats?: import('../../../shared/stopped-turn').StoppedTurnStats;
-    turnStats?: import('../../../shared/stopped-turn').TurnStats;
-    activity?: ActivityLine[];
-    event?: TimelineEvent;
-    reactions?: MessageReaction[];
-    author?: { userId: string; displayName: string };
-    inputState?: InputState;
-    canEditPending?: boolean;
-  }>;
-  author?: { userId: string; displayName: string };
-  voiceInput?: VoiceInputCapability;
-  canSend?: boolean;
-  on?: boolean;
-  /** reaction frame: target message id the emoji attaches to. */
-  targetId?: string;
-  /** reaction frame: unicode emoji (server already resolved the shortcode). */
-  emoji?: string;
-  hint?: string;
-  /** Stable host timestamp for the current turn, preserved across WS reconnects. */
-  startedAt?: number;
-  /** Effective configured model for the current turn. */
-  model?: string;
-  /** Latest cumulative usage snapshot for the in-flight turn. */
-  usage?: TurnUsage;
-  /** Complete host-reduced activity snapshot for the current turn. */
-  items?: ActivityLine[] | null;
-  text?: string;
-  content?:
-    | string
-    | {
-        text?: string;
-        markdown?: string;
-        fallbackText?: string;
-        delivery_origin?: 'send_message' | 'send_file' | 'response';
-        suggested_action?: SuggestedAction;
-        stopped?: boolean;
-        stopped_stats?: unknown;
-        turn_stats?: unknown;
-      };
-  card?: DisplayCard;
-  files?: ChatMessageFile[] | null;
-  timestamp?: string;
-  id?: string;
-  messageKind?: 'internal' | 'final' | string;
-  question?: {
-    questionId: string;
-    title: string;
-    question: string;
-    responseMode: 'choice' | 'text' | 'choice_or_text';
-    options: { label: string; selectedLabel: string; value: string }[];
-  };
-  /** task-run frame fields. */
-  summary?: string;
-  taskId?: string;
-  recurrence?: string | null;
-  status?: TaskAttemptDto['status'];
-  triggerSource?: 'scheduled' | 'manual';
-  error?: string | null;
-  autoPaused?: boolean;
-}
 export interface VoiceInputCapability {
   backend: 'elevenlabs' | 'disabled';
   ready: boolean;

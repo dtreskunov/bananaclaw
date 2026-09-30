@@ -114,7 +114,8 @@ describe('pending input cancellation', () => {
     expect(cancellation.requestId).toMatch(/^[0-9a-f-]{36}$/);
     finish({ ok: true, status: 200, json: async () => ({ ok: true, id: message.id }) });
     expect(await cancelling).toBe(true);
-    expect(chatMessages.value).toEqual([{ ...message, direction: 'out' }]);
+    expect(chatMessages.value).toEqual([message, { ...message, direction: 'out' }]);
+    expect(cancellation.state.value.confirmed).toBe(true);
     expect(activeTurn.value).toBe(turn);
     expect(pending.value).toBe(files);
     expect(stopRequest.value).toBeNull();

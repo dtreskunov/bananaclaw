@@ -20,6 +20,8 @@ import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
 import { sendChat } from '../actions';
 import type { ChatMessage, Thread } from '../types';
+import { applyConversationFrame, resetConversation } from '../conversation-state';
+import { testSnapshot } from '../conversation-test-fixtures';
 
 // Exercise the real Composer's refs, layout transitions, handlers and rendered
 // controls without adding a browser-DOM dependency to the repository.
@@ -107,6 +109,7 @@ function resetMount(text = '') {
 }
 
 beforeEach(() => {
+  resetConversation();
   resetMount('Unsent composer draft');
   pendingEditorSessions.value = new Map();
   composerSendInFlight.value = false;
@@ -159,11 +162,29 @@ describe('main composer pending edits', () => {
     expect(input.value).toBe('Unsent composer draft');
     expect(pending.value).toBe(files);
     expect(pinnedContext.value).toEqual(['keep/context.txt']);
-    expect(chatMessages.value[0].text).toBe('Revision');
+    expect(chatMessages.value[0].text).toBe('Original');
     expect(chatMessages.value[0].files).toBe(attachments);
     expect(activeTurn.value).toBe(turn);
     expect(sendChat).not.toHaveBeenCalled();
     expect(find(tree, 'button', 'Send')).toBeTruthy();
+    applyConversationFrame(
+      testSnapshot({
+        messages: [
+          {
+            id: 'message',
+            direction: 'in',
+            text: 'Revision',
+            timestamp: '1',
+            files: [{ filename: 'instructions.txt', size: 1 }],
+            inputState: message.inputState,
+          },
+        ],
+      }),
+      'thread',
+    );
+    expect(chatMessages.value[0].text).toBe('Revision');
+    expect(input.value).toBe('Unsent composer draft');
+    expect(pending.value).toBe(files);
   });
 
   it('exits without a request and restores the draft; reopening keeps the unsaved revision', () => {

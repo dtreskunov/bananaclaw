@@ -55,6 +55,87 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('authoritative conversation projection', () => {
+  it('reduces tool state by identity while preserving emit order and unrecognized history', () => {
+    const result = projectConversation(db, context, 't', 'g', [], [], {
+      ...signals,
+      activity: [
+        {
+          turnId: 'turn',
+          ordinal: 0,
+          ts: '1000',
+          text: JSON.stringify({
+            kind: 'tool',
+            id: 'tool',
+            tool: 'Read',
+            status: 'running',
+            detail: 'file.txt',
+          }),
+        },
+        { turnId: 'turn', ordinal: 1, ts: '1001', text: 'Imported activity' },
+        {
+          turnId: 'turn',
+          ordinal: 2,
+          ts: '2000',
+          text: JSON.stringify({
+            kind: 'tool',
+            id: 'tool',
+            tool: 'Read',
+            status: 'completed',
+          }),
+        },
+      ],
+    });
+    expect(result.turns[0].activity).toHaveLength(2);
+    expect(result.turns[0].activity[0].ordinal).toBe(0);
+    expect(JSON.parse(result.turns[0].activity[0].text)).toMatchObject({
+      status: 'completed',
+      detail: 'file.txt',
+      durationMs: 1000,
+    });
+    expect(result.turns[0].activity[1].text).toBe('Imported activity');
+  });
+
+  it('scopes questions by platform as well as thread and preserves unassociated historical traces', () => {
+    const question: Parameters<typeof projectConversation>[5][number] = {
+      question_id: 'q',
+      session_id: 's',
+      message_out_id: 'legacy-question',
+      in_reply_to: null,
+      channel_type: 'web',
+      platform_id: 'group:g',
+      thread_id: 't',
+      title: 'Question',
+      question_text: 'Choose?',
+      response_mode: 'text',
+      options_json: '[]',
+      status: 'pending',
+      answer_value: null,
+      answer_type: null,
+      answered_by: null,
+      answered_at: null,
+      cancelled_at: null,
+      created_at: 'now',
+    };
+    db.prepare('INSERT INTO turn_activity VALUES (?, ?, ?, ?, ?)').run('legacy-question', 0, '1', 'legacy', null);
+    const readQuestions = (status: typeof question.status) =>
+      projectConversation(
+        db,
+        context,
+        't',
+        'g',
+        [],
+        [
+          { ...question, status },
+          { ...question, question_id: 'private', platform_id: 'private' },
+        ],
+        signals,
+      );
+    expect(readQuestions('pending').questions).toHaveLength(1);
+    expect(readQuestions('answered').questions[0]).toMatchObject({
+      status: 'answered',
+      activity: [{ ts: '1', text: 'legacy' }],
+    });
+  });
   it('stages the response until the matching durable settlement and keeps live trace on reconnect', () => {
     const before = read([output, { ...output, id: 'update', deliveryOrigin: 'send_message' }]);
     expect(before.messages.map((m) => m.id)).toEqual(['update']);

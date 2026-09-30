@@ -109,17 +109,16 @@ describe('turn-scoped Stop', () => {
     expect(stopRequest.value?.busy).toBe(true);
   });
 
-  it('does not claim completion on timeout; permits an idempotent retry', async () => {
+  it('waits for durable settlement without a confirmation timeout', async () => {
     await stopActiveTurn('turn-1');
     applyTurnState({ id: 'turn-1', status: 'stopping' }, true);
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(stopRequest.value?.busy).toBe(false);
-    expect(stopRequest.value?.error).toContain('not been confirmed');
+    expect(stopRequest.value?.busy).toBe(true);
+    expect(stopRequest.value?.error).toBe('');
     expect(activeTurn.value?.id).toBe('turn-1');
     applyTurnState({ id: 'turn-1', status: 'stopping' }, true);
     expect(vi.getTimerCount()).toBe(0);
-    await stopActiveTurn('turn-1');
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('bounds requests that never return', async () => {
@@ -132,14 +131,15 @@ describe('turn-scoped Stop', () => {
     const request = stopActiveTurn('turn-1');
     await vi.advanceTimersByTimeAsync(30_000);
     await request;
-    expect(stopRequest.value?.error).toContain('not been confirmed');
+    expect(stopRequest.value?.error).toContain('request timed out');
     expect(stopRequest.value?.busy).toBe(false);
   });
 
-  it('handles stopping from another tab with a bounded confirmation wait', async () => {
+  it('keeps another tab stopping without inferring failure from elapsed time', async () => {
     applyTurnState({ id: 'turn-1', status: 'stopping' }, true);
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(stopRequest.value?.error).toContain('not been confirmed');
+    expect(stopRequest.value).toBeNull();
+    expect(activeTurn.value?.status).toBe('stopping');
     expect(fetch).not.toHaveBeenCalled();
   });
 

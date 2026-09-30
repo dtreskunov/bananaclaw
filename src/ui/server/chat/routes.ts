@@ -43,11 +43,9 @@ import {
   listAllThreadsForAgentGroup,
   listAllThreadsForUser,
   readChatHistory,
-  readChatActiveTurn,
-  readTurnActivityForOutbound,
   viewerHasContent,
 } from './chat.js';
-import type { ThreadSummary, HistoryMessage } from './chat.js';
+import type { ThreadSummary } from './chat.js';
 import { handleGroupAdminRequest } from './group-admin.js';
 import {
   addCatalog,
@@ -68,6 +66,8 @@ import { handleWriteRequest } from './write.js';
 import { resolveVoiceInputConfig } from './voice-input-config.js';
 
 export { handleChatUpgrade };
+import { readConversation } from './conversation.js';
+import { conversationSnapshot } from './conversation-stream.js';
 
 // UI assets live under src/ (not compiled by tsc); resolve from project root,
 // which the host always runs from.
@@ -649,93 +649,11 @@ function handleListApprovals(ctx: Ctx, userId: string): void {
   json(ctx, 200, { approvals: listApprovalsForUser(userId) });
 }
 
-interface QuestionDto {
-  questionId: string;
-  title: string;
-  question: string;
-  responseMode: 'choice' | 'text' | 'choice_or_text';
-  options: { label: string; selectedLabel: string; value: string }[];
-  status: 'pending' | 'answered' | 'cancelled';
-  answerValue: string | null;
-  answerType: 'choice' | 'text' | null;
-  answeredAt: string | null;
-  activity?: { ts: string; text: string }[];
-  threadId: string | null;
-  agentGroupId: string;
-  createdAt: string;
-}
-
-function listQuestionsForUser(userId: string, filterGroupId?: string, filterThreadId?: string | null): QuestionDto[] {
-  const rows = getDb()
-    .prepare(
-      'SELECT q.*, s.agent_group_id FROM questions q JOIN sessions s ON q.session_id = s.id ORDER BY q.created_at ASC',
-    )
-    .all() as Array<{
-    question_id: string;
-    session_id: string;
-    message_out_id: string;
-    platform_id: string | null;
-    channel_type: string | null;
-    thread_id: string | null;
-    title: string;
-    question_text: string;
-    response_mode: 'choice' | 'text' | 'choice_or_text';
-    options_json: string;
-    status: 'pending' | 'answered' | 'cancelled';
-    answer_value: string | null;
-    answer_type: 'choice' | 'text' | null;
-    answered_at: string | null;
-    created_at: string;
-    agent_group_id: string;
-  }>;
-  const visible: QuestionDto[] = [];
-  for (const r of rows) {
-    if (!canAccessAgentGroup(userId, r.agent_group_id).allowed) continue;
-    if (filterGroupId && r.agent_group_id !== filterGroupId) continue;
-    if (filterThreadId !== undefined && r.thread_id !== filterThreadId) continue;
-    let options: { label: string; selectedLabel: string; value: string }[] = [];
-    try {
-      const parsed = JSON.parse(r.options_json) as { label?: string; selectedLabel?: string; value?: string }[];
-      if (Array.isArray(parsed)) {
-        options = parsed
-          .filter((o) => o && typeof o.label === 'string' && typeof o.value === 'string')
-          .map((o) => ({
-            label: o.label as string,
-            selectedLabel: typeof o.selectedLabel === 'string' ? o.selectedLabel : (o.label as string),
-            value: o.value as string,
-          }));
-      }
-    } catch {
-      /* ignore */
-    }
-    const activity = readTurnActivityForOutbound(r.agent_group_id, r.session_id, r.message_out_id);
-    visible.push({
-      questionId: r.question_id,
-      title: r.title,
-      question: r.question_text,
-      responseMode: r.response_mode,
-      options,
-      status: r.status,
-      answerValue: r.answer_value,
-      answerType: r.answer_type,
-      answeredAt: r.answered_at,
-      ...(activity ? { activity } : {}),
-      threadId: r.thread_id,
-      agentGroupId: r.agent_group_id,
-      createdAt: r.created_at,
-    });
-  }
-  return visible;
-}
-
 interface SyncResponse {
   approvals: ApprovalDto[];
-  questions?: QuestionDto[];
   threads?: ThreadSummary[];
-  threadMessages?: HistoryMessage[];
+  conversation?: import('../../shared/conversation-protocol.js').ConversationSnapshot;
   voiceInput?: ReturnType<typeof resolveVoiceInputConfig>;
-  activeTurn?: ReturnType<typeof readChatActiveTurn>['activeTurn'];
-  connected?: boolean;
 }
 
 function handleSync(ctx: Ctx, userId: string): void {
@@ -754,27 +672,19 @@ function handleSync(ctx: Ctx, userId: string): void {
     const tid = ctx.url.searchParams.get('tid') || '';
     const channel = ctx.url.searchParams.get('channel') || '';
     const mg = ctx.url.searchParams.get('mg') || '';
-    if (tid && !!channel === !!mg) {
-      Object.assign(
-        out,
-        readChatActiveTurn(
-          userId,
-          gid,
-          tid,
-          channel && mg ? { channelType: channel, messagingGroupId: mg } : undefined,
-        ),
-      );
-    }
     if (tid && channel && channel !== 'web' && mg) {
       try {
-        out.threadMessages = readChatHistory(userId, gid, tid, { channelType: channel, messagingGroupId: mg });
+        out.conversation = conversationSnapshot(
+          readConversation(userId, gid, tid, {
+            channelType: channel,
+            messagingGroupId: mg,
+          }),
+        );
       } catch (err) {
-        log.warn('sync history read failed', { userId, gid, tid, err });
+        log.error('Conversation projection failed', { userId, gid, tid, err });
+        return json(ctx, 500, { error: 'Conversation unavailable. Reconnect or reload.' });
       }
     }
-    // Include the durable question history for the active thread.
-    const questionThreadId = tid.startsWith('__dm:') ? null : tid || undefined;
-    out.questions = listQuestionsForUser(userId, gid, questionThreadId);
   }
   json(ctx, 200, out);
 }

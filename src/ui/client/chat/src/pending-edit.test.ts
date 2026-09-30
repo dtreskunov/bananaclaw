@@ -110,7 +110,7 @@ describe('durable in-place edit action', () => {
     );
     finish({ ok: true, status: 200, json: async () => success().data });
     await saving;
-    expect(chatMessages.value).toEqual([{ ...message, text: 'Revised' }, outgoing]);
+    expect(chatMessages.value).toEqual([message, outgoing]);
     expect(chatMessages.value[0].files).toBe(message.files);
     expect(chatMessages.value[0].inputState).toBe(message.inputState);
     expect(composer.value).toBe('Unsent composer draft');
@@ -135,7 +135,7 @@ describe('durable in-place edit action', () => {
     });
     expect(chatMessages.value[0]).toBe(message);
   });
-  it('uses canonical response text when retrying an older accepted edit after another tab saved', async () => {
+  it('does not overwrite newer projected text when retrying an older accepted edit', async () => {
     chatMessages.value = [{ ...message, text: 'Newer edit from another tab' }];
     vi.stubGlobal(
       'fetch',

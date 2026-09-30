@@ -6,50 +6,41 @@ import {
   groupId,
   messagingGroupId,
   refs,
-  responseReceived,
   stopRequest,
   threadId,
   turnConnected,
 } from './state';
 import type { ActiveTurn } from './types';
-import { resetTurnPresentation } from './turn-presentation';
 
-const STOP_TIMEOUT_MS = 30_000;
-let confirmationTimer: ReturnType<typeof setTimeout> | null = null;
+const STOP_REQUEST_TIMEOUT_MS = 30_000;
+let requestTimer: ReturnType<typeof setTimeout> | null = null;
 let requestController: AbortController | null = null;
 
 function clearPendingStop(): void {
-  if (confirmationTimer) clearTimeout(confirmationTimer);
-  confirmationTimer = null;
+  if (requestTimer) clearTimeout(requestTimer);
+  requestTimer = null;
   requestController?.abort();
   requestController = null;
 }
 
-function awaitConfirmation(turnId: string): void {
-  if (confirmationTimer) return;
-  confirmationTimer = setTimeout(() => {
-    confirmationTimer = null;
+function boundRequest(turnId: string): void {
+  requestTimer = setTimeout(() => {
+    requestTimer = null;
     requestController?.abort();
     requestController = null;
     if (activeTurn.value?.id !== turnId) return;
     stopRequest.value = {
       turnId,
       busy: false,
-      error: 'Stopping has not been confirmed. The response may still be running. Retry Stop to check again.',
+      error: 'Stop request timed out. Reconnect to check the authoritative turn state.',
     };
-  }, STOP_TIMEOUT_MS);
+  }, STOP_REQUEST_TIMEOUT_MS);
 }
 
 export function applyTurnState(turn: ActiveTurn | null, connected: boolean): void {
   const changed = activeTurn.value?.id !== turn?.id;
   if (changed) clearPendingStop();
   batch(() => {
-    if (turn && refs.presentationTurnId !== turn.id) {
-      // The first turn frame may follow its initial typing snapshot.
-      if (refs.presentationTurnId !== null || responseReceived.value) resetTurnPresentation();
-      refs.presentationTurnId = turn.id;
-      refs.carryActivity = [];
-    }
     if (changed) stopRequest.value = null;
     activeTurn.value = turn;
     turnConnected.value = connected;
@@ -62,14 +53,11 @@ export function applyTurnState(turn: ActiveTurn | null, connected: boolean): voi
       };
     }
   });
-  if (connected && turn?.status === 'stopping' && !stopRequest.value?.error) awaitConfirmation(turn.id);
 }
 
 export function resetTurnState(): void {
   clearPendingStop();
   batch(() => {
-    resetTurnPresentation();
-    refs.presentationTurnId = null;
     activeTurn.value = null;
     turnConnected.value = false;
     stopRequest.value = null;
@@ -98,7 +86,7 @@ export async function stopActiveTurn(turnId: string): Promise<void> {
   stopRequest.value = { turnId, busy: true, error: '' };
   const controller = new AbortController();
   requestController = controller;
-  awaitConfirmation(turnId);
+  boundRequest(turnId);
   let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/stop`;
   if (channelType.value !== 'web' && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
@@ -135,6 +123,10 @@ export async function stopActiveTurn(turnId: string): Promise<void> {
       error: error instanceof Error ? error.message : 'Stop request failed. Try again.',
     };
   } finally {
-    if (requestController === controller) requestController = null;
+    if (requestController === controller) {
+      requestController = null;
+      if (requestTimer) clearTimeout(requestTimer);
+      requestTimer = null;
+    }
   }
 }

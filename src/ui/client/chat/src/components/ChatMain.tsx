@@ -5,13 +5,13 @@ import { signal } from '@preact/signals';
 import type { JSX } from 'preact';
 import { useRef, useEffect, useState } from 'preact/hooks';
 import {
-  chatMessages, chatStatus, chatLoading, chatReady, isTyping, typingHint, typingStartedAt, typingModel, typingUsage, activityLog, threadId, channelType, canSend, pending,
+  chatMessages, chatStatus, chatLoading, chatReady, threadId, channelType, canSend, pending,
   threads, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions, respondingQuestionIds,
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
   pendingWebSends,
-  activeTurn, turnConnected, stopRequest, typingEndedAt, responseReceived,
+  activeTurn, turnConnected, stopRequest,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
 } from '../state';
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
@@ -30,7 +30,9 @@ import { canEditMessageInBranch, composerSendInFlight, currentPendingEditor } fr
 import { usePendingComposer } from '../pending-composer';
 import { mergeQuestionTimeline } from '../question-timeline';
 import { splitPendingInputs, timelineLayoutKey } from '../queued-followups';
-import { showsMidTurnLabel, showsTurnActivity } from '../chat-protocol';
+import { showsMidTurnLabel } from '../chat-protocol';
+import type { ConversationTurn } from '../../../../shared/conversation';
+import { conversationState } from '../conversation-state';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -301,11 +303,13 @@ function ActivityTraceRow({ line, open, live, now, onToggle }: { line: ActivityL
   const step = !live && parsedStep.kind === 'tool' && (parsedStep.status === 'pending' || parsedStep.status === 'running')
     ? { ...parsedStep, status: 'unknown' as const }
     : parsedStep;
-  const headline = stepHeadline(step);
+  const described = stepHeadline(step);
+  const known = !!(described.action || described.subject);
+  const headline = known ? described : { action: line.text };
   const running = live && step.kind === 'tool' && step.status === 'running';
   const startedAt = Number(line.ts);
   const hasStartedAt = Number.isFinite(startedAt);
-  const code = open ? stepBody(step) : null;
+  const code = open ? (known ? stepBody(step) : line.text) : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
   const meta = open ? stepMeta(step, elapsedMs) : null;
   return (
@@ -335,16 +339,26 @@ function ActivityTraceRow({ line, open, live, now, onToggle }: { line: ActivityL
  *  Single-open accordion. Shared by the persisted trace and the live typing
  *  bubble. */
 function activityLineId(line: ActivityLine, index: number): string {
-  return parseStep(line.text).id || `activity-${index}`;
+  if (line.ordinal !== undefined) return `activity-${line.ordinal}`;
+  const step = parseStep(line.text);
+  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
 }
 
 function ActivityTraceList({ lines, live = false, now = null, openLatest = false }: { lines: ActivityLine[]; live?: boolean; now?: number | null; openLatest?: boolean }) {
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const follow = useRef(true);
+  useEffect(() => {
+    if (live && follow.current && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [lines, live]);
   const [sel, setSel] = useState<string | null>(() => openLatest && lines.length
     ? activityLineId(lines[lines.length - 1], lines.length - 1)
     : null);
   const toggle = (id: string) => setSel((cur) => (cur === id ? null : id));
   return (
-    <ul class="activity-trace">
+    <ul class="activity-trace" ref={listRef} onScroll={() => {
+      const element = listRef.current;
+      if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+    }}>
       {lines.map((line, i) => {
         const id = activityLineId(line, i);
         return <ActivityTraceRow key={id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(id)} />;
@@ -355,7 +369,9 @@ function ActivityTraceList({ lines, live = false, now = null, openLatest = false
 
 function latestActivityHeadline(lines: ActivityLine[]): StepHeadline | null {
   if (!lines.length) return null;
-  return stepHeadline(parseStep(lines[lines.length - 1].text));
+  const line = lines[lines.length - 1];
+  const headline = stepHeadline(parseStep(line.text));
+  return headline.action || headline.subject ? headline : { action: line.text };
 }
 
 /** Shared header and row list for live and completed activity traces. */
@@ -485,7 +501,7 @@ function UsageMeta({ u, live = false, partial = false, provisional = false }: {
         <>
           <span class="usage-backdrop" onClick={() => setExpanded(false)} />
           <span class="usage-popover" role="dialog" aria-label="Turn usage details">
-            {partial ? <span class="usage-row">Usage reported before cancellation; final totals may be higher.</span> : null}
+            {partial ? <span class="usage-row">Partial usage report; final totals may be higher.</span> : null}
             {provisional ? <span class="usage-row">Usage reported so far; awaiting final totals.</span> : null}
             <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{cost}</strong></span>
             {dur ? <span class="usage-row"><span>Elapsed</span><strong>{dur}</strong></span> : null}
@@ -508,15 +524,15 @@ function AgentActionLabel({ label, title }: { label: string; title: string }) {
 }
 
 export function MessageTurnMetadata({ message }: { message: ChatMessage }) {
-  const usage = message.usage ?? message.provisionalTurn?.usage;
-  if (usage) return <UsageMeta u={usage} partial={!!message.stoppedStats} provisional={!message.usage} />;
+  const usage = message.usage;
+  if (usage) return <UsageMeta u={usage} partial={!!message.stoppedStats} />;
   if (message.stoppedStats) {
     const stats = message.stoppedStats;
     return <span title="Token usage was not reported before cancellation.">
       {fmtDur(stats.durationMs)} {'\u00b7'} {stats.model ? shortModel(stats.model) : 'Model unavailable'} {'\u00b7'} Tokens unavailable
     </span>;
   }
-  const stats = message.turnStats ?? message.provisionalTurn;
+  const stats = message.turnStats;
   return stats ? <span>{[
     stats.durationMs !== undefined ? fmtDur(stats.durationMs) : '',
     stats.model ? shortModel(stats.model) : '',
@@ -669,12 +685,13 @@ function openThreadAt(targetThreadId: string, messageId: string): void {
 }
 
 function Message(
-  { m, allowContinue = false, isLatest = false }:
+  { m, allowContinue = false }:
   { m: ChatMessage; allowContinue?: boolean; isLatest?: boolean },
 ) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  if (m.direction === 'turn' && m.turn) return <ConversationTurnRow turn={m.turn} />;
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
@@ -816,7 +833,7 @@ function Message(
             <button
               type="button"
               class="message-action-btn"
-              disabled={continueState !== 'idle' || !canSend.value || isTyping.value}
+              disabled={continueState !== 'idle' || !canSend.value || !!activeTurn.value}
               onClick={async () => {
                 if (continueState !== 'idle') return;
                 setContinueState('sending');
@@ -849,7 +866,8 @@ function Message(
         {m.ts && <RelativeTime ts={m.ts} />}
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
         <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} />
-        {showsMidTurnLabel(m.deliveryOrigin, isLatest, isTyping.value || !!activeTurn.value)
+        {showsMidTurnLabel(m.deliveryOrigin,
+          !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled'))
           ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
@@ -1120,25 +1138,26 @@ function TaskIndicator() {
   );
 }
 
-function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: boolean; onToggleTrace: () => void }) {
-  const turn = activeTurn.value;
-  const stop = stopRequest.value?.turnId === turn?.id ? stopRequest.value : null;
-  const stableStartedAt = typingStartedAt.value;
-  const fallbackStartedAt = useRef(Date.now());
-  const startedAt = stableStartedAt ?? fallbackStartedAt.current;
-  const endedAt = typingEndedAt.value;
+function ConversationTurnRow({ turn }: { turn: ConversationTurn }) {
+  const [traceExpanded, setTraceExpanded] = useState(false);
+  const onToggleTrace = () => setTraceExpanded((value) => !value);
+  const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
+  const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : null;
+  const settled = turn.phase === 'settled';
+  const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : null;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
-    if (endedAt !== null) return;
+    if (settled) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [startedAt, endedAt]);
-  const model = typingModel.value ? shortModel(typingModel.value) : '';
-  const elapsed = Math.max(0, (endedAt ?? now) - startedAt);
-  const metadata = [fmtDur(elapsed), model].filter(Boolean).join(' \u00b7 ');
-  const usage = typingUsage.value ? { ...typingUsage.value, duration_ms: elapsed } : null;
-  const liveHeadline = latestActivityHeadline(activityLog.value);
+  }, [startedAt, settled]);
+  const model = turn.metadata.model ? shortModel(turn.metadata.model) : '';
+  const durationEnd = endedAt ?? (settled ? null : now);
+  const elapsed = turn.metadata.durationMs ??
+    (startedAt !== null && durationEnd !== null ? Math.max(0, durationEnd - startedAt) : null);
+  const metadata = [elapsed !== null ? fmtDur(elapsed) : '', model].filter(Boolean).join(' \u00b7 ');
+  const liveHeadline = latestActivityHeadline(turn.activity);
   const [openLatestOnExpand, setOpenLatestOnExpand] = useState(false);
   const toggleFromPreview = () => {
     setOpenLatestOnExpand(!traceExpanded);
@@ -1149,10 +1168,10 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
     onToggleTrace();
   };
   return (
-    <div class={`typing${traceExpanded ? ' expanded' : ''}`} aria-live="polite">
+    <div class={`typing${traceExpanded ? ' expanded' : ''}`} data-turn-id={turn.id} aria-live={settled ? 'off' : 'polite'}>
       <div class="typing-summary">
         <div class="typing-dots">
-          {endedAt === null ? <><span></span><span></span><span></span></> : null}
+          {!settled ? <><span></span><span></span><span></span></> : null}
           {liveHeadline
             ? <button
                 type="button"
@@ -1162,26 +1181,27 @@ function TypingIndicator({ traceExpanded, onToggleTrace }: { traceExpanded: bool
                 title={traceExpanded ? 'Hide activity' : 'Show latest activity'}
                 onClick={toggleFromPreview}
               ><StepHeadlineContent headline={liveHeadline} /></button>
-            : !traceExpanded && typingHint.value
-              ? <span class="hint">{typingHint.value}</span>
-              : null}
+            : <span class="hint">{settled ? turn.outcome : turn.phase}</span>}
         </div>
       </div>
       {stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
-      {endedAt !== null ? <div class="turn-stop-note">{turn ? 'Finishing response\u2026' : 'Turn finished'}</div> : null}
-      {turn && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Disconnected. Reconnect to stop this response.</div> : null}
+      <div class="turn-stop-note">{settled ? `Turn ${turn.outcome}` : turn.phase === 'settling' ? 'Finalizing turn…' : turn.phase}</div>
+      {!settled && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Runner disconnected. The outcome is not yet confirmed.</div> : null}
       <ActivityTracePanel
-        lines={activityLog.value}
+        lines={turn.activity}
         expanded={traceExpanded}
         onToggle={toggleFromCount}
-        live={endedAt === null}
+        live={!settled}
         now={endedAt ?? now}
         openLatest={openLatestOnExpand}
       />
       <div class="meta">
         <span class="typing-meta">{metadata}</span>
-        {usage ? <span class="typing-usage"><UsageMeta u={usage} live /></span> : null}
-        <ActiveTurnStopButton />
+        {turn.usage.map((record) => <UsageMeta key={record.id} u={record.value}
+          provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
+        {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} live provisional /> : null}
+        {!turn.usage.length && !turn.liveUsage ? <span>Tokens unavailable</span> : null}
+        {activeTurn.value?.id === turn.id ? <ActiveTurnStopButton /> : null}
       </div>
     </div>
   );
@@ -1192,14 +1212,7 @@ function MessageLog() {
   const appliedHighlightRef = useRef<string | null>(null);
   const prevMsgCountRef = useRef<number>(0);
   const prevLayoutRef = useRef('');
-  const wasTypingRef = useRef<boolean>(false);
   const prevScrollTickRef = useRef<number>(scrollToBottomTick.value);
-  const prevTraceLenRef = useRef<number>(0);
-  const prevExpandedRef = useRef<boolean>(false);
-  // Whether the user has expanded the activity trace. Collapsed by default:
-  // the bubble shows only the dots + latest hint + a chevron, and expands to
-  // the scrollable step list on demand.
-  const [traceExpanded, setTraceExpanded] = useState(false);
   const [scrollable, setScrollable] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [newMessageBelow, setNewMessageBelow] = useState(false);
@@ -1208,14 +1221,9 @@ function MessageLog() {
   const { transcript, queued } = splitPendingInputs(timeline);
   const layoutKey = timelineLayoutKey(timeline);
   const msgCount = timeline.length;
-  const typing = showsTurnActivity(
-    activeTurn.value, isTyping.value, threadId.value, chatLoading.value,
-    responseReceived.value, typingEndedAt.value !== null,
-  );
+  const activeTurnId = activeTurn.value?.id;
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
-  // Subscribe to trace growth so the effect re-runs as steps stream in.
-  const traceLen = activityLog.value.length;
   const atBottomRef = useRef<boolean>(true);
   const followingBottomRef = useRef<boolean>(true);
 
@@ -1264,14 +1272,15 @@ function MessageLog() {
   }, []);
 
   useEffect(() => {
-    const bubble = ref.current?.querySelector('.typing');
-    if (!typing || !bubble || typeof ResizeObserver === 'undefined') return;
+    const bubble = Array.from(ref.current?.querySelectorAll('[data-turn-id]') ?? [])
+      .find((element) => element.getAttribute('data-turn-id') === activeTurnId);
+    if (!bubble || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
       if (followingBottomRef.current) scrollToBottom();
     });
     observer.observe(bubble);
     return () => observer.disconnect();
-  }, [typing, activeThreadId]);
+  }, [activeTurnId, activeThreadId]);
 
   useEffect(() => {
     prevMsgCountRef.current = 0;
@@ -1312,23 +1321,8 @@ function MessageLog() {
       const currentlyAtBottom = measureScroll();
       const newMessages = msgCount > prevMsgCountRef.current;
       const repositioned = prevLayoutRef.current !== layoutKey;
-      const typingJustStarted = typing && !wasTypingRef.current;
-      const traceGrew = traceLen > prevTraceLenRef.current;
-      const justExpanded = traceExpanded && !prevExpandedRef.current;
-      // The trace is collapsed by default; only when expanded is it rendered
-      // as a bounded, internally-scrolling list. Keep its newest line visible
-      // as steps stream in while expanded.
-      if (traceExpanded && traceGrew) {
-        const ul = ref.current.querySelector('.activity-trace');
-        if (ul) ul.scrollTop = ul.scrollHeight;
-      }
-      // Follow the log to the bottom on new messages, when the typing
-      // indicator first appears, when the user just expanded the trace (the
-      // bubble grows), or as an expanded trace grows — the last only while
-      // the user is pinned to the bottom, so we never yank them down if
-      // they've scrolled up to read earlier messages.
-      const shouldFollow = wasAtBottom
-        && (newMessages || repositioned || typingJustStarted || justExpanded || (traceExpanded && traceGrew));
+      // Only follow authoritative timeline changes while the viewer is pinned.
+      const shouldFollow = wasAtBottom && (newMessages || repositioned);
       if ((newMessages || repositioned) && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {
         scrollToBottom();
@@ -1337,11 +1331,8 @@ function MessageLog() {
         requestAnimationFrame(measureScroll);
       }
       prevMsgCountRef.current = msgCount;
-      prevTraceLenRef.current = traceLen;
     }
-    wasTypingRef.current = !!typing;
     prevLayoutRef.current = layoutKey;
-    prevExpandedRef.current = traceExpanded;
   });
   const list = transcript;
   const groups = groupMessages(list);
@@ -1405,9 +1396,6 @@ function MessageLog() {
                     </>
                   );
                 })}
-        {typing
-          ? <TypingIndicator traceExpanded={traceExpanded} onToggleTrace={() => setTraceExpanded((v) => !v)} />
-          : null}
         {!chatLoading.value && queued.map((message) => <Message key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
         <TaskIndicator />
       </div>

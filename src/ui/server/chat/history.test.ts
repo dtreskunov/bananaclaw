@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   chatSdkHistoryContent,
-  createBufferedFrameSender,
   inboundAttachmentSecurityHeaders,
   matchChatPath,
   parseOutboundContent,
@@ -10,22 +9,6 @@ import {
 } from './chat.js';
 
 describe('chat socket bootstrap', () => {
-  it('orders history before buffered live frames and ready', () => {
-    const frames: string[] = [];
-    const sender = createBufferedFrameSender((frame) => frames.push(frame));
-
-    sender.send({ kind: 'inbound', id: 'during-snapshot' });
-    sender.finish({ kind: 'history', messages: [] }, { kind: 'ready' });
-    sender.send({ kind: 'outbound', id: 'after-ready' });
-
-    expect(frames.map((frame) => JSON.parse(frame))).toEqual([
-      { kind: 'history', messages: [] },
-      { kind: 'inbound', id: 'during-snapshot' },
-      { kind: 'ready' },
-      { kind: 'outbound', id: 'after-ready' },
-    ]);
-  });
-
   it('does not expose a REST history route', () => {
     expect(matchChatPath('/api/groups/group-1/chat/thread-1/history')).toBeNull();
   });
