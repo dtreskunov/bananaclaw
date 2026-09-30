@@ -1883,17 +1883,18 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .msg-action-btn {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
-  padding: 3px 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-lg);
   color: var(--muted);
   font: inherit;
-  font-size: var(--font-xs, var(--font-2xs));
-  line-height: 1.2;
+  line-height: 1;
   cursor: pointer;
 }
 .chat-main .msg-action-btn:hover {
@@ -1909,12 +1910,39 @@ nav.tab-bar-strip.group-strip {
   cursor: default;
   opacity: 0.5;
 }
-.chat-main .msg-copy-icon {
+.chat-main .msg-action-icon {
   width: 14px;
   height: 14px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.chat-main .msg-action-icon-solid {
+  fill: currentColor;
+  stroke: none;
+}
+@media (pointer: coarse) {
+  .chat-main .msg-action-btn {
+    width: 32px;
+    height: 32px;
+  }
+  .chat-main .msg-action-icon {
+    width: 16px;
+    height: 16px;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .chat-main .msg .msg-inline-actions {
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+  .chat-main .msg:hover .msg-inline-actions,
+  .chat-main .msg:focus-within .msg-inline-actions,
+  .chat-main .msg.latest .msg-inline-actions {
+    opacity: 1;
+  }
 }
 .chat-main .events-group.open {
   align-self: stretch;
@@ -2095,9 +2123,9 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .usage {
   appearance: none;
-  padding: 0;
+  padding: 1px 4px;
   border: 0;
-  border-bottom: 1px dotted var(--muted);
+  border-radius: var(--radius-pill);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -2108,6 +2136,7 @@ nav.tab-bar-strip.group-strip {
 .chat-main .usage:hover {
   opacity: 1;
   color: var(--fg);
+  background: rgba(127, 127, 127, 0.12);
 }
 .chat-main .usage:focus-visible {
   outline: 2px solid var(--accent-strong);
@@ -2341,33 +2370,36 @@ nav.tab-bar-strip.group-strip {
   gap: 4px;
   max-width: 100%;
 }
-.chat-main .msg-activity .trace-toggle {
+.chat-main .meta .trace-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   padding: 1px 4px;
   border: none;
   background: none;
-  color: var(--muted);
+  color: inherit;
   cursor: pointer;
-  border-radius: 4px;
-  font-size: var(--font-xs);
+  border-radius: var(--radius-pill);
+  font: inherit;
 }
-.chat-main .msg-activity .trace-toggle:hover {
-  background: rgba(127, 127, 127, 0.15);
+.chat-main .meta .trace-toggle:hover {
+  background: rgba(127, 127, 127, 0.12);
   color: var(--fg);
 }
-.chat-main .msg-activity .trace-toggle .chevron {
+.chat-main .meta .trace-toggle:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+.chat-main .meta .trace-toggle .chevron {
   display: inline-block;
-  font-size: 14px;
+  font-size: 1.3em;
   line-height: 1;
   transition: transform 0.15s ease;
 }
-.chat-main .msg-activity .trace-toggle .chevron.open {
+.chat-main .meta .trace-toggle .chevron.open {
   transform: rotate(90deg);
 }
-.chat-main .msg-activity .trace-count {
-  font-style: italic;
+.chat-main .meta .trace-count {
   white-space: nowrap;
 }
 .chat-main .msg-activity .activity-trace {

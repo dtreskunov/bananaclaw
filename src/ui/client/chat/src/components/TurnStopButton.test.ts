@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { StopIcon } from './ActionIcons';
 import { TurnStopButton } from './TurnStopButton';
 
 function button(
@@ -16,7 +17,7 @@ function button(
 }
 
 describe('activity bubble Stop control', () => {
-  it('uses the shared bubble-action style and shows only a square in every state', () => {
+  it('uses the shared bubble-action style and shows only the stop icon in every state', () => {
     for (const options of [
       {},
       { busy: true },
@@ -26,8 +27,7 @@ describe('activity bubble Stop control', () => {
     ]) {
       const { view } = button(options);
       expect(view.props.class).toBe('msg-action-btn turn-stop');
-      expect(view.props.children.type).toBe('span');
-      expect(view.props.children.props).toEqual({ 'aria-hidden': 'true', children: '\u25A0' });
+      expect(view.props.children.type).toBe(StopIcon);
     }
   });
 

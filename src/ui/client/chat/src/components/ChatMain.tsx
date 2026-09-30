@@ -42,6 +42,7 @@ import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
 import { MobileDialog } from './MobileDialog';
 import { ZoomableImage } from './ZoomableImage';
+import { BranchIcon, EditIcon } from './ActionIcons';
 import { CopyTranscriptButton } from './CopyTranscriptButton';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
@@ -375,50 +376,43 @@ function latestActivityHeadline(lines: ActivityLine[]): StepHeadline | null {
   return headline.action || headline.subject ? headline : { action: line.text };
 }
 
-/** Shared header and row list for live and completed activity traces. */
+/** The "› N steps" disclosure; lives in the bubble's meta row. */
+function ActivityTraceToggle({ count, expanded, onToggle }: { count: number; expanded: boolean; onToggle: () => void }) {
+  if (!count) return null;
+  return (
+    <button
+      type="button"
+      class="trace-toggle"
+      aria-expanded={expanded}
+      aria-label={expanded ? 'Hide activity' : 'Show activity'}
+      title={expanded ? 'Hide activity' : 'Show activity'}
+      onClick={onToggle}
+    >
+      <span class={`chevron${expanded ? ' open' : ''}`}>{'\u203A'}</span>
+      <span class="trace-count">{count} step{count === 1 ? '' : 's'}</span>
+    </button>
+  );
+}
+
+/** Expanded step list, shared by live and completed traces; opens above the meta row. */
 function ActivityTracePanel({
   lines,
   expanded,
-  onToggle,
   live = false,
   now = null,
   openLatest = false,
 }: {
   lines: ActivityLine[];
   expanded: boolean;
-  onToggle: () => void;
   live?: boolean;
   now?: number | null;
   openLatest?: boolean;
 }) {
-  if (!lines.length) return null;
+  if (!lines.length || !expanded) return null;
   return (
-    <div class={`msg-activity${expanded ? ' expanded' : ''}`}>
-      <button
-        type="button"
-        class="trace-toggle"
-        aria-expanded={expanded}
-        aria-label={expanded ? 'Hide activity' : 'Show activity'}
-        title={expanded ? 'Hide activity' : 'Show activity'}
-        onClick={onToggle}
-      >
-        <span class={`chevron${expanded ? ' open' : ''}`}>{'\u203A'}</span>
-        <span class="trace-count">{lines.length} step{lines.length === 1 ? '' : 's'}</span>
-      </button>
-      {expanded ? <ActivityTraceList lines={lines} live={live} now={now} openLatest={openLatest} /> : null}
+    <div class="msg-activity expanded">
+      <ActivityTraceList lines={lines} live={live} now={now} openLatest={openLatest} />
     </div>
-  );
-}
-
-/** A collapsible activity trace on a completed outbound message. */
-function ActivityTrace({ lines }: { lines: ActivityLine[] }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <ActivityTracePanel
-      lines={lines}
-      expanded={expanded}
-      onToggle={() => setExpanded((v) => !v)}
-    />
   );
 }
 
@@ -593,7 +587,7 @@ function ForkButton({ m }: { m: ChatMessage }) {
       aria-label="Branch a new thread from this message"
       disabled={busy}
       onClick={onFork}
-    >{'\u2442'}</button>
+    ><BranchIcon /></button>
   );
 }
 
@@ -620,7 +614,7 @@ function EditMessageButton({ m }: { m: ChatMessage }) {
       aria-label="Edit this message in a new branch"
       disabled={busy}
       onClick={() => { onEdit().catch(console.error); }}
-    >{'\u270e'}</button>
+    ><EditIcon /></button>
   );
 }
 
@@ -679,12 +673,13 @@ function openThreadAt(targetThreadId: string, messageId: string): void {
 }
 
 function Message(
-  { m, allowContinue = false }:
+  { m, allowContinue = false, isLatest = false }:
   { m: ChatMessage; allowContinue?: boolean; isLatest?: boolean },
 ) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [traceExpanded, setTraceExpanded] = useState(false);
   if (m.direction === 'turn' && m.turn) return <ConversationTurnRow turn={m.turn} lines={m.activity ?? []} status={!!m.turnStatus} />;
   if (m.direction === 'event') {
     const ev = m.event;
@@ -760,8 +755,9 @@ function Message(
   }, [m.text, md != null, q]);
   const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
   const inputPresentation = m.direction === 'in' ? inputStatePresentation(m.inputState) : null;
+  const activity = m.direction === 'out' ? m.activity ?? [] : [];
   const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '')
-    + (inputPresentation ? ` ${inputPresentation.className}` : '');
+    + (inputPresentation ? ` ${inputPresentation.className}` : '') + (isLatest ? ' latest' : '');
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === 'web';
@@ -844,9 +840,7 @@ function Message(
           </div>
         )
         : null}
-      {m.direction === 'out' && m.activity && m.activity.length
-        ? <ActivityTrace lines={m.activity} />
-        : null}
+      {activity.length ? <ActivityTracePanel lines={activity} expanded={traceExpanded} /> : null}
       {m.reactions && m.reactions.length
         ? (
           <div class="reactions">
@@ -856,8 +850,9 @@ function Message(
           </div>
         )
         : null}
-      {m.ts || m.inputState ? <div class="meta">
+      {m.ts || m.inputState || activity.length ? <div class="meta">
         {m.ts && <RelativeTime ts={m.ts} />}
+        <ActivityTraceToggle count={activity.length} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
         <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} />
         {showsMidTurnLabel(m.deliveryOrigin,
@@ -868,9 +863,9 @@ function Message(
             : null}
         {m.direction === 'out' && m.statsTurn ? <ReplyTurnStats turn={m.statsTurn} /> : null}
         <span class="msg-inline-actions">
-          <CopyTranscriptButton getContent={() => mdRef.current} />
           <EditMessageButton m={m} />
           <ForkButton m={m} />
+          <CopyTranscriptButton getContent={() => mdRef.current} />
         </span>
       </div> : null}
     </div>
@@ -878,6 +873,8 @@ function Message(
 }
 
 function DisplayCardMessage({ message, card }: { message: ChatMessage; card: DisplayCard }) {
+  const [traceExpanded, setTraceExpanded] = useState(false);
+  const activity = message.activity ?? [];
   return (
     <div class="msg out display-card agent-action" data-msg-id={message.id}>
       {card.title ? <div class="display-card-title">{card.title}</div> : null}
@@ -900,7 +897,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      {message.activity?.length ? <ActivityTrace lines={message.activity} /> : null}
+      <ActivityTracePanel lines={activity} expanded={traceExpanded} />
       {message.reactions?.length ? (
         <div class="reactions">
           {message.reactions.map((reaction, index) => (
@@ -908,8 +905,9 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      {message.ts ? <div class="meta">
-        <RelativeTime ts={message.ts} />
+      {message.ts || activity.length ? <div class="meta">
+        {message.ts ? <RelativeTime ts={message.ts} /> : null}
+        <ActivityTraceToggle count={activity.length} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
         <AgentActionLabel label="card" title="Sent with send_card" />
         {message.statsTurn ? <ReplyTurnStats turn={message.statsTurn} /> : null}
       </div> : null}
@@ -1218,14 +1216,16 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
       <ActivityTracePanel
         lines={lines}
         expanded={traceExpanded}
-        onToggle={toggleFromCount}
         live={!settled}
         now={endedAt ?? now}
         openLatest={openLatestOnExpand}
       />
-      {status ? <div class="meta">
-        <TurnStats turn={turn} view={view} />
-        {activeTurn.value?.id === turn.id ? <ActiveTurnStopButton /> : null}
+      {status || lines.length ? <div class="meta">
+        <ActivityTraceToggle count={lines.length} expanded={traceExpanded} onToggle={toggleFromCount} />
+        {status ? <TurnStats turn={turn} view={view} /> : null}
+        {status && activeTurn.value?.id === turn.id
+          ? <span class="msg-inline-actions"><ActiveTurnStopButton /></span>
+          : null}
       </div> : null}
     </div>
   );
@@ -1471,6 +1471,7 @@ function PendingTray() {
 
 function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto; busy: boolean }) {
   const [answer, setAnswer] = useState('');
+  const [traceExpanded, setTraceExpanded] = useState(false);
   const answerRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const gid = groupId.value;
@@ -1585,9 +1586,10 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
           )}
         </>
       )}
-      {q.activity?.length ? <ActivityTrace lines={q.activity} /> : null}
+      <ActivityTracePanel lines={q.activity ?? []} expanded={traceExpanded} />
       <div class="meta question-card-meta">
         <RelativeTime ts={answered && q.answeredAt ? q.answeredAt : q.createdAt} />
+        <ActivityTraceToggle count={q.activity?.length ?? 0} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
         {!answered ? <AgentActionLabel label="question" title="Sent with ask_user_question" /> : null}
       </div>
     </div>

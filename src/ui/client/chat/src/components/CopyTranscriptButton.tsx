@@ -1,4 +1,5 @@
 import { copyTranscriptContent } from '../transcript-clipboard';
+import { CopyIcon } from './ActionIcons';
 import { showToast } from './Toast';
 
 export function CopyTranscriptButton({ getContent }: { getContent: () => HTMLElement | null }) {
@@ -26,10 +27,7 @@ export function CopyTranscriptButton({ getContent }: { getContent: () => HTMLEle
       aria-label="Copy this message"
       onClick={copy}
     >
-      <svg class="msg-copy-icon" viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
-        <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
-      </svg>
+      <CopyIcon />
     </button>
   );
 }

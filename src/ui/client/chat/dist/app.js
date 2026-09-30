@@ -21145,6 +21145,32 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
   );
 }
 
+// src/components/ActionIcons.tsx
+function CopyIcon() {
+  return /* @__PURE__ */ u4("svg", { class: "msg-action-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: [
+    /* @__PURE__ */ u4("rect", { x: "5.5", y: "5.5", width: "8", height: "8", rx: "1.5" }),
+    /* @__PURE__ */ u4("path", { d: "M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" })
+  ] });
+}
+function EditIcon() {
+  return /* @__PURE__ */ u4("svg", { class: "msg-action-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: [
+    /* @__PURE__ */ u4("path", { d: "M10.5 2.5l3 3-8 8h-3v-3z" }),
+    /* @__PURE__ */ u4("path", { d: "M9 4l3 3" })
+  ] });
+}
+function BranchIcon() {
+  return /* @__PURE__ */ u4("svg", { class: "msg-action-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: [
+    /* @__PURE__ */ u4("circle", { cx: "4.5", cy: "3.5", r: "1.5" }),
+    /* @__PURE__ */ u4("circle", { cx: "11.5", cy: "3.5", r: "1.5" }),
+    /* @__PURE__ */ u4("circle", { cx: "8", cy: "12.5", r: "1.5" }),
+    /* @__PURE__ */ u4("path", { d: "M4.5 5v1a2 2 0 0 0 2 2h3a2 2 0 0 0 2-2V5" }),
+    /* @__PURE__ */ u4("path", { d: "M8 8v3" })
+  ] });
+}
+function StopIcon() {
+  return /* @__PURE__ */ u4("svg", { class: "msg-action-icon msg-action-icon-solid", viewBox: "0 0 16 16", "aria-hidden": "true", children: /* @__PURE__ */ u4("rect", { x: "4", y: "4", width: "8", height: "8", rx: "1.5" }) });
+}
+
 // src/components/TurnStopButton.tsx
 function TurnStopButton({ turn: turn2, connected, busy, error, onStop }) {
   const stopping = !error && (busy || turn2.status === "stopping");
@@ -21159,7 +21185,7 @@ function TurnStopButton({ turn: turn2, connected, busy, error, onStop }) {
       title: connected ? `${label}. Queued follow-ups will still run, including steering not yet applied; completed actions are not undone.` : "Reconnect to stop this response.",
       disabled: !connected || stopping,
       onClick: () => onStop(turn2.id),
-      children: /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: "\u25A0" })
+      children: /* @__PURE__ */ u4(StopIcon, {})
     }
   );
 }
@@ -21807,10 +21833,7 @@ function CopyTranscriptButton({ getContent }) {
       title: "Copy this message",
       "aria-label": "Copy this message",
       onClick: copy,
-      children: /* @__PURE__ */ u4("svg", { class: "msg-copy-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: [
-        /* @__PURE__ */ u4("rect", { x: "5.5", y: "5.5", width: "8", height: "8", rx: "1.5" }),
-        /* @__PURE__ */ u4("path", { d: "M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" })
-      ] })
+      children: /* @__PURE__ */ u4(CopyIcon, {})
     }
   );
 }
@@ -22056,48 +22079,37 @@ function latestActivityHeadline(lines) {
   const headline = stepHeadline(parseStep(line.text));
   return headline.action || headline.subject ? headline : { action: line.text };
 }
+function ActivityTraceToggle({ count, expanded, onToggle }) {
+  if (!count) return null;
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "trace-toggle",
+      "aria-expanded": expanded,
+      "aria-label": expanded ? "Hide activity" : "Show activity",
+      title: expanded ? "Hide activity" : "Show activity",
+      onClick: onToggle,
+      children: [
+        /* @__PURE__ */ u4("span", { class: `chevron${expanded ? " open" : ""}`, children: "\u203A" }),
+        /* @__PURE__ */ u4("span", { class: "trace-count", children: [
+          count,
+          " step",
+          count === 1 ? "" : "s"
+        ] })
+      ]
+    }
+  );
+}
 function ActivityTracePanel({
   lines,
   expanded,
-  onToggle,
   live = false,
   now = null,
   openLatest = false
 }) {
-  if (!lines.length) return null;
-  return /* @__PURE__ */ u4("div", { class: `msg-activity${expanded ? " expanded" : ""}`, children: [
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "trace-toggle",
-        "aria-expanded": expanded,
-        "aria-label": expanded ? "Hide activity" : "Show activity",
-        title: expanded ? "Hide activity" : "Show activity",
-        onClick: onToggle,
-        children: [
-          /* @__PURE__ */ u4("span", { class: `chevron${expanded ? " open" : ""}`, children: "\u203A" }),
-          /* @__PURE__ */ u4("span", { class: "trace-count", children: [
-            lines.length,
-            " step",
-            lines.length === 1 ? "" : "s"
-          ] })
-        ]
-      }
-    ),
-    expanded ? /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now, openLatest }) : null
-  ] });
-}
-function ActivityTrace({ lines }) {
-  const [expanded, setExpanded] = h2(false);
-  return /* @__PURE__ */ u4(
-    ActivityTracePanel,
-    {
-      lines,
-      expanded,
-      onToggle: () => setExpanded((v5) => !v5)
-    }
-  );
+  if (!lines.length || !expanded) return null;
+  return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now, openLatest }) });
 }
 function fmtCost(usd) {
   if (usd >= 1) return "$" + usd.toFixed(2);
@@ -22259,7 +22271,7 @@ function ForkButton({ m: m6 }) {
       "aria-label": "Branch a new thread from this message",
       disabled: busy,
       onClick: onFork,
-      children: "\u2442"
+      children: /* @__PURE__ */ u4(BranchIcon, {})
     }
   );
 }
@@ -22289,7 +22301,7 @@ function EditMessageButton({ m: m6 }) {
       onClick: () => {
         onEdit().catch(console.error);
       },
-      children: "\u270E"
+      children: /* @__PURE__ */ u4(EditIcon, {})
     }
   );
 }
@@ -22347,10 +22359,11 @@ function openThreadAt(targetThreadId, messageId) {
   highlightMessageId.value = messageId;
   openChat(groupId.value, targetThreadId, null).catch(console.error);
 }
-function Message({ m: m6, allowContinue = false }) {
+function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
   const [continueState, setContinueState] = h2("idle");
+  const [traceExpanded, setTraceExpanded] = h2(false);
   if (m6.direction === "turn" && m6.turn) return /* @__PURE__ */ u4(ConversationTurnRow, { turn: m6.turn, lines: m6.activity ?? [], status: !!m6.turnStatus });
   if (m6.direction === "event") {
     const ev = m6.event;
@@ -22431,7 +22444,8 @@ function Message({ m: m6, allowContinue = false }) {
   }, [m6.text, md != null, q5]);
   const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
   const inputPresentation = m6.direction === "in" ? inputStatePresentation(m6.inputState) : null;
-  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (inputPresentation ? ` ${inputPresentation.className}` : "");
+  const activity = m6.direction === "out" ? m6.activity ?? [] : [];
+  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === "web";
@@ -22500,10 +22514,11 @@ function Message({ m: m6, allowContinue = false }) {
             children: continueState === "sent" ? "Sent" : continueState === "sending" ? action.sendingLabel : action.label
           }
         ) }) : null,
-        m6.direction === "out" && m6.activity && m6.activity.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: m6.activity }) : null,
+        activity.length ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded }) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
-        m6.ts || m6.inputState ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+        m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
           m6.ts && /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+          /* @__PURE__ */ u4(ActivityTraceToggle, { count: activity.length, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
           showsMidTurnLabel(
@@ -22512,9 +22527,9 @@ function Message({ m: m6, allowContinue = false }) {
           ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
           m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: m6.statsTurn }) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
-            /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current }),
             /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
-            /* @__PURE__ */ u4(ForkButton, { m: m6 })
+            /* @__PURE__ */ u4(ForkButton, { m: m6 }),
+            /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current })
           ] })
         ] }) : null
       ]
@@ -22522,6 +22537,8 @@ function Message({ m: m6, allowContinue = false }) {
   );
 }
 function DisplayCardMessage({ message: message2, card }) {
+  const [traceExpanded, setTraceExpanded] = h2(false);
+  const activity = message2.activity ?? [];
   return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message2.id, children: [
     card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
     card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
@@ -22543,10 +22560,11 @@ function DisplayCardMessage({ message: message2, card }) {
       },
       `${action.label}:${action.url}`
     )) }) : null,
-    message2.activity?.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: message2.activity }) : null,
+    /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded }),
     message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
-    message2.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
-      /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }),
+    message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+      message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
+      /* @__PURE__ */ u4(ActivityTraceToggle, { count: activity.length, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
       /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }),
       message2.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: message2.statsTurn }) : null
     ] }) : null
@@ -22816,15 +22834,15 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
           {
             lines,
             expanded: traceExpanded,
-            onToggle: toggleFromCount,
             live: !settled,
             now: endedAt ?? now,
             openLatest: openLatestOnExpand
           }
         ),
-        status ? /* @__PURE__ */ u4("div", { class: "meta", children: [
-          /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }),
-          activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4(ActiveTurnStopButton, {}) : null
+        status || lines.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+          /* @__PURE__ */ u4(ActivityTraceToggle, { count: lines.length, expanded: traceExpanded, onToggle: toggleFromCount }),
+          status ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null,
+          status && activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null
         ] }) : null
       ]
     }
@@ -23034,6 +23052,7 @@ function PendingTray() {
 }
 function QuestionCardItem({ question: q5, busy }) {
   const [answer, setAnswer] = h2("");
+  const [traceExpanded, setTraceExpanded] = h2(false);
   const answerRef = A2("");
   const textareaRef = A2(null);
   const gid = groupId.value;
@@ -23162,9 +23181,10 @@ function QuestionCardItem({ question: q5, busy }) {
         }
       )
     ] }),
-    q5.activity?.length ? /* @__PURE__ */ u4(ActivityTrace, { lines: q5.activity }) : null,
+    /* @__PURE__ */ u4(ActivityTracePanel, { lines: q5.activity ?? [], expanded: traceExpanded }),
     /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }),
+      /* @__PURE__ */ u4(ActivityTraceToggle, { count: q5.activity?.length ?? 0, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
       !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null
     ] })
   ] });

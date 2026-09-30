@@ -1,4 +1,5 @@
 import type { ActiveTurn } from '../types';
+import { StopIcon } from './ActionIcons';
 
 interface TurnStopButtonProps {
   turn: ActiveTurn;
@@ -25,7 +26,7 @@ export function TurnStopButton({ turn, connected, busy, error, onStop }: TurnSto
       disabled={!connected || stopping}
       onClick={() => onStop(turn.id)}
     >
-      <span aria-hidden="true">{'\u25A0'}</span>
+      <StopIcon />
     </button>
   );
 }
