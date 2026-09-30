@@ -28,7 +28,7 @@ interface CatalogModel {
   tool_call?: boolean;
   modalities?: { input?: string[]; output?: string[] };
   limit?: { context?: number; output?: number };
-  cost?: { input?: number; output?: number };
+  cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
   provider?: { npm?: string; api?: string };
 }
 
@@ -51,6 +51,8 @@ export interface NativeModel {
   maxOutputTokens?: number;
   inputCostPerMTok?: number;
   outputCostPerMTok?: number;
+  cacheReadCostPerMTok?: number;
+  cacheWriteCostPerMTok?: number;
   inputModalities?: string[];
 }
 
@@ -141,6 +143,8 @@ export async function resolveNativeModel(wireId: string): Promise<NativeModel> {
     maxOutputTokens: model?.limit?.output,
     inputCostPerMTok: model?.cost?.input,
     outputCostPerMTok: model?.cost?.output,
+    cacheReadCostPerMTok: model?.cost?.cache_read,
+    cacheWriteCostPerMTok: model?.cost?.cache_write,
     inputModalities: model?.modalities?.input,
   };
 }

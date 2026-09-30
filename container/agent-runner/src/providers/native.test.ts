@@ -123,7 +123,7 @@ beforeEach(() => {
               ].join('\n')
             : [
                 'event: message_start',
-                'data: {"type":"message_start","message":{"id":"msg_minimax","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0}}}',
+                'data: {"type":"message_start","message":{"id":"msg_minimax","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0,"cache_read_input_tokens":20,"cache_creation_input_tokens":3}}}',
                 '',
                 'event: content_block_start',
                 'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
@@ -1254,6 +1254,28 @@ describe('NativeProvider', () => {
     expect(new URL(requestUrls[0]!).pathname).toBe('/v1/messages');
     expect(requestHeaders[0]!.get('x-api-key')).toBe('placeholder');
     expect(requests[0]?.model).toBe('MiniMax-M3');
+  });
+
+  it('reports and prices MiniMax cache reads separately from uncached input', async () => {
+    const catalog = spyOn(nativeCatalog, 'resolveNativeModel').mockResolvedValue({
+      wireId: 'minimax/MiniMax-M3', providerId: 'minimax', modelId: 'MiniMax-M3',
+      baseURL: process.env.NATIVE_BASE_URL!, protocol: 'anthropic-messages',
+      inputCostPerMTok: 0.3, outputCostPerMTok: 1.2, cacheReadCostPerMTok: 0.06, cacheWriteCostPerMTok: 0.375,
+    });
+    try {
+      const events = await collect(new NativeProvider({ model: 'minimax/MiniMax-M3', modelParams: { max_tokens: 8192 } }));
+      const usage = events.find((event) => event.type === 'usage') as { data: Record<string, number> };
+      expect(usage.data).toMatchObject({
+        input_tokens: 4,
+        cache_read_tokens: 20,
+        cache_write_tokens: 3,
+        output_tokens: 5,
+        context_tokens: 32,
+      });
+      expect(usage.data.cost_usd).toBeCloseTo((4 * 0.3 + 20 * 0.06 + 3 * 0.375 + 5 * 1.2) / 1_000_000, 12);
+    } finally {
+      catalog.mockRestore();
+    }
   });
 
   it('sends and resumes image attachments through direct MiniMax Messages', async () => {

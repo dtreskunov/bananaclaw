@@ -59,27 +59,41 @@ function usageFor(
   };
 }
 
+/**
+ * Maps AI SDK usage onto the provider-wide convention shared with the Claude
+ * and OpenCode providers: `input_tokens` counts uncached input only, cache
+ * reads/writes are separate, and `context_tokens` is the whole prompt plus reply.
+ */
 function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
   const usage = (raw ?? {}) as {
     inputTokens?: number;
     outputTokens?: number;
-    cachedInputTokens?: number;
-    reasoningTokens?: number;
+    inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+    outputTokenDetails?: { reasoningTokens?: number };
   };
-  const input = usage.inputTokens ?? 0;
+  const totalInput = usage.inputTokens ?? 0;
+  const cacheRead = usage.inputTokenDetails?.cacheReadTokens ?? 0;
+  const cacheWrite = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+  const input = usage.inputTokenDetails?.noCacheTokens ?? Math.max(0, totalInput - cacheRead - cacheWrite);
   const output = usage.outputTokens ?? 0;
-  const cost = (input * (model.inputCostPerMTok ?? 0) + output * (model.outputCostPerMTok ?? 0)) / 1_000_000;
+  const inputRate = model.inputCostPerMTok ?? 0;
+  const cost =
+    (input * inputRate +
+      cacheRead * (model.cacheReadCostPerMTok ?? inputRate) +
+      cacheWrite * (model.cacheWriteCostPerMTok ?? inputRate) +
+      output * (model.outputCostPerMTok ?? 0)) /
+    1_000_000;
   return {
     cost_usd: cost,
     input_tokens: input,
     output_tokens: output,
-    cache_read_tokens: usage.cachedInputTokens ?? 0,
-    cache_write_tokens: 0,
-    reasoning_tokens: usage.reasoningTokens,
+    cache_read_tokens: cacheRead,
+    cache_write_tokens: cacheWrite,
+    reasoning_tokens: usage.outputTokenDetails?.reasoningTokens,
     model: model.wireId,
     context_window: model.contextWindow,
     max_output_tokens: model.maxOutputTokens,
-    context_tokens: input + output,
+    context_tokens: input + cacheRead + cacheWrite + output,
   };
 }
 
