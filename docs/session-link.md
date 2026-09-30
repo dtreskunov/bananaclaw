@@ -26,6 +26,21 @@ invalidate but cannot publish new state. Projection failures are explicit,
 not successful empty histories. Unknown imported origins expose only sidecars
 anchored to visible messages; off-route sends never expose the source trace.
 
+The browser protocol is separately versioned (`protocolVersion: 1`). A
+subscription starts with `{kind:"snapshot", streamId, revision, conversation}`.
+Each atomic `update` names `baseRevision` and the next `revision`, with entity
+upserts, removals, complete ordering, connection state and action capabilities.
+Revisions count changed browser projections, never runner journal sequences.
+The pure shared reducer validates frames before applying them, ignores duplicate
+revisions and requests a new snapshot for gaps or unknown streams. Reconnect
+always gets a new stream ID; there are no durable browser ACKs or replay logs.
+
+`startConversationStream` subscribes before taking its snapshot. Its single dirty
+bit covers invalidations during the initial read and coalesces progress at 40ms
+boundaries without storing a queue of frames. Failed reads/sends close the
+subscription explicitly. Transport adapters must reject slow consumers rather
+than buffering unbounded updates. Every refresh re-authorizes the viewer.
+
 The host listens at a hashed path below `data/.session-links/` and mounts only
 that session's leaf directory at `/run/nanoclaw:ro`. The runner connects to
 `/run/nanoclaw/runner.sock`.
