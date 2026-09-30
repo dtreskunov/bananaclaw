@@ -64,7 +64,10 @@ restart against it during the operation, and the old installation stays offline
 through verification and replacement. It is **not** an override for live data.
 The tool rejects the configured live `DATA_DIR`, aliases beneath it, links,
 non-DELETE journal modes, SQLite sidecars, and any conflicting SQLite lock.
-It holds exclusive locks on all original stores during preflight and backup.
+It works one session at a time, holding exclusive locks on that session's
+stores while it checks, hashes, migrates or verifies them. Every session passes
+preflight before anything is written, and each session's files are re-hashed
+against the backup under those locks immediately before migration.
 Filesystem locks alone cannot prove a container will not start later; the
 staging-copy attestation is required even for dry-run.
 
@@ -77,6 +80,21 @@ and package dependencies:
 bun scripts/conversation-cutover.ts \
   --staging-data-dir ./cutover/data --attest-offline-copy
 ```
+
+Memory use is bounded by the largest single session, not the whole tree:
+sessions are processed sequentially and files/tables are hashed as streams.
+Progress (`<phase>: <n>/<total> sessions`) goes to stderr; stdout remains a
+single JSON result. On Linux, run each step under a hard memory cap so that an
+unexpectedly large session fails the step instead of exhausting the host:
+
+```bash
+systemd-run --user --scope -p MemoryMax=2G -p MemorySwapMax=0 \
+  bun scripts/conversation-cutover.ts \
+  --staging-data-dir ./cutover/data --attest-offline-copy [--apply|--verify|...]
+```
+
+A killed step is recoverable the same way as any other interrupted cutover
+(`--retry` or `--rollback`).
 
 Discovery is limited to the staging root's `v2-sessions`:
 
@@ -115,11 +133,13 @@ Before any schema mutation, the tool creates
 `./cutover/data/.conversation-cutover/` with mode `0700`:
 
 - `snapshot/<original-relative-path>`: consistent raw copies of **every actual
-  session database**, verified against SHA-256 hashes while exclusive locks
-  are held. The inbound store is backed up but never migrated.
-- `manifest.json`: exact scope, original file hashes and original-table
-  counts/digests, phase, per-file commit progress, and verified final hashes.
-  Snapshot files are mode `0600`. They contain private data; protect them.
+  session database**, verified against streamed SHA-256 hashes. The inbound
+  store is backed up but never migrated. Snapshot files are mode `0600`. They
+  contain private data; protect them.
+- `manifest.json` (version 2): exact scope, original file hashes and
+  original-table counts/digests, phase, and verified final hashes. Manifests
+  from an earlier migrator version are refused; use a fresh staging copy.
+- `progress.log`: one line per session committed during the current apply.
 
 The Bun CLI runs the mirrored `backfillTurns` implementation on both projections
 and `migrateRunnerTurnJournal` only on the runner. Both backfill implementations

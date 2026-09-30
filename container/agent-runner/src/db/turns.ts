@@ -92,16 +92,16 @@ INSERT OR IGNORE INTO conversation_sync_migrations(step) VALUES ('schema:1');
 `;
 
 export function hasTurnSchema(db: Database): boolean {
-  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'turns'").get();
+  return !!db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'turns'").get();
 }
 
 export function getTurn(db: Database, id: string): TurnRow | undefined {
-  return (db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as TurnRow | null) ?? undefined;
+  return (db.query('SELECT * FROM turns WHERE id = ?').get(id) as TurnRow | null) ?? undefined;
 }
 
 /** Storage upsert; callers own lifecycle validation and runner journal triggers. */
 export function putTurn(db: Database, turn: TurnRow): void {
-  db.prepare(
+  db.query(
     `
     INSERT INTO turns (id, origin_channel_type, origin_platform_id, origin_thread_id,
       origin_source_session_id, started_at, ended_at, phase, outcome, provenance,
@@ -132,12 +132,12 @@ export function putTurn(db: Database, turn: TurnRow): void {
 }
 
 export function getTurnInputs(db: Database, turnId: string): TurnInputRow[] {
-  return db.prepare('SELECT * FROM turn_inputs WHERE turn_id = ? ORDER BY message_in_id').all(turnId) as TurnInputRow[];
+  return db.query('SELECT * FROM turn_inputs WHERE turn_id = ? ORDER BY message_in_id').all(turnId) as TurnInputRow[];
 }
 
 export function linkTurnInput(db: Database, input: TurnInputRow): void {
   if (!getTurn(db, input.turn_id)) throw new Error(`Unknown turn: ${input.turn_id}`);
-  db.prepare(
+  db.query(
     `INSERT INTO turn_inputs (turn_id, message_in_id, association) VALUES (?, ?, ?)
     ON CONFLICT(turn_id, message_in_id) DO NOTHING`,
   ).run(input.turn_id, input.message_in_id, input.association);
@@ -154,13 +154,13 @@ export function getTurnAssociations(db: Database, turnId: string): TurnAssociati
   return {
     inputs: getTurnInputs(db, turnId),
     outputIds: (
-      db.prepare('SELECT id FROM messages_out WHERE turn_id = ? ORDER BY id').all(turnId) as Array<{ id: string }>
+      db.query('SELECT id FROM messages_out WHERE turn_id = ? ORDER BY id').all(turnId) as Array<{ id: string }>
     ).map((r) => r.id),
     usageIds: (
-      db.prepare('SELECT id FROM turn_usage WHERE turn_id = ? ORDER BY id').all(turnId) as Array<{ id: string }>
+      db.query('SELECT id FROM turn_usage WHERE turn_id = ? ORDER BY id').all(turnId) as Array<{ id: string }>
     ).map((r) => r.id),
     activity: db
-      .prepare('SELECT message_out_id, ordinal FROM turn_activity WHERE turn_id = ? ORDER BY message_out_id, ordinal')
+      .query('SELECT message_out_id, ordinal FROM turn_activity WHERE turn_id = ? ORDER BY message_out_id, ordinal')
       .all(turnId) as TurnAssociations['activity'],
   };
 }
@@ -175,13 +175,13 @@ export function linkTurnRecord(db: Database, turnId: string, target: TurnAssocia
     if (!getTurn(db, turnId)) throw new Error(`Unknown turn: ${turnId}`);
     const where = target.table === 'turn_activity' ? 'message_out_id = ? AND ordinal = ?' : 'id = ?';
     const values = target.table === 'turn_activity' ? [target.message_out_id, target.ordinal] : [target.id];
-    const row = db.prepare(`SELECT turn_id FROM ${target.table} WHERE ${where}`).get(...values) as {
+    const row = db.query(`SELECT turn_id FROM ${target.table} WHERE ${where}`).get(...values) as {
       turn_id: string | null;
     } | null;
     if (!row) throw new Error('Unknown turn association target');
     if (row.turn_id !== null && row.turn_id !== turnId) throw new Error('Record already belongs to another turn');
     if (row.turn_id === null)
-      db.prepare(`UPDATE ${target.table} SET turn_id = ? WHERE ${where}`).run(turnId, ...values);
+      db.query(`UPDATE ${target.table} SET turn_id = ? WHERE ${where}`).run(turnId, ...values);
   })();
 }
 
@@ -189,21 +189,21 @@ export function linkTurnRecord(db: Database, turnId: string, target: TurnAssocia
 export function migrateTurnSchema(db: Database): void {
   db.transaction(() => {
     db.exec(TURN_SCHEMA);
-    if (db.prepare("SELECT 1 FROM conversation_sync_migrations WHERE step = 'schema:1'").get()) return;
+    if (db.query("SELECT 1 FROM conversation_sync_migrations WHERE step = 'schema:1'").get()) return;
     for (const table of ['messages_out', 'turn_usage', 'turn_activity']) {
-      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      const columns = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
       if (!columns.some((c) => c.name === 'turn_id')) {
         db.exec(`ALTER TABLE ${table} ADD COLUMN turn_id TEXT REFERENCES turns(id)`);
       }
     }
-    const activityColumns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{
+    const activityColumns = db.query('PRAGMA table_info(turn_activity)').all() as Array<{
       name: string;
       notnull: number;
     }>;
     if (activityColumns.some((c) => c.name === 'message_out_id' && c.notnull)) {
       // Preserve legacy keys and trigger SQL while permitting silent-turn activity.
       const objects = db
-        .prepare(
+        .query(
           "SELECT sql FROM sqlite_master WHERE tbl_name = 'turn_activity' AND type IN ('index', 'trigger') AND sql IS NOT NULL",
         )
         .all() as Array<{ sql: string }>;
@@ -247,9 +247,9 @@ export interface TurnBackfillEvidence {
 export function backfillTurns(db: Database, inputs?: TurnInputEvidence[], shared?: TurnBackfillEvidence): void {
   db.transaction(() => {
     migrateTurnSchema(db);
-    if (db.prepare("SELECT 1 FROM conversation_sync_migrations WHERE step = 'backfill:1'").get()) return;
+    if (db.query("SELECT 1 FROM conversation_sync_migrations WHERE step = 'backfill:1'").get()) return;
     const triggers = db
-      .prepare(
+      .query(
         `SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND
           (tbl_name IN ('messages_out', 'turn_usage', 'turn_activity') OR
            name IN ('journal_turn_insert', 'journal_turn_update', 'journal_turn_input_insert'))`,
@@ -257,12 +257,12 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[], shared
       .all() as Array<{ name: string; sql: string }>;
     for (const { name } of triggers) db.exec(`DROP TRIGGER "${name.replaceAll('"', '""')}"`);
 
-    const hasInputs = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_in'").get();
+    const hasInputs = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_in'").get();
     const evidence =
       inputs ??
       (hasInputs
         ? (db
-            .prepare('SELECT id, channel_type, platform_id, thread_id, source_session_id FROM messages_in')
+            .query('SELECT id, channel_type, platform_id, thread_id, source_session_id FROM messages_in')
             .all() as TurnInputEvidence[])
         : []);
     const inputById = new Map(evidence.map((row) => [row.id, row]));
@@ -272,7 +272,7 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[], shared
     for (const link of shared?.links ?? []) linkTurnInput(db, link);
     const outputs =
       shared?.outputs ??
-      (db.prepare('SELECT id, in_reply_to, content, turn_id FROM messages_out ORDER BY id').all() as Array<{
+      (db.query('SELECT id, in_reply_to, content, turn_id FROM messages_out ORDER BY id').all() as Array<{
         id: string;
         in_reply_to: string | null;
         content: string;
@@ -281,7 +281,7 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[], shared
     const applied: Array<{ messageId: string; turnId: string }> = [];
     const states =
       shared?.states ??
-      (db.prepare("SELECT key, value FROM session_state WHERE key LIKE 'input:%'").all() as Array<{
+      (db.query("SELECT key, value FROM session_state WHERE key LIKE 'input:%'").all() as Array<{
         key: string;
         value: string;
       }>);
@@ -299,14 +299,14 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[], shared
       applied.push({ messageId: value.messageId, turnId });
     }
     const reserved = new Set([
-      ...(db.prepare('SELECT id FROM turns').all() as Array<{ id: string }>).map((r) => r.id),
+      ...(db.query('SELECT id FROM turns').all() as Array<{ id: string }>).map((r) => r.id),
       ...outputs.map((r) => r.turn_id ?? explicitId(parseObject(r.content).turn_id)).filter((id): id is string => !!id),
       ...applied.map((r) => r.turnId),
     ]);
     const imported = new Set<string>();
     const outputTurns = new Map<string, string>();
     const localOutputIds = new Set(
-      (db.prepare('SELECT id FROM messages_out').all() as Array<{ id: string }>).map((r) => r.id),
+      (db.query('SELECT id FROM messages_out').all() as Array<{ id: string }>).map((r) => r.id),
     );
     const ensureTurn = (id: string) => {
       if (getTurn(db, id)) return;
@@ -340,7 +340,7 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[], shared
       }
       ensureTurn(id);
       outputTurns.set(output.id, id);
-      db.prepare('UPDATE messages_out SET turn_id = ? WHERE id = ? AND turn_id IS NULL').run(id, output.id);
+      db.query('UPDATE messages_out SET turn_id = ? WHERE id = ? AND turn_id IS NULL').run(id, output.id);
       if (output.in_reply_to && inputById.has(output.in_reply_to)) {
         linkTurnInput(db, { turn_id: id, message_in_id: output.in_reply_to, association: 'reply' });
       }
@@ -367,13 +367,13 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[], shared
       db.exec(`UPDATE ${table} SET turn_id = (SELECT turn_id FROM messages_out WHERE id = ${table}.message_out_id)
         WHERE turn_id IS NULL AND EXISTS (SELECT 1 FROM messages_out WHERE id = ${table}.message_out_id)`);
       if (shared) {
-        const link = db.prepare(`UPDATE ${table} SET turn_id = ? WHERE turn_id IS NULL AND message_out_id = ?`);
+        const link = db.query(`UPDATE ${table} SET turn_id = ? WHERE turn_id IS NULL AND message_out_id = ?`);
         for (const [outputId, turnId] of outputTurns) {
           if (!localOutputIds.has(outputId)) link.run(turnId, outputId);
         }
       }
     }
     for (const { sql } of triggers) db.exec(sql);
-    db.prepare("INSERT INTO conversation_sync_migrations(step) VALUES ('backfill:1')").run();
+    db.query("INSERT INTO conversation_sync_migrations(step) VALUES ('backfill:1')").run();
   })();
 }

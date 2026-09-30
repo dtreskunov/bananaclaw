@@ -235,14 +235,10 @@ describe('offline coordinated conversation cutover', () => {
 
   it('retains the original snapshot across partial failure and an explicit retry', () => {
     const original = [input, output, runner].map(hash);
-    const rename = fs.renameSync;
-    const fail = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
-      if (String(from).endsWith('manifest.json.next')) {
-        const next = JSON.parse(fs.readFileSync(from, 'utf8'));
-        if (next.phase === 'applying' && next.completedFiles?.length === 1)
-          throw new Error('injected post-commit failure');
-      }
-      return rename(from, to);
+    const append = fs.appendFileSync;
+    const fail = spyOn(fs, 'appendFileSync').mockImplementation((file, data, options) => {
+      if (String(file).endsWith('progress.log')) throw new Error('injected post-commit failure');
+      return append(file, data, options);
     });
     try {
       expect(() => cutover(root, 'apply')).toThrow('injected');

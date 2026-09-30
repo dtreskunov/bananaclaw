@@ -4,6 +4,9 @@
  *
  * Bun's SQLite implementation runs the mirrored migration on both private stores;
  * only the runner gets its journal upgraded. No runtime opens the other peer's DB.
+ *
+ * Memory is bounded by the largest single session: sessions are opened, checked,
+ * migrated and verified one at a time, and files/tables are hashed as streams.
  */
 import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
@@ -11,7 +14,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { DATA_DIR } from '../src/config.js';
-import { CONVERSATION_CUTOVER_MANIFEST } from '../src/conversation-cutover.js';
+import {
+  CONVERSATION_CUTOVER_MANIFEST,
+  CONVERSATION_CUTOVER_MANIFEST_VERSION as MANIFEST_VERSION,
+} from '../src/conversation-cutover.js';
 import {
   backfillTurns,
   type TurnBackfillEvidence,
@@ -34,10 +40,9 @@ interface FileSnapshot {
   tables: TableSnapshot[];
 }
 interface Manifest {
-  version: 1;
+  version: typeof MANIFEST_VERSION;
   phase: Phase;
   files: FileSnapshot[];
-  completedFiles?: string[];
 }
 interface Store {
   name: string;
@@ -45,13 +50,26 @@ interface Store {
   db: Database;
 }
 type Mode = 'dry-run' | 'apply' | 'verify' | 'retry' | 'rollback';
+type Progress = (message: string) => void;
+const PROGRESS_LOG = path.join(path.dirname(CONVERSATION_CUTOVER_MANIFEST), 'progress.log');
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
 const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
-const fileHash = (file: string) => digest(fs.readFileSync(file));
 const has = (db: Database, table: string) =>
   !!db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
 const rows = (db: Database, table: string): Row[] => db.query(`SELECT * FROM ${quote(table)}`).all() as Row[];
 const canonical = (row: Row) => JSON.stringify(Object.entries(row).sort(([a], [b]) => a.localeCompare(b)));
+
+function fileHash(file: string): string {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(1 << 20);
+  const fd = fs.openSync(file, 'r');
+  try {
+    for (let n; (n = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0; ) hash.update(buffer.subarray(0, n));
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
 
 function syncFile(file: string): void {
   const fd = fs.openSync(file, 'r');
@@ -165,9 +183,17 @@ function closeStores(stores: Store[]): void {
   }
 }
 
+/** Order-independent table digest; rows are streamed and only their hashes are retained. */
+function tableDigest(db: Database, name: string, columns?: string[]): { count: number; digest: string } {
+  const select = columns ? columns.map(quote).join(',') : '*';
+  const hashes: string[] = [];
+  for (const row of db.query(`SELECT ${select} FROM ${quote(name)}`).iterate() as IterableIterator<Row>)
+    hashes.push(digest(canonical(row)));
+  return { count: hashes.length, digest: digest(hashes.sort().join('\n')) };
+}
+
 function tableSnapshot(db: Database, name: string, columns: string[]): TableSnapshot {
-  const data = db.query(`SELECT ${columns.map(quote).join(',')} FROM ${quote(name)}`).all() as Row[];
-  return { name, columns, count: data.length, digest: digest(data.map(canonical).sort().join('\n')) };
+  return { name, columns, ...tableDigest(db, name, columns) };
 }
 
 function preserve(db: Database): TableSnapshot[] {
@@ -191,9 +217,15 @@ function sameUsageEvidence(a: Row, b: Row): boolean {
   if (first === second) return true;
   // SQLite's JSON journal can round a double to its adjacent representable value.
   // This is comparison-only: preservation checks still hash each store exactly.
-  return typeof first === 'number' && typeof second === 'number' &&
-    Number.isFinite(first) && Number.isFinite(second) && first >= 0 && second >= 0 &&
-    Math.abs(first - second) <= Number.EPSILON * Math.max(first, second);
+  return (
+    typeof first === 'number' &&
+    typeof second === 'number' &&
+    Number.isFinite(first) &&
+    Number.isFinite(second) &&
+    first >= 0 &&
+    second >= 0 &&
+    Math.abs(first - second) <= Number.EPSILON * Math.max(first, second)
+  );
 }
 
 function union<T extends object>(
@@ -214,10 +246,8 @@ function union<T extends object>(
   return [...all].sort(([a], [b]) => a.localeCompare(b)).map(([, row]) => row);
 }
 
-function sessionEvidence(stores: Store[], session: string) {
-  const local = stores.filter(
-    (s) => path.dirname(s.name) === session || path.dirname(s.name) === path.join(session, 'runner-state'),
-  );
+/** Evidence for one session; `local` must be exactly that session's stores. */
+function sessionEvidence(local: Store[]) {
   const outputs = local.filter((s) => path.basename(s.name) !== 'inbound.db');
   const inputSets = local
     .filter((s) => has(s.db, 'messages_in'))
@@ -271,8 +301,32 @@ function sessionEvidence(stores: Store[], session: string) {
   return { outputs, inputs: union(inputSets, (r) => r.id), shared };
 }
 
-function sessions(stores: Store[]): string[] {
-  return stores.filter((s) => path.basename(s.name) === 'inbound.db').map((s) => path.dirname(s.name));
+/** Group discovered files by session, preserving discovery order. */
+function sessionGroups(names: string[]): string[][] {
+  const groups = new Map<string, string[]>();
+  for (const name of names) {
+    const dir = path.dirname(name);
+    const session = path.basename(name) === 'runner-state.db' ? path.dirname(dir) : dir;
+    groups.set(session, [...(groups.get(session) ?? []), name]);
+  }
+  return [...groups.values()];
+}
+
+/** Open, lock and preflight one session's stores, always releasing them afterwards. */
+function withSession<T>(root: string, names: string[], run: (stores: Store[]) => T): T {
+  const stores = openStores(root, names);
+  try {
+    return run(stores);
+  } finally {
+    closeStores(stores);
+  }
+}
+
+function assertFileHashes(root: string, manifest: Manifest, names: string[], key: 'before' | 'after', error: string) {
+  for (const name of names) {
+    const file = manifest.files.find((f) => f.name === name);
+    if (!file?.[key] || fileHash(path.join(root, name)) !== file[key]) throw new Error(error);
+  }
 }
 
 function verify(root: string, stores: Store[], manifest: Manifest): void {
@@ -288,7 +342,7 @@ function verify(root: string, stores: Store[], manifest: Manifest): void {
     try {
       for (const table of ['turns', 'turn_inputs', 'messages_out', 'turn_usage', 'turn_activity']) {
         if (!has(original, table)) continue;
-        for (const row of rows(original, table)) {
+        for (const row of original.query(`SELECT * FROM ${quote(table)}`).iterate() as IterableIterator<Row>) {
           const identity =
             table === 'turn_inputs'
               ? ['turn_id', 'message_in_id']
@@ -316,13 +370,11 @@ function verify(root: string, stores: Store[], manifest: Manifest): void {
     if (has(store.db, 'pending_runner_events') && store.db.query('SELECT 1 FROM pending_runner_events LIMIT 1').get())
       throw new Error('Migration unexpectedly enqueued runner events');
   }
-  for (const session of sessions(stores)) {
-    const { outputs } = sessionEvidence(stores, session);
-    for (const table of ['turns', 'turn_inputs']) {
-      const expected = rows(outputs[0].db, table).map(canonical).sort().join('\n');
-      if (outputs.some(({ db }) => rows(db, table).map(canonical).sort().join('\n') !== expected))
-        throw new Error('Peer turn projection mismatch');
-    }
+  const { outputs } = sessionEvidence(stores);
+  for (const table of ['turns', 'turn_inputs']) {
+    const expected = tableDigest(outputs[0].db, table).digest;
+    if (outputs.some(({ db }) => tableDigest(db, table).digest !== expected))
+      throw new Error('Peer turn projection mismatch');
   }
 }
 
@@ -372,106 +424,138 @@ function completeBackup(root: string, manifest: Manifest): void {
   syncFile(path.join(root, '.conversation-cutover'));
 }
 
-export function cutover(root: string, mode: Mode): { mode: Mode; sessions: number; files: number; phase: string } {
+function recordProgress(root: string, session?: string): void {
+  const file = path.join(root, PROGRESS_LOG);
+  if (fs.existsSync(file)) checkPath(file);
+  if (session === undefined) fs.writeFileSync(file, '', { mode: 0o600 });
+  else fs.appendFileSync(file, session + '\n');
+  syncFile(file);
+}
+
+export function cutover(
+  root: string,
+  mode: Mode,
+  progress: Progress = () => {},
+): { mode: Mode; sessions: number; files: number; phase: string } {
   root = path.resolve(root);
   checkPath(root, true);
   const liveRoot = fs.existsSync(DATA_DIR) ? fs.realpathSync(DATA_DIR) : path.resolve(DATA_DIR);
   if (fs.realpathSync(root) !== root || root === liveRoot || root.startsWith(liveRoot + path.sep))
     throw new Error('Refusing live DATA_DIR or aliases; provide a separate offline staging copy');
   const names = discoverSessionFiles(root);
+  const groups = sessionGroups(names);
+  const result = (phase: string) => ({ mode, sessions: groups.length, files: names.length, phase });
   const manifestPath = path.join(root, CONVERSATION_CUTOVER_MANIFEST);
   let manifest: Manifest | undefined;
   if (fs.existsSync(path.dirname(manifestPath))) {
     checkPath(path.dirname(manifestPath), true);
     if (!fs.existsSync(manifestPath))
-      throw new Error('Cutover directory has no manifest; retain it for inspection and use a new coherent staging copy');
+      throw new Error(
+        'Cutover directory has no manifest; retain it for inspection and use a new coherent staging copy',
+      );
   }
   if (fs.existsSync(manifestPath)) {
     checkPath(manifestPath);
     manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Manifest;
-    if (
-      manifest.version !== 1 ||
-      !Array.isArray(manifest.files) ||
-      JSON.stringify(manifest.files.map((f) => f.name)) !== JSON.stringify(names)
-    )
+    if (manifest.version !== MANIFEST_VERSION)
+      throw new Error('Manifest written by an incompatible migrator version; use a new coherent staging copy');
+    if (!Array.isArray(manifest.files) || JSON.stringify(manifest.files.map((f) => f.name)) !== JSON.stringify(names))
       throw new Error('Manifest scope mismatch; refuse partial or changed session set');
   }
-  let stores = openStores(root, names);
+  // Only one session's stores are ever open, so memory is bounded by the largest session.
+  const eachSession = (label: string, run: (stores: Store[], session: string) => void) => {
+    groups.forEach((files, index) => {
+      withSession(root, files, (stores) => run(stores, path.dirname(files[0])));
+      if ((index + 1) % 25 === 0 || index + 1 === groups.length)
+        progress(`${label}: ${index + 1}/${groups.length} sessions`);
+    });
+  };
   try {
-    const count = sessions(stores).length;
     if (mode === 'rollback' || mode === 'retry') {
       if (!manifest) throw new Error('No original snapshot to restore');
-      if (manifest.phase === 'verified') {
-        for (const file of manifest.files)
-          if (!file.after || fileHash(path.join(root, file.name)) !== file.after)
-            throw new Error('Verified store changed; refusing to overwrite later writes');
-      }
+      eachSession('preflight', () => {});
+      if (manifest.phase === 'verified')
+        assertFileHashes(root, manifest, names, 'after', 'Verified store changed; refusing to overwrite later writes');
       if (manifest.phase === 'backing-up') completeBackup(root, manifest);
-      closeStores(stores);
-      stores = [];
       snapshots(root, manifest, true);
-      if (mode === 'rollback') return { mode, sessions: count, files: names.length, phase: manifest.phase };
-      stores = openStores(root, names);
+      if (mode === 'rollback') return result(manifest.phase);
     } else if (manifest) {
       if (manifest.phase !== 'verified') throw new Error('Incomplete cutover; use explicit --retry or --rollback');
       snapshots(root, manifest, false);
-      for (const file of manifest.files)
-        if (!file.after || fileHash(path.join(root, file.name)) !== file.after)
-          throw new Error('Verified store changed; refusing to bless or overwrite later writes');
-      verify(root, stores, manifest);
-      return { mode, sessions: count, files: names.length, phase: 'verified' };
+      assertFileHashes(
+        root,
+        manifest,
+        names,
+        'after',
+        'Verified store changed; refusing to bless or overwrite later writes',
+      );
+      const verified = manifest;
+      eachSession('verify', (stores) => verify(root, stores, verified));
+      return result('verified');
     } else if (mode === 'verify')
       throw new Error('No cutover manifest; verification cannot certify an untracked migration');
 
-    const evidence = sessions(stores).map((session) => sessionEvidence(stores, session));
-    for (const { db } of stores) {
-      if (
-        has(db, 'conversation_sync_migrations') &&
-        db.query("SELECT 1 FROM conversation_sync_migrations WHERE step='backfill:1'").get()
-      )
-        throw new Error('Preexisting untracked backfill; restore the coordinated pre-cutover snapshot');
-    }
-    if (mode === 'dry-run') return { mode, sessions: count, files: names.length, phase: 'preflight-ok' };
+    // Every session must pass before anything persistent is written.
+    const baseline: FileSnapshot[] = [];
+    eachSession('preflight', (stores) => {
+      sessionEvidence(stores);
+      for (const { db } of stores) {
+        if (
+          has(db, 'conversation_sync_migrations') &&
+          db.query("SELECT 1 FROM conversation_sync_migrations WHERE step='backfill:1'").get()
+        )
+          throw new Error('Preexisting untracked backfill; restore the coordinated pre-cutover snapshot');
+      }
+      if (!manifest && mode === 'apply')
+        for (const store of stores)
+          baseline.push({ name: store.name, before: fileHash(store.file), tables: preserve(store.db) });
+    });
+    if (mode === 'dry-run') return result('preflight-ok');
     if (!manifest) {
       manifest = {
-        version: 1,
+        version: MANIFEST_VERSION,
         phase: 'backing-up',
-        files: stores.map((s) => ({ name: s.name, before: fileHash(s.file), tables: preserve(s.db) })),
+        files: baseline.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
       };
       fs.mkdirSync(path.dirname(manifestPath), { mode: 0o700 });
       syncFile(root);
       saveManifest(root, manifest);
       completeBackup(root, manifest);
     }
-    manifest.phase = 'applying';
-    manifest.completedFiles = [];
-    saveManifest(root, manifest);
-    for (const { outputs, inputs, shared } of evidence) {
+    const active = manifest;
+    active.phase = 'applying';
+    saveManifest(root, active);
+    recordProgress(root);
+    eachSession('apply', (stores, session) => {
+      // Checked under this session's exclusive locks: migrate exactly what was backed up.
+      assertFileHashes(
+        root,
+        active,
+        stores.map((s) => s.name),
+        'before',
+        'Store changed since backup; use explicit --retry or --rollback',
+      );
+      const { outputs, inputs, shared } = sessionEvidence(stores);
       for (const store of outputs) {
         backfillTurns(store.db, inputs, shared);
         if (store.name.endsWith('runner-state.db')) migrateRunnerTurnJournal(store.db);
         store.db.exec('COMMIT');
-        manifest.completedFiles.push(store.name);
-        saveManifest(root, manifest);
       }
-    }
-    manifest.phase = 'verifying';
-    saveManifest(root, manifest);
-    closeStores(stores);
-    stores = openStores(root, names);
-    verify(root, stores, manifest);
-    for (const file of manifest.files) file.after = fileHash(path.join(root, file.name));
-    manifest.phase = 'verified';
-    saveManifest(root, manifest);
-    return { mode, sessions: count, files: names.length, phase: manifest.phase };
+      recordProgress(root, session);
+    });
+    active.phase = 'verifying';
+    saveManifest(root, active);
+    eachSession('verify', (stores) => verify(root, stores, active));
+    for (const file of active.files) file.after = fileHash(path.join(root, file.name));
+    active.phase = 'verified';
+    saveManifest(root, active);
+    return result(active.phase);
   } catch (error) {
     if (manifest && !['verified', 'rolled-back', 'backing-up'].includes(manifest.phase)) {
       manifest.phase = 'failed';
       saveManifest(root, manifest);
     }
     throw error;
-  } finally {
-    closeStores(stores);
   }
 }
 
@@ -493,7 +577,9 @@ if (import.meta.main) {
       throw new Error('Require --staging-data-dir and --attest-offline-copy; read docs/conversation-cutover.md');
     const modes = (['apply', 'verify', 'retry', 'rollback', 'dry-run'] as const).filter((m) => values[m]);
     if (modes.length > 1) throw new Error('Choose only one mode');
-    console.log(JSON.stringify(cutover(values['staging-data-dir'], modes[0] ?? 'dry-run')));
+    console.log(
+      JSON.stringify(cutover(values['staging-data-dir'], modes[0] ?? 'dry-run', (message) => console.error(message))),
+    );
   } catch (error) {
     // Never print rows, env, credential-bearing config, or raw SQLite diagnostics.
     console.error(
