@@ -55,6 +55,21 @@ export interface AgentProvider {
    */
   modelLimits?(usage: TurnUsage): Promise<ModelLimits>;
 
+  /**
+   * Optional. True when the provider's work prompt omits the `<message>` wrap
+   * contract: the final text is a draft the runner routes through a delivery
+   * turn (see `delivery-turn.ts`). Requires `complete`.
+   */
+  readonly unwrappedReplies?: boolean;
+
+  /**
+   * Optional. One tool-free model call outside any conversation, on the
+   * group's configured model. The runner uses it for the delivery turn that
+   * routes a final reply it could not deliver as-is; providers without it
+   * fall back to in-conversation recovery nudges.
+   */
+  complete?(request: CompletionRequest): Promise<CompletionResult>;
+
   /** Start a new query. Returns a handle for streaming input and output. */
   query(input: QueryInput): AgentQuery;
 
@@ -273,6 +288,18 @@ export interface TurnUsage {
  * TurnUsage snapshot so lossy host polling never has to reconstruct totals
  * from individual events. */
 export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms' | 'duration_api_ms'>;
+
+export interface CompletionRequest {
+  system: string;
+  prompt: string;
+  maxOutputTokens: number;
+  signal?: AbortSignal;
+}
+
+export interface CompletionResult {
+  text: string;
+  usage?: CallUsage;
+}
 
 /**
  * One step of a turn's activity trace, in structured form. Providers emit

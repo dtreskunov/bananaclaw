@@ -9,7 +9,13 @@ import { clearActivity, clearUsageProgress, writeUsageProgress } from '../db/ses
 import { writeTurnCheckpoint } from '../db/turn-checkpoints.js';
 import type { AgentProvider, CallUsage, TurnUsage } from '../providers/types.js';
 import { accumulateTurnUsage } from '../providers/usage.js';
-import { persistTurnMetadata, recordTurnUsage, turnUsage, type TurnExecution } from '../turn-execution.js';
+import {
+  persistTurnMetadata,
+  recordRunnerCallUsage,
+  recordTurnUsage,
+  turnUsage,
+  type TurnExecution,
+} from '../turn-execution.js';
 
 function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
@@ -53,6 +59,11 @@ export class TurnAccounting {
     } catch {
       /* best-effort */
     }
+  }
+
+  /** Settled usage from a runner-side call after the provider's report. */
+  onRunnerCallUsage(data: CallUsage): void {
+    recordRunnerCallUsage(this.execution.current, data);
   }
 
   /**

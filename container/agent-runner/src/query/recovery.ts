@@ -4,9 +4,15 @@
  * push into the same warm query. Also picks the terminal notice for a turn
  * that ends having delivered nothing.
  *
+ * Before any of that, `routeDraft` hands a result that cannot be delivered
+ * as-is (prose outside `<message>` blocks, or a block to an unknown
+ * destination) to the delivery turn when the provider supports one-shot
+ * completions — a small tool-free call, instead of a full-context retry.
+ *
  * Three retry shapes, each bounded:
- *  - delivery nudge: bare unwrapped text, or a reply swallowed by reasoning.
- *    One-shot; offers an <internal> escape hatch for intentional silence.
+ *  - delivery nudge: bare unwrapped text (providers without a delivery turn),
+ *    or a reply swallowed by reasoning. One-shot; offers an <internal> escape
+ *    hatch for intentional silence.
  *  - malformed-tool nudge: a tool call that never executed. Retries the work.
  *  - post-tool report: a native tool already ran but the final reply was
  *    lost. Tools are disabled so the retry can only report, never repeat.
@@ -14,7 +20,8 @@
 import { findByRouting, getAllDestinations } from '../destinations.js';
 import { getOutboundDb } from '../db/connection.js';
 import type { RoutingContext } from '../formatter.js';
-import type { AgentQuery, ProviderExchange } from '../providers/types.js';
+import type { AgentQuery, CallUsage, ProviderExchange } from '../providers/types.js';
+import { isSilentDraft, runDeliveryTurn, type Complete } from '../delivery-turn.js';
 import type { ToolStep } from './runaway-guard.js';
 
 const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
@@ -43,6 +50,12 @@ export interface RecoveryPort {
     replyOnly: boolean,
   ): { sent: number; hasUnwrapped: boolean; internalCount: number };
   exchangeComplete(result: string | null, status: ProviderExchange['status']): void;
+  /** One-shot completion for the delivery turn; absent providers keep the nudges. */
+  complete?: Complete;
+  /** The provider's work prompt has no `<message>` wrap contract. */
+  unwrappedReplies?: boolean;
+  assistantName?: string;
+  recordUsage(usage: CallUsage): void;
 }
 
 export interface ResultInput {
@@ -227,6 +240,41 @@ export class DeliveryRecovery {
     const isRetry = this.mode !== null;
     const routing = isRetry ? this.retryRouting : null;
     return { isRetry, routing };
+  }
+
+  /**
+   * Route a result that cannot be delivered as-is through the delivery turn.
+   * Returns the text to dispatch: wrapped when the delivery turn ran,
+   * unchanged otherwise. Throws only when `signal` aborts it.
+   */
+  async routeDraft(
+    input: { text: string | null; routing: RoutingContext; since: number; turnId: string },
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    const complete = this.port.complete;
+    // A report-only retry already delivers its prose to the retried route.
+    if (!input.text || !complete || this.mode === 'delivery') return input.text;
+    // The unwrapped-reply prompt defines an <internal>-only reply as silence.
+    if (this.port.unwrappedReplies && isSilentDraft(input.text)) {
+      this.silenceConfirmed = true;
+      return input.text;
+    }
+    const outcome = await runDeliveryTurn(
+      complete,
+      {
+        draft: input.text,
+        routing: input.routing,
+        since: input.since,
+        turnId: input.turnId,
+        ...(this.port.assistantName ? { assistantName: this.port.assistantName } : {}),
+      },
+      signal,
+    );
+    if (!outcome) return input.text;
+    if (outcome.usage) this.port.recordUsage(outcome.usage);
+    // A deliberate "send nothing" is intentional silence, not an empty turn.
+    if (outcome.silent) this.silenceConfirmed = true;
+    return outcome.text;
   }
 
   /**
@@ -470,6 +518,15 @@ export class DeliveryRecovery {
     const names = getAllDestinations()
       .map((d) => d.name)
       .join(', ');
+    if (this.port.unwrappedReplies) {
+      this.port.query.push(
+        `<system>Your reply was not delivered: it was left inside your reasoning. ` +
+          `If you have a response, write it now as your final reply. ` +
+          `If you intentionally have nothing to send, reply with a brief ` +
+          `<internal>…</internal> note explaining why (it will not be delivered).</system>`,
+      );
+      return;
+    }
     this.port.query.push(
       `<system>Your reply was not delivered. Either it was not wrapped in ` +
         `<message to="name">...</message> blocks, or it was left inside your ` +
@@ -497,8 +554,10 @@ export class DeliveryRecovery {
         `or printed XML-like tool-call markup as ordinary text. That tool call did NOT execute. ` +
         `Continue the original request now and invoke the required tools through the native tool ` +
         `interface with all required arguments. Do not write <tool_call>, <invoke>, or <command> ` +
-        `markup yourself. After the tool work completes, send the result in a ` +
-        `<message to="name">...</message> block.</system>`,
+        `markup yourself. After the tool work completes, ` +
+        (this.port.unwrappedReplies
+          ? `reply with the result.</system>`
+          : `send the result in a <message to="name">...</message> block.</system>`),
     );
   }
 
@@ -531,7 +590,10 @@ export class DeliveryRecovery {
       .map((d) => d.name)
       .join(', ');
     const replyDestination = findByRouting(failedRouting.channelType, failedRouting.platformId);
-    const replyInstruction = replyDestination
+    const unwrapped = this.port.unwrappedReplies === true;
+    const replyInstruction = unwrapped
+      ? ''
+      : replyDestination
       ? `Report to <message to="${replyDestination.name}"> in the originating conversation. ` +
         `Messages already sent to other destinations are not a reply here. `
       : '';
@@ -554,16 +616,17 @@ export class DeliveryRecovery {
       this.postToolAttempts > 1
         ? `Your previous reporting-only response incorrectly tried to use another tool. ` +
           `Do not continue, inspect, search, verify, or perform more work. Report only what the ` +
-          `completed calls already established and what remains unfinished. Output exactly one ` +
-          `<message to="name">...</message> block and no other text. `
+          `completed calls already established and what remains unfinished. ` +
+          (unwrapped ? `Output only the report. ` : `Output exactly one <message to="name">...</message> block and no other text. `)
         : '';
     return (
       `<system>At least one native tool already ran in the previous turn, but the final reply ` +
       `was not delivered. Here is the execution record:\n${callSummary || 'One or more native tools may have executed.'}\n` +
       `Do NOT repeat any of those calls or make equivalent requests through other tools. ` +
       `Tools are disabled for this recovery turn. ${retryInstruction}Use the existing native results above and report ` +
-      `the actual result in ` +
-      `a <message to="name">...</message> block. ${replyInstruction}Your destinations: ${names}.</system>`
+      (unwrapped
+        ? `the actual result as your final reply.</system>`
+        : `the actual result in a <message to="name">...</message> block. ${replyInstruction}Your destinations: ${names}.</system>`)
     );
   }
 }

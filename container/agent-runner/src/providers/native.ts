@@ -1,4 +1,4 @@
-import { isStepCount, streamText, type ModelMessage, type ToolSet } from 'ai';
+import { generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from 'ai';
 
 import { registerProvider } from './provider-registry.js';
 import { loadConfig } from '../config.js';
@@ -14,6 +14,8 @@ import type {
   QueryInput,
   QueryPushOptions,
   CallUsage,
+  CompletionRequest,
+  CompletionResult,
   TurnUsage,
   SteeringInput,
 } from './types.js';
@@ -240,6 +242,7 @@ export class NativeProvider implements AgentProvider {
   readonly supportsSteering = true;
   readonly supportsInputEditing = true;
   readonly supportsInputCancellation = true;
+  readonly unwrappedReplies = true;
   private readonly options: ProviderOptions;
   private readonly store: NativeStore;
 
@@ -259,6 +262,21 @@ export class NativeProvider implements AgentProvider {
 
   appliedSteering(continuation: string, ids: string[]): string[] {
     return this.store.appliedSteering(continuation, ids);
+  }
+
+  async complete(request: CompletionRequest): Promise<CompletionResult> {
+    const configuredModel = this.options.model ?? process.env.NATIVE_MODEL;
+    if (!configuredModel) throw new Error('native requires a canonical model setting');
+    const resolved = await resolveNativeModel(configuredModel);
+    const result = await generateText({
+      model: await languageModel(resolved),
+      system: request.system,
+      prompt: request.prompt,
+      maxOutputTokens: request.maxOutputTokens,
+      maxRetries: 2,
+      ...(request.signal ? { abortSignal: request.signal } : {}),
+    });
+    return { text: result.text, usage: callUsageFor(resolved, result.usage) };
   }
 
   query(input: QueryInput): AgentQuery {

@@ -446,7 +446,7 @@ so upstream changes merge with few conflicts. Fork-only behavior lives in
 
 | Module                 | Owns                                                                          |
 | ---------------------- | ----------------------------------------------------------------------------- |
-| `recovery.ts`          | Delivery/malformed-tool/post-tool retries at each `result`; terminal notices   |
+| `recovery.ts`          | Delivery turn, delivery/malformed-tool/post-tool retries at each `result`; terminal notices |
 | `runaway-guard.ts`     | Per-turn loop backstops (duplicate sends, identical tool streaks, text steps)  |
 | `steering.ts`          | Offering, applying and releasing native steering; published turn capabilities |
 | `accounting.ts`        | Usage/checkpoint capture and flush at the result boundary; live-state reset   |
@@ -469,8 +469,36 @@ as one-way. A per-batch routing hint forbids inventing a reply address or
 substituting the session's human channel. This does not grant reverse access.
 Host-origin system messages retain their existing no-`from` formatting.
 
-**Final-response recovery:** Bare final text remains scratchpad, not an
-automatic channel delivery. If a tool sent content elsewhere but the final
+**Delivery turn:** When a provider implements `complete()` (one tool-free
+call on the group's model — today only `native`), a final result that cannot
+be delivered as-is — prose outside `<message to="…">` blocks, or a block to an
+unknown destination — is routed by a small separate call before the typing
+indicator ends (`delivery-turn.ts`, reached from `recovery.routeDraft`). It sees
+the delivery rules, the assistant name, `CLAUDE.local.md`, the destinations with
+the latest message's origin marked, about 24k characters of recent visible
+transcript on the reply route, what was already sent this turn, and the draft.
+It answers with directives only: `<deliver to="name"/>` (send the draft's
+visible text verbatim: reasoning and `<internal>` removed, `<message>` wrappers
+unwrapped in place), `<message to="name">…</message>` (custom text), or
+`<internal>…</internal>` (send nothing — treated as intentional silence). Blocks
+the draft already addressed to other known destinations and its `<internal>`
+notes pass through unchanged. A failed call, unusable output, or an unknown
+destination falls back to delivering the draft to the reply route, or to the
+activity trace when the turn already answered there. Rewrites and skips leave
+an `<internal>` note (with the original draft) in the trace; plain delivery
+leaves none. Its billing is added to the turn's settled usage (duration,
+limits and context size stay the provider's). Report-only post-tool retries
+bypass it and keep their fixed route. The draft stays in the provider's history; the delivery exchange is
+not journaled. Each run logs `[delivery-turn] decision=… draft=… out=…`.
+
+Providers with `unwrappedReplies` (native) drop the wrap contract from their
+work prompt: the native loader swaps the shared `module-core.md` fragment for
+`providers/native/core.md`, and `buildSystemPromptAddendum` emits the
+destination list without wrap rules. The final text is simply the reply;
+`send_message` stays for mid-turn updates and other destinations.
+
+**Final-response recovery:** For providers without a delivery turn, bare final
+text remains scratchpad, not an automatic channel delivery. If a tool sent content elsewhere but the final
 confirmation is unwrapped (or was stripped as reasoning), the runner requests
 a reporting-only correction with tools disabled and cross-destination message
 blocks rejected during that correction. Only content on the same

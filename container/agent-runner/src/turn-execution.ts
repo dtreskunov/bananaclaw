@@ -84,6 +84,27 @@ export function recordTurnUsage(context: TurnExecution, data: TurnUsage | CallUs
   persistTurnMetadata(context, false);
 }
 
+/**
+ * Settled usage from a runner-side model call outside the provider's stream
+ * (the delivery turn). Adds billing only: duration, model limits and context
+ * size stay the provider's, and it never counts as an in-flight partial call.
+ */
+export function recordRunnerCallUsage(context: TurnExecution, data: CallUsage): void {
+  const prior = context.reportedUsage;
+  context.reportedUsage = prior
+    ? {
+        ...prior,
+        cost_usd: prior.cost_usd + data.cost_usd,
+        input_tokens: prior.input_tokens + data.input_tokens,
+        output_tokens: prior.output_tokens + data.output_tokens,
+        cache_read_tokens: prior.cache_read_tokens + data.cache_read_tokens,
+        cache_write_tokens: prior.cache_write_tokens + data.cache_write_tokens,
+        reasoning_tokens: (prior.reasoning_tokens ?? 0) + (data.reasoning_tokens ?? 0) || prior.reasoning_tokens,
+      }
+    : { ...data, context_tokens: undefined };
+  persistTurnMetadata(context, false);
+}
+
 /** Preserve billed partial calls when a failed provider attempt is retried. */
 export function finishUsageAttempt(context: TurnExecution): void {
   context.partialUsage = sum(context.partialUsage, context.callUsage);
