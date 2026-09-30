@@ -138,13 +138,57 @@ The runner rejects sequence gaps and waits for `host.ready` before constructing
 the provider, so its first prompt always sees a complete routing/message snapshot.
 Invalid host events receive a fatal `host.nack` and remain journaled for diagnosis.
 
-`turn.persisted` wakes final response delivery after usage, checkpoints, and
-activity have landed. Tool-origin and system messages can wake delivery
+The final `turn.upsert` with `phase=settled` is the identity-bearing delivery
+barrier: its input associations, messages, usage, activity and metadata have
+already committed in journal order. The old anonymous `turn.persisted {}` event
+is rejected. Tool-origin and system messages can wake delivery
 immediately. `batch.persisted` follows each fully persisted logical result and
 wakes processing reconciliation only after its task attempts and completion
 acknowledgements are final. This boundary does not wait for a warm provider query
 to close. A 60-second host scan recovers messages committed immediately before a
 host crash; routine one-second outbound polling is gone.
+
+### Lifecycle and metadata
+
+Turns progress through `running`, optional `stopping`, `settling`, and
+`settled`. Only a terminal turn has an outcome and `ended_at`. Native outcomes
+are `replied`, `warning`, `silent`, `stopped`, `failed`, or `interrupted`.
+An intentionally silent corrective response needs no synthetic message.
+Provider failures, including provider construction and outer fallback paths,
+remain failures even when a human-readable error is delivered.
+
+Activity is journaled as it is emitted, even with no output. Final settlement
+may anchor it to the last turn-owned output without changing turn/ordinal or
+emit time. MCP invocations register outstanding work in runner state; a result
+cannot settle or accept a successor until captured tool invocations complete.
+An irrecoverably hung/crashed tool sidecar therefore needs runner termination,
+not a fabricated successful settlement.
+
+`session_state['turn-metadata:<turn ID>']` is a versioned-by-protocol metadata
+record (`turnId`, `durationMs`, `model`, `usageId`, `status`, `final`). Status is
+`provisional` before any report, `partial` for reported calls/incomplete attempts,
+`final` for completed reported totals, or `unavailable` when no usage was
+reported. `final=true` means the metadata is settled, not that token coverage
+is complete. Missing reports never create zero-token usage rows.
+One stable usage row (`tu-<turn ID>`) is overwritten with the accumulated
+reported billing across attempts; aggregate reports replace the current
+attempt's call deltas, not add them again. Provider durations never reset the
+logical turn's walltime. Usage timestamps and IDs survive re-linking.
+
+`onSessionTurnChange` notifies host consumers after durable commits, with
+changed turn IDs and an optional settled ID; identical replays do not produce
+new mutations. `getSessionTurnSignals` preserves live turn IDs, activity
+ordinals/times and usage time for a later projector. `readTurnMetadata` exposes
+the durable metadata contract. These hooks do not implement browser projection.
+
+A lost socket is not completion: the host retains the last matching turn.
+`confirmSessionRunnerExit` emits a separate `runner-exited` observation only
+after a successful runtime wait, not a failed watcher or link disconnect.
+On replacement-runner startup, abandoned durable turns are journaled as
+`interrupted` before any fresh input is consumed. Their end timestamp records
+when interruption was confirmed; duration retains the last observed value
+(or null), not invented downtime or a success. Until that replay commits, the
+projector must present a confirmed exit as interruption pending reconciliation.
 
 The runner waits on host event notifications instead of polling. Future
 `process_after` rows use one timer for the next due timestamp; active-query

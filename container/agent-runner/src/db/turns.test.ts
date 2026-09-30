@@ -34,8 +34,19 @@ function legacy(): Database {
     );
     CREATE TABLE turn_activity (message_out_id TEXT NOT NULL, ordinal INTEGER NOT NULL, ts TEXT NOT NULL, text TEXT NOT NULL,
       PRIMARY KEY (message_out_id, ordinal));
+    CREATE TABLE messages_in (id TEXT PRIMARY KEY, seq INTEGER, kind TEXT, timestamp TEXT,
+      channel_type TEXT, platform_id TEXT, thread_id TEXT, source_session_id TEXT, content TEXT);
+    CREATE TABLE session_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE pending_runner_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id TEXT UNIQUE, event_type TEXT, payload TEXT, created_at TEXT);
+    CREATE TRIGGER journal_turn_activity_update AFTER UPDATE ON turn_activity BEGIN
+      INSERT INTO pending_runner_events (event_id, event_type, payload, created_at)
+      VALUES (lower(hex(randomblob(16))), 'activity.persist',
+        json_object('message_out_id', NEW.message_out_id, 'ordinal', NEW.ordinal, 'ts', NEW.ts, 'text', NEW.text), 'now');
+    END;
+    INSERT INTO pending_runner_events (event_id, event_type, payload, created_at)
+      VALUES ('old-pending-event', 'turn.persisted', '{}', 'now');
   `);
-  ensureRunnerStateSchema(db);
   return db;
 }
 
@@ -87,7 +98,7 @@ describe('runner durable turns', () => {
   it('does not implicitly migrate or backfill an existing DB on runtime open', () => {
     const db = legacy();
     seed(db);
-    ensureRunnerStateSchema(db);
+    expect(() => ensureRunnerStateSchema(db)).toThrow('offline');
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'turns'").all()).toEqual([]);
     expect(
       (db.prepare('PRAGMA table_info(messages_out)').all() as Array<{ name: string }>).some(
@@ -107,7 +118,7 @@ describe('runner durable turns', () => {
     backfillTurns(db);
     const turns = db.prepare('SELECT * FROM turns ORDER BY id').all();
     migrateTurnSchema(db);
-    ensureRunnerStateSchema(db);
+    expect(() => ensureRunnerStateSchema(db)).toThrow('offline');
     backfillTurns(db);
     expect(db.prepare('SELECT * FROM turns ORDER BY id').all()).toEqual(turns);
     expect(turns).toHaveLength(4);

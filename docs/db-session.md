@@ -270,6 +270,26 @@ same metadata as the fork's host projection.
 
 ## 5. Runner State (`runner-state/runner-state.db`)
 
+Native execution now writes `turns` and `turn_inputs` before producing output.
+The final `turn.upsert` journal event (`phase=settled`) is the ordered settlement
+barrier; no response message is required to persist the turn. `turn_activity`
+is initially turn-owned with a null output anchor and can be re-anchored at
+settlement. The turn-local ordinal and emit time do not change.
+
+Additional metadata uses the existing `session_state` table, not new columns:
+`turn-metadata:<id>` contains `{turnId,durationMs,model,usageId,status,final}`.
+`status` is `provisional|partial|final|unavailable`; a settled record may remain
+`partial`, and no usage report means `usageId=null` rather than fabricated
+tokens. Native billing uses one stable `turn_usage.id = 'tu-' + turn_id` across
+corrective/stale-session attempts. Historical usage IDs and totals are unchanged.
+See [session-link.md](session-link.md#lifecycle-and-metadata) for lifecycle and
+post-commit hooks.
+
+The DB-backed `runner:turn-context`, `runner:tools:<id>` and `runner:sends:<id>`
+state keys coordinate runner/MCP sidecars, captured reply ownership, outstanding
+tool calls and duplicate-send detection. They are internal runner metadata,
+not evidence that a turn completed.
+
 Runner-owned and the only database mounted into the container. Its parent
 directory is mounted so SQLite rollback journals survive container crashes. It contains the
 runner's writable output/state tables, `pending_runner_events`, and local copies
@@ -311,6 +331,12 @@ Before deploying a new required table or column, stop the host, back up the sess
   differ. Do not migrate `inbound.db`; consumed-input associations belong to the
   outbound projection. `migrateTurnSchema(db)` is available separately for
   schema-only work; backfill invokes it in the same encompassing transaction.
+  After draining the old protocol's pending events and completing backfill,
+  explicitly run Bun's `migrateRunnerTurnJournal(db)` on the runner file
+  (records `journal:2`). It recreates the turn-aware triggers and refuses an
+  undrained journal. No additional schema migration is needed for metadata,
+  which uses the existing `session_state` table. Upgrade both link peers and
+  restart runners together; see the coordinated offline steps in `session-link.md`.
   This step does **not** run any of these operations on an installed session.
 - **Import policy:** reuse nonempty string `messages_out.content.turn_id`
   (or an existing relational link); otherwise allocate

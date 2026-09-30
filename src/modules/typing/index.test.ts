@@ -14,7 +14,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 
 vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-typing' };
+  return { ...actual, DATA_DIR: '.test-typing' };
 });
 vi.mock('../../container-config.js', () => ({ configFromDb: () => ({ model: 'openrouter/minimax/minimax-m3' }) }));
 vi.mock('../../db/agent-groups.js', () => ({ getAgentGroup: () => ({ id: 'ag-1' }) }));
@@ -50,7 +50,7 @@ beforeEach(() => {
 afterEach(async () => {
   stopTypingRefresh('sess-1');
   await stopSessionSignalServer('sess-1', true);
-  fs.rmSync('/tmp/nanoclaw-test-typing', { recursive: true, force: true });
+  fs.rmSync('.test-typing', { recursive: true, force: true });
   vi.useRealTimers();
 });
 
@@ -161,15 +161,20 @@ describe('startTypingRefresh — instance forwarding', () => {
     });
     socket.write(
       `${JSON.stringify({
-        v: 3,
+        v: 4,
         type: 'activity',
+        turnId: null,
+        ts: String(Date.now()),
+        ordinal: 0,
         step: { kind: 'tool', id: 'lookup', tool: 'budget', status: 'completed' },
       })}\n`,
     );
     socket.write(
       `${JSON.stringify({
-        v: 3,
+        v: 4,
         type: 'usage',
+        turnId: null,
+        ts: String(Date.now()),
         usage: {
           cost_usd: 0.25,
           input_tokens: 1200,
@@ -242,7 +247,7 @@ describe('startTypingRefresh — transient heartbeat stalls', () => {
       socket.once('connect', resolve);
       socket.once('error', reject);
     });
-    socket.write(`${JSON.stringify({ v: 3, type: 'heartbeat' })}\n`);
+    socket.write(`${JSON.stringify({ v: 4, type: 'heartbeat' })}\n`);
     await vi.advanceTimersByTimeAsync(100);
     await vi.advanceTimersByTimeAsync(4_000);
 

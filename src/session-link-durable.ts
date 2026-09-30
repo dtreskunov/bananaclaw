@@ -27,6 +27,22 @@ export interface DurableApplyResult {
   deliveryReady: boolean;
   processingReady: boolean;
   editedInput?: EditedInput;
+  changedTurnIds?: string[];
+  settledTurnId?: string;
+}
+
+export interface TurnMetadata {
+  turnId: string;
+  durationMs: number | null;
+  model: string | null;
+  usageId: string | null;
+  status: 'provisional' | 'partial' | 'final' | 'unavailable';
+  final: boolean;
+}
+
+export function readTurnMetadata(db: Database.Database, turnId: string): TurnMetadata | undefined {
+  const row = db.prepare('SELECT value FROM session_state WHERE key = ?').get(`turn-metadata:${turnId}`) as { value: string } | undefined;
+  return row ? JSON.parse(row.value) as TurnMetadata : undefined;
 }
 
 function dbPath(agentGroupId: string, sessionId: string, name: 'inbound.db' | 'outbound.db'): string {
@@ -132,8 +148,8 @@ function applyMessage(db: Database.Database, payload: Record<string, unknown>, m
   try {
     content = JSON.parse(payload.content as string) as Record<string, unknown>;
     if (!content || typeof content !== 'object' || Array.isArray(content)) throw new Error('not an object');
-  } catch {
-    throw new Error('invalid message content');
+  } catch (error) {
+    throw new Error('invalid message content', { cause: error });
   }
   validateMessageCollections(content);
   requireTurn(db, payload.turn_id);
@@ -180,6 +196,26 @@ function applyState(db: Database.Database, payload: Record<string, unknown>): vo
     !text(payload.updated_at)
   )
     throw new Error('invalid state.upsert payload');
+  if (payload.key.startsWith('turn-metadata:')) {
+    const value = record(JSON.parse(payload.value));
+    const turnId = payload.key.slice('turn-metadata:'.length);
+    requireTurn(db, turnId);
+    if (!value || !exactKeys(value, ['turnId', 'durationMs', 'model', 'usageId', 'status', 'final']) ||
+      value.turnId !== turnId || !nullableInteger(value.durationMs) || !nullableText(value.model) ||
+      !nullableText(value.usageId) || typeof value.final !== 'boolean' ||
+      !['provisional', 'partial', 'final', 'unavailable'].includes(String(value.status)) ||
+      (!value.final && ['final', 'unavailable'].includes(String(value.status))) ||
+      (value.final && value.status === 'provisional') ||
+      (['partial', 'final'].includes(String(value.status)) !== (value.usageId !== null)))
+      throw new Error('invalid turn metadata');
+    if (value.usageId !== null) {
+      const usage = db.prepare('SELECT turn_id FROM turn_usage WHERE id = ?').get(value.usageId) as { turn_id: string } | undefined;
+      if (usage?.turn_id !== turnId) throw new Error('turn metadata references unrelated usage');
+    }
+    const prior = readTurnMetadata(db, turnId);
+    if (getTurn(db, turnId)?.phase === 'settled' && JSON.stringify(prior) !== JSON.stringify(value))
+      throw new Error('settled turn metadata is immutable');
+  }
   db.prepare(
     `INSERT INTO session_state (key, value, updated_at) VALUES (@key, @value, @updated_at)
      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
@@ -241,9 +277,14 @@ function applyActivity(db: Database.Database, payload: Record<string, unknown>):
   )
     throw new Error('invalid activity.persist payload');
   requireTurn(db, payload.turn_id);
+  requireOutputAnchor(db, payload.turn_id, payload.message_out_id);
   const existing = db.prepare('SELECT turn_id FROM turn_activity WHERE message_out_id IS ? AND ordinal = ? AND (message_out_id IS NOT NULL OR turn_id IS ?)')
     .get(payload.message_out_id, payload.ordinal, payload.turn_id) as { turn_id: string | null } | undefined;
   if (existing && existing.turn_id !== payload.turn_id) throw new Error('immutable activity turn');
+  if (payload.turn_id !== null) {
+    db.prepare('DELETE FROM turn_activity WHERE turn_id = ? AND ordinal = ? AND message_out_id IS NOT ?')
+      .run(payload.turn_id, payload.ordinal, payload.message_out_id);
+  }
   db.prepare(
     `INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id)
      VALUES (@message_out_id, @ordinal, @ts, @text, @turn_id)
@@ -293,6 +334,7 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
   )
     throw new Error('invalid usage.persist payload');
   requireTurn(db, payload.turn_id);
+  requireOutputAnchor(db, payload.turn_id, payload.message_out_id);
   const existing = db.prepare('SELECT turn_id FROM turn_usage WHERE id = ?').get(payload.id) as { turn_id: string | null } | undefined;
   if (existing && existing.turn_id !== payload.turn_id) throw new Error('immutable usage turn');
   db.prepare(
@@ -318,6 +360,12 @@ function requireTurn(db: Database.Database, id: unknown): void {
   if (id !== null && (typeof id !== 'string' || !getTurn(db, id))) throw new Error('unknown turn');
 }
 
+function requireOutputAnchor(db: Database.Database, turnId: unknown, outputId: unknown): void {
+  if (turnId === null || outputId === null) return;
+  const row = db.prepare('SELECT turn_id FROM messages_out WHERE id = ?').get(outputId) as { turn_id: string | null } | undefined;
+  if (row?.turn_id !== turnId) throw new Error('output anchor belongs to another turn');
+}
+
 function applyTurn(db: Database.Database, payload: Record<string, unknown>): void {
   if (!exactKeys(payload, ['id', 'origin_channel_type', 'origin_platform_id', 'origin_thread_id',
     'origin_source_session_id', 'started_at', 'ended_at', 'phase', 'outcome', 'provenance',
@@ -333,6 +381,15 @@ function applyTurn(db: Database.Database, payload: Record<string, unknown>): voi
   if (prior && ['origin_channel_type', 'origin_platform_id', 'origin_thread_id', 'origin_source_session_id',
     'started_at', 'provenance', 'imported_from_session_id', 'imported_from_turn_id']
     .some((key) => prior[key as keyof TurnRow] !== payload[key])) throw new Error('immutable turn identity');
+  if (prior?.phase === 'settled' && (payload.phase !== 'settled' ||
+    payload.outcome !== prior.outcome || payload.ended_at !== prior.ended_at)) throw new Error('turn already settled');
+  const phases = ['running', 'stopping', 'settling', 'settled'];
+  if (prior && phases.indexOf(String(payload.phase)) < phases.indexOf(prior.phase)) throw new Error('turn phase regression');
+  if (payload.phase === 'settled') {
+    if (payload.outcome === 'pending' || !text(payload.ended_at)) throw new Error('invalid turn settlement');
+    if (payload.provenance === 'native' && !readTurnMetadata(db, payload.id)?.final)
+      throw new Error('turn metadata must precede settlement');
+  } else if (payload.outcome !== 'pending' || payload.ended_at !== null) throw new Error('premature turn outcome');
   putTurn(db, payload as unknown as TurnRow);
 }
 
@@ -403,6 +460,8 @@ export function applyDurableRunnerEvent(
   let deliveryReady = false;
   let processingReady = false;
   let editedInput: EditedInput | undefined;
+  const changedTurnIds = new Set<string>();
+  let settledTurnId: string | undefined;
   const isInputEdit = frame.event.type === 'state.upsert' &&
     typeof payload.key === 'string' &&
     (payload.key.startsWith(INPUT_EDIT_PREFIX) || payload.key.startsWith(INPUT_CANCEL_PREFIX));
@@ -435,7 +494,7 @@ export function applyDurableRunnerEvent(
           existing.event_digest !== digest
         )
           throw new Error('conflicting durable event replay');
-        deliveryReady = frame.event.type === 'turn.persisted';
+        deliveryReady = frame.event.type === 'turn.upsert' && payload.phase === 'settled';
         processingReady = frame.event.type === 'batch.persisted';
         if (isInputEdit) editedInput = projectInputEditResult(db, String(payload.key), String(payload.value), true);
         return;
@@ -448,12 +507,21 @@ export function applyDurableRunnerEvent(
       switch (frame.event.type) {
         case 'turn.upsert':
           applyTurn(db, payload);
+          if (payload.phase === 'settled') {
+            deliveryReady = true;
+            settledTurnId = String(payload.id);
+          }
           break;
         case 'turn-input.upsert':
           if (!exactKeys(payload, ['turn_id', 'message_in_id', 'association']) ||
             !text(payload.turn_id) || !text(payload.message_in_id) ||
             !['consumed', 'applied', 'reply'].includes(String(payload.association)))
             throw new Error('invalid turn-input.upsert payload');
+          {
+            const prior = db.prepare('SELECT association FROM turn_inputs WHERE turn_id = ? AND message_in_id = ?')
+              .get(payload.turn_id, payload.message_in_id) as { association: string } | undefined;
+            if (prior && prior.association !== payload.association) throw new Error('immutable input association');
+          }
           linkTurnInput(db, payload as unknown as import('./db/turns.js').TurnInputRow);
           break;
         case 'message.upsert':
@@ -497,10 +565,6 @@ export function applyDurableRunnerEvent(
         case 'task-attempt.upsert':
           applyTaskAttempt(db, payload);
           break;
-        case 'turn.persisted':
-          if (!exactKeys(payload, [])) throw new Error('invalid turn.persisted payload');
-          deliveryReady = true;
-          break;
         case 'batch.persisted':
           if (!exactKeys(payload, [])) throw new Error('invalid batch.persisted payload');
           processingReady = true;
@@ -508,6 +572,10 @@ export function applyDurableRunnerEvent(
         default:
           throw new Error(`unknown durable event type: ${frame.event.type}`);
       }
+      if (frame.event.type === 'turn.upsert') changedTurnIds.add(String(payload.id));
+      else if (typeof payload.turn_id === 'string') changedTurnIds.add(payload.turn_id);
+      else if (frame.event.type === 'state.upsert' && typeof payload.key === 'string' &&
+        payload.key.startsWith('turn-metadata:')) changedTurnIds.add(payload.key.slice('turn-metadata:'.length));
       db.prepare(
         `INSERT INTO applied_runner_events (event_id, sequence, event_type, event_digest, applied_at)
         VALUES (?, ?, ?, ?, datetime('now'))`,
@@ -518,5 +586,8 @@ export function applyDurableRunnerEvent(
     db.close();
   }
 
-  return { deliveryReady, processingReady, ...(editedInput ? { editedInput } : {}) };
+  return { deliveryReady, processingReady, ...(editedInput ? { editedInput } : {}),
+    ...(changedTurnIds.size ? { changedTurnIds: [...changedTurnIds] } : {}),
+    ...(settledTurnId ? { settledTurnId } : {}),
+  };
 }

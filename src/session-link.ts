@@ -96,6 +96,37 @@ const states = new Map<string, SessionSignalState>();
 const listeners = new Set<SignalListener>();
 const durableMessageListeners = new Set<DurableMessageListener>();
 const durableProcessingListeners = new Set<DurableProcessingListener>();
+export interface SessionTurnChange {
+  turnIds: string[];
+  settledTurnId?: string;
+  reason: 'committed' | 'runner-exited';
+}
+const turnChangeListeners = new Set<(sessionId: string, change: SessionTurnChange) => void>();
+
+/** Called only after commit (or confirmed runner exit), never from live frames. */
+export function onSessionTurnChange(listener: (sessionId: string, change: SessionTurnChange) => void): () => void {
+  turnChangeListeners.add(listener);
+  return () => turnChangeListeners.delete(listener);
+}
+
+function notifyTurnChange(sessionId: string, change: SessionTurnChange): void {
+  for (const listener of turnChangeListeners) {
+    try { listener(sessionId, change); }
+    catch (err) { log.warn('Turn change listener failed', { sessionId, err }); }
+  }
+}
+
+/** Exit is not successful settlement; a replacement runner journals interruption. */
+export function confirmSessionRunnerExit(sessionId: string): void {
+  const state = states.get(sessionId);
+  if (!state) return;
+  state.connected = false;
+  state.turnStateReady = false;
+  notifyTurnChange(sessionId, {
+    turnIds: state.activeTurn ? [state.activeTurn.id] : [],
+    reason: 'runner-exited',
+  });
+}
 let globalRateWindowStartedAt = 0;
 let globalFramesThisWindow = 0;
 let globalFrameBytesThisWindow = 0;
@@ -522,6 +553,11 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
       event: { type: event.type, payload },
     });
     entry.connection?.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'ack', eventId: frame.eventId })}\n`);
+    if (result.changedTurnIds) notifyTurnChange(sessionId, {
+      turnIds: result.changedTurnIds,
+      ...(result.settledTurnId ? { settledTurnId: result.settledTurnId } : {}),
+      reason: 'committed',
+    });
     if (result.deliveryReady) {
       for (const listener of durableMessageListeners) listener(sessionId);
     }
@@ -877,6 +913,22 @@ export function getSessionSignalUsage(sessionId: string, sinceMs?: number): Usag
   const state = states.get(sessionId);
   if (!state?.usage || (sinceMs !== undefined && state.usageUpdatedAt < sinceMs)) return null;
   return { ...state.usage };
+}
+
+/** Identity-preserving live input for the later authoritative conversation projector. */
+export function getSessionTurnSignals(sessionId: string): {
+  active: ReturnType<typeof getSessionActiveTurn>;
+  activity: Array<ActivityLine & { turnId: string | null; ordinal: number }>;
+  usage: { turnId: string | null; ts: number; value: UsageSnapshot } | null;
+} {
+  const state = states.get(sessionId);
+  return {
+    active: getSessionActiveTurn(sessionId),
+    activity: state?.activity.map((line) => ({ ...line })) ?? [],
+    usage: state?.usage
+      ? { turnId: state.usageTurnId, ts: state.usageUpdatedAt, value: { ...state.usage } }
+      : null,
+  };
 }
 
 export function getSessionSignalTurnEndedAt(sessionId: string): number {

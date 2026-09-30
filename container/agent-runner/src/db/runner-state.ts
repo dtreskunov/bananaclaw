@@ -14,11 +14,14 @@ const enqueue = (eventType: string, payload: string): string => `
 `;
 
 export function ensureRunnerStateSchema(db: Database): void {
+  const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_out'").get();
+  if (!fresh && !db.prepare("SELECT 1 FROM sqlite_master WHERE name='conversation_sync_migrations'").get()) {
+    throw new Error('Runner turn schema requires offline migrateTurnSchema()');
+  }
   const journalExists = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'pending_runner_events'").get();
   if (journalExists && !db.prepare("SELECT 1 FROM conversation_sync_migrations WHERE step = 'journal:2'").get()) {
     throw new Error('Runner turn journal requires offline migrateRunnerTurnJournal()');
   }
-  const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_out'").get();
   if (fresh) db.exec(TURN_SCHEMA);
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages_in (
@@ -431,13 +434,6 @@ export function listPendingRunnerEvents(db: Database, limit = 32): PendingRunner
 
 export function acknowledgeRunnerEvent(db: Database, eventId: string): void {
   db.prepare('DELETE FROM pending_runner_events WHERE event_id = ?').run(eventId);
-}
-
-export function markTurnPersisted(db: Database): void {
-  db.prepare(
-    `INSERT INTO pending_runner_events (event_id, event_type, payload, created_at)
-       VALUES (lower(hex(randomblob(16))), 'turn.persisted', '{}', datetime('now'))`,
-  ).run();
 }
 
 export function markBatchPersisted(db: Database): void {

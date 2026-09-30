@@ -49,6 +49,7 @@ import {
   sessionLinkDir,
   startSessionSignalServer,
   stopSessionSignalServer,
+  confirmSessionRunnerExit,
 } from './session-link.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
@@ -460,6 +461,7 @@ function attachContainerWatcher(sessionId: string, containerName: string): void 
   markContainerRunning(sessionId);
 
   watcher.on('close', (code) => {
+    if (code === 0) confirmSessionRunnerExit(sessionId);
     activeContainers.delete(sessionId);
     markContainerStopped(sessionId);
     stopTypingRefresh(sessionId);

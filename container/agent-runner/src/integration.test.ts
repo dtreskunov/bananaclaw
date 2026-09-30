@@ -180,7 +180,12 @@ describe('poll loop integration', () => {
     const boundaries = getOutboundDb()
       .prepare("SELECT event_type FROM pending_runner_events WHERE event_type LIKE '%.persisted' ORDER BY sequence")
       .all() as { event_type: string }[];
-    expect(boundaries.map((row) => row.event_type)).toEqual(['turn.persisted', 'batch.persisted']);
+    expect(boundaries.map((row) => row.event_type)).toEqual(['batch.persisted']);
+    const settlement = getOutboundDb().prepare(
+      "SELECT sequence FROM pending_runner_events WHERE event_type='turn.upsert' AND json_extract(payload, '$.phase')='settled'",
+    ).get() as { sequence: number };
+    const batch = getOutboundDb().prepare("SELECT sequence FROM pending_runner_events WHERE event_type='batch.persisted'").get() as { sequence: number };
+    expect(settlement.sequence).toBeLessThan(batch.sequence);
     expect(getPendingMessages()).toHaveLength(0);
 
     controller.abort();
@@ -1196,8 +1201,7 @@ describe('poll loop — recovery nudge on stripped-to-empty', () => {
     expect(provider.pushes).toHaveLength(1);
     const rows = getOutboundDb().prepare('SELECT message_out_id, cost_usd FROM turn_usage ORDER BY cost_usd').all();
     expect(rows).toEqual([
-      { message_out_id: '', cost_usd: 0.25 },
-      { message_out_id: getUndeliveredMessages()[0].id, cost_usd: 0.5 },
+      { message_out_id: getUndeliveredMessages()[0].id, cost_usd: 0.75 },
     ]);
   });
 

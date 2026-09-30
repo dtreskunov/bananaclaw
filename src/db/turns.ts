@@ -100,7 +100,7 @@ export function getTurn(db: Database.Database, id: string): TurnRow | undefined 
   return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as TurnRow | undefined;
 }
 
-/** Storage-only helper. Lifecycle transitions and journaling are deliberately not wired yet. */
+/** Storage upsert; callers own lifecycle validation and runner journal triggers. */
 export function putTurn(db: Database.Database, turn: TurnRow): void {
   db.prepare(
     `

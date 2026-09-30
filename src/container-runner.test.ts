@@ -90,7 +90,7 @@ describe('runnerStateStoreMount', () => {
 
 describe('syncSkillSymlinks', () => {
   it('converts selected copied skills to symlinks and removes unselected shared copies', () => {
-    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+    const root = fs.mkdtempSync(path.resolve('.test-skill-sync-'));
     const claudeDir = path.join(root, 'claude');
     const shared = path.join(root, 'shared');
     for (const name of ['selected', 'unselected']) {
@@ -113,7 +113,7 @@ describe('syncSkillSymlinks', () => {
   });
 
   it('links a symlinked skill folder and repoints a slug that moved roots', () => {
-    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+    const root = fs.mkdtempSync(path.resolve('.test-skill-sync-'));
     const claudeDir = path.join(root, 'claude');
     const builtin = path.join(root, 'builtin');
     const installed = path.join(root, 'installed');
@@ -141,7 +141,7 @@ describe('syncSkillSymlinks', () => {
   });
 
   it('keeps workspace skills linked even when the selection excludes them', () => {
-    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+    const root = fs.mkdtempSync(path.resolve('.test-skill-sync-'));
     const claudeDir = path.join(root, 'claude');
     const builtin = path.join(root, 'builtin');
     const workspace = path.join(root, 'workspace');
@@ -166,7 +166,7 @@ describe('syncSkillSymlinks', () => {
   });
 
   it('lets the deny-list switch off a workspace skill and a selected one', () => {
-    const root = fs.mkdtempSync(path.join('/tmp', 'nanoclaw-skill-sync-'));
+    const root = fs.mkdtempSync(path.resolve('.test-skill-sync-'));
     const claudeDir = path.join(root, 'claude');
     const builtin = path.join(root, 'builtin');
     const workspace = path.join(root, 'workspace');

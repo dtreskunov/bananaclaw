@@ -173,8 +173,8 @@ export class SessionSignalClient {
     this.send({ v: PROTOCOL_VERSION, type: 'activity.clear' });
   }
 
-  appendActivity(step: ActivityStep, ts = String(Date.now()), turnId = this.turn?.id ?? null): void {
-    const frame = { v: PROTOCOL_VERSION, type: 'activity', step, ts, turnId, ordinal: this.activityOrdinal++ } as const;
+  appendActivity(step: ActivityStep, ts = String(Date.now()), turnId = this.turn?.id ?? null, ordinal = this.activityOrdinal++): void {
+    const frame = { v: PROTOCOL_VERSION, type: 'activity', step, ts, turnId, ordinal } as const;
     if (!this.encode(frame)) return;
     this.activity.push(frame);
     if (this.activity.length > MAX_ACTIVITY_LINES) {
@@ -447,8 +447,8 @@ export function clearActivitySignal(): void {
   client.clearActivity();
 }
 
-export function emitActivitySignal(step: ActivityStep, ts?: string, turnId?: string | null): void {
-  client.appendActivity(step, ts, turnId);
+export function emitActivitySignal(step: ActivityStep, ts?: string, turnId?: string | null, ordinal?: number): void {
+  client.appendActivity(step, ts, turnId, ordinal);
 }
 
 export function clearUsageSignal(): void {

@@ -22,6 +22,9 @@ import {
   getSessionActiveTurn,
   requestSessionTurnStop,
   onSessionSignal,
+  onSessionTurnChange,
+  confirmSessionRunnerExit,
+  getSessionTurnSignals,
 } from './session-link.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath } from './session-manager.js';
 import { insertMessage } from './db/session-db.js';
@@ -78,6 +81,47 @@ const ACTIVE_TURN = {
 };
 
 describe('current turn control', () => {
+  it('notifies turn observers only after committing a new mutation, not on replay', async () => {
+    const observed: string[] = [];
+    const unsubscribe = onSessionTurnChange((_id, change) => {
+      const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+      try {
+        expect(db.prepare('SELECT id FROM turns').pluck().get()).toBe('committed-turn');
+        observed.push(...change.turnIds);
+      } finally { db.close(); }
+    });
+    const socket = await connect();
+    const frame = { v: 4, type: 'durable', eventId: 'turn-commit', sequence: 1, event: {
+      type: 'turn.upsert', payload: {
+        id: 'committed-turn', origin_channel_type: 'web', origin_platform_id: 'room',
+        origin_thread_id: null, origin_source_session_id: null, started_at: '2026-09-01T00:00:00.000Z',
+        ended_at: null, phase: 'running', outcome: 'pending', provenance: 'native',
+        imported_from_session_id: null, imported_from_turn_id: null,
+      },
+    } };
+    try {
+      socket.write(`${JSON.stringify(frame)}\n`);
+      await waitFor(() => observed.length === 1);
+      socket.write(`${JSON.stringify(frame)}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(observed).toEqual(['committed-turn']);
+    } finally { socket.destroy(); unsubscribe(); }
+  });
+  it('retains a disconnected turn without a completion notification and reports confirmed exit separately', async () => {
+    const changes: Array<{ turnIds: string[]; reason: string }> = [];
+    const unsubscribe = onSessionTurnChange((_sessionId, change) => changes.push(change));
+    const socket = await connect();
+    try {
+      socket.write(`${JSON.stringify({ v: 4, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
+      await waitFor(() => getSessionActiveTurn(SESSION_ID).turn !== null);
+      socket.destroy();
+      await waitFor(() => !getSessionActiveTurn(SESSION_ID).connected);
+      expect(getSessionTurnSignals(SESSION_ID).active.turn?.id).toBe(ACTIVE_TURN.id);
+      expect(changes).toEqual([]);
+      confirmSessionRunnerExit(SESSION_ID);
+      expect(changes).toEqual([{ turnIds: [ACTIVE_TURN.id], reason: 'runner-exited' }]);
+    } finally { socket.destroy(); unsubscribe(); }
+  });
   it('accepts an optional native steering capability and replays it with the active turn', async () => {
     const socket = await connect();
     socket.write(`${JSON.stringify({

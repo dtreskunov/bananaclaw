@@ -137,11 +137,10 @@ export interface ActivityLine {
 // multi-KB command/argument blob.
 const ACTIVITY_MAX_CHARS = 2000;
 
-/** Append one structured step to the per-turn activity trace. The host
+/** Append and journal one structured step to the per-turn activity trace. The host
  *  forwards the full ordered list to the web UI (and derives the single
  *  latest typing hint from the last line), so the user can see every tool
- *  call / progress step as it happens. Best-effort — callers should
- *  swallow errors.
+ *  call / progress step as it happens. Durable write failures must propagate.
  *
  *  The step is JSON-encoded into the line's `text`; because JSON escapes
  *  newlines, the `<ts>\t<json>\n` file line format stays intact even when a
@@ -167,7 +166,16 @@ export function appendActivity(step: ActivityStep): void {
   _lastActivity = text;
   const ts = String(Date.now());
   _activityBuffer.push({ ts, text });
-  emitActivitySignal(s, ts, getTurnContext()?.turnId ?? null);
+  const turnId = getTurnContext()?.turnId ?? null;
+  let ordinal: number | undefined;
+  if (turnId) {
+    const db = getOutboundDb();
+    const row = db.prepare(`INSERT INTO turn_activity (turn_id, message_out_id, ordinal, ts, text)
+      SELECT ?, NULL, COALESCE(MAX(ordinal), -1) + 1, ?, ? FROM turn_activity WHERE turn_id = ?
+      RETURNING ordinal`).get(turnId, ts, text, turnId) as { ordinal: number };
+    ordinal = row.ordinal;
+  }
+  emitActivitySignal(s, ts, turnId, ordinal);
 }
 
 /** Cap user/model/provider text fields before they leave the container. */

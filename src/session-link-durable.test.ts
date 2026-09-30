@@ -456,14 +456,23 @@ describe('applyDurableRunnerEvent', () => {
   });
 
   it('defers response delivery until the turn persistence marker', () => {
+    const turn = {
+      id: 'settled-turn', origin_channel_type: 'web', origin_platform_id: 'chat-1',
+      origin_thread_id: null, origin_source_session_id: null, started_at: '2026-09-01T00:00:00.000Z',
+      ended_at: null, phase: 'running', outcome: 'pending', provenance: 'native',
+      imported_from_session_id: null, imported_from_turn_id: null,
+    };
+    applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+      eventId: 'turn-start', sequence: 1, event: { type: 'turn.upsert', payload: turn },
+    });
     const messageResult = applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
       eventId: 'event-1',
-      sequence: 1,
+      sequence: 2,
       event: {
         type: 'message.upsert',
         payload: {
           id: 'out-1',
-          turn_id: null,
+          turn_id: turn.id,
           seq: 1,
           in_reply_to: null,
           timestamp: '2026-09-01 00:00:00',
@@ -479,11 +488,30 @@ describe('applyDurableRunnerEvent', () => {
     });
     expect(messageResult.deliveryReady).toBe(false);
 
+    const settled = { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-01T00:00:01.000Z' };
+    expect(() => applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+      eventId: 'premature-settlement', sequence: 3, event: { type: 'turn.upsert', payload: settled },
+    })).toThrow('metadata must precede settlement');
+    applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+      eventId: 'metadata', sequence: 3, event: { type: 'state.upsert', payload: {
+        key: `turn-metadata:${turn.id}`, updated_at: 'now',
+        value: JSON.stringify({ turnId: turn.id, durationMs: 1000, model: null, usageId: null, status: 'unavailable', final: true }),
+      } },
+    });
     const turnResult = applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
       eventId: 'event-2',
-      sequence: 2,
-      event: { type: 'turn.persisted', payload: {} },
+      sequence: 4,
+      event: { type: 'turn.upsert', payload: settled },
     });
     expect(turnResult.deliveryReady).toBe(true);
+    expect(turnResult.changedTurnIds).toEqual([turn.id]);
+    expect(turnResult.settledTurnId).toBe(turn.id);
+    const replay = applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+      eventId: 'event-2', sequence: 4, event: { type: 'turn.upsert', payload: settled },
+    });
+    expect(replay.changedTurnIds).toBeUndefined();
+    expect(() => applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+      eventId: 'regression', sequence: 5, event: { type: 'turn.upsert', payload: turn },
+    })).toThrow('already settled');
   });
 });

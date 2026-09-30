@@ -159,7 +159,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
       if (
         holdAcks &&
         typeof args[0] === 'string' &&
-        args[0].startsWith('{"v":3,"type":"ack"') &&
+        args[0].startsWith('{"v":4,"type":"ack"') &&
         outDb!.prepare("SELECT 1 FROM messages_out WHERE json_extract(content,'$.stopped')=1").get()
       ) {
         held.push(() => Reflect.apply(originalWrite, this, args));

@@ -11,7 +11,7 @@ import { getTurnContext } from '../current-batch.js';
 export function writeTurnUsage(id: string, messageOutId: string | null, data: TurnUsage, turnId = getTurnContext()?.turnId ?? null): void {
   getOutboundDb()
     .prepare(
-      `INSERT OR REPLACE INTO turn_usage
+      `INSERT INTO turn_usage
          (id, message_out_id, turn_id, cost_usd, input_tokens, output_tokens,
           cache_read_tokens, cache_write_tokens, reasoning_tokens,
           num_turns, duration_ms, duration_api_ms,
@@ -19,7 +19,14 @@ export function writeTurnUsage(id: string, messageOutId: string | null, data: Tu
        VALUES ($id, $message_out_id, $turn_id, $cost_usd, $input_tokens, $output_tokens,
           $cache_read_tokens, $cache_write_tokens, $reasoning_tokens,
           $num_turns, $duration_ms, $duration_api_ms,
-          $model, $context_window, $max_output_tokens, $context_tokens, datetime('now'))`,
+          $model, $context_window, $max_output_tokens, $context_tokens, datetime('now'))
+       ON CONFLICT(id) DO UPDATE SET message_out_id=excluded.message_out_id,
+         cost_usd=excluded.cost_usd, input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
+         cache_read_tokens=excluded.cache_read_tokens, cache_write_tokens=excluded.cache_write_tokens,
+         reasoning_tokens=excluded.reasoning_tokens, num_turns=excluded.num_turns,
+         duration_ms=excluded.duration_ms, duration_api_ms=excluded.duration_api_ms,
+         model=excluded.model, context_window=excluded.context_window, max_output_tokens=excluded.max_output_tokens,
+         context_tokens=excluded.context_tokens`,
     )
     .run({
       $id: id,

@@ -8,9 +8,8 @@
  * row so the host's a2a return-path routing can correlate replies back to
  * the originating session.
  *
- * The runner keeps an in-process reply context. Poll-loop calls `setCurrentInReplyTo`
- * before invoking the provider and `clearCurrentInReplyTo` after the batch
- * completes (or errors out).
+ * The runner publishes a durable context for external MCP sidecars. Tools
+ * capture it at invocation, so async completion cannot read a successor.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
@@ -32,7 +31,9 @@ export function setTurnContext(context: TurnContext | null): void {
   getOutboundDb().prepare(
     `INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
-  ).run(CONTEXT_KEY, JSON.stringify(context), new Date().toISOString());
+  ).run(CONTEXT_KEY, JSON.stringify(context ? {
+    turnId: context.turnId, inReplyTo: context.inReplyTo, startedAt: context.startedAt,
+  } : null), new Date().toISOString());
   currentInReplyTo = context?.inReplyTo ?? null;
 }
 
@@ -51,6 +52,22 @@ export function readTurnContext(db: Database): TurnContext | null {
 /** Capture before a tool's first await; never look up a successor on completion. */
 export function withTurnContext<T>(context: TurnContext | null, run: () => T): T {
   return captured.run(context ? { ...context } : null, run);
+}
+
+export function trackTurnTool(context: TurnContext, delta: 1 | -1): void {
+  const db = getOutboundDb();
+  const key = `runner:tools:${context.turnId}`;
+  db.prepare(`INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(0, CAST(value AS INTEGER) + ?) AS TEXT),
+      updated_at=excluded.updated_at`)
+    .run(key, String(Math.max(0, delta)), new Date().toISOString(), delta);
+}
+
+export async function waitForTurnTools(context: TurnContext): Promise<void> {
+  while (Number((getOutboundDb().prepare('SELECT value FROM session_state WHERE key = ?')
+    .get(`runner:tools:${context.turnId}`) as { value: string } | undefined)?.value ?? 0) > 0) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 export function setCurrentInReplyTo(id: string | null): void {

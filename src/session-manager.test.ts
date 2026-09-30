@@ -14,13 +14,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', async () => {
   const actual = await vi.importActual<typeof import('./config.js')>('./config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-write-outbound' };
+  return { ...actual, DATA_DIR: '.test-write-outbound' };
 });
 
 import { initSessionFolder, outboundDbPath, readSessionUsageProgress, writeOutboundDirect } from './session-manager.js';
 import { sessionLinkSocketPath, startSessionSignalServer, stopSessionSignalServer } from './session-link.js';
 
-const TEST_DIR = '/tmp/nanoclaw-test-write-outbound';
+const TEST_DIR = '.test-write-outbound';
 const AG = 'ag-test';
 const SESS = 'sess-test';
 
@@ -126,7 +126,7 @@ describe('readSessionUsageProgress', () => {
       context_window: 1_048_576,
     };
     const before = Date.now();
-    await sendSignal({ v: 3, type: 'usage', usage });
+    await sendSignal({ v: 4, type: 'usage', usage, turnId: null, ts: String(Date.now()) });
     expect(readSessionUsageProgress(AG, SESS)).toEqual(usage);
     expect(readSessionUsageProgress(AG, SESS, before)).toEqual(usage);
     expect(readSessionUsageProgress(AG, SESS, Date.now() + 1)).toBeNull();

@@ -11,10 +11,8 @@ import {
   type MessageInRow,
 } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
-import { writeTurnUsage } from './db/turn-usage.js';
 import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
-import { writeTurnActivity } from './db/turn-activity.js';
-import { markBatchPersisted, markTurnPersisted } from './db/runner-state.js';
+import { markBatchPersisted } from './db/runner-state.js';
 import { completeTaskAttempts, markTaskAttemptsProviderInvoked } from './db/task-attempts.js';
 import { getInboundDb, getOutboundDb, clearStaleProcessingAcks } from './db/connection.js';
 import {
@@ -41,8 +39,13 @@ import {
   resetTurnSendTracking,
   setCurrentInReplyTo,
   setTurnContext,
+  waitForTurnTools,
 } from './current-batch.js';
-import { beginTurn, associateInput, type TurnExecution } from './turn-execution.js';
+import {
+  beginTurn, associateInput, finishUsageAttempt, interruptAbandonedTurns,
+  markTurnStopping, persistTurnMetadata, recordTurnUsage, settleTurn, turnDuration,
+  turnUsage, type TurnExecution,
+} from './turn-execution.js';
 import {
   formatMessages,
   extractFileAttachments,
@@ -55,7 +58,7 @@ import {
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
-import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
+import { accumulateTurnUsage } from './providers/usage.js';
 import { processPendingInputEdits, startInputProcessing, steeringDisposition, writeInputState } from './steering.js';
 import { drainSessionJournal, getHostEventGeneration, onHostEvent, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
 
@@ -162,6 +165,7 @@ export interface PollLoopConfig {
  * 6. Loop
  */
 export async function runPollLoop(config: PollLoopConfig): Promise<void> {
+  interruptAbandonedTurns();
   // Resume the agent's prior session from a previous container run if one
   // was persisted. The continuation is opaque to the poll-loop — the
   // provider decides how to use it (Claude resumes a .jsonl transcript,
@@ -436,7 +440,6 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // local transcript is gone), clear the continuation and retry once
     // with a fresh session — silently, so the user never sees the error.
     let attempt = 0;
-    const files = extractFileAttachments(keep);
     const taskAttemptIds = keep.filter((message) => message.kind === 'task').map((message) => message.id);
     const taskAttemptIdSet = new Set(taskAttemptIds);
     const finalizedTaskAttemptIds = new Set<string>();
@@ -445,26 +448,30 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const execution = { current: beginTurn(routing, processingIds) };
     try {
       while (true) {
-        const query = config.provider.query({
-          prompt,
-          continuation: isTaskOnly ? undefined : continuation,
-          cwd: config.cwd,
-          files: files.length > 0 ? files : undefined,
-          systemContext: config.systemContext?.(),
-        });
-        activeQuery = query;
+        let query: AgentQuery;
         try {
+          query = config.provider.query({
+            prompt: promptTracker.latest,
+            continuation: isTaskOnly ? undefined : continuation,
+            cwd: config.cwd,
+            files: extractFileAttachments(execution.current.inputIds.flatMap((id) => {
+              const row = getInboundDb().prepare('SELECT * FROM messages_in WHERE id = ?').get(id) as MessageInRow | undefined;
+              return row ? [row] : [];
+            })),
+            systemContext: config.systemContext?.(),
+          });
+          activeQuery = query;
           const result = await processQuery(
             query,
-            routing,
-            processingIds,
+            execution.current.routing,
+            execution.current.inputIds,
             config.providerName,
             config.provider,
             isTaskOnly ? undefined : continuation,
             !isTaskOnly,
             promptTracker,
             config.provider.onExchangeComplete?.bind(config.provider),
-            prompt,
+            promptTracker.latest,
             (completedIds, providerFailed) => {
               const completedTaskIds = completedIds.filter((id) => taskAttemptIdSet.has(id));
               completeTaskAttempts(completedTaskIds, providerFailed);
@@ -472,6 +479,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
               markBatchPersisted(getOutboundDb());
             },
             execution,
+            true,
           );
           if (!isTaskOnly && result.continuation && result.continuation !== continuation) {
             continuation = result.continuation;
@@ -488,20 +496,32 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
               channel_type: errorRouting.channelType,
               thread_id: errorRouting.threadId,
               content: JSON.stringify({
+                delivery_origin: 'response',
                 text: `⚠️ Agent provider error${tag}: ${result.unsurfacedError.message}\n\nYour message was not processed.`,
               }),
             });
             log(`Surfaced provider error to user: ${result.unsurfacedError.message}`);
+            await settleTurn(execution.current, 'failed');
           }
           break;
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           log(`Query error: ${errMsg}`);
 
+          // A warm transport can fail while idle. Its previous terminal result
+          // is not a failed new turn and must never replay consumed input.
+          if (execution.current.settled) {
+            if (config.provider.isSessionInvalid(err)) {
+              continuation = undefined;
+              clearContinuation(config.providerName);
+            }
+            break;
+          }
           if (attempt === 0 && continuation && config.provider.isSessionInvalid(err)) {
             log(`Stale session detected (${continuation}) — clearing and retrying with fresh session`);
             continuation = undefined;
             clearContinuation(config.providerName);
+            finishUsageAttempt(execution.current);
             attempt++;
             continue;
           }
@@ -520,6 +540,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             log(`Failed to persist failed-turn record: ${e instanceof Error ? e.message : String(e)}`);
           }
           const failureRouting = promptTracker.routing;
+          execution.current.failure = true;
+          finishUsageAttempt(execution.current);
           const ack = await tryAcknowledgeFailure(config, failureRouting, errMsg, undefined, execution);
           if (!ack.delivered) {
             writeMessageOut({
@@ -528,13 +550,15 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
               platform_id: failureRouting.platformId,
               channel_type: failureRouting.channelType,
               thread_id: failureRouting.threadId,
-              content: JSON.stringify({ text: friendlyProviderErrorFallback(errMsg) }),
+              content: JSON.stringify({ text: friendlyProviderErrorFallback(errMsg), delivery_origin: 'response' }),
             });
           }
+          await settleTurn(execution.current, 'failed');
           break;
         }
       }
     } finally {
+      if (!execution.current.settled) await settleTurn(execution.current, 'interrupted');
       setTurnContext(null);
       clearCurrentInReplyTo();
       activeQuery = null;
@@ -746,6 +770,9 @@ async function tryAcknowledgeFailure(
   errorClassification: string | undefined,
   execution: { current: TurnExecution },
 ): Promise<AcknowledgeResult> {
+  const outputCount = () => (getOutboundDb().prepare("SELECT COUNT(*) AS n FROM messages_out WHERE turn_id = ? AND kind NOT IN ('system','internal')")
+    .get(execution.current.turnId) as { n: number }).n;
+  const priorOutputCount = outputCount();
   const tag = errorClassification ? ` (${errorClassification})` : '';
   const ackPrompt = [
     `<system>`,
@@ -769,17 +796,18 @@ async function tryAcknowledgeFailure(
       cwd: config.cwd,
       systemContext: config.systemContext?.(),
     });
-    await processQuery(query, routing, [], config.providerName, config.provider, undefined, false,
-      undefined, undefined, '', undefined, execution);
-    return { delivered: true };
+    const result = await processQuery(query, routing, [], config.providerName, config.provider, undefined, false,
+      undefined, undefined, '', undefined, execution, true);
+    return { delivered: result.delivered || outputCount() > priorOutputCount };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     log(`Acknowledgment turn threw: ${errMsg}`);
-    return { delivered: false };
+    return { delivered: outputCount() > priorOutputCount };
   }
 }
 
 interface QueryResult {
+  delivered: boolean;
   continuation?: string;
   /**
    * Last non-retryable provider error seen during the turn. Only set when
@@ -804,6 +832,7 @@ async function processQuery(
   initialPrompt = '',
   onBatchComplete?: (completedIds: string[], providerFailed: boolean) => void,
   execution: { current: TurnExecution } = { current: beginTurn(routing, initialBatchIds) },
+  deferFailureSettlement = false,
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let resultSeen = false;
@@ -871,21 +900,10 @@ async function processQuery(
   // Captured from the provider's `usage` event; flushed at end of turn so
   // it can be linked to the last outbound row written this turn.
   let pendingUsage: import('./providers/types.js').TurnUsage | null = null;
-  // Runner-owned cumulative snapshot built from disaggregated provider calls.
-  // Live usage is an overwrite snapshot, so it must never receive call deltas.
-  let liveUsage: import('./providers/types.js').TurnUsage | null = null;
-  let latestUsage: import('./providers/types.js').TurnUsage | null = null;
-  let unlinkedUsage: { id: string; data: import('./providers/types.js').TurnUsage } | null = null;
-  let activityStartedAt = Date.now();
+  let latestUsage: import('./providers/types.js').TurnUsage | null = turnUsage(execution.current);
   // Captured from the provider's `checkpoint` event; flushed with the usage so
   // it lands on the same outbound row.
   let pendingCheckpoint: string | null = null;
-  // Count of activity lines already persisted to turn_activity this batch.
-  // Advanced after each result flush so multiple results in one query don't
-  // re-persist earlier lines. Long-lived providers reuse this processQuery
-  // across user turns, so reset both the buffer and this cursor at every
-  // actual turn boundary rather than only when processQuery starts.
-  let activityFlushedCount = 0;
   const resetActivityForNextTurn = () => {
     try {
       clearActivity();
@@ -897,11 +915,7 @@ async function processQuery(
     } catch {
       /* best-effort */
     }
-    liveUsage = null;
     latestUsage = null;
-    unlinkedUsage = null;
-    activityStartedAt = Date.now();
-    activityFlushedCount = 0;
   };
 
   // Per-push batch queue. Each push (initial + every follow-up) enqueues
@@ -911,7 +925,7 @@ async function processQuery(
   // queued prompts into one turn (OpenCode in particular) — the rows
   // looked "done" to the host but no reply was ever dispatched.
   type QueuedBatch = { ids: string[]; routing: RoutingContext };
-  const turnBatchQueue: QueuedBatch[] = [{ ids: initialBatchIds, routing }];
+  const turnBatchQueue: QueuedBatch[] = [{ ids: [...initialBatchIds], routing }];
   const consumedIds = new Set(initialBatchIds);
   const steeringInputs = new Map<string, MessageInRow>();
   const declinedSteering = new Set<string>();
@@ -1183,6 +1197,8 @@ async function processQuery(
         // malformed-tool retry state resets below only at a real idle-to-active
         // turn boundary; concurrent arrivals are deferred while it is in flight.
         nudgedForDelivery = false;
+        resultSeen = false;
+        lastProviderError = null;
         sentAny = false;
         emptyResultSeen = false;
         silenceConfirmed = false;
@@ -1199,9 +1215,12 @@ async function processQuery(
         }
         turnActive = true;
         execution.current = beginTurn(activeTurnRouting, keptIds, false);
+        countedToolCallIds.clear();
+        identicalToolStreak = 0;
+        lastToolSignature = null;
+        consecutiveTextSteps = 0;
         turnId = execution.current.turnId;
         publishTurn();
-        turnStartTime = Date.now();
         try {
           clearTurnEnded();
         } catch {
@@ -1209,6 +1228,7 @@ async function processQuery(
         }
         setCurrentInReplyTo(activeTurnRouting.inReplyTo);
         if (!query.push(prompt, followUpFiles.length > 0 ? followUpFiles : undefined)) {
+          await settleTurn(execution.current, 'interrupted');
           releaseProcessing(keptIds);
           turnActive = false;
           signalTurnState(null);
@@ -1306,7 +1326,6 @@ async function processQuery(
   // matching the behavior between processQuery calls (the outer poll
   // loop doesn't touch the heartbeat either).
   let turnActive = true;
-  let turnStartTime = Date.now();
   const publishTurn = (): void => {
     signalTurnState({
       id: turnId,
@@ -1324,6 +1343,7 @@ async function processQuery(
   const unsubscribeStop = onTurnStop((requestedId) => {
     if (requestedId !== turnId || !turnActive || userStopped || done) return;
     userStopped = true;
+    markTurnStopping(execution.current);
     stopFollowUpWatcher();
     // A crash while the provider is settling must not replay cancelled input.
     // Ordinary queued messages have not been claimed and are not in this list.
@@ -1333,15 +1353,11 @@ async function processQuery(
   });
   publishTurn();
   const beginCorrectiveTurn = (activityText: string): void => {
-    try {
-      appendActivity({
-        kind: 'notification',
-        id: `nudge:${generateId()}`,
-        text: activityText,
-      });
-    } catch {
-      /* best-effort */
-    }
+    appendActivity({
+      kind: 'notification',
+      id: `nudge:${generateId()}`,
+      text: activityText,
+    });
     turnActive = true;
     try {
       clearTurnEnded();
@@ -1611,22 +1627,18 @@ async function processQuery(
           query.end();
         }
       } else if (event.type === 'usage') {
-        // Provider emits this just before `result`; stash and flush after
-        // result so we can link to the last outbound row written this turn.
-        // Fill in wall-clock duration when the provider doesn't supply one.
-        if (!event.data.duration_ms) {
-          event.data.duration_ms = Date.now() - turnStartTime;
-        }
+        // Provider reports an attempt aggregate, replacing its live call deltas.
         // Accumulated, not replaced: a turn that retried, or that errored and
         // was re-prompted, emits one event per attempt and every attempt was
         // billed. Non-additive fields take the latest attempt's value.
         pendingUsage = accumulateTurnUsage(pendingUsage, event.data);
-        latestUsage = pendingUsage;
+        recordTurnUsage(execution.current, event.data, true);
+        latestUsage = turnUsage(execution.current);
       } else if (event.type === 'usage_call') {
-        liveUsage = accumulateCallUsage(liveUsage, event.data);
-        latestUsage = liveUsage;
+        recordTurnUsage(execution.current, event.data, false);
+        latestUsage = turnUsage(execution.current);
         try {
-          writeUsageProgress(liveUsage);
+          writeUsageProgress(latestUsage!);
         } catch {
           /* best-effort */
         }
@@ -1634,6 +1646,8 @@ async function processQuery(
         pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {
         resultFinishing = true;
+        await waitForTurnTools(execution.current);
+        if (userStopped) continue;
         releaseUnappliedSteering();
         resultSeen = true;
         const recoveryMode = malformedToolRecoveryMode;
@@ -1890,13 +1904,14 @@ async function processQuery(
             } catch (e) {
               log(`Failed to resolve model limits: ${e instanceof Error ? e.message : String(e)}`);
             }
-            try {
-              const usageId = `tu-${randomUUID()}`;
-              writeTurnUsage(usageId, lastOutId, pendingUsage);
-              unlinkedUsage = lastOutId ? null : { id: usageId, data: pendingUsage };
-            } catch (e) {
-              log(`Failed to write turn_usage: ${e instanceof Error ? e.message : String(e)}`);
+            if (execution.current.reportedUsage) {
+              execution.current.reportedUsage = {
+                ...execution.current.reportedUsage,
+                context_window: pendingUsage.context_window,
+                max_output_tokens: pendingUsage.max_output_tokens,
+              };
             }
+            persistTurnMetadata(execution.current, false);
             pendingUsage = null;
           }
           // Record where this turn sits in the provider's own session so a
@@ -1912,35 +1927,26 @@ async function processQuery(
             }
           }
           pendingCheckpoint = null;
-          // Persist activity lines emitted since the last flush (avoids
-          // overlap when one query yields multiple results). Linked to a
-          // real outbound row only — scratchpad-only turns have no bubble
-          // to attach a trace to.
-          if (lastOutId) {
-            try {
-              const buffer = getActivityBuffer();
-              const fresh = buffer.slice(activityFlushedCount);
-              writeTurnActivity(lastOutId, fresh, activityFlushedCount);
-              activityFlushedCount = buffer.length;
-            } catch (e) {
-              log(`Failed to write turn_activity: ${e instanceof Error ? e.message : String(e)}`);
-            }
-          }
           // A queued user batch begins as soon as this result is consumed.
           // Its provider events must replace, not extend, the completed
           // turn's live snapshot. Persist first, then clear at the boundary.
           if (turnBatchQueue.length > 0) resetActivityForNextTurn();
         }
-        markTurnPersisted(getOutboundDb());
-        if (drainedIds.length > 0) {
-          onBatchComplete?.(drainedIds, !sentAny && lastProviderError !== null);
+        if (!turnActive && (sentAny || silenceConfirmed)) {
+          if (!execution.current.failure) {
+            await settleTurn(execution.current, lastProviderError ? 'failed' : sentAny ? 'replied' : 'silent');
+          }
+          if (silenceConfirmed) {
+            endedForCommand = true;
+            query.end();
+          }
+          onBatchComplete?.([...consumedIds], lastProviderError !== null);
         }
         // Reset the per-turn baseline so a follow-up push within the same
         // query starts a fresh "did MCP write anything?" window.
         outboundMaxAtTurnStart = currentOutboundMax();
-        turnStartTime = Date.now();
         resultFinishing = false;
-        if (!turnActive) {
+        if (!turnActive && execution.current.settled) {
           markCompleted([...consumedIds]);
           signalTurnState(null);
           queueMicrotask(wakeFollowUpWatcher);
@@ -2013,6 +2019,8 @@ async function processQuery(
       queryContinuation = priorContinuation;
     }
     if (userStopped) {
+      await waitForTurnTools(execution.current);
+      execution.current.endedAt = new Date().toISOString();
       const latestTools = new Map<string, import('./providers/types.js').ActivityStep>();
       for (const line of getActivityBuffer()) {
         try {
@@ -2032,7 +2040,7 @@ async function processQuery(
       appendActivity({ kind: 'notification', id: `stopped:${turnId}`, text: 'Stopped by user.' });
       const noticeId = generateId();
       const usage = latestUsage;
-      const durationMs = Math.max(0, Date.now() - turnStartTime);
+      const durationMs = turnDuration(execution.current);
       writeMessageOut({
         id: noticeId,
         in_reply_to: activeTurnRouting.inReplyTo,
@@ -2042,6 +2050,7 @@ async function processQuery(
         thread_id: activeTurnRouting.threadId,
         content: JSON.stringify({
           text: 'Stopped by user.',
+          delivery_origin: 'response',
           stopped: true,
           turn_id: turnId,
           stopped_stats: {
@@ -2050,31 +2059,31 @@ async function processQuery(
           },
         }),
       });
-      writeTurnActivity(noticeId, getActivityBuffer());
-      if (usage) writeTurnUsage(`tu-${randomUUID()}`, noticeId, { ...usage, duration_ms: durationMs });
       const savedContinuation = queryContinuation ?? priorContinuation;
       if (pendingCheckpoint && savedContinuation) {
         writeTurnCheckpoint(noticeId, providerName, savedContinuation, pendingCheckpoint);
       }
       clearFailedTurn();
-      markTurnPersisted(getOutboundDb());
+      await settleTurn(execution.current, 'stopped');
       await drainSessionJournal();
       setTurnEnded();
     }
-    signalTurnState(null);
+    if (execution.current.settled) signalTurnState(null);
   }
 
-  if (userStopped) return { continuation: queryContinuation ?? priorContinuation };
+  if (userStopped) return { continuation: queryContinuation ?? priorContinuation, delivered: true };
 
-  const writeTurnNotice = (
+  const writeTurnNotice = async (
     noticeRouting: RoutingContext,
     text: string,
     failureLabel: string,
     suggestedAction?: SuggestedAction,
-  ): void => {
+  ): Promise<void> => {
     try {
+      await waitForTurnTools(execution.current);
+      execution.current.endedAt ??= new Date().toISOString();
       const id = generateId();
-      const durationMs = Math.max(0, Date.now() - activityStartedAt);
+      const durationMs = turnDuration(execution.current);
       writeMessageOut({
         id,
         in_reply_to: noticeRouting.inReplyTo,
@@ -2089,15 +2098,10 @@ async function processQuery(
           ...(suggestedAction ? { suggested_action: suggestedAction } : {}),
         }),
       });
-      writeTurnActivity(id, getActivityBuffer());
-      const noticeUsage = unlinkedUsage?.data ?? latestUsage;
-      if (noticeUsage) {
-        // Re-link an empty result's usage rather than billing it a second time.
-        writeTurnUsage(unlinkedUsage?.id ?? `tu-${randomUUID()}`, id, { ...noticeUsage, duration_ms: durationMs });
-      }
-      markTurnPersisted(getOutboundDb());
+      if (!execution.current.failure) await settleTurn(execution.current, 'warning');
     } catch (e) {
       log(`Failed to write ${failureLabel}: ${e instanceof Error ? e.message : String(e)}`);
+      throw e;
     }
   };
 
@@ -2126,7 +2130,7 @@ async function processQuery(
     // and none of the branches below fire. Without this the turn ends in total
     // silence and the thread just looks stuck.
     log(`Turn aborted as runaway (${runawayAbortReason}) — notifying user`);
-    writeTurnNotice(
+    await writeTurnNotice(
       routing,
       `⚠️ The agent got stuck in a loop (${runawayAbortReason}) and the turn was stopped before it could reply. Retry, or switch to a stronger model if it keeps happening.`,
       'runaway-abort notice',
@@ -2134,7 +2138,7 @@ async function processQuery(
     );
   } else if (!sentAny && malformedToolRecoveryExhausted && !lastProviderError) {
     log('Malformed tool-call recovery exhausted — surfacing specific error');
-    writeTurnNotice(
+    await writeTurnNotice(
       malformedToolErrorRouting,
       malformedToolRecoveryHadNativeTool
         ? '⚠️ A tool ran, but the model repeatedly failed to format its final reply. The action was not retried. Ask the agent to report the existing result or switch models.'
@@ -2144,7 +2148,7 @@ async function processQuery(
     );
   } else if (!sentAny && nudgedForDelivery && !lastProviderError) {
     log('Turn produced no deliverable output after recovery nudge — surfacing generic error');
-    writeTurnNotice(
+    await writeTurnNotice(
       deliveryErrorRouting,
       '⚠️ Something went wrong producing a reply. Please try again.',
       'generic delivery error',
@@ -2158,7 +2162,7 @@ async function processQuery(
   // doesn't look like the agent is still working or died.
   else if (!sentAny && emptyResultSeen && !lastProviderError) {
     log('Turn completed with an empty result and no error — notifying user');
-    writeTurnNotice(
+    await writeTurnNotice(
       routing,
       '⚠️ The agent finished without producing a response, and without reporting an error. Please try again.',
       'empty-result notice',
@@ -2166,7 +2170,14 @@ async function processQuery(
     );
   }
 
+  if (!execution.current.settled && !lastProviderError && !execution.current.failure) {
+    await settleTurn(execution.current, silenceConfirmed ? 'silent' : resultSeen ? 'silent' : 'interrupted');
+  } else if (!execution.current.settled && !deferFailureSettlement) {
+    await settleTurn(execution.current, 'failed');
+  }
+  if (execution.current.settled) signalTurnState(null);
   return {
+    delivered: sentAny,
     continuation: queryContinuation,
     // Only surface a provider error if the stream completed cleanly AND
     // the turn produced nothing deliverable. If the SDK threw, that path
@@ -2216,11 +2227,7 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       const s = event.step;
       const label = s.kind === 'tool' ? s.tool : 'text' in s ? s.text : '';
       log(`Progress: ${s.kind}${label ? ` ${label}` : ''}`);
-      try {
-        appendActivity(s);
-      } catch {
-        /* best-effort */
-      }
+      appendActivity(s);
       break;
     }
   }
@@ -2251,15 +2258,11 @@ function dispatchResultText(
   // deliveries. Emit one identified step per block so repeated blocks remain
   // distinct and the host can reduce the trace normally.
   for (let i = 0; i < parsed.internal.length; i++) {
-    try {
-      appendActivity({
-        kind: 'internal',
-        id: `internal:${generateId()}:${i}`,
-        text: parsed.internal[i],
-      });
-    } catch {
-      /* best-effort */
-    }
+    appendActivity({
+      kind: 'internal',
+      id: `internal:${generateId()}:${i}`,
+      text: parsed.internal[i],
+    });
   }
 
   let sent = 0;
