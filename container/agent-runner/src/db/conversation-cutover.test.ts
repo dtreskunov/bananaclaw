@@ -195,6 +195,26 @@ describe('offline coordinated conversation cutover', () => {
     expect([input, output, runner].map(hash)).toEqual(before);
   });
 
+  it('preserves adjacent-double costs from SQLite journal serialization without accepting accounting changes', () => {
+    withDb(output, (db) => db.query("UPDATE turn_usage SET cost_usd=? WHERE id='billing-id'").run(0.3));
+    withDb(runner, (db) => {
+      db.query("UPDATE turn_usage SET cost_usd=? WHERE id='billing-id'").run(0.300001);
+      db.exec('DELETE FROM pending_runner_events');
+    });
+    expect(() => cutover(root, 'dry-run')).toThrow('Conflicting peer evidence');
+    withDb(runner, (db) => {
+      db.query("UPDATE turn_usage SET cost_usd=? WHERE id='billing-id'").run(0.1 + 0.2);
+      db.exec('DELETE FROM pending_runner_events');
+    });
+    expect(cutover(root, 'apply').phase).toBe('verified');
+    withDb(output, (db) =>
+      expect(db.query("SELECT cost_usd FROM turn_usage WHERE id='billing-id'").get()).toEqual({ cost_usd: 0.3 }),
+    );
+    withDb(runner, (db) =>
+      expect(db.query("SELECT cost_usd FROM turn_usage WHERE id='billing-id'").get()).toEqual({ cost_usd: 0.1 + 0.2 }),
+    );
+  });
+
   it('fails closed on conflicts, orphan stores, links, sidecars and active SQLite readers', () => {
     fs.writeFileSync(output + '-journal', 'rollback journal');
     expect(() => cutover(root, 'dry-run')).toThrow('sidecar');

@@ -184,13 +184,29 @@ function preserve(db: Database): TableSnapshot[] {
     });
 }
 
-function union<T extends object>(sets: T[][], key: (row: T) => string): T[] {
+function sameUsageEvidence(a: Row, b: Row): boolean {
+  const { cost_usd: first, ...restA } = a;
+  const { cost_usd: second, ...restB } = b;
+  if (canonical(restA) !== canonical(restB)) return false;
+  if (first === second) return true;
+  // SQLite's JSON journal can round a double to its adjacent representable value.
+  // This is comparison-only: preservation checks still hash each store exactly.
+  return typeof first === 'number' && typeof second === 'number' &&
+    Number.isFinite(first) && Number.isFinite(second) && first >= 0 && second >= 0 &&
+    Math.abs(first - second) <= Number.EPSILON * Math.max(first, second);
+}
+
+function union<T extends object>(
+  sets: T[][],
+  key: (row: T) => string,
+  equal: (a: T, b: T) => boolean = (a, b) => canonical(a as Row) === canonical(b as Row),
+): T[] {
   const all = new Map<string, T>();
   for (const set of sets) {
     for (const row of set) {
       const id = key(row);
       const prior = all.get(id);
-      if (prior && canonical(prior as Row) !== canonical(row as Row))
+      if (prior && !equal(prior, row))
         throw new Error('Conflicting peer evidence; reconcile with the old peers before cutover');
       all.set(id, row);
     }
@@ -216,6 +232,7 @@ function sessionEvidence(stores: Store[], session: string) {
     union<Row>(
       outputs.map(({ db }) => rows(db, table).map((r) => ({ ...r, turn_id: r.turn_id ?? null }))),
       (r) => (table === 'turn_activity' ? JSON.stringify([r.message_out_id, r.ordinal]) : String(r.id)),
+      table === 'turn_usage' ? sameUsageEvidence : undefined,
     );
   const shared: TurnBackfillEvidence = {
     outputs: union(

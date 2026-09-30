@@ -100,6 +100,9 @@ direct outputs and the runner may contain only a subset. Conflicting records,
 undrained journals, corrupt files, and untracked completed/partial backfills
 fail closed. Resolve them using the retained old peers or restore a consistent
 pre-cutover snapshot; never discard events or override the checks.
+Cross-peer usage comparisons allow adjacent floating-point cost values caused
+by SQLite JSON serialization. This does not rewrite or round stored costs:
+each store's original accounting values must still pass exact preservation checks.
 
 ### 3. Apply explicitly
 
