@@ -65,6 +65,14 @@ per session, closes on malformed input, and validates
 each payload before updating memory. The frame budget belongs to the session,
 not the connection, so reconnecting cannot reset it.
 
+On the host, `FRAME_SPECS` in `src/session-link.ts` maps each runner frame type
+to its closed field list and handler. Nested records (activity steps, usage,
+turns, durable events) are checked by the declarative field specs in
+`src/session-link-validate.ts`: unknown keys, missing required fields, and
+failed checks reject the frame, and the sanitized copy is rebuilt in spec order.
+`src/session-link-frames.test.ts` is the accept/reject matrix for every frame
+type and activity kind.
+
 Supported live runner signals:
 
 - `heartbeat`

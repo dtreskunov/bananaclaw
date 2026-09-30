@@ -4,15 +4,33 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
-import { reduceActivityLines, type ActivityStep } from './activity.js';
+import { reduceActivityLines } from './activity.js';
 import type { ActivityLine, UsageSnapshot } from './channels/adapter.js';
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
 import { invalidateConversation } from './conversation-events.js';
-import { applyDurableRunnerEvent } from './session-link-durable.js';
+import { applyDurableRunnerEvent, type DurableApplyResult } from './session-link-durable.js';
+import {
+  isAny,
+  isCount,
+  isRecord,
+  isRecordValue,
+  isSafeInteger,
+  isSessionTurnId,
+  isString,
+  isTimestamp,
+  isTrue,
+  isTurnIdOrNull,
+  parseTurnState,
+  required,
+  sanitizeActivityStep,
+  sanitizeFields,
+  sanitizeUsage,
+  type FieldSpec,
+} from './session-link-validate.js';
 import { getSession } from './db/sessions.js';
 import { indexMessage, deleteMessageFromIndex } from './search-index.js';
-import { INPUT_EDIT_PREFIX, INPUT_CANCEL_PREFIX } from './pending-input-edit.js';
+import { INPUT_EDIT_PREFIX, INPUT_CANCEL_PREFIX, type EditedInput } from './pending-input-edit.js';
 
 const PROTOCOL_VERSION = 4;
 export const SESSION_LINK_VERSION = 'v4';
@@ -24,8 +42,6 @@ const MAX_GLOBAL_FRAME_BYTES_PER_SECOND = 32 * 1024 * 1024;
 const MAX_FRAMES_PER_SECOND = 256;
 const MAX_CONNECTIONS_PER_SECOND = 32;
 const MAX_ACTIVITY_LINES = 128;
-const MAX_ID_CHARS = 256;
-const MAX_TEXT_CHARS = 2_000;
 const HOST_ACK_TIMEOUT_MS = 10_000;
 
 type SignalKind = 'disconnected' | 'heartbeat' | 'activity' | 'usage' | 'turn.end' | 'turn.state' | 'input.state';
@@ -45,18 +61,7 @@ export type SessionTurnStopResult =
   | { accepted: true; turn: SessionActiveTurn }
   | { accepted: false; error: 'invalid_turn_id' | 'not_active' | 'disconnected' };
 
-export function isSessionTurnId(value: unknown): value is string {
-  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
-}
-
-function isTurnRoutingText(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= 1024 &&
-    [...value].every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127)
-  );
-}
+export { isSessionTurnId };
 
 interface SessionSignalState {
   connected: boolean;
@@ -189,6 +194,37 @@ function flushHostEvents(sessionId: string, entry: SessionSignalServer): void {
   }
 }
 
+function applyHostAck(frame: Record<string, unknown>, { sessionId, entry }: FrameContext): boolean {
+  const inFlight = entry.hostInFlight;
+  if (!entry.agentGroupId || !inFlight || inFlight.eventId !== frame.eventId) return false;
+  const db = new Database(inboundPath(entry.agentGroupId, sessionId));
+  try {
+    db.prepare('DELETE FROM pending_host_events WHERE event_id = ? AND sequence = ?').run(
+      inFlight.eventId,
+      inFlight.sequence,
+    );
+  } finally {
+    db.close();
+  }
+  if (entry.hostAckTimer) clearTimeout(entry.hostAckTimer);
+  entry.hostAckTimer = null;
+  entry.hostInFlight = null;
+  flushHostEvents(sessionId, entry);
+  return true;
+}
+
+function applyHostNack(frame: Record<string, unknown>, { sessionId, entry }: FrameContext): boolean {
+  const inFlight = entry.hostInFlight;
+  if (!inFlight || inFlight.eventId !== frame.eventId) return false;
+  log.error('Runner rejected host session event', {
+    sessionId,
+    sequence: inFlight.sequence,
+    error: (frame.error as string).slice(0, 256),
+  });
+  entry.connection?.destroy();
+  return true;
+}
+
 export function notifySessionHostState(sessionId: string): void {
   invalidateConversation(sessionId);
   const entry = servers.get(sessionId);
@@ -211,6 +247,89 @@ function decodeDurablePayload(eventType: string, value: unknown): unknown {
   }
   const { content_base64: _contentBase64, ...rest } = payload;
   return { ...rest, content: content.toString('utf8') };
+}
+
+const DURABLE_EVENT_FIELDS: readonly FieldSpec[] = [required('type', isString), required('payload', isAny)];
+
+function applyDurableFrame(frame: Record<string, unknown>, { sessionId, entry }: FrameContext): boolean {
+  const agentGroupId = entry.agentGroupId;
+  const wireEvent = frame.event as Record<string, unknown>;
+  if (!agentGroupId || !sanitizeFields(wireEvent, DURABLE_EVENT_FIELDS)) return false;
+  const eventId = frame.eventId as string;
+  const event = {
+    type: wireEvent.type as string,
+    payload: decodeDurablePayload(wireEvent.type as string, wireEvent.payload),
+  };
+  const result = applyDurableRunnerEvent(agentGroupId, sessionId, {
+    eventId,
+    sequence: frame.sequence as number,
+    event,
+  });
+  entry.connection?.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'ack', eventId })}\n`);
+  publishDurableEffects(sessionId, entry, agentGroupId, event, result);
+  return true;
+}
+
+/** Fan-out after a durable runner event has committed and been acknowledged. */
+function publishDurableEffects(
+  sessionId: string,
+  entry: SessionSignalServer,
+  agentGroupId: string,
+  event: { type: string; payload: unknown },
+  result: DurableApplyResult,
+): void {
+  if (result.changedTurnIds) {
+    notifyTurnChange(sessionId, {
+      turnIds: result.changedTurnIds,
+      ...(result.settledTurnId ? { settledTurnId: result.settledTurnId } : {}),
+      reason: 'committed',
+    });
+  }
+  if (result.deliveryReady) {
+    for (const listener of durableMessageListeners) listener(sessionId);
+  }
+  if (result.processingReady) {
+    for (const listener of durableProcessingListeners) listener(sessionId);
+  }
+  if (result.editedInput) {
+    reindexEditedInput(sessionId, agentGroupId, result.editedInput);
+    flushHostEvents(sessionId, entry);
+  }
+  if (isInputStateEvent(event)) emit(sessionId, 'input.state');
+}
+
+function reindexEditedInput(sessionId: string, agentGroupId: string, input: EditedInput): void {
+  try {
+    if (input.cancelled) deleteMessageFromIndex(input.id, agentGroupId, sessionId);
+    else
+      indexMessage(
+        {
+          id: input.id,
+          sessionId,
+          agentGroupId,
+          messagingGroupId: getSession(sessionId)?.messaging_group_id ?? null,
+          channelType: input.channel_type,
+          threadId: input.thread_id,
+          direction: 'in',
+          timestamp: input.timestamp,
+          text: input.text,
+          senderUserId: input.sender_user_id,
+        },
+        { replaceText: true },
+      );
+  } catch (err) {
+    log.warn('Failed to update pending-input search index', { sessionId, messageId: input.id, err });
+  }
+}
+
+function isInputStateEvent({ type, payload }: { type: string; payload: unknown }): boolean {
+  if (type === 'processing.upsert' || type === 'processing.delete') return true;
+  const key =
+    type === 'state.upsert' && payload && typeof payload === 'object' && 'key' in payload ? payload.key : null;
+  return (
+    typeof key === 'string' &&
+    (key.startsWith('input:') || key.startsWith(INPUT_EDIT_PREFIX) || key.startsWith(INPUT_CANCEL_PREFIX))
+  );
 }
 
 function emptyState(): SessionSignalState {
@@ -284,417 +403,166 @@ export function sessionLinkSocketPath(sessionId: string): string {
   return socketPath;
 }
 
-function boundedString(value: unknown, max = MAX_TEXT_CHARS): string | undefined {
-  return typeof value === 'string' && value.length > 0 && value.length <= max ? value : undefined;
+interface FrameContext {
+  sessionId: string;
+  entry: SessionSignalServer;
+  state: SessionSignalState;
+  now: number;
 }
 
-function optionalString(value: unknown): string | undefined | null {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'string' || value.length > MAX_TEXT_CHARS) return null;
-  return value;
-}
+type FrameHandler = (frame: Record<string, unknown>, ctx: FrameContext) => boolean;
 
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  const keys = Object.keys(value);
-  return keys.length === allowed.length && keys.every((key) => allowed.includes(key));
-}
+/** Mutates live state and names the signal to emit ('silent' for none), or returns false to reject. */
+type LiveFrameHandler = (frame: Record<string, unknown>, ctx: FrameContext) => SignalKind | 'silent' | false;
 
-function sanitizeActivityStep(value: unknown): ActivityStep | null {
-  if (!value || typeof value !== 'object') return null;
-  const input = value as Record<string, unknown>;
-  const id = boundedString(input.id, MAX_ID_CHARS);
-  if (!id || typeof input.kind !== 'string') return null;
-
-  switch (input.kind) {
-    case 'tool': {
-      if (
-        !hasOnlyKeys(
-          input,
-          ['kind', 'id', 'tool', 'status', 'detail', 'title', 'error', 'durationMs', 'rejectedBeforeExecution'].filter(
-            (key) => input[key] !== undefined,
-          ),
-        )
-      )
-        return null;
-      const tool = boundedString(input.tool, MAX_ID_CHARS);
-      if (
-        !tool ||
-        !['pending', 'running', 'completed', 'error', 'interrupted', 'unknown'].includes(String(input.status))
-      )
-        return null;
-      const detail = optionalString(input.detail);
-      const title = optionalString(input.title);
-      const error = optionalString(input.error);
-      if (detail === null || title === null || error === null) return null;
-      if (input.rejectedBeforeExecution !== undefined && typeof input.rejectedBeforeExecution !== 'boolean')
-        return null;
-      const durationMs =
-        input.durationMs === undefined
-          ? undefined
-          : typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs >= 0
-            ? input.durationMs
-            : null;
-      if (durationMs === null) return null;
-      return {
-        kind: 'tool',
-        id,
-        tool,
-        status: input.status as Extract<ActivityStep, { kind: 'tool' }>['status'],
-        ...(detail !== undefined ? { detail } : {}),
-        ...(title !== undefined ? { title } : {}),
-        ...(error !== undefined ? { error } : {}),
-        ...(durationMs !== undefined ? { durationMs } : {}),
-        ...(input.rejectedBeforeExecution !== undefined
-          ? { rejectedBeforeExecution: input.rejectedBeforeExecution }
-          : {}),
-      };
-    }
-    case 'internal':
-    case 'notification': {
-      if (!hasOnlyKeys(input, ['kind', 'id', 'text'])) return null;
-      const text = boundedString(input.text);
-      return text ? { kind: input.kind, id, text } : null;
-    }
-    case 'file': {
-      if (
-        !hasOnlyKeys(
-          input,
-          ['kind', 'id', 'path', 'name', 'mime'].filter((key) => input[key] !== undefined),
-        )
-      ) {
-        return null;
-      }
-      const filePath = optionalString(input.path);
-      const name = optionalString(input.name);
-      const mime = optionalString(input.mime);
-      if (filePath === null || name === null || mime === null) return null;
-      return {
-        kind: 'file',
-        id,
-        ...(filePath !== undefined ? { path: filePath } : {}),
-        ...(name !== undefined ? { name } : {}),
-        ...(mime !== undefined ? { mime } : {}),
-      };
-    }
-    case 'patch': {
-      if (!hasOnlyKeys(input, ['kind', 'id', 'files'])) return null;
-      if (!Array.isArray(input.files) || input.files.length > 100) return null;
-      const files = input.files.map((file) => boundedString(file));
-      return files.every((file): file is string => file !== undefined) ? { kind: 'patch', id, files } : null;
-    }
-    case 'retry': {
-      if (
-        !hasOnlyKeys(
-          input,
-          ['kind', 'id', 'attempt', 'error'].filter((key) => input[key] !== undefined),
-        )
-      ) {
-        return null;
-      }
-      const error = optionalString(input.error);
-      if (error === null || !Number.isInteger(input.attempt) || Number(input.attempt) < 0) return null;
-      return { kind: 'retry', id, attempt: Number(input.attempt), ...(error !== undefined ? { error } : {}) };
-    }
-    case 'compaction':
-      return hasOnlyKeys(
-        input,
-        ['kind', 'id', 'auto'].filter((key) => input[key] !== undefined),
-      ) &&
-        (input.auto === undefined || typeof input.auto === 'boolean')
-        ? { kind: 'compaction', id, ...(input.auto !== undefined ? { auto: input.auto } : {}) }
-        : null;
-    case 'subtask': {
-      if (
-        !hasOnlyKeys(
-          input,
-          ['kind', 'id', 'agent', 'description'].filter((key) => input[key] !== undefined),
-        )
-      ) {
-        return null;
-      }
-      const agent = optionalString(input.agent);
-      const description = optionalString(input.description);
-      if (agent === null || description === null) return null;
-      return {
-        kind: 'subtask',
-        id,
-        ...(agent !== undefined ? { agent } : {}),
-        ...(description !== undefined ? { description } : {}),
-      };
-    }
-    default:
-      return null;
-  }
-}
-
-function sanitizeUsage(value: unknown): UsageSnapshot | null {
-  if (!value || typeof value !== 'object') return null;
-  const input = value as Record<string, unknown>;
-  if (
-    !hasOnlyKeys(
-      input,
-      [
-        'cost_usd',
-        'input_tokens',
-        'output_tokens',
-        'cache_read_tokens',
-        'cache_write_tokens',
-        'reasoning_tokens',
-        'num_turns',
-        'duration_ms',
-        'duration_api_ms',
-        'context_window',
-        'max_output_tokens',
-        'context_tokens',
-        'model',
-      ].filter((key) => input[key] !== undefined),
-    )
-  )
-    return null;
-  if (
-    typeof input.cost_usd !== 'number' ||
-    !Number.isFinite(input.cost_usd) ||
-    input.cost_usd < 0 ||
-    input.cost_usd > 1_000_000
-  ) {
-    return null;
-  }
-  const requiredIntegers = ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens'] as const;
-  if (requiredIntegers.some((key) => !Number.isSafeInteger(input[key]) || Number(input[key]) < 0)) return null;
-  const model = boundedString(input.model, MAX_ID_CHARS);
-  if (!model) return null;
-  const output: UsageSnapshot = {
-    cost_usd: Number(input.cost_usd),
-    input_tokens: Number(input.input_tokens),
-    output_tokens: Number(input.output_tokens),
-    cache_read_tokens: Number(input.cache_read_tokens),
-    cache_write_tokens: Number(input.cache_write_tokens),
-    model,
+/** Live frames are telemetry: they refresh `lastSeenAt` and never touch the session DBs. */
+function live(handler: LiveFrameHandler): FrameHandler {
+  return (frame, ctx) => {
+    const signal = handler(frame, ctx);
+    if (signal === false) return false;
+    ctx.state.lastSeenAt = ctx.now;
+    if (signal !== 'silent') emit(ctx.sessionId, signal);
+    return true;
   };
-  for (const key of [
-    'reasoning_tokens',
-    'num_turns',
-    'duration_ms',
-    'duration_api_ms',
-    'context_window',
-    'max_output_tokens',
-    'context_tokens',
-  ] as const) {
-    const candidate = input[key];
-    if (candidate === undefined) continue;
-    if (!Number.isSafeInteger(candidate) || Number(candidate) < 0) return null;
-    output[key] = Number(candidate);
-  }
-  return output;
 }
+
+/** Keeps a host-initiated 'stopping' status when the runner replays the same turn as running. */
+function mergeStopping(
+  next: SessionActiveTurn | null,
+  current: SessionActiveTurn | null,
+  stopRequest: SessionSignalServer['stopRequest'],
+): SessionActiveTurn | null {
+  const keep = next && next.id === current?.id && current.status === 'stopping' && stopRequest?.turnId === next.id;
+  return keep ? { ...next, status: 'stopping' } : next;
+}
+
+function applyTurnState(frame: Record<string, unknown>, { entry, state }: FrameContext): SignalKind | false {
+  const turn = parseTurnState(frame.turn);
+  if (turn === false) return false;
+  if (entry.stopRequest?.turnId !== turn?.id) entry.stopRequest = null;
+  state.activeTurn = mergeStopping(turn, state.activeTurn, entry.stopRequest);
+  state.turnStateReady = true;
+  return 'turn.state';
+}
+
+function applyActivity(frame: Record<string, unknown>, { state }: FrameContext): SignalKind | false {
+  const step = sanitizeActivityStep(frame.step);
+  if (!step) return false;
+  const turnId = frame.turnId as string | null;
+  const ordinal = frame.ordinal as number;
+  state.activity = state.activity.filter((line) => line.turnId !== turnId || line.ordinal !== ordinal);
+  state.activity.push({ ts: frame.ts as string, text: JSON.stringify(step), turnId, ordinal });
+  if (state.activity.length > MAX_ACTIVITY_LINES) state.activity.splice(0, state.activity.length - MAX_ACTIVITY_LINES);
+  return 'activity';
+}
+
+function applyUsage(frame: Record<string, unknown>, { state }: FrameContext): SignalKind | false {
+  const usage = sanitizeUsage(frame.usage);
+  if (!usage) return false;
+  state.usage = usage;
+  state.usageUpdatedAt = Number(frame.ts);
+  state.usageTurnId = frame.turnId as string | null;
+  return 'usage';
+}
+
+interface FrameSpec {
+  fields: readonly FieldSpec[];
+  apply: FrameHandler;
+}
+
+/** Frame fields are all required; nested records are validated by the handler. */
+function frameSpec(fields: readonly FieldSpec[], apply: FrameHandler): FrameSpec {
+  return { fields: [required('v', isAny), required('type', isAny), ...fields], apply };
+}
+
+const FRAME_SPECS = new Map<string, FrameSpec>([
+  ['host.ack', frameSpec([required('eventId', isString)], applyHostAck)],
+  [
+    'host.nack',
+    frameSpec([required('eventId', isString), required('fatal', isTrue), required('error', isString)], applyHostNack),
+  ],
+  [
+    'durable',
+    frameSpec(
+      [required('eventId', isString), required('sequence', isSafeInteger), required('event', isRecordValue)],
+      applyDurableFrame,
+    ),
+  ],
+  ['turn.state', frameSpec([required('turn', isAny)], live(applyTurnState))],
+  [
+    'activity',
+    frameSpec(
+      [
+        required('step', isAny),
+        required('turnId', isTurnIdOrNull),
+        required('ts', isTimestamp),
+        required('ordinal', isCount),
+      ],
+      live(applyActivity),
+    ),
+  ],
+  [
+    'usage',
+    frameSpec(
+      [required('usage', isAny), required('turnId', isTurnIdOrNull), required('ts', isTimestamp)],
+      live(applyUsage),
+    ),
+  ],
+  [
+    'heartbeat',
+    frameSpec(
+      [],
+      live(() => 'heartbeat'),
+    ),
+  ],
+  [
+    'activity.clear',
+    frameSpec(
+      [],
+      live((_frame, { state }) => {
+        state.activity = [];
+        return 'activity';
+      }),
+    ),
+  ],
+  [
+    'usage.clear',
+    frameSpec(
+      [],
+      live((_frame, { state }) => {
+        state.usage = null;
+        state.usageUpdatedAt = 0;
+        return 'usage';
+      }),
+    ),
+  ],
+  [
+    'turn.resume',
+    frameSpec(
+      [],
+      live((_frame, { state }) => {
+        state.turnEndedAt = 0;
+        return 'silent';
+      }),
+    ),
+  ],
+  [
+    'turn.end',
+    frameSpec(
+      [],
+      live((_frame, { state, now }) => {
+        state.turnEndedAt = now;
+        return 'turn.end';
+      }),
+    ),
+  ],
+]);
 
 function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown): boolean {
-  if (!raw || typeof raw !== 'object') return false;
-  const frame = raw as Record<string, unknown>;
-  if (frame.v !== PROTOCOL_VERSION || typeof frame.type !== 'string') return false;
-
-  if (frame.type === 'host.ack') {
-    if (
-      !entry.agentGroupId ||
-      !hasOnlyKeys(frame, ['v', 'type', 'eventId']) ||
-      typeof frame.eventId !== 'string' ||
-      entry.hostInFlight?.eventId !== frame.eventId
-    ) {
-      return false;
-    }
-    const db = new Database(inboundPath(entry.agentGroupId, sessionId));
-    try {
-      db.prepare('DELETE FROM pending_host_events WHERE event_id = ? AND sequence = ?').run(
-        frame.eventId,
-        entry.hostInFlight.sequence,
-      );
-    } finally {
-      db.close();
-    }
-    if (entry.hostAckTimer) clearTimeout(entry.hostAckTimer);
-    entry.hostAckTimer = null;
-    entry.hostInFlight = null;
-    flushHostEvents(sessionId, entry);
-    return true;
-  }
-
-  if (frame.type === 'host.nack') {
-    if (
-      !hasOnlyKeys(frame, ['v', 'type', 'eventId', 'fatal', 'error']) ||
-      typeof frame.eventId !== 'string' ||
-      frame.fatal !== true ||
-      typeof frame.error !== 'string' ||
-      entry.hostInFlight?.eventId !== frame.eventId
-    ) {
-      return false;
-    }
-    log.error('Runner rejected host session event', {
-      sessionId,
-      sequence: entry.hostInFlight.sequence,
-      error: frame.error.slice(0, 256),
-    });
-    entry.connection?.destroy();
-    return true;
-  }
-
-  if (frame.type === 'durable') {
-    if (
-      !entry.agentGroupId ||
-      !hasOnlyKeys(frame, ['v', 'type', 'eventId', 'sequence', 'event']) ||
-      typeof frame.eventId !== 'string' ||
-      !Number.isSafeInteger(frame.sequence) ||
-      !frame.event ||
-      typeof frame.event !== 'object' ||
-      Array.isArray(frame.event)
-    )
-      return false;
-    const event = frame.event as Record<string, unknown>;
-    if (!hasOnlyKeys(event, ['type', 'payload']) || typeof event.type !== 'string') return false;
-    const payload = decodeDurablePayload(event.type, event.payload);
-    const result = applyDurableRunnerEvent(entry.agentGroupId, sessionId, {
-      eventId: frame.eventId,
-      sequence: Number(frame.sequence),
-      event: { type: event.type, payload },
-    });
-    entry.connection?.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'ack', eventId: frame.eventId })}\n`);
-    if (result.changedTurnIds) notifyTurnChange(sessionId, {
-      turnIds: result.changedTurnIds,
-      ...(result.settledTurnId ? { settledTurnId: result.settledTurnId } : {}),
-      reason: 'committed',
-    });
-    if (result.deliveryReady) {
-      for (const listener of durableMessageListeners) listener(sessionId);
-    }
-    if (result.processingReady) {
-      for (const listener of durableProcessingListeners) listener(sessionId);
-    }
-    if (result.editedInput) {
-      const input = result.editedInput;
-      try {
-        if (input.cancelled) deleteMessageFromIndex(input.id, entry.agentGroupId, sessionId);
-        else indexMessage({
-          id: input.id, sessionId, agentGroupId: entry.agentGroupId,
-          messagingGroupId: getSession(sessionId)?.messaging_group_id ?? null,
-          channelType: input.channel_type, threadId: input.thread_id, direction: 'in',
-          timestamp: input.timestamp, text: input.text, senderUserId: input.sender_user_id,
-        }, { replaceText: true });
-      } catch (err) {
-        log.warn('Failed to update pending-input search index', { sessionId, messageId: input.id, err });
-      }
-      flushHostEvents(sessionId, entry);
-    }
-    const stateKey = payload && typeof payload === 'object' && 'key' in payload ? payload.key : undefined;
-    if (
-      event.type === 'processing.upsert' || event.type === 'processing.delete' ||
-      (event.type === 'state.upsert' && typeof stateKey === 'string' &&
-        (stateKey.startsWith('input:') || stateKey.startsWith(INPUT_EDIT_PREFIX) || stateKey.startsWith(INPUT_CANCEL_PREFIX)))
-    ) emit(sessionId, 'input.state');
-    return true;
-  }
-
-  const state = stateFor(sessionId);
-  const now = Date.now();
-  switch (frame.type) {
-    case 'turn.state': {
-      if (!hasOnlyKeys(frame, ['v', 'type', 'turn'])) return false;
-      const turn = frame.turn as Record<string, unknown> | null;
-      if (
-        turn !== null &&
-        (!turn ||
-          typeof turn !== 'object' ||
-          Array.isArray(turn) ||
-          !hasOnlyKeys(turn, [
-            'id', 'status', 'channelType', 'platformId', 'threadId',
-            ...('supportsSteering' in turn ? ['supportsSteering'] : []),
-            ...('supportsInputEditing' in turn ? ['supportsInputEditing'] : []),
-            ...('supportsInputCancellation' in turn ? ['supportsInputCancellation'] : []),
-          ]) ||
-          (turn.supportsSteering !== undefined && typeof turn.supportsSteering !== 'boolean') ||
-          (turn.supportsInputEditing !== undefined && typeof turn.supportsInputEditing !== 'boolean') ||
-          (turn.supportsInputCancellation !== undefined && typeof turn.supportsInputCancellation !== 'boolean') ||
-          !isSessionTurnId(turn.id) ||
-          (turn.status !== 'running' && turn.status !== 'stopping') ||
-          !isTurnRoutingText(turn.channelType) ||
-          !isTurnRoutingText(turn.platformId) ||
-          (turn.threadId !== null && !isTurnRoutingText(turn.threadId)))
-      )
-        return false;
-      if (entry.stopRequest?.turnId !== turn?.id) entry.stopRequest = null;
-      const activeTurn = turn === null ? null : ({ ...turn } as unknown as SessionActiveTurn);
-      if (
-        activeTurn &&
-        activeTurn.id === state.activeTurn?.id &&
-        state.activeTurn.status === 'stopping' &&
-        entry.stopRequest?.turnId === activeTurn.id
-      )
-        activeTurn.status = 'stopping';
-      state.activeTurn = activeTurn;
-      state.turnStateReady = true;
-      state.lastSeenAt = now;
-      emit(sessionId, 'turn.state');
-      return true;
-    }
-    case 'heartbeat':
-      if (!hasOnlyKeys(frame, ['v', 'type'])) return false;
-      state.lastSeenAt = now;
-      emit(sessionId, 'heartbeat');
-      return true;
-    case 'activity.clear':
-      if (!hasOnlyKeys(frame, ['v', 'type'])) return false;
-      state.lastSeenAt = now;
-      state.activity = [];
-      emit(sessionId, 'activity');
-      return true;
-    case 'activity': {
-      if (!hasOnlyKeys(frame, ['v', 'type', 'step', 'turnId', 'ts', 'ordinal']) ||
-        !(frame.turnId === null || isSessionTurnId(frame.turnId)) ||
-        typeof frame.ts !== 'string' || !/^\d{1,16}$/.test(frame.ts) ||
-        !Number.isSafeInteger(frame.ordinal) || Number(frame.ordinal) < 0) return false;
-      const step = sanitizeActivityStep(frame.step);
-      if (!step) return false;
-      state.lastSeenAt = now;
-      state.activity = state.activity.filter((line) => line.turnId !== frame.turnId || line.ordinal !== frame.ordinal);
-      state.activity.push({ ts: frame.ts, text: JSON.stringify(step), turnId: frame.turnId as string | null,
-        ordinal: Number(frame.ordinal) });
-      if (state.activity.length > MAX_ACTIVITY_LINES)
-        state.activity.splice(0, state.activity.length - MAX_ACTIVITY_LINES);
-      emit(sessionId, 'activity');
-      return true;
-    }
-    case 'usage': {
-      if (!hasOnlyKeys(frame, ['v', 'type', 'usage', 'turnId', 'ts']) ||
-        !(frame.turnId === null || isSessionTurnId(frame.turnId)) ||
-        typeof frame.ts !== 'string' || !/^\d{1,16}$/.test(frame.ts)) return false;
-      const usage = sanitizeUsage(frame.usage);
-      if (!usage) return false;
-      state.lastSeenAt = now;
-      state.usage = usage;
-      state.usageUpdatedAt = Number(frame.ts);
-      state.usageTurnId = frame.turnId as string | null;
-      emit(sessionId, 'usage');
-      return true;
-    }
-    case 'usage.clear':
-      if (!hasOnlyKeys(frame, ['v', 'type'])) return false;
-      state.lastSeenAt = now;
-      state.usage = null;
-      state.usageUpdatedAt = 0;
-      emit(sessionId, 'usage');
-      return true;
-    case 'turn.resume':
-      if (!hasOnlyKeys(frame, ['v', 'type'])) return false;
-      state.lastSeenAt = now;
-      state.turnEndedAt = 0;
-      return true;
-    case 'turn.end':
-      if (!hasOnlyKeys(frame, ['v', 'type'])) return false;
-      state.lastSeenAt = now;
-      state.turnEndedAt = now;
-      emit(sessionId, 'turn.end');
-      return true;
-    default:
-      return false;
-  }
+  if (!isRecord(raw) || raw.v !== PROTOCOL_VERSION || typeof raw.type !== 'string') return false;
+  const spec = FRAME_SPECS.get(raw.type);
+  if (!spec || !sanitizeFields(raw, spec.fields)) return false;
+  return spec.apply(raw, { sessionId, entry, state: stateFor(sessionId), now: Date.now() });
 }
 
 function handleConnection(sessionId: string, entry: SessionSignalServer, connection: net.Socket): void {

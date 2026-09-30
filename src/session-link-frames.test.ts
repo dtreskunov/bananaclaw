@@ -309,6 +309,7 @@ describe('session link frame acceptance', () => {
     ['tool 257-char tool', activity({ ...TOOL, tool: LONG_ID })],
     ['tool bad status', activity({ ...TOOL, status: 'done' })],
     ['tool missing status', activity({ ...TOOL, status: undefined })],
+    ['tool array status', activity({ ...TOOL, status: ['running'] })],
     ['tool numeric detail', activity({ ...TOOL, detail: 1 })],
     ['tool 2001-char detail', activity({ ...TOOL, detail: LONG_TEXT })],
     ['tool null title', activity({ ...TOOL, title: null })],
