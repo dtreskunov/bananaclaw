@@ -1,3 +1,5 @@
+import './ActionIcons.css';
+
 /** 16px line icons shared by the bubble action buttons, drawn with currentColor. */
 
 export function CopyIcon() {
@@ -34,6 +36,17 @@ export function StopIcon() {
   return (
     <svg class="msg-action-icon msg-action-icon-solid" viewBox="0 0 16 16" aria-hidden="true">
       <rect x="4" y="4" width="8" height="8" rx="1.5" />
+    </svg>
+  );
+}
+
+export function TrashIcon() {
+  return (
+    <svg class="msg-action-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.5 4.5h11" />
+      <path d="M6 4.5v-1a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" />
+      <path d="M4 4.5l.7 8.1a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8.1" />
+      <path d="M6.75 7v4M9.25 7v4" />
     </svg>
   );
 }

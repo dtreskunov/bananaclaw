@@ -1262,22 +1262,15 @@ nav.tab-bar-strip.group-strip {
 }
 .threads-rail .thread .del {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  padding: 0 5px;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  color: var(--muted);
-  font-size: var(--font-lg);
-  line-height: 1;
-  display: none;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
 }
-.threads-rail .thread:hover .del {
-  display: block;
-}
-.threads-rail .thread .del:hover {
-  color: var(--error);
+.threads-rail .thread:hover .del,
+.threads-rail .thread:focus-within .del,
+.threads-rail .thread .del:focus-visible {
+  opacity: 1;
 }
 .threads-rail .thread-section {
   display: flex;
@@ -1368,17 +1361,10 @@ nav.tab-bar-strip.group-strip {
 }
 @media (hover: none) {
   .threads-rail .thread .del {
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
-    opacity: 0.7;
+    opacity: 1;
     top: 50%;
     right: 4px;
     transform: translateY(-50%);
-    font-size: 26px;
-    min-width: 40px;
-    min-height: 40px;
-    padding: 0;
   }
   .threads-rail .thread .title {
     padding-right: 40px;
@@ -1632,6 +1618,64 @@ nav.tab-bar-strip.group-strip {
   background: var(--wash);
 }
 
+/* src/components/ActionIcons.css */
+.msg-action-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.msg-action-btn:hover {
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--surface-fg);
+}
+.msg-action-btn:focus-visible {
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--surface-fg);
+  border-color: var(--border-strong);
+}
+.msg-action-btn[disabled] {
+  cursor: default;
+  opacity: 0.5;
+}
+.msg-action-icon {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.msg-action-icon-solid {
+  fill: currentColor;
+  stroke: none;
+}
+@media (pointer: coarse) {
+  .msg-action-btn {
+    width: 32px;
+    height: 32px;
+  }
+  .msg-action-icon {
+    width: 16px;
+    height: 16px;
+  }
+}
+.msg-action-btn.danger:hover,
+.msg-action-btn.danger:focus-visible {
+  color: var(--error);
+}
+
 /* src/components/ChatMain.css */
 .chat-main .pending-input-action {
   border: 0;
@@ -1880,58 +1924,6 @@ nav.tab-bar-strip.group-strip {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-}
-.chat-main .msg-action-btn {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-lg);
-  color: var(--muted);
-  font: inherit;
-  line-height: 1;
-  cursor: pointer;
-}
-.chat-main .msg-action-btn:hover {
-  background: rgba(127, 127, 127, 0.12);
-  color: var(--surface-fg);
-}
-.chat-main .msg-action-btn:focus-visible {
-  background: rgba(127, 127, 127, 0.12);
-  color: var(--surface-fg);
-  border-color: var(--border-strong);
-}
-.chat-main .msg-action-btn[disabled] {
-  cursor: default;
-  opacity: 0.5;
-}
-.chat-main .msg-action-icon {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.chat-main .msg-action-icon-solid {
-  fill: currentColor;
-  stroke: none;
-}
-@media (pointer: coarse) {
-  .chat-main .msg-action-btn {
-    width: 32px;
-    height: 32px;
-  }
-  .chat-main .msg-action-icon {
-    width: 16px;
-    height: 16px;
-  }
 }
 @media (hover: hover) and (pointer: fine) {
   .chat-main .msg .msg-inline-actions {

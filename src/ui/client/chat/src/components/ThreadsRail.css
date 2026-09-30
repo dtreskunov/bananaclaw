@@ -67,9 +67,11 @@
 }
 .readonly-banner { padding: 10px 12px; border-top: 1px solid var(--border); background: var(--wash-soft); font-size: var(--font-sm); color: var(--muted); }
 .chat-subnotice { padding: 4px 12px; border-top: 1px solid var(--border); background: var(--wash-subtle); font-size: var(--font-xs); color: var(--muted); }
-.threads-rail .thread .del { position: absolute; top: 6px; right: 6px; padding: 0 5px; border: 0; background: transparent; cursor: pointer; color: var(--muted); font-size: var(--font-lg); line-height: 1; display: none; }
-.threads-rail .thread:hover .del { display: block; }
-.threads-rail .thread .del:hover { color: var(--error); }
+/* Look comes from the shared .msg-action-btn; only placement and reveal here. */
+.threads-rail .thread .del { position: absolute; top: 4px; right: 4px; opacity: 0; transition: opacity 0.12s ease; }
+.threads-rail .thread:hover .del,
+.threads-rail .thread:focus-within .del,
+.threads-rail .thread .del:focus-visible { opacity: 1; }
 
 /* Collapsible channel sections. Open sections grow to fill available
    height and scroll their thread list; collapsed sections are flex
@@ -124,7 +126,7 @@
 
 /* Show delete on touch devices (no hover). */
 @media (hover: none) {
-  .threads-rail .thread .del { display: flex !important; align-items: center; justify-content: center; opacity: 0.7; top: 50%; right: 4px; transform: translateY(-50%); font-size: 26px; min-width: 40px; min-height: 40px; padding: 0; }
+  .threads-rail .thread .del { opacity: 1; top: 50%; right: 4px; transform: translateY(-50%); }
   .threads-rail .thread .title { padding-right: 40px; }
 }
 

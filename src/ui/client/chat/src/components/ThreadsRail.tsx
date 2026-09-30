@@ -18,6 +18,7 @@ import {
 import { requestChoice, requestConfirm } from './PromptModal';
 import { tsKey } from '../utils';
 import { Pane } from './Pane';
+import { TrashIcon } from './ActionIcons';
 import { RelativeTime } from './RelativeTime';
 import type { Thread, ThreadCtx, SearchResult } from '../types';
 
@@ -124,7 +125,7 @@ function ThreadRow({ t }: { t: Thread }) {
       </div>
       <div class="meta"><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</div>
       {isAdmin.value && (ct === 'web' || (t.sessionMode === 'per-thread' && !!t.messagingGroupId))
-        ? <button type="button" class="del" title="Delete thread" aria-label="Delete thread" onClick={onDel}>{'\u00d7'}</button>
+        ? <button type="button" class="msg-action-btn danger del" title="Delete thread" aria-label="Delete thread" onClick={onDel}><TrashIcon /></button>
         : null}
     </div>
   );
