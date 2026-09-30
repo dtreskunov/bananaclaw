@@ -187,7 +187,8 @@ export function projectConversation(
         status:
           turn.phase !== 'settled' ? 'provisional' : (metadata?.status ?? (usage.length ? 'partial' : 'unavailable')),
         model: metadata?.model ?? usage.at(-1)?.value.model ?? liveUsage?.model ?? null,
-        durationMs: metadata?.durationMs ?? usage.at(-1)?.value.duration_ms ?? null,
+        // A running turn's stored duration is a stale checkpoint, not its elapsed time.
+        durationMs: turn.phase === 'settled' ? (metadata?.durationMs ?? usage.at(-1)?.value.duration_ms ?? null) : null,
       },
       liveUsage,
     });

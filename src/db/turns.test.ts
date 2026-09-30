@@ -159,7 +159,7 @@ describe('durable turn migration', () => {
     ]);
     expect(getTurn(db, 'explicit')).toMatchObject({
       phase: 'settled',
-      outcome: 'unknown',
+      outcome: 'replied',
       started_at: null,
       ended_at: null,
       provenance: 'backfill',
@@ -171,7 +171,8 @@ describe('durable turn migration', () => {
       { turn_id: 'explicit', message_in_id: 'input', association: 'reply' },
     ]);
     expect(getTurn(db, historicalTurnId('three'))?.origin_channel_type).toBeNull();
-    expect(getTurn(db, historicalTurnId('four'))).toBeDefined();
+    expect(getTurn(db, historicalTurnId('three'))?.outcome).toBe('unknown');
+    expect(getTurn(db, historicalTurnId('four'))?.outcome).toBe('unknown');
     expect(db.prepare('SELECT * FROM journal').all()).toEqual([]);
     expect(db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY name").all()).toEqual(
       triggers,
@@ -206,6 +207,27 @@ describe('durable turn migration', () => {
     expect(db.prepare('SELECT id FROM turns').all()).toEqual([{ id: 'turn-input' }]);
     expect(getTurnInputs(db, 'turn-input')[0].association).toBe('applied');
     expect(getTurn(db, 'turn-input')?.outcome).toBe('unknown');
+  });
+
+  it('derives imported outcomes only from each turn’s own outputs, never rewriting existing turns', () => {
+    const db = legacy();
+    for (const [id, content] of [
+      ['reply', '{"text":"answer"}'],
+      ['file', '{"text":"","files":["a.png"]}'],
+      ['stop-a', '{"turn_id":"stopped-turn","text":"partial answer"}'],
+      ['stop-b', '{"turn_id":"stopped-turn","text":"Stopped by user.","stopped":true}'],
+      ['title', '{"action":"set_thread_title","title":"T"}'],
+      ['kept', '{"turn_id":"existing","text":"answer"}'],
+    ])
+      db.prepare("INSERT INTO messages_out VALUES (?, ?, NULL, 'now')").run(id, content);
+    migrateTurnSchema(db);
+    db.exec("INSERT INTO turns (id, phase, outcome, provenance) VALUES ('existing', 'settled', 'failed', 'native')");
+    backfillTurns(db);
+    expect(getTurn(db, historicalTurnId('reply'))?.outcome).toBe('replied');
+    expect(getTurn(db, historicalTurnId('file'))?.outcome).toBe('replied');
+    expect(getTurn(db, 'stopped-turn')?.outcome).toBe('stopped');
+    expect(getTurn(db, historicalTurnId('title'))?.outcome).toBe('unknown');
+    expect(getTurn(db, 'existing')?.outcome).toBe('failed');
   });
 
   it('does not merge a generated historical ID with a conflicting explicit ID', () => {

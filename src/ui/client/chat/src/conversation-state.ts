@@ -49,16 +49,24 @@ export function conversationMessages(view: Conversation): ChatMessage[] {
     });
   for (const turn of view.turns) {
     const anchor = view.messages.find((m) => turn.outputIds.includes(m.id) || turn.inputIds.includes(m.id));
+    const key = (m: Conversation['messages'][number]) => timelineSortKey(m.timestamp, m.timelinePosition);
     const inputs = view.messages.filter((m) => turn.inputIds.includes(m.id));
-    const firstInput = inputs.length
-      ? Math.min(...inputs.map((m) => timelineSortKey(m.timestamp, m.timelinePosition)))
-      : null;
+    const outputs = view.messages.filter((m) => turn.outputIds.includes(m.id));
+    const firstInput = inputs.length ? Math.min(...inputs.map(key)) : null;
+    const firstOutput = outputs.length ? Math.min(...outputs.map(key)) : null;
     const ts =
       turn.startedAt ??
       anchor?.timestamp ??
       view.questions.find((q) => q.turnId === turn.id)?.createdAt ??
       turn.endedAt ??
       '';
+    // Imported history has no start time; its trace belongs directly above its own reply.
+    const position =
+      !turn.startedAt && firstOutput !== null
+        ? Math.max(firstOutput - 1, firstInput !== null ? firstInput + 1 : 0)
+        : firstInput !== null
+          ? Math.max(timelineSortKey(ts), firstInput + 1)
+          : null;
     messages.push({
       id: `turn:${turn.id}`,
       direction: 'turn',
@@ -66,7 +74,7 @@ export function conversationMessages(view: Conversation): ChatMessage[] {
       text: turn.outcome,
       files: null,
       ts,
-      ...(firstInput !== null ? { timelinePosition: Math.max(timelineSortKey(ts), firstInput + 1) } : {}),
+      ...(position !== null ? { timelinePosition: position } : {}),
     });
   }
   return messages.sort((a, b) => timelineSortKey(a.ts, a.timelinePosition) - timelineSortKey(b.ts, b.timelinePosition));

@@ -150,6 +150,24 @@ describe('authoritative conversation projection', () => {
     expect(after.capabilities.stop).toBe(false);
   });
 
+  it('omits a running turn’s checkpointed duration so the client shows live elapsed time', () => {
+    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+      'turn-metadata:turn',
+      JSON.stringify({
+        turnId: 'turn',
+        durationMs: 1000,
+        model: 'm',
+        usageId: null,
+        status: 'provisional',
+        final: false,
+      }),
+      'now',
+    );
+    expect(read().turns[0].metadata).toEqual({ status: 'provisional', model: 'm', durationMs: null });
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
+    expect(read().turns[0].metadata.durationMs).toBe(1000);
+  });
+
   it.each(['silent', 'warning', 'interrupted', 'failed', 'stopped'] as const)(
     'retains outputless %s turns without inventing tokens',
     (outcome) => {

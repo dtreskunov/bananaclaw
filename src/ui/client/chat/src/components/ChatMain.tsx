@@ -33,6 +33,7 @@ import { splitPendingInputs, timelineLayoutKey } from '../queued-followups';
 import { showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import { conversationState } from '../conversation-state';
+import { turnRowView } from '../turn-row';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -486,7 +487,7 @@ function UsageMeta({ u, live = false, partial = false, provisional = false }: {
   const short = live
     ? [estimatedCost, `${input} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
     : partial
-      ? [dur, model, reported].filter(Boolean).join(' \u00b7 ')
+      ? [u.cost_usd !== undefined ? cost : '', dur, model, reported].filter(Boolean).join(' \u00b7 ')
       : [provisional ? estimatedCost : cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
   const contextDetail = contextTokens
     ? `${fmtTok(contextTokens)}${u.context_window
@@ -1151,7 +1152,6 @@ function ConversationTurnRow({ turn }: { turn: ConversationTurn }) {
   const [traceExpanded, setTraceExpanded] = useState(false);
   const onToggleTrace = () => setTraceExpanded((value) => !value);
   const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
-  const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : null;
   const settled = turn.phase === 'settled';
   const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : null;
   const [now, setNow] = useState(() => Date.now());
@@ -1160,14 +1160,14 @@ function ConversationTurnRow({ turn }: { turn: ConversationTurn }) {
     if (settled) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [startedAt, settled]);
-  const model = turn.metadata.model ? shortModel(turn.metadata.model) : '';
-  const durationEnd = endedAt ?? (settled ? null : now);
-  const elapsed = turn.metadata.durationMs ??
-    (startedAt !== null && durationEnd !== null ? Math.max(0, durationEnd - startedAt) : null);
-  const metadata = [elapsed !== null ? fmtDur(elapsed) : '', model].filter(Boolean).join(' \u00b7 ');
+  }, [turn.startedAt, settled]);
+  const view = turnRowView(turn, now);
+  const metadata = [view.elapsedMs !== null ? fmtDur(view.elapsedMs) : '', view.model ? shortModel(view.model) : '']
+    .filter(Boolean)
+    .join(' \u00b7 ');
   const liveHeadline = latestActivityHeadline(turn.activity);
   const [openLatestOnExpand, setOpenLatestOnExpand] = useState(false);
+  if (view.hidden) return null;
   const toggleFromPreview = () => {
     setOpenLatestOnExpand(!traceExpanded);
     onToggleTrace();
@@ -1190,11 +1190,11 @@ function ConversationTurnRow({ turn }: { turn: ConversationTurn }) {
                 title={traceExpanded ? 'Hide activity' : 'Show latest activity'}
                 onClick={toggleFromPreview}
               ><StepHeadlineContent headline={liveHeadline} /></button>
-            : <span class="hint">{settled ? turn.outcome : turn.phase}</span>}
+            : view.status ? <span class="hint">{view.status}</span> : null}
         </div>
       </div>
       {stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
-      <div class="turn-stop-note">{settled ? `Turn ${turn.outcome}` : turn.phase === 'settling' ? 'Finalizing turn…' : turn.phase}</div>
+      {view.note ? <div class="turn-stop-note">{view.note}</div> : null}
       {!settled && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Runner disconnected. The outcome is not yet confirmed.</div> : null}
       <ActivityTracePanel
         lines={turn.activity}
@@ -1205,11 +1205,11 @@ function ConversationTurnRow({ turn }: { turn: ConversationTurn }) {
         openLatest={openLatestOnExpand}
       />
       <div class="meta">
-        <span class="typing-meta">{metadata}</span>
-        {turn.usage.map((record) => <UsageMeta key={record.id} u={record.value}
+        {view.showTiming && metadata ? <span class="typing-meta">{metadata}</span> : null}
+        {view.usage.map((record) => <UsageMeta key={record.id} u={record.value}
           provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
         {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} live provisional /> : null}
-        {!turn.usage.length && !turn.liveUsage ? <span>Tokens unavailable</span> : null}
+        {view.showTokensUnavailable ? <span>Tokens unavailable</span> : null}
         {activeTurn.value?.id === turn.id ? <ActiveTurnStopButton /> : null}
       </div>
     </div>

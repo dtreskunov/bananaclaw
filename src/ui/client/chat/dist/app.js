@@ -18617,9 +18617,13 @@ function conversationMessages(view) {
   });
   for (const turn2 of view.turns) {
     const anchor = view.messages.find((m6) => turn2.outputIds.includes(m6.id) || turn2.inputIds.includes(m6.id));
+    const key = (m6) => timelineSortKey(m6.timestamp, m6.timelinePosition);
     const inputs = view.messages.filter((m6) => turn2.inputIds.includes(m6.id));
-    const firstInput = inputs.length ? Math.min(...inputs.map((m6) => timelineSortKey(m6.timestamp, m6.timelinePosition))) : null;
+    const outputs = view.messages.filter((m6) => turn2.outputIds.includes(m6.id));
+    const firstInput = inputs.length ? Math.min(...inputs.map(key)) : null;
+    const firstOutput = outputs.length ? Math.min(...outputs.map(key)) : null;
     const ts = turn2.startedAt ?? anchor?.timestamp ?? view.questions.find((q5) => q5.turnId === turn2.id)?.createdAt ?? turn2.endedAt ?? "";
+    const position = !turn2.startedAt && firstOutput !== null ? Math.max(firstOutput - 1, firstInput !== null ? firstInput + 1 : 0) : firstInput !== null ? Math.max(timelineSortKey(ts), firstInput + 1) : null;
     messages.push({
       id: `turn:${turn2.id}`,
       direction: "turn",
@@ -18627,7 +18631,7 @@ function conversationMessages(view) {
       text: turn2.outcome,
       files: null,
       ts,
-      ...firstInput !== null ? { timelinePosition: Math.max(timelineSortKey(ts), firstInput + 1) } : {}
+      ...position !== null ? { timelinePosition: position } : {}
     });
   }
   return messages.sort((a4, b5) => timelineSortKey(a4.ts, a4.timelinePosition) - timelineSortKey(b5.ts, b5.timelinePosition));
@@ -21292,6 +21296,35 @@ function timelineLayoutKey(messages) {
   );
 }
 
+// src/turn-row.ts
+var OUTCOME_NOTES = {
+  stopped: "Stopped",
+  failed: "Failed",
+  warning: "Ended with a warning",
+  interrupted: "Interrupted; outcome unknown",
+  silent: "No reply"
+};
+function turnRowView(turn2, now) {
+  const settled = turn2.phase === "settled";
+  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
+  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
+  const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
+  const model = turn2.metadata.model;
+  const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : turn2.phase === "settling" ? "Finalizing turn\u2026" : null;
+  const hasTiming = elapsedMs !== null || !!model;
+  return {
+    hidden: settled && !turn2.activity.length && !turn2.usage.length && !hasTiming && !note,
+    status: !settled && turn2.phase === "running" ? "Working\u2026" : null,
+    note,
+    elapsedMs,
+    model,
+    showTiming: !settled || !turn2.usage.length,
+    showTokensUnavailable: settled && !turn2.usage.length && hasTiming,
+    // While running, the live line owns elapsed time and model; checkpointed values would be stale.
+    usage: settled ? turn2.usage : turn2.usage.map(({ id: id2, value }) => ({ id: id2, value: { ...value, duration_ms: void 0, model: void 0 } }))
+  };
+}
+
 // src/input-state.ts
 function inputStatePresentation(state) {
   if (!state) return null;
@@ -22081,7 +22114,7 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false }
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
   const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
   const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
-  const short = live ? [estimatedCost, `${input} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [dur, model, reported].filter(Boolean).join(" \xB7 ") : [provisional ? estimatedCost : cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
+  const short = live ? [estimatedCost, `${input} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [u5.cost_usd !== void 0 ? cost : "", dur, model, reported].filter(Boolean).join(" \xB7 ") : [provisional ? estimatedCost : cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
   const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
@@ -22695,7 +22728,6 @@ function ConversationTurnRow({ turn: turn2 }) {
   const [traceExpanded, setTraceExpanded] = h2(false);
   const onToggleTrace = () => setTraceExpanded((value) => !value);
   const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
-  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : null;
   const settled = turn2.phase === "settled";
   const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : null;
   const [now, setNow] = h2(() => Date.now());
@@ -22704,13 +22736,12 @@ function ConversationTurnRow({ turn: turn2 }) {
     if (settled) return;
     const timer2 = window.setInterval(() => setNow(Date.now()), 1e3);
     return () => window.clearInterval(timer2);
-  }, [startedAt2, settled]);
-  const model = turn2.metadata.model ? shortModel(turn2.metadata.model) : "";
-  const durationEnd = endedAt ?? (settled ? null : now);
-  const elapsed = turn2.metadata.durationMs ?? (startedAt2 !== null && durationEnd !== null ? Math.max(0, durationEnd - startedAt2) : null);
-  const metadata = [elapsed !== null ? fmtDur(elapsed) : "", model].filter(Boolean).join(" \xB7 ");
+  }, [turn2.startedAt, settled]);
+  const view = turnRowView(turn2, now);
+  const metadata = [view.elapsedMs !== null ? fmtDur(view.elapsedMs) : "", view.model ? shortModel(view.model) : ""].filter(Boolean).join(" \xB7 ");
   const liveHeadline = latestActivityHeadline(turn2.activity);
   const [openLatestOnExpand, setOpenLatestOnExpand] = h2(false);
+  if (view.hidden) return null;
   const toggleFromPreview = () => {
     setOpenLatestOnExpand(!traceExpanded);
     onToggleTrace();
@@ -22737,10 +22768,10 @@ function ConversationTurnRow({ turn: turn2 }) {
           onClick: toggleFromPreview,
           children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
         }
-      ) : /* @__PURE__ */ u4("span", { class: "hint", children: settled ? turn2.outcome : turn2.phase })
+      ) : view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
     ] }) }),
     stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
-    /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: settled ? `Turn ${turn2.outcome}` : turn2.phase === "settling" ? "Finalizing turn\u2026" : turn2.phase }),
+    view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,
     !settled && !turnConnected.value && !stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: "Runner disconnected. The outcome is not yet confirmed." }) : null,
     /* @__PURE__ */ u4(
       ActivityTracePanel,
@@ -22754,8 +22785,8 @@ function ConversationTurnRow({ turn: turn2 }) {
       }
     ),
     /* @__PURE__ */ u4("div", { class: "meta", children: [
-      /* @__PURE__ */ u4("span", { class: "typing-meta", children: metadata }),
-      turn2.usage.map((record) => /* @__PURE__ */ u4(
+      view.showTiming && metadata ? /* @__PURE__ */ u4("span", { class: "typing-meta", children: metadata }) : null,
+      view.usage.map((record) => /* @__PURE__ */ u4(
         UsageMeta,
         {
           u: record.value,
@@ -22765,7 +22796,7 @@ function ConversationTurnRow({ turn: turn2 }) {
         record.id
       )),
       !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, live: true, provisional: true }) : null,
-      !turn2.usage.length && !turn2.liveUsage ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null,
+      view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null,
       activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4(ActiveTurnStopButton, {}) : null
     ] })
   ] });

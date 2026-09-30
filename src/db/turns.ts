@@ -245,6 +245,17 @@ export interface TurnBackfillEvidence {
   links: TurnInputRow[];
 }
 
+/**
+ * Outcome proven by one legacy output alone: a recorded stop, or a chat
+ * payload. System-only outputs (e.g. thread titles) prove neither.
+ */
+function legacyOutputOutcome(content: string): 'replied' | 'stopped' | undefined {
+  const value = parseObject(content);
+  if (value.stopped === true) return 'stopped';
+  if (typeof value.text === 'string' || Array.isArray(value.files)) return 'replied';
+  return undefined;
+}
+
 /** Conservative one-time import; no clock-based grouping or lifecycle reconstruction. */
 export function backfillTurns(
   db: Database.Database,
@@ -304,6 +315,7 @@ export function backfillTurns(
       ...applied.map((r) => r.turnId),
     ]);
     const imported = new Set<string>();
+    const outcomes = new Map<string, 'replied' | 'stopped'>();
     const outputTurns = new Map<string, string>();
     const localOutputIds = new Set(
       (db.prepare('SELECT id FROM messages_out').all() as Array<{ id: string }>).map((r) => r.id),
@@ -340,6 +352,10 @@ export function backfillTurns(
       }
       ensureTurn(id);
       outputTurns.set(output.id, id);
+      if (imported.has(id)) {
+        const outcome = legacyOutputOutcome(output.content);
+        if (outcome && outcomes.get(id) !== 'stopped') outcomes.set(id, outcome);
+      }
       db.prepare('UPDATE messages_out SET turn_id = ? WHERE id = ? AND turn_id IS NULL').run(id, output.id);
       if (output.in_reply_to && inputById.has(output.in_reply_to)) {
         linkTurnInput(db, { turn_id: id, message_in_id: output.in_reply_to, association: 'reply' });
@@ -353,16 +369,21 @@ export function backfillTurns(
         origins.map((r) => [JSON.stringify([r.channel_type, r.platform_id, r.thread_id, r.source_session_id]), r]),
       );
       // A destination is not proof of origin. Conflicting/missing inputs remain unknown.
-      if (routes.size === 1) {
-        const route = origins[0];
-        putTurn(db, {
-          ...getTurn(db, id)!,
-          origin_channel_type: route.channel_type,
-          origin_platform_id: route.platform_id,
-          origin_thread_id: route.thread_id,
-          origin_source_session_id: route.source_session_id,
-        });
-      }
+      const route = routes.size === 1 ? origins[0] : undefined;
+      const outcome = outcomes.get(id);
+      if (!route && !outcome) continue;
+      putTurn(db, {
+        ...getTurn(db, id)!,
+        ...(route
+          ? {
+              origin_channel_type: route.channel_type,
+              origin_platform_id: route.platform_id,
+              origin_thread_id: route.thread_id,
+              origin_source_session_id: route.source_session_id,
+            }
+          : {}),
+        ...(outcome ? { outcome } : {}),
+      });
     }
     for (const table of ['turn_usage', 'turn_activity']) {
       db.exec(`UPDATE ${table} SET turn_id = (SELECT turn_id FROM messages_out WHERE id = ${table}.message_out_id)

@@ -137,7 +137,7 @@ describe('runner durable turns', () => {
     ]);
     expect(getTurn(db, 'explicit')).toMatchObject({
       phase: 'settled',
-      outcome: 'unknown',
+      outcome: 'replied',
       started_at: null,
       ended_at: null,
       provenance: 'backfill',
@@ -145,8 +145,10 @@ describe('runner durable turns', () => {
       origin_platform_id: 'chat',
       origin_thread_id: 'thread',
     });
-    expect(getTurn(db, historicalTurnId('three'))).toBeDefined();
-    expect(getTurn(db, historicalTurnId('four'))).toBeDefined();
+    // Neither unparseable nor text-less outputs, nor an applied input, prove an outcome.
+    expect(getTurn(db, historicalTurnId('three'))?.outcome).toBe('unknown');
+    expect(getTurn(db, historicalTurnId('four'))?.outcome).toBe('unknown');
+    expect(getTurn(db, 'steered-turn')?.outcome).toBe('unknown');
     expect(getTurnInputs(db, 'steered-turn')).toEqual([
       { turn_id: 'steered-turn', message_in_id: 'steer', association: 'applied' },
     ]);

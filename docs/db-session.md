@@ -353,7 +353,9 @@ underlying primitives, not a live-migration procedure.
   (or an existing relational link); otherwise allocate
   `legacy:out:<sha256(message ID)>`, with deterministic numeric suffixes if
   explicit IDs collide. Equal timestamps or reply anchors do not merge outputs.
-  Create historical turns as `settled`/`unknown`, with null start/end times.
+  Create historical turns as `settled`, with null start/end times. The outcome
+  is `stopped` or `replied` only when one of the turn's own outputs records
+  `stopped: true` or carries a chat payload; otherwise `unknown`.
   Link inputs only via a present `in_reply_to` row or a matching hashed
   `input:*` receipt with `status=applied` and a turn ID. Queue/steering intent,
   processing state, timestamps, and the default session route are not evidence.

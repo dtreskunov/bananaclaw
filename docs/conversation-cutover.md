@@ -149,8 +149,11 @@ either peer. This also reserves host-only explicit turn IDs when choosing
 deterministic IDs for shared outputs. It adds the same turn/input metadata to
 both projections, never copies peer-only messages or accounting rows.
 
-Historical turns remain `settled`/`unknown`, with **null start/end times**;
-equal timestamps do not combine turns. Missing/conflicting origin evidence
+Historical turns are `settled`, with **null start/end times**. A turn's outcome
+comes only from its own outputs: `stopped` if one records `stopped: true`,
+`replied` if one carries a chat payload (`text` or `files`), otherwise
+`unknown` (for example system actions and thread titles). Equal timestamps do
+not combine turns. Missing/conflicting origin evidence
 stays unknown. Orphan accounting remains unassociated. Original message content,
 usage IDs and numeric values, activity timestamps/text, and prior non-null turn
 associations are preserved. Backfill suppresses journal emission, then the
