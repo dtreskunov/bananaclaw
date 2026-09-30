@@ -412,6 +412,24 @@ The agent-runner sends heartbeat, activity, progressive usage, and turn
 completion over its private per-session Unix socket. The host uses the latest
 accepted signal timestamp for typing freshness and stuck-container detection.
 
+**Code layout:** `processQuery` in `poll-loop.ts` keeps upstream NanoClaw's
+signature and section order (state → follow-up poll → event loop → catch/finally)
+so upstream changes merge with few conflicts. Fork-only behavior lives in
+`src/query/` and is reached from call sites marked `// FORK-HOOK:<name>`:
+
+| Module                 | Owns                                                                          |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `recovery.ts`          | Delivery/malformed-tool/post-tool retries at each `result`; terminal notices   |
+| `runaway-guard.ts`     | Per-turn loop backstops (duplicate sends, identical tool streaks, text steps)  |
+| `steering.ts`          | Offering, applying and releasing native steering; published turn capabilities |
+| `accounting.ts`        | Usage/checkpoint capture and flush at the result boundary; live-state reset   |
+| `follow-up-watcher.ts` | Host-event/due-time wakeups, poll coalescing, fatal inbound-DB errors         |
+| `notices.ts`           | "Stopped by user." finalization and warning rows for undelivered turns        |
+
+Fork-only options (`provider`, `persistContinuation`, `promptTracker`,
+`onBatchComplete`, `execution`, `deferFailureSettlement`) travel in the trailing
+`fork` object instead of extra positional parameters.
+
 ### Message Formatting
 
 The agent-runner transforms messages_in rows into a prompt string. The provider receives a ready-to-send string — it doesn't know about message kinds or routing.

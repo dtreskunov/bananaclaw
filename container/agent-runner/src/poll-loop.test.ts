@@ -4,12 +4,8 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getPendingMessages, markCompleted, MAX_TIMER_DELAY_MS, nextPendingDueDelayMs } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
-import {
-  isCorruptionError,
-  isMissingDbError,
-  friendlyProviderErrorFallback,
-  shouldDeferInteractiveResponse,
-} from './poll-loop.js';
+import { friendlyProviderErrorFallback, shouldDeferInteractiveResponse } from './poll-loop.js';
+import { isCorruptionError, isMissingDbError } from './query/follow-up-watcher.js';
 import { MockProvider } from './providers/mock.js';
 
 beforeEach(() => {

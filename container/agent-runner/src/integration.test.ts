@@ -1104,6 +1104,31 @@ describe('poll loop — empty result notice', () => {
     const activity = getOutboundDb().prepare('SELECT text FROM turn_activity WHERE message_out_id = ?').all(messageId) as { text: string }[];
     expect(activity.some((line) => JSON.parse(line.text).tool === 'web_search')).toBe(true);
   });
+
+  it('fills missing model limits at the result boundary without overriding reported ones', async () => {
+    insertMessage('m-limits', { sender: 'Alice', text: 'hi' }, { platformId: 'chan-1', channelType: 'discord' });
+    class LimitsProvider extends ScriptedProvider {
+      async modelLimits() {
+        return { context_window: 200_000, max_output_tokens: 1 };
+      }
+    }
+    const provider = new LimitsProvider([
+      { text: '<message to="discord-test">done</message>', usage: {
+        cost_usd: 0.1, input_tokens: 10, output_tokens: 5,
+        cache_read_tokens: 0, cache_write_tokens: 0, model: 'test-model', max_output_tokens: 4096,
+      } },
+    ]);
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+    await waitFor(() => (getOutboundDb().prepare('SELECT context_window FROM turn_usage').get() as
+      { context_window: number | null } | undefined)?.context_window != null, 2000);
+    controller.abort();
+    await loopPromise.catch(() => {});
+
+    expect(getOutboundDb().prepare('SELECT context_window, max_output_tokens FROM turn_usage').all())
+      .toEqual([{ context_window: 200_000, max_output_tokens: 4096 }]);
+  });
 });
 
 describe('poll loop — recovery nudge on stripped-to-empty', () => {

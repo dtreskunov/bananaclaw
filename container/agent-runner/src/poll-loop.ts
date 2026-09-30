@@ -1,16 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { findByName, findByRouting, getAllDestinations, type DestinationEntry } from './destinations.js';
+import { findByName, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
-  getSteeringCandidates,
-  markProcessing,
   releaseProcessing,
   markCompleted,
   nextPendingDueDelayMs,
   type MessageInRow,
 } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
-import { writeTurnCheckpoint } from './db/turn-checkpoints.js';
 import { markBatchPersisted } from './db/runner-state.js';
 import { completeTaskAttempts, markTaskAttemptsProviderInvoked } from './db/task-attempts.js';
 import { getInboundDb, getOutboundDb, clearStaleProcessingAcks } from './db/connection.js';
@@ -19,9 +16,6 @@ import {
   clearFailedTurn,
   clearTurnEnded,
   appendActivity,
-  clearActivity,
-  clearUsageProgress,
-  getActivityBuffer,
   getContinuation,
   getFailedTurn,
   isForkOriginAbsorbed,
@@ -29,12 +23,10 @@ import {
   setContinuation,
   setFailedTurn,
   setTurnEnded,
-  writeUsageProgress,
 } from './db/session-state.js';
 import { getForkOrigin, type ForkOriginRow } from './db/fork-origin.js';
 import {
   clearCurrentInReplyTo,
-  getDuplicateSendCount,
   resetTurnSendTracking,
   setCurrentInReplyTo,
   setTurnContext,
@@ -42,8 +34,7 @@ import {
 } from './current-batch.js';
 import {
   beginTurn, associateInput, finishUsageAttempt, interruptAbandonedTurns,
-  markTurnStopping, persistTurnMetadata, recordTurnUsage, settleTurn,
-  turnUsage, type TurnExecution,
+  markTurnStopping, settleTurn, type TurnExecution,
 } from './turn-execution.js';
 import {
   formatMessages,
@@ -57,73 +48,17 @@ import {
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
-import { accumulateTurnUsage } from './providers/usage.js';
-import { processPendingInputEdits, startInputProcessing, steeringDisposition, writeInputState } from './steering.js';
-import { drainSessionJournal, getHostEventGeneration, onHostEvent, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
-
-const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
-const MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS = 2;
-/**
- * Abort the turn after this many refused duplicate `send_message` calls.
- * Refusing the write already spares the user the flood; aborting also stops
- * the token burn, since a model looping this way never emits a `stop` finish
- * and OpenCode's prompt loop would otherwise step forever.
- */
-const MAX_DUPLICATE_SENDS_PER_TURN = 3;
-/**
- * Backstops for the same failure mode with a different tool. A model that has
- * collapsed into repeating one step verbatim keeps finishing as `tool-calls`,
- * so nothing in the provider loop ever terminates the turn. Both bounds sit
- * far above healthy agentic work (observed good turns peak around 70 steps).
- */
-const MAX_IDENTICAL_TOOL_STREAK = 8;
-const MAX_TOOL_CALLS_PER_TURN = 250;
-/**
- * Backstop for the same failure mode expressed as text alone. A model can
- * collapse into re-emitting its final answer over and over — each step a
- * clean `stop`, no tool call anywhere — which both bounds above are blind to,
- * so the turn runs until someone notices. Healthy turns close after at most
- * one consecutive text-only step (the reply itself).
- */
-const MAX_CONSECUTIVE_TEXT_STEPS = 6;
-type SuggestedAction = 'continue' | 'retry' | 'report';
-
-/**
- * Number of consecutive local SQLite corruption errors after which the
- * follow-up watcher gives up and exits the process.
- */
-const CORRUPTION_STREAK_EXIT = 10;
-
-/**
- * True for SQLite errors that indicate a corrupt READ view — almost always a
- * cross-mount page-cache coherency issue on Docker Desktop macOS rather than
- * actual file damage (host-side integrity_check passes). Reopening the DB
- * handle inside this process does NOT recover; only a fresh container mount
- * does. Caller's job is to exit so host-sweep respawns the container.
- */
-export function isCorruptionError(msg: string): boolean {
-  return (
-    msg.includes('database disk image is malformed') ||
-    msg.includes('SQLITE_CORRUPT') ||
-    msg.includes('file is not a database')
-  );
-}
+import { processPendingInputEdits, startInputProcessing, writeInputState } from './steering.js';
+import { getHostEventGeneration, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
+import { TurnAccounting, resetLiveTurnState } from './query/accounting.js';
+import { FollowUpWatcher } from './query/follow-up-watcher.js';
+import { finalizeStoppedTurn, writeTurnNotice } from './query/notices.js';
+import { DeliveryRecovery, type SuggestedAction } from './query/recovery.js';
+import { RunawayGuard } from './query/runaway-guard.js';
+import { SteeringSession } from './query/steering.js';
 
 export function shouldDeferInteractiveResponse(messages: MessageInRow[], turnActive: boolean): boolean {
   return turnActive && messages.some((message) => message.kind === 'interactive_response');
-}
-
-/**
- * True for SQLite errors that indicate the DB file has been removed
- * (e.g. the host deleted the chat thread / session dir). The container
- * should exit immediately rather than poll a dead file forever.
- */
-export function isMissingDbError(msg: string): boolean {
-  return (
-    msg.includes('unable to open database file') ||
-    msg.includes('SQLITE_CANTOPEN') ||
-    msg.includes('no such file or directory')
-  );
 }
 
 function log(msg: string): void {
@@ -465,20 +400,22 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             execution.current.routing,
             execution.current.inputIds,
             config.providerName,
-            config.provider,
-            isTaskOnly ? undefined : continuation,
-            !isTaskOnly,
-            promptTracker,
             config.provider.onExchangeComplete?.bind(config.provider),
             promptTracker.latest,
-            (completedIds, providerFailed) => {
-              const completedTaskIds = completedIds.filter((id) => taskAttemptIdSet.has(id));
-              completeTaskAttempts(completedTaskIds, providerFailed);
-              for (const id of completedTaskIds) finalizedTaskAttemptIds.add(id);
-              markBatchPersisted(getOutboundDb());
+            isTaskOnly ? undefined : continuation,
+            {
+              provider: config.provider,
+              persistContinuation: !isTaskOnly,
+              promptTracker,
+              onBatchComplete: (completedIds, providerFailed) => {
+                const completedTaskIds = completedIds.filter((id) => taskAttemptIdSet.has(id));
+                completeTaskAttempts(completedTaskIds, providerFailed);
+                for (const id of completedTaskIds) finalizedTaskAttemptIds.add(id);
+                markBatchPersisted(getOutboundDb());
+              },
+              execution,
+              deferFailureSettlement: true,
             },
-            execution,
-            true,
           );
           if (!isTaskOnly && result.continuation && result.continuation !== continuation) {
             continuation = result.continuation;
@@ -795,8 +732,12 @@ async function tryAcknowledgeFailure(
       cwd: config.cwd,
       systemContext: config.systemContext?.(),
     });
-    const result = await processQuery(query, routing, [], config.providerName, config.provider, undefined, false,
-      undefined, undefined, '', undefined, execution, true);
+    const result = await processQuery(query, routing, [], config.providerName, undefined, '', undefined, {
+      provider: config.provider,
+      persistContinuation: false,
+      execution,
+      deferFailureSettlement: true,
+    });
     return { delivered: result.delivered || outputCount() > priorOutputCount };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -818,104 +759,59 @@ interface QueryResult {
   unsurfacedError?: { message: string; classification?: string; routing: RoutingContext };
 }
 
-async function processQuery(
+/**
+ * Fork-only options, kept out of the upstream-shaped positional signature so
+ * `processQuery` stays mergeable. Fork logic lives in `src/query/` and is
+ * reached from marked `FORK-HOOK:<name>` sites.
+ */
+export interface ForkQueryOptions {
+  provider: AgentProvider;
+  /**
+   * False for one-shot calls (the in-turn ack): they run in a throwaway
+   * session, must not clobber the rolled-back continuation, and end after
+   * their first result.
+   */
+  persistContinuation?: boolean;
+  promptTracker?: { latest: string; routing: RoutingContext };
+  onBatchComplete?: (completedIds: string[], providerFailed: boolean) => void;
+  execution?: { current: TurnExecution };
+  deferFailureSettlement?: boolean;
+}
+
+/** Provider events still processed after the user stopped the turn. */
+const STOPPED_TURN_EVENTS = new Set(['init', 'progress', 'usage', 'usage_call', 'checkpoint', 'steering_applied']);
+
+export async function processQuery(
   query: AgentQuery,
   routing: RoutingContext,
   initialBatchIds: string[],
   providerName: string,
-  provider: AgentProvider,
-  priorContinuation: string | undefined,
-  persistContinuation = true,
-  promptTracker?: { latest: string; routing: RoutingContext },
-  onExchangeComplete?: (exchange: ProviderExchange) => void,
-  initialPrompt = '',
-  onBatchComplete?: (completedIds: string[], providerFailed: boolean) => void,
-  execution: { current: TurnExecution } = { current: beginTurn(routing, initialBatchIds) },
-  deferFailureSettlement = false,
+  onExchangeComplete: ((exchange: ProviderExchange) => void) | undefined,
+  initialPrompt: string,
+  initialContinuation: string | undefined,
+  fork: ForkQueryOptions,
 ): Promise<QueryResult> {
+  const { provider, persistContinuation = true, promptTracker, onBatchComplete, deferFailureSettlement = false } = fork;
+  const execution = fork.execution ?? { current: beginTurn(routing, initialBatchIds) };
   let queryContinuation: string | undefined;
-  let resultSeen = false;
   let done = false;
+  let resultSeen = false;
   let userStopped = false;
   let turnId = execution.current.turnId;
   setTurnContext(execution.current);
-  // Set once we've pushed the recovery nudge this turn — a self-correction
-  // retry asking the model to re-send its reply properly wrapped. Fires for
-  // BOTH failure shapes: (a) the model emitted bare top-level text it forgot
-  // to wrap (`hasUnwrapped`), and (b) the model buried its whole reply inside
-  // reasoning that normalized to empty (`event.strippedToEmpty`). One-shot:
-  // if the retry still delivers nothing we surface a generic error rather
-  // than nudging again. Reset at every turn boundary (warm-query safety).
-  let nudgedForDelivery = false;
-  let deliveryErrorRouting: RoutingContext = routing;
-  let malformedToolRecoveryAttempts = 0;
-  let malformedToolRecoveryExhausted = false;
-  let malformedToolErrorRouting: RoutingContext = routing;
-  let malformedToolRecoveryMode: 'tool' | 'delivery' | null = null;
-  let malformedToolRecoveryRouting: RoutingContext | null = null;
-  let malformedToolRecoveryHadNativeTool = false;
-  let postToolDeliveryRecoveryAttempts = 0;
-  let recoveringOffRouteReply = false;
-  const executedToolCalls = new Map<
-    string,
-    {
-      tool: string;
-      detail?: string;
-      status: 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
-    }
-  >();
   let activeTurnRouting = routing;
-  // Set when the post-nudge retry comes back as an `<internal>` note (the
-  // model confirming, via the escape hatch in the nudge text, that it meant
-  // to stay silent). Suppresses BOTH terminal notices — a deliberate no-op
-  // must not surface as an error.
-  let silenceConfirmed = false;
-  // Set when a `result` event has no deliverable response and we did not nudge
-  // it — either genuinely empty text or an initial all-<internal> scratchpad.
-  // Distinct from `event.strippedToEmpty` (a swallowed reply → nudged, above)
-  // and a post-nudge <internal> result (confirmed intentional silence).
-  let emptyResultSeen = false;
-  // A fresh batch is being processed \u2014 wipe any turn-ended marker from
-  // the previous turn so the host typing module re-arms cleanly.
+  // Assigned from the event handler closure; the assertion keeps TypeScript
+  // from narrowing it to its initial null.
+  let lastProviderError = null as { message: string; classification?: string } | null;
+  // A fresh batch is being processed — wipe any turn-ended marker from the
+  // previous turn so the host typing module re-arms cleanly, and start a
+  // fresh activity trace so the web UI shows the work for this wake.
   try {
     clearTurnEnded();
   } catch {
     /* best-effort */
   }
-  // Start each batch with a fresh activity trace so the web UI shows the
-  // work for this wake, not a stale trace from the previous turn.
-  try {
-    clearActivity();
-  } catch {
-    /* best-effort */
-  }
-  try {
-    clearUsageProgress();
-  } catch {
-    /* best-effort */
-  }
-  let lastProviderError: { message: string; classification?: string } | null = null;
-  let sentAny = false;
-  // Captured from the provider's `usage` event; flushed at end of turn so
-  // it can be linked to the last outbound row written this turn.
-  let pendingUsage: import('./providers/types.js').TurnUsage | null = null;
-  let latestUsage: import('./providers/types.js').TurnUsage | null = turnUsage(execution.current);
-  // Captured from the provider's `checkpoint` event; flushed with the usage so
-  // it lands on the same outbound row.
-  let pendingCheckpoint: string | null = null;
-  const resetActivityForNextTurn = () => {
-    try {
-      clearActivity();
-    } catch {
-      /* best-effort */
-    }
-    try {
-      clearUsageProgress();
-    } catch {
-      /* best-effort */
-    }
-    latestUsage = null;
-  };
+  resetLiveTurnState();
 
   // Per-push batch queue. Each push (initial + every follow-up) enqueues
   // its ids + routing. On `result` we drain the queue — only then are the
@@ -926,17 +822,6 @@ async function processQuery(
   type QueuedBatch = { ids: string[]; routing: RoutingContext };
   const turnBatchQueue: QueuedBatch[] = [{ ids: [...initialBatchIds], routing }];
   const consumedIds = new Set(initialBatchIds);
-  const steeringInputs = new Map<string, MessageInRow>();
-  const declinedSteering = new Set<string>();
-  const supportsSteering = persistContinuation && provider.supportsSteering === true && query.steer !== undefined;
-
-  const releaseUnappliedSteering = (): void => {
-    for (const messageId of steeringInputs.keys()) {
-      writeInputState({ messageId, status: 'queued', reason: 'turn_finished', queuedForNextTurn: true });
-    }
-    steeringInputs.clear();
-    declinedSteering.clear();
-  };
 
   // Snapshot the outbound seq so the result handler can detect whether MCP
   // tools wrote anything this turn. Without this, an agent that calls
@@ -946,57 +831,54 @@ async function processQuery(
     (getOutboundDb().prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
   let outboundMaxAtTurnStart = currentOutboundMax();
 
-  /**
-   * Count outbound rows written this turn that represent a real user-facing
-   * reply (text, file, or any non-operation chat content) vs operation-only
-   * rows (reactions, edits) and web-only internal-thought rows.
-   *
-   * A reaction or edit is NOT a substitute for answering the user; if the
-   * agent only reacts and then leaves its final-result text unwrapped, the
-   * nudge path must still fire so the answer isn't silently dropped.
-   */
-  const countTurnContentMessages = (since: number, replyRoute?: RoutingContext): number => {
-    const rows = getOutboundDb()
-      .prepare('SELECT kind, content, channel_type, platform_id, thread_id FROM messages_out WHERE seq > ? AND turn_id = ?')
-      .all(since, turnId) as {
-      kind: string;
-      content: string;
-      channel_type: string | null;
-      platform_id: string | null;
-      thread_id: string | null;
-    }[];
-    let n = 0;
-    for (const r of rows) {
-      if (replyRoute && (
-        r.channel_type !== replyRoute.channelType ||
-        r.platform_id !== replyRoute.platformId ||
-        r.thread_id !== replyRoute.threadId
-      )) continue;
-      // kind='internal' is the web thought-bubble surfaced by dispatchResultText
-      // from <internal>...</internal> blocks — not a reply.
-      if (r.kind === 'internal' || r.kind === 'system') continue;
-      // chat-kind rows can carry either content (text/markdown/files) or a
-      // bare operation (reaction/edit). Only the former counts as a reply.
-      if (r.kind === 'chat') {
-        type ContentShape = { operation?: unknown; text?: unknown; markdown?: unknown; files?: unknown };
-        let parsed: ContentShape | null = null;
-        try {
-          parsed = JSON.parse(r.content) as ContentShape;
-        } catch {
-          parsed = null;
-        }
-        if (parsed && parsed.operation && !parsed.text && !parsed.markdown && !parsed.files) continue;
-      }
-      n++;
-    }
-    return n;
-  };
-
   // Prompt queue for the exchange hook — each result event consumes the
   // oldest unanswered prompt, except a wrapping-retry result, which answers
   // the same prompt again. Unused (and unmaintained) when the provider
   // doesn't implement `onExchangeComplete`.
   const archivePrompts: string[] = [initialPrompt];
+
+  // `turnActive` is true between turn start (initial entry into the
+  // for-await + every follow-up push) and the terminating `result` /
+  // `error` event. While true, the liveness timer below keeps the heartbeat
+  // warm; when false it goes stale so the host marks us idle.
+  let turnActive = true;
+  const endStream = (): void => {
+    if (endedForCommand) return;
+    endedForCommand = true;
+    query.end();
+  };
+
+  // FORK-HOOK:state
+  const accounting = new TurnAccounting(execution);
+  const runaway = new RunawayGuard();
+  const steering = new SteeringSession(provider, query, persistContinuation);
+  const recovery = new DeliveryRecovery(
+    {
+      query,
+      endStream,
+      queueEmpty: () => turnBatchQueue.length === 0,
+      beginCorrectiveTurn: (activityText) => {
+        appendActivity({ kind: 'notification', id: `nudge:${generateId()}`, text: activityText });
+        turnActive = true;
+        try {
+          clearTurnEnded();
+        } catch {
+          /* best-effort */
+        }
+      },
+      dispatch: (text, replyRouting, deliverUnwrapped, since, replyOnly) =>
+        dispatchResultText(text, replyRouting, deliverUnwrapped, since, undefined, replyOnly),
+      exchangeComplete: (result, status) =>
+        notifyExchangeComplete(onExchangeComplete, {
+          prompt: archivePrompts[0] ?? initialPrompt,
+          result,
+          continuation: queryContinuation ?? initialContinuation,
+          status,
+        }),
+    },
+    routing,
+  );
+  const publishTurn = (): void => steering.publishTurn(turnId, userStopped, activeTurnRouting);
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -1007,343 +889,167 @@ async function processQuery(
   // Stream liveness is decided host-side via session-link signals + processing
   // claim age (see src/host-sweep.ts); if something is truly stuck, the host
   // will kill the container and messages get reset to pending.
-  let pollInFlight = false;
-  let resultFinishing = false;
-  let pollDirty = false;
   let endedForCommand = false;
-  let corruptionStreak = 0;
-  let followUpTimer: ReturnType<typeof setTimeout> | null = null;
-  let unsubscribeHostEvents: () => void = () => {};
-  const resetMalformedToolRecovery = (): void => {
-    malformedToolRecoveryAttempts = 0;
-    malformedToolRecoveryExhausted = false;
-    malformedToolRecoveryRouting = null;
-    malformedToolRecoveryHadNativeTool = false;
-    postToolDeliveryRecoveryAttempts = 0;
-    recoveringOffRouteReply = false;
-    executedToolCalls.clear();
-  };
-  const exhaustMalformedToolRecovery = (failedRouting: RoutingContext): void => {
-    malformedToolRecoveryExhausted = true;
-    malformedToolErrorRouting = failedRouting;
-  };
-  const stopFollowUpWatcher = () => {
-    unsubscribeHostEvents();
-    unsubscribeHostEvents = () => {};
-    if (followUpTimer) clearTimeout(followUpTimer);
-    followUpTimer = null;
-  };
-  const scheduleNextDue = () => {
-    if (done || userStopped || endedForCommand || followUpTimer) return;
-    const delay = nextPendingDueDelayMs();
-    if (delay === undefined) return;
-    followUpTimer = setTimeout(() => {
-      followUpTimer = null;
-      pollForFollowUps();
-    }, delay);
-    followUpTimer.unref?.();
-  };
-  const pollForFollowUps = () => {
-    if (done || userStopped || endedForCommand || resultFinishing) return;
-    if (pollInFlight) {
-      pollDirty = true;
+  let resultFinishing = false;
+  const pollForFollowUps = async (): Promise<void> => {
+    processPendingInputEdits(provider, getContinuation(providerName), { query, steeringInputs: steering.inputs });
+    const pending = getPendingMessages();
+
+    // Slash commands need a fresh query: /clear resets the SDK's
+    // resume id (fixed at sdkQuery() time); admin/passthrough commands
+    // (/compact, /cost, …) only dispatch when they're the first input
+    // of a query — pushed mid-stream they arrive as plain text and
+    // the SDK never runs them. Abort the active stream and leave the
+    // rows pending; the outer loop handles them on next iteration via
+    // the canonical command path + formatMessagesWithCommands. Abort,
+    // not end: end() lets an in-flight turn run to completion, which
+    // can block the command (e.g. /clear during a long task) for as
+    // long as the turn takes.
+    if (pending.some((m) => isRunnerCommand(m))) {
+      log('Pending slash command — aborting active stream so outer loop can process');
+      endedForCommand = true;
+      query.abort();
       return;
     }
-    pollInFlight = true;
 
-    void (async () => {
-      try {
-        processPendingInputEdits(provider, getContinuation(providerName), { query, steeringInputs });
-        const pending = getPendingMessages();
+    // Scheduled tasks must never be folded into an active query. A task
+    // pushed as a follow-up inherits the in-flight conversation context —
+    // often the very exchange that just scheduled it — and the model
+    // treats it as already-handled, emitting an empty result: the task
+    // fires but nothing is sent. Instead, end the stream and leave the
+    // task rows pending so the outer loop runs each task as its own clean
+    // turn (fresh prompt + the pre-task script hook, which then runs
+    // exactly once). Unlike the command path we use end(), not abort():
+    // a task is not urgent, so let any in-flight reply finish rather than
+    // cutting it off.
+    if (pending.some((m) => m.kind === 'task')) {
+      log('Pending scheduled task — ending active stream so it runs as its own turn');
+      endedForCommand = true;
+      query.end();
+      return;
+    }
 
-        // Slash commands need a fresh query: /clear resets the SDK's
-        // resume id (fixed at sdkQuery() time); admin/passthrough commands
-        // (/compact, /cost, …) only dispatch when they're the first input
-        // of a query — pushed mid-stream they arrive as plain text and
-        // the SDK never runs them. Abort the active stream and leave the
-        // rows pending; the outer loop handles them on next iteration via
-        // the canonical command path + formatMessagesWithCommands. Abort,
-        // not end: end() lets an in-flight turn run to completion, which
-        // can block the command (e.g. /clear during a long task) for as
-        // long as the turn takes.
-        if (pending.some((m) => isRunnerCommand(m))) {
-          log('Pending slash command — aborting active stream so outer loop can process');
-          endedForCommand = true;
-          query.abort();
-          return;
-        }
+    // Skip legacy system messages (MCP tool responses).
+    // Thread routing is the router's concern — if a message landed in this
+    // session, the agent should see it. Per-thread sessions already isolate
+    // threads into separate containers; shared sessions intentionally merge
+    // everything. Filtering on thread_id here caused deadlocks when the
+    // initial batch and follow-ups had mismatched thread_ids (e.g. a
+    // host-generated welcome trigger with null thread vs a Discord DM reply).
+    const newMessages = pending.filter((m) => m.kind !== 'system');
+    if (turnActive) {
+      // FORK-HOOK:steering
+      steering.offer(activeTurnRouting, turnId);
+      return;
+    }
+    if (newMessages.length === 0) return;
 
-        // Scheduled tasks must never be folded into an active query. A task
-        // pushed as a follow-up inherits the in-flight conversation context —
-        // often the very exchange that just scheduled it — and the model
-        // treats it as already-handled, emitting an empty result: the task
-        // fires but nothing is sent. Instead, end the stream and leave the
-        // task rows pending so the outer loop runs each task as its own clean
-        // turn (fresh prompt + the pre-task script hook, which then runs
-        // exactly once). Unlike the command path we use end(), not abort():
-        // a task is not urgent, so let any in-flight reply finish rather than
-        // cutting it off. The follow-up poll only runs while a turn is active,
-        // so this fires only when a task lands mid-turn; a task arriving at an
-        // idle container is already handled directly by the outer loop.
-        if (pending.some((m) => m.kind === 'task')) {
-          log('Pending scheduled task — ending active stream so it runs as its own turn');
-          endedForCommand = true;
-          query.end();
-          return;
-        }
+    // A user can answer as soon as the card is delivered, before the
+    // provider has emitted the result that safely closes the asking turn.
+    // Persist the answer immediately, but do not push it into that active
+    // turn. The next poll after the result resumes it as a distinct turn.
+    if (shouldDeferInteractiveResponse(newMessages, turnActive)) return;
 
-        // Skip legacy system messages (MCP tool responses).
-        // Thread routing is the router's concern — if a message landed in this
-        // session, the agent should see it. Per-thread sessions already isolate
-        // threads into separate containers; shared sessions intentionally merge
-        // everything. Filtering on thread_id here caused deadlocks when the
-        // initial batch and follow-ups had mismatched thread_ids (e.g. a
-        // host-generated welcome trigger with null thread vs a Discord DM reply).
-        const newMessages = pending.filter((m) => m.kind !== 'system');
-        if (turnActive) {
-          // Queue visibility must not depend on which inputs fit the next prompt.
-          for (const message of getPendingMessages(false, { uncapped: true })) {
-            if (!['chat', 'chat-sdk'].includes(message.kind) || message.trigger !== 1 ||
-              steeringInputs.has(message.id)) continue;
-            const disposition = steeringDisposition(message, activeTurnRouting, turnId, supportsSteering);
-            // "Waiting to steer" means the provider has accepted the input.
-            writeInputState({ ...disposition, status: 'queued', queuedForNextTurn: true });
-          }
-          if (supportsSteering) {
-            let accepted = false;
-            while (!accepted) {
-              const candidates = getSteeringCandidates(activeTurnRouting, [
-                ...steeringInputs.keys(), ...declinedSteering,
-              ]);
-              if (candidates.length === 0) break;
-              for (const message of candidates) {
-                const disposition = steeringDisposition(message, activeTurnRouting, turnId, true);
-                if (disposition.status !== 'steering') {
-                  declinedSteering.add(message.id);
-                  writeInputState({ ...disposition, queuedForNextTurn: true });
-                  continue;
-                }
-                const files = extractFileAttachments([message]);
-                if (!query.steer!({
-                  id: message.id,
-                  prompt: formatMessages([message]),
-                  ...(files.length ? { files } : {}),
-                })) {
-                  declinedSteering.add(message.id);
-                  writeInputState({ ...disposition, status: 'queued', reason: 'turn_finished', queuedForNextTurn: true });
-                  continue;
-                }
-                accepted = true;
-                steeringInputs.set(message.id, message);
-                writeInputState(disposition);
-              }
-            }
-          }
-          return;
-        }
-        if (newMessages.length === 0) return;
+    // All providers wait for the prior result boundary; push acceptance
+    // alone must never promote input while the preceding turn is active.
+    startInputProcessing(newMessages);
 
-        // A user can answer as soon as the card is delivered, before the
-        // provider has emitted the result that safely closes the asking turn.
-        // Persist the answer immediately, but do not push it into that active
-        // turn. The next poll after the result resumes it as a distinct turn.
-        if (shouldDeferInteractiveResponse(newMessages, turnActive)) return;
+    // Run pre-task scripts on follow-ups too — without this, a task that
+    // arrives during an active query (e.g. a */10 monitoring cron) bypasses
+    // its script gate and always wakes the agent, defeating the gate.
+    // Mirrors the initial-batch hook above.
+    let keep = newMessages;
+    let skipped: string[] = [];
+    // MODULE-HOOK:scheduling-pre-task-followup:start
+    const { applyPreTaskScripts } = await import('./scheduling/task-script.js');
+    const preTask = await applyPreTaskScripts(newMessages);
+    keep = preTask.keep;
+    skipped = preTask.skipped;
+    if (skipped.length > 0) {
+      markCompleted(skipped);
+      log(`Pre-task script skipped ${skipped.length} follow-up task(s): ${skipped.join(', ')}`);
+    }
+    // MODULE-HOOK:scheduling-pre-task-followup:end
 
-        // All providers wait for the prior result boundary; push acceptance
-        // alone must never promote input while the preceding turn is active.
-        startInputProcessing(newMessages);
+    if (keep.length === 0) return;
+    // Re-check done — the outer query may have finished while the script
+    // was awaited. Pushing into a closed stream is wasted work; the
+    // claimed messages get released by the host's processing-claim sweep.
+    if (done || userStopped) {
+      releaseProcessing(keep.map((message) => message.id));
+      return;
+    }
 
-        // Run pre-task scripts on follow-ups too — without this, a task that
-        // arrives during an active query (e.g. a */10 monitoring cron) bypasses
-        // its script gate and always wakes the agent, defeating the gate.
-        // Mirrors the initial-batch hook above.
-        let keep = newMessages;
-        let skipped: string[] = [];
-        // MODULE-HOOK:scheduling-pre-task-followup:start
-        const { applyPreTaskScripts } = await import('./scheduling/task-script.js');
-        const preTask = await applyPreTaskScripts(newMessages);
-        keep = preTask.keep;
-        skipped = preTask.skipped;
-        if (skipped.length > 0) {
-          markCompleted(skipped);
-          log(`Pre-task script skipped ${skipped.length} follow-up task(s): ${skipped.join(', ')}`);
-        }
-        // MODULE-HOOK:scheduling-pre-task-followup:end
-
-        if (keep.length === 0) return;
-        // Re-check done — the outer query may have finished while the script
-        // was awaited. Pushing into a closed stream is wasted work; the
-        // claimed messages get released by the host's processing-claim sweep.
-        if (done || userStopped) {
-          releaseProcessing(keep.map((message) => message.id));
-          return;
-        }
-
-        const keptIds = keep.map((m) => m.id);
-        const prompt = formatMessages(keep);
-        const followUpFiles = extractFileAttachments(keep);
-        log(`Pushing ${keep.length} follow-up message(s) into active query`);
-        // Reset the per-turn delivery/notice flags for the new turn. On a
-        // long-lived provider (OpenCode) the query stays open across turns, so
-        // these query-scoped flags would otherwise stay set from an earlier
-        // turn that DID deliver. That stickiness silently breaks the empty-turn
-        // safety net: `sentAny` staying true skips both the in-loop
-        // `query.end()` (below) and the post-stream "finished without producing
-        // a response" notice, so a later turn that strips to empty (e.g. a
-        // reasoning model emitting a mangled/unclosed <think> wrapper) leaves
-        // the user with total silence. Reset all three so the notices key off
-        // THIS turn's delivery, not the whole warm query's history. The
-        // malformed-tool retry state resets below only at a real idle-to-active
-        // turn boundary; concurrent arrivals are deferred while it is in flight.
-        nudgedForDelivery = false;
-        resultSeen = false;
-        lastProviderError = null;
-        sentAny = false;
-        emptyResultSeen = false;
-        silenceConfirmed = false;
-        if (promptTracker) promptTracker.latest = prompt;
-        activeTurnRouting = extractRouting(keep);
-        if (promptTracker) promptTracker.routing = activeTurnRouting;
-        // If the previous result already completed, this push starts a new
-        // turn immediately. Clear its trace before the provider can emit the
-        // first event. When a follow-up was queued during an active turn, the
-        // result handler below performs this reset at the precise boundary.
-        if (!turnActive) {
-          resetActivityForNextTurn();
-          resetMalformedToolRecovery();
-        }
-        turnActive = true;
-        execution.current = beginTurn(activeTurnRouting, keptIds, false);
-        countedToolCallIds.clear();
-        identicalToolStreak = 0;
-        lastToolSignature = null;
-        consecutiveTextSteps = 0;
-        turnId = execution.current.turnId;
-        publishTurn();
-        try {
-          clearTurnEnded();
-        } catch {
-          /* best-effort */
-        }
-        setCurrentInReplyTo(activeTurnRouting.inReplyTo);
-        if (!query.push(prompt, followUpFiles.length > 0 ? followUpFiles : undefined)) {
-          await settleTurn(execution.current, 'interrupted');
-          releaseProcessing(keptIds);
-          turnActive = false;
-          signalTurnState(null);
-          endedForCommand = true;
-          query.end();
-          return;
-        }
-        consumedIds.clear();
-        for (const id of keptIds) {
-          consumedIds.add(id);
-          associateInput(execution.current, id, 'consumed');
-        }
-        archivePrompts.push(prompt);
-        // Enqueue this push as its own batch. We do NOT markCompleted here —
-        // that happens when the corresponding `result` event drains the
-        // queue. Marking at push time loses messages whose prompts the
-        // provider collapsed into a single turn (no separate result fires).
-        turnBatchQueue.push({ ids: keptIds, routing: activeTurnRouting });
-      } catch (err) {
-        // Without this catch the rejection escapes the void IIFE and Node
-        // terminates the container on unhandled-rejection. The initial-batch
-        // path is wrapped by processQuery's outer try/catch; the follow-up
-        // path is not, so it needs its own.
-        const errMsg = err instanceof Error ? err.message : String(err);
-        log(`Follow-up poll error: ${errMsg}`);
-
-        // Session DB gone — the host deleted the thread (e.g. user clicked
-        // the trash icon) and removed the on-disk session dir. Without this
-        // bail, we'd spam `unable to open database file` at the poll rate
-        // forever until host-sweep's heartbeat-staleness rule eventually
-        // notices. Exit immediately so the container is torn down.
-        if (isMissingDbError(errMsg)) {
-          log('Follow-up poll: inbound.db is gone — session was deleted by host. Exiting.');
-          done = true;
-          stopFollowUpWatcher();
-          setTimeout(() => process.exit(0), 100);
-          return;
-        }
-
-        // Detect SQLite cross-mount corruption (Docker Desktop macOS virtiofs /
-        // gRPC-FUSE coherency bug — the kernel page cache for the inbound.db
-        // bind mount can latch a torn snapshot mid-host-write, after which
-        // every fresh openInboundDb() in this process sees the same broken
-        // view. Reopening inside the container does NOT recover; only a fresh
-        // container mount does. Exit so the host sweep respawns us.
-        if (isCorruptionError(errMsg)) {
-          corruptionStreak += 1;
-          if (corruptionStreak >= CORRUPTION_STREAK_EXIT) {
-            log(
-              `Follow-up poll: ${corruptionStreak} consecutive '${errMsg}' errors — ` +
-                `inbound.db page cache is poisoned. Exiting so host respawns with a fresh mount.`,
-            );
-            // Stop touching the heartbeat so host-sweep stale detection fires
-            // promptly even if exit() races with in-flight async work.
-            done = true;
-            stopFollowUpWatcher();
-            // Defer exit one tick so this log line flushes through Docker's
-            // log driver before the process dies.
-            setTimeout(() => process.exit(75), 100);
-          }
-        } else {
-          corruptionStreak = 0;
-        }
-      } finally {
-        pollInFlight = false;
-        if (pollDirty) {
-          pollDirty = false;
-          pollForFollowUps();
-        } else {
-          scheduleNextDue();
-        }
-      }
-    })();
+    const keptIds = keep.map((m) => m.id);
+    const prompt = formatMessages(keep);
+    const followUpFiles = extractFileAttachments(keep);
+    log(`Pushing ${keep.length} follow-up message(s) into active query`);
+    // FORK-HOOK:turn-start — per-turn flags key off THIS turn's delivery,
+    // not the whole warm query's history.
+    recovery.resetDeliveryFlags();
+    resultSeen = false;
+    lastProviderError = null;
+    if (promptTracker) promptTracker.latest = prompt;
+    activeTurnRouting = extractRouting(keep);
+    if (promptTracker) promptTracker.routing = activeTurnRouting;
+    // If the previous result already completed, this push starts a new
+    // turn immediately. Clear its trace before the provider emits the
+    // first event. When a follow-up was queued during an active turn, the
+    // result handler below performs this reset at the precise boundary.
+    // Retry budgets reset only at a real idle-to-active boundary.
+    if (!turnActive) {
+      resetLiveTurnState();
+      recovery.resetToolRecovery();
+    }
+    turnActive = true;
+    execution.current = beginTurn(activeTurnRouting, keptIds, false);
+    runaway.reset();
+    turnId = execution.current.turnId;
+    publishTurn();
+    try {
+      clearTurnEnded();
+    } catch {
+      /* best-effort */
+    }
+    setCurrentInReplyTo(activeTurnRouting.inReplyTo);
+    if (!query.push(prompt, followUpFiles.length > 0 ? followUpFiles : undefined)) {
+      await settleTurn(execution.current, 'interrupted');
+      releaseProcessing(keptIds);
+      turnActive = false;
+      signalTurnState(null);
+      endedForCommand = true;
+      query.end();
+      return;
+    }
+    consumedIds.clear();
+    for (const id of keptIds) {
+      consumedIds.add(id);
+      associateInput(execution.current, id, 'consumed');
+    }
+    archivePrompts.push(prompt);
+    // Enqueue this push as its own batch. We do NOT markCompleted here —
+    // that happens when the corresponding `result` event drains the
+    // queue. Marking at push time loses messages whose prompts the
+    // provider collapsed into a single turn (no separate result fires).
+    turnBatchQueue.push({ ids: keptIds, routing: activeTurnRouting });
   };
-  const wakeFollowUpWatcher = () => {
-    if (followUpTimer) clearTimeout(followUpTimer);
-    followUpTimer = null;
-    pollForFollowUps();
-  };
-  unsubscribeHostEvents = onHostEvent(wakeFollowUpWatcher);
-  scheduleNextDue();
+  // FORK-HOOK:follow-ups — woken by host events over the session link and
+  // by due scheduled rows, instead of upstream's fixed-interval poll.
+  const watcher = new FollowUpWatcher({
+    poll: pollForFollowUps,
+    closed: () => done || userStopped || endedForCommand,
+    finishingResult: () => resultFinishing,
+    onFatal: () => {
+      done = true;
+    },
+  });
+  watcher.start();
 
-  // Keep the heartbeat warm for as long as a turn is actually in flight.
-  // The SDK can stall for 10–30s between events while Anthropic generates
-  // the first token of a response; without this timer the host-side typing
-  // module would mark the agent stale, drop the indicator, and never
-  // re-arm it until the next inbound. Independent of `signalHeartbeat()`
-  // on each event — that path still runs and stays the source of truth
-  // when events are flowing.
-  //
-  // `turnActive` is true between turn start (initial entry into the
-  // for-await + every follow-up push) and the terminating `result` /
-  // `error` event. When false, we deliberately let the heartbeat go
-  // stale so the host marks us idle and clears the typing indicator —
-  // matching the behavior between processQuery calls (the outer poll
-  // loop doesn't touch the heartbeat either).
-  let turnActive = true;
-  const publishTurn = (): void => {
-    signalTurnState({
-      id: turnId,
-      status: userStopped ? 'stopping' : 'running',
-      channelType: activeTurnRouting.channelType ?? '',
-      platformId: activeTurnRouting.platformId ?? '',
-      threadId: activeTurnRouting.threadId,
-      ...(supportsSteering ? { supportsSteering: true } : {}),
-      ...(supportsSteering && provider.supportsInputEditing === true && query.replaceSteering
-        ? { supportsInputEditing: true } : {}),
-      ...(supportsSteering && provider.supportsInputCancellation === true && query.cancelSteering
-        ? { supportsInputCancellation: true } : {}),
-    });
-  };
   const unsubscribeStop = onTurnStop((requestedId) => {
     if (requestedId !== turnId || !turnActive || userStopped || done) return;
     userStopped = true;
     markTurnStopping(execution.current);
-    stopFollowUpWatcher();
+    watcher.stop();
     // A crash while the provider is settling must not replay cancelled input.
     // Ordinary queued messages have not been claimed and are not in this list.
     markCompleted([...consumedIds]);
@@ -1351,140 +1057,12 @@ async function processQuery(
     query.abort('user');
   });
   publishTurn();
-  const beginCorrectiveTurn = (activityText: string): void => {
-    appendActivity({
-      kind: 'notification',
-      id: `nudge:${generateId()}`,
-      text: activityText,
-    });
-    turnActive = true;
-    try {
-      clearTurnEnded();
-    } catch {
-      /* best-effort */
-    }
-  };
-  // Push the recovery nudge: a self-correction retry within the same warm
-  // query. Used for both failure shapes — bare unwrapped text and a reply
-  // swallowed by reasoning that normalized to empty. The nudge offers an
-  // explicit escape hatch (re-send wrapped, OR emit <internal> to confirm
-  // intentional silence) so a genuinely silent turn is never prodded into
-  // fabricating a reply. One-shot: callers gate on `!nudgedForDelivery`.
-  const pushDeliveryNudge = (failedRouting: RoutingContext): void => {
-    nudgedForDelivery = true;
-    deliveryErrorRouting = failedRouting;
-    log('Recovery nudge: turn delivered nothing — asking the agent to re-send it wrapped');
-    // Surface the recovery in the web-UI activity trace. The buffer carries
-    // across the nudge→retry boundary (no reset without a queued user batch)
-    // and flushes onto the recovered reply's row.
-    beginCorrectiveTurn('Reply wasn’t formatted for delivery — asked the agent to re-send it.');
-    const names = getAllDestinations()
-      .map((d) => d.name)
-      .join(', ');
-    query.push(
-      `<system>Your reply was not delivered. Either it was not wrapped in ` +
-        `<message to="name">...</message> blocks, or it was left inside your ` +
-        `reasoning. All delivered output must be wrapped: use <message to="name"> ` +
-        `for content to send, or <internal> for scratchpad. ` +
-        `Your destinations: ${names}. ` +
-        `If you have a response, re-send it now with the correct wrapping. ` +
-        `If you intentionally have nothing to send, reply with a brief ` +
-        `<internal>…</internal> note explaining why (it will not be delivered).</system>`,
-    );
-  };
-  const pushMalformedToolNudge = (failedRouting: RoutingContext): void => {
-    if (malformedToolRecoveryAttempts === 0) malformedToolRecoveryHadNativeTool = false;
-    malformedToolRecoveryAttempts++;
-    malformedToolRecoveryMode = 'tool';
-    malformedToolRecoveryRouting = failedRouting;
-    log(
-      `Recovery nudge: model emitted a malformed tool invocation ` +
-        `(attempt ${malformedToolRecoveryAttempts}/${MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS})`,
-    );
-    beginCorrectiveTurn('A malformed tool call did not run - asked the agent to retry it natively.');
-    query.push(
-      `<system>Your previous tool invocation was malformed: it either omitted required arguments ` +
-        `or printed XML-like tool-call markup as ordinary text. That tool call did NOT execute. ` +
-        `Continue the original request now and invoke the required tools through the native tool ` +
-        `interface with all required arguments. Do not write <tool_call>, <invoke>, or <command> ` +
-        `markup yourself. After the tool work completes, send the result in a ` +
-        `<message to="name">...</message> block.</system>`,
-    );
-  };
-  const pushPostToolDeliveryNudge = (failedRouting: RoutingContext, replyOnly = false): boolean => {
-    recoveringOffRouteReply ||= replyOnly;
-    postToolDeliveryRecoveryAttempts++;
-    nudgedForDelivery = true;
-    malformedToolRecoveryHadNativeTool = true;
-    malformedToolRecoveryMode = 'delivery';
-    malformedToolRecoveryRouting = failedRouting;
-    log(
-      `Recovery nudge: undelivered final output followed native tool activity - requesting delivery only ` +
-        `(attempt ${postToolDeliveryRecoveryAttempts}/${MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS})`,
-    );
-    beginCorrectiveTurn(
-      'A tool ran but its final reply was malformed - asked the agent to report the result without repeating the action.',
-    );
-    const names = getAllDestinations()
-      .map((d) => d.name)
-      .join(', ');
-    const replyDestination = findByRouting(failedRouting.channelType, failedRouting.platformId);
-    const replyInstruction = replyDestination
-      ? `Report to <message to="${replyDestination.name}"> in the originating conversation. ` +
-        `Messages already sent to other destinations are not a reply here. `
-      : '';
-    const summarizeCall = ({ tool, detail }: { tool: string; detail?: string }): string => {
-      const safeDetail = detail
-        ? JSON.stringify(detail.slice(0, 240))
-            .replace(/&/g, '\\u0026')
-            .replace(/</g, '\\u003c')
-            .replace(/>/g, '\\u003e')
-        : '';
-      return `- ${tool}${safeDetail ? `: ${safeDetail}` : ''}`;
-    };
-    const calls = [...executedToolCalls.values()];
-    const completedCalls = calls.filter((call) => call.status === 'completed').map(summarizeCall);
-    const uncertainCalls = calls.filter((call) => call.status !== 'completed').map(summarizeCall);
-    const callSummary = [
-      ...(completedCalls.length > 0
-        ? [
-            `Calls whose tool invocation completed (use their native results above to determine success or failure):\n${completedCalls.join('\n')}`,
-          ]
-        : []),
-      ...(uncertainCalls.length > 0
-        ? [
-            `Calls that started but did not complete cleanly (they may still have effects):\n${uncertainCalls.join('\n')}`,
-          ]
-        : []),
-    ].join('\n');
-    const retryInstruction =
-      postToolDeliveryRecoveryAttempts > 1
-        ? `Your previous reporting-only response incorrectly tried to use another tool. ` +
-          `Do not continue, inspect, search, verify, or perform more work. Report only what the ` +
-          `completed calls already established and what remains unfinished. Output exactly one ` +
-          `<message to="name">...</message> block and no other text. `
-        : '';
-    const accepted = query.push(
-      `<system>At least one native tool already ran in the previous turn, but the final reply ` +
-        `was not delivered. Here is the execution record:\n${callSummary || 'One or more native tools may have executed.'}\n` +
-        `Do NOT repeat any of those calls or make equivalent requests through other tools. ` +
-        `Tools are disabled for this recovery turn. ${retryInstruction}Use the existing native results above and report ` +
-        `the actual result in ` +
-        `a <message to="name">...</message> block. ${replyInstruction}Your destinations: ${names}.</system>`,
-      undefined,
-      { tools: 'disabled' },
-    );
-    if (!accepted) {
-      malformedToolRecoveryMode = null;
-      exhaustMalformedToolRecovery(failedRouting);
-      if (!endedForCommand) {
-        endedForCommand = true;
-        query.end();
-      }
-      return false;
-    }
-    return true;
-  };
+
+  // Keep the heartbeat warm for as long as a turn is actually in flight.
+  // The SDK can stall for 10–30s between events while Anthropic generates
+  // the first token of a response; without this timer the host-side typing
+  // module would mark the agent stale, drop the indicator, and never
+  // re-arm it until the next inbound.
   const liveHandle = setInterval(() => {
     if (!turnActive) return;
     try {
@@ -1496,99 +1074,93 @@ async function processQuery(
   liveHandle.unref?.();
 
   resetTurnSendTracking();
-  const countedToolCallIds = new Set<string>();
-  let lastToolSignature: string | null = null;
-  let identicalToolStreak = 0;
-  let consecutiveTextSteps = 0;
-  let runawayAbortReason: string | null = null;
+
+  const abortRunaway = (reason: string | null): void => {
+    if (!reason || endedForCommand) return;
+    log(`Runaway turn: ${reason} — aborting stream`);
+    runaway.abortReason = reason;
+    endedForCommand = true;
+    query.abort();
+  };
+  // Provider events only the fork acts on; upstream ignores them.
+  const handleForkEvent = (event: ProviderEvent): void => {
+    switch (event.type) {
+      case 'steering_applied': {
+        const guidance = steering.apply(event.id, execution.current, userStopped);
+        turnBatchQueue[0]?.ids.push(event.id);
+        consumedIds.add(event.id);
+        archivePrompts[0] = `${archivePrompts[0] ?? initialPrompt}\n\n${guidance}`;
+        if (promptTracker) promptTracker.latest += `\n\n${guidance}`;
+        queueMicrotask(() => watcher.wake());
+        break;
+      }
+      case 'progress':
+        if (event.step.kind !== 'tool') break;
+        abortRunaway(runaway.onToolProgress(event.step, event.toolInputFingerprint));
+        recovery.onToolProgress(event.step);
+        break;
+      case 'assistant_message':
+        abortRunaway(runaway.onAssistantMessage());
+        break;
+      case 'error':
+        if (event.retryable) break;
+        // Capture non-retryable provider errors. Don't write to outbound
+        // here — the SDK may still throw immediately after (e.g. the
+        // stale-session case yields an is_error result then throws
+        // "No conversation found"). If it does, the outer catch handles
+        // the retry and the user never sees this transient error.
+        lastProviderError = { message: event.message, classification: event.classification };
+        if (promptTracker) promptTracker.routing = recovery.pendingRetryRouting ?? activeTurnRouting;
+        // Force the stream closed so the turn ends now. Without this, the
+        // SDK can keep the stream alive after a non-retryable error (e.g.
+        // a 429 rate-limit) and the next user message gets pushed in,
+        // transparently "recovering" — but the user never finds out their
+        // original request failed. End early so the unsurfacedError path
+        // notifies them; the next message starts a fresh query.
+        endStream();
+        break;
+      case 'usage':
+        accounting.onUsage(event.data);
+        break;
+      case 'usage_call':
+        accounting.onUsageCall(event.data);
+        break;
+      case 'checkpoint':
+        accounting.checkpoint = event.ref;
+        break;
+    }
+  };
+  // Settle the turn once its last queued batch is answered and wake the
+  // watcher so input that waited for this boundary starts the next turn.
+  const settleAtBoundary = async (): Promise<void> => {
+    if (!turnActive && (recovery.sentAny || recovery.silenceConfirmed)) {
+      if (!execution.current.failure) {
+        await settleTurn(execution.current, lastProviderError ? 'failed' : recovery.sentAny ? 'replied' : 'silent');
+      }
+      if (recovery.silenceConfirmed) {
+        endedForCommand = true;
+        query.end();
+      }
+      onBatchComplete?.([...consumedIds], lastProviderError !== null);
+    }
+    // Reset the per-turn baseline so a follow-up push within the same
+    // query starts a fresh "did MCP write anything?" window.
+    outboundMaxAtTurnStart = currentOutboundMax();
+    resultFinishing = false;
+    if (!turnActive && execution.current.settled) {
+      markCompleted([...consumedIds]);
+      signalTurnState(null);
+      queueMicrotask(() => watcher.wake());
+    }
+  };
 
   try {
     for await (const event of query.events) {
       signalHeartbeat();
-      if (userStopped && !['init', 'progress', 'usage', 'usage_call', 'checkpoint', 'steering_applied'].includes(event.type)) continue;
+      if (userStopped && !STOPPED_TURN_EVENTS.has(event.type)) continue;
       handleEvent(event, routing);
-
-      if (event.type === 'steering_applied') {
-        const message = steeringInputs.get(event.id);
-        if (!message) throw new Error(`Provider applied unaccepted steering input: ${event.id}`);
-        const batch = turnBatchQueue[0];
-        getOutboundDb().transaction(() => {
-          writeInputState({ messageId: event.id, status: 'applied', turnId });
-          associateInput(execution.current, event.id, 'applied');
-          if (userStopped) markCompleted([event.id]);
-          else markProcessing([event.id]);
-        })();
-        batch?.ids.push(event.id);
-        consumedIds.add(event.id);
-        steeringInputs.delete(event.id);
-        const guidance = formatMessages([message]);
-        archivePrompts[0] = `${archivePrompts[0] ?? initialPrompt}\n\n${guidance}`;
-        if (promptTracker) promptTracker.latest += `\n\n${guidance}`;
-        queueMicrotask(wakeFollowUpWatcher);
-      } else if (event.type === 'progress' && event.step.kind === 'tool') {
-        // Display detail intentionally omits arbitrary MCP arguments. Providers
-        // supply a private fingerprint once complete arguments are available.
-        // A terminal event without one still counts as a tool call, but it
-        // breaks the identical-call streak rather than assuming empty input.
-        const callResolved =
-          event.toolInputFingerprint !== undefined ||
-          !['pending', 'running'].includes(event.step.status);
-        if (callResolved && !countedToolCallIds.has(event.step.id)) {
-          countedToolCallIds.add(event.step.id);
-          consecutiveTextSteps = 0;
-          if (event.toolInputFingerprint !== undefined) {
-            const signature = `${event.step.tool}\u0000${event.toolInputFingerprint}`;
-            identicalToolStreak = signature === lastToolSignature ? identicalToolStreak + 1 : 1;
-            lastToolSignature = signature;
-          } else {
-            identicalToolStreak = 0;
-            lastToolSignature = null;
-          }
-        }
-        const runawayReason =
-          getDuplicateSendCount() >= MAX_DUPLICATE_SENDS_PER_TURN
-            ? `${getDuplicateSendCount()} duplicate send_message calls`
-            : identicalToolStreak >= MAX_IDENTICAL_TOOL_STREAK
-              ? `${identicalToolStreak} identical consecutive "${event.step.tool}" calls`
-              : countedToolCallIds.size > MAX_TOOL_CALLS_PER_TURN
-                ? `${countedToolCallIds.size} tool calls`
-                : null;
-        if (runawayReason && !endedForCommand) {
-          log(`Runaway turn: ${runawayReason} — aborting stream`);
-          runawayAbortReason = runawayReason;
-          endedForCommand = true;
-          query.abort();
-        }
-        const isSubstantiveTool = !event.step.tool.endsWith('send_message');
-        const priorCall = executedToolCalls.get(event.step.id);
-        const reachedExecution =
-          !event.step.rejectedBeforeExecution &&
-          (event.step.status === 'running' ||
-            event.step.status === 'completed' ||
-            event.step.status === 'error' ||
-            event.step.status === 'interrupted' ||
-            event.step.status === 'unknown' ||
-            priorCall !== undefined);
-        if (isSubstantiveTool && reachedExecution) {
-          malformedToolRecoveryHadNativeTool = true;
-          executedToolCalls.set(event.step.id, {
-            tool: event.step.tool,
-            ...(event.step.detail || priorCall?.detail ? { detail: event.step.detail ?? priorCall?.detail } : {}),
-            status: event.step.status === 'pending' ? priorCall!.status : event.step.status,
-          });
-        }
-      }
-
-      if (event.type === 'assistant_message') {
-        consecutiveTextSteps++;
-        if (consecutiveTextSteps >= MAX_CONSECUTIVE_TEXT_STEPS && !endedForCommand) {
-          const reason = `${consecutiveTextSteps} replies in a row with no tool call`;
-          log(`Runaway turn: ${reason} — aborting stream`);
-          runawayAbortReason = reason;
-          endedForCommand = true;
-          query.abort();
-        }
-      }
+      // FORK-HOOK:event
+      handleForkEvent(event);
 
       if (event.type === 'init') {
         queryContinuation = event.continuation;
@@ -1598,78 +1170,29 @@ async function processQuery(
         // container died between `init` and `result`, the SDK session was
         // effectively orphaned and the next message started a blank
         // Claude session with no prior context.
-        // Skip for one-shot calls (e.g. the in-turn ack), which run in a
-        // throwaway session and would otherwise clobber the rolled-back
-        // continuation set by the failing turn's processQuery.
         if (persistContinuation) {
           setContinuation(providerName, event.continuation);
         }
-      } else if (event.type === 'error' && !event.retryable) {
-        // Capture non-retryable provider errors. Don't write to outbound
-        // here — the SDK may still throw immediately after (e.g. the
-        // stale-session case yields an is_error result then throws
-        // "No conversation found"). If it does, the outer catch handles
-        // the retry and the user never sees this transient error.
-        lastProviderError = { message: event.message, classification: event.classification };
-        if (promptTracker) {
-          promptTracker.routing = malformedToolRecoveryRouting ?? activeTurnRouting;
-        }
-
-        // Force the stream closed so the turn ends now. Without this, the
-        // SDK can keep the stream alive after a non-retryable error (e.g.
-        // a 429 rate-limit) and the next user message gets pushed in,
-        // transparently "recovering" — but the user never finds out their
-        // original request failed. End early so the unsurfacedError path
-        // notifies them; the next message starts a fresh query.
-        if (!endedForCommand) {
-          endedForCommand = true;
-          query.end();
-        }
-      } else if (event.type === 'usage') {
-        // Provider reports an attempt aggregate, replacing its live call deltas.
-        // Accumulated, not replaced: a turn that retried, or that errored and
-        // was re-prompted, emits one event per attempt and every attempt was
-        // billed. Non-additive fields take the latest attempt's value.
-        pendingUsage = accumulateTurnUsage(pendingUsage, event.data);
-        recordTurnUsage(execution.current, event.data, true);
-        latestUsage = turnUsage(execution.current);
-      } else if (event.type === 'usage_call') {
-        recordTurnUsage(execution.current, event.data, false);
-        latestUsage = turnUsage(execution.current);
-        try {
-          writeUsageProgress(latestUsage!);
-        } catch {
-          /* best-effort */
-        }
-      } else if (event.type === 'checkpoint') {
-        pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {
         resultFinishing = true;
         await waitForTurnTools(execution.current);
         if (userStopped) continue;
-        releaseUnappliedSteering();
+        steering.releaseUnapplied();
         resultSeen = true;
-        const recoveryMode = malformedToolRecoveryMode;
-        const isMalformedToolRecoveryResult = recoveryMode !== null;
-        const isPostToolDeliveryRecovery = recoveryMode === 'delivery';
-        malformedToolRecoveryMode = null;
+        // FORK-HOOK:recovery — a corrective retry's result answers the
+        // retried turn: it keeps that turn's route and drains no batch.
+        const retry = recovery.beginResult();
         // Drain the OLDEST batch from the queue — one result corresponds
         // to one batch of work. When providers run separate turns per
-        // pushed prompt (typical case, including OpenCode when pushes
-        // are spaced out enough that the prior turn has already
-        // finished), each result event drains its own batch, the reply
-        // is stamped with that batch's routing, and the typing
-        // indicator stays on across the gap because the queue still
-        // has the next batch.
-        //
-        // When a provider really does collapse multiple queued pushes
-        // into a single assistant response (one result event for two
-        // pushed prompts), the leftover batch stays in the queue and
-        // gets drained by the stream-end finally block below.
-        let resultRouting =
-          isMalformedToolRecoveryResult && malformedToolRecoveryRouting ? malformedToolRecoveryRouting : activeTurnRouting;
+        // pushed prompt, each result event drains its own batch, the reply
+        // is stamped with that batch's routing, and the typing indicator
+        // stays on across the gap because the queue still has the next
+        // batch. When a provider collapses multiple queued pushes into a
+        // single response, the leftover batch stays in the queue and gets
+        // drained by the stream-end finally block below.
+        let resultRouting = retry.routing ?? activeTurnRouting;
         const drainedIds: string[] = [];
-        if (!isMalformedToolRecoveryResult && turnBatchQueue.length > 0) {
+        if (!retry.isRetry && turnBatchQueue.length > 0) {
           const head = turnBatchQueue.shift()!;
           drainedIds.push(...head.ids);
           resultRouting = head.routing;
@@ -1691,265 +1214,41 @@ async function processQuery(
         // provider may run within this query (e.g. on the nudge push
         // below, or a still-queued follow-up that arrived in the gap).
         setCurrentInReplyTo(resultRouting.inReplyTo);
-        if (event.text) {
-          const mcpWroteContent = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
-          if (drainedIds.length > 0) markCompleted(drainedIds);
-          const wasRecoveringDelivery = nudgedForDelivery;
-          const { sent, hasUnwrapped, internalCount } = dispatchResultText(
-            event.text,
-            resultRouting,
-            isPostToolDeliveryRecovery,
-            outboundMaxAtTurnStart,
-            undefined,
-            recoveringOffRouteReply,
-          );
-          // Off-route sends are completed actions, not delivery of an unwrapped
-          // answer to this conversation. Recover only the report, never the action.
-          const mcpWroteReply = mcpWroteContent && (
-            !hasUnwrapped || countTurnContentMessages(outboundMaxAtTurnStart, resultRouting) > 0
-          );
-          const needsPostToolReport = malformedToolRecoveryHadNativeTool || mcpWroteContent;
-          if (sent > 0) sentAny = true;
-          // A post-nudge retry that delivers nothing but writes an <internal>
-          // note is the model taking the escape hatch — confirming it meant to
-          // stay silent. Treat as intentional silence, not a delivery failure.
-          if (nudgedForDelivery && sent === 0 && internalCount > 0) silenceConfirmed = true;
-          let continuedPostToolDeliveryRecovery = false;
-          if (isPostToolDeliveryRecovery && !mcpWroteReply && sent === 0) {
-            silenceConfirmed = false;
-            if (postToolDeliveryRecoveryAttempts < MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS) {
-              continuedPostToolDeliveryRecovery = pushPostToolDeliveryNudge(resultRouting);
-            } else {
-              exhaustMalformedToolRecovery(resultRouting);
-              if (turnBatchQueue.length === 0 && !endedForCommand) {
-                endedForCommand = true;
-                query.end();
-              }
-            }
-          }
-          if (sent > 0 || mcpWroteReply) {
-            resetMalformedToolRecovery();
-          }
-          const willRetryWrapping =
-            !mcpWroteReply && hasUnwrapped && !needsPostToolReport && !nudgedForDelivery;
-          const willRecoverPostToolDelivery =
-            !mcpWroteReply && hasUnwrapped && needsPostToolReport && !nudgedForDelivery;
-          notifyExchangeComplete(onExchangeComplete, {
-            prompt: archivePrompts[0] ?? initialPrompt,
-            result: event.text,
-            continuation: queryContinuation ?? priorContinuation,
-            status: !mcpWroteReply && hasUnwrapped ? 'undelivered' : 'completed',
-          });
-          if (mcpWroteReply) {
-            sentAny = true;
-          } else if (willRecoverPostToolDelivery) {
-            pushPostToolDeliveryNudge(resultRouting, mcpWroteContent);
-          } else if (willRetryWrapping) {
-            log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
-            pushDeliveryNudge(resultRouting);
-          } else if (sent === 0 && internalCount > 0 && !wasRecoveringDelivery) {
-            emptyResultSeen = true;
-            if (turnBatchQueue.length === 0 && !endedForCommand) {
-              endedForCommand = true;
-              query.end();
-            }
-          }
-          // Recovery retries answer the SAME user prompt — keep it queued so
-          // the retry archives against it, not the nudge text.
-          if (!willRetryWrapping && !willRecoverPostToolDelivery && !continuedPostToolDeliveryRecovery) {
-            archivePrompts.shift();
-          }
-          if (
-            wasRecoveringDelivery &&
-            !mcpWroteReply &&
-            sent === 0 &&
-            internalCount === 0 &&
-            !continuedPostToolDeliveryRecovery &&
-            turnBatchQueue.length === 0 &&
-            !endedForCommand
-          ) {
-            endedForCommand = true;
-            query.end();
-          }
-        } else {
-          // A result event with no final text. Two sub-cases:
-          //  (a) `strippedToEmpty` — the model produced raw text that
-          //      normalized to nothing (its reply was swallowed by reasoning
-          //      with no <message> wrapper). Recoverable: nudge once, exactly
-          //      like bare unwrapped text above.
-          //  (b) genuinely nothing — no reasoning to strip, nothing to
-          //      recover. This is the shape of a legitimately silent
-          //      autonomous/task turn, so it is NOT nudged; it falls through
-          //      to the terminal empty-result notice.
-          const mcpWroteContent = countTurnContentMessages(outboundMaxAtTurnStart) > 0;
-          const mcpWroteReply = mcpWroteContent && (
-            !event.strippedToEmpty || countTurnContentMessages(outboundMaxAtTurnStart, resultRouting) > 0
-          );
-          const needsPostToolReport = malformedToolRecoveryHadNativeTool || mcpWroteContent;
-          let continuedPostToolDeliveryRecovery = false;
-          if (isPostToolDeliveryRecovery && !mcpWroteReply) {
-            if (postToolDeliveryRecoveryAttempts < MAX_POST_TOOL_DELIVERY_RECOVERY_ATTEMPTS) {
-              continuedPostToolDeliveryRecovery = pushPostToolDeliveryNudge(resultRouting);
-            } else {
-              exhaustMalformedToolRecovery(resultRouting);
-            }
-          }
-          if (mcpWroteReply) {
-            sentAny = true;
-            resetMalformedToolRecovery();
-          }
-          if (drainedIds.length > 0) markCompleted(drainedIds);
-          const willNudge =
-            !mcpWroteReply &&
-            !needsPostToolReport &&
-            event.strippedToEmpty === true &&
-            event.malformedToolCall !== true &&
-            !nudgedForDelivery &&
-            !lastProviderError;
-          const willRetryMalformedTool =
-            !mcpWroteReply &&
-            !needsPostToolReport &&
-            event.malformedToolCall === true &&
-            malformedToolRecoveryAttempts < MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS &&
-            !nudgedForDelivery &&
-            !lastProviderError;
-          const willRecoverPostToolDelivery =
-            !mcpWroteReply &&
-            needsPostToolReport &&
-            event.strippedToEmpty === true &&
-            !nudgedForDelivery &&
-            !lastProviderError;
-          if (continuedPostToolDeliveryRecovery) {
-            // Keep the prompt queued: this is another tools-disabled attempt
-            // to report the existing result, never permission to resume work.
-          } else if (willRetryMalformedTool) {
-            pushMalformedToolNudge(resultRouting);
-            // Keep the prompt queued: the retry continues the same work.
-          } else if (willRecoverPostToolDelivery) {
-            pushPostToolDeliveryNudge(resultRouting, mcpWroteContent);
-            // Keep the prompt queued: the retry only reports prior results.
-          } else if (event.malformedToolCall && !mcpWroteReply) {
-            exhaustMalformedToolRecovery(malformedToolRecoveryRouting ?? resultRouting);
-            archivePrompts.shift();
-            if (turnBatchQueue.length === 0 && !endedForCommand) {
-              endedForCommand = true;
-              query.end();
-            }
-          } else if (willNudge) {
-            log('Result stripped to empty (reply swallowed by reasoning) — nudging');
-            pushDeliveryNudge(resultRouting);
-            // Keep the prompt queued: the retry answers the same user prompt.
-          } else {
-            if (mcpWroteReply) {
-              notifyExchangeComplete(onExchangeComplete, {
-                prompt: archivePrompts[0] ?? initialPrompt,
-                result: null,
-                continuation: queryContinuation ?? priorContinuation,
-                status: 'completed',
-              });
-            } else {
-              emptyResultSeen = true;
-            }
-            archivePrompts.shift();
-            // Long-lived providers (OpenCode) keep the query open after a turn
-            // so rapid follow-ups reuse the warm session. That's fine when a
-            // reply was sent, but an empty turn sends nothing, so the query
-            // would sit open and the post-stream empty-result notice (below the
-            // events loop) would never run. When nothing was sent and no
-            // follow-up batches are queued, end the stream now so the turn
-            // completes and the notice fires. The continuation was persisted at
-            // `init`, so the next message resumes the same session normally.
-            if (!sentAny && turnBatchQueue.length === 0 && !endedForCommand) {
-              endedForCommand = true;
-              query.end();
-            }
-          }
+        if (drainedIds.length > 0) markCompleted(drainedIds);
+        const answered = recovery.onResult({
+          text: event.text,
+          strippedToEmpty: event.strippedToEmpty,
+          malformedToolCall: event.malformedToolCall,
+          routing: resultRouting,
+          since: outboundMaxAtTurnStart,
+          turnId,
+          providerFailed: lastProviderError !== null,
+        });
+        // Each result consumes one input; recovery retries answer the same
+        // user prompt again, so it stays queued for them.
+        if (answered) {
+          archivePrompts.shift();
         }
         // One-shot calls (in-turn ack): end the stream immediately after
-        // the first result. Without this, the query stays open waiting
-        // for stream-close, and the follow-up poller pushes the next
-        // user message into this throwaway session — defeating the
-        // continuation rollback. The user's next turn must start a
-        // fresh query against the rolled-back continuation.
+        // the first result, so the follow-up poller never pushes the next
+        // user message into this throwaway session.
         if (!persistContinuation) {
           endedForCommand = true;
           query.end();
         }
-        // Flush captured usage, linking to the last outbound row written
-        // this turn. If the turn produced no outbound rows (e.g. scratchpad
-        // only), still record the usage with an empty message link so the
-        // numbers don't disappear. Also persist the activity trace against
-        // the same row so historical messages show the steps live viewers saw.
-        {
-          const lastOutId =
-            (
-              getOutboundDb()
-                .prepare('SELECT id FROM messages_out WHERE seq > ? AND turn_id = ? ORDER BY seq DESC LIMIT 1')
-                .get(outboundMaxAtTurnStart, turnId) as { id: string } | undefined
-            )?.id ?? '';
-          if (pendingUsage) {
-            // Providers that resolve limits from a remote catalog fill them in
-            // here rather than mid-turn, so enrichment is uniform and a slow
-            // catalog can never stall the reply. Gaps only: a provider whose
-            // SDK already reported limits keeps its own numbers.
-            try {
-              const limits = await provider.modelLimits?.(pendingUsage);
-              if (pendingUsage.context_window === undefined && limits?.context_window !== undefined) {
-                pendingUsage.context_window = limits.context_window;
-              }
-              if (pendingUsage.max_output_tokens === undefined && limits?.max_output_tokens !== undefined) {
-                pendingUsage.max_output_tokens = limits.max_output_tokens;
-              }
-            } catch (e) {
-              log(`Failed to resolve model limits: ${e instanceof Error ? e.message : String(e)}`);
-            }
-            if (execution.current.reportedUsage) {
-              execution.current.reportedUsage = {
-                ...execution.current.reportedUsage,
-                context_window: pendingUsage.context_window,
-                max_output_tokens: pendingUsage.max_output_tokens,
-              };
-            }
-            persistTurnMetadata(execution.current, false);
-            pendingUsage = null;
-          }
-          // Record where this turn sits in the provider's own session so a
-          // later fork of the thread can branch at exactly this message.
-          // Needs a real outbound row: the fork anchor is chosen by picking a
-          // message in the UI, and a turn with no bubble can't be picked.
-          const checkpointContinuation = queryContinuation ?? priorContinuation;
-          if (pendingCheckpoint && lastOutId && checkpointContinuation) {
-            try {
-              writeTurnCheckpoint(lastOutId, providerName, checkpointContinuation, pendingCheckpoint);
-            } catch (e) {
-              log(`Failed to write turn_checkpoints: ${e instanceof Error ? e.message : String(e)}`);
-            }
-          }
-          pendingCheckpoint = null;
-          // A queued user batch begins as soon as this result is consumed.
-          // Its provider events must replace, not extend, the completed
-          // turn's live snapshot. Persist first, then clear at the boundary.
-          if (turnBatchQueue.length > 0) resetActivityForNextTurn();
-        }
-        if (!turnActive && (sentAny || silenceConfirmed)) {
-          if (!execution.current.failure) {
-            await settleTurn(execution.current, lastProviderError ? 'failed' : sentAny ? 'replied' : 'silent');
-          }
-          if (silenceConfirmed) {
-            endedForCommand = true;
-            query.end();
-          }
-          onBatchComplete?.([...consumedIds], lastProviderError !== null);
-        }
-        // Reset the per-turn baseline so a follow-up push within the same
-        // query starts a fresh "did MCP write anything?" window.
-        outboundMaxAtTurnStart = currentOutboundMax();
-        resultFinishing = false;
-        if (!turnActive && execution.current.settled) {
-          markCompleted([...consumedIds]);
-          signalTurnState(null);
-          queueMicrotask(wakeFollowUpWatcher);
-        }
+        // FORK-HOOK:boundary
+        await accounting.flushAtResult({
+          provider,
+          providerName,
+          continuation: queryContinuation ?? initialContinuation,
+          since: outboundMaxAtTurnStart,
+          turnId,
+        });
+        // A queued user batch begins as soon as this result is consumed.
+        // Its provider events must replace, not extend, the completed
+        // turn's live snapshot. Persist first, then clear at the boundary.
+        if (turnBatchQueue.length > 0) resetLiveTurnState();
+        await settleAtBoundary();
       }
     }
   } catch (err) {
@@ -1958,45 +1257,18 @@ async function processQuery(
       notifyExchangeComplete(onExchangeComplete, {
         prompt: archivePrompts[0] ?? initialPrompt,
         result: `Error: ${errMsg}`,
-        continuation: queryContinuation ?? priorContinuation,
+        continuation: queryContinuation ?? initialContinuation,
         status: 'error',
       });
       throw err;
     }
   } finally {
     done = true;
-    releaseUnappliedSteering();
+    steering.releaseUnapplied();
     unsubscribeStop();
-    stopFollowUpWatcher();
+    watcher.stop();
     clearInterval(liveHandle);
-    // Drain any queued follow-up batches that never reached a `result`
-    // event. Without this, when the SDK throws mid-turn the outer catch
-    // only marks the initial batch completed (via runPollLoop's
-    // `markCompleted(processingIds)`), and any messages pushed into the
-    // active query during the failure window stay markProcessing'd in
-    // inbound.db forever — they never re-fire and never get acknowledged.
-    // markCompleted is INSERT OR REPLACE, so re-marking the initial batch
-    // here is harmless.
-    const orphanedIds: string[] = [...consumedIds];
-    while (turnBatchQueue.length > 0) {
-      orphanedIds.push(...turnBatchQueue.shift()!.ids);
-    }
-    if (orphanedIds.length > 0) {
-      try {
-        markCompleted(orphanedIds);
-      } catch {
-        /* best-effort */
-      }
-      // Stream closed with leftover queued batches — the result branch
-      // skipped setTurnEnded because the queue was non-empty, so do it
-      // here so the host's typing module clears the indicator promptly
-      // instead of waiting for the heartbeat to age out.
-      try {
-        setTurnEnded();
-      } catch {
-        /* best-effort */
-      }
-    }
+    completeOrphanedBatches(consumedIds, turnBatchQueue);
     // Atomic continuation rollback. The `init` handler persisted the new
     // SDK session id immediately (for mid-turn crash recovery), but if the
     // turn never reached a `result` event — the stream errored out or the
@@ -2006,179 +1278,90 @@ async function processQuery(
     // into a fresh session and the agent eventually has nothing to anchor
     // on. Restore the prior good id so the next turn resumes from a
     // session that actually completed at least one turn cleanly.
-    if (!userStopped && !resultSeen && priorContinuation && queryContinuation && queryContinuation !== priorContinuation) {
+    if (
+      !userStopped &&
+      !resultSeen &&
+      initialContinuation &&
+      queryContinuation &&
+      queryContinuation !== initialContinuation
+    ) {
       log(
-        `Turn ended without result; restoring prior continuation ${priorContinuation} (discarding ${queryContinuation})`,
+        `Turn ended without result; restoring prior continuation ${initialContinuation} (discarding ${queryContinuation})`,
       );
       try {
-        setContinuation(providerName, priorContinuation);
+        setContinuation(providerName, initialContinuation);
       } catch {
         /* best-effort */
       }
-      queryContinuation = priorContinuation;
+      queryContinuation = initialContinuation;
     }
     if (userStopped) {
-      await waitForTurnTools(execution.current);
-      execution.current.endedAt = new Date().toISOString();
-      const latestTools = new Map<string, import('./providers/types.js').ActivityStep>();
-      for (const line of getActivityBuffer()) {
-        try {
-          const step = JSON.parse(line.text) as import('./providers/types.js').ActivityStep;
-          if (step.kind === 'tool') latestTools.set(step.id, step);
-        } catch { /* legacy activity text */ }
-      }
-      for (const step of latestTools.values()) {
-        if (step.kind === 'tool' && (step.status === 'running' || step.status === 'pending')) {
-          appendActivity({
-            ...step,
-            status: 'interrupted',
-            error: 'Interrupted; outcome unknown. External side effects may have occurred.',
-          });
-        }
-      }
-      appendActivity({ kind: 'notification', id: `stopped:${turnId}`, text: 'Stopped by user.' });
-      const noticeId = generateId();
-      writeMessageOut({
-        id: noticeId,
-        in_reply_to: activeTurnRouting.inReplyTo,
-        kind: 'chat',
-        platform_id: activeTurnRouting.platformId,
-        channel_type: activeTurnRouting.channelType,
-        thread_id: activeTurnRouting.threadId,
-        content: JSON.stringify({
-          text: 'Stopped by user.',
-          delivery_origin: 'response',
-          stopped: true,
-          turn_id: turnId,
-        }),
+      // FORK-HOOK:stop
+      await finalizeStoppedTurn({
+        execution: execution.current,
+        routing: activeTurnRouting,
+        providerName,
+        continuation: queryContinuation ?? initialContinuation,
+        checkpoint: accounting.checkpoint,
       });
-      const savedContinuation = queryContinuation ?? priorContinuation;
-      if (pendingCheckpoint && savedContinuation) {
-        writeTurnCheckpoint(noticeId, providerName, savedContinuation, pendingCheckpoint);
-      }
-      clearFailedTurn();
-      await settleTurn(execution.current, 'stopped');
-      await drainSessionJournal();
-      setTurnEnded();
     }
     if (execution.current.settled) signalTurnState(null);
   }
 
-  if (userStopped) return { continuation: queryContinuation ?? priorContinuation, delivered: true };
+  if (userStopped) return { continuation: queryContinuation ?? initialContinuation, delivered: true };
 
-  const writeTurnNotice = async (
-    noticeRouting: RoutingContext,
-    text: string,
-    failureLabel: string,
-    suggestedAction?: SuggestedAction,
-  ): Promise<void> => {
-    try {
-      await waitForTurnTools(execution.current);
-      execution.current.endedAt ??= new Date().toISOString();
-      const id = generateId();
-      writeMessageOut({
-        id,
-        in_reply_to: noticeRouting.inReplyTo,
-        kind: 'chat',
-        platform_id: noticeRouting.platformId,
-        channel_type: noticeRouting.channelType,
-        thread_id: noticeRouting.threadId,
-        content: JSON.stringify({
-          text,
-          delivery_origin: 'response',
-          ...(suggestedAction ? { suggested_action: suggestedAction } : {}),
-        }),
-      });
-      if (!execution.current.failure) await settleTurn(execution.current, 'warning');
-    } catch (e) {
-      log(`Failed to write ${failureLabel}: ${e instanceof Error ? e.message : String(e)}`);
-      throw e;
-    }
-  };
-
-  // Three mutually-exclusive terminal outcomes for a turn that delivered
-  // nothing (all gated on `!sentAny && !lastProviderError`). Ordered by
-  // specificity — the first match wins:
-  //
-  //  1. silenceConfirmed → deliver NOTHING. We nudged a turn that produced no
-  //     deliverable, and the retry came back as an <internal> note: the model
-  //     took the escape hatch and confirmed it meant to stay quiet. A
-  //     deliberate no-op must not surface as an error.
-  //
-  //  2. nudgedForDelivery (and not silence-confirmed) → generic error. The
-  //     model left evidence it was trying to reply — bare unwrapped text, or a
-  //     reply swallowed by reasoning — we asked it to re-send wrapped, and it
-  //     STILL delivered nothing. That's a genuine malfunction.
-  //
-  //  3. emptyResultSeen (never nudged) → "finished without producing a
-  //     response". The turn produced no deliverable response: no bare reply,
-  //     no reasoning that stripped away, and at most an internal scratchpad.
-  //     We deliberately do not nudge this path.
-  if (!sentAny && silenceConfirmed && !lastProviderError) {
-    log('Turn confirmed intentional silence after nudge — delivering nothing');
-  } else if (!sentAny && runawayAbortReason) {
-    // The runaway guard aborts the stream, so no `result` event ever arrives
-    // and none of the branches below fire. Without this the turn ends in total
-    // silence and the thread just looks stuck.
-    log(`Turn aborted as runaway (${runawayAbortReason}) — notifying user`);
-    await writeTurnNotice(
-      routing,
-      `⚠️ The agent got stuck in a loop (${runawayAbortReason}) and the turn was stopped before it could reply. Retry, or switch to a stronger model if it keeps happening.`,
-      'runaway-abort notice',
-      'retry',
-    );
-  } else if (!sentAny && malformedToolRecoveryExhausted && !lastProviderError) {
-    log('Malformed tool-call recovery exhausted — surfacing specific error');
-    await writeTurnNotice(
-      malformedToolErrorRouting,
-      malformedToolRecoveryHadNativeTool
-        ? '⚠️ A tool ran, but the model repeatedly failed to format its final reply. The action was not retried. Ask the agent to report the existing result or switch models.'
-        : '⚠️ The model repeatedly produced malformed tool calls, so no tool was executed. Retry the task or switch to a model with reliable native tool calling.',
-      'malformed-tool error',
-      malformedToolRecoveryHadNativeTool ? 'report' : 'retry',
-    );
-  } else if (!sentAny && nudgedForDelivery && !lastProviderError) {
-    log('Turn produced no deliverable output after recovery nudge — surfacing generic error');
-    await writeTurnNotice(
-      deliveryErrorRouting,
-      '⚠️ Something went wrong producing a reply. Please try again.',
-      'generic delivery error',
-      malformedToolRecoveryHadNativeTool ? 'report' : 'retry',
-    );
-  }
-
-  // Stream completed cleanly with a `result` event, but the model produced no
-  // deliverable response — and reported no error, and there was nothing to
-  // recover (so we never nudged). Tell the user plainly so a silent turn
-  // doesn't look like the agent is still working or died.
-  else if (!sentAny && emptyResultSeen && !lastProviderError) {
-    log('Turn completed with an empty result and no error — notifying user');
-    await writeTurnNotice(
-      routing,
-      '⚠️ The agent finished without producing a response, and without reporting an error. Please try again.',
-      'empty-result notice',
-      malformedToolRecoveryHadNativeTool ? 'report' : 'retry',
-    );
-  }
+  // FORK-HOOK:finish — a turn that delivered nothing gets one notice saying why.
+  const notice = recovery.terminalNotice(routing, lastProviderError !== null, runaway.abortReason);
+  if (notice) await writeTurnNotice(execution.current, notice);
 
   if (!execution.current.settled && !lastProviderError && !execution.current.failure) {
-    await settleTurn(execution.current, silenceConfirmed ? 'silent' : resultSeen ? 'silent' : 'interrupted');
+    await settleTurn(execution.current, recovery.silenceConfirmed || resultSeen ? 'silent' : 'interrupted');
   } else if (!execution.current.settled && !deferFailureSettlement) {
     await settleTurn(execution.current, 'failed');
   }
   if (execution.current.settled) signalTurnState(null);
   return {
-    delivered: sentAny,
+    delivered: recovery.sentAny,
     continuation: queryContinuation,
     // Only surface a provider error if the stream completed cleanly AND
     // the turn produced nothing deliverable. If the SDK threw, that path
     // takes over (with stale-session retry); if a message did get sent,
     // a trailing error is best left in the logs.
     unsurfacedError:
-      !sentAny && lastProviderError
+      !recovery.sentAny && lastProviderError
         ? { ...lastProviderError, routing: promptTracker?.routing ?? activeTurnRouting }
         : undefined,
   };
+}
+
+/**
+ * Drain any queued follow-up batches that never reached a `result` event.
+ * Without this, when the SDK throws mid-turn, messages pushed into the
+ * active query during the failure window stay markProcessing'd in
+ * inbound.db forever — they never re-fire and never get acknowledged.
+ * markCompleted is INSERT OR REPLACE, so re-marking the initial batch is
+ * harmless.
+ */
+function completeOrphanedBatches(consumedIds: Set<string>, queue: { ids: string[] }[]): void {
+  const orphanedIds: string[] = [...consumedIds];
+  while (queue.length > 0) {
+    orphanedIds.push(...queue.shift()!.ids);
+  }
+  if (orphanedIds.length === 0) return;
+  try {
+    markCompleted(orphanedIds);
+  } catch {
+    /* best-effort */
+  }
+  // Stream closed with leftover queued batches — the result branch skipped
+  // setTurnEnded because the queue was non-empty, so do it here so the
+  // host's typing module clears the indicator promptly instead of waiting
+  // for the heartbeat to age out.
+  try {
+    setTurnEnded();
+  } catch {
+    /* best-effort */
+  }
 }
 
 function notifyExchangeComplete(
