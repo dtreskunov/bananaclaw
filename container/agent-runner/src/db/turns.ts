@@ -235,14 +235,24 @@ export function historicalTurnId(messageOutId: string): string {
   return `legacy:out:${createHash('sha256').update(messageOutId).digest('hex')}`;
 }
 
+/** One offline snapshot shared by both peers, including host-only outputs. */
+export interface TurnBackfillEvidence {
+  outputs: Array<{ id: string; in_reply_to: string | null; content: string; turn_id: string | null }>;
+  states: Array<{ key: string; value: string }>;
+  turns: TurnRow[];
+  links: TurnInputRow[];
+}
+
 /** Conservative one-time import; no clock-based grouping or lifecycle reconstruction. */
-export function backfillTurns(db: Database, inputs?: TurnInputEvidence[]): void {
+export function backfillTurns(db: Database, inputs?: TurnInputEvidence[], shared?: TurnBackfillEvidence): void {
   db.transaction(() => {
     migrateTurnSchema(db);
     if (db.prepare("SELECT 1 FROM conversation_sync_migrations WHERE step = 'backfill:1'").get()) return;
     const triggers = db
       .prepare(
-        "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN ('messages_out', 'turn_usage', 'turn_activity')",
+        `SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND
+          (tbl_name IN ('messages_out', 'turn_usage', 'turn_activity') OR
+           name IN ('journal_turn_insert', 'journal_turn_update', 'journal_turn_input_insert'))`,
       )
       .all() as Array<{ name: string; sql: string }>;
     for (const { name } of triggers) db.exec(`DROP TRIGGER "${name.replaceAll('"', '""')}"`);
@@ -256,14 +266,25 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[]): void 
             .all() as TurnInputEvidence[])
         : []);
     const inputById = new Map(evidence.map((row) => [row.id, row]));
-    const outputs = db
-      .prepare('SELECT id, in_reply_to, content, turn_id FROM messages_out ORDER BY id')
-      .all() as Array<{ id: string; in_reply_to: string | null; content: string; turn_id: string | null }>;
+    for (const turn of shared?.turns ?? []) {
+      if (!getTurn(db, turn.id)) putTurn(db, turn);
+    }
+    for (const link of shared?.links ?? []) linkTurnInput(db, link);
+    const outputs =
+      shared?.outputs ??
+      (db.prepare('SELECT id, in_reply_to, content, turn_id FROM messages_out ORDER BY id').all() as Array<{
+        id: string;
+        in_reply_to: string | null;
+        content: string;
+        turn_id: string | null;
+      }>);
     const applied: Array<{ messageId: string; turnId: string }> = [];
-    const states = db.prepare("SELECT key, value FROM session_state WHERE key LIKE 'input:%'").all() as Array<{
-      key: string;
-      value: string;
-    }>;
+    const states =
+      shared?.states ??
+      (db.prepare("SELECT key, value FROM session_state WHERE key LIKE 'input:%'").all() as Array<{
+        key: string;
+        value: string;
+      }>);
     for (const state of states) {
       const value = parseObject(state.value);
       const turnId = explicitId(value.turnId);
@@ -283,6 +304,10 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[]): void 
       ...applied.map((r) => r.turnId),
     ]);
     const imported = new Set<string>();
+    const outputTurns = new Map<string, string>();
+    const localOutputIds = new Set(
+      (db.prepare('SELECT id FROM messages_out').all() as Array<{ id: string }>).map((r) => r.id),
+    );
     const ensureTurn = (id: string) => {
       if (getTurn(db, id)) return;
       putTurn(db, {
@@ -314,6 +339,7 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[]): void 
         reserved.add(id);
       }
       ensureTurn(id);
+      outputTurns.set(output.id, id);
       db.prepare('UPDATE messages_out SET turn_id = ? WHERE id = ? AND turn_id IS NULL').run(id, output.id);
       if (output.in_reply_to && inputById.has(output.in_reply_to)) {
         linkTurnInput(db, { turn_id: id, message_in_id: output.in_reply_to, association: 'reply' });
@@ -340,6 +366,12 @@ export function backfillTurns(db: Database, inputs?: TurnInputEvidence[]): void 
     for (const table of ['turn_usage', 'turn_activity']) {
       db.exec(`UPDATE ${table} SET turn_id = (SELECT turn_id FROM messages_out WHERE id = ${table}.message_out_id)
         WHERE turn_id IS NULL AND EXISTS (SELECT 1 FROM messages_out WHERE id = ${table}.message_out_id)`);
+      if (shared) {
+        const link = db.prepare(`UPDATE ${table} SET turn_id = ? WHERE turn_id IS NULL AND message_out_id = ?`);
+        for (const [outputId, turnId] of outputTurns) {
+          if (!localOutputIds.has(outputId)) link.run(turnId, outputId);
+        }
+      }
     }
     for (const { sql } of triggers) db.exec(sql);
     db.prepare("INSERT INTO conversation_sync_migrations(step) VALUES ('backfill:1')").run();

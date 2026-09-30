@@ -81,7 +81,7 @@ export interface ConversationTurn {
   outputIds: string[];
   activity: { ordinal: number; ts: string; text: string }[];
   /** Accounting records remain keyed by their original usage IDs, never by response count. */
-  usage: { id: string; value: ConversationUsage }[];
+  usage: { id: string; value: Partial<ConversationUsage> }[];
   metadata: {
     status: 'provisional' | 'partial' | 'final' | 'unavailable';
     model: string | null;

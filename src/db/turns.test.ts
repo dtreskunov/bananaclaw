@@ -17,6 +17,7 @@ import {
   TURN_SCHEMA,
   TURN_ACTIVITY_SCHEMA,
   TURN_INDEX_SCHEMA,
+  type TurnBackfillEvidence,
 } from './turns.js';
 
 const opened: Database.Database[] = [];
@@ -80,6 +81,36 @@ function originalRows(db: Database.Database, table: string) {
 }
 
 describe('durable turn migration', () => {
+  it('uses the complete peer evidence for collision IDs and origins without copying peer messages', () => {
+    const db = legacy();
+    db.prepare('INSERT INTO messages_out VALUES (?, ?, ?, ?)').run('common', '{}', 'input', 'unchanged');
+    const shared: TurnBackfillEvidence = {
+      outputs: [
+        { id: 'common', in_reply_to: 'input', content: '{}', turn_id: null },
+        {
+          id: 'host-only',
+          in_reply_to: null,
+          content: JSON.stringify({ turn_id: historicalTurnId('common') }),
+          turn_id: null,
+        },
+      ],
+      states: [],
+      turns: [],
+      links: [],
+    };
+    backfillTurns(db, evidence, shared);
+    expect(db.prepare('SELECT id, turn_id FROM messages_out').all()).toEqual([
+      { id: 'common', turn_id: `${historicalTurnId('common')}:1` },
+    ]);
+    expect(getTurn(db, `${historicalTurnId('common')}:1`)).toMatchObject({
+      origin_channel_type: 'web',
+      origin_platform_id: 'chat',
+      started_at: null,
+      ended_at: null,
+    });
+    expect(getTurn(db, historicalTurnId('common'))).toBeDefined();
+    expect(db.prepare('SELECT * FROM journal').all()).toEqual([]);
+  });
   it('keeps host and runner SQL contracts identical without cross-runtime imports', () => {
     const runner = fs.readFileSync(path.join(process.cwd(), 'container/agent-runner/src/db/turns.ts'), 'utf8');
     for (const [name, sql] of Object.entries({ TURN_SCHEMA, TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA })) {

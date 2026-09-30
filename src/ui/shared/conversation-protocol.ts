@@ -69,7 +69,7 @@ const shape =
     object(v) && Object.entries(fields).every(([key, check]) => check(v[key]));
 const strings = array(id);
 const trace = shape({ ts: text, text });
-const usage = shape({
+const usageFields = {
   cost_usd: number,
   input_tokens: number,
   output_tokens: number,
@@ -82,7 +82,11 @@ const usage = shape({
   max_output_tokens: optional(number),
   context_tokens: optional(number),
   duration_ms: optional(number),
-});
+};
+const usage = shape(usageFields);
+const reportedUsage = shape(
+  Object.fromEntries(Object.entries(usageFields).map(([key, check]) => [key, optional(check)])),
+);
 const stats = shape({ durationMs: number, model: optional(text) });
 const message = shape({
   id,
@@ -151,7 +155,7 @@ const turn = shape({
   inputIds: strings,
   outputIds: strings,
   activity: array(shape({ ordinal: integer, ts: text, text })),
-  usage: array(shape({ id, value: usage })),
+  usage: array(shape({ id, value: reportedUsage })),
   metadata: shape({
     status: oneOf('provisional', 'partial', 'final', 'unavailable'),
     model: nullable(text),

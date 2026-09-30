@@ -60,7 +60,7 @@ function displayActivity(lines: ConversationTurn['activity']): ConversationTurn[
   });
 }
 
-function usageValue(row: Record<string, unknown>): ConversationUsage {
+function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
   const value: Record<string, unknown> = {};
   for (const key of [
     'cost_usd',
@@ -77,7 +77,7 @@ function usageValue(row: Record<string, unknown>): ConversationUsage {
     'duration_ms',
   ])
     if (row[key] !== null && row[key] !== undefined) value[key] = row[key];
-  return value as unknown as ConversationUsage;
+  return value as Partial<ConversationUsage>;
 }
 
 /** Pure synchronous read of host-owned state. The host is the only writer and cannot
@@ -126,6 +126,12 @@ export function projectConversation(
           turnStats: _stats,
           ...visible
         } = message;
+        return visible;
+      }
+      // Associated accounting is represented once, by its original usage ID on
+      // the turn. Legacy message DTOs can contain null fields, not reported zeros.
+      if (turn) {
+        const { usage: _usage, ...visible } = message;
         return visible;
       }
       return { ...message };

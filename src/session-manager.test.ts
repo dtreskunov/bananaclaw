@@ -10,6 +10,7 @@
 import fs from 'fs';
 import Database from 'better-sqlite3';
 import net from 'node:net';
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', async () => {
@@ -17,7 +18,15 @@ vi.mock('./config.js', async () => {
   return { ...actual, DATA_DIR: '.test-write-outbound' };
 });
 
-import { initSessionFolder, outboundDbPath, readSessionUsageProgress, writeOutboundDirect } from './session-manager.js';
+import {
+  initSessionFolder,
+  outboundDbPath,
+  readSessionUsageProgress,
+  writeOutboundDirect,
+  seedRunnerState,
+  runnerStateDbPath,
+} from './session-manager.js';
+import { putTurn } from './db/turns.js';
 import { sessionLinkSocketPath, startSessionSignalServer, stopSessionSignalServer } from './session-link.js';
 
 const TEST_DIR = '.test-write-outbound';
@@ -60,6 +69,59 @@ async function sendSignal(frame: unknown): Promise<void> {
 }
 
 describe('writeOutboundDirect', () => {
+  it('opens a fresh host-projection seed in the real Bun runner without replaying copied history', () => {
+    const db = new Database(outboundDbPath(AG, SESS));
+    putTurn(db, {
+      id: 'seed-turn',
+      phase: 'settled',
+      outcome: 'silent',
+      provenance: 'native',
+      origin_channel_type: 'web',
+      origin_platform_id: 'chat',
+      origin_thread_id: null,
+      origin_source_session_id: null,
+      started_at: 'original start',
+      ended_at: 'original end',
+      imported_from_session_id: null,
+      imported_from_turn_id: null,
+    });
+    db.prepare(`INSERT INTO turn_usage (id,turn_id,input_tokens) VALUES ('seed-bill','seed-turn',17)`).run();
+    db.close();
+    seedRunnerState(AG, SESS, true);
+    const result = execFileSync(
+      'bun',
+      [
+        '--eval',
+        `
+      import { Database } from 'bun:sqlite';
+      import { ensureRunnerStateSchema } from './container/agent-runner/src/db/runner-state.ts';
+      const db = new Database(${JSON.stringify(runnerStateDbPath(AG, SESS))});
+      db.exec('PRAGMA foreign_keys=ON');
+      ensureRunnerStateSchema(db);
+      ensureRunnerStateSchema(db);
+      console.log(JSON.stringify({
+        turns: db.query('SELECT id,phase,outcome FROM turns').all(),
+        usage: db.query('SELECT id,turn_id,input_tokens FROM turn_usage').all(),
+        journal: db.query('SELECT * FROM pending_runner_events').all(),
+        foreignKeys: db.query('PRAGMA foreign_key_check').all(),
+        markers: db.query('SELECT step FROM conversation_sync_migrations ORDER BY step').all(),
+      }));
+      db.close();
+    `,
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(JSON.parse(result)).toEqual({
+      turns: [{ id: 'seed-turn', phase: 'settled', outcome: 'silent' }],
+      usage: [{ id: 'seed-bill', turn_id: 'seed-turn', input_tokens: 17 }],
+      journal: [],
+      foreignKeys: [],
+      markers: [{ step: 'journal:2' }, { step: 'schema:1' }],
+    });
+    const bytes = fs.readFileSync(runnerStateDbPath(AG, SESS));
+    seedRunnerState(AG, SESS);
+    expect(fs.readFileSync(runnerStateDbPath(AG, SESS))).toEqual(bytes);
+  });
   it('inserts into messages_out with an even host-side seq (requires a writable outbound.db)', () => {
     // With a readonly open this very call throws SQLITE_READONLY.
     writeOutboundDirect(AG, SESS, {

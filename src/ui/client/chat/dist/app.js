@@ -17698,7 +17698,7 @@ var oneOf = (...values) => (v5) => typeof v5 === "string" && values.includes(v5)
 var shape = (fields) => (v5) => object(v5) && Object.entries(fields).every(([key, check]) => check(v5[key]));
 var strings = array(id);
 var trace = shape({ ts: text, text });
-var usage = shape({
+var usageFields = {
   cost_usd: number,
   input_tokens: number,
   output_tokens: number,
@@ -17711,7 +17711,11 @@ var usage = shape({
   max_output_tokens: optional(number),
   context_tokens: optional(number),
   duration_ms: optional(number)
-});
+};
+var usage = shape(usageFields);
+var reportedUsage = shape(
+  Object.fromEntries(Object.entries(usageFields).map(([key, check]) => [key, optional(check)]))
+);
 var stats = shape({ durationMs: number, model: optional(text) });
 var message = shape({
   id,
@@ -17780,7 +17784,7 @@ var turn = shape({
   inputIds: strings,
   outputIds: strings,
   activity: array(shape({ ordinal: integer, ts: text, text })),
-  usage: array(shape({ id, value: usage })),
+  usage: array(shape({ id, value: reportedUsage })),
   metadata: shape({
     status: oneOf("provisional", "partial", "final", "unavailable"),
     model: nullable(text),
@@ -22064,13 +22068,20 @@ function fmtContextLimit(tokens) {
 }
 function UsageMeta({ u: u5, live = false, partial = false, provisional = false }) {
   const [expanded, setExpanded] = h2(false);
-  const cost = fmtCost(u5.cost_usd);
+  const cost = u5.cost_usd !== void 0 ? fmtCost(u5.cost_usd) : "Cost unavailable";
+  const estimatedCost = u5.cost_usd !== void 0 ? `${cost} est.` : cost;
+  const input = u5.input_tokens !== void 0 ? fmtTok(u5.input_tokens) : "unavailable";
+  const output = u5.output_tokens !== void 0 ? fmtTok(u5.output_tokens) : "unavailable";
+  const reported = u5.input_tokens !== void 0 && u5.output_tokens !== void 0 ? `${fmtTok(u5.input_tokens + u5.output_tokens)} tokens reported` : [
+    u5.input_tokens !== void 0 ? `${input} input tokens reported` : "",
+    u5.output_tokens !== void 0 ? `${output} output tokens reported` : ""
+  ].filter(Boolean).join(" \xB7 ") || "Tokens unavailable";
   const model = u5.model ? shortModel(u5.model) : "";
   const dur = u5.duration_ms != null ? fmtDur(u5.duration_ms) : "";
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
   const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
   const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
-  const short = live ? [`${cost} est.`, `${fmtTok(u5.input_tokens)} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [dur, model, `${fmtTok(u5.input_tokens + u5.output_tokens)} tokens reported`].filter(Boolean).join(" \xB7 ") : [provisional ? `${cost} est.` : cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
+  const short = live ? [estimatedCost, `${input} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [dur, model, reported].filter(Boolean).join(" \xB7 ") : [provisional ? estimatedCost : cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
   const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
@@ -22115,11 +22126,11 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false }
         /* @__PURE__ */ u4("span", { class: "usage-row", children: [
           /* @__PURE__ */ u4("span", { children: live ? "Processing so far" : "Turn processing" }),
           /* @__PURE__ */ u4("strong", { children: [
-            fmtTok(u5.input_tokens),
+            input,
             " input ",
             "\xB7",
             " ",
-            fmtTok(u5.output_tokens),
+            output,
             " output"
           ] })
         ] }),
@@ -22127,11 +22138,11 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false }
           /* @__PURE__ */ u4("span", { children: live ? "Model calls so far" : "Model calls" }),
           /* @__PURE__ */ u4("strong", { children: u5.num_turns })
         ] }) : null,
-        u5.cache_read_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+        u5.cache_read_tokens !== void 0 && u5.cache_read_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
           /* @__PURE__ */ u4("span", { children: "Cache read" }),
           /* @__PURE__ */ u4("strong", { children: fmtTok(u5.cache_read_tokens) })
         ] }) : null,
-        u5.cache_write_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+        u5.cache_write_tokens !== void 0 && u5.cache_write_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
           /* @__PURE__ */ u4("span", { children: "Cache write" }),
           /* @__PURE__ */ u4("strong", { children: fmtTok(u5.cache_write_tokens) })
         ] }) : null,

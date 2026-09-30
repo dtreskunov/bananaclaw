@@ -459,10 +459,19 @@ function fmtContextLimit(tokens: number): string {
 }
 
 function UsageMeta({ u, live = false, partial = false, provisional = false }: {
-  u: TurnUsage; live?: boolean; partial?: boolean; provisional?: boolean;
+  u: Partial<TurnUsage>; live?: boolean; partial?: boolean; provisional?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const cost = fmtCost(u.cost_usd);
+  const cost = u.cost_usd !== undefined ? fmtCost(u.cost_usd) : 'Cost unavailable';
+  const estimatedCost = u.cost_usd !== undefined ? `${cost} est.` : cost;
+  const input = u.input_tokens !== undefined ? fmtTok(u.input_tokens) : 'unavailable';
+  const output = u.output_tokens !== undefined ? fmtTok(u.output_tokens) : 'unavailable';
+  const reported = u.input_tokens !== undefined && u.output_tokens !== undefined
+    ? `${fmtTok(u.input_tokens + u.output_tokens)} tokens reported`
+    : [
+        u.input_tokens !== undefined ? `${input} input tokens reported` : '',
+        u.output_tokens !== undefined ? `${output} output tokens reported` : '',
+      ].filter(Boolean).join(' \u00b7 ') || 'Tokens unavailable';
   const model = u.model ? shortModel(u.model) : '';
   const dur = u.duration_ms != null ? fmtDur(u.duration_ms) : '';
   const contextTokens = u.context_tokens && (!u.context_window || u.context_tokens <= u.context_window)
@@ -475,10 +484,10 @@ function UsageMeta({ u, live = false, partial = false, provisional = false }: {
     : '';
   const calls = u.num_turns ? `${u.num_turns} call${u.num_turns === 1 ? '' : 's'}` : '';
   const short = live
-    ? [`${cost} est.`, `${fmtTok(u.input_tokens)} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
+    ? [estimatedCost, `${input} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
     : partial
-      ? [dur, model, `${fmtTok(u.input_tokens + u.output_tokens)} tokens reported`].filter(Boolean).join(' \u00b7 ')
-      : [provisional ? `${cost} est.` : cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
+      ? [dur, model, reported].filter(Boolean).join(' \u00b7 ')
+      : [provisional ? estimatedCost : cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
   const contextDetail = contextTokens
     ? `${fmtTok(contextTokens)}${u.context_window
       ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})`
@@ -507,10 +516,10 @@ function UsageMeta({ u, live = false, partial = false, provisional = false }: {
             {dur ? <span class="usage-row"><span>Elapsed</span><strong>{dur}</strong></span> : null}
             {model ? <span class="usage-row"><span>Model</span><strong title={u.model}>{model}</strong></span> : null}
             {contextDetail ? <span class="usage-row"><span>{live ? 'Context after latest call' : 'Context at end'}</span><strong>{contextDetail}</strong></span> : null}
-            <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{fmtTok(u.input_tokens)} input {'\u00b7'} {fmtTok(u.output_tokens)} output</strong></span>
+            <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{input} input {'\u00b7'} {output} output</strong></span>
             {u.num_turns ? <span class="usage-row"><span>{live ? 'Model calls so far' : 'Model calls'}</span><strong>{u.num_turns}</strong></span> : null}
-            {u.cache_read_tokens > 0 ? <span class="usage-row"><span>Cache read</span><strong>{fmtTok(u.cache_read_tokens)}</strong></span> : null}
-            {u.cache_write_tokens > 0 ? <span class="usage-row"><span>Cache write</span><strong>{fmtTok(u.cache_write_tokens)}</strong></span> : null}
+            {u.cache_read_tokens !== undefined && u.cache_read_tokens > 0 ? <span class="usage-row"><span>Cache read</span><strong>{fmtTok(u.cache_read_tokens)}</strong></span> : null}
+            {u.cache_write_tokens !== undefined && u.cache_write_tokens > 0 ? <span class="usage-row"><span>Cache write</span><strong>{fmtTok(u.cache_write_tokens)}</strong></span> : null}
             {u.reasoning_tokens ? <span class="usage-row"><span>Reasoning</span><strong>{fmtTok(u.reasoning_tokens)}</strong></span> : null}
           </span>
         </>

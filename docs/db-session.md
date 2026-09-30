@@ -309,9 +309,16 @@ The host never opens this file. The runner never opens either host DB.
 
 Unlike the central DB, session DBs do **not** automatically run upgrade migrations. Both `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA` create the complete current shape for fresh sessions. Existing session files are normalized as an explicit data operation before runtime code starts requiring a newly added table or column.
 
-Before deploying a new required table or column, stop the host, back up the session directory, and normalize every existing session DB explicitly. Verify every file against the new schema and run `PRAGMA quick_check` before removing the compatibility code or restarting the host. Prefer nullable columns or defaulted values when the historical value cannot be reconstructed.
+Before deploying a new required table or column, stop both peers, back up the session directory, and normalize every existing session DB explicitly. Verify every file against the new schema and run integrity/foreign-key checks before starting matching peers. Prefer nullable columns or defaulted values when the historical value cannot be reconstructed. There is no mixed-version compatibility.
 
 ### Explicit durable-turn migration
+
+Use the executable [coordinated offline cutover](conversation-cutover.md) rather
+than calling these helpers independently on installed files. It discovers
+flat/nested sessions, enforces drained journals, preserves a complete original
+database snapshot, supplies shared peer evidence, verifies both projections, and
+blocks startup after an incomplete migration. The API notes below describe the
+underlying primitives, not a live-migration procedure.
 
 - **Detect:** inspect `PRAGMA table_info(messages_out)` for `turn_id` and
   `conversation_sync_migrations` for `schema:1` and `backfill:1`. Fresh schemas
@@ -328,7 +335,11 @@ Before deploying a new required table or column, stop the host, back up the sess
   `bun:sqlite` and call its own `backfillTurns(runnerDb)`; it reads the local
   input projection by default (an explicit evidence array is also accepted).
   Use the same available input evidence in both calls when their projections
-  differ. Do not migrate `inbound.db`; consumed-input associations belong to the
+  differ. Their optional third `TurnBackfillEvidence` argument supplies the
+  complete peer output/receipt/turn/link union, including host-only reserved
+  explicit IDs, so deterministic associations and origins match even when the
+  runner contains a subset. The cutover CLI validates conflicts and supplies
+  this evidence before changing either store. Do not migrate `inbound.db`; consumed-input associations belong to the
   outbound projection. `migrateTurnSchema(db)` is available separately for
   schema-only work; backfill invokes it in the same encompassing transaction.
   After draining the old protocol's pending events and completing backfill,

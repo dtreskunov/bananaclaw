@@ -2,6 +2,20 @@
 
 Optional read-only web UI mounted on the existing webhook HTTP server under `/ui`. A shared auth shell (`/ui/auth/*`) hands out a single bearer-cookie that's reused by every UI app. Today the only app is the **chat** app at `/ui/chat`; more apps will live alongside it.
 
+### Conversation protocol cutover
+
+The chat client uses versioned atomic conversation snapshots/updates, with
+explicit turn identity and durable settlement. Upgrading an existing install
+requires the matching host, runners, session stores, and browser assets:
+follow [the offline conversation cutover](conversation-cutover.md). Reload cached
+clients after replacement; there is no old-client compatibility path.
+
+Missed frames, unknown streams, and revision gaps require an actual authorized
+resnapshot. Disconnect or confirmed runner exit disables controls, but never
+fabricates a final response, completion time, or billing record. Silent turns
+remain visible without synthetic output. At the same host revision, reducing
+incremental frames yields the same conversation as a fresh snapshot.
+
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 

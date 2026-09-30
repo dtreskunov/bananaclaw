@@ -64,6 +64,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('authoritative turn presentation', () => {
+  it('retains a migrated partial accounting record without synthesizing the absent counters', () => {
+    const imported = {
+      ...testTurn,
+      phase: 'settled' as const,
+      outcome: 'unknown' as const,
+      usage: [{ id: 'original-bill', value: { input_tokens: 17 } }],
+      metadata: { status: 'partial' as const, model: null, durationMs: null },
+    };
+    update({ ...initial, turns: [imported], connection: { connected: false, activeTurnId: null } });
+    expect(chatReady.value).toBe(true);
+    expect(chatMessages.value[0].turn?.usage).toEqual([{ id: 'original-bill', value: { input_tokens: 17 } }]);
+  });
   it('renders the initial live trace from the snapshot without waiting for another signal', () => {
     expect(chatReady.value).toBe(true);
     expect(chatMessages.value[0]).toMatchObject({ id: 'turn:turn-1', turn: { activity: testTurn.activity } });

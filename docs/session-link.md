@@ -96,15 +96,14 @@ using async-local storage across awaits. This works in both in-process tools
 and external stdio sidecars; late completion cannot read a successor's ID or
 reply address. The context is routing metadata, not a credential.
 
-**Coordinated offline upgrade:** stop both peers after draining the v3 runner
-journal, back up all three session databases, run the explicit turn-schema and
-backfill helpers documented in `db-session.md`, then call
-`migrateRunnerTurnJournal(db)` from the Bun runner package on each runner DB.
-It refuses undrained old events and recreates the versioned journal triggers.
-Verify `conversation_sync_migrations` contains `journal:2`, and that turn
-associations match on both peers before starting the v4 host and new runners.
-Production DB open does not migrate an existing journal. Roll back code and
-the backed-up databases together; mixed protocol versions are unsupported.
+**Coordinated offline upgrade:** follow
+[conversation-cutover.md](conversation-cutover.md) for the executable staging-only
+preflight/apply/verify CLI, shared peer evidence, consistent snapshots, partial
+failure startup guard, and rollback. Drain **both** old journals using the old
+peers before making the offline copy. The tool calls the explicit backfill and
+`migrateRunnerTurnJournal(db)` helpers; it never starts peers or translates old
+events. Production DB open does not migrate an existing journal. Roll back code
+and all backed-up databases together; mixed protocol versions are unsupported.
 
 User cancellation uses a host-to-runner live `turn.stop` control carrying the
 exact turn ID. Both peers compare it with the active turn; stale controls never
@@ -329,8 +328,8 @@ a container that survived a host restart. The runner reconnects with bounded
 exponential backoff. Container exit closes the listener; graceful host shutdown
 closes all listeners. A host restart recreates each socket path and an adopted
 runner replays its current live snapshot. Containers carry a
-`nanoclaw-session-link=v3` label; startup stops rather than adopts a live
-container with a missing or incompatible link version. Version 3 containers
+`nanoclaw-session-link=v4` label; startup stops rather than adopts a live
+container with a missing or incompatible link version. Version 4 containers
 mount only their writable projection directory (`runner-state/`, containing
 `runner-state.db` and its rollback journal), a read-only inbox, a writable
 outbox, and provider-specific state directories.
@@ -344,23 +343,13 @@ code until restarted. Develop in a separate checkout or coordinate both sides
 of a rollout; leaving a running old host against edited runner source is not an
 isolated staging environment.
 
-The Stop extension (`turn.state` / `turn.stop`) requires a matching host and
-runner. An older host rejects the new live frame even though both use the `v3`
-label. This can leave input pending while containers repeatedly connect and
-exit before processing it. Rebuild and restart the host with the matching code;
-the pending input is retained and the normal wake path resumes it. Do not
-resubmit or delete session data to recover from this mismatch.
-
-The native steering capability similarly requires a host that recognizes the
-optional `supportsSteering` field on `turn.state`. Deploy matching host, runner,
-and chat assets together. There is no host-message schema migration: steering
-intent uses the existing inbound content journal, and dispositions use the
-existing durable session-state projection.
-
-Pending editing adds the optional `supportsInputEditing` live field and the
-`input-edit:` receipt semantics. Update the host before recycling runners and
-serving the rebuilt editing UI; old runners do not advertise the editing
-capability and must not receive edit requests.
+Stop, steering, input editing and cancellation all require matching peers.
+Their live capabilities are advertised on `turn.state`; inbound commands and
+durable disposition/receipt records remain in the existing journals. They do
+not provide compatibility with an older link version. For this cutover, drain
+and stop both old peers, migrate offline, then deploy host, runner and chat
+assets together using [conversation-cutover.md](conversation-cutover.md).
+Do not resubmit inputs or delete session data to recover from version mismatch.
 
 Verify a rollout with host health **and** an actual session exchange; a
 successful build or an HTTP 200 alone does not prove runner compatibility.
