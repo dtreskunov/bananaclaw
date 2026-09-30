@@ -1,11 +1,10 @@
 import type Database from 'better-sqlite3';
 
-import { getTurn, hasTurnSchema, linkTurnInput, putTurn, type TurnInputRow } from './turns.js';
+import { getTurn, linkTurnInput, putTurn, type TurnInputRow } from './turns.js';
 
 type Row = Record<string, unknown>;
 
 function rows(db: Database.Database, table: string): Row[] {
-  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) return [];
   return db.prepare(`SELECT * FROM ${table}`).all() as Row[];
 }
 
@@ -19,7 +18,7 @@ function insert(db: Database.Database, table: string, row: Row): void {
 /**
  * Copy only metadata justified by the selected transcript. Partial/active turns
  * become inert historical snapshots; unanchored totals require a complete,
- * settled source turn. Legacy parents need no runtime migration.
+ * settled source turn.
  */
 export function copyForkTurnHistory(
   src: Database.Database,
@@ -35,10 +34,9 @@ export function copyForkTurnHistory(
 ): Set<string> {
   return src.transaction(() => {
     const outputIds = new Set(options.outputRows.map((r) => String(r.id)));
-    const hasTurns = hasTurnSchema(src);
     const activity = rows(src, 'turn_activity');
     const usage = rows(src, 'turn_usage');
-    const inputs = hasTurns ? (src.prepare('SELECT * FROM turn_inputs').all() as TurnInputRow[]) : [];
+    const inputs = src.prepare('SELECT * FROM turn_inputs').all() as TurnInputRow[];
     const inputsByTurn = new Map<string, TurnInputRow[]>();
     const incomplete = new Set<string>();
     const candidates = new Set<string>();
@@ -62,7 +60,7 @@ export function copyForkTurnHistory(
       if (options.inputIds.has(row.message_in_id)) candidates.add(row.turn_id);
       else incomplete.add(row.turn_id);
     }
-    const allOutputs = hasTurns ? (src.prepare('SELECT id, turn_id FROM messages_out').all() as Row[]) : [];
+    const allOutputs = src.prepare('SELECT id, turn_id FROM messages_out').all() as Row[];
     for (const row of allOutputs) {
       if (typeof row.turn_id === 'string' && !outputIds.has(String(row.id))) incomplete.add(row.turn_id);
     }
@@ -70,7 +68,7 @@ export function copyForkTurnHistory(
     const complete = new Set<string>();
     dst.transaction(() => {
       for (const id of candidates) {
-        const turn = hasTurns ? getTurn(src, id) : undefined;
+        const turn = getTurn(src, id);
         if (!turn) continue;
         const turnInputs = inputsByTurn.get(id) ?? [];
         const entireTurn = turn.phase === 'settled' && !incomplete.has(id);

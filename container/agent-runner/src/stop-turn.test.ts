@@ -73,9 +73,10 @@ it.each(['none', 'calls', 'final', 'recovery'] as const)('persists elapsed time,
     await sleep(20);
     link.requestTurnStop(active!.id);
     await until(() => active === null);
-    const row = getOutboundDb().prepare('SELECT id, content FROM messages_out').get() as { id: string; content: string };
-    const stats = JSON.parse(row.content).stopped_stats;
-    expect(stats.model).toBe(usageMode === 'none' ? 'configured-model' : 'reported-model');
+    const row = getOutboundDb().prepare('SELECT id, turn_id FROM messages_out').get() as { id: string; turn_id: string };
+    const stats = JSON.parse((getOutboundDb().prepare('SELECT value FROM session_state WHERE key = ?')
+      .get(`turn-metadata:${row.turn_id}`) as { value: string }).value);
+    expect(stats.model).toBe(usageMode === 'none' ? null : 'reported-model');
     expect(stats.durationMs).toBeGreaterThanOrEqual(20);
     expect(stats.durationMs).toBeLessThan(999999);
     const usage = getOutboundDb().prepare('SELECT * FROM turn_usage WHERE message_out_id = ?').get(row.id);

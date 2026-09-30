@@ -29,39 +29,6 @@ afterEach(() => {
 });
 
 describe('Stop integration with chat actions', () => {
-  it.each([false, true])(
-    'retains stopped metadata when loading history (replace=%s)',
-    async (replaceThreadMessages) => {
-      groupId.value = 'group';
-      threadId.value = 'thread';
-      channelType.value = 'telegram';
-      const stoppedStats = { durationMs: 12500, model: 'native/MiniMax-M3' };
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue({
-          ok: true,
-          json: async () => ({
-            approvals: [],
-            conversation: testSnapshot({
-              messages: [
-                {
-                  id: 'stopped',
-                  direction: 'out',
-                  text: 'Stopped by user.',
-                  timestamp: '2026-09-25T00:00:00Z',
-                  stoppedStats,
-                },
-              ],
-            }),
-          }),
-        }),
-      );
-      await runSync({ replaceThreadMessages });
-      expect(chatMessages.value).toEqual([expect.objectContaining({ id: 'stopped', stoppedStats })]);
-      expect(chatMessages.value[0].usage).toBeUndefined();
-    },
-  );
-
   it('keeps enqueueing follow-ups while Stop is pending', async () => {
     groupId.value = 'group';
     threadId.value = 'thread';

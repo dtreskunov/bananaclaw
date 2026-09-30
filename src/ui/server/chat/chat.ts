@@ -15,7 +15,6 @@ import path from 'path';
 import Busboy from 'busboy';
 import { WebSocketServer, type WebSocket } from 'ws';
 
-import { reduceActivityLines } from '../../../activity.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
 import {
@@ -86,12 +85,6 @@ import { authenticate, COOKIE_NAME } from '../auth.js';
 import { handleVoiceUpgrade } from './voice-stream.js';
 import { uiBaseUrl } from '../server.js';
 import fs from 'fs';
-import {
-  readStoppedTurnStats,
-  readTurnStats,
-  type StoppedTurnStats,
-  type TurnStats,
-} from '../../shared/stopped-turn.js';
 import { parseInputState, type InputHandling, type InputState } from '../../shared/input-state.js';
 import { INPUT_EDIT_ID } from '../../../pending-input-edit.js';
 import { cancelPendingInput, editPendingInput } from './pending-input-edit.js';
@@ -949,24 +942,6 @@ export async function handleChatRequest(
   return false;
 }
 
-export interface TurnUsageDto {
-  cost_usd: number;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  reasoning_tokens?: number;
-  num_turns?: number;
-  model: string;
-  context_window?: number;
-  max_output_tokens?: number;
-  /** Tokens resident in the context at turn end. Unlike the token counts,
-   *  which are billing sums over every round trip, this is comparable to
-   *  `context_window`. */
-  context_tokens?: number;
-  duration_ms?: number;
-}
-
 type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface HistoryMessage {
@@ -974,8 +949,6 @@ export interface HistoryMessage {
   inputState?: InputState;
   canEditPending?: boolean;
   timelinePosition?: number;
-  stoppedStats?: StoppedTurnStats;
-  turnStats?: TurnStats;
   /** Human sender attribution for inbound messages. */
   author?: { userId: string; displayName: string };
   direction: 'in' | 'out' | 'internal' | 'event';
@@ -991,10 +964,6 @@ export interface HistoryMessage {
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
   files?: { filename: string; size: number; path?: string; url?: string; contentType?: string }[];
-  usage?: TurnUsageDto;
-  /** Persisted activity trace (tool calls / progress steps) for this turn,
-   *  in emit order. Present on outbound messages that recorded a trace. */
-  activity?: { ts: string; text: string }[];
   /** Non-chat timeline event (e.g. a scheduled task firing). Present only
    *  when `direction === 'event'`; drives distinct rendering client-side. */
   event?: {
@@ -1224,73 +1193,6 @@ export function readChatHistory(
         turn_id: string | null;
       }>;
 
-      // Load turn_usage for all outbound messages in one query.
-      const outIds = rows
-        .filter((r) => r.kind === 'chat' || r.kind === 'text' || r.kind === 'chat-sdk')
-        .map((r) => r.id);
-      const usageMap = new Map<string, TurnUsageDto>();
-      if (outIds.length > 0) {
-        const usageRows = outDb
-          .prepare(
-            `SELECT message_out_id, cost_usd, input_tokens, output_tokens,
-                      cache_read_tokens, cache_write_tokens, reasoning_tokens,
-                      num_turns, model, context_window, max_output_tokens, context_tokens, duration_ms
-               FROM turn_usage WHERE message_out_id IN (${outIds.map(() => '?').join(',')})`,
-          )
-          .all(...outIds) as Array<{
-          message_out_id: string;
-          cost_usd: number;
-          input_tokens: number;
-          output_tokens: number;
-          cache_read_tokens: number;
-          cache_write_tokens: number;
-          reasoning_tokens: number | null;
-          num_turns: number | null;
-          model: string;
-          context_window: number | null;
-          max_output_tokens: number | null;
-          context_tokens: number | null;
-          duration_ms: number | null;
-        }>;
-        for (const u of usageRows) {
-          usageMap.set(u.message_out_id, {
-            cost_usd: u.cost_usd,
-            input_tokens: u.input_tokens,
-            output_tokens: u.output_tokens,
-            cache_read_tokens: u.cache_read_tokens,
-            cache_write_tokens: u.cache_write_tokens,
-            ...(u.reasoning_tokens != null ? { reasoning_tokens: u.reasoning_tokens } : {}),
-            ...(u.num_turns != null ? { num_turns: u.num_turns } : {}),
-            model: u.model,
-            ...(u.context_window != null ? { context_window: u.context_window } : {}),
-            ...(u.max_output_tokens != null ? { max_output_tokens: u.max_output_tokens } : {}),
-            ...(u.context_tokens != null ? { context_tokens: u.context_tokens } : {}),
-            ...(u.duration_ms != null ? { duration_ms: u.duration_ms } : {}),
-          });
-        }
-      }
-
-      // Load turn_activity for all outbound messages in one query, grouped
-      // by message id in append order.
-      const activityMap = new Map<string, { ts: string; text: string }[]>();
-      if (outIds.length > 0) {
-        const actRows = outDb
-          .prepare(
-            `SELECT message_out_id, ts, text FROM turn_activity
-                WHERE message_out_id IN (${outIds.map(() => '?').join(',')})
-                ORDER BY message_out_id, ordinal`,
-          )
-          .all(...outIds) as Array<{ message_out_id: string; ts: string; text: string }>;
-        for (const a of actRows) {
-          let arr = activityMap.get(a.message_out_id);
-          if (!arr) {
-            arr = [];
-            activityMap.set(a.message_out_id, arr);
-          }
-          arr.push({ ts: a.ts, text: a.text });
-        }
-      }
-
       // Reactions are `chat` rows with `operation:'reaction'` targeting a
       // prior message id. Collect them keyed by target so they fold onto the
       // target bubble after the loop instead of rendering as empty bubbles.
@@ -1317,8 +1219,6 @@ export function readChatHistory(
           // card after reload. Fire-and-forget cards still need their fallback.
           const content = chatSdkHistoryContent(r.content);
           if (content) {
-            const rawActivity = activityMap.get(r.id);
-            const activity = rawActivity ? reduceActivityLines(rawActivity) : undefined;
             const timelinePosition = parseOutboundContent(r.content).timelinePosition;
             messages.push({
               direction: 'out',
@@ -1329,7 +1229,6 @@ export function readChatHistory(
               ...(timelinePosition !== undefined ? { timelinePosition } : {}),
               ...(content.card ? { card: content.card } : {}),
               files: undefined,
-              ...(activity && activity.length > 0 ? { activity } : {}),
             });
           }
           continue;
@@ -1357,9 +1256,6 @@ export function readChatHistory(
           /* not JSON — treat as a normal text bubble below */
         }
         const parsed = parseOutboundContent(r.content);
-        const usage = usageMap.get(r.id);
-        const rawActivity = activityMap.get(r.id);
-        const activity = rawActivity ? reduceActivityLines(rawActivity) : undefined;
         messages.push({
           direction: 'out',
           id: r.id,
@@ -1369,11 +1265,7 @@ export function readChatHistory(
           ...(r.turn_id ? { turnId: r.turn_id } : {}),
           ...(parsed.deliveryOrigin ? { deliveryOrigin: parsed.deliveryOrigin } : {}),
           ...(parsed.suggestedAction ? { suggestedAction: parsed.suggestedAction } : {}),
-          ...(parsed.stoppedStats ? { stoppedStats: parsed.stoppedStats } : {}),
-          ...(parsed.turnStats ? { turnStats: parsed.turnStats } : {}),
           ...(parsed.timelinePosition !== undefined ? { timelinePosition: parsed.timelinePosition } : {}),
-          ...(usage ? { usage } : {}),
-          ...(activity && activity.length > 0 ? { activity } : {}),
         });
       }
 
@@ -2068,14 +1960,10 @@ export function parseOutboundContent(content: string): {
   files?: { filename: string; size: number; path?: string }[];
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   suggestedAction?: SuggestedAction;
-  stoppedStats?: StoppedTurnStats;
-  turnStats?: TurnStats;
   timelinePosition?: number;
 } {
   const o = JSON.parse(content);
   const timelinePosition = parseTimelinePosition(o?.timelinePosition);
-  const stoppedStats = readStoppedTurnStats(o);
-  const turnStats = readTurnStats(o);
   const text = typeof o?.text === 'string' ? o.text : '';
   const deliveryOrigin =
     o?.delivery_origin === 'send_message' || o?.delivery_origin === 'send_file' || o?.delivery_origin === 'response'
@@ -2112,8 +2000,6 @@ export function parseOutboundContent(content: string): {
     files,
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
     ...(suggestedAction ? { suggestedAction } : {}),
-    ...(stoppedStats ? { stoppedStats } : {}),
-    ...(turnStats ? { turnStats } : {}),
     ...(timelinePosition !== undefined ? { timelinePosition } : {}),
   };
 }

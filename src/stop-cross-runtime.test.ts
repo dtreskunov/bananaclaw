@@ -229,7 +229,10 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     expect(stopRow.seq).toBeGreaterThan(original!.seq);
     expect(JSON.parse(stopRow.content)).toMatchObject({ turn_id: turnId, stopped: true });
     expect(JSON.parse(stopRow.content)).not.toHaveProperty('cancelled_question_ids');
-    const stats = JSON.parse(stopRow.content).stopped_stats;
+    const stats = JSON.parse(
+      (outDb.prepare('SELECT value FROM session_state WHERE key = ?').get(`turn-metadata:${turnId}`) as { value: string })
+        .value,
+    );
     expect(stats.model).toBe('fixture-model');
     expect(stats.durationMs).toBeGreaterThan(0);
     expect(outDb.prepare('SELECT * FROM turn_usage WHERE message_out_id=?').get(stopRow.id)).toMatchObject({

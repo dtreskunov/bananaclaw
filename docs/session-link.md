@@ -96,14 +96,10 @@ using async-local storage across awaits. This works in both in-process tools
 and external stdio sidecars; late completion cannot read a successor's ID or
 reply address. The context is routing metadata, not a credential.
 
-**Coordinated offline upgrade:** follow
-[conversation-cutover.md](conversation-cutover.md) for the executable staging-only
-preflight/apply/verify CLI, shared peer evidence, consistent snapshots, partial
-failure startup guard, and rollback. Drain **both** old journals using the old
-peers before making the offline copy. The tool calls the explicit backfill and
-`migrateRunnerTurnJournal(db)` helpers; it never starts peers or translates old
-events. Production DB open does not migrate an existing journal. Roll back code
-and all backed-up databases together; mixed protocol versions are unsupported.
+**No upgrade path from v3.** Runner and host DB openers create the v4 turn
+schema and turn-aware journal triggers; they never migrate an older store. The
+only way back to v3 is the snapshot restore in
+[downgrade-to-v3.md](downgrade-to-v3.md); mixed protocol versions are unsupported.
 
 User cancellation uses a host-to-runner live `turn.stop` control carrying the
 exact turn ID. Both peers compare it with the active turn; stale controls never
@@ -346,9 +342,8 @@ isolated staging environment.
 Stop, steering, input editing and cancellation all require matching peers.
 Their live capabilities are advertised on `turn.state`; inbound commands and
 durable disposition/receipt records remain in the existing journals. They do
-not provide compatibility with an older link version. For this cutover, drain
-and stop both old peers, migrate offline, then deploy host, runner and chat
-assets together using [conversation-cutover.md](conversation-cutover.md).
+not provide compatibility with an older link version. Deploy host, runner and
+chat assets together; see [downgrade-to-v3.md](downgrade-to-v3.md) for rollback.
 Do not resubmit inputs or delete session data to recover from version mismatch.
 
 Verify a rollout with host health **and** an actual session exchange; a

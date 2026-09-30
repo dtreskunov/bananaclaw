@@ -8,7 +8,6 @@
 import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import { ensureRunnerStateSchema } from './runner-state.js';
-import { migrateTurnSchema } from './turns.js';
 
 const DEFAULT_RUNNER_STATE_PATH = '/workspace/runner-state/runner-state.db';
 const MAX_DECLARED_TOOL_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -188,89 +187,6 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
 
   _outbound = new Database(':memory:');
   _outbound.exec('PRAGMA foreign_keys = ON');
-  _outbound.exec(`
-    CREATE TABLE messages_out (
-      id             TEXT PRIMARY KEY,
-      seq            INTEGER UNIQUE,
-      in_reply_to    TEXT,
-      timestamp      TEXT NOT NULL,
-      deliver_after  TEXT,
-      recurrence     TEXT,
-      kind           TEXT NOT NULL,
-      platform_id    TEXT,
-      channel_type   TEXT,
-      thread_id      TEXT,
-      content        TEXT NOT NULL
-    );
-    CREATE TABLE processing_ack (
-      message_id     TEXT PRIMARY KEY,
-      status         TEXT NOT NULL,
-      status_changed TEXT NOT NULL
-    );
-    CREATE TABLE session_state (
-      key        TEXT PRIMARY KEY,
-      value      TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE container_state (
-      id                       INTEGER PRIMARY KEY CHECK (id = 1),
-      current_tool             TEXT,
-      tool_declared_timeout_ms INTEGER,
-      tool_started_at          TEXT,
-      updated_at               TEXT NOT NULL
-    );
-    CREATE TABLE turn_checkpoints (
-      message_out_id    TEXT PRIMARY KEY,
-      provider          TEXT NOT NULL,
-      continuation      TEXT NOT NULL,
-      provider_turn_ref TEXT NOT NULL,
-      created_at        TEXT NOT NULL
-    );
-    CREATE TABLE turn_activity (
-      message_out_id TEXT NOT NULL,
-      ordinal        INTEGER NOT NULL,
-      ts             TEXT NOT NULL,
-      text           TEXT NOT NULL,
-      PRIMARY KEY (message_out_id, ordinal)
-    );
-    CREATE TABLE turn_usage (
-      id                  TEXT PRIMARY KEY,
-      message_out_id      TEXT,
-      cost_usd            REAL,
-      input_tokens        INTEGER,
-      output_tokens        INTEGER,
-      cache_read_tokens   INTEGER,
-      cache_write_tokens  INTEGER,
-      reasoning_tokens    INTEGER,
-      num_turns           INTEGER,
-      duration_ms         INTEGER,
-      duration_api_ms     INTEGER,
-      model               TEXT,
-      context_window      INTEGER,
-      max_output_tokens   INTEGER,
-      context_tokens      INTEGER,
-      timestamp           TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE TABLE task_attempts (
-      task_message_id  TEXT PRIMARY KEY,
-      series_id        TEXT NOT NULL,
-      trigger_source   TEXT NOT NULL,
-      status           TEXT NOT NULL,
-      started_at       TEXT NOT NULL,
-      completed_at     TEXT,
-      duration_ms      INTEGER,
-      exit_code        INTEGER,
-      signal           TEXT,
-      stdout           TEXT,
-      stderr           TEXT,
-      error             TEXT,
-      wake_agent       INTEGER,
-      provider_invoked INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX idx_task_attempts_series_started
-      ON task_attempts(series_id, started_at DESC);
-  `);
-  migrateTurnSchema(_outbound);
   ensureRunnerStateSchema(_outbound);
 
   if (options.unifiedHostProjection) {

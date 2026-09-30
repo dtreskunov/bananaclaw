@@ -117,21 +117,8 @@ export function projectConversation(
     .map((message) => {
       const turn = message.turnId ? byId.get(message.turnId) : undefined;
       if (turn && !owns(turn) && !unknown(turn)) {
-        // Off-route sends expose the message, never the source conversation's trace.
-        const {
-          turnId: _turn,
-          activity: _activity,
-          usage: _usage,
-          stoppedStats: _stopped,
-          turnStats: _stats,
-          ...visible
-        } = message;
-        return visible;
-      }
-      // Associated accounting is represented once, by its original usage ID on
-      // the turn. Legacy message DTOs can contain null fields, not reported zeros.
-      if (turn) {
-        const { usage: _usage, ...visible } = message;
+        // Off-route sends expose the message, never the source conversation's turn.
+        const { turnId: _turn, ...visible } = message;
         return visible;
       }
       return { ...message };

@@ -185,24 +185,9 @@ describe('authoritative conversation projection', () => {
 
   it('does not leak another route through an explicitly targeted outbound message', () => {
     putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', origin_thread_id: 'private' });
-    const result = read([
-      {
-        ...output,
-        usage: {
-          cost_usd: 1,
-          input_tokens: 1,
-          output_tokens: 1,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          model: 'secret',
-        },
-        activity: [{ ts: '1', text: 'private' }],
-      },
-    ]);
+    const result = read([output]);
     expect(result.turns).toEqual([]);
     expect(result.messages[0]).not.toHaveProperty('turnId');
-    expect(result.messages[0]).not.toHaveProperty('usage');
-    expect(result.messages[0]).not.toHaveProperty('activity');
     expect(result.connection.activeTurnId).toBeNull();
   });
 

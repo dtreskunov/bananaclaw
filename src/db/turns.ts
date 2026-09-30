@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 // Mirrored in the Bun runner's db/turns.ts; neither runtime imports the other.
@@ -33,20 +32,7 @@ export interface TurnInputRow {
   association: 'consumed' | 'applied' | 'reply';
 }
 
-/** Host passes a read-only inbound snapshot; runner reads its local projection. */
-export interface TurnInputEvidence {
-  id: string;
-  channel_type: string | null;
-  platform_id: string | null;
-  thread_id: string | null;
-  source_session_id: string | null;
-}
-
 export const TURN_SCHEMA = `
-CREATE TABLE IF NOT EXISTS conversation_sync_migrations (
-  step TEXT PRIMARY KEY,
-  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
 CREATE TABLE IF NOT EXISTS turns (
   id TEXT PRIMARY KEY NOT NULL CHECK (length(id) > 0),
   origin_channel_type TEXT,
@@ -89,12 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_turn_usage_turn ON turn_usage(turn_id);
 CREATE INDEX IF NOT EXISTS idx_turn_activity_turn ON turn_activity(turn_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_activity_unanchored
   ON turn_activity(turn_id, ordinal) WHERE message_out_id IS NULL;
-INSERT OR IGNORE INTO conversation_sync_migrations(step) VALUES ('schema:1');
 `;
-
-export function hasTurnSchema(db: Database.Database): boolean {
-  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'turns'").get();
-}
 
 export function getTurn(db: Database.Database, id: string): TurnRow | undefined {
   return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as TurnRow | undefined;
@@ -183,219 +164,5 @@ export function linkTurnRecord(db: Database.Database, turnId: string, target: Tu
     if (row.turn_id !== null && row.turn_id !== turnId) throw new Error('Record already belongs to another turn');
     if (row.turn_id === null)
       db.prepare(`UPDATE ${target.table} SET turn_id = ? WHERE ${where}`).run(turnId, ...values);
-  })();
-}
-
-/** Explicit, versioned schema migration. Never called by a production DB opener. */
-export function migrateTurnSchema(db: Database.Database): void {
-  db.transaction(() => {
-    db.exec(TURN_SCHEMA);
-    if (db.prepare("SELECT 1 FROM conversation_sync_migrations WHERE step = 'schema:1'").get()) return;
-    for (const table of ['messages_out', 'turn_usage', 'turn_activity']) {
-      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-      if (!columns.some((c) => c.name === 'turn_id')) {
-        db.exec(`ALTER TABLE ${table} ADD COLUMN turn_id TEXT REFERENCES turns(id)`);
-      }
-    }
-    const activityColumns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{
-      name: string;
-      notnull: number;
-    }>;
-    if (activityColumns.some((c) => c.name === 'message_out_id' && c.notnull)) {
-      // Keep legacy keys, ordinals, and trigger SQL byte-for-byte. The new nullable
-      // output anchor permits activity on silent turns without a synthetic reply.
-      const objects = db
-        .prepare(
-          "SELECT sql FROM sqlite_master WHERE tbl_name = 'turn_activity' AND type IN ('index', 'trigger') AND sql IS NOT NULL",
-        )
-        .all() as Array<{ sql: string }>;
-      db.exec(`ALTER TABLE turn_activity RENAME TO turn_activity_before_sync;
-        ${TURN_ACTIVITY_SCHEMA}
-        INSERT INTO turn_activity SELECT message_out_id, ordinal, ts, text, turn_id FROM turn_activity_before_sync;
-        DROP TABLE turn_activity_before_sync;`);
-      for (const { sql } of objects) db.exec(sql);
-    }
-    db.exec(TURN_INDEX_SCHEMA);
-  })();
-}
-
-function parseObject(text: string): Record<string, unknown> {
-  try {
-    const value: unknown = JSON.parse(text);
-    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-  } catch (err) {
-    if (err instanceof SyntaxError) return {};
-    throw err;
-  }
-}
-
-function explicitId(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
-}
-
-export function historicalTurnId(messageOutId: string): string {
-  return `legacy:out:${createHash('sha256').update(messageOutId).digest('hex')}`;
-}
-
-/** One offline snapshot shared by both peers, including host-only outputs. */
-export interface TurnBackfillEvidence {
-  outputs: Array<{ id: string; in_reply_to: string | null; content: string; turn_id: string | null }>;
-  states: Array<{ key: string; value: string }>;
-  turns: TurnRow[];
-  links: TurnInputRow[];
-}
-
-/**
- * Outcome proven by one legacy output alone: a recorded stop, or a chat
- * payload. System-only outputs (e.g. thread titles) prove neither.
- */
-function legacyOutputOutcome(content: string): 'replied' | 'stopped' | undefined {
-  const value = parseObject(content);
-  if (value.stopped === true) return 'stopped';
-  if (typeof value.text === 'string' || Array.isArray(value.files)) return 'replied';
-  return undefined;
-}
-
-/** Conservative one-time import; no clock-based grouping or lifecycle reconstruction. */
-export function backfillTurns(
-  db: Database.Database,
-  inputs: TurnInputEvidence[] = [],
-  shared?: TurnBackfillEvidence,
-): void {
-  db.transaction(() => {
-    migrateTurnSchema(db);
-    if (db.prepare("SELECT 1 FROM conversation_sync_migrations WHERE step = 'backfill:1'").get()) return;
-    // Association-only updates must not enqueue old protocol payloads (or replay
-    // existing usage). Restore the same triggers before committing.
-    const triggers = db
-      .prepare(
-        `SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND
-          (tbl_name IN ('messages_out', 'turn_usage', 'turn_activity') OR
-           name IN ('journal_turn_insert', 'journal_turn_update', 'journal_turn_input_insert'))`,
-      )
-      .all() as Array<{ name: string; sql: string }>;
-    for (const { name } of triggers) db.exec(`DROP TRIGGER "${name.replaceAll('"', '""')}"`);
-
-    const inputById = new Map(inputs.map((row) => [row.id, row]));
-    for (const turn of shared?.turns ?? []) {
-      if (!getTurn(db, turn.id)) putTurn(db, turn);
-    }
-    for (const link of shared?.links ?? []) linkTurnInput(db, link);
-    const outputs =
-      shared?.outputs ??
-      (db.prepare('SELECT id, in_reply_to, content, turn_id FROM messages_out ORDER BY id').all() as Array<{
-        id: string;
-        in_reply_to: string | null;
-        content: string;
-        turn_id: string | null;
-      }>);
-    const applied: Array<{ messageId: string; turnId: string }> = [];
-    const states =
-      shared?.states ??
-      (db.prepare("SELECT key, value FROM session_state WHERE key LIKE 'input:%'").all() as Array<{
-        key: string;
-        value: string;
-      }>);
-    for (const state of states) {
-      const value = parseObject(state.value);
-      const turnId = explicitId(value.turnId);
-      if (
-        value.status !== 'applied' ||
-        !turnId ||
-        typeof value.messageId !== 'string' ||
-        !inputById.has(value.messageId)
-      )
-        continue;
-      if (state.key !== `input:${createHash('sha256').update(value.messageId).digest('hex')}`) continue;
-      applied.push({ messageId: value.messageId, turnId });
-    }
-    const reserved = new Set([
-      ...(db.prepare('SELECT id FROM turns').all() as Array<{ id: string }>).map((r) => r.id),
-      ...outputs.map((r) => r.turn_id ?? explicitId(parseObject(r.content).turn_id)).filter((id): id is string => !!id),
-      ...applied.map((r) => r.turnId),
-    ]);
-    const imported = new Set<string>();
-    const outcomes = new Map<string, 'replied' | 'stopped'>();
-    const outputTurns = new Map<string, string>();
-    const localOutputIds = new Set(
-      (db.prepare('SELECT id FROM messages_out').all() as Array<{ id: string }>).map((r) => r.id),
-    );
-    const ensureTurn = (id: string) => {
-      if (getTurn(db, id)) return;
-      putTurn(db, {
-        id,
-        origin_channel_type: null,
-        origin_platform_id: null,
-        origin_thread_id: null,
-        origin_source_session_id: null,
-        started_at: null,
-        ended_at: null,
-        phase: 'settled',
-        outcome: 'unknown',
-        provenance: 'backfill',
-        imported_from_session_id: null,
-        imported_from_turn_id: null,
-      });
-      imported.add(id);
-    };
-    for (const input of applied) {
-      ensureTurn(input.turnId);
-      linkTurnInput(db, { turn_id: input.turnId, message_in_id: input.messageId, association: 'applied' });
-    }
-    for (const output of outputs) {
-      let id = output.turn_id ?? explicitId(parseObject(output.content).turn_id);
-      if (!id) {
-        const base = historicalTurnId(output.id);
-        id = base;
-        for (let suffix = 1; reserved.has(id); suffix++) id = `${base}:${suffix}`;
-        reserved.add(id);
-      }
-      ensureTurn(id);
-      outputTurns.set(output.id, id);
-      if (imported.has(id)) {
-        const outcome = legacyOutputOutcome(output.content);
-        if (outcome && outcomes.get(id) !== 'stopped') outcomes.set(id, outcome);
-      }
-      db.prepare('UPDATE messages_out SET turn_id = ? WHERE id = ? AND turn_id IS NULL').run(id, output.id);
-      if (output.in_reply_to && inputById.has(output.in_reply_to)) {
-        linkTurnInput(db, { turn_id: id, message_in_id: output.in_reply_to, association: 'reply' });
-      }
-    }
-    for (const id of imported) {
-      const origins = getTurnInputs(db, id)
-        .map((r) => inputById.get(r.message_in_id))
-        .filter((r) => r !== undefined);
-      const routes = new Map(
-        origins.map((r) => [JSON.stringify([r.channel_type, r.platform_id, r.thread_id, r.source_session_id]), r]),
-      );
-      // A destination is not proof of origin. Conflicting/missing inputs remain unknown.
-      const route = routes.size === 1 ? origins[0] : undefined;
-      const outcome = outcomes.get(id);
-      if (!route && !outcome) continue;
-      putTurn(db, {
-        ...getTurn(db, id)!,
-        ...(route
-          ? {
-              origin_channel_type: route.channel_type,
-              origin_platform_id: route.platform_id,
-              origin_thread_id: route.thread_id,
-              origin_source_session_id: route.source_session_id,
-            }
-          : {}),
-        ...(outcome ? { outcome } : {}),
-      });
-    }
-    for (const table of ['turn_usage', 'turn_activity']) {
-      db.exec(`UPDATE ${table} SET turn_id = (SELECT turn_id FROM messages_out WHERE id = ${table}.message_out_id)
-        WHERE turn_id IS NULL AND EXISTS (SELECT 1 FROM messages_out WHERE id = ${table}.message_out_id)`);
-      if (shared) {
-        const link = db.prepare(`UPDATE ${table} SET turn_id = ? WHERE turn_id IS NULL AND message_out_id = ?`);
-        for (const [outputId, turnId] of outputTurns) {
-          if (!localOutputIds.has(outputId)) link.run(turnId, outputId);
-        }
-      }
-    }
-    for (const { sql } of triggers) db.exec(sql);
-    db.prepare("INSERT INTO conversation_sync_migrations(step) VALUES ('backfill:1')").run();
   })();
 }

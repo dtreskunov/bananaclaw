@@ -46,18 +46,6 @@ describe('inboundAttachmentSecurityHeaders', () => {
 });
 
 describe('parseOutboundContent', () => {
-  it('preserves warning timing without inventing usage or marking it stopped', () => {
-    const turnStats = { durationMs: 12000, model: 'native/MiniMax-M3' };
-    expect(parseOutboundContent(JSON.stringify({ text: 'No response', turn_stats: turnStats }))).toEqual({
-      text: 'No response',
-      files: undefined,
-      turnStats,
-    });
-    expect(
-      parseOutboundContent(JSON.stringify({ text: 'No response', turn_stats: { ...turnStats, durationMs: -1 } }))
-        .turnStats,
-    ).toBeUndefined();
-  });
   it('projects a stable logical position for live and reloaded responses', () => {
     const timelinePosition = Date.parse('2026-09-26T00:00:00.000Z') * 1000 + 1;
     expect(parseOutboundContent(JSON.stringify({ text: 'Done', timelinePosition }))).toEqual({
@@ -70,19 +58,6 @@ describe('parseOutboundContent', () => {
         parseOutboundContent(JSON.stringify({ text: 'Legacy', timelinePosition: invalid })).timelinePosition,
       ).toBeUndefined();
     }
-  });
-
-  it('preserves stopped metadata without inventing token usage', () => {
-    const stoppedStats = { durationMs: 12500, model: 'native/MiniMax-M3' };
-    expect(
-      parseOutboundContent(
-        JSON.stringify({
-          text: 'Stopped by user.',
-          stopped: true,
-          stopped_stats: stoppedStats,
-        }),
-      ),
-    ).toEqual({ text: 'Stopped by user.', files: undefined, stoppedStats });
   });
 
   it('preserves recognized delivery provenance', () => {

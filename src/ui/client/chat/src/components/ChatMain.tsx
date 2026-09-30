@@ -533,22 +533,6 @@ function AgentActionLabel({ label, title }: { label: string; title: string }) {
   return <span class="delivery-origin" title={title}>{label}</span>;
 }
 
-export function MessageTurnMetadata({ message }: { message: ChatMessage }) {
-  const usage = message.usage;
-  if (usage) return <UsageMeta u={usage} partial={!!message.stoppedStats} />;
-  if (message.stoppedStats) {
-    const stats = message.stoppedStats;
-    return <span title="Token usage was not reported before cancellation.">
-      {fmtDur(stats.durationMs)} {'\u00b7'} {stats.model ? shortModel(stats.model) : 'Model unavailable'} {'\u00b7'} Tokens unavailable
-    </span>;
-  }
-  const stats = message.turnStats;
-  return stats ? <span>{[
-    stats.durationMs !== undefined ? fmtDur(stats.durationMs) : '',
-    stats.model ? shortModel(stats.model) : '',
-  ].filter(Boolean).join(' \u00b7 ')}</span> : null;
-}
-
 /** The thread currently open in the log, as the rail knows it. */
 function activeThread(): Thread | undefined {
   return threads.value.find((x) => x.threadId === threadId.value);
@@ -882,9 +866,7 @@ function Message(
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
-        {m.direction === 'out'
-          ? m.statsTurn ? <ReplyTurnStats turn={m.statsTurn} /> : <MessageTurnMetadata message={m} />
-          : null}
+        {m.direction === 'out' && m.statsTurn ? <ReplyTurnStats turn={m.statsTurn} /> : null}
         <span class="msg-inline-actions">
           <CopyTranscriptButton getContent={() => mdRef.current} />
           <EditMessageButton m={m} />

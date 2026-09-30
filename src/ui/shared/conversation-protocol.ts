@@ -87,7 +87,6 @@ const usage = shape(usageFields);
 const reportedUsage = shape(
   Object.fromEntries(Object.entries(usageFields).map(([key, check]) => [key, optional(check)])),
 );
-const stats = shape({ durationMs: number, model: optional(text) });
 const message = shape({
   id,
   direction: oneOf('in', 'out', 'internal', 'event'),
@@ -128,10 +127,6 @@ const message = shape({
       actions: array(shape({ label: text, url: text, style: optional(oneOf('primary', 'danger', 'default')) })),
     }),
   ),
-  usage: optional(usage),
-  activity: optional(array(trace)),
-  stoppedStats: optional(stats),
-  turnStats: optional(stats),
   reactions: optional(array(shape({ emoji: text, ts: text }))),
   event: optional(
     shape({

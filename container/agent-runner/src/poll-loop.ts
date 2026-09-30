@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { loadConfig } from './config.js';
 import { findByName, findByRouting, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
@@ -43,7 +42,7 @@ import {
 } from './current-batch.js';
 import {
   beginTurn, associateInput, finishUsageAttempt, interruptAbandonedTurns,
-  markTurnStopping, persistTurnMetadata, recordTurnUsage, settleTurn, turnDuration,
+  markTurnStopping, persistTurnMetadata, recordTurnUsage, settleTurn,
   turnUsage, type TurnExecution,
 } from './turn-execution.js';
 import {
@@ -2039,8 +2038,6 @@ async function processQuery(
       }
       appendActivity({ kind: 'notification', id: `stopped:${turnId}`, text: 'Stopped by user.' });
       const noticeId = generateId();
-      const usage = latestUsage;
-      const durationMs = turnDuration(execution.current);
       writeMessageOut({
         id: noticeId,
         in_reply_to: activeTurnRouting.inReplyTo,
@@ -2053,10 +2050,6 @@ async function processQuery(
           delivery_origin: 'response',
           stopped: true,
           turn_id: turnId,
-          stopped_stats: {
-            durationMs,
-            model: usage?.model || loadConfig().model || null,
-          },
         }),
       });
       const savedContinuation = queryContinuation ?? priorContinuation;
@@ -2083,7 +2076,6 @@ async function processQuery(
       await waitForTurnTools(execution.current);
       execution.current.endedAt ??= new Date().toISOString();
       const id = generateId();
-      const durationMs = turnDuration(execution.current);
       writeMessageOut({
         id,
         in_reply_to: noticeRouting.inReplyTo,
@@ -2094,7 +2086,6 @@ async function processQuery(
         content: JSON.stringify({
           text,
           delivery_origin: 'response',
-          turn_stats: { durationMs, model: latestUsage?.model || loadConfig().model || null },
           ...(suggestedAction ? { suggested_action: suggestedAction } : {}),
         }),
       });

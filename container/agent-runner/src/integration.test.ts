@@ -1099,7 +1099,6 @@ describe('poll loop — empty result notice', () => {
     expect(content.text).toContain('without producing a response');
     expect(content.suggested_action).toBe('report');
     const messageId = getUndeliveredMessages()[0].id;
-    expect(content.turn_stats).toEqual({ durationMs: expect.any(Number), model: 'test-model' });
     expect(getOutboundDb().prepare('SELECT message_out_id, input_tokens FROM turn_usage').all())
       .toEqual([{ message_out_id: messageId, input_tokens: 1200 }]);
     const activity = getOutboundDb().prepare('SELECT text FROM turn_activity WHERE message_out_id = ?').all(messageId) as { text: string }[];

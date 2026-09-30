@@ -30,9 +30,9 @@ export function resetConversation(): void {
   conversationState.value = null;
 }
 
-/** Activity `ts` is epoch milliseconds; imported history may carry ISO text or nothing usable. */
+/** Activity `ts` is epoch milliseconds. */
 function activityKey(ts: string): number | null {
-  const ms = /^\d+$/.test(ts) ? Number(ts) : Date.parse(ts);
+  const ms = Number(ts);
   return Number.isFinite(ms) ? ms * 1000 : null;
 }
 
@@ -44,7 +44,6 @@ function activityKey(ts: string): number | null {
  * a status bubble.
  */
 export function conversationMessages(view: Conversation): ChatMessage[] {
-  const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
   const key = (m: Conversation['messages'][number]) => timelineSortKey(m.timestamp, m.timelinePosition);
   const statsHosts = new Map<string, ConversationTurn>();
   for (const turn of view.turns) {
@@ -56,19 +55,8 @@ export function conversationMessages(view: Conversation): ChatMessage[] {
   const messages: ChatMessage[] = view.messages
     .filter((m) => m.inputState?.status !== 'cancelled')
     .map(({ timestamp, ...m }) => {
-      const turn = m.turnId ? turns.get(m.turnId) : undefined;
       const statsTurn = statsHosts.get(m.id);
-      return {
-        ...m,
-        files: m.files ?? null,
-        ts: timestamp,
-        ...(turn?.activity.length ? { activity: undefined } : {}),
-        ...(turn?.usage.length ? { usage: undefined } : {}),
-        ...(turn?.metadata.durationMs !== null && turn?.metadata.durationMs !== undefined
-          ? { turnStats: undefined, stoppedStats: undefined }
-          : {}),
-        ...(statsTurn ? { statsTurn } : {}),
-      };
+      return { ...m, files: m.files ?? null, ts: timestamp, ...(statsTurn ? { statsTurn } : {}) };
     });
   const byId = new Map(messages.map((m) => [m.id, m]));
   const hostOf = new Map([...statsHosts].map(([id, turn]) => [turn.id, id]));

@@ -288,34 +288,6 @@ describe('forkThread', () => {
     } finally { db.close(); }
   });
 
-  it('copies legacy sidecars without migrating the parent at runtime', () => {
-    const source = new Database(outboundDbPath(AG, PARENT_SESSION));
-    source.exec(`
-      DROP INDEX idx_messages_out_turn;
-      ALTER TABLE messages_out DROP COLUMN turn_id;
-      DROP INDEX idx_turn_usage_turn;
-      ALTER TABLE turn_usage DROP COLUMN turn_id;
-      DROP TABLE turn_activity;
-      CREATE TABLE turn_activity (message_out_id TEXT NOT NULL, ordinal INTEGER NOT NULL, ts TEXT NOT NULL, text TEXT NOT NULL,
-        PRIMARY KEY (message_out_id, ordinal));
-      DROP TABLE turn_inputs;
-      DROP TABLE turns;
-      DROP TABLE conversation_sync_migrations;
-      INSERT INTO turn_usage (id, message_out_id, cost_usd) VALUES ('legacy', 'a1', 1);
-      INSERT INTO turn_activity VALUES ('a1', 0, 'now', 'legacy');
-    `);
-    source.close();
-    const result = fork();
-    const db = new Database(outboundDbPath(AG, result.sessionId));
-    const parent = new Database(outboundDbPath(AG, PARENT_SESSION), { readonly: true });
-    try {
-      expect(db.prepare('SELECT id, turn_id FROM turn_usage').all()).toEqual([{ id: 'legacy', turn_id: null }]);
-      expect(db.prepare('SELECT text, turn_id FROM turn_activity').all()).toEqual([{ text: 'legacy', turn_id: null }]);
-      expect(db.prepare('SELECT * FROM turns').all()).toEqual([]);
-      expect(parent.prepare("SELECT name FROM sqlite_master WHERE name = 'turns'").all()).toEqual([]);
-    } finally { db.close(); parent.close(); }
-  });
-
   it.each(['content', 'receipt'] as const)('excludes %s cancellation tombstones and refuses them as branch anchors', (source) => {
     if (source === 'content') {
       const db = new Database(inboundDbPath(AG, PARENT_SESSION));

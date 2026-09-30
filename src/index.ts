@@ -7,7 +7,6 @@
 import path from 'path';
 
 import { DATA_DIR } from './config.js';
-import { assertConversationCutoverComplete } from './conversation-cutover.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
@@ -65,7 +64,6 @@ import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
 import { initChannelAdapters, teardownChannelAdapters, getChannelAdapterExact } from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
-  assertConversationCutoverComplete(DATA_DIR);
   log.info('NanoClaw starting');
 
   // 0. Circuit breaker — backoff on rapid restarts

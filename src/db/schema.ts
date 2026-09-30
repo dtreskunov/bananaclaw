@@ -397,7 +397,7 @@ END;
 `;
 
 /** Host-owned projection of durable runner output and state. */
-export const OUTBOUND_BASE_SCHEMA = `
+const OUTBOUND_BASE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS messages_out (
   id             TEXT PRIMARY KEY,
   seq            INTEGER UNIQUE,
@@ -507,5 +507,4 @@ CREATE TABLE IF NOT EXISTS applied_runner_events (
 );
 `;
 
-/** Complete fresh schema; existing files require explicit migrateTurnSchema/backfillTurns. */
 export const OUTBOUND_SCHEMA = TURN_SCHEMA + OUTBOUND_BASE_SCHEMA + TURN_INDEX_SCHEMA;

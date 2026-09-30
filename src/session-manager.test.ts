@@ -104,7 +104,6 @@ describe('writeOutboundDirect', () => {
         usage: db.query('SELECT id,turn_id,input_tokens FROM turn_usage').all(),
         journal: db.query('SELECT * FROM pending_runner_events').all(),
         foreignKeys: db.query('PRAGMA foreign_key_check').all(),
-        markers: db.query('SELECT step FROM conversation_sync_migrations ORDER BY step').all(),
       }));
       db.close();
     `,
@@ -116,7 +115,6 @@ describe('writeOutboundDirect', () => {
       usage: [{ id: 'seed-bill', turn_id: 'seed-turn', input_tokens: 17 }],
       journal: [],
       foreignKeys: [],
-      markers: [{ step: 'journal:2' }, { step: 'schema:1' }],
     });
     const bytes = fs.readFileSync(runnerStateDbPath(AG, SESS));
     seedRunnerState(AG, SESS);

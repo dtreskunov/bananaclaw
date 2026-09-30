@@ -206,14 +206,12 @@ CREATE TABLE session_state (
 
 Access: `container/agent-runner/src/db/session-state.ts`.
 
-### 4.4 Durable logical turns (conversation-sync step 1)
+### 4.4 Durable logical turns
 
 The host projection and runner state have matching, runtime-local definitions
-in `src/db/turns.ts` and `container/agent-runner/src/db/turns.ts`. There are no
-cross-runtime imports. This step is **storage only**: it does not change live
-turn tracking, the browser, or session-link payloads/triggers. Existing writers
-continue to leave new associations null. Do not treat these tables as complete
-live lifecycle state until the coupled host/runner protocol change lands.
+in `src/db/turns.ts` and `container/agent-runner/src/db/turns.ts` (a host test
+asserts the schema text is identical). There are no cross-runtime imports. Both
+DB openers create this schema for every store; there is no migration path.
 
 `turns` has these columns:
 
@@ -221,10 +219,10 @@ live lifecycle state until the coupled host/runner protocol change lands.
 | --- | --- |
 | `id` | Nonempty stable text primary key, scoped to the session |
 | `origin_channel_type`, `origin_platform_id`, `origin_thread_id`, `origin_source_session_id` | Nullable original input route, not an outbound destination |
-| `started_at`, `ended_at` | Nullable timestamps; imports do not manufacture lifecycle times |
+| `started_at`, `ended_at` | Nullable timestamps; historical turns have none |
 | `phase` | `running`, `stopping`, `settling`, `settled` |
 | `outcome` | `pending`, `replied`, `warning`, `silent`, `stopped`, `failed`, `unknown`, `interrupted` |
-| `provenance` | `native`, `backfill`, `fork` |
+| `provenance` | `native`, `fork`, or `backfill` (historical turns imported at the v4 cutover; never written now) |
 | `imported_from_session_id`, `imported_from_turn_id` | Nullable fork source identifiers (provenance, not local foreign keys) |
 
 Associations are explicit:
@@ -244,17 +242,21 @@ Associations are explicit:
   unique index on `(turn_id, ordinal) WHERE message_out_id IS NULL` identifies
   unanchored activity. Legacy ordinals are not renumbered, even when multiple
   output anchors share a turn. Timestamps never determine association/order.
-- Unlinked usage and orphaned legacy activity remain stored and unattributed.
-  No cost/token rows are dropped, cloned, or attributed by time proximity.
+- Historical usage/activity rows that point at an existing output but no turn
+  remain stored and unattributed; nothing is attributed by time proximity.
+  Rows reachable from neither a turn nor an output are not kept.
+
+Historical (`backfill`) turns are settled with null start/end times. Their
+outcome is `stopped`/`replied` only when an output said so, otherwise
+`unknown`, and their origin route is null unless evidence existed. Some of their
+activity rows are plain text rather than JSON steps; readers accept both.
 
 Storage APIs (both runtimes): `getTurn`, `putTurn`, `getTurnInputs`,
-`linkTurnInput`, `getTurnAssociations`, `linkTurnRecord`, `historicalTurnId`,
-`migrateTurnSchema`, and `backfillTurns`. `TurnRow`, `TurnInputRow`,
-`TurnInputEvidence`, `TurnAssociations`, and `TurnAssociationTarget` define their
+`linkTurnInput`, `getTurnAssociations`, and `linkTurnRecord`. `TurnRow`,
+`TurnInputRow`, `TurnAssociations`, and `TurnAssociationTarget` define their
 contracts. `linkTurnRecord(db, turnId, target)` accepts an output/usage ID or
 an existing activity `(message_out_id, ordinal)` and rejects missing turns,
-missing records, and reassignment to a different turn. These helpers are not
-yet a live event/projection API; no new turn payloads are journaled.
+missing records, and reassignment to a different turn.
 
 Forks retain IDs only for turns associated with included inputs/outputs/sidecars.
 The origin is rewritten to the fork's route and provenance records the parent.
@@ -311,64 +313,8 @@ Unlike the central DB, session DBs do **not** automatically run upgrade migratio
 
 Before deploying a new required table or column, stop both peers, back up the session directory, and normalize every existing session DB explicitly. Verify every file against the new schema and run integrity/foreign-key checks before starting matching peers. Prefer nullable columns or defaulted values when the historical value cannot be reconstructed. There is no mixed-version compatibility.
 
-### Explicit durable-turn migration
+### Downgrading
 
-Use the executable [coordinated offline cutover](conversation-cutover.md) rather
-than calling these helpers independently on installed files. It discovers
-flat/nested sessions, enforces drained journals, preserves a complete original
-database snapshot, supplies shared peer evidence, verifies both projections, and
-blocks startup after an incomplete migration. The API notes below describe the
-underlying primitives, not a live-migration procedure.
-
-- **Detect:** inspect `PRAGMA table_info(messages_out)` for `turn_id` and
-  `conversation_sync_migrations` for `schema:1` and `backfill:1`. Fresh schemas
-  record `schema:1` only. Neither DB opener invokes migration or backfill.
-- **Why:** historical rows usually identify an output message, not the logical
-  turn. A nullable association avoids changing accounting or inventing past
-  lifecycle events.
-- **Fix (operator-invoked, offline):** stop all writers and retain a backup of
-  all three DB files. On the host, open `outbound.db` with `better-sqlite3` and
-  call `backfillTurns(outDb, inputs)` from `src/db/turns.ts`, where `inputs` is a
-  read-only snapshot of
-  `SELECT id, channel_type, platform_id, thread_id, source_session_id FROM messages_in`
-  from that session's `inbound.db`. In Bun, open `runner-state.db` with
-  `bun:sqlite` and call its own `backfillTurns(runnerDb)`; it reads the local
-  input projection by default (an explicit evidence array is also accepted).
-  Use the same available input evidence in both calls when their projections
-  differ. Their optional third `TurnBackfillEvidence` argument supplies the
-  complete peer output/receipt/turn/link union, including host-only reserved
-  explicit IDs, so deterministic associations and origins match even when the
-  runner contains a subset. The cutover CLI validates conflicts and supplies
-  this evidence before changing either store. Do not migrate `inbound.db`; consumed-input associations belong to the
-  outbound projection. `migrateTurnSchema(db)` is available separately for
-  schema-only work; backfill invokes it in the same encompassing transaction.
-  After draining the old protocol's pending events and completing backfill,
-  explicitly run Bun's `migrateRunnerTurnJournal(db)` on the runner file
-  (records `journal:2`). It recreates the turn-aware triggers and refuses an
-  undrained journal. No additional schema migration is needed for metadata,
-  which uses the existing `session_state` table. Upgrade both link peers and
-  restart runners together; see the coordinated offline steps in `session-link.md`.
-  This step does **not** run any of these operations on an installed session.
-- **Import policy:** reuse nonempty string `messages_out.content.turn_id`
-  (or an existing relational link); otherwise allocate
-  `legacy:out:<sha256(message ID)>`, with deterministic numeric suffixes if
-  explicit IDs collide. Equal timestamps or reply anchors do not merge outputs.
-  Create historical turns as `settled`, with null start/end times. The outcome
-  is `stopped` or `replied` only when one of the turn's own outputs records
-  `stopped: true` or carries a chat payload; otherwise `unknown`.
-  Link inputs only via a present `in_reply_to` row or a matching hashed
-  `input:*` receipt with `status=applied` and a turn ID. Queue/steering intent,
-  processing state, timestamps, and the default session route are not evidence.
-  Conflicting input origins stay unknown. Usage/activity inherit a turn only
-  through an existing output anchor; orphaned/unlinked records stay unchanged.
-- **Verify:** compare original message IDs/content, usage IDs and every numeric
-  total, activity keys/text, journal rows, and input records before/after. Check
-  `PRAGMA quick_check` and `PRAGMA foreign_key_check`; inspect the two migration
-  markers. Both schema and backfill are versioned, transactional and repeatable.
-  Re-running a completed backfill is a no-op, not a reconciliation job. Supply
-  evidence on the first invocation; absent evidence intentionally stays unknown.
-  Existing journal triggers are restored verbatim; migration does not enqueue
-  duplicate usage or change payloads.
-- **Rollback:** while writers remain stopped, restore the complete backed-up
-  session directory and prior code. Do not selectively remove turn rows/columns
-  from a live file or reseed an existing runner journal from the host projection.
+Session stores cannot be converted back to link v3. Rollback is a full
+snapshot restore together with the v3 code; see
+[downgrade-to-v3.md](downgrade-to-v3.md).

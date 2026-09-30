@@ -191,9 +191,6 @@ export interface ChatMessage {
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   /** Safe next-turn action suggested by the agent runner. */
   suggestedAction?: SuggestedAction;
-  usage?: TurnUsage;
-  stoppedStats?: import('../../../shared/stopped-turn').StoppedTurnStats;
-  turnStats?: import('../../../shared/stopped-turn').TurnStats;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
   card?: DisplayCard;
   /** Persisted activity trace for an outbound turn, in emit order. */

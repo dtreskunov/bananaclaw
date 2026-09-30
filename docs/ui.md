@@ -2,13 +2,13 @@
 
 Optional read-only web UI mounted on the existing webhook HTTP server under `/ui`. A shared auth shell (`/ui/auth/*`) hands out a single bearer-cookie that's reused by every UI app. Today the only app is the **chat** app at `/ui/chat`; more apps will live alongside it.
 
-### Conversation protocol cutover
+### Conversation protocol
 
 The chat client uses versioned atomic conversation snapshots/updates, with
-explicit turn identity and durable settlement. Upgrading an existing install
-requires the matching host, runners, session stores, and browser assets:
-follow [the offline conversation cutover](conversation-cutover.md). Reload cached
-clients after replacement; there is no old-client compatibility path.
+explicit turn identity and durable settlement. Host, runners, session stores
+and browser assets must match; there is no old-client compatibility path.
+Reload cached clients after a deployment. Going back to the pre-turn protocol
+is a snapshot restore: see [downgrade-to-v3.md](downgrade-to-v3.md).
 
 Missed frames, unknown streams, and revision gaps require an actual authorized
 resnapshot. Disconnect or confirmed runner exit disables controls, but never
@@ -257,15 +257,15 @@ coalesced on the host with a bounded dirty flag. Slow consumers are closed rathe
 than building an unlimited queue. There is no durable browser replay/ACK log.
 Every projection rechecks access and scopes channel, platform and thread, including
 shared sessions and synthetic DM IDs. Off-route sends cannot reveal their originating
-turn's trace; imported unknown origins expose only already-visible message sidecars.
+turn's trace; historical turns with an unknown origin expose only activity and
+usage anchored to already-visible outputs.
 
-**Coordinated cutover:** this client and host have no legacy frame support. Build
+**Deployment:** this client and host have no legacy frame support. Build
 the checked-in bundle with `pnpm --dir src/ui/client/chat run build`, deploy host
-and assets together only after the offline turn-schema/session-link migration
-in [db-session.md](db-session.md), and reload open tabs. Verify that a reconnect
-starts with a `snapshot` and subsequent changes are revisioned `update` envelopes.
-For rollback, restore matching code/assets and the coordinated database backups;
-do not mix protocol versions. No deployment or live migration occurs during a build.
+and assets together, and reload open tabs. Verify that a reconnect starts with a
+`snapshot` and subsequent changes are revisioned `update` envelopes. Do not mix
+protocol versions; see [downgrade-to-v3.md](downgrade-to-v3.md) for rollback.
+No deployment occurs during a build.
 
 ### Live voice input
 

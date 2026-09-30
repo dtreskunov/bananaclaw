@@ -135,12 +135,10 @@ describe('authoritative turn presentation', () => {
         direction: 'out',
         text: id,
         timestamp: '2026-09-29T00:00:02Z',
-        usage: value,
       })),
       connection: { connected: true, activeTurnId: null },
     };
     update(settled);
-    expect(chatMessages.value.filter((m) => m.direction === 'out').every((m) => !m.usage)).toBe(true);
     expect(chatMessages.value.some((m) => m.direction === 'turn')).toBe(false);
     expect(chatMessages.value.find((m) => m.statsTurn)?.statsTurn?.usage).toEqual([{ id: 'usage-1', value }]);
     receive(testSnapshot(settled, 'reconnect'));

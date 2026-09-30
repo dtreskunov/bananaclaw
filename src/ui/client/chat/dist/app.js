@@ -17716,7 +17716,6 @@ var usage = shape(usageFields);
 var reportedUsage = shape(
   Object.fromEntries(Object.entries(usageFields).map(([key, check]) => [key, optional(check)]))
 );
-var stats = shape({ durationMs: number, model: optional(text) });
 var message = shape({
   id,
   direction: oneOf("in", "out", "internal", "event"),
@@ -17757,10 +17756,6 @@ var message = shape({
       actions: array(shape({ label: text, url: text, style: optional(oneOf("primary", "danger", "default")) }))
     })
   ),
-  usage: optional(usage),
-  activity: optional(array(trace)),
-  stoppedStats: optional(stats),
-  turnStats: optional(stats),
   reactions: optional(array(shape({ emoji: text, ts: text }))),
   event: optional(
     shape({
@@ -18632,11 +18627,10 @@ function resetConversation() {
   conversationState.value = null;
 }
 function activityKey(ts) {
-  const ms = /^\d+$/.test(ts) ? Number(ts) : Date.parse(ts);
+  const ms = Number(ts);
   return Number.isFinite(ms) ? ms * 1e3 : null;
 }
 function conversationMessages(view) {
-  const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
   const key = (m6) => timelineSortKey(m6.timestamp, m6.timelinePosition);
   const statsHosts = /* @__PURE__ */ new Map();
   for (const turn2 of view.turns) {
@@ -18646,17 +18640,8 @@ function conversationMessages(view) {
     if (last) statsHosts.set(last.id, turn2);
   }
   const messages = view.messages.filter((m6) => m6.inputState?.status !== "cancelled").map(({ timestamp, ...m6 }) => {
-    const turn2 = m6.turnId ? turns.get(m6.turnId) : void 0;
     const statsTurn = statsHosts.get(m6.id);
-    return {
-      ...m6,
-      files: m6.files ?? null,
-      ts: timestamp,
-      ...turn2?.activity.length ? { activity: void 0 } : {},
-      ...turn2?.usage.length ? { usage: void 0 } : {},
-      ...turn2?.metadata.durationMs !== null && turn2?.metadata.durationMs !== void 0 ? { turnStats: void 0, stoppedStats: void 0 } : {},
-      ...statsTurn ? { statsTurn } : {}
-    };
+    return { ...m6, files: m6.files ?? null, ts: timestamp, ...statsTurn ? { statsTurn } : {} };
   });
   const byId = new Map(messages.map((m6) => [m6.id, m6]));
   const hostOf = new Map([...statsHosts].map(([id2, turn2]) => [turn2.id, id2]));
@@ -22234,28 +22219,6 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false }
 function AgentActionLabel({ label, title }) {
   return /* @__PURE__ */ u4("span", { class: "delivery-origin", title, children: label });
 }
-function MessageTurnMetadata({ message: message2 }) {
-  const usage2 = message2.usage;
-  if (usage2) return /* @__PURE__ */ u4(UsageMeta, { u: usage2, partial: !!message2.stoppedStats });
-  if (message2.stoppedStats) {
-    const stats3 = message2.stoppedStats;
-    return /* @__PURE__ */ u4("span", { title: "Token usage was not reported before cancellation.", children: [
-      fmtDur(stats3.durationMs),
-      " ",
-      "\xB7",
-      " ",
-      stats3.model ? shortModel(stats3.model) : "Model unavailable",
-      " ",
-      "\xB7",
-      " Tokens unavailable"
-    ] });
-  }
-  const stats2 = message2.turnStats;
-  return stats2 ? /* @__PURE__ */ u4("span", { children: [
-    stats2.durationMs !== void 0 ? fmtDur(stats2.durationMs) : "",
-    stats2.model ? shortModel(stats2.model) : ""
-  ].filter(Boolean).join(" \xB7 ") }) : null;
-}
 function activeThread() {
   return threads.value.find((x6) => x6.threadId === threadId.value);
 }
@@ -22547,7 +22510,7 @@ function Message({ m: m6, allowContinue = false }) {
             m6.deliveryOrigin,
             !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
           ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-          m6.direction === "out" ? m6.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: m6.statsTurn }) : /* @__PURE__ */ u4(MessageTurnMetadata, { message: m6 }) : null,
+          m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: m6.statsTurn }) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
             /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current }),
             /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),

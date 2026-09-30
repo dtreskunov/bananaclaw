@@ -10,7 +10,7 @@ vi.mock('../../../config.js', async (original) => ({
 }));
 
 import { initTestDb, runMigrations, getDb, closeDb } from '../../../db/index.js';
-import { backfillTurns, type TurnRow } from '../../../db/turns.js';
+import { type TurnRow } from '../../../db/turns.js';
 import { initSessionFolder, inboundDbPath, outboundDbPath } from '../../../session-manager.js';
 import { applyDurableRunnerEvent, type DurableRunnerFrame } from '../../../session-link-durable.js';
 import {
@@ -224,7 +224,7 @@ afterEach(async () => {
 });
 
 describe('host projector → ordered stream → browser reducer convergence', () => {
-  it('converges migrated partial accounting without inventing missing numeric values', async () => {
+  it('converges historical partial accounting without inventing missing numeric values', async () => {
     const input = new Database(inboundDbPath(group, session));
     input
       .prepare(
@@ -235,19 +235,19 @@ describe('host projector → ordered stream → browser reducer convergence', ()
     input.close();
     const db = new Database(outboundDbPath(group, session));
     db.prepare(
-      `INSERT INTO messages_out(id,seq,in_reply_to,kind,timestamp,content,channel_type,platform_id,thread_id)
-      VALUES ('legacy-out',1,'legacy-in','chat',?,'{"text":"old answer"}','web',?,'thread')`,
+      `INSERT INTO turns(id,origin_channel_type,origin_platform_id,origin_thread_id,phase,outcome,provenance)
+      VALUES ('historical','web',?,'thread','settled','replied','backfill')`,
+    ).run(`group:${group}`);
+    db.prepare(
+      "INSERT INTO turn_inputs(turn_id,message_in_id,association) VALUES('historical','legacy-in','reply')",
+    ).run();
+    db.prepare(
+      `INSERT INTO messages_out(id,seq,in_reply_to,kind,timestamp,content,channel_type,platform_id,thread_id,turn_id)
+      VALUES ('legacy-out',1,'legacy-in','chat',?,'{"text":"old answer"}','web',?,'thread','historical')`,
     ).run(now, `group:${group}`);
-    db.prepare("INSERT INTO turn_usage(id,message_out_id,input_tokens) VALUES('partial-bill','legacy-out',17)").run();
-    backfillTurns(db, [
-      {
-        id: 'legacy-in',
-        channel_type: 'web',
-        platform_id: `group:${group}`,
-        thread_id: 'thread',
-        source_session_id: null,
-      },
-    ]);
+    db.prepare(
+      "INSERT INTO turn_usage(id,message_out_id,turn_id,input_tokens) VALUES('partial-bill','legacy-out','historical',17)",
+    ).run();
     db.close();
     const client = browser();
     await client.converged();

@@ -1,5 +1,4 @@
 import type { InputState } from './input-state.js';
-import type { StoppedTurnStats, TurnStats } from './stopped-turn.js';
 
 /** Browser-safe, route-scoped host projection. No runner journal or routing IDs. */
 export interface ConversationUsage {
@@ -36,11 +35,6 @@ export interface ConversationMessage {
     children: string[];
     actions: { label: string; url: string; style?: 'primary' | 'danger' | 'default' }[];
   };
-  // Unassociated imported history retains its message-anchored sidecars.
-  usage?: ConversationUsage;
-  activity?: { ts: string; text: string }[];
-  stoppedStats?: StoppedTurnStats;
-  turnStats?: TurnStats;
   reactions?: { emoji: string; ts: string }[];
   event?: {
     kind: 'task-run';

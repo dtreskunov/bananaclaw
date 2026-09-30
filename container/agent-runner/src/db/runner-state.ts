@@ -14,15 +14,7 @@ const enqueue = (eventType: string, payload: string): string => `
 `;
 
 export function ensureRunnerStateSchema(db: Database): void {
-  const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_out'").get();
-  if (!fresh && !db.prepare("SELECT 1 FROM sqlite_master WHERE name='conversation_sync_migrations'").get()) {
-    throw new Error('Runner turn schema requires offline migrateTurnSchema()');
-  }
-  const journalExists = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'pending_runner_events'").get();
-  if (journalExists && !db.prepare("SELECT 1 FROM conversation_sync_migrations WHERE step = 'journal:2'").get()) {
-    throw new Error('Runner turn journal requires offline migrateRunnerTurnJournal()');
-  }
-  if (fresh) db.exec(TURN_SCHEMA);
+  db.exec(TURN_SCHEMA);
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages_in (
       id TEXT PRIMARY KEY,
@@ -382,7 +374,7 @@ export function ensureRunnerStateSchema(db: Database): void {
       )}
     END;
   `);
-  if (fresh) db.exec(TURN_INDEX_SCHEMA);
+  db.exec(TURN_INDEX_SCHEMA);
   for (const operation of ['INSERT', 'UPDATE']) {
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS journal_turn_${operation.toLowerCase()}
@@ -403,24 +395,7 @@ export function ensureRunnerStateSchema(db: Database): void {
       ${enqueue('turn-input.upsert', `json_object('turn_id', NEW.turn_id,
         'message_in_id', NEW.message_in_id, 'association', NEW.association)`)}
     END;
-    INSERT OR IGNORE INTO conversation_sync_migrations(step) VALUES ('journal:2');
   `);
-}
-
-/** Offline only: old journal payloads must be drained before upgrading both peers. */
-export function migrateRunnerTurnJournal(db: Database): void {
-  db.transaction(() => {
-    const journalExists = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'pending_runner_events'").get();
-    if (journalExists && db.prepare('SELECT 1 FROM pending_runner_events LIMIT 1').get()) {
-      throw new Error('Drain the old runner journal before upgrading the session link');
-    }
-    for (const name of ['message_out_insert', 'turn_activity_insert', 'turn_activity_update',
-      'turn_usage_insert', 'turn_usage_update']) {
-      db.exec(`DROP TRIGGER IF EXISTS journal_${name}`);
-    }
-    db.exec("INSERT OR IGNORE INTO conversation_sync_migrations(step) VALUES ('journal:2')");
-    ensureRunnerStateSchema(db);
-  })();
 }
 
 export function listPendingRunnerEvents(db: Database, limit = 32): PendingRunnerEvent[] {
