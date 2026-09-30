@@ -4,15 +4,27 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { dynamicTool, jsonSchema, type JSONSchema7, type ToolSet } from 'ai';
+import { dynamicTool, jsonSchema, type JSONSchema7, type Tool, type ToolSet } from 'ai';
 
 import type { McpServerConfig } from '../types.js';
+import { mcpToolPrefix, sanitizeMcpName } from './mcp-names.js';
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.MCP_TOOL_TIMEOUT) || 60_000;
 
 interface Connection {
   client: Client;
   timeout: number;
+}
+
+/** One discovered external MCP tool, as exposed to the model. */
+export interface McpToolEntry {
+  /** Model-facing name: `mcp__<server>__<tool>`. */
+  name: string;
+  server: string;
+  toolName: string;
+  description: string;
+  inputSchema: unknown;
+  tool: Tool;
 }
 
 function inheritedEnvironment(): Record<string, string> {
@@ -44,10 +56,6 @@ function createTransport(config: McpServerConfig, cwd: string): Transport {
   });
   transport.stderr?.on('data', () => {});
   return transport;
-}
-
-function sanitizeName(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 function contentOutput(result: CallToolResult) {
@@ -114,7 +122,7 @@ function errorMessage(error: unknown): string {
 
 export class NativeMcpManager {
   private readonly connections: Connection[] = [];
-  private toolsPromise: Promise<ToolSet> | null = null;
+  private entriesPromise: Promise<McpToolEntry[]> | null = null;
   private closed = false;
 
   constructor(
@@ -122,9 +130,13 @@ export class NativeMcpManager {
     private readonly cwd = '/workspace/agent',
   ) {}
 
-  tools(signal?: AbortSignal): Promise<ToolSet> {
-    this.toolsPromise ??= this.discoverTools(signal);
-    return this.toolsPromise;
+  entries(signal?: AbortSignal): Promise<McpToolEntry[]> {
+    this.entriesPromise ??= this.discoverTools(signal);
+    return this.entriesPromise;
+  }
+
+  async tools(signal?: AbortSignal): Promise<ToolSet> {
+    return Object.fromEntries((await this.entries(signal)).map((entry) => [entry.name, entry.tool]));
   }
 
   async close(): Promise<void> {
@@ -133,10 +145,10 @@ export class NativeMcpManager {
     await Promise.all(connections.map(({ client }) => client.close().catch(() => {})));
   }
 
-  private async discoverTools(signal?: AbortSignal): Promise<ToolSet> {
+  private async discoverTools(signal?: AbortSignal): Promise<McpToolEntry[]> {
     const toolSets = await Promise.all(
       Object.entries(this.servers).map(async ([serverName, config]) => {
-        const client = new Client({ name: `nanoclaw-native-${sanitizeName(serverName)}`, version: '1.0.0' });
+        const client = new Client({ name: `nanoclaw-native-${sanitizeMcpName(serverName)}`, version: '1.0.0' });
         const timeout = config.timeout ?? DEFAULT_TIMEOUT_MS;
         try {
           await client.connect(createTransport(config, this.cwd), { timeout, signal });
@@ -149,15 +161,16 @@ export class NativeMcpManager {
           } while (cursor);
           if (this.closed || signal?.aborted) {
             await client.close().catch(() => {});
-            return {};
+            return [];
           }
           this.connections.push({ client, timeout });
-          const tools: ToolSet = {};
+          const entries = new Map<string, McpToolEntry>();
           for (const definition of definitions) {
-            const exposedName = `mcp__${sanitizeName(serverName)}__${sanitizeName(definition.name)}`;
-            if (tools[exposedName]) throw new Error(`MCP tool name collision in ${serverName}: ${exposedName}`);
-            tools[exposedName] = dynamicTool({
-              description: definition.description ?? `${definition.name} from ${serverName}`,
+            const exposedName = `${mcpToolPrefix(serverName)}${sanitizeMcpName(definition.name)}`;
+            if (entries.has(exposedName)) throw new Error(`MCP tool name collision in ${serverName}: ${exposedName}`);
+            const description = definition.description ?? `${definition.name} from ${serverName}`;
+            const tool = dynamicTool({
+              description,
               inputSchema: jsonSchema(definition.inputSchema as JSONSchema7),
               execute: async (input, options) => {
                 const result = await client.callTool(
@@ -173,23 +186,29 @@ export class NativeMcpManager {
                   ? contentOutput(output as CallToolResult)
                   : { type: 'json' as const, value: output as never },
             });
+            entries.set(exposedName, {
+              name: exposedName,
+              server: serverName,
+              toolName: definition.name,
+              description,
+              inputSchema: definition.inputSchema,
+              tool,
+            });
           }
-          return tools;
+          return [...entries.values()];
         } catch (error) {
           await client.close().catch(() => {});
           console.error(`[native-mcp] Skipping ${serverName}: ${errorMessage(error)}`);
-          return {};
+          return [];
         }
       }),
     );
 
-    const merged: ToolSet = {};
-    for (const tools of toolSets) {
-      for (const [name, definition] of Object.entries(tools)) {
-        if (merged[name]) throw new Error(`External MCP tool name collision: ${name}`);
-        merged[name] = definition;
-      }
+    const merged = new Map<string, McpToolEntry>();
+    for (const entry of toolSets.flat()) {
+      if (merged.has(entry.name)) throw new Error(`External MCP tool name collision: ${entry.name}`);
+      merged.set(entry.name, entry);
     }
-    return merged;
+    return [...merged.values()];
   }
 }

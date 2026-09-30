@@ -21,6 +21,8 @@ let requestHeaders: Headers[];
 let toolMode: boolean;
 let anthropicToolMode: boolean;
 let externalMcpToolMode: boolean;
+/** Each OpenAI-compatible model request pops one scripted call; text when empty. */
+let scriptedToolCalls: Array<[name: string, args: string]>;
 let skillToolMode: boolean;
 let todoToolMode: boolean;
 let rejectAudio: boolean;
@@ -57,6 +59,7 @@ beforeEach(() => {
   toolMode = false;
   anthropicToolMode = false;
   externalMcpToolMode = false;
+  scriptedToolCalls = [];
   skillToolMode = false;
   todoToolMode = false;
   rejectAudio = false;
@@ -144,10 +147,11 @@ beforeEach(() => {
       const requestBody = requests.at(-1)!;
       const messages = requestBody.messages as Array<{ role: string }>;
       const toolResultCount = messages.filter((message) => message.role === 'tool').length;
-      const shouldCallTool = todoToolMode
+      const scripted = scriptedToolCalls.shift();
+      const shouldCallTool = scripted ? true : todoToolMode
         ? toolResultCount < 2
         : (toolMode || externalMcpToolMode || skillToolMode || slowToolMode) && toolResultCount === 0;
-      const toolName = slowToolMode ? 'bash' : todoToolMode
+      const toolName = scripted ? scripted[0] : slowToolMode ? 'bash' : todoToolMode
         ? toolResultCount === 0
           ? 'todowrite'
           : 'todoread'
@@ -156,7 +160,7 @@ beforeEach(() => {
           : externalMcpToolMode
             ? 'mcp__Fixture__echo_value'
             : 'mcp__nanoclaw__send_message';
-      const toolArguments = slowToolMode ? '{"command":"sleep 30"}' : todoToolMode
+      const toolArguments = scripted ? scripted[1] : slowToolMode ? '{"command":"sleep 30"}' : todoToolMode
         ? toolResultCount === 0
           ? '{"todos":[{"id":"inspect","content":"turn-one-secret","status":"in_progress"}]}'
           : '{}'
@@ -727,6 +731,10 @@ describe('NativeProvider', () => {
       'completed',
     )).toMatchObject({ tool: 'skill', title: 'Loaded skill', detail: 'deploy/references/checklist.md' });
     expect(formatNativeToolStep(
+      { toolCallId: 'search-1', toolName: 'tool_search', input: { query: 'select:mcp__Fixture__echo_value' } },
+      'running',
+    )).toMatchObject({ tool: 'tool_search', title: 'Loading tools', detail: 'mcp__Fixture__echo_value' });
+    expect(formatNativeToolStep(
       { toolCallId: 'mcp-1', toolName: 'mcp__example__lookup', input: { name: 'private-value' } },
       'completed',
     )).not.toHaveProperty('detail');
@@ -943,7 +951,76 @@ describe('NativeProvider', () => {
       }),
     );
     expect(requests).toHaveLength(2);
+    expect(requestToolNames(0)).toContain('mcp__Fixture__echo_value');
+    expect(requestToolNames(0)).not.toContain('tool_search');
     expect(JSON.stringify(requests[1]?.messages)).toContain('echo:from-model');
+  });
+
+  function fixtureProvider(mode: 'always' | 'auto' = 'always'): NativeProvider {
+    const bun = Bun.which('bun');
+    if (!bun) throw new Error('bun executable not found');
+    return new NativeProvider({
+      model: 'local/test-model',
+      modelParams: { mcp_tool_search: mode },
+      mcpServers: {
+        Fixture: { command: bun, args: ['run', path.join(import.meta.dir, 'native', 'test-fixtures', 'stdio-mcp.ts')] },
+      },
+    });
+  }
+
+  function requestToolNames(index: number): string[] {
+    return ((requests[index]?.tools ?? []) as Array<{ function: { name: string } }>).map((item) => item.function.name);
+  }
+
+  it('defers external MCP tools behind tool_search and loads them for the next step', async () => {
+    scriptedToolCalls = [
+      ['tool_search', '{"query":"echo value"}'],
+      ['mcp__Fixture__echo_value', '{"value":"deferred"}'],
+    ];
+    const provider = fixtureProvider();
+    const events = await collect(provider);
+
+    expect(requests).toHaveLength(3);
+    expect(requestToolNames(0)).toContain('tool_search');
+    expect(requestToolNames(0)).not.toContain('mcp__Fixture__echo_value');
+    expect(JSON.stringify(requests[0]?.messages)).toContain(
+      '**Fixture** (3 tools, prefix `mcp__Fixture__`): echo_value, wait, image',
+    );
+    expect(requestToolNames(1)).toContain('mcp__Fixture__echo_value');
+    expect(requestToolNames(1)).not.toContain('mcp__Fixture__wait');
+    expect(JSON.stringify(requests[2]?.messages)).toContain('echo:deferred');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'progress',
+        step: expect.objectContaining({ tool: 'mcp__Fixture__echo_value', status: 'completed' }),
+      }),
+    );
+
+    // The loaded set is rebuilt from history on the next turn.
+    const continuation = events.find((event) => event.type === 'init')!.continuation;
+    await collect(provider, continuation);
+    expect(requests).toHaveLength(4);
+    expect(requestToolNames(3)).toContain('mcp__Fixture__echo_value');
+    expect(requestToolNames(3)).not.toContain('mcp__Fixture__wait');
+  });
+
+  it('turns a direct call to an unloaded MCP tool into a tool_search load', async () => {
+    scriptedToolCalls = [
+      ['mcp__Fixture__echo_value', '{"value":"early"}'],
+      ['mcp__Fixture__echo_value', '{"value":"retried"}'],
+    ];
+    const events = await collect(fixtureProvider());
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'progress',
+        step: expect.objectContaining({ tool: 'tool_search', status: 'completed' }),
+      }),
+    );
+    expect(JSON.stringify(requests[1]?.messages)).toContain('select:mcp__Fixture__echo_value');
+    expect(requestToolNames(1)).toContain('mcp__Fixture__echo_value');
+    expect(JSON.stringify(requests[2]?.messages)).toContain('echo:retried');
+    expect(JSON.stringify(requests[2]?.messages)).not.toContain('echo:early');
   });
 
   it('indexes and progressively loads a group-local skill through the model tool loop', async () => {

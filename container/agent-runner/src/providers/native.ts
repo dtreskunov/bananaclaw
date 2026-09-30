@@ -27,6 +27,12 @@ import { NativeStore } from './native/store.js';
 import { NativeTurnJournal } from './native/turn-journal.js';
 import { createNativeTools } from './native/tools.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
+import {
+  DeferredMcpTools,
+  estimateMcpToolTokens,
+  mcpToolSearchMode,
+  shouldDeferMcpTools,
+} from './native/tool-search.js';
 
 function log(message: string): void {
   console.error(`[native-provider] ${message}`);
@@ -108,6 +114,9 @@ export function formatNativeToolStep(
     title = status === 'running'
       ? detail ? 'Applying patch to' : 'Applying patch'
       : detail ? 'Applied patch to' : 'Applied patch';
+  } else if (tool === 'tool_search') {
+    detail = typeof input?.query === 'string' ? input.query.replace(/^select:/i, '').trim() || undefined : undefined;
+    title = status === 'running' ? 'Loading tools' : 'Loaded tools';
   } else if (tool === 'todoread') {
     title = status === 'running' ? 'Reviewing task list' : 'Reviewed task list';
   }
@@ -151,13 +160,13 @@ function lazyMcpManager(servers: Record<string, McpServerConfig> | undefined, cw
   const configured = servers && Object.keys(servers).length > 0 ? servers : null;
   let instance: import('./native/mcp-client.js').NativeMcpManager | null = null;
   return {
-    async tools(signal: AbortSignal): Promise<ToolSet> {
-      if (!configured) return {};
+    async entries(signal: AbortSignal): Promise<import('./native/mcp-client.js').McpToolEntry[]> {
+      if (!configured) return [];
       if (!instance) {
         const { NativeMcpManager } = await import('./native/mcp-client.js');
         instance = new NativeMcpManager(configured, cwd);
       }
-      return instance.tools(signal);
+      return instance.entries(signal);
     },
     async close(): Promise<void> {
       await instance?.close();
@@ -252,6 +261,8 @@ export class NativeProvider implements AgentProvider {
     const options = this.options;
     const store = this.store;
     const mcpManager = lazyMcpManager(options.mcpServers, input.cwd);
+    const toolSearchMode = mcpToolSearchMode(options.modelParams?.mcp_tool_search);
+    let loggedDeferral = false;
     const skills = new NativeSkillRegistry(undefined, undefined, undefined, loadConfig().disabledSkills);
 
     const events: AsyncIterable<ProviderEvent> = {
@@ -299,12 +310,26 @@ export class NativeProvider implements AgentProvider {
               });
               journal.updateInput(incoming);
               abortController.signal.throwIfAborted();
-              const tools = turn.toolsDisabled
+              const nativeTools: ToolSet = turn.toolsDisabled
                 ? {}
-                : {
-                    ...createNativeTools(input.cwd, options.additionalDirectories, skills, todoState),
-                    ...(await mcpManager.tools(abortController.signal)),
-                  };
+                : createNativeTools(input.cwd, options.additionalDirectories, skills, todoState);
+              const mcpEntries = turn.toolsDisabled ? [] : await mcpManager.entries(abortController.signal);
+              // Large external tool sets are loaded on demand via tool_search;
+              // the loaded set can grow between steps, so rebuild per step.
+              const deferredMcp = shouldDeferMcpTools(mcpEntries, toolSearchMode)
+                ? new DeferredMcpTools(mcpEntries, prior)
+                : null;
+              if (deferredMcp && !loggedDeferral) {
+                loggedDeferral = true;
+                console.error(
+                  `[native-provider] Deferring ${mcpEntries.length} MCP tools (~${estimateMcpToolTokens(mcpEntries)} tokens) behind tool_search`,
+                );
+              }
+              const mcpTools: ToolSet = deferredMcp
+                ? {}
+                : Object.fromEntries(mcpEntries.map((entry) => [entry.name, entry.tool]));
+              const stepTools = (): ToolSet => ({ ...nativeTools, ...(deferredMcp?.toolSet() ?? mcpTools) });
+              const mcpCatalog = deferredMcp?.instructions() ?? null;
               abortController.signal.throwIfAborted();
               const configuredMaxOutput =
                 typeof options.modelParams?.max_tokens === 'number'
@@ -324,11 +349,12 @@ export class NativeProvider implements AgentProvider {
                   model,
                   system: loadNativeInstructions(
                     input.systemContext?.instructions,
-                    skills.instructions(),
+                    [skills.instructions(), mcpCatalog].filter(Boolean).join('\n\n') || null,
                     turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
                   ),
                   messages,
-                  tools: journal.wrap(tools, abortController.signal),
+                  tools: journal.wrap(stepTools(), abortController.signal),
+                  ...(deferredMcp ? { repairToolCall: deferredMcp.repairToolCall } : {}),
                   // Own the boundary: SDK prepareStep cannot resume a text-only
                   // final step and may race ahead of the consumer's event loop.
                   stopWhen: isStepCount(1),

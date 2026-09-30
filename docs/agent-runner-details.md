@@ -306,6 +306,33 @@ class OpenCodeProvider implements AgentProvider {
 - System prompt injected via `<system>` prefix in prompt text
 - No resume support (sessions are always new or reused by ID)
 
+### Native Provider: External MCP Tools
+
+The native provider (`providers/native.ts`) runs its built-in tools in-process
+and connects to the group's external MCP servers itself
+(`native/mcp-client.ts`). Each discovered tool is exposed as
+`mcp__<server>__<tool>`.
+
+Because every tool schema is resent on every model step, large MCP servers
+are loaded on demand (`native/tool-search.ts`):
+
+- `model_params.mcp_tool_search` selects the mode: `auto` (default) defers
+  when the external schemas exceed about 8k tokens, `always` always defers,
+  and `never` sends every tool on every step.
+- When deferring, the system prompt carries a compact catalog (server, tool
+  count, and tool names only), and the model gets a `tool_search` tool. It
+  takes keywords, or `select:<name>[,<name>...]` for exact names, and loads
+  the matching tools for the next step.
+- A direct call to a catalog tool that is not loaded yet is rewritten into a
+  `tool_search` select, so the model sees it loaded instead of an error.
+- The loaded set is rebuilt from the conversation history on each turn: MCP
+  tool calls plus `tool_search` results. It keeps the 30 most recently used
+  tools, so it needs no extra state and follows forks and edits.
+
+```bash
+ncl groups config set-param --id <group> --key mcp_tool_search --value always
+```
+
 ## Agent-Runner Core
 
 Everything below is handled by the agent-runner, not the provider.
