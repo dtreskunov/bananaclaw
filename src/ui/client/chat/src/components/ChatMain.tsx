@@ -33,7 +33,7 @@ import { splitPendingInputs, timelineLayoutKey } from '../queued-followups';
 import { showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import { conversationState } from '../conversation-state';
-import { turnRowView } from '../turn-row';
+import { turnRowView, type TurnRowView } from '../turn-row';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -701,7 +701,7 @@ function Message(
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
-  if (m.direction === 'turn' && m.turn) return <ConversationTurnRow turn={m.turn} />;
+  if (m.direction === 'turn' && m.turn) return <ConversationTurnRow turn={m.turn} lines={m.activity ?? []} status={!!m.turnStatus} />;
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
@@ -882,7 +882,9 @@ function Message(
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
-        {m.direction === 'out' ? <MessageTurnMetadata message={m} /> : null}
+        {m.direction === 'out'
+          ? m.statsTurn ? <ReplyTurnStats turn={m.statsTurn} /> : <MessageTurnMetadata message={m} />
+          : null}
         <span class="msg-inline-actions">
           <CopyTranscriptButton getContent={() => mdRef.current} />
           <EditMessageButton m={m} />
@@ -927,6 +929,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
       {message.ts ? <div class="meta">
         <RelativeTime ts={message.ts} />
         <AgentActionLabel label="card" title="Sent with send_card" />
+        {message.statsTurn ? <ReplyTurnStats turn={message.statsTurn} /> : null}
       </div> : null}
     </div>
   );
@@ -1148,26 +1151,55 @@ function TaskIndicator() {
   );
 }
 
-function ConversationTurnRow({ turn }: { turn: ConversationTurn }) {
+/** Elapsed/model line, usage and token availability for a turn; shared by status rows and replies. */
+function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }) {
+  const metadata = [view.elapsedMs !== null ? fmtDur(view.elapsedMs) : '', view.model ? shortModel(view.model) : '']
+    .filter(Boolean)
+    .join(' \u00b7 ');
+  return (
+    <>
+      {view.showTiming && metadata ? <span class="typing-meta">{metadata}</span> : null}
+      {view.usage.map((record) => <UsageMeta key={record.id} u={record.value}
+        provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
+      {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} live provisional /> : null}
+      {view.showTokensUnavailable ? <span>Tokens unavailable</span> : null}
+    </>
+  );
+}
+
+/** A settled turn's outcome note and accounting, in the meta line of its last reply. */
+function ReplyTurnStats({ turn }: { turn: ConversationTurn }) {
+  const view = turnRowView(turn, Date.now());
+  return (
+    <>
+      {view.note ? <span class="turn-outcome-note">{view.note}</span> : null}
+      <TurnStats turn={turn} view={view} />
+    </>
+  );
+}
+
+/**
+ * A system row of turn activity between the turn's own messages. The status row also carries the
+ * live headline, timer, usage and Stop control, or settled stats for a turn without a reply.
+ */
+function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; lines: ActivityLine[]; status: boolean }) {
   const [traceExpanded, setTraceExpanded] = useState(false);
   const onToggleTrace = () => setTraceExpanded((value) => !value);
   const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
   const settled = turn.phase === 'settled';
+  const live = status && !settled;
   const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : null;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
-    if (settled) return;
+    if (!live) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [turn.startedAt, settled]);
+  }, [turn.startedAt, live]);
   const view = turnRowView(turn, now);
-  const metadata = [view.elapsedMs !== null ? fmtDur(view.elapsedMs) : '', view.model ? shortModel(view.model) : '']
-    .filter(Boolean)
-    .join(' \u00b7 ');
-  const liveHeadline = latestActivityHeadline(turn.activity);
+  const liveHeadline = latestActivityHeadline(lines);
   const [openLatestOnExpand, setOpenLatestOnExpand] = useState(false);
-  if (view.hidden) return null;
+  if (!lines.length && !status) return null;
   const toggleFromPreview = () => {
     setOpenLatestOnExpand(!traceExpanded);
     onToggleTrace();
@@ -1177,10 +1209,14 @@ function ConversationTurnRow({ turn }: { turn: ConversationTurn }) {
     onToggleTrace();
   };
   return (
-    <div class={`typing${traceExpanded ? ' expanded' : ''}`} data-turn-id={turn.id} aria-live={settled ? 'off' : 'polite'}>
+    <div
+      class={`typing turn-system${traceExpanded ? ' expanded' : ''}`}
+      data-turn-id={status ? turn.id : undefined}
+      aria-live={live ? 'polite' : 'off'}
+    >
       <div class="typing-summary">
         <div class="typing-dots">
-          {!settled ? <><span></span><span></span><span></span></> : null}
+          {live ? <><span></span><span></span><span></span></> : null}
           {liveHeadline
             ? <button
                 type="button"
@@ -1190,28 +1226,24 @@ function ConversationTurnRow({ turn }: { turn: ConversationTurn }) {
                 title={traceExpanded ? 'Hide activity' : 'Show latest activity'}
                 onClick={toggleFromPreview}
               ><StepHeadlineContent headline={liveHeadline} /></button>
-            : view.status ? <span class="hint">{view.status}</span> : null}
+            : live && view.status ? <span class="hint">{view.status}</span> : null}
         </div>
       </div>
-      {stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
-      {view.note ? <div class="turn-stop-note">{view.note}</div> : null}
-      {!settled && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Runner disconnected. The outcome is not yet confirmed.</div> : null}
+      {status && stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
+      {status && view.note ? <div class="turn-stop-note">{view.note}</div> : null}
+      {live && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Runner disconnected. The outcome is not yet confirmed.</div> : null}
       <ActivityTracePanel
-        lines={turn.activity}
+        lines={lines}
         expanded={traceExpanded}
         onToggle={toggleFromCount}
         live={!settled}
         now={endedAt ?? now}
         openLatest={openLatestOnExpand}
       />
-      <div class="meta">
-        {view.showTiming && metadata ? <span class="typing-meta">{metadata}</span> : null}
-        {view.usage.map((record) => <UsageMeta key={record.id} u={record.value}
-          provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
-        {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} live provisional /> : null}
-        {view.showTokensUnavailable ? <span>Tokens unavailable</span> : null}
+      {status ? <div class="meta">
+        <TurnStats turn={turn} view={view} />
         {activeTurn.value?.id === turn.id ? <ActiveTurnStopButton /> : null}
-      </div>
+      </div> : null}
     </div>
   );
 }

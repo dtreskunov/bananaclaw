@@ -81,3 +81,87 @@ describe('turn row placement', () => {
     expect(conversationMessages(view).map((m) => m.id)).toEqual(['ask', 'turn:n', 'reply']);
   });
 });
+
+describe('turn activity between messages', () => {
+  const us = start * 1000;
+  const message = (
+    id: string,
+    direction: 'in' | 'out',
+    offsetMs: number,
+    status?: 'applied' | 'steering',
+  ): ConversationMessage => ({
+    id,
+    direction,
+    timestamp: '2026-09-29T00:00:00Z',
+    text: id,
+    timelinePosition: us + offsetMs * 1000,
+    ...(status ? { inputState: { messageId: id, status } } : {}),
+  });
+  const step = (ordinal: number, offsetMs: number) => ({
+    ordinal,
+    ts: String(start + offsetMs),
+    text: `step ${ordinal}`,
+  });
+  const rows = (view: ReturnType<typeof testSnapshot>['conversation']) =>
+    conversationMessages(view).map((m) => ({
+      id: m.id,
+      lines: m.direction === 'turn' ? m.activity?.map((line) => line.text) : undefined,
+      status: m.turnStatus ?? false,
+      stats: m.statsTurn?.id,
+    }));
+
+  it('splits activity at a steering message and puts settled stats on the reply', () => {
+    const messages = [message('ask', 'in', -1), message('steer', 'in', 3000, 'applied'), message('reply', 'out', 9000)];
+    const turn = settled({
+      id: 's',
+      inputIds: ['ask', 'steer'],
+      outputIds: ['reply'],
+      activity: [step(0, 1000), step(1, 5000)],
+    });
+    expect(rows(testSnapshot({ messages, turns: [turn] }).conversation)).toEqual([
+      { id: 'ask', lines: undefined, status: false, stats: undefined },
+      { id: 'turn:s', lines: ['step 0'], status: false, stats: undefined },
+      { id: 'steer', lines: undefined, status: false, stats: undefined },
+      { id: 'turn:s:1', lines: ['step 1'], status: false, stats: undefined },
+      { id: 'reply', lines: undefined, status: false, stats: 's' },
+    ]);
+  });
+
+  it('shows live status after the newest applied steer, but not for one still waiting', () => {
+    const running = { ...testTurn, id: 'r', inputIds: ['ask', 'steer'], activity: [step(0, 1000)] };
+    const applied = [message('ask', 'in', -1), message('steer', 'in', 3000, 'applied')];
+    expect(
+      rows(testSnapshot({ messages: applied, turns: [running] }).conversation).map((r) => [r.id, r.status]),
+    ).toEqual([
+      ['ask', false],
+      ['turn:r', false],
+      ['steer', false],
+      ['turn:r:1', true],
+    ]);
+    const waiting = [message('ask', 'in', -1), message('steer', 'in', 3000, 'steering')];
+    expect(
+      rows(testSnapshot({ messages: waiting, turns: [running] }).conversation).map((r) => [r.id, r.status]),
+    ).toEqual([
+      ['ask', false],
+      ['turn:r', true],
+      ['steer', false],
+    ]);
+  });
+
+  it('keeps settled stats on the last system row when the turn has no reply', () => {
+    const turn = settled({ id: 'q', outcome: 'silent', inputIds: ['ask'], activity: [step(0, 1000)] });
+    expect(rows(testSnapshot({ messages: [message('ask', 'in', -1)], turns: [turn] }).conversation)).toEqual([
+      { id: 'ask', lines: undefined, status: false, stats: undefined },
+      { id: 'turn:q', lines: ['step 0'], status: true, stats: undefined },
+    ]);
+  });
+
+  it('drops a settled turn with a reply and no activity to a stats line on that reply', () => {
+    const turn = settled({ id: 'p', inputIds: ['ask'], outputIds: ['reply'], activity: [] });
+    const messages = [message('ask', 'in', -1), message('reply', 'out', 2000)];
+    expect(rows(testSnapshot({ messages, turns: [turn] }).conversation).map((r) => [r.id, r.stats])).toEqual([
+      ['ask', undefined],
+      ['reply', 'p'],
+    ]);
+  });
+});

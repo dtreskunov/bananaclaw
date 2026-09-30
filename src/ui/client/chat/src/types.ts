@@ -174,6 +174,10 @@ export type SuggestedAction = 'continue' | 'retry' | 'report';
 export interface ChatMessage {
   turnId?: string;
   turn?: import('../../../shared/conversation').ConversationTurn;
+  /** Turn rows only: this row carries the turn's live status, or its settled stats when it has no reply. */
+  turnStatus?: boolean;
+  /** Replies only: the settled turn whose accounting renders in this bubble's meta line. */
+  statsTurn?: import('../../../shared/conversation').ConversationTurn;
   timelinePosition?: number;
   canEditPending?: boolean;
   inputState?: InputState;

@@ -17889,6 +17889,35 @@ function timelineSortKey(timestamp, timelinePosition) {
   return Number.isFinite(milliseconds) ? milliseconds * 1e3 : 0;
 }
 
+// src/turn-row.ts
+var OUTCOME_NOTES = {
+  stopped: "Stopped",
+  failed: "Failed",
+  warning: "Ended with a warning",
+  interrupted: "Interrupted; outcome unknown",
+  silent: "No reply"
+};
+function turnRowView(turn2, now) {
+  const settled = turn2.phase === "settled";
+  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
+  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
+  const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
+  const model = turn2.metadata.model;
+  const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : turn2.phase === "settling" ? "Finalizing turn\u2026" : null;
+  const hasTiming = elapsedMs !== null || !!model;
+  return {
+    hidden: settled && !turn2.activity.length && !turn2.usage.length && !hasTiming && !note,
+    status: !settled && turn2.phase === "running" ? "Working\u2026" : null,
+    note,
+    elapsedMs,
+    model,
+    showTiming: !settled || !turn2.usage.length,
+    showTokensUnavailable: settled && !turn2.usage.length && hasTiming,
+    // While running, the live line owns elapsed time and model; checkpointed values would be stale.
+    usage: settled ? turn2.usage : turn2.usage.map(({ id: id2, value }) => ({ id: id2, value: { ...value, duration_ms: void 0, model: void 0 } }))
+  };
+}
+
 // src/stop-turn.ts
 var STOP_REQUEST_TIMEOUT_MS = 3e4;
 var requestTimer = null;
@@ -18602,37 +18631,68 @@ var conversationState = y3(null);
 function resetConversation() {
   conversationState.value = null;
 }
+function activityKey(ts) {
+  const ms = /^\d+$/.test(ts) ? Number(ts) : Date.parse(ts);
+  return Number.isFinite(ms) ? ms * 1e3 : null;
+}
 function conversationMessages(view) {
   const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
+  const key = (m6) => timelineSortKey(m6.timestamp, m6.timelinePosition);
+  const statsHosts = /* @__PURE__ */ new Map();
+  for (const turn2 of view.turns) {
+    if (turn2.phase !== "settled") continue;
+    const replies = view.messages.filter((m6) => turn2.outputIds.includes(m6.id) && m6.direction === "out");
+    const last = replies.sort((a4, b5) => key(a4) - key(b5)).at(-1);
+    if (last) statsHosts.set(last.id, turn2);
+  }
   const messages = view.messages.filter((m6) => m6.inputState?.status !== "cancelled").map(({ timestamp, ...m6 }) => {
     const turn2 = m6.turnId ? turns.get(m6.turnId) : void 0;
+    const statsTurn = statsHosts.get(m6.id);
     return {
       ...m6,
       files: m6.files ?? null,
       ts: timestamp,
       ...turn2?.activity.length ? { activity: void 0 } : {},
       ...turn2?.usage.length ? { usage: void 0 } : {},
-      ...turn2?.metadata.durationMs !== null && turn2?.metadata.durationMs !== void 0 ? { turnStats: void 0, stoppedStats: void 0 } : {}
+      ...turn2?.metadata.durationMs !== null && turn2?.metadata.durationMs !== void 0 ? { turnStats: void 0, stoppedStats: void 0 } : {},
+      ...statsTurn ? { statsTurn } : {}
     };
   });
   for (const turn2 of view.turns) {
     const anchor = view.messages.find((m6) => turn2.outputIds.includes(m6.id) || turn2.inputIds.includes(m6.id));
-    const key = (m6) => timelineSortKey(m6.timestamp, m6.timelinePosition);
     const inputs = view.messages.filter((m6) => turn2.inputIds.includes(m6.id));
     const outputs = view.messages.filter((m6) => turn2.outputIds.includes(m6.id));
     const firstInput = inputs.length ? Math.min(...inputs.map(key)) : null;
     const firstOutput = outputs.length ? Math.min(...outputs.map(key)) : null;
     const ts = turn2.startedAt ?? anchor?.timestamp ?? view.questions.find((q5) => q5.turnId === turn2.id)?.createdAt ?? turn2.endedAt ?? "";
-    const position = !turn2.startedAt && firstOutput !== null ? Math.max(firstOutput - 1, firstInput !== null ? firstInput + 1 : 0) : firstInput !== null ? Math.max(timelineSortKey(ts), firstInput + 1) : null;
-    messages.push({
-      id: `turn:${turn2.id}`,
-      direction: "turn",
-      turn: turn2,
-      text: turn2.outcome,
-      files: null,
-      ts,
-      ...position !== null ? { timelinePosition: position } : {}
-    });
+    const start = !turn2.startedAt && firstOutput !== null ? Math.max(firstOutput - 1, firstInput !== null ? firstInput + 1 : 0) : firstInput !== null ? Math.max(timelineSortKey(ts), firstInput + 1) : null;
+    const boundaries = turn2.startedAt ? [...inputs, ...outputs].filter((m6) => m6.inputState?.status !== "steering" && m6.inputState?.status !== "cancelled").map(key).filter((position) => firstInput === null || position > firstInput).sort((a4, b5) => a4 - b5) : [];
+    const segmentOf = (ts2) => {
+      const at = activityKey(ts2);
+      return at === null ? 0 : boundaries.filter((boundary) => boundary <= at).length;
+    };
+    const segments = /* @__PURE__ */ new Map();
+    for (const line of turn2.activity) {
+      const index = segmentOf(line.ts);
+      segments.set(index, [...segments.get(index) ?? [], line]);
+    }
+    const settled = turn2.phase === "settled";
+    const statusSegment = !settled ? boundaries.length : [...statsHosts.values()].includes(turn2) || turnRowView(turn2, 0).hidden ? null : Math.max(-1, ...segments.keys()) >= 0 ? Math.max(...segments.keys()) : 0;
+    if (statusSegment !== null && !segments.has(statusSegment)) segments.set(statusSegment, []);
+    for (const [index, lines] of segments) {
+      const position = index === 0 ? start : boundaries[index - 1] + 1;
+      messages.push({
+        id: index === 0 ? `turn:${turn2.id}` : `turn:${turn2.id}:${index}`,
+        direction: "turn",
+        turn: turn2,
+        activity: lines,
+        ...index === statusSegment ? { turnStatus: true } : {},
+        text: turn2.outcome,
+        files: null,
+        ts,
+        ...position !== null ? { timelinePosition: position } : {}
+      });
+    }
   }
   return messages.sort((a4, b5) => timelineSortKey(a4.ts, a4.timelinePosition) - timelineSortKey(b5.ts, b5.timelinePosition));
 }
@@ -21291,38 +21351,11 @@ function timelineLayoutKey(messages) {
       message2.inputState?.status === "steering",
       message2.turn?.phase,
       message2.turn?.activity,
-      message2.turn?.metadata
+      message2.turn?.metadata,
+      message2.turnStatus,
+      message2.statsTurn?.id
     ])
   );
-}
-
-// src/turn-row.ts
-var OUTCOME_NOTES = {
-  stopped: "Stopped",
-  failed: "Failed",
-  warning: "Ended with a warning",
-  interrupted: "Interrupted; outcome unknown",
-  silent: "No reply"
-};
-function turnRowView(turn2, now) {
-  const settled = turn2.phase === "settled";
-  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
-  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
-  const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
-  const model = turn2.metadata.model;
-  const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : turn2.phase === "settling" ? "Finalizing turn\u2026" : null;
-  const hasTiming = elapsedMs !== null || !!model;
-  return {
-    hidden: settled && !turn2.activity.length && !turn2.usage.length && !hasTiming && !note,
-    status: !settled && turn2.phase === "running" ? "Working\u2026" : null,
-    note,
-    elapsedMs,
-    model,
-    showTiming: !settled || !turn2.usage.length,
-    showTokensUnavailable: settled && !turn2.usage.length && hasTiming,
-    // While running, the live line owns elapsed time and model; checkpointed values would be stale.
-    usage: settled ? turn2.usage : turn2.usage.map(({ id: id2, value }) => ({ id: id2, value: { ...value, duration_ms: void 0, model: void 0 } }))
-  };
 }
 
 // src/input-state.ts
@@ -22344,7 +22377,7 @@ function Message({ m: m6, allowContinue = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
   const [continueState, setContinueState] = h2("idle");
-  if (m6.direction === "turn" && m6.turn) return /* @__PURE__ */ u4(ConversationTurnRow, { turn: m6.turn });
+  if (m6.direction === "turn" && m6.turn) return /* @__PURE__ */ u4(ConversationTurnRow, { turn: m6.turn, lines: m6.activity ?? [], status: !!m6.turnStatus });
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -22503,7 +22536,7 @@ function Message({ m: m6, allowContinue = false }) {
             m6.deliveryOrigin,
             !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
           ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-          m6.direction === "out" ? /* @__PURE__ */ u4(MessageTurnMetadata, { message: m6 }) : null,
+          m6.direction === "out" ? m6.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: m6.statsTurn }) : /* @__PURE__ */ u4(MessageTurnMetadata, { message: m6 }) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
             /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current }),
             /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
@@ -22540,7 +22573,8 @@ function DisplayCardMessage({ message: message2, card }) {
     message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
     message2.ts ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }),
-      /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" })
+      /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }),
+      message2.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: message2.statsTurn }) : null
     ] }) : null
   ] });
 }
@@ -22724,24 +22758,48 @@ function TaskIndicator() {
     );
   }) });
 }
-function ConversationTurnRow({ turn: turn2 }) {
+function TurnStats({ turn: turn2, view }) {
+  const metadata = [view.elapsedMs !== null ? fmtDur(view.elapsedMs) : "", view.model ? shortModel(view.model) : ""].filter(Boolean).join(" \xB7 ");
+  return /* @__PURE__ */ u4(k, { children: [
+    view.showTiming && metadata ? /* @__PURE__ */ u4("span", { class: "typing-meta", children: metadata }) : null,
+    view.usage.map((record) => /* @__PURE__ */ u4(
+      UsageMeta,
+      {
+        u: record.value,
+        provisional: turn2.metadata.status === "provisional",
+        partial: turn2.metadata.status === "partial"
+      },
+      record.id
+    )),
+    !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, live: true, provisional: true }) : null,
+    view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null
+  ] });
+}
+function ReplyTurnStats({ turn: turn2 }) {
+  const view = turnRowView(turn2, Date.now());
+  return /* @__PURE__ */ u4(k, { children: [
+    view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null,
+    /* @__PURE__ */ u4(TurnStats, { turn: turn2, view })
+  ] });
+}
+function ConversationTurnRow({ turn: turn2, lines, status }) {
   const [traceExpanded, setTraceExpanded] = h2(false);
   const onToggleTrace = () => setTraceExpanded((value) => !value);
   const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
   const settled = turn2.phase === "settled";
+  const live = status && !settled;
   const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : null;
   const [now, setNow] = h2(() => Date.now());
   y2(() => {
     setNow(Date.now());
-    if (settled) return;
+    if (!live) return;
     const timer2 = window.setInterval(() => setNow(Date.now()), 1e3);
     return () => window.clearInterval(timer2);
-  }, [turn2.startedAt, settled]);
+  }, [turn2.startedAt, live]);
   const view = turnRowView(turn2, now);
-  const metadata = [view.elapsedMs !== null ? fmtDur(view.elapsedMs) : "", view.model ? shortModel(view.model) : ""].filter(Boolean).join(" \xB7 ");
-  const liveHeadline = latestActivityHeadline(turn2.activity);
+  const liveHeadline = latestActivityHeadline(lines);
   const [openLatestOnExpand, setOpenLatestOnExpand] = h2(false);
-  if (view.hidden) return null;
+  if (!lines.length && !status) return null;
   const toggleFromPreview = () => {
     setOpenLatestOnExpand(!traceExpanded);
     onToggleTrace();
@@ -22750,56 +22808,53 @@ function ConversationTurnRow({ turn: turn2 }) {
     setOpenLatestOnExpand(false);
     onToggleTrace();
   };
-  return /* @__PURE__ */ u4("div", { class: `typing${traceExpanded ? " expanded" : ""}`, "data-turn-id": turn2.id, "aria-live": settled ? "off" : "polite", children: [
-    /* @__PURE__ */ u4("div", { class: "typing-summary", children: /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
-      !settled ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("span", {}),
-        /* @__PURE__ */ u4("span", {}),
-        /* @__PURE__ */ u4("span", {})
-      ] }) : null,
-      liveHeadline ? /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "hint trace-preview",
-          "aria-expanded": traceExpanded,
-          "aria-label": traceExpanded ? "Hide activity" : "Show latest activity",
-          title: traceExpanded ? "Hide activity" : "Show latest activity",
-          onClick: toggleFromPreview,
-          children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
-        }
-      ) : view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
-    ] }) }),
-    stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
-    view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,
-    !settled && !turnConnected.value && !stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: "Runner disconnected. The outcome is not yet confirmed." }) : null,
-    /* @__PURE__ */ u4(
-      ActivityTracePanel,
-      {
-        lines: turn2.activity,
-        expanded: traceExpanded,
-        onToggle: toggleFromCount,
-        live: !settled,
-        now: endedAt ?? now,
-        openLatest: openLatestOnExpand
-      }
-    ),
-    /* @__PURE__ */ u4("div", { class: "meta", children: [
-      view.showTiming && metadata ? /* @__PURE__ */ u4("span", { class: "typing-meta", children: metadata }) : null,
-      view.usage.map((record) => /* @__PURE__ */ u4(
-        UsageMeta,
-        {
-          u: record.value,
-          provisional: turn2.metadata.status === "provisional",
-          partial: turn2.metadata.status === "partial"
-        },
-        record.id
-      )),
-      !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, live: true, provisional: true }) : null,
-      view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null,
-      activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4(ActiveTurnStopButton, {}) : null
-    ] })
-  ] });
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: `typing turn-system${traceExpanded ? " expanded" : ""}`,
+      "data-turn-id": status ? turn2.id : void 0,
+      "aria-live": live ? "polite" : "off",
+      children: [
+        /* @__PURE__ */ u4("div", { class: "typing-summary", children: /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
+          live ? /* @__PURE__ */ u4(k, { children: [
+            /* @__PURE__ */ u4("span", {}),
+            /* @__PURE__ */ u4("span", {}),
+            /* @__PURE__ */ u4("span", {})
+          ] }) : null,
+          liveHeadline ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "hint trace-preview",
+              "aria-expanded": traceExpanded,
+              "aria-label": traceExpanded ? "Hide activity" : "Show latest activity",
+              title: traceExpanded ? "Hide activity" : "Show latest activity",
+              onClick: toggleFromPreview,
+              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
+            }
+          ) : live && view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
+        ] }) }),
+        status && stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
+        status && view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,
+        live && !turnConnected.value && !stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: "Runner disconnected. The outcome is not yet confirmed." }) : null,
+        /* @__PURE__ */ u4(
+          ActivityTracePanel,
+          {
+            lines,
+            expanded: traceExpanded,
+            onToggle: toggleFromCount,
+            live: !settled,
+            now: endedAt ?? now,
+            openLatest: openLatestOnExpand
+          }
+        ),
+        status ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+          /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }),
+          activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4(ActiveTurnStopButton, {}) : null
+        ] }) : null
+      ]
+    }
+  );
 }
 function MessageLog() {
   const ref = A2(null);

@@ -320,6 +320,11 @@
    trace is expanded, widen it so command hints don't truncate to a sliver
   (especially on narrow mobile viewports). Capped by the 78% max-width. */
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
+/* Turn activity reads as a system notice between messages, not as another agent bubble. */
+.chat-main .typing.turn-system { align-self: center; background: transparent; border: 1px solid var(--border, var(--muted)); border-radius: var(--radius-lg); padding: 4px 12px; max-width: 92%; gap: 2px; }
+.chat-main .typing.turn-system.expanded { min-width: min(92%, 460px); }
+.chat-main .typing.turn-system .msg-activity { margin-top: 0; }
+.chat-main .msg .meta .turn-outcome-note { color: var(--surface-fg, inherit); opacity: 0.8; font-weight: 600; }
 .chat-main .activity-trace li .ts { margin-right: 6px; opacity: 0.6; font-variant-numeric: tabular-nums; }
 /* Persisted activity trace on a delivered message. Collapsed by default;
    the chevron button reveals the timestamped step list. */

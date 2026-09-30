@@ -44,6 +44,8 @@ export function timelineLayoutKey(messages: ChatMessage[]): string {
       message.turn?.phase,
       message.turn?.activity,
       message.turn?.metadata,
+      message.turnStatus,
+      message.statsTurn?.id,
     ]),
   );
 }
