@@ -14,6 +14,10 @@ const enqueue = (eventType: string, payload: string): string => `
 `;
 
 export function ensureRunnerStateSchema(db: Database): void {
+  const journalExists = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'pending_runner_events'").get();
+  if (journalExists && !db.prepare("SELECT 1 FROM conversation_sync_migrations WHERE step = 'journal:2'").get()) {
+    throw new Error('Runner turn journal requires offline migrateRunnerTurnJournal()');
+  }
   const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_out'").get();
   if (fresh) db.exec(TURN_SCHEMA);
   db.exec(`
@@ -191,7 +195,7 @@ export function ensureRunnerStateSchema(db: Database): void {
         'timestamp', NEW.timestamp, 'deliver_after', NEW.deliver_after,
         'recurrence', NEW.recurrence, 'kind', NEW.kind,
         'platform_id', NEW.platform_id, 'channel_type', NEW.channel_type,
-        'thread_id', NEW.thread_id, 'content', NEW.content
+        'thread_id', NEW.thread_id, 'content', NEW.content, 'turn_id', NEW.turn_id
       )`,
       )}
     END;
@@ -296,7 +300,7 @@ export function ensureRunnerStateSchema(db: Database): void {
         'activity.persist',
         `json_object(
         'message_out_id', NEW.message_out_id, 'ordinal', NEW.ordinal,
-        'ts', NEW.ts, 'text', NEW.text
+        'ts', NEW.ts, 'text', NEW.text, 'turn_id', NEW.turn_id
       )`,
       )}
     END;
@@ -306,7 +310,7 @@ export function ensureRunnerStateSchema(db: Database): void {
         'activity.persist',
         `json_object(
         'message_out_id', NEW.message_out_id, 'ordinal', NEW.ordinal,
-        'ts', NEW.ts, 'text', NEW.text
+        'ts', NEW.ts, 'text', NEW.text, 'turn_id', NEW.turn_id
       )`,
       )}
     END;
@@ -316,7 +320,7 @@ export function ensureRunnerStateSchema(db: Database): void {
       ${enqueue(
         'usage.persist',
         `json_object(
-        'id', NEW.id, 'message_out_id', NEW.message_out_id,
+        'id', NEW.id, 'message_out_id', NEW.message_out_id, 'turn_id', NEW.turn_id,
         'cost_usd', NEW.cost_usd, 'input_tokens', NEW.input_tokens,
         'output_tokens', NEW.output_tokens, 'cache_read_tokens', NEW.cache_read_tokens,
         'cache_write_tokens', NEW.cache_write_tokens, 'reasoning_tokens', NEW.reasoning_tokens,
@@ -332,7 +336,7 @@ export function ensureRunnerStateSchema(db: Database): void {
       ${enqueue(
         'usage.persist',
         `json_object(
-        'id', NEW.id, 'message_out_id', NEW.message_out_id,
+        'id', NEW.id, 'message_out_id', NEW.message_out_id, 'turn_id', NEW.turn_id,
         'cost_usd', NEW.cost_usd, 'input_tokens', NEW.input_tokens,
         'output_tokens', NEW.output_tokens, 'cache_read_tokens', NEW.cache_read_tokens,
         'cache_write_tokens', NEW.cache_write_tokens, 'reasoning_tokens', NEW.reasoning_tokens,
@@ -376,6 +380,44 @@ export function ensureRunnerStateSchema(db: Database): void {
     END;
   `);
   if (fresh) db.exec(TURN_INDEX_SCHEMA);
+  for (const operation of ['INSERT', 'UPDATE']) {
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS journal_turn_${operation.toLowerCase()}
+      AFTER ${operation} ON turns BEGIN
+        ${enqueue('turn.upsert', `json_object(
+          'id', NEW.id, 'origin_channel_type', NEW.origin_channel_type,
+          'origin_platform_id', NEW.origin_platform_id, 'origin_thread_id', NEW.origin_thread_id,
+          'origin_source_session_id', NEW.origin_source_session_id,
+          'started_at', NEW.started_at, 'ended_at', NEW.ended_at, 'phase', NEW.phase,
+          'outcome', NEW.outcome, 'provenance', NEW.provenance,
+          'imported_from_session_id', NEW.imported_from_session_id,
+          'imported_from_turn_id', NEW.imported_from_turn_id)`)}
+      END;
+    `);
+  }
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS journal_turn_input_insert AFTER INSERT ON turn_inputs BEGIN
+      ${enqueue('turn-input.upsert', `json_object('turn_id', NEW.turn_id,
+        'message_in_id', NEW.message_in_id, 'association', NEW.association)`)}
+    END;
+    INSERT OR IGNORE INTO conversation_sync_migrations(step) VALUES ('journal:2');
+  `);
+}
+
+/** Offline only: old journal payloads must be drained before upgrading both peers. */
+export function migrateRunnerTurnJournal(db: Database): void {
+  db.transaction(() => {
+    const journalExists = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'pending_runner_events'").get();
+    if (journalExists && db.prepare('SELECT 1 FROM pending_runner_events LIMIT 1').get()) {
+      throw new Error('Drain the old runner journal before upgrading the session link');
+    }
+    for (const name of ['message_out_insert', 'turn_activity_insert', 'turn_activity_update',
+      'turn_usage_insert', 'turn_usage_update']) {
+      db.exec(`DROP TRIGGER IF EXISTS journal_${name}`);
+    }
+    db.exec("INSERT OR IGNORE INTO conversation_sync_migrations(step) VALUES ('journal:2')");
+    ensureRunnerStateSchema(db);
+  })();
 }
 
 export function listPendingRunnerEvents(db: Database, limit = 32): PendingRunnerEvent[] {

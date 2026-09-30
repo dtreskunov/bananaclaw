@@ -5,6 +5,7 @@ import path from 'node:path';
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
 import { INPUT_EDIT_PREFIX, INPUT_CANCEL_PREFIX, projectInputEditResult, type EditedInput } from './pending-input-edit.js';
+import { getTurn, putTurn, linkTurnInput, type TurnRow } from './db/turns.js';
 
 const MAX_ID_CHARS = 256;
 const MAX_STATE_CHARS = 1024 * 1024;
@@ -105,10 +106,12 @@ function applyMessage(db: Database.Database, payload: Record<string, unknown>, m
     'channel_type',
     'thread_id',
     'content',
+    'turn_id',
   ];
   if (
     !exactKeys(payload, keys) ||
     !text(payload.id) ||
+    !nullableText(payload.turn_id) ||
     !Number.isSafeInteger(payload.seq) ||
     Number(payload.seq) <= 0 ||
     Number(payload.seq) % 2 !== 1 ||
@@ -133,6 +136,7 @@ function applyMessage(db: Database.Database, payload: Record<string, unknown>, m
     throw new Error('invalid message content');
   }
   validateMessageCollections(content);
+  requireTurn(db, payload.turn_id);
 
   const maxOdd = (
     db.prepare('SELECT COALESCE(MAX(seq), -1) AS value FROM messages_out WHERE seq % 2 = 1').get() as { value: number }
@@ -146,9 +150,9 @@ function applyMessage(db: Database.Database, payload: Record<string, unknown>, m
   }
   db.prepare(
     `INSERT INTO messages_out
-      (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content)
+      (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content, turn_id)
      VALUES (@id, @seq, @in_reply_to, @timestamp, @deliver_after, @recurrence, @kind,
-       @platform_id, @channel_type, @thread_id, @content)`,
+       @platform_id, @channel_type, @thread_id, @content, @turn_id)`,
   ).run(payload);
   return payload.kind === 'system' || content.delivery_origin !== 'response';
 }
@@ -226,18 +230,24 @@ function applyCheckpoint(db: Database.Database, payload: Record<string, unknown>
 
 function applyActivity(db: Database.Database, payload: Record<string, unknown>): void {
   if (
-    !exactKeys(payload, ['message_out_id', 'ordinal', 'ts', 'text']) ||
-    !text(payload.message_out_id) ||
+    !exactKeys(payload, ['message_out_id', 'ordinal', 'ts', 'text', 'turn_id']) ||
+    !nullableText(payload.message_out_id) ||
+    !nullableText(payload.turn_id) ||
+    (payload.message_out_id === null && payload.turn_id === null) ||
     !Number.isSafeInteger(payload.ordinal) ||
     Number(payload.ordinal) < 0 ||
     !text(payload.ts) ||
     !text(payload.text, 16 * 1024)
   )
     throw new Error('invalid activity.persist payload');
+  requireTurn(db, payload.turn_id);
+  const existing = db.prepare('SELECT turn_id FROM turn_activity WHERE message_out_id IS ? AND ordinal = ? AND (message_out_id IS NOT NULL OR turn_id IS ?)')
+    .get(payload.message_out_id, payload.ordinal, payload.turn_id) as { turn_id: string | null } | undefined;
+  if (existing && existing.turn_id !== payload.turn_id) throw new Error('immutable activity turn');
   db.prepare(
-    `INSERT INTO turn_activity (message_out_id, ordinal, ts, text)
-     VALUES (@message_out_id, @ordinal, @ts, @text)
-     ON CONFLICT(message_out_id, ordinal) DO UPDATE SET ts=excluded.ts, text=excluded.text`,
+    `INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id)
+     VALUES (@message_out_id, @ordinal, @ts, @text, @turn_id)
+     ON CONFLICT DO UPDATE SET ts=excluded.ts, text=excluded.text`,
   ).run(payload);
 }
 
@@ -245,6 +255,7 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
   const keys = [
     'id',
     'message_out_id',
+    'turn_id',
     'cost_usd',
     'input_tokens',
     'output_tokens',
@@ -263,6 +274,7 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
   if (
     !exactKeys(payload, keys) ||
     !text(payload.id) ||
+    !nullableText(payload.turn_id) ||
     !nullableText(payload.message_out_id) ||
     !nullableNumber(payload.cost_usd) ||
     !nullableInteger(payload.input_tokens) ||
@@ -280,12 +292,15 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
     !text(payload.timestamp)
   )
     throw new Error('invalid usage.persist payload');
+  requireTurn(db, payload.turn_id);
+  const existing = db.prepare('SELECT turn_id FROM turn_usage WHERE id = ?').get(payload.id) as { turn_id: string | null } | undefined;
+  if (existing && existing.turn_id !== payload.turn_id) throw new Error('immutable usage turn');
   db.prepare(
     `INSERT INTO turn_usage
-      (id, message_out_id, cost_usd, input_tokens, output_tokens, cache_read_tokens,
+      (id, message_out_id, turn_id, cost_usd, input_tokens, output_tokens, cache_read_tokens,
        cache_write_tokens, reasoning_tokens, num_turns, duration_ms, duration_api_ms,
        model, context_window, max_output_tokens, context_tokens, timestamp)
-     VALUES (@id, @message_out_id, @cost_usd, @input_tokens, @output_tokens, @cache_read_tokens,
+     VALUES (@id, @message_out_id, @turn_id, @cost_usd, @input_tokens, @output_tokens, @cache_read_tokens,
        @cache_write_tokens, @reasoning_tokens, @num_turns, @duration_ms, @duration_api_ms,
        @model, @context_window, @max_output_tokens, @context_tokens, @timestamp)
      ON CONFLICT(id) DO UPDATE SET message_out_id=excluded.message_out_id,
@@ -297,6 +312,28 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
        context_window=excluded.context_window, max_output_tokens=excluded.max_output_tokens,
        context_tokens=excluded.context_tokens, timestamp=excluded.timestamp`,
   ).run(payload);
+}
+
+function requireTurn(db: Database.Database, id: unknown): void {
+  if (id !== null && (typeof id !== 'string' || !getTurn(db, id))) throw new Error('unknown turn');
+}
+
+function applyTurn(db: Database.Database, payload: Record<string, unknown>): void {
+  if (!exactKeys(payload, ['id', 'origin_channel_type', 'origin_platform_id', 'origin_thread_id',
+    'origin_source_session_id', 'started_at', 'ended_at', 'phase', 'outcome', 'provenance',
+    'imported_from_session_id', 'imported_from_turn_id']) ||
+    !text(payload.id) ||
+    !['origin_channel_type', 'origin_platform_id', 'origin_thread_id', 'origin_source_session_id',
+      'started_at', 'ended_at', 'imported_from_session_id', 'imported_from_turn_id']
+      .every((key) => nullableText(payload[key], 1024)) ||
+    !['running', 'stopping', 'settling', 'settled'].includes(String(payload.phase)) ||
+    !['pending', 'replied', 'warning', 'silent', 'stopped', 'failed', 'unknown', 'interrupted'].includes(String(payload.outcome)) ||
+    !['native', 'backfill', 'fork'].includes(String(payload.provenance))) throw new Error('invalid turn.upsert payload');
+  const prior = getTurn(db, payload.id);
+  if (prior && ['origin_channel_type', 'origin_platform_id', 'origin_thread_id', 'origin_source_session_id',
+    'started_at', 'provenance', 'imported_from_session_id', 'imported_from_turn_id']
+    .some((key) => prior[key as keyof TurnRow] !== payload[key])) throw new Error('immutable turn identity');
+  putTurn(db, payload as unknown as TurnRow);
 }
 
 function applyTaskAttempt(db: Database.Database, payload: Record<string, unknown>): void {
@@ -409,6 +446,16 @@ export function applyDurableRunnerEvent(
       if (frame.sequence <= lastSequence) return;
       if (frame.sequence !== lastSequence + 1) throw new Error('out-of-order durable event');
       switch (frame.event.type) {
+        case 'turn.upsert':
+          applyTurn(db, payload);
+          break;
+        case 'turn-input.upsert':
+          if (!exactKeys(payload, ['turn_id', 'message_in_id', 'association']) ||
+            !text(payload.turn_id) || !text(payload.message_in_id) ||
+            !['consumed', 'applied', 'reply'].includes(String(payload.association)))
+            throw new Error('invalid turn-input.upsert payload');
+          linkTurnInput(db, payload as unknown as import('./db/turns.js').TurnInputRow);
+          break;
         case 'message.upsert':
           deliveryReady = applyMessage(db, payload, maxInboundSeq);
           break;

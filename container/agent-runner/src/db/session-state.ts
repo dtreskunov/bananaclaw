@@ -10,6 +10,7 @@
  * on file and resumes cleanly if the user flips back.
  */
 import { getOutboundDb } from './connection.js';
+import { getTurnContext } from '../current-batch.js';
 
 const MAX_STATE_CHARS = 1024 * 1024;
 
@@ -166,7 +167,7 @@ export function appendActivity(step: ActivityStep): void {
   _lastActivity = text;
   const ts = String(Date.now());
   _activityBuffer.push({ ts, text });
-  emitActivitySignal(s);
+  emitActivitySignal(s, ts, getTurnContext()?.turnId ?? null);
 }
 
 /** Cap user/model/provider text fields before they leave the container. */
@@ -200,7 +201,7 @@ export function clearActivity(): void {
 }
 
 export function writeUsageProgress(usage: TurnUsage): void {
-  emitUsageSignal(usage);
+  emitUsageSignal(usage, getTurnContext()?.turnId ?? null);
 }
 
 export function clearUsageProgress(): void {

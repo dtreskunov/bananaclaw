@@ -12,6 +12,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import type { McpToolDefinition } from './types.js';
+import { getTurnContext, withTurnContext } from '../current-batch.js';
 
 const allTools: McpToolDefinition[] = [];
 const toolMap = new Map<string, McpToolDefinition>();
@@ -39,5 +40,5 @@ export async function invokeRegisteredTool(
   if (!tool) {
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   }
-  return tool.handler(args);
+  return withTurnContext(getTurnContext(), () => tool.handler(args));
 }

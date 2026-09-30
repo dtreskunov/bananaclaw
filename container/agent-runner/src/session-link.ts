@@ -6,7 +6,7 @@ import { acknowledgeRunnerEvent, listPendingRunnerEvents } from './db/runner-sta
 import type { ActivityStep, TurnUsage } from './providers/types.js';
 
 const DEFAULT_SOCKET_PATH = '/run/nanoclaw/runner.sock';
-const PROTOCOL_VERSION = 3;
+const PROTOCOL_VERSION = 4;
 const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
 const MAX_DURABLE_FRAME_BYTES = Math.ceil((MAX_OUTPUT_BYTES * 4) / 3) + 2 * 1024 * 1024;
@@ -16,14 +16,14 @@ const INITIAL_RECONNECT_MS = 100;
 const MAX_RECONNECT_MS = 5_000;
 
 type SignalFrame =
-  | { v: 3; type: 'turn.state'; turn: ActiveTurn | null }
-  | { v: 3; type: 'heartbeat' }
-  | { v: 3; type: 'activity.clear' }
-  | { v: 3; type: 'activity'; step: ActivityStep }
-  | { v: 3; type: 'usage.clear' }
-  | { v: 3; type: 'usage'; usage: TurnUsage }
-  | { v: 3; type: 'turn.resume' }
-  | { v: 3; type: 'turn.end' };
+  | { v: 4; type: 'turn.state'; turn: ActiveTurn | null }
+  | { v: 4; type: 'heartbeat' }
+  | { v: 4; type: 'activity.clear' }
+  | { v: 4; type: 'activity'; step: ActivityStep; turnId: string | null; ts: string; ordinal: number }
+  | { v: 4; type: 'usage.clear' }
+  | { v: 4; type: 'usage'; usage: TurnUsage; turnId: string | null; ts: string }
+  | { v: 4; type: 'turn.resume' }
+  | { v: 4; type: 'turn.end' };
 
 export interface ActiveTurn {
   id: string;
@@ -55,7 +55,7 @@ export function requestTurnStop(turnId: string): void {
 }
 
 interface DurableFrame {
-  v: 3;
+  v: 4;
   type: 'durable';
   eventId: string;
   sequence: number;
@@ -122,8 +122,9 @@ export class SessionSignalClient {
   private pumpTimer: ReturnType<typeof setInterval> | null = null;
   private sentAt = new Map<string, number>();
   private running = false;
-  private activity: ActivityStep[] = [];
-  private usage: TurnUsage | null = null;
+  private activity: Extract<SignalFrame, { type: 'activity' }>[] = [];
+  private activityOrdinal = 0;
+  private usage: Extract<SignalFrame, { type: 'usage' }> | null = null;
   private turnEnded = false;
   private turn: ActiveTurn | null = null;
   private durableBlocked = false;
@@ -168,13 +169,14 @@ export class SessionSignalClient {
 
   clearActivity(): void {
     this.activity = [];
+    this.activityOrdinal = 0;
     this.send({ v: PROTOCOL_VERSION, type: 'activity.clear' });
   }
 
-  appendActivity(step: ActivityStep): void {
-    const frame = { v: PROTOCOL_VERSION, type: 'activity', step } as const;
+  appendActivity(step: ActivityStep, ts = String(Date.now()), turnId = this.turn?.id ?? null): void {
+    const frame = { v: PROTOCOL_VERSION, type: 'activity', step, ts, turnId, ordinal: this.activityOrdinal++ } as const;
     if (!this.encode(frame)) return;
-    this.activity.push(step);
+    this.activity.push(frame);
     if (this.activity.length > MAX_ACTIVITY_LINES) {
       this.activity.splice(0, this.activity.length - MAX_ACTIVITY_LINES);
     }
@@ -186,10 +188,10 @@ export class SessionSignalClient {
     this.send({ v: PROTOCOL_VERSION, type: 'usage.clear' });
   }
 
-  updateUsage(usage: TurnUsage): void {
-    const frame = { v: PROTOCOL_VERSION, type: 'usage', usage } as const;
+  updateUsage(usage: TurnUsage, turnId = this.turn?.id ?? null): void {
+    const frame = { v: PROTOCOL_VERSION, type: 'usage', usage, turnId, ts: String(Date.now()) } as const;
     if (!this.encode(frame)) return;
-    this.usage = usage;
+    this.usage = frame;
     this.send(frame);
   }
 
@@ -341,10 +343,10 @@ export class SessionSignalClient {
   private replaySnapshot(): void {
     this.send({ v: PROTOCOL_VERSION, type: 'heartbeat' });
     this.send({ v: PROTOCOL_VERSION, type: 'activity.clear' });
-    for (const step of this.activity) this.send({ v: PROTOCOL_VERSION, type: 'activity', step });
+    for (const frame of this.activity) this.send(frame);
     this.send(
       this.usage
-        ? { v: PROTOCOL_VERSION, type: 'usage', usage: this.usage }
+        ? this.usage
         : { v: PROTOCOL_VERSION, type: 'usage.clear' },
     );
     this.send({ v: PROTOCOL_VERSION, type: this.turnEnded ? 'turn.end' : 'turn.resume' });
@@ -445,16 +447,16 @@ export function clearActivitySignal(): void {
   client.clearActivity();
 }
 
-export function emitActivitySignal(step: ActivityStep): void {
-  client.appendActivity(step);
+export function emitActivitySignal(step: ActivityStep, ts?: string, turnId?: string | null): void {
+  client.appendActivity(step, ts, turnId);
 }
 
 export function clearUsageSignal(): void {
   client.clearUsage();
 }
 
-export function emitUsageSignal(usage: TurnUsage): void {
-  client.updateUsage(usage);
+export function emitUsageSignal(usage: TurnUsage, turnId?: string | null): void {
+  client.updateUsage(usage, turnId);
 }
 
 export function resumeTurnSignal(): void {

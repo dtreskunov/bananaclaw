@@ -5,19 +5,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./config.js')>()),
-  DATA_DIR: '/tmp/nanoclaw-durable-link-test',
+  DATA_DIR: '.test-durable-link',
 }));
 
 import { initSessionFolder, outboundDbPath, openInboundDb } from './session-manager.js';
 import { applyDurableRunnerEvent } from './session-link-durable.js';
 
-const ROOT = '/tmp/nanoclaw-durable-link-test';
+const ROOT = '.test-durable-link';
 const AGENT_GROUP_ID = 'agent-a';
 const SESSION_ID = 'session-a';
 
 function messagePayload(content: Record<string, unknown>): Record<string, unknown> {
   return {
     id: 'out-1',
+    turn_id: null,
     seq: 1,
     in_reply_to: null,
     timestamp: '2026-09-01 00:00:00',
@@ -39,6 +40,32 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 describe('applyDurableRunnerEvent', () => {
+  it('projects turn identity before associations and rejects missing or reassigned identities', () => {
+    const turn = {
+      id: 'logical-turn', origin_channel_type: 'web', origin_platform_id: 'chat',
+      origin_thread_id: null, origin_source_session_id: null, started_at: '2026-09-01T00:00:00.000Z',
+      ended_at: null, phase: 'running', outcome: 'pending', provenance: 'native',
+      imported_from_session_id: null, imported_from_turn_id: null,
+    };
+    const apply = (sequence: number, type: string, payload: Record<string, unknown>) =>
+      applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+        sequence, eventId: `turn-event-${sequence}`, event: { type, payload },
+      });
+    expect(() => apply(1, 'message.upsert', { ...messagePayload({ text: 'hello' }), turn_id: turn.id }))
+      .toThrow('unknown turn');
+    apply(1, 'turn.upsert', turn);
+    apply(2, 'turn-input.upsert', { turn_id: turn.id, message_in_id: 'in-1', association: 'consumed' });
+    apply(3, 'message.upsert', { ...messagePayload({ text: 'hello' }), turn_id: turn.id });
+    apply(4, 'activity.persist', { turn_id: turn.id, message_out_id: null, ordinal: 0, ts: '123', text: 'work' });
+    apply(4, 'activity.persist', { turn_id: turn.id, message_out_id: null, ordinal: 0, ts: '123', text: 'work' });
+    expect(() => apply(5, 'turn.upsert', { ...turn, started_at: 'different' })).toThrow('immutable turn identity');
+    const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+    try {
+      expect(db.prepare('SELECT turn_id FROM messages_out').pluck().get()).toBe(turn.id);
+      expect(db.prepare('SELECT turn_id FROM turn_inputs').pluck().get()).toBe(turn.id);
+      expect(db.prepare('SELECT count(*) FROM turn_activity').pluck().get()).toBe(1);
+    } finally { db.close(); }
+  });
   const editId = '64192f5f-2016-4a4b-8a10-f215f780275e';
   function seedEdit() {
     const db = openInboundDb(AGENT_GROUP_ID, SESSION_ID);
@@ -228,6 +255,7 @@ describe('applyDurableRunnerEvent', () => {
 
     apply('message.upsert', {
       id: 'out-1',
+      turn_id: null,
       seq: 1,
       in_reply_to: null,
       timestamp: '2026-09-01 00:00:00',
@@ -264,12 +292,14 @@ describe('applyDurableRunnerEvent', () => {
       created_at: '2026-09-01 00:00:04',
     });
     apply('activity.persist', {
+      turn_id: null,
       message_out_id: 'out-1',
       ordinal: 0,
       ts: '1',
       text: '{"kind":"notification","id":"n1","text":"ok"}',
     });
     apply('usage.persist', {
+      turn_id: null,
       id: 'usage-1',
       message_out_id: 'out-1',
       cost_usd: 0.1,
@@ -331,6 +361,7 @@ describe('applyDurableRunnerEvent', () => {
           type: 'message.upsert',
           payload: {
             id: 'out-1',
+            turn_id: null,
             seq: 1,
             in_reply_to: null,
             timestamp: 'now',
@@ -432,6 +463,7 @@ describe('applyDurableRunnerEvent', () => {
         type: 'message.upsert',
         payload: {
           id: 'out-1',
+          turn_id: null,
           seq: 1,
           in_reply_to: null,
           timestamp: '2026-09-01 00:00:00',

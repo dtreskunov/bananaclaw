@@ -22,7 +22,7 @@ sees a replacement socket after the host unlinks and rebinds it during restart.
 
 ## Protocol
 
-Version 3 is newline-delimited JSON. Every frame contains `v: 3` and a closed
+Version 4 is newline-delimited JSON. Every frame contains `v: 4` and a closed
 `type`. Live frames are capped at 16 KiB; durable frames are bounded by the
 configured output cap plus envelope overhead. Each session is limited to 256
 frames and 24 MiB per second,
@@ -44,6 +44,33 @@ Activity is capped at 128 current steps and text fields are bounded. Usage
 numbers must be finite and non-negative. Live state is best-effort: the runner
 keeps its current snapshot in memory and replays it after reconnect, but the
 socket does not acknowledge or journal these signals.
+
+Activity carries `turnId`, its original emit-time `ts` and a turn-local
+`ordinal`; usage carries `turnId` and emit-time `ts`. Reconnect replays these
+unchanged, rather than inventing a new time or a successor's identity.
+
+The runner creates a durable logical turn before invoking the provider.
+`turn.upsert` and `turn-input.upsert` precede its output, activity and usage
+events, which carry `turn_id`. Steering and corrective prompts stay on that
+turn; stale-continuation retries also retain its ID. Ordinary queued input
+starts a new turn only after the previous result has finished persisting,
+including asynchronous model-limit enrichment. Providers are never given
+several independent queued turns to collapse into one result.
+
+The MCP registry captures a DB-backed `runner:turn-context` at invocation,
+using async-local storage across awaits. This works in both in-process tools
+and external stdio sidecars; late completion cannot read a successor's ID or
+reply address. The context is routing metadata, not a credential.
+
+**Coordinated offline upgrade:** stop both peers after draining the v3 runner
+journal, back up all three session databases, run the explicit turn-schema and
+backfill helpers documented in `db-session.md`, then call
+`migrateRunnerTurnJournal(db)` from the Bun runner package on each runner DB.
+It refuses undrained old events and recreates the versioned journal triggers.
+Verify `conversation_sync_migrations` contains `journal:2`, and that turn
+associations match on both peers before starting the v4 host and new runners.
+Production DB open does not migrate an existing journal. Roll back code and
+the backed-up databases together; mixed protocol versions are unsupported.
 
 User cancellation uses a host-to-runner live `turn.stop` control carrying the
 exact turn ID. Both peers compare it with the active turn; stale controls never

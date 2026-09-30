@@ -13,10 +13,25 @@ import { startTaskAttempt, recordTaskScriptResult } from './task-attempts.js';
 import { writeTurnActivity } from './turn-activity.js';
 import { writeTurnCheckpoint } from './turn-checkpoints.js';
 import { writeTurnUsage } from './turn-usage.js';
+import { ensureRunnerStateSchema, migrateRunnerTurnJournal } from './runner-state.js';
+import { beginTurn } from '../turn-execution.js';
 
 afterEach(() => closeSessionDb());
 
 describe('runner state journal', () => {
+  it('journals a durable identity and associations before output and only explicitly upgrades triggers', () => {
+    initTestSessionDb();
+    const db = getOutboundDb();
+    const turn = beginTurn({ channelType: 'web', platformId: 'chat', threadId: null, inReplyTo: null }, []);
+    const row = db.prepare("SELECT payload FROM pending_runner_events WHERE event_type='turn.upsert'").get() as { payload: string };
+    expect(JSON.parse(row.payload).id).toBe(turn.turnId);
+    db.exec("DELETE FROM conversation_sync_migrations WHERE step='journal:2'");
+    expect(() => ensureRunnerStateSchema(db)).toThrow('offline');
+    expect(() => migrateRunnerTurnJournal(db)).toThrow('Drain');
+    db.exec('DELETE FROM pending_runner_events');
+    migrateRunnerTurnJournal(db);
+    expect(() => ensureRunnerStateSchema(db)).not.toThrow();
+  });
   it('journals every durable runner-owned table mutation in order', () => {
     initTestSessionDb();
     const db = getOutboundDb();

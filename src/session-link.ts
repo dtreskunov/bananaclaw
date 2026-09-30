@@ -13,8 +13,8 @@ import { getSession } from './db/sessions.js';
 import { indexMessage, deleteMessageFromIndex } from './search-index.js';
 import { INPUT_EDIT_PREFIX, INPUT_CANCEL_PREFIX } from './pending-input-edit.js';
 
-const PROTOCOL_VERSION = 3;
-export const SESSION_LINK_VERSION = 'v3';
+const PROTOCOL_VERSION = 4;
+export const SESSION_LINK_VERSION = 'v4';
 const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_FRAME_BYTES = Math.ceil((CONTAINER_MAX_OUTPUT_SIZE * 4) / 3) + 2 * 1024 * 1024;
 const MAX_FRAME_BYTES_PER_SECOND = 24 * 1024 * 1024;
@@ -66,7 +66,8 @@ interface SessionSignalState {
   frameBytesThisWindow: number;
   connectionWindowStartedAt: number;
   connectionsThisWindow: number;
-  activity: ActivityLine[];
+  activity: Array<ActivityLine & { turnId: string | null; ordinal: number }>;
+  usageTurnId: string | null;
   usage: UsageSnapshot | null;
   usageUpdatedAt: number;
   turnEndedAt: number;
@@ -189,6 +190,7 @@ function emptyState(): SessionSignalState {
     connectionWindowStartedAt: 0,
     connectionsThisWindow: 0,
     activity: [],
+    usageTurnId: null,
     usage: null,
     usageUpdatedAt: 0,
     turnEndedAt: 0,
@@ -604,23 +606,31 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
       emit(sessionId, 'activity');
       return true;
     case 'activity': {
-      if (!hasOnlyKeys(frame, ['v', 'type', 'step'])) return false;
+      if (!hasOnlyKeys(frame, ['v', 'type', 'step', 'turnId', 'ts', 'ordinal']) ||
+        !(frame.turnId === null || isSessionTurnId(frame.turnId)) ||
+        typeof frame.ts !== 'string' || !/^\d{1,16}$/.test(frame.ts) ||
+        !Number.isSafeInteger(frame.ordinal) || Number(frame.ordinal) < 0) return false;
       const step = sanitizeActivityStep(frame.step);
       if (!step) return false;
       state.lastSeenAt = now;
-      state.activity.push({ ts: String(now), text: JSON.stringify(step) });
+      state.activity = state.activity.filter((line) => line.turnId !== frame.turnId || line.ordinal !== frame.ordinal);
+      state.activity.push({ ts: frame.ts, text: JSON.stringify(step), turnId: frame.turnId as string | null,
+        ordinal: Number(frame.ordinal) });
       if (state.activity.length > MAX_ACTIVITY_LINES)
         state.activity.splice(0, state.activity.length - MAX_ACTIVITY_LINES);
       emit(sessionId, 'activity');
       return true;
     }
     case 'usage': {
-      if (!hasOnlyKeys(frame, ['v', 'type', 'usage'])) return false;
+      if (!hasOnlyKeys(frame, ['v', 'type', 'usage', 'turnId', 'ts']) ||
+        !(frame.turnId === null || isSessionTurnId(frame.turnId)) ||
+        typeof frame.ts !== 'string' || !/^\d{1,16}$/.test(frame.ts)) return false;
       const usage = sanitizeUsage(frame.usage);
       if (!usage) return false;
       state.lastSeenAt = now;
       state.usage = usage;
-      state.usageUpdatedAt = now;
+      state.usageUpdatedAt = Number(frame.ts);
+      state.usageTurnId = frame.turnId as string | null;
       emit(sessionId, 'usage');
       return true;
     }

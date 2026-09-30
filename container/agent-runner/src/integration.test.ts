@@ -4,7 +4,7 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getUndeliveredMessages, writeMessageOut } from './db/messages-out.js';
 import { getPendingMessages } from './db/messages-in.js';
 import { getActivityBuffer, getContinuation, setContinuation } from './db/session-state.js';
-import { getCurrentInReplyTo } from './current-batch.js';
+import { getCurrentInReplyTo, getTurnContext } from './current-batch.js';
 import { MockProvider } from './providers/mock.js';
 import {
   fingerprintToolInput,
@@ -46,6 +46,35 @@ function insertMessage(id: string, content: object, opts?: { platformId?: string
 }
 
 describe('poll loop integration', () => {
+  it('keeps correction attempts on one turn and makes warm successors distinct', async () => {
+    const seen: Array<{ turnId: string; inReplyTo: string | null }> = [];
+    const provider = new MockProvider({}, () => {
+      seen.push(getTurnContext()!);
+      return seen.length === 1 ? 'unwrapped reply' : '<message to="discord-test">wrapped</message>';
+    });
+    insertMessage('identity-1', { text: 'first' }, { channelType: 'discord', platformId: 'chan-1' });
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider, controller.signal, 3000);
+    try {
+      await waitFor(() => getUndeliveredMessages().length === 1, 2000);
+      insertMessage('identity-2', { text: 'second' }, { channelType: 'discord', platformId: 'chan-1' });
+      await waitFor(() => getUndeliveredMessages().length === 2, 2000);
+      expect(seen).toHaveLength(3);
+      expect(seen[0].turnId).toBe(seen[1].turnId);
+      expect(seen[2].turnId).not.toBe(seen[0].turnId);
+      expect(getUndeliveredMessages().map((row) => row.turn_id)).toEqual([seen[0].turnId, seen[2].turnId]);
+      expect(getOutboundDb().prepare('SELECT turn_id, message_in_id, association FROM turn_inputs ORDER BY message_in_id').all())
+        .toEqual([
+          { turn_id: seen[0].turnId, message_in_id: 'identity-1', association: 'consumed' },
+          { turn_id: seen[2].turnId, message_in_id: 'identity-2', association: 'consumed' },
+        ]);
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
   it('passes channel audio files and on-disk references unchanged on initial and follow-up turns', async () => {
     const received: Array<{ prompt: string; files?: FileAttachment[] }> = [];
     class AttachmentProvider extends MockProvider {
@@ -566,7 +595,7 @@ async function runPollLoopWithTimeout(provider: MockProvider, signal: AbortSigna
     runPollLoop({
       provider,
       providerName: 'mock',
-      cwd: '/tmp',
+      cwd: process.cwd(),
       signal,
     }),
     new Promise<void>((_, reject) => {

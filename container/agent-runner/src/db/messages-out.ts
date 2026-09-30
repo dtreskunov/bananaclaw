@@ -8,6 +8,7 @@ import { getInboundDb, getOutboundDb } from './connection.js';
 import type { Database } from 'bun:sqlite';
 import { isSafeAttachmentName } from '../attachment-safety.js';
 import { allocateTimelinePosition } from './timeline.js';
+import { getTurnContext } from '../current-batch.js';
 
 const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
 const MAX_CONTENT_ARRAY_ITEMS = 100;
@@ -64,6 +65,7 @@ function validateMessageContent(raw: string): void {
 }
 
 export interface MessageOutRow {
+  turn_id: string | null;
   id: string;
   seq: number | null;
   in_reply_to: string | null;
@@ -78,6 +80,7 @@ export interface MessageOutRow {
 }
 
 export interface WriteMessageOut {
+  turn_id?: string | null;
   id: string;
   in_reply_to?: string | null;
   deliver_after?: string | null;
@@ -100,6 +103,12 @@ export interface WriteMessageOut {
  * the agent's "edit message #5" could resolve to the wrong row.
  */
 export function writeMessageOut(msg: WriteMessageOut): number {
+  const context = getTurnContext();
+  msg = {
+    ...msg,
+    turn_id: msg.turn_id === undefined ? context?.turnId ?? null : msg.turn_id,
+    in_reply_to: msg.in_reply_to === undefined ? context?.inReplyTo ?? null : msg.in_reply_to,
+  };
   const outbound = getOutboundDb();
   const inbound = getInboundDb();
   return writeMessageOutWithConnections(msg, outbound, inbound);
@@ -134,11 +143,12 @@ export function writeMessageOutWithConnections(
     // in the JS object keys (better-sqlite3 auto-stripped it, bun:sqlite does not).
     outbound
       .prepare(
-        `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content)
-     VALUES ($id, $seq, $in_reply_to, datetime('now'), $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content)`,
+        `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content, turn_id)
+     VALUES ($id, $seq, $in_reply_to, datetime('now'), $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content, $turn_id)`,
       )
       .run({
         $id: msg.id,
+        $turn_id: msg.turn_id ?? null,
         $seq: nextSeq,
         $in_reply_to: msg.in_reply_to ?? null,
         $deliver_after: msg.deliver_after ?? null,

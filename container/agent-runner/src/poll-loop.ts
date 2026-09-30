@@ -40,7 +40,9 @@ import {
   getDuplicateSendCount,
   resetTurnSendTracking,
   setCurrentInReplyTo,
+  setTurnContext,
 } from './current-batch.js';
+import { beginTurn, associateInput, type TurnExecution } from './turn-execution.js';
 import {
   formatMessages,
   extractFileAttachments,
@@ -440,6 +442,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const finalizedTaskAttemptIds = new Set<string>();
     markTaskAttemptsProviderInvoked(taskAttemptIds);
     let taskProviderFailed = false;
+    const execution = { current: beginTurn(routing, processingIds) };
     try {
       while (true) {
         const query = config.provider.query({
@@ -468,6 +471,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
               for (const id of completedTaskIds) finalizedTaskAttemptIds.add(id);
               markBatchPersisted(getOutboundDb());
             },
+            execution,
           );
           if (!isTaskOnly && result.continuation && result.continuation !== continuation) {
             continuation = result.continuation;
@@ -516,7 +520,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             log(`Failed to persist failed-turn record: ${e instanceof Error ? e.message : String(e)}`);
           }
           const failureRouting = promptTracker.routing;
-          const ack = await tryAcknowledgeFailure(config, failureRouting, errMsg, undefined);
+          const ack = await tryAcknowledgeFailure(config, failureRouting, errMsg, undefined, execution);
           if (!ack.delivered) {
             writeMessageOut({
               id: generateId(),
@@ -531,6 +535,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         }
       }
     } finally {
+      setTurnContext(null);
       clearCurrentInReplyTo();
       activeQuery = null;
     }
@@ -739,6 +744,7 @@ async function tryAcknowledgeFailure(
   routing: RoutingContext,
   errorMessage: string,
   errorClassification: string | undefined,
+  execution: { current: TurnExecution },
 ): Promise<AcknowledgeResult> {
   const tag = errorClassification ? ` (${errorClassification})` : '';
   const ackPrompt = [
@@ -763,7 +769,8 @@ async function tryAcknowledgeFailure(
       cwd: config.cwd,
       systemContext: config.systemContext?.(),
     });
-    await processQuery(query, routing, [], config.providerName, config.provider, undefined, false);
+    await processQuery(query, routing, [], config.providerName, config.provider, undefined, false,
+      undefined, undefined, '', undefined, execution);
     return { delivered: true };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -796,12 +803,14 @@ async function processQuery(
   onExchangeComplete?: (exchange: ProviderExchange) => void,
   initialPrompt = '',
   onBatchComplete?: (completedIds: string[], providerFailed: boolean) => void,
+  execution: { current: TurnExecution } = { current: beginTurn(routing, initialBatchIds) },
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let resultSeen = false;
   let done = false;
   let userStopped = false;
-  let turnId = randomUUID();
+  let turnId = execution.current.turnId;
+  setTurnContext(execution.current);
   // Set once we've pushed the recovery nudge this turn — a self-correction
   // retry asking the model to re-send its reply properly wrapped. Fires for
   // BOTH failure shapes: (a) the model emitted bare top-level text it forgot
@@ -903,6 +912,7 @@ async function processQuery(
   // looked "done" to the host but no reply was ever dispatched.
   type QueuedBatch = { ids: string[]; routing: RoutingContext };
   const turnBatchQueue: QueuedBatch[] = [{ ids: initialBatchIds, routing }];
+  const consumedIds = new Set(initialBatchIds);
   const steeringInputs = new Map<string, MessageInRow>();
   const declinedSteering = new Set<string>();
   const supportsSteering = persistContinuation && provider.supportsSteering === true && query.steer !== undefined;
@@ -934,8 +944,8 @@ async function processQuery(
    */
   const countTurnContentMessages = (since: number, replyRoute?: RoutingContext): number => {
     const rows = getOutboundDb()
-      .prepare('SELECT kind, content, channel_type, platform_id, thread_id FROM messages_out WHERE seq > ?')
-      .all(since) as {
+      .prepare('SELECT kind, content, channel_type, platform_id, thread_id FROM messages_out WHERE seq > ? AND turn_id = ?')
+      .all(since, turnId) as {
       kind: string;
       content: string;
       channel_type: string | null;
@@ -985,6 +995,7 @@ async function processQuery(
   // claim age (see src/host-sweep.ts); if something is truly stuck, the host
   // will kill the container and messages get reset to pending.
   let pollInFlight = false;
+  let resultFinishing = false;
   let pollDirty = false;
   let endedForCommand = false;
   let corruptionStreak = 0;
@@ -1020,7 +1031,7 @@ async function processQuery(
     followUpTimer.unref?.();
   };
   const pollForFollowUps = () => {
-    if (done || userStopped || endedForCommand) return;
+    if (done || userStopped || endedForCommand || resultFinishing) return;
     if (pollInFlight) {
       pollDirty = true;
       return;
@@ -1187,7 +1198,8 @@ async function processQuery(
           resetMalformedToolRecovery();
         }
         turnActive = true;
-        turnId = randomUUID();
+        execution.current = beginTurn(activeTurnRouting, keptIds, false);
+        turnId = execution.current.turnId;
         publishTurn();
         turnStartTime = Date.now();
         try {
@@ -1203,6 +1215,11 @@ async function processQuery(
           endedForCommand = true;
           query.end();
           return;
+        }
+        consumedIds.clear();
+        for (const id of keptIds) {
+          consumedIds.add(id);
+          associateInput(execution.current, id, 'consumed');
         }
         archivePrompts.push(prompt);
         // Enqueue this push as its own batch. We do NOT markCompleted here —
@@ -1310,7 +1327,7 @@ async function processQuery(
     stopFollowUpWatcher();
     // A crash while the provider is settling must not replay cancelled input.
     // Ordinary queued messages have not been claimed and are not in this list.
-    markCompleted(turnBatchQueue.flatMap((batch) => batch.ids));
+    markCompleted([...consumedIds]);
     publishTurn();
     query.abort('user');
   });
@@ -1480,13 +1497,14 @@ async function processQuery(
         const message = steeringInputs.get(event.id);
         if (!message) throw new Error(`Provider applied unaccepted steering input: ${event.id}`);
         const batch = turnBatchQueue[0];
-        if (!batch) throw new Error(`Provider applied steering without an active batch: ${event.id}`);
         getOutboundDb().transaction(() => {
           writeInputState({ messageId: event.id, status: 'applied', turnId });
+          associateInput(execution.current, event.id, 'applied');
           if (userStopped) markCompleted([event.id]);
           else markProcessing([event.id]);
         })();
-        batch.ids.push(event.id);
+        batch?.ids.push(event.id);
+        consumedIds.add(event.id);
         steeringInputs.delete(event.id);
         const guidance = formatMessages([message]);
         archivePrompts[0] = `${archivePrompts[0] ?? initialPrompt}\n\n${guidance}`;
@@ -1615,6 +1633,7 @@ async function processQuery(
       } else if (event.type === 'checkpoint') {
         pendingCheckpoint = event.ref;
       } else if (event.type === 'result') {
+        resultFinishing = true;
         releaseUnappliedSteering();
         resultSeen = true;
         const recoveryMode = malformedToolRecoveryMode;
@@ -1635,7 +1654,7 @@ async function processQuery(
         // pushed prompts), the leftover batch stays in the queue and
         // gets drained by the stream-end finally block below.
         let resultRouting =
-          isMalformedToolRecoveryResult && malformedToolRecoveryRouting ? malformedToolRecoveryRouting : routing;
+          isMalformedToolRecoveryResult && malformedToolRecoveryRouting ? malformedToolRecoveryRouting : activeTurnRouting;
         const drainedIds: string[] = [];
         if (!isMalformedToolRecoveryResult && turnBatchQueue.length > 0) {
           const head = turnBatchQueue.shift()!;
@@ -1852,8 +1871,8 @@ async function processQuery(
           const lastOutId =
             (
               getOutboundDb()
-                .prepare('SELECT id FROM messages_out WHERE seq > ? ORDER BY seq DESC LIMIT 1')
-                .get(outboundMaxAtTurnStart) as { id: string } | undefined
+                .prepare('SELECT id FROM messages_out WHERE seq > ? AND turn_id = ? ORDER BY seq DESC LIMIT 1')
+                .get(outboundMaxAtTurnStart, turnId) as { id: string } | undefined
             )?.id ?? '';
           if (pendingUsage) {
             // Providers that resolve limits from a remote catalog fill them in
@@ -1920,7 +1939,9 @@ async function processQuery(
         // query starts a fresh "did MCP write anything?" window.
         outboundMaxAtTurnStart = currentOutboundMax();
         turnStartTime = Date.now();
+        resultFinishing = false;
         if (!turnActive) {
+          markCompleted([...consumedIds]);
           signalTurnState(null);
           queueMicrotask(wakeFollowUpWatcher);
         }
@@ -1951,7 +1972,7 @@ async function processQuery(
     // inbound.db forever — they never re-fire and never get acknowledged.
     // markCompleted is INSERT OR REPLACE, so re-marking the initial batch
     // here is harmless.
-    const orphanedIds: string[] = [];
+    const orphanedIds: string[] = [...consumedIds];
     while (turnBatchQueue.length > 0) {
       orphanedIds.push(...turnBatchQueue.shift()!.ids);
     }

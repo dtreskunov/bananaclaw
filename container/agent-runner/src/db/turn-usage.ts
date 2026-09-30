@@ -6,22 +6,24 @@
  */
 import { getOutboundDb } from './connection.js';
 import type { TurnUsage } from '../providers/types.js';
+import { getTurnContext } from '../current-batch.js';
 
-export function writeTurnUsage(id: string, messageOutId: string, data: TurnUsage): void {
+export function writeTurnUsage(id: string, messageOutId: string | null, data: TurnUsage, turnId = getTurnContext()?.turnId ?? null): void {
   getOutboundDb()
     .prepare(
       `INSERT OR REPLACE INTO turn_usage
-         (id, message_out_id, cost_usd, input_tokens, output_tokens,
+         (id, message_out_id, turn_id, cost_usd, input_tokens, output_tokens,
           cache_read_tokens, cache_write_tokens, reasoning_tokens,
           num_turns, duration_ms, duration_api_ms,
           model, context_window, max_output_tokens, context_tokens, timestamp)
-       VALUES ($id, $message_out_id, $cost_usd, $input_tokens, $output_tokens,
+       VALUES ($id, $message_out_id, $turn_id, $cost_usd, $input_tokens, $output_tokens,
           $cache_read_tokens, $cache_write_tokens, $reasoning_tokens,
           $num_turns, $duration_ms, $duration_api_ms,
           $model, $context_window, $max_output_tokens, $context_tokens, datetime('now'))`,
     )
     .run({
       $id: id,
+      $turn_id: turnId,
       $message_out_id: messageOutId,
       $cost_usd: data.cost_usd,
       $input_tokens: data.input_tokens,
