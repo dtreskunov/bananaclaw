@@ -1179,8 +1179,9 @@ function ReplyTurnStats({ turn }: { turn: ConversationTurn }) {
 }
 
 /**
- * A system row of turn activity between the turn's own messages. The status row also carries the
- * live headline, timer, usage and Stop control, or settled stats for a turn without a reply.
+ * A system bubble for turn activity that no agent message carries (before a steer, live, or no reply).
+ * The status bubble also carries the live headline, timer, usage and Stop control, or settled stats
+ * for a turn without a reply.
  */
 function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; lines: ActivityLine[]; status: boolean }) {
   const [traceExpanded, setTraceExpanded] = useState(false);

@@ -18658,6 +18658,8 @@ function conversationMessages(view) {
       ...statsTurn ? { statsTurn } : {}
     };
   });
+  const byId = new Map(messages.map((m6) => [m6.id, m6]));
+  const hostOf = new Map([...statsHosts].map(([id2, turn2]) => [turn2.id, id2]));
   for (const turn2 of view.turns) {
     const anchor = view.messages.find((m6) => turn2.outputIds.includes(m6.id) || turn2.inputIds.includes(m6.id));
     const inputs = view.messages.filter((m6) => turn2.inputIds.includes(m6.id));
@@ -18666,10 +18668,10 @@ function conversationMessages(view) {
     const firstOutput = outputs.length ? Math.min(...outputs.map(key)) : null;
     const ts = turn2.startedAt ?? anchor?.timestamp ?? view.questions.find((q5) => q5.turnId === turn2.id)?.createdAt ?? turn2.endedAt ?? "";
     const start = !turn2.startedAt && firstOutput !== null ? Math.max(firstOutput - 1, firstInput !== null ? firstInput + 1 : 0) : firstInput !== null ? Math.max(timelineSortKey(ts), firstInput + 1) : null;
-    const boundaries = turn2.startedAt ? [...inputs, ...outputs].filter((m6) => m6.inputState?.status !== "steering" && m6.inputState?.status !== "cancelled").map(key).filter((position) => firstInput === null || position > firstInput).sort((a4, b5) => a4 - b5) : [];
+    const boundaries = turn2.startedAt ? [...inputs, ...outputs].filter((m6) => m6.inputState?.status !== "steering" && m6.inputState?.status !== "cancelled").filter((m6) => firstInput === null || key(m6) > firstInput).sort((a4, b5) => key(a4) - key(b5)) : [];
     const segmentOf = (ts2) => {
       const at = activityKey(ts2);
-      return at === null ? 0 : boundaries.filter((boundary) => boundary <= at).length;
+      return at === null ? 0 : boundaries.filter((boundary) => key(boundary) <= at).length;
     };
     const segments = /* @__PURE__ */ new Map();
     for (const line of turn2.activity) {
@@ -18677,10 +18679,19 @@ function conversationMessages(view) {
       segments.set(index, [...segments.get(index) ?? [], line]);
     }
     const settled = turn2.phase === "settled";
-    const statusSegment = !settled ? boundaries.length : [...statsHosts.values()].includes(turn2) || turnRowView(turn2, 0).hidden ? null : Math.max(-1, ...segments.keys()) >= 0 ? Math.max(...segments.keys()) : 0;
-    if (statusSegment !== null && !segments.has(statusSegment)) segments.set(statusSegment, []);
+    const host = hostOf.get(turn2.id);
+    const bubbles = /* @__PURE__ */ new Map();
     for (const [index, lines] of segments) {
-      const position = index === 0 ? start : boundaries[index - 1] + 1;
+      const next = boundaries[index];
+      const target = next?.direction === "out" ? next.id : !next && settled ? host : void 0;
+      const message2 = target ? byId.get(target) : void 0;
+      if (message2) message2.activity = [...message2.activity ?? [], ...lines];
+      else bubbles.set(index, lines);
+    }
+    const statusSegment = !settled ? boundaries.length : host || turnRowView(turn2, 0).hidden ? null : Math.max(0, ...bubbles.keys());
+    if (statusSegment !== null && !bubbles.has(statusSegment)) bubbles.set(statusSegment, []);
+    for (const [index, lines] of bubbles) {
+      const position = index === 0 ? start : key(boundaries[index - 1]) + 1;
       messages.push({
         id: index === 0 ? `turn:${turn2.id}` : `turn:${turn2.id}:${index}`,
         direction: "turn",

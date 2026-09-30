@@ -2313,16 +2313,12 @@ nav.tab-bar-strip.group-strip {
   min-width: min(78%, 460px);
 }
 .chat-main .typing.turn-system {
-  align-self: center;
+  align-self: flex-start;
   background: transparent;
   border: 1px solid var(--border, var(--muted));
   border-radius: var(--radius-lg);
-  padding: 4px 12px;
-  max-width: 92%;
+  padding: 6px 10px;
   gap: 2px;
-}
-.chat-main .typing.turn-system.expanded {
-  min-width: min(92%, 460px);
 }
 .chat-main .typing.turn-system .msg-activity {
   margin-top: 0;

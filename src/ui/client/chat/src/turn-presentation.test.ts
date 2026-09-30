@@ -141,7 +141,8 @@ describe('authoritative turn presentation', () => {
     };
     update(settled);
     expect(chatMessages.value.filter((m) => m.direction === 'out').every((m) => !m.usage)).toBe(true);
-    expect(chatMessages.value.find((m) => m.turn)?.turn?.usage).toEqual([{ id: 'usage-1', value }]);
+    expect(chatMessages.value.some((m) => m.direction === 'turn')).toBe(false);
+    expect(chatMessages.value.find((m) => m.statsTurn)?.statsTurn?.usage).toEqual([{ id: 'usage-1', value }]);
     receive(testSnapshot(settled, 'reconnect'));
     expect(conversationState.value?.conversation).toEqual(settled);
   });

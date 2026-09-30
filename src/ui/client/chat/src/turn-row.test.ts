@@ -65,12 +65,16 @@ describe('turn row placement', () => {
     timelinePosition: position,
   });
 
-  it('places imported history (no start time) directly above its own reply, not after the shared input', () => {
+  it('puts imported history (no start time) inside its own reply, not after the shared input', () => {
     const messages = [message('ask', 'in', 100), message('first', 'out', 200), message('later', 'out', 900)];
     const imported = (id: string, output: string): ConversationTurn =>
       settled({ id, startedAt: null, endedAt: null, inputIds: ['ask'], outputIds: [output] });
     const view = testSnapshot({ messages, turns: [imported('a', 'first'), imported('b', 'later')] }).conversation;
-    expect(conversationMessages(view).map((m) => m.id)).toEqual(['ask', 'turn:a', 'first', 'turn:b', 'later']);
+    expect(conversationMessages(view).map((m) => [m.id, m.activity?.length, m.statsTurn?.id])).toEqual([
+      ['ask', undefined, undefined],
+      ['first', 1, 'a'],
+      ['later', 1, 'b'],
+    ]);
   });
 
   it('keeps native turns at their start, after their first input', () => {
@@ -78,11 +82,14 @@ describe('turn row placement', () => {
     const messages = [message('ask', 'in', us - 1000), message('reply', 'out', us + 5_000_000)];
     const turn = settled({ id: 'n', inputIds: ['ask'], outputIds: ['reply'] });
     const view = testSnapshot({ messages, turns: [turn] }).conversation;
-    expect(conversationMessages(view).map((m) => m.id)).toEqual(['ask', 'turn:n', 'reply']);
+    expect(conversationMessages(view).map((m) => [m.id, m.activity?.length])).toEqual([
+      ['ask', undefined],
+      ['reply', 1],
+    ]);
   });
 });
 
-describe('turn activity between messages', () => {
+describe('turn activity placement', () => {
   const us = start * 1000;
   const message = (
     id: string,
@@ -105,12 +112,12 @@ describe('turn activity between messages', () => {
   const rows = (view: ReturnType<typeof testSnapshot>['conversation']) =>
     conversationMessages(view).map((m) => ({
       id: m.id,
-      lines: m.direction === 'turn' ? m.activity?.map((line) => line.text) : undefined,
+      lines: m.activity?.map((line) => line.text),
       status: m.turnStatus ?? false,
       stats: m.statsTurn?.id,
     }));
 
-  it('splits activity at a steering message and puts settled stats on the reply', () => {
+  it('splits activity at a steering message: a system bubble before it, the reply after it', () => {
     const messages = [message('ask', 'in', -1), message('steer', 'in', 3000, 'applied'), message('reply', 'out', 9000)];
     const turn = settled({
       id: 's',
@@ -122,8 +129,7 @@ describe('turn activity between messages', () => {
       { id: 'ask', lines: undefined, status: false, stats: undefined },
       { id: 'turn:s', lines: ['step 0'], status: false, stats: undefined },
       { id: 'steer', lines: undefined, status: false, stats: undefined },
-      { id: 'turn:s:1', lines: ['step 1'], status: false, stats: undefined },
-      { id: 'reply', lines: undefined, status: false, stats: 's' },
+      { id: 'reply', lines: ['step 1'], status: false, stats: 's' },
     ]);
   });
 
@@ -145,6 +151,22 @@ describe('turn activity between messages', () => {
       ['ask', false],
       ['turn:r', true],
       ['steer', false],
+    ]);
+  });
+
+  it('puts work before a mid-turn message inside it, and later live work in a status bubble', () => {
+    const running = {
+      ...testTurn,
+      id: 'm',
+      inputIds: ['ask'],
+      outputIds: ['update'],
+      activity: [step(0, 1000), step(1, 5000)],
+    };
+    const messages = [message('ask', 'in', -1), message('update', 'out', 3000)];
+    expect(rows(testSnapshot({ messages, turns: [running] }).conversation)).toEqual([
+      { id: 'ask', lines: undefined, status: false, stats: undefined },
+      { id: 'update', lines: ['step 0'], status: false, stats: undefined },
+      { id: 'turn:m:1', lines: ['step 1'], status: true, stats: undefined },
     ]);
   });
 

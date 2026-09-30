@@ -37,9 +37,11 @@ function activityKey(ts: string): number | null {
 }
 
 /**
- * A turn renders as system rows of activity between its own messages: each steering input or
- * mid-turn output starts a new row, so work done before and after it reads in order. Settled
- * accounting belongs on the turn's last reply; only a turn without one keeps a status row.
+ * A turn's activity renders inside the bubble it led to: each steering input or mid-turn output
+ * ends a segment, so work before and after it reads in order. A segment that ends in an agent
+ * message is that message's trace; the rest (before a steer, live, or with no reply at all) get a
+ * system bubble. Settled accounting belongs on the turn's last reply; only a turn without one keeps
+ * a status bubble.
  */
 export function conversationMessages(view: Conversation): ChatMessage[] {
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
@@ -68,6 +70,8 @@ export function conversationMessages(view: Conversation): ChatMessage[] {
         ...(statsTurn ? { statsTurn } : {}),
       };
     });
+  const byId = new Map(messages.map((m) => [m.id, m]));
+  const hostOf = new Map([...statsHosts].map(([id, turn]) => [turn.id, id]));
   for (const turn of view.turns) {
     const anchor = view.messages.find((m) => turn.outputIds.includes(m.id) || turn.inputIds.includes(m.id));
     const inputs = view.messages.filter((m) => turn.inputIds.includes(m.id));
@@ -92,13 +96,12 @@ export function conversationMessages(view: Conversation): ChatMessage[] {
     const boundaries = turn.startedAt
       ? [...inputs, ...outputs]
           .filter((m) => m.inputState?.status !== 'steering' && m.inputState?.status !== 'cancelled')
-          .map(key)
-          .filter((position) => firstInput === null || position > firstInput)
-          .sort((a, b) => a - b)
+          .filter((m) => firstInput === null || key(m) > firstInput)
+          .sort((a, b) => key(a) - key(b))
       : [];
     const segmentOf = (ts: string): number => {
       const at = activityKey(ts);
-      return at === null ? 0 : boundaries.filter((boundary) => boundary <= at).length;
+      return at === null ? 0 : boundaries.filter((boundary) => key(boundary) <= at).length;
     };
     const segments = new Map<number, ConversationTurn['activity']>();
     for (const line of turn.activity) {
@@ -106,17 +109,25 @@ export function conversationMessages(view: Conversation): ChatMessage[] {
       segments.set(index, [...(segments.get(index) ?? []), line]);
     }
     const settled = turn.phase === 'settled';
-    // Live status follows the newest turn message; settled status needs a row only without a reply.
+    const host = hostOf.get(turn.id);
+    const bubbles = new Map<number, ConversationTurn['activity']>();
+    for (const [index, lines] of segments) {
+      // The agent message that ends a segment carries it; a settled turn's trailing work joins its reply.
+      const next = boundaries[index];
+      const target = next?.direction === 'out' ? next.id : !next && settled ? host : undefined;
+      const message = target ? byId.get(target) : undefined;
+      if (message) message.activity = [...(message.activity ?? []), ...lines];
+      else bubbles.set(index, lines);
+    }
+    // Live status follows the newest turn message; settled status needs a bubble only without a reply.
     const statusSegment = !settled
       ? boundaries.length
-      : [...statsHosts.values()].includes(turn) || turnRowView(turn, 0).hidden
+      : host || turnRowView(turn, 0).hidden
         ? null
-        : Math.max(-1, ...segments.keys()) >= 0
-          ? Math.max(...segments.keys())
-          : 0;
-    if (statusSegment !== null && !segments.has(statusSegment)) segments.set(statusSegment, []);
-    for (const [index, lines] of segments) {
-      const position = index === 0 ? start : boundaries[index - 1] + 1;
+        : Math.max(0, ...bubbles.keys());
+    if (statusSegment !== null && !bubbles.has(statusSegment)) bubbles.set(statusSegment, []);
+    for (const [index, lines] of bubbles) {
+      const position = index === 0 ? start : key(boundaries[index - 1]) + 1;
       messages.push({
         id: index === 0 ? `turn:${turn.id}` : `turn:${turn.id}:${index}`,
         direction: 'turn',
