@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', async () => {
   const actual = await vi.importActual('./config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-fork' };
+  return { ...actual, DATA_DIR: `${process.cwd()}/.test-conversation-fork` };
 });
 
 vi.mock('./container-runner.js', () => ({
@@ -29,6 +29,7 @@ vi.mock('./env.js', () => ({
 import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrations } from './db/index.js';
 import { createSession, getSession } from './db/sessions.js';
 import { getThreadFork } from './db/thread-forks.js';
+import { getTurn, getTurnInputs, linkTurnInput, putTurn } from './db/turns.js';
 import { ForkError, forkThread } from './fork-session.js';
 import { inputStateKey, readInputTimeline } from './input-timeline.js';
 // container-runner is mocked above, so the provider barrel it normally pulls
@@ -47,7 +48,7 @@ import {
 } from './session-manager.js';
 import type { Session } from './types.js';
 
-const TEST_DIR = '/tmp/nanoclaw-test-fork';
+const TEST_DIR = path.join(process.cwd(), '.test-conversation-fork');
 const AG = 'ag-1';
 const MG = 'mg-1';
 const PARENT_SESSION = 'sess-parent';
@@ -197,6 +198,124 @@ afterEach(() => {
 });
 
 describe('forkThread', () => {
+  function seedTurnHistory(phase: 'running' | 'settled' = 'settled') {
+    const db = new Database(outboundDbPath(AG, PARENT_SESSION));
+    putTurn(db, {
+      id: 'turn-parent', origin_channel_type: 'discord', origin_platform_id: 'chan-1',
+      origin_thread_id: PARENT_THREAD, origin_source_session_id: null,
+      started_at: ts(1), ended_at: phase === 'settled' ? ts(4) : null, phase,
+      outcome: phase === 'settled' ? 'replied' : 'pending', provenance: 'native',
+      imported_from_session_id: null, imported_from_turn_id: null,
+    });
+    for (const id of ['u1', 'u2']) {
+      linkTurnInput(db, { turn_id: 'turn-parent', message_in_id: id, association: 'consumed' });
+    }
+    db.exec(`
+      UPDATE messages_out SET turn_id = 'turn-parent';
+      INSERT INTO turn_usage (id, message_out_id, turn_id, cost_usd) VALUES ('first', 'a1', 'turn-parent', 1);
+      INSERT INTO turn_usage (id, message_out_id, turn_id, cost_usd) VALUES ('second', 'a2', 'turn-parent', 2);
+      INSERT INTO turn_usage (id, turn_id, cost_usd) VALUES ('turn-only', 'turn-parent', 3);
+      INSERT INTO turn_usage (id, cost_usd) VALUES ('unattributed', 4);
+      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text) VALUES ('a1', 'turn-parent', 0, 'now', 'first');
+      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text) VALUES ('a2', 'turn-parent', 0, 'now', 'second');
+      INSERT INTO turn_activity (turn_id, ordinal, ts, text) VALUES ('turn-parent', 2, 'now', 'turn-only');
+      INSERT INTO turns (id, phase, outcome, provenance) VALUES ('unrelated', 'running', 'pending', 'native');
+    `);
+    db.close();
+  }
+
+  it('copies only included associations for a partial turn, rethreads its origin, and seeds no dangling references', () => {
+    seedTurnHistory();
+    const result = fork('a1');
+    for (const file of [outboundDbPath(AG, result.sessionId), runnerStateDbPath(AG, result.sessionId)]) {
+      const db = new Database(file);
+      try {
+        expect(db.prepare('SELECT id FROM turns').all()).toEqual([{ id: 'turn-parent' }]);
+        expect(getTurn(db, 'turn-parent')).toMatchObject({
+          phase: 'settled', outcome: 'unknown', started_at: null, ended_at: null, provenance: 'fork',
+          origin_thread_id: NEW_THREAD, origin_channel_type: 'discord', origin_platform_id: 'chan-1',
+          imported_from_session_id: PARENT_SESSION, imported_from_turn_id: 'turn-parent',
+        });
+        expect(getTurnInputs(db, 'turn-parent').map((r) => r.message_in_id)).toEqual(['u1']);
+        expect(db.prepare('SELECT id, turn_id FROM messages_out').all()).toEqual([{ id: 'a1', turn_id: 'turn-parent' }]);
+        expect(db.prepare('SELECT id, cost_usd FROM turn_usage').all()).toEqual([{ id: 'first', cost_usd: 1 }]);
+        expect(db.prepare('SELECT text FROM turn_activity').all()).toEqual([{ text: 'first' }]);
+        expect(db.pragma('foreign_key_check')).toEqual([]);
+      } finally { db.close(); }
+    }
+  });
+
+  it.each(['running', 'settled'] as const)('inherits no active lifecycle from a %s source and includes turn-only totals only when complete', (phase) => {
+    seedTurnHistory(phase);
+    const result = fork('a2');
+    const db = new Database(outboundDbPath(AG, result.sessionId));
+    try {
+      expect(getTurn(db, 'turn-parent')).toMatchObject({
+        phase: 'settled', outcome: phase === 'settled' ? 'replied' : 'unknown',
+      });
+      expect(db.prepare('SELECT sum(cost_usd) AS cost FROM turn_usage').get()).toEqual({ cost: phase === 'settled' ? 6 : 3 });
+      expect(db.prepare('SELECT count(*) AS count FROM turn_activity').get()).toEqual({ count: phase === 'settled' ? 3 : 2 });
+      expect(getTurn(db, 'unrelated')).toBeUndefined();
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally { db.close(); }
+  });
+
+  it('drops dangling turn links from copied records instead of inheriting an invalid reference', () => {
+    const source = new Database(outboundDbPath(AG, PARENT_SESSION));
+    source.exec(`PRAGMA foreign_keys = OFF;
+      UPDATE messages_out SET turn_id = 'missing';
+      INSERT INTO turn_usage (id, message_out_id, turn_id, cost_usd) VALUES ('u', 'a1', 'missing', 1);`);
+    source.close();
+    const result = fork();
+    const db = new Database(outboundDbPath(AG, result.sessionId));
+    try {
+      expect(db.prepare('SELECT turn_id FROM messages_out').all()).toEqual([{ turn_id: null }]);
+      expect(db.prepare('SELECT turn_id FROM turn_usage').all()).toEqual([{ turn_id: null }]);
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally { db.close(); }
+  });
+
+  it('keeps an input-only fork inert without copying later output or turn-only accounting', () => {
+    seedTurnHistory('running');
+    const result = fork('u1');
+    const db = new Database(outboundDbPath(AG, result.sessionId));
+    try {
+      expect(getTurn(db, 'turn-parent')).toMatchObject({ phase: 'settled', outcome: 'unknown' });
+      expect(getTurnInputs(db, 'turn-parent').map((r) => r.message_in_id)).toEqual(['u1']);
+      for (const table of ['messages_out', 'turn_usage', 'turn_activity']) {
+        expect(db.prepare(`SELECT * FROM ${table}`).all()).toEqual([]);
+      }
+    } finally { db.close(); }
+  });
+
+  it('copies legacy sidecars without migrating the parent at runtime', () => {
+    const source = new Database(outboundDbPath(AG, PARENT_SESSION));
+    source.exec(`
+      DROP INDEX idx_messages_out_turn;
+      ALTER TABLE messages_out DROP COLUMN turn_id;
+      DROP INDEX idx_turn_usage_turn;
+      ALTER TABLE turn_usage DROP COLUMN turn_id;
+      DROP TABLE turn_activity;
+      CREATE TABLE turn_activity (message_out_id TEXT NOT NULL, ordinal INTEGER NOT NULL, ts TEXT NOT NULL, text TEXT NOT NULL,
+        PRIMARY KEY (message_out_id, ordinal));
+      DROP TABLE turn_inputs;
+      DROP TABLE turns;
+      DROP TABLE conversation_sync_migrations;
+      INSERT INTO turn_usage (id, message_out_id, cost_usd) VALUES ('legacy', 'a1', 1);
+      INSERT INTO turn_activity VALUES ('a1', 0, 'now', 'legacy');
+    `);
+    source.close();
+    const result = fork();
+    const db = new Database(outboundDbPath(AG, result.sessionId));
+    const parent = new Database(outboundDbPath(AG, PARENT_SESSION), { readonly: true });
+    try {
+      expect(db.prepare('SELECT id, turn_id FROM turn_usage').all()).toEqual([{ id: 'legacy', turn_id: null }]);
+      expect(db.prepare('SELECT text, turn_id FROM turn_activity').all()).toEqual([{ text: 'legacy', turn_id: null }]);
+      expect(db.prepare('SELECT * FROM turns').all()).toEqual([]);
+      expect(parent.prepare("SELECT name FROM sqlite_master WHERE name = 'turns'").all()).toEqual([]);
+    } finally { db.close(); parent.close(); }
+  });
+
   it.each(['content', 'receipt'] as const)('excludes %s cancellation tombstones and refuses them as branch anchors', (source) => {
     if (source === 'content') {
       const db = new Database(inboundDbPath(AG, PARENT_SESSION));

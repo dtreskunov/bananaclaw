@@ -7,7 +7,7 @@
  */
 import Database from 'better-sqlite3';
 
-import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
+import { INBOUND_SCHEMA, OUTBOUND_BASE_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
 import { CONTAINER_MAX_OUTPUT_SIZE } from '../config.js';
 import { assertUserUuid } from './uuid.js';
 
@@ -15,7 +15,8 @@ import { assertUserUuid } from './uuid.js';
 export function ensureSchema(dbPath: string, schema: 'inbound' | 'outbound'): void {
   const db = new Database(dbPath);
   db.pragma('journal_mode = DELETE');
-  db.exec(schema === 'inbound' ? INBOUND_SCHEMA : OUTBOUND_SCHEMA);
+  const existingOutput = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_out'").get();
+  db.exec(schema === 'inbound' ? INBOUND_SCHEMA : existingOutput ? OUTBOUND_BASE_SCHEMA : OUTBOUND_SCHEMA);
   if (schema === 'inbound') {
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS validate_message_in_size_insert

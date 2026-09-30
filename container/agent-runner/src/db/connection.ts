@@ -8,6 +8,7 @@
 import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import { ensureRunnerStateSchema } from './runner-state.js';
+import { migrateTurnSchema } from './turns.js';
 
 const DEFAULT_RUNNER_STATE_PATH = '/workspace/runner-state/runner-state.db';
 const MAX_DECLARED_TOOL_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -269,6 +270,7 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
     CREATE INDEX idx_task_attempts_series_started
       ON task_attempts(series_id, started_at DESC);
   `);
+  migrateTurnSchema(_outbound);
   ensureRunnerStateSchema(_outbound);
 
   if (options.unifiedHostProjection) {

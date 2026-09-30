@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA, TURN_SCHEMA } from './turns.js';
 
 export interface PendingRunnerEvent {
   event_id: string;
@@ -13,6 +14,8 @@ const enqueue = (eventType: string, payload: string): string => `
 `;
 
 export function ensureRunnerStateSchema(db: Database): void {
+  const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_out'").get();
+  if (fresh) db.exec(TURN_SCHEMA);
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages_in (
       id TEXT PRIMARY KEY,
@@ -89,7 +92,8 @@ export function ensureRunnerStateSchema(db: Database): void {
       platform_id TEXT,
       channel_type TEXT,
       thread_id TEXT,
-      content TEXT NOT NULL
+      content TEXT NOT NULL,
+      turn_id TEXT REFERENCES turns(id)
     );
     CREATE TABLE IF NOT EXISTS processing_ack (
       message_id TEXT PRIMARY KEY,
@@ -132,16 +136,11 @@ export function ensureRunnerStateSchema(db: Database): void {
       provider_turn_ref TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS turn_activity (
-      message_out_id TEXT NOT NULL,
-      ordinal INTEGER NOT NULL,
-      ts TEXT NOT NULL,
-      text TEXT NOT NULL,
-      PRIMARY KEY (message_out_id, ordinal)
-    );
+    ${TURN_ACTIVITY_SCHEMA}
     CREATE TABLE IF NOT EXISTS turn_usage (
       id TEXT PRIMARY KEY,
       message_out_id TEXT,
+      turn_id TEXT REFERENCES turns(id),
       cost_usd REAL,
       input_tokens INTEGER,
       output_tokens INTEGER,
@@ -376,6 +375,7 @@ export function ensureRunnerStateSchema(db: Database): void {
       )}
     END;
   `);
+  if (fresh) db.exec(TURN_INDEX_SCHEMA);
 }
 
 export function listPendingRunnerEvents(db: Database, limit = 32): PendingRunnerEvent[] {

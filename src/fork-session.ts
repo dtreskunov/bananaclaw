@@ -18,6 +18,8 @@ import path from 'path';
 
 import { resolveProviderName } from './container-runner.js';
 import { getContainerConfig } from './db/container-configs.js';
+import { copyForkTurnHistory } from './db/fork-turns.js';
+import { getMessagingGroup } from './db/messaging-groups.js';
 import { createSession } from './db/sessions.js';
 import { createThreadFork } from './db/thread-forks.js';
 import { readEnvFile } from './env.js';
@@ -31,7 +33,6 @@ import {
   openInboundDb,
   openOutboundDb,
   openOutboundDbRw,
-  outboundDbPath,
   seedRunnerState,
   sessionDir,
   writeSessionRouting,
@@ -150,19 +151,6 @@ function insertRows(db: Database.Database, table: string, rows: Row[]): void {
     for (const row of batch) stmt.run(row);
   });
   run(rows);
-}
-
-/** Best-effort copy of rows keyed by `message_out_id` from a table that may not exist. */
-function copyOutboundSidecar(src: Database.Database, dst: Database.Database, table: string, ids: string[]): void {
-  if (ids.length === 0) return;
-  try {
-    const rows = src
-      .prepare(`SELECT * FROM ${table} WHERE message_out_id IN (${ids.map(() => '?').join(',')})`)
-      .all(...ids) as Row[];
-    insertRows(dst, table, rows);
-  } catch (err) {
-    log.debug('Fork: sidecar table not copied', { table, err });
-  }
 }
 
 /**
@@ -358,6 +346,8 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
       sessionId,
       parentSessionId: parentSession.id,
       newThreadId,
+      channelType,
+      platformId: getMessagingGroup(messagingGroupId)?.platform_id ?? null,
       inRows,
       outRows,
       titleRow,
@@ -418,6 +408,8 @@ function populateForkSession(args: {
   sessionId: string;
   parentSessionId: string;
   newThreadId: string;
+  channelType: string;
+  platformId: string | null;
   inRows: Row[];
   outRows: Row[];
   titleRow: Row | undefined;
@@ -490,7 +482,17 @@ function populateForkSession(args: {
   const srcOut = openOutboundDb(agentGroupId, parentSessionId);
   const dstOut = openOutboundDbRw(agentGroupId, sessionId);
   try {
-    insertRows(dstOut, 'messages_out', rethread(outRows));
+    const copiedTurns = copyForkTurnHistory(srcOut, dstOut, {
+      inputIds: new Set(inRows.map((r) => String(r.id))),
+      outputRows: outRows,
+      parentSessionId,
+      channelType: args.channelType,
+      platformId: args.platformId,
+      threadId: newThreadId,
+    });
+    insertRows(dstOut, 'messages_out', rethread(outRows).map((row) => ({
+      ...row, turn_id: typeof row.turn_id === 'string' && copiedTurns.has(row.turn_id) ? row.turn_id : null,
+    })));
     for (const row of inRows) {
       const state = readInputTimeline(srcOut, String(row.id));
       if (state?.timelinePosition === undefined) continue;
@@ -506,10 +508,6 @@ function populateForkSession(args: {
       'processing_ack',
       inRows.map((r) => ({ message_id: String(r.id), status: 'completed', status_changed: args.createdAt })),
     );
-
-    const outIds = outRows.map((r) => String(r.id));
-    copyOutboundSidecar(srcOut, dstOut, 'turn_usage', outIds);
-    copyOutboundSidecar(srcOut, dstOut, 'turn_activity', outIds);
   } finally {
     srcOut.close();
     dstOut.close();

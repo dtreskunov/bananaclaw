@@ -3,6 +3,7 @@
  * Read this to understand the DB structure.
  * Actual creation is done by migrations — do not use this at runtime.
  */
+import { TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA, TURN_SCHEMA } from './turns.js';
 
 export const SCHEMA = `
 -- Agent workspaces: folder, skills, CLAUDE.md.
@@ -396,7 +397,7 @@ END;
 `;
 
 /** Host-owned projection of durable runner output and state. */
-export const OUTBOUND_SCHEMA = `
+export const OUTBOUND_BASE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS messages_out (
   id             TEXT PRIMARY KEY,
   seq            INTEGER UNIQUE,
@@ -408,7 +409,8 @@ CREATE TABLE IF NOT EXISTS messages_out (
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
-  content        TEXT NOT NULL
+  content        TEXT NOT NULL,
+  turn_id        TEXT REFERENCES turns(id)
 );
 
 -- Host projects runner processing status here instead of allowing the
@@ -451,18 +453,13 @@ CREATE TABLE IF NOT EXISTS turn_checkpoints (
 );
 
 -- Ordered progress trace persisted at turn end for historical display.
-CREATE TABLE IF NOT EXISTS turn_activity (
-  message_out_id TEXT NOT NULL,
-  ordinal        INTEGER NOT NULL,
-  ts             TEXT NOT NULL,
-  text           TEXT NOT NULL,
-  PRIMARY KEY (message_out_id, ordinal)
-);
+${TURN_ACTIVITY_SCHEMA}
 
 -- Per-turn provider usage linked to the final outbound message.
 CREATE TABLE IF NOT EXISTS turn_usage (
   id                  TEXT PRIMARY KEY,
   message_out_id      TEXT,
+  turn_id             TEXT REFERENCES turns(id),
   cost_usd            REAL,
   input_tokens        INTEGER,
   output_tokens       INTEGER,
@@ -509,3 +506,6 @@ CREATE TABLE IF NOT EXISTS applied_runner_events (
   applied_at TEXT NOT NULL
 );
 `;
+
+/** Complete fresh schema; existing files require explicit migrateTurnSchema/backfillTurns. */
+export const OUTBOUND_SCHEMA = TURN_SCHEMA + OUTBOUND_BASE_SCHEMA + TURN_INDEX_SCHEMA;
