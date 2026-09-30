@@ -8,6 +8,7 @@ import { reduceActivityLines, type ActivityStep } from './activity.js';
 import type { ActivityLine, UsageSnapshot } from './channels/adapter.js';
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
+import { invalidateConversation } from './conversation-events.js';
 import { applyDurableRunnerEvent } from './session-link-durable.js';
 import { getSession } from './db/sessions.js';
 import { indexMessage, deleteMessageFromIndex } from './search-index.js';
@@ -110,6 +111,7 @@ export function onSessionTurnChange(listener: (sessionId: string, change: Sessio
 }
 
 function notifyTurnChange(sessionId: string, change: SessionTurnChange): void {
+  invalidateConversation(sessionId);
   for (const listener of turnChangeListeners) {
     try { listener(sessionId, change); }
     catch (err) { log.warn('Turn change listener failed', { sessionId, err }); }
@@ -188,6 +190,7 @@ function flushHostEvents(sessionId: string, entry: SessionSignalServer): void {
 }
 
 export function notifySessionHostState(sessionId: string): void {
+  invalidateConversation(sessionId);
   const entry = servers.get(sessionId);
   if (entry) flushHostEvents(sessionId, entry);
 }
@@ -240,6 +243,7 @@ function stateFor(sessionId: string): SessionSignalState {
 }
 
 function emit(sessionId: string, kind: SignalKind): void {
+  if (kind !== 'heartbeat') invalidateConversation(sessionId);
   for (const listener of listeners) {
     try {
       listener(sessionId, kind);

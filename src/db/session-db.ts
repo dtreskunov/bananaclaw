@@ -6,6 +6,7 @@
  * (open-write-close per op). See session-manager.ts header for invariants.
  */
 import Database from 'better-sqlite3';
+import { invalidateSessionDatabase } from '../conversation-events.js';
 
 import { INBOUND_SCHEMA, OUTBOUND_BASE_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
 import { CONTAINER_MAX_OUTPUT_SIZE } from '../config.js';
@@ -245,6 +246,7 @@ export function insertMessage(
     senderIdentity: message.senderIdentity ?? null,
     seq: nextEvenSeq(db),
   });
+  invalidateSessionDatabase(db.name);
 }
 
 export function countDueMessages(db: Database.Database): number {
@@ -332,6 +334,7 @@ export function insertOutboundBounce(
       threadId: msg.threadId,
       content: JSON.stringify({ text: msg.text }),
     });
+  invalidateSessionDatabase(outDb.name);
 }
 
 /**
@@ -354,6 +357,7 @@ export function syncProcessingAcks(inDb: Database.Database, outDb: Database.Data
       if (updateStmt.run(message_id).changes > 0) transitioned.push(message_id);
     }
   })();
+  invalidateSessionDatabase(inDb.name);
   return transitioned;
 }
 

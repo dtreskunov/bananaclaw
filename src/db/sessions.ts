@@ -1,5 +1,6 @@
 import type { PendingApproval, Question, Session } from '../types.js';
 import { getDb, hasTable } from './connection.js';
+import { invalidateConversation } from '../conversation-events.js';
 
 // ── Sessions ──
 
@@ -119,6 +120,7 @@ export function createQuestion(question: Question): boolean {
       ...question,
       options_json: JSON.stringify(question.options),
     });
+  if (result.changes) queueMicrotask(() => invalidateConversation(question.session_id));
   return result.changes > 0;
 }
 
@@ -143,6 +145,8 @@ export function answerQuestion(
         WHERE question_id = @questionId AND status = 'pending'`,
     )
     .run({ questionId, ...answer });
+  const sessionId = result.changes ? getQuestion(questionId)?.session_id : undefined;
+  if (sessionId) queueMicrotask(() => invalidateConversation(sessionId));
   return result.changes > 0;
 }
 

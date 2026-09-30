@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
+import { invalidateConversation } from './conversation-events.js';
 import path from 'node:path';
 
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
@@ -586,6 +587,7 @@ export function applyDurableRunnerEvent(
     db.close();
   }
 
+  invalidateConversation(sessionId);
   return { deliveryReady, processingReady, ...(editedInput ? { editedInput } : {}),
     ...(changedTurnIds.size ? { changedTurnIds: [...changedTurnIds] } : {}),
     ...(settledTurnId ? { settledTurnId } : {}),

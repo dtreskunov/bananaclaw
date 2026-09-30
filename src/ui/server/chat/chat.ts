@@ -989,6 +989,7 @@ export interface TurnUsageDto {
 type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface HistoryMessage {
+  turnId?: string;
   inputState?: InputState;
   canEditPending?: boolean;
   timelinePosition?: number;
@@ -1104,8 +1105,8 @@ function readVisibleInputStates(
     } finally {
       outDb.close();
     }
-  } catch {
-    /* The outbound projection may not exist yet. */
+  } catch (err) {
+    throw new Error('Unable to read input dispositions', { cause: err });
   }
   return { states, positions };
 }
@@ -1215,15 +1216,12 @@ export function readChatHistory(
   override?: { channelType: string; messagingGroupId: string },
   options: { includeCancelled?: boolean } = {},
 ): HistoryMessage[] {
+  const context = resolveTurnContext(userId, groupId, threadId, override);
+  if (!context) throw new Error('Conversation is not accessible');
   const elevated = isElevated(userId);
   const target = resolveTargetMessagingGroup(userId, groupId, override, elevated);
   if (!target) return [];
-  // Threadless DM rooms (e.g. Telegram 1:1) use a synthetic `__dm:<mg>`
-  // threadId. The session-lookup wants thread_id=null and the message
-  // queries need `thread_id IS NULL`. We also scope by the viewer's
-  // platform_id(s) so DMs from other users sharing the mg don't leak —
-  // unless the viewer is elevated, in which case all DMs in the mg are
-  // returned.
+  // Synthetic DM IDs resolve to the same route as active-turn controls.
   const isDm = threadId.startsWith('__dm:');
   const session = resolveSessionForMode(groupId, target.messagingGroupId, target.sessionMode, isDm ? '' : threadId);
   if (!session) return [];
@@ -1234,29 +1232,19 @@ export function readChatHistory(
   try {
     const inDb = openInboundDb(groupId, session.id);
     try {
-      let rows: { id: string; timestamp: string; content: string; status: string; sender_user_id: string | null }[];
-      if (isDm && elevated) {
-        rows = inDb
-          .prepare(
-            'SELECT id, timestamp, content, status, sender_user_id FROM messages_in WHERE channel_type = ? AND thread_id IS NULL ORDER BY seq',
-          )
-          .all(target.channelType) as typeof rows;
-      } else if (isDm) {
-        rows = inDb
-          .prepare(
-            `SELECT id, timestamp, content, status, sender_user_id FROM messages_in
-              WHERE channel_type = ? AND thread_id IS NULL
-                AND platform_id IN (${viewerHandles.map(() => '?').join(',')})
-              ORDER BY seq`,
-          )
-          .all(target.channelType, ...viewerHandles) as typeof rows;
-      } else {
-        rows = inDb
-          .prepare(
-            'SELECT id, timestamp, content, status, sender_user_id FROM messages_in WHERE channel_type = ? AND thread_id = ? AND platform_id = ? ORDER BY seq',
-          )
-          .all(target.channelType, threadId, getMessagingGroup(target.messagingGroupId)?.platform_id) as typeof rows;
-      }
+      const rows = inDb
+        .prepare(
+          `SELECT id, timestamp, content, status, sender_user_id FROM messages_in
+         WHERE channel_type = ? AND thread_id IS ?
+           AND platform_id IN (${context.platformIds.map(() => '?').join(',')}) ORDER BY seq`,
+        )
+        .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
+        id: string;
+        timestamp: string;
+        content: string;
+        status: string;
+        sender_user_id: string | null;
+      }>;
       const { states: inputStates, positions: inputPositions } = readVisibleInputStates(
         groupId,
         session.id,
@@ -1319,25 +1307,27 @@ export function readChatHistory(
     } finally {
       inDb.close();
     }
-  } catch {
-    // inbound DB may not exist
+  } catch (err) {
+    throw new Error('Unable to read conversation inputs', { cause: err });
   }
 
   try {
     const outDb = openOutboundDb(groupId, session.id);
     try {
-      const rows = isDm
-        ? (outDb
-            .prepare(
-              `SELECT id, timestamp, kind, content FROM messages_out
-                WHERE channel_type = ? AND thread_id IS NULL ORDER BY seq`,
-            )
-            .all(target.channelType) as { id: string; timestamp: string; kind: string; content: string }[])
-        : (outDb
-            .prepare(
-              'SELECT id, timestamp, kind, content FROM messages_out WHERE channel_type = ? AND thread_id = ? ORDER BY seq',
-            )
-            .all(target.channelType, threadId) as { id: string; timestamp: string; kind: string; content: string }[]);
+      const rows = outDb
+        .prepare(
+          `SELECT id, timestamp, kind, content, turn_id FROM messages_out
+         WHERE channel_type = ? AND thread_id IS ?
+           AND platform_id IN (${context.platformIds.map(() => '?').join(',')})
+         ORDER BY seq`,
+        )
+        .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
+        id: string;
+        timestamp: string;
+        kind: string;
+        content: string;
+        turn_id: string | null;
+      }>;
 
       // Load turn_usage for all outbound messages in one query.
       const outIds = rows
@@ -1410,6 +1400,7 @@ export function readChatHistory(
       // prior message id. Collect them keyed by target so they fold onto the
       // target bubble after the loop instead of rendering as empty bubbles.
       const reactionsByTarget = new Map<string, { emoji: string; ts: string }[]>();
+      const editsByTarget = new Map<string, string>();
 
       for (const r of rows) {
         if (r.kind === 'internal') {
@@ -1417,6 +1408,7 @@ export function readChatHistory(
           messages.push({
             direction: 'internal',
             id: r.id,
+            ...(r.turn_id ? { turnId: r.turn_id } : {}),
             timestamp: r.timestamp,
             text: parsed.text,
             files: parsed.files,
@@ -1436,6 +1428,7 @@ export function readChatHistory(
             messages.push({
               direction: 'out',
               id: r.id,
+              ...(r.turn_id ? { turnId: r.turn_id } : {}),
               timestamp: r.timestamp,
               text: content.text,
               ...(timelinePosition !== undefined ? { timelinePosition } : {}),
@@ -1450,7 +1443,11 @@ export function readChatHistory(
         // Fold reaction rows onto their target bubble rather than rendering
         // a standalone (empty-text) message.
         try {
-          const c = JSON.parse(r.content) as { operation?: string; messageId?: string; emoji?: string };
+          const c = JSON.parse(r.content) as { operation?: string; messageId?: string; emoji?: string; text?: string };
+          if (c?.operation === 'edit' && c.messageId && typeof c.text === 'string') {
+            editsByTarget.set(publicInboundMessageId(c.messageId, groupId), c.text);
+            continue;
+          }
           if (c?.operation === 'reaction' && c.messageId && c.emoji) {
             // Inbound ids are de-namespaced for the client (the `:<groupId>`
             // suffix is stripped above); match that so reactions on the
@@ -1474,6 +1471,7 @@ export function readChatHistory(
           timestamp: r.timestamp,
           text: parsed.text,
           files: parsed.files,
+          ...(r.turn_id ? { turnId: r.turn_id } : {}),
           ...(parsed.deliveryOrigin ? { deliveryOrigin: parsed.deliveryOrigin } : {}),
           ...(parsed.suggestedAction ? { suggestedAction: parsed.suggestedAction } : {}),
           ...(parsed.stoppedStats ? { stoppedStats: parsed.stoppedStats } : {}),
@@ -1482,6 +1480,11 @@ export function readChatHistory(
           ...(usage ? { usage } : {}),
           ...(activity && activity.length > 0 ? { activity } : {}),
         });
+      }
+
+      for (const message of messages) {
+        const edit = editsByTarget.get(message.id);
+        if (edit !== undefined) message.text = edit;
       }
 
       // Attach collected reactions to their target messages. Targets may be
@@ -1496,8 +1499,8 @@ export function readChatHistory(
     } finally {
       outDb.close();
     }
-  } catch {
-    // outbound DB may not exist
+  } catch (err) {
+    throw new Error('Unable to read conversation outputs', { cause: err });
   }
 
   // Scheduled-task firings: completed `kind='task'` rows are the record of
@@ -1507,33 +1510,19 @@ export function readChatHistory(
   try {
     const inDb = openInboundDb(groupId, session.id);
     try {
-      const taskRows = isDm
-        ? (inDb
-            .prepare(
-              `SELECT id, process_after, content, recurrence, series_id FROM messages_in
-                WHERE kind = 'task' AND status = 'completed'
-                  AND channel_type = ? AND thread_id IS NULL ORDER BY seq`,
-            )
-            .all(target.channelType) as {
-            id: string;
-            process_after: string;
-            content: string;
-            recurrence: string | null;
-            series_id: string | null;
-          }[])
-        : (inDb
-            .prepare(
-              `SELECT id, process_after, content, recurrence, series_id FROM messages_in
-                WHERE kind = 'task' AND status = 'completed'
-                  AND channel_type = ? AND thread_id = ? ORDER BY seq`,
-            )
-            .all(target.channelType, threadId) as {
-            id: string;
-            process_after: string;
-            content: string;
-            recurrence: string | null;
-            series_id: string | null;
-          }[]);
+      const taskRows = inDb
+        .prepare(
+          `SELECT id, process_after, content, recurrence, series_id FROM messages_in
+         WHERE kind = 'task' AND status = 'completed' AND channel_type = ? AND thread_id IS ?
+           AND platform_id IN (${context.platformIds.map(() => '?').join(',')}) ORDER BY seq`,
+        )
+        .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
+        id: string;
+        process_after: string;
+        content: string;
+        recurrence: string | null;
+        series_id: string | null;
+      }>;
       for (const r of taskRows) {
         const summary = summarizeTaskPrompt(r.content);
         let attempt:
@@ -1552,8 +1541,8 @@ export function readChatHistory(
           } finally {
             outDb.close();
           }
-        } catch {
-          attempt = undefined;
+        } catch (err) {
+          throw new Error('Unable to read conversation task attempt', { cause: err });
         }
         const status = attempt?.status ?? 'completed';
         const triggerSource = attempt?.trigger_source === 'manual' ? 'manual' : 'scheduled';
@@ -1593,8 +1582,8 @@ export function readChatHistory(
     } finally {
       inDb.close();
     }
-  } catch {
-    // inbound DB may not exist
+  } catch (err) {
+    throw new Error('Unable to read conversation tasks', { cause: err });
   }
 
   messages.sort(
@@ -1697,7 +1686,7 @@ function resolveSessionForMode(
   );
 }
 
-interface TurnContext {
+export interface TurnContext {
   sessionId?: string;
   channelType: string;
   platformIds: string[];
@@ -1720,7 +1709,7 @@ function publicActiveTurn(turn: SessionActiveTurn): ChatActiveTurn {
   };
 }
 
-function resolveTurnContext(
+export function resolveTurnContext(
   userId: string,
   groupId: string,
   threadId: string,

@@ -7,6 +7,25 @@ receiver commits them locally.
 
 ## Capability boundary
 
+### Browser conversation projection
+
+`readConversation` in `src/ui/server/chat/conversation.ts` projects a single
+authorized channel/platform/thread from host-owned state. Messages, input
+dispositions, explicit turns, questions and action capabilities are read
+synchronously. Final response rows remain staged until their turn's durable
+`settled` barrier; outputless turns remain visible. Live trace and usage are
+joined by turn ID, never by the next response or a typing timeout. Billing
+records retain their accounting IDs even when a turn has multiple outputs.
+
+`onConversationChange` is an invalidation bus, not a delivery protocol. Host
+input/output commits, durable runner application, live signals and question
+mutations invalidate it. Subscribers must reauthorize and reproject; invalidation
+itself does not prove a changed browser view. DB helpers defer notification
+until synchronous outer transactions have unwound. A rolled-back write can
+invalidate but cannot publish new state. Projection failures are explicit,
+not successful empty histories. Unknown imported origins expose only sidecars
+anchored to visible messages; off-route sends never expose the source trace.
+
 The host listens at a hashed path below `data/.session-links/` and mounts only
 that session's leaf directory at `/run/nanoclaw:ro`. The runner connects to
 `/run/nanoclaw/runner.sock`.
