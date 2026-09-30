@@ -89,6 +89,9 @@ Orphaned/incomplete pairs and unexpected store depths fail. Missing runner state
 is allowed for a session that has never spawned; no runner is silently reseeded.
 Attachment and per-group source/cache subtrees (`inbox`, `outbox`,
 `.claude-shared`, `agent-runner-src`) are not database-discovery roots.
+Once a session directory is identified, only its named host databases and
+`runner-state` directory are inspected. Provider stores, user workspaces and
+package symlinks inside that session are retained unchanged, not traversed.
 
 Preflight checks SQLite integrity and foreign keys, empty
 `pending_runner_events` **and** `pending_host_events`, and consistent overlapping

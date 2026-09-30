@@ -94,7 +94,12 @@ export function discoverSessionFiles(root: string): string[] {
   const files: string[] = [];
   const visit = (dir: string) => {
     checkPath(dir, true);
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const session = entries.some((entry) => ['inbound.db', 'outbound.db', 'runner-state'].includes(entry.name));
+    for (const entry of entries) {
+      // A session also contains provider stores, workspaces and package trees.
+      // Only its explicitly named host/runner stores are migration inputs.
+      if (session && !['inbound.db', 'outbound.db', 'runner-state'].includes(entry.name)) continue;
       const file = path.join(dir, entry.name);
       if (entry.isSymbolicLink()) throw new Error('Symlink in session tree; use a private dereferenced staging copy');
       if (entry.isDirectory()) {

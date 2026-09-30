@@ -109,6 +109,18 @@ describe('offline coordinated conversation cutover', () => {
     expect(fs.existsSync(manifestFile)).toBe(false);
   });
 
+  it('leaves session workspaces and provider stores outside database discovery', () => {
+    const workspace = path.join(session, 'group', 'node_modules');
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.symlinkSync('/not-a-migration-input', path.join(workspace, 'dependency'));
+    fs.writeFileSync(path.join(workspace, 'inbound.db'), 'user file, not a session journal');
+    fs.mkdirSync(path.join(session, 'opencode-xdg'));
+    fs.writeFileSync(path.join(session, 'opencode-xdg', 'opencode.db-wal'), 'provider journal');
+    expect(discoverSessionFiles(root)).toHaveLength(3);
+    expect(cutover(root, 'dry-run')).toMatchObject({ sessions: 1, files: 3, phase: 'preflight-ok' });
+    expect(fs.readlinkSync(path.join(workspace, 'dependency'))).toBe('/not-a-migration-input');
+  });
+
   it('preserves rows and accounting, uses shared input/collision evidence, and verifies idempotently', () => {
     withDb(output, (db) => {
       const key = `input:${createHash('sha256').update('in').digest('hex')}`;
