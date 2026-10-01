@@ -100,6 +100,73 @@ describe('NativeMcpManager', () => {
     });
   });
 
+  it('re-initializes and retries when a Streamable HTTP session expires', async () => {
+    const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
+    let expireSession = false;
+    let initializationCount = 0;
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const sessionId = request.headers.get('mcp-session-id');
+        if (sessionId) {
+          const transport = sessions.get(sessionId);
+          if (!transport || expireSession) {
+            expireSession = false;
+            sessions.delete(sessionId);
+            return new Response('expired transport state', { status: 404 });
+          }
+          return transport.handleRequest(request);
+        }
+
+        initializationCount += 1;
+        const transport = new WebStandardStreamableHTTPServerTransport({
+          sessionIdGenerator: () => `session-${initializationCount}`,
+          onsessioninitialized: (id) => sessions.set(id, transport),
+        });
+        await server().connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager({ Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } });
+    managers.push(manager);
+
+    const tools = await manager.tools();
+    expireSession = true;
+    expect(await execute(tools, 'mcp__Remote__remote_echo', {})).toEqual({
+      content: [{ type: 'text', text: 'remote:ok' }],
+    });
+    expect(initializationCount).toBe(2);
+  });
+
+  it('does not re-initialize a sessionless Streamable HTTP connection on 404', async () => {
+    let rejectCalls = false;
+    let initializationCount = 0;
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const message = request.method === 'POST'
+          ? await request.clone().json() as { method?: string }
+          : undefined;
+        if (message?.method === 'initialize') initializationCount += 1;
+        if (rejectCalls && message?.method === 'tools/call') {
+          return new Response('ordinary missing resource', { status: 404 });
+        }
+        const transport = new WebStandardStreamableHTTPServerTransport();
+        await server().connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager({ Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } });
+    managers.push(manager);
+
+    const tools = await manager.tools();
+    rejectCalls = true;
+    expect(execute(tools, 'mcp__Remote__remote_echo', {})).rejects.toThrow('ordinary missing resource');
+    expect(initializationCount).toBe(1);
+  });
+
   it('discovers and invokes a legacy SSE MCP tool', async () => {
     let transport: SSEServerTransport | undefined;
     const http = createServer(async (request, response) => {

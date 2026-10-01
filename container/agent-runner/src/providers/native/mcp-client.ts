@@ -1,7 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { dynamicTool, jsonSchema, type JSONSchema7, type Tool, type ToolSet } from 'ai';
@@ -13,7 +16,11 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.MCP_TOOL_TIMEOUT) || 60_000;
 
 interface Connection {
   client: Client;
+  config: McpServerConfig;
+  serverName: string;
   timeout: number;
+  transport: Transport;
+  reconnecting?: Promise<void>;
 }
 
 /** One discovered external MCP tool, as exposed to the model. */
@@ -120,6 +127,10 @@ function errorMessage(error: unknown): string {
     .slice(0, 500);
 }
 
+function isExpiredHttpSession(error: unknown): boolean {
+  return error instanceof StreamableHTTPError && error.code === 404;
+}
+
 export class NativeMcpManager {
   private readonly connections: Connection[] = [];
   private entriesPromise: Promise<McpToolEntry[]> | null = null;
@@ -145,13 +156,71 @@ export class NativeMcpManager {
     await Promise.all(connections.map(({ client }) => client.close().catch(() => {})));
   }
 
+  private async reconnect(
+    connection: Connection,
+    failedClient: Client,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (connection.client !== failedClient) return;
+    connection.reconnecting ??= (async () => {
+      const replacement = new Client({
+        name: `nanoclaw-native-${sanitizeMcpName(connection.serverName)}`,
+        version: '1.0.0',
+      });
+      const replacementTransport = createTransport(connection.config, this.cwd);
+      await replacement.connect(replacementTransport, {
+        timeout: connection.timeout,
+        signal,
+      });
+      if (this.closed) {
+        await replacement.close().catch(() => {});
+        throw new Error('MCP manager closed while reconnecting');
+      }
+      connection.client = replacement;
+      connection.transport = replacementTransport;
+      await failedClient.close().catch(() => {});
+    })().finally(() => {
+      connection.reconnecting = undefined;
+    });
+    await connection.reconnecting;
+  }
+
+  private async callTool(
+    connection: Connection,
+    name: string,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<CallToolResult> {
+    const call = (client: Client) => client.callTool(
+      { name, arguments: input },
+      undefined,
+      { timeout: connection.timeout, signal, resetTimeoutOnProgress: true },
+    ) as Promise<CallToolResult>;
+    const client = connection.client;
+    try {
+      return await call(client);
+    } catch (error) {
+      if (
+        connection.config.type !== 'http'
+        || !(connection.transport instanceof StreamableHTTPClientTransport)
+        || !connection.transport.sessionId
+        || !isExpiredHttpSession(error)
+      ) {
+        throw error;
+      }
+      await this.reconnect(connection, client, signal);
+      return call(connection.client);
+    }
+  }
+
   private async discoverTools(signal?: AbortSignal): Promise<McpToolEntry[]> {
     const toolSets = await Promise.all(
       Object.entries(this.servers).map(async ([serverName, config]) => {
         const client = new Client({ name: `nanoclaw-native-${sanitizeMcpName(serverName)}`, version: '1.0.0' });
         const timeout = config.timeout ?? DEFAULT_TIMEOUT_MS;
+        const transport = createTransport(config, this.cwd);
         try {
-          await client.connect(createTransport(config, this.cwd), { timeout, signal });
+          await client.connect(transport, { timeout, signal });
           const definitions = [];
           let cursor: string | undefined;
           do {
@@ -163,7 +232,8 @@ export class NativeMcpManager {
             await client.close().catch(() => {});
             return [];
           }
-          this.connections.push({ client, timeout });
+          const connection: Connection = { client, config, serverName, timeout, transport };
+          this.connections.push(connection);
           const entries = new Map<string, McpToolEntry>();
           for (const definition of definitions) {
             const exposedName = `${mcpToolPrefix(serverName)}${sanitizeMcpName(definition.name)}`;
@@ -173,10 +243,11 @@ export class NativeMcpManager {
               description,
               inputSchema: jsonSchema(definition.inputSchema as JSONSchema7),
               execute: async (input, options) => {
-                const result = await client.callTool(
-                  { name: definition.name, arguments: input as Record<string, unknown> },
-                  undefined,
-                  { timeout, signal: options.abortSignal, resetTimeoutOnProgress: true },
+                const result = await this.callTool(
+                  connection,
+                  definition.name,
+                  input as Record<string, unknown>,
+                  options.abortSignal,
                 );
                 if ('toolResult' in result) return result.toolResult;
                 return result as CallToolResult;
