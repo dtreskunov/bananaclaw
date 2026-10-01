@@ -29,7 +29,6 @@ import { createNativeTools } from './native/tools.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
 import {
   createReplyTools,
-  FORCE_REPLY_PROMPT,
   isPointerReply,
   isReplyTool,
   POINTER_REPLY_PROMPT,
@@ -376,10 +375,9 @@ export class NativeProvider implements AgentProvider {
               let replyDue = true;
               // Transient instruction for a step that must call `reply`; never persisted.
               let forcing: string | null = null;
-              let forcedReply = false;
               let pointerChecked = false;
               let undeliveredChars = 0;
-              // What to deliver if even a forced step ends without calling reply.
+              // What to deliver if the turn ends without calling reply.
               let salvage: string | null = null;
               while (true) {
                 abortController.signal.throwIfAborted();
@@ -397,6 +395,7 @@ export class NativeProvider implements AgentProvider {
                   tools: journal.wrap(stepTools(), abortController.signal),
                   repairToolCall: async (repair) =>
                     (await repairReply(repair)) ?? (deferredMcp ? deferredMcp.repairToolCall(repair) : null),
+                  // Honored by most providers; MiniMax ignores it and relies on the instruction.
                   ...(forcedStep ? { toolChoice: { type: 'tool' as const, toolName: REPLY_TOOL } } : {}),
                   // Own the boundary: SDK prepareStep cannot resume a text-only
                   // final step and may race ahead of the consumer's event loop.
@@ -531,7 +530,6 @@ export class NativeProvider implements AgentProvider {
                 if (applied) {
                   // New guidance needs its own reply.
                   replyDue = true;
-                  forcedReply = false;
                   salvage = null;
                   continue;
                 }
@@ -542,13 +540,16 @@ export class NativeProvider implements AgentProvider {
                 }
                 if (!replyDue) break;
                 if (stepsCompleted < MAX_STEPS && continueTools) continue;
+                // Not worth another step: MiniMax ignores tool_choice, so a
+                // forced reply step mostly repeats this text at extra cost.
                 salvage = stepText ?? salvage;
-                if (forcedReply) break;
-                forcedReply = true;
-                forcing = FORCE_REPLY_PROMPT;
+                break;
               }
               if (replyDue && salvage) {
-                log('Turn ended without a reply call; delivering its final text as the reply');
+                log(
+                  `WARNING: turn ended without a reply call after ${stepsCompleted} step(s); ` +
+                    `delivering its final text (${salvage.length} chars) as the reply`,
+                );
                 replies.record({ text: salvage });
               }
               // No await or yield between closing acceptance and deciding the

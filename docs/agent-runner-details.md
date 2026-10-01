@@ -350,13 +350,14 @@ in-process tools (`native/reply.ts`):
 Text the model writes outside `reply` is never delivered. Recovery happens
 inside the provider's step loop:
 
-- **Plain-text ending.** A step that ends without `reply` gets one extra step
-  forced to `reply`, with a transient instruction that is not stored in the
-  conversation. If the model still doesn't call it, the text of that step (or
-  the step before it) is sent as the reply.
+- **Plain-text ending.** A turn that ends without calling `reply` delivers
+  its final text as the reply, and the runner logs a warning. There is no
+  extra step: MiniMax ignores `tool_choice`, so a step forced to `reply`
+  mostly repeats the same text at extra cost.
 - **Pointer reply.** A short reply like "see above", sent after at least
   400 characters of undelivered text, is discarded once and the model is
-  asked to resend the message itself.
+  asked, with a transient instruction that is not stored, to resend the
+  message itself.
 - **Malformed arguments.** The first `reply` call with invalid arguments goes
   back to the model as a tool error. The text of a second one is salvaged
   from the raw arguments.

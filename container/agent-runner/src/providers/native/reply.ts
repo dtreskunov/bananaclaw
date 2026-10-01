@@ -10,10 +10,6 @@ export function isReplyTool(name: unknown): boolean {
   return name === REPLY_TOOL || name === NO_REPLY_TOOL;
 }
 
-/** Sent as a transient user message when a step ends without calling `reply`. */
-export const FORCE_REPLY_PROMPT =
-  '<system>Nothing was sent: the user only sees what you pass to the reply tool. Call reply now with the complete message for the user. Text you wrote earlier is not visible to them, so do not refer to it.</system>';
-
 /** Sent as a transient user message when a reply only points at undelivered text. */
 export const POINTER_REPLY_PROMPT =
   '<system>That reply was not sent: it refers to text the user cannot see. Text outside the reply tool is never delivered. Call reply again with the complete message itself.</system>';

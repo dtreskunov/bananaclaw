@@ -32,19 +32,19 @@ let modelRequestStarted: (() => void) | undefined;
 let slowToolMode: boolean;
 /** Answer with plain text even when the reply tool is offered (unless it is forced). */
 let plainTextMode: boolean;
-/** Answer with plain text even when the reply tool is forced. */
-let ignoreForcedReply: boolean;
 let replyText: string;
 /** Texts for successive reply calls; `replyText` once empty. */
 let scriptedReplies: string[];
 /** Content of a plain-text answer. */
 let stubText: string;
+/** Stream `stubText` before the reply call, in the same step. */
+let textBeforeReply: boolean;
 let catalogFetch: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 let catalogModels: Record<string, unknown>;
 
 function replyAllowed(requestBody: Record<string, unknown>): boolean {
   const forced = JSON.stringify(requestBody.tool_choice ?? '').includes('reply');
-  return forced ? !ignoreForcedReply : !plainTextMode;
+  return forced || !plainTextMode;
 }
 
 function replyTexts(events: ProviderEvent[]): string[][] {
@@ -86,10 +86,10 @@ beforeEach(() => {
   modelRequestStarted = undefined;
   slowToolMode = false;
   plainTextMode = false;
-  ignoreForcedReply = false;
   replyText = 'hello from stub';
   scriptedReplies = [];
   stubText = 'hello from stub';
+  textBeforeReply = false;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -200,6 +200,12 @@ beforeEach(() => {
       const callReply = !shouldCallTool && offersReply && replyAllowed(requestBody);
       const body = shouldCallTool || callReply
         ? [
+            ...(callReply && textBeforeReply
+              ? [
+                  `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(stubText)}},"finish_reason":null}]}`,
+                  '',
+                ]
+              : []),
             `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_${requests.length}","type":"function","function":{"name":"${callReply ? 'reply' : toolName}","arguments":${JSON.stringify(callReply ? JSON.stringify({ text: scriptedReplies.shift() ?? replyText }) : toolArguments)}}}]},"finish_reason":null}]}`,
             '',
             `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":${callReply ? '{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}' : '{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}'}}`,
@@ -937,42 +943,24 @@ describe('NativeProvider', () => {
         .toBe(false);
     });
 
-    it('forces a reply step after a plain-text ending without persisting the nudge', async () => {
+    it('delivers a plain-text ending directly, without an extra step', async () => {
       plainTextMode = true;
-      replyText = 'the real answer';
-      const provider = new NativeProvider({ model: 'local/test-model' });
-      const first = await collect(provider);
-
-      expect(requests).toHaveLength(2);
-      expect(requests[1]?.tool_choice).toEqual({ type: 'function', function: { name: 'reply' } });
-      expect(JSON.stringify((requests[1]?.messages as unknown[]).at(-1))).toContain('Nothing was sent');
-      expect(replyTexts(first)).toEqual([['the real answer']]);
-
-      plainTextMode = false;
-      const continuation = (first.find((event) => event.type === 'init') as { continuation: string }).continuation;
-      await collect(provider, continuation);
-      expect(JSON.stringify(requests[2]?.messages)).toContain('the real answer');
-      expect(JSON.stringify(requests[2]?.messages)).not.toContain('Nothing was sent');
-    });
-
-    it('delivers the final text when the forced reply step is ignored', async () => {
-      plainTextMode = true;
-      ignoreForcedReply = true;
       stubText = 'plain answer';
       const events = await collect(new NativeProvider({ model: 'local/test-model' }));
 
-      expect(requests).toHaveLength(2);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.tool_choice).toBe('auto');
       expect(replyTexts(events)).toEqual([['plain answer']]);
     });
 
     it('retries a reply that only points at undelivered text', async () => {
-      plainTextMode = true;
+      textBeforeReply = true;
       stubText = 'Here is the full itinerary, day by day. '.repeat(12);
       scriptedReplies = ['See the itinerary above.', 'Day one: arrive and check in.'];
       const events = await collect(new NativeProvider({ model: 'local/test-model' }));
 
-      expect(requests).toHaveLength(3);
-      expect(JSON.stringify((requests[2]?.messages as unknown[]).at(-1))).toContain('refers to text the user cannot see');
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify((requests[1]?.messages as unknown[]).at(-1))).toContain('refers to text the user cannot see');
       expect(replyTexts(events)).toEqual([['Day one: arrive and check in.']]);
     });
 
