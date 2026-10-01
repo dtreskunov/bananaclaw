@@ -5,7 +5,7 @@ import { jsonSchema, tool } from 'ai';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
 import { resetTurnSendTracking } from '../current-batch.js';
-import { formatNativeToolStep, NativeProvider, portableHistory, userMessage } from './native.js';
+import { formatNativeToolStep, MAX_STEPS, NativeProvider, portableHistory, userMessage } from './native.js';
 import * as nativeCatalog from './native/catalog.js';
 import * as nativeAudio from './native/audio.js';
 import * as nativeTools from './native/tools.js';
@@ -512,7 +512,7 @@ describe('NativeProvider', () => {
     expect(getOutboundDb().prepare('SELECT COUNT(*) AS count FROM messages_out').get()).toMatchObject({ count: 1 });
   });
 
-  it('leaves guidance at the total 20-step limit unapplied instead of running another turn', async () => {
+  it('leaves guidance at the total step limit unapplied instead of running another turn', async () => {
     const provider = new NativeProvider({ model: 'local/test-model' });
     const query = provider.query({ prompt: 'original', cwd: root });
     const events: ProviderEvent[] = [];
@@ -524,12 +524,13 @@ describe('NativeProvider', () => {
       }
       if (event.type === 'result') query.end();
     }
-    expect(requests).toHaveLength(20);
-    expect(events.filter((event) => event.type === 'steering_applied')).toHaveLength(19);
+    expect(requests).toHaveLength(MAX_STEPS);
+    expect(events.filter((event) => event.type === 'steering_applied')).toHaveLength(MAX_STEPS - 1);
     expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
-    expect(events.find((event) => event.type === 'usage')).toMatchObject({ data: { num_turns: 20, input_tokens: 80 } });
+    expect(events.find((event) => event.type === 'usage'))
+      .toMatchObject({ data: { num_turns: MAX_STEPS, input_tokens: 4 * MAX_STEPS } });
     const continuation = events.find((event) => event.type === 'init')!.continuation;
-    expect(provider.appliedSteering(continuation, ['s19', 's20'])).toEqual(['s19']);
+    expect(provider.appliedSteering(continuation, [`s${MAX_STEPS - 1}`, `s${MAX_STEPS}`])).toEqual([`s${MAX_STEPS - 1}`]);
   });
 
   it.each(['end', 'abort'] as const)('does not consume queued guidance after %s at a boundary', async (action) => {
@@ -962,6 +963,21 @@ describe('NativeProvider', () => {
       expect(requests).toHaveLength(2);
       expect(JSON.stringify((requests[1]?.messages as unknown[]).at(-1))).toContain('refers to text the user cannot see');
       expect(replyTexts(events)).toEqual([['Day one: arrive and check in.']]);
+    });
+
+    it('asks for a progress reply with only the reply tools once the step limit is reached', async () => {
+      scriptedToolCalls = Array.from({ length: MAX_STEPS }, () =>
+        ['todowrite', '{"todos":[{"id":"work","content":"keep going","status":"in_progress"}]}'] as [string, string]);
+      replyText = 'progress so far';
+      const events = await collect(new NativeProvider({ model: 'local/test-model' }));
+
+      expect(requests).toHaveLength(MAX_STEPS + 1);
+      const toolNames = (body: Record<string, unknown> | undefined) =>
+        ((body?.tools ?? []) as Array<{ function?: { name?: string } }>).map((item) => item.function?.name).sort();
+      expect(toolNames(requests[MAX_STEPS - 1])).toContain('todowrite');
+      expect(toolNames(requests[MAX_STEPS])).toEqual(['no_reply', 'reply']);
+      expect(JSON.stringify((requests[MAX_STEPS]?.messages as unknown[]).at(-1))).toContain('step limit');
+      expect(replyTexts(events)).toEqual([['progress so far']]);
     });
 
     it('reports an explicit no_reply as silence', async () => {

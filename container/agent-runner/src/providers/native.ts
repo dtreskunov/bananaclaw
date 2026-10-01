@@ -35,6 +35,7 @@ import {
   REPLY_TOOL,
   ReplyCollector,
   replyRepair,
+  STEP_LIMIT_PROMPT,
 } from './native/reply.js';
 import {
   DeferredMcpTools,
@@ -43,7 +44,7 @@ import {
   shouldDeferMcpTools,
 } from './native/tool-search.js';
 
-const MAX_STEPS = 20;
+export const MAX_STEPS = 50;
 
 function log(message: string): void {
   console.error(`[native-provider] ${message}`);
@@ -376,6 +377,8 @@ export class NativeProvider implements AgentProvider {
               // Transient instruction for a step that must call `reply`; never persisted.
               let forcing: string | null = null;
               let pointerChecked = false;
+              // Past the step limit: only the reply tools remain, to report progress.
+              let wrappingUp = false;
               let undeliveredChars = 0;
               // What to deliver if the turn ends without calling reply.
               let salvage: string | null = null;
@@ -392,7 +395,7 @@ export class NativeProvider implements AgentProvider {
                     turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
                   ),
                   messages: forcedStep ? [...messages, { role: 'user', content: forcedStep }] : messages,
-                  tools: journal.wrap(stepTools(), abortController.signal),
+                  tools: journal.wrap(wrappingUp ? replyTools : stepTools(), abortController.signal),
                   repairToolCall: async (repair) =>
                     (await repairReply(repair)) ?? (deferredMcp ? deferredMcp.repairToolCall(repair) : null),
                   // Honored by most providers; MiniMax ignores it and relies on the instruction.
@@ -539,7 +542,15 @@ export class NativeProvider implements AgentProvider {
                   continue;
                 }
                 if (!replyDue) break;
-                if (stepsCompleted < MAX_STEPS && continueTools) continue;
+                if (continueTools) {
+                  if (stepsCompleted < MAX_STEPS) continue;
+                  if (!wrappingUp) {
+                    wrappingUp = true;
+                    forcing = STEP_LIMIT_PROMPT;
+                    log(`Reached the ${MAX_STEPS}-step limit; asking for a progress reply`);
+                    continue;
+                  }
+                }
                 // Not worth another step: MiniMax ignores tool_choice, so a
                 // forced reply step mostly repeats this text at extra cost.
                 salvage = stepText ?? salvage;

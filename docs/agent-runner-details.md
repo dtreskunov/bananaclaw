@@ -358,6 +358,10 @@ inside the provider's step loop:
   400 characters of undelivered text, is discarded once and the model is
   asked, with a transient instruction that is not stored, to resend the
   message itself.
+- **Step limit.** A turn runs at most 50 model steps (`MAX_STEPS`). If the
+  model is still calling tools at the limit, one more step offers only
+  `reply` and `no_reply`, with a transient instruction to report what was
+  done and what remains.
 - **Malformed arguments.** The first `reply` call with invalid arguments goes
   back to the model as a tool error. The text of a second one is salvaged
   from the raw arguments.

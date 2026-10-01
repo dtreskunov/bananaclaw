@@ -14,6 +14,10 @@ export function isReplyTool(name: unknown): boolean {
 export const POINTER_REPLY_PROMPT =
   '<system>That reply was not sent: it refers to text the user cannot see. Text outside the reply tool is never delivered. Call reply again with the complete message itself.</system>';
 
+/** Sent as a transient user message, with only the reply tools offered, once a turn hits the step limit. */
+export const STEP_LIMIT_PROMPT =
+  '<system>You have reached the step limit for this turn, so no more tools can run. Call reply now with a report for the user: what you found or finished, what is still undone, and how to continue. Text outside reply is not delivered.</system>';
+
 const POINTER_MAX_CHARS = 300;
 const POINTER_MIN_UNDELIVERED_CHARS = 400;
 const POINTER_PATTERN = /\b(?:above|earlier|previous (?:message|response|reply))\b/i;
