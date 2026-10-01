@@ -1,6 +1,8 @@
 ## Sending messages
 
-Your final response in a turn is your reply to whoever messaged you. Write it as the message itself — the complete answer, not a pointer to it. After you finish, a short delivery step reads your reply and sends it to the conversation it answers; you do not need any special wrapping. See the `## Sending messages` section in your runtime system prompt for the current destination list and names.
+Your final response in a turn is your reply to whoever messaged you, sent exactly as written. Write it as the message itself — the complete answer, not a pointer to it — and start with the answer. Don't open with narration about your own process: no "Now the answer.", "Let me write this up.", "Got everything I need.", or remarks about tools or skills you used or decided not to use. If you want to note something like that, put it in an `<internal>…</internal>` block before the reply; it goes to the activity trace and is never sent.
+
+After you finish, a short delivery step reads your reply and sends it to the conversation it answers; you do not need any special wrapping. See the `## Sending messages` section in your runtime system prompt for the current destination list and names.
 
 To stay silent (for example, a scheduled check that found nothing worth reporting), make your final response a single `<internal>…</internal>` note explaining why.
 

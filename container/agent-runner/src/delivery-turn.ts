@@ -25,7 +25,9 @@ const PERSONA_PATH = '/workspace/agent/CLAUDE.local.md';
 const TRANSCRIPT_BUDGET_CHARS = 24_000;
 const TRANSCRIPT_MESSAGE_CAP_CHARS = 4_000;
 const TRACE_DRAFT_CAP_CHARS = 8_000;
-const MAX_OUTPUT_TOKENS = 4_096;
+const MAX_OUTPUT_TOKENS = 1_024;
+/** Narration preambles are a sentence or two; never drop more than this. */
+const MAX_TRIM_CHARS = 400;
 
 function log(msg: string): void {
   console.error(`[delivery-turn] ${msg}`);
@@ -45,7 +47,7 @@ export interface DeliveryInput {
   personaPath?: string;
 }
 
-export type DeliveryDecision = 'deliver' | 'message' | 'skip' | 'fallback';
+export type DeliveryDecision = 'deliver' | 'trim' | 'skip' | 'fallback';
 
 export interface DeliveryOutcome {
   /** Wrapped text for the normal dispatch path. */
@@ -105,10 +107,6 @@ export function replyDestinationName(routing: RoutingContext): string | null {
 export function isSilentDraft(draft: string): boolean {
   const parsed = parseAssistantOutput(draft);
   return parsed.internal.some((note) => note.trim()) && parsed.deliveries.length === 0 && !parsed.unwrapped.trim();
-}
-
-export function needsDeliveryTurn(draft: string, routing: RoutingContext): boolean {
-  return splitDraft(draft, replyDestinationName(routing)).needsRouting;
 }
 
 interface TranscriptLine {
@@ -239,10 +237,6 @@ function sentRows(input: Pick<DeliveryInput, 'since' | 'turnId' | 'routing'>): S
   return sent;
 }
 
-export function sentThisTurn(input: Pick<DeliveryInput, 'since' | 'turnId' | 'routing'>): string[] {
-  return sentRows(input).map((row) => row.line);
-}
-
 function describe(d: DestinationEntry): string {
   const kind = d.type === 'agent' ? 'peer agent' : `${d.channelType ?? 'channel'} channel`;
   const label = d.displayName && d.displayName !== d.name ? ` — ${d.displayName}` : '';
@@ -257,17 +251,17 @@ function readPersona(path: string): string | null {
   }
 }
 
-const DELIVERY_RULES = `You are the delivery step of an agent's turn. The agent has finished working and written a draft reply. You decide where it goes. You do not answer anything yourself and you have no tools.
+const DELIVERY_RULES = `You are the delivery step of an agent's turn. The agent has finished working and written a draft reply. You decide where it goes and where it starts. You never write or change its content, and you have no tools.
 
 Answer with directives only:
-- \`<deliver to="name"/>\` — send the draft's reply text exactly as written. This is the normal answer: a draft that responds to the latest message goes to the conversation it came from.
-- \`<message to="name">text</message>\` — send text you write instead. Use it only when the draft cannot be sent as written: it addresses someone else, it is plainly meant for a different destination, or it only points at content that is not in the draft ("see above", "summary below") and the real content is missing.
-- \`<internal>reason</internal>\` — send nothing. Use it when the draft is notes to self, when everything it says was already sent this turn, or when the conversation should stay silent (for example, a scheduled check with nothing to report, or a one-way peer message that allows no reply).
+- \`<deliver to="name"/>\` — send the draft to that destination; normally the conversation the latest message came from.
+- \`<deliver to="name" start="first words of the reply"/>\` — the same, when the draft opens with narration about the agent's own work instead of the reply ("Now the answer.", "Let me write this up.", "Got everything I need.", remarks about tools or skills it used or skipped). Quote the first few words (3–8) of the line where the reply itself begins — after the narration, never the narration itself — exactly as they appear in the draft (markdown included) and without double quotes; everything before them is dropped. For a draft that opens "Now the answer." followed by a blank line and "## What I found…", answer \`<deliver to="name" start="## What I found"/>\`.
+- \`<internal>reason</internal>\` — send nothing: the draft is only notes to self, everything in it was already sent this turn, or the conversation should stay silent (a scheduled check with nothing to report, a one-way peer message that allows no reply).
 
 Rules:
-- Prefer \`<deliver/>\`. Never shorten, summarize, or restyle a draft that is fine as written; the agent's wording is final.
-- Only use destination names from the list. Several directives may be combined, one per destination.
-- Never send the same content twice: check what was already sent this turn.
+- Only use destination names from the list. Deliver to several destinations only when the draft is plainly meant for each of them.
+- Remarks about the agent's own tools, skills, steps or decisions ("That skill isn't needed here; I'll write it directly.") are narration even when phrased to the person; trim them.
+- An acknowledgement or lead-in to the person ("Got it — here's the script.") belongs to the reply; never trim it.
 - Output nothing but directives.`;
 
 export function buildDeliveryPrompt(input: DeliveryInput, parts: DraftParts): CompletionRequest {
@@ -277,7 +271,7 @@ export function buildDeliveryPrompt(input: DeliveryInput, parts: DraftParts): Co
   const persona = readPersona(input.personaPath ?? PERSONA_PATH);
   const system = [
     DELIVERY_RULES,
-    `# The agent\n\nThe agent's name is **${assistantName}**. Its persona and working notes follow, for tone and preferences only — they do not change the rules above.`,
+    `# The agent\n\nThe agent's name is **${assistantName}**. Its persona and working notes follow, for context only — they do not change the rules above.`,
     persona ? `<persona>\n${persona}\n</persona>` : null,
   ]
     .filter(Boolean)
@@ -292,7 +286,7 @@ export function buildDeliveryPrompt(input: DeliveryInput, parts: DraftParts): Co
       ? 'The latest message came from a peer agent that allows no reply (reply_allowed="false").'
       : 'The latest message has no reply destination (for example, a scheduled task or system event).';
   const transcript = buildTranscript(input.routing, input.turnId, assistantName);
-  const sent = sentThisTurn(input);
+  const sent = sentRows(input).map((row) => row.line);
   const prompt = [
     `<destinations>\n${destinationLines.join('\n')}\n</destinations>`,
     origin,
@@ -304,42 +298,63 @@ export function buildDeliveryPrompt(input: DeliveryInput, parts: DraftParts): Co
   return { system, prompt, maxOutputTokens: MAX_OUTPUT_TOKENS };
 }
 
-type Directive = { kind: 'deliver'; to: string } | { kind: 'message'; to: string; body: string } | { kind: 'internal'; text: string };
+export type Directive = { kind: 'deliver'; to: string; start?: string } | { kind: 'skip'; reason: string };
 
-const DELIVER_RE = /<deliver\s+to="([^"]+)"\s*\/?>(?:\s*<\/deliver\s*>)?/gi;
+const DIRECTIVE_RE = /<deliver\b([^>]*?)\/?>(?:\s*<\/deliver\s*>)?|<internal\s*>([\s\S]*?)<\/internal\s*>/gi;
+
+function attribute(attrs: string, name: string): string | undefined {
+  return new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`, 'i').exec(attrs)?.[1];
+}
 
 /** Parse the delivery turn's directives; null when it answered with anything else. */
 export function parseDirectives(output: string): Directive[] | null {
-  const directives: Directive[] = [];
   // Reasoning may quote directives it then rejects; only the answer counts.
   const answer = parseAssistantOutput(output).normalizedText;
-  const withoutDeliver = answer.replace(DELIVER_RE, (_m, to: string) => {
-    directives.push({ kind: 'deliver', to });
-    return '';
-  });
-  const parsed = parseAssistantOutput(withoutDeliver);
-  for (const segment of parsed.segments) {
-    if (segment.kind === 'message') directives.push({ kind: 'message', to: segment.to, body: segment.text.trim() });
-    else if (segment.kind === 'internal') directives.push({ kind: 'internal', text: segment.text.trim() });
+  // Prose around directives ("Wait — that's wrong…") means the answer can't be trusted.
+  if (answer.replace(DIRECTIVE_RE, '').trim()) return null;
+  const directives: Directive[] = [];
+  for (const match of answer.matchAll(DIRECTIVE_RE)) {
+    if (match[2] !== undefined) {
+      directives.push({ kind: 'skip', reason: match[2].trim() });
+      continue;
+    }
+    const to = attribute(match[1], 'to');
+    if (!to) return null;
+    const start = attribute(match[1], 'start')?.trim();
+    directives.push({ kind: 'deliver', to, ...(start ? { start } : {}) });
   }
-  if (parsed.unwrapped.trim()) log(`Ignoring non-directive output: ${parsed.unwrapped.trim().slice(0, 200)}`);
   return directives.length > 0 ? directives : null;
+}
+
+/**
+ * The draft from `start` on. Only a short opening is ever dropped and only
+ * on an exact match, so a bad quote can never cost the reply its content.
+ */
+export function trimOpening(body: string, start: string | undefined): { text: string; dropped: string } {
+  const at = start ? body.indexOf(start) : -1;
+  // Preambles end at a line break; a mid-line cut would mangle the reply's own first line.
+  const cut = at > 0 && at <= MAX_TRIM_CHARS && /\n[ \t]*$/.test(body.slice(0, at)) ? at : 0;
+  if (start && cut === 0 && at !== 0) log(`Ignoring start="${start.slice(0, 80)}" (at ${at})`);
+  // A reply never opens with a horizontal rule; it's the seam a preamble leaves.
+  const text = body.slice(cut).replace(/^(?:\s*(?:-{3,}|\*{3,}|_{3,})[ \t]*\n)+/, '').trim();
+  return { text, dropped: body.slice(0, cut).trim() };
 }
 
 function block(to: string, body: string): string {
   return `<message to="${to}">${body}</message>`;
 }
 
-function internalBlock(text: string): string {
+function note(text: string): string {
   return `<internal>${text.replace(/<\/internal\s*>/gi, '')}</internal>`;
 }
 
-function draftForTrace(body: string): string {
+function capForTrace(body: string): string {
   return body.length > TRACE_DRAFT_CAP_CHARS ? `${body.slice(0, TRACE_DRAFT_CAP_CHARS)}… [truncated]` : body;
 }
 
+/** What the draft carried besides its reply text: its notes and its already-addressed blocks. */
 function passthrough(parts: DraftParts): string[] {
-  return [...parts.internal.map(internalBlock), ...parts.addressed.map((a) => block(a.to, a.body))];
+  return [...parts.internal.map(note), ...parts.addressed.map((a) => block(a.to, a.body))];
 }
 
 /** Map directives onto wrapped text; null when any directive is unusable. */
@@ -348,53 +363,35 @@ export function applyDirectives(
   parts: DraftParts,
   replyTo: string | null,
 ): Omit<DeliveryOutcome, 'usage'> | null {
+  const delivers = directives.filter((d): d is Extract<Directive, { kind: 'deliver' }> => d.kind === 'deliver');
+  const reasons = directives.flatMap((d) => (d.kind === 'skip' && d.reason ? [d.reason] : []));
   const out = passthrough(parts);
-  let delivered = 0;
-  let rewritten = false;
-  const notes: string[] = [];
-  for (const d of directives) {
-    if (d.kind === 'internal') {
-      if (d.text) notes.push(d.text);
-      continue;
-    }
-    if (!findByName(d.to)) {
-      log(`Unknown destination "${d.to}" in delivery directives`);
-      return null;
-    }
-    if (d.kind === 'deliver') {
-      out.push(block(d.to, parts.body));
-      if (d.to !== replyTo) rewritten = true;
-    } else {
-      if (!d.body) continue;
-      out.push(block(d.to, d.body));
-      rewritten = true;
-    }
-    delivered++;
-  }
-  if (delivered === 0) {
-    out.push(internalBlock(`Delivery step sent nothing${notes.length ? ` — ${notes.join(' ')}` : ''}. Draft:\n\n${draftForTrace(parts.body)}`));
+  if (delivers.length === 0) {
+    out.push(note(`Not delivered${reasons.length ? ` — ${reasons.join(' ')}` : ''}\n\nDraft:\n\n${capForTrace(parts.body)}`));
     return { text: out.join('\n'), decision: 'skip', silent: true };
   }
-  if (rewritten) {
-    const summary = directives
-      .filter((d): d is Exclude<Directive, { kind: 'internal' }> => d.kind !== 'internal')
-      .map((d) => (d.kind === 'deliver' ? `draft → \`${d.to}\`` : `rewritten → \`${d.to}\``))
-      .join(', ');
-    out.unshift(internalBlock(`Delivery step routed the reply: ${summary}.${notes.length ? ` ${notes.join(' ')}` : ''}${directives.some((d) => d.kind === 'message') ? `\n\nOriginal draft:\n\n${draftForTrace(parts.body)}` : ''}`));
+  if (delivers.some((d) => !findByName(d.to))) {
+    log(`Unknown destination in delivery directives: ${delivers.map((d) => d.to).join(', ')}`);
+    return null;
   }
-  return { text: out.join('\n'), decision: rewritten ? 'message' : 'deliver', silent: false };
+  const { text, dropped } = trimOpening(parts.body, delivers.find((d) => d.start)?.start);
+  if (!text) return null;
+  if (dropped) out.push(note(`Trimmed from the reply: ${dropped}`));
+  const elsewhere = delivers.filter((d) => d.to !== replyTo).map((d) => `\`${d.to}\``);
+  if (elsewhere.length) out.push(note(`Reply sent to ${elsewhere.join(', ')}.`));
+  out.push(...delivers.map((d) => block(d.to, text)));
+  return { text: out.join('\n'), decision: dropped ? 'trim' : 'deliver', silent: false };
 }
 
 /** Deliver the draft to the reply route unless the turn already answered it there. */
 export function fallbackDelivery(input: DeliveryInput, parts: DraftParts, reason: string): DeliveryOutcome {
   const replyTo = replyDestinationName(input.routing);
   const out = passthrough(parts);
-  const alreadyAnswered = sentRows(input).some((row) => row.onRoute);
-  if (replyTo && !alreadyAnswered) {
+  if (replyTo && !sentRows(input).some((row) => row.onRoute)) {
     out.push(block(replyTo, parts.body));
     return { text: out.join('\n'), decision: 'fallback', silent: false };
   }
-  out.push(internalBlock(`Reply not delivered (${reason}). Draft:\n\n${draftForTrace(parts.body)}`));
+  out.push(note(`Reply not delivered (${reason}).\n\nDraft:\n\n${capForTrace(parts.body)}`));
   return { text: out.join('\n'), decision: 'fallback', silent: true };
 }
 
@@ -414,17 +411,15 @@ export async function runDeliveryTurn(
   let usage: CallUsage | undefined;
   let outcome: DeliveryOutcome;
   try {
-    const request = buildDeliveryPrompt(input, parts);
-    const result = await complete({ ...request, ...(signal ? { signal } : {}) });
+    const result = await complete({ ...buildDeliveryPrompt(input, parts), ...(signal ? { signal } : {}) });
     usage = result.usage;
     const directives = parseDirectives(result.text);
     const applied = directives ? applyDirectives(directives, parts, replyTo) : null;
-    outcome = applied ?? fallbackDelivery(input, parts, 'delivery step answered without usable directives');
     if (!applied) log(`Unusable delivery output: ${result.text.slice(0, 300)}`);
+    outcome = applied ?? fallbackDelivery(input, parts, 'delivery step answered without usable directives');
   } catch (err) {
     if (signal?.aborted) throw err;
-    const message = err instanceof Error ? err.message : String(err);
-    log(`Delivery call failed: ${message}`);
+    log(`Delivery call failed: ${err instanceof Error ? err.message : String(err)}`);
     outcome = fallbackDelivery(input, parts, 'delivery step failed');
   }
   log(

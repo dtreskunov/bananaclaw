@@ -477,16 +477,20 @@ indicator ends (`delivery-turn.ts`, reached from `recovery.routeDraft`). It sees
 the delivery rules, the assistant name, `CLAUDE.local.md`, the destinations with
 the latest message's origin marked, about 24k characters of recent visible
 transcript on the reply route, what was already sent this turn, and the draft.
-It answers with directives only: `<deliver to="name"/>` (send the draft's
-visible text verbatim: reasoning and `<internal>` removed, `<message>` wrappers
-unwrapped in place), `<message to="name">…</message>` (custom text), or
-`<internal>…</internal>` (send nothing — treated as intentional silence). Blocks
-the draft already addressed to other known destinations and its `<internal>`
-notes pass through unchanged. A failed call, unusable output, or an unknown
-destination falls back to delivering the draft to the reply route, or to the
-activity trace when the turn already answered there. Rewrites and skips leave
-an `<internal>` note (with the original draft) in the trace; plain delivery
-leaves none. Its billing is added to the turn's settled usage (duration,
+It routes and trims but never writes content, answering with directives only:
+`<deliver to="name"/>` (send the draft's visible text verbatim: reasoning and
+`<internal>` removed, `<message>` wrappers unwrapped in place), optionally with
+`start="first words"` to drop a narration opening ("Now the answer.") — the
+cut happens only on an exact match at a line start within the first 400 characters, otherwise
+the full draft goes out — or `<internal>…</internal>` (send nothing — treated
+as intentional silence). Leading horizontal-rule lines are always stripped.
+Blocks the draft already addressed to other known destinations and its
+`<internal>` notes pass through unchanged. A failed call, unusable output (any prose around the directives counts), or
+an unknown destination falls back to delivering the draft to the reply route,
+or to the activity trace when the turn already answered there. Trims, skips and
+redirects leave an `<internal>` note in the trace (a skip keeps the draft);
+plain delivery leaves none. Decisions are `deliver`, `trim`, `skip` and
+`fallback`. Its billing is added to the turn's settled usage (duration,
 limits and context size stay the provider's). Report-only post-tool retries
 bypass it and keep their fixed route. The draft stays in the provider's history; the delivery exchange is
 not journaled. Each run logs `[delivery-turn] decision=… draft=… out=…`.
@@ -494,7 +498,8 @@ not journaled. Each run logs `[delivery-turn] decision=… draft=… out=…`.
 Providers with `unwrappedReplies` (native) drop the wrap contract from their
 work prompt: the native loader swaps the shared `module-core.md` fragment for
 `providers/native/core.md`, and `buildSystemPromptAddendum` emits the
-destination list without wrap rules. The final text is simply the reply;
+destination list without wrap rules. The final text is simply the reply, and the native prompt asks it to start
+with the answer, putting any process narration in `<internal>`;
 `send_message` stays for mid-turn updates and other destinations.
 
 **Final-response recovery:** For providers without a delivery turn, bare final

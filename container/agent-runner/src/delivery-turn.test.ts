@@ -9,10 +9,10 @@ import {
   applyDirectives,
   buildDeliveryPrompt,
   buildTranscript,
-  needsDeliveryTurn,
   parseDirectives,
   runDeliveryTurn,
   splitDraft,
+  trimOpening,
   type Complete,
   type DeliveryInput,
 } from './delivery-turn.js';
@@ -90,18 +90,18 @@ function completing(text: string, seen: CompletionRequest[] = []): Complete {
   };
 }
 
-describe('splitDraft / needsDeliveryTurn', () => {
+describe('splitDraft', () => {
   it('passes through drafts that are only blocks to known destinations', () => {
-    expect(needsDeliveryTurn('<message to="web">hi</message>', route)).toBe(false);
-    expect(needsDeliveryTurn('<internal>nothing to do</internal>', route)).toBe(false);
-    expect(needsDeliveryTurn('<think>hmm</think>\n<message to="web">hi</message>\n', route)).toBe(false);
-    expect(needsDeliveryTurn('', route)).toBe(false);
+    expect(splitDraft('<message to="web">hi</message>', 'web').needsRouting).toBe(false);
+    expect(splitDraft('<internal>nothing to do</internal>', 'web').needsRouting).toBe(false);
+    expect(splitDraft('<think>hmm</think>\n<message to="web">hi</message>\n', 'web').needsRouting).toBe(false);
+    expect(splitDraft('', 'web').needsRouting).toBe(false);
   });
 
   it('routes prose, prose next to blocks, and unknown destinations', () => {
-    expect(needsDeliveryTurn('Here is the answer.', route)).toBe(true);
-    expect(needsDeliveryTurn('Full table…\n<message to="web">Summary above.</message>', route)).toBe(true);
-    expect(needsDeliveryTurn('<message to="nobody">hi</message>', route)).toBe(true);
+    expect(splitDraft('Here is the answer.', 'web').needsRouting).toBe(true);
+    expect(splitDraft('Full table…\n<message to="web">Summary above.</message>', 'web').needsRouting).toBe(true);
+    expect(splitDraft('<message to="nobody">hi</message>', 'web').needsRouting).toBe(true);
   });
 
   it('keeps prose and reply-route blocks in order and sets aside other addressed blocks', () => {
@@ -120,17 +120,20 @@ describe('splitDraft / needsDeliveryTurn', () => {
 describe('parseDirectives / applyDirectives', () => {
   const parts = splitDraft('The full answer.', 'web');
 
-  it('parses deliver, message and internal directives and ignores reasoning', () => {
+  it('parses deliver and internal directives in any attribute order and ignores reasoning', () => {
     expect(
-      parseDirectives('<think>maybe <deliver to="treskowitz"/>?</think><deliver to="web"/>\n<internal>ok</internal>'),
+      parseDirectives(
+        '<think>maybe <deliver to="treskowitz"/>?</think><deliver start="Here is" to="web" />\n<internal>ok</internal>',
+      ),
     ).toEqual([
-      { kind: 'deliver', to: 'web' },
-      { kind: 'internal', text: 'ok' },
+      { kind: 'deliver', to: 'web', start: 'Here is' },
+      { kind: 'skip', reason: 'ok' },
     ]);
-    expect(parseDirectives('<message to="treskowitz">ping</message>')).toEqual([
-      { kind: 'message', to: 'treskowitz', body: 'ping' },
-    ]);
+    expect(parseDirectives('<deliver/>')).toBeNull();
     expect(parseDirectives('Sure, I will deliver it.')).toBeNull();
+    expect(
+      parseDirectives('<deliver to="treskowitz"/> Wait — that\'s wrong. Let me re-check.\n<deliver to="web"/>'),
+    ).toBeNull();
   });
 
   it('delivers the draft as-is without a trace note', () => {
@@ -141,17 +144,37 @@ describe('parseDirectives / applyDirectives', () => {
     });
   });
 
-  it('notes a rewrite in the trace with the original draft', () => {
-    const out = applyDirectives([{ kind: 'message', to: 'web', body: 'Short.' }], parts, 'web')!;
-    expect(out.decision).toBe('message');
-    expect(out.text).toContain('<message to="web">Short.</message>');
-    expect(out.text).toMatch(/<internal>Delivery step routed the reply: rewritten → `web`\.[\s\S]*The full answer\.<\/internal>/);
+  it('trims a narration opening and the rule it leaves, noting it in the trace', () => {
+    const draft = splitDraft(
+      "I don't need that skill — this isn't a frontend task. Let me just write the request.\n\n---\n\n**Subject:** Refund",
+      'web',
+    );
+    const out = applyDirectives([{ kind: 'deliver', to: 'web', start: '**Subject:** Refund' }], draft, 'web')!;
+    expect(out).toMatchObject({ decision: 'trim', silent: false });
+    expect(out.text).toBe(
+      "<internal>Trimmed from the reply: I don't need that skill — this isn't a frontend task. Let me just write the request.\n\n---</internal>\n" +
+        '<message to="web">**Subject:** Refund</message>',
+    );
+  });
+
+  it('never trims on an inexact quote or past the opening', () => {
+    const long = splitDraft(`${'Intro. '.repeat(80)}Answer.`, 'web');
+    expect(trimOpening(long.body, 'Answer.').text).toBe(long.body);
+    expect(trimOpening('Now the answer.\n\nAnswer.', 'Answr.').text).toBe('Now the answer.\n\nAnswer.');
+    expect(trimOpening('> "I\'ve reviewed the case."', "I've reviewed").text).toBe('> "I\'ve reviewed the case."');
+    expect(trimOpening('Now the answer.\n\n## Found', '## Found')).toEqual({ text: '## Found', dropped: 'Now the answer.' });
+    expect(trimOpening('---\nAnswer.', undefined)).toEqual({ text: 'Answer.', dropped: '' });
+  });
+
+  it('notes a reply sent somewhere other than the conversation', () => {
+    const out = applyDirectives([{ kind: 'deliver', to: 'treskowitz' }], parts, 'web')!;
+    expect(out.text).toBe('<internal>Reply sent to `treskowitz`.</internal>\n<message to="treskowitz">The full answer.</message>');
   });
 
   it('records a skip as silence with the draft in the trace', () => {
-    const out = applyDirectives([{ kind: 'internal', text: 'Already sent.' }], parts, 'web')!;
+    const out = applyDirectives([{ kind: 'skip', reason: 'Already sent.' }], parts, 'web')!;
     expect(out).toMatchObject({ decision: 'skip', silent: true });
-    expect(out.text).toBe('<internal>Delivery step sent nothing — Already sent.. Draft:\n\nThe full answer.</internal>');
+    expect(out.text).toBe('<internal>Not delivered — Already sent.\n\nDraft:\n\nThe full answer.</internal>');
   });
 
   it('rejects unknown destinations', () => {
@@ -271,7 +294,7 @@ describe('native work prompt', () => {
   it('drops the wrap contract when replies are unwrapped', () => {
     const prompt = buildSystemPromptAddendum('Lab', { unwrappedReplies: true });
     expect(prompt).not.toContain('<message to=');
-    expect(prompt).toContain('write it as plain text; it is delivered for you');
+    expect(prompt).toContain('Write it as plain text that starts with the answer; it is delivered verbatim');
     expect(prompt).toContain('`send_message` MCP tool with `to="name"`');
     expect(buildSystemPromptAddendum('Lab')).toContain('Wrap each delivered message');
   });
@@ -280,6 +303,7 @@ describe('native work prompt', () => {
     const core = fs.readFileSync(path.join(import.meta.dir, 'providers/native/core.md'), 'utf8');
     expect(core).not.toContain('<message to=');
     expect(core).toContain('## Sending messages');
+    expect(core).toContain('start with the answer');
   });
 });
 

@@ -173,7 +173,7 @@ export function sessionOriginDestination(all = getAllDestinations()): Destinatio
 function appendDraftReplyRules(lines: string[], all: DestinationEntry[], origin: DestinationEntry | undefined): void {
   lines.push('');
   lines.push(
-    'Your final response is your reply to the destination the latest message came `from` — write it as plain text; it is delivered for you. To reach any other destination, or to send an update mid-turn, call the `send_message` MCP tool with `to="name"`. `<internal>…</internal>` marks notes shown in the activity trace but never sent.',
+    'Your final response is your reply to the destination the latest message came `from`. Write it as plain text that starts with the answer; it is delivered verbatim, and anything before the answer reaches the user too. To reach any other destination, or to send an update mid-turn, call the `send_message` MCP tool with `to="name"`. `<internal>…</internal>` marks notes shown in the activity trace but never sent.',
   );
   lines.push('');
   lines.push(
