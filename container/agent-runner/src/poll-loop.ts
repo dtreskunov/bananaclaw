@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { findByName, type DestinationEntry } from './destinations.js';
+import { findByName, findByRouting, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
   releaseProcessing,
@@ -47,7 +47,7 @@ import {
   type RoutingContext,
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
-import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
+import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange, ProviderReply } from './providers/types.js';
 import { processPendingInputEdits, startInputProcessing, writeInputState } from './steering.js';
 import { getHostEventGeneration, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
 import { TurnAccounting, resetLiveTurnState } from './query/accounting.js';
@@ -868,6 +868,7 @@ export async function processQuery(
       },
       dispatch: (text, replyRouting, deliverUnwrapped, since, replyOnly) =>
         dispatchResultText(text, replyRouting, deliverUnwrapped, since, undefined, replyOnly),
+      dispatchReplies,
       exchangeComplete: (result, status) =>
         notifyExchangeComplete(onExchangeComplete, {
           prompt: archivePrompts[0] ?? initialPrompt,
@@ -1217,6 +1218,8 @@ export async function processQuery(
         if (drainedIds.length > 0) markCompleted(drainedIds);
         const answered = recovery.onResult({
           text: event.text,
+          ...(event.replies ? { replies: event.replies } : {}),
+          ...(event.silence !== undefined ? { silence: event.silence } : {}),
           strippedToEmpty: event.strippedToEmpty,
           malformedToolCall: event.malformedToolCall,
           routing: resultRouting,
@@ -1382,7 +1385,14 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       log(`Session: ${event.continuation}`);
       break;
     case 'result':
-      log(`Result: ${event.text ? event.text.slice(0, 200) : '(empty)'}`);
+      if (event.replies) {
+        log(
+          `Result: ${event.replies.length} repl${event.replies.length === 1 ? 'y' : 'ies'}` +
+            (event.replies[0] ? ` — ${event.replies[0].text.slice(0, 200)}` : event.silence !== undefined ? ' (no_reply)' : ''),
+        );
+      } else {
+        log(`Result: ${event.text ? event.text.slice(0, 200) : '(empty)'}`);
+      }
       // setTurnEnded is intentionally NOT called here — the caller (result
       // branch in processQuery) decides whether the turn is truly done
       // (queue empty) or another turn for a queued push is about to start.
@@ -1405,6 +1415,73 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       break;
     }
   }
+}
+
+/**
+ * Conversations that predate the reply tool are full of `<message to>`
+ * wrapping, so a model may still wrap a reply's text. Unwrap it rather than
+ * send the tags: each block goes to its own destination, the rest to the
+ * reply's, and `<internal>` notes go to the activity trace.
+ */
+function unwrapLegacyReply(reply: ProviderReply): ProviderReply[] {
+  const parsed = parseAssistantOutput(reply.text);
+  if (parsed.deliveries.length === 0 && parsed.internal.length === 0 && parsed.diagnostics.length === 0) {
+    return [reply];
+  }
+  for (let i = 0; i < parsed.internal.length; i++) {
+    appendActivity({ kind: 'internal', id: `internal:${generateId()}:${i}`, text: parsed.internal[i] });
+  }
+  const unwrapped = parsed.unwrapped.trim();
+  return [
+    ...(unwrapped ? [{ ...reply, text: unwrapped }] : []),
+    ...parsed.deliveries.map((delivery) => ({ text: delivery.body, to: delivery.to })),
+  ];
+}
+
+/**
+ * Deliver replies a `replyTool` provider sent through its reply tool. Each
+ * text is sent verbatim; no `to` means the conversation being answered. A
+ * silence reason is recorded in the activity trace and sends nothing.
+ */
+function dispatchReplies(
+  replies: ProviderReply[],
+  silence: string | undefined,
+  routing: RoutingContext,
+  duplicateSince: number,
+): { sent: number } {
+  if (silence !== undefined && replies.length === 0) {
+    appendActivity({ kind: 'internal', id: `internal:${generateId()}:0`, text: silence });
+    log(`No reply: ${silence.slice(0, 200)}`);
+    return { sent: 0 };
+  }
+  let sent = 0;
+  for (const reply of replies.flatMap(unwrapLegacyReply)) {
+    if (!reply.text.trim()) continue;
+    const dest = reply.to ? findByName(reply.to) : findByRouting(routing.channelType, routing.platformId);
+    if (reply.to && !dest) {
+      log(`Unknown destination "${reply.to}" in reply, dropping it: ${reply.text.slice(0, 200)}`);
+      continue;
+    }
+    if (dest && isDuplicateSendMessage(dest, reply.text, routing, duplicateSince)) {
+      log(`Duplicate reply to "${dest.name}" already sent via send_message, dropping it`);
+      continue;
+    }
+    if (dest) {
+      sendToDestination(dest, reply.text, routing);
+    } else {
+      writeMessageOut({
+        id: generateId(),
+        in_reply_to: routing.inReplyTo,
+        kind: 'chat',
+        platform_id: routing.platformId,
+        channel_type: routing.channelType,
+        thread_id: routing.threadId,
+        content: JSON.stringify({ text: reply.text, delivery_origin: 'response' }),
+      });
+    }
+    sent++;
+  }
+  return { sent };
 }
 
 /**

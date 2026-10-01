@@ -1,5 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Native replies go through its reply tool, so the shared `<message>` wrap
+// contract (module-core.md) is swapped for this one.
+const NATIVE_CORE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'core.md');
+const SHARED_CORE = 'module-core.md';
 
 function readIfPresent(filename: string): string | null {
   try {
@@ -24,7 +30,7 @@ export function loadNativeInstructions(
       .readdirSync(fragmentsDir)
       .filter((entry) => entry.endsWith('.md'))
       .sort()) {
-      const fragment = readIfPresent(path.join(fragmentsDir, filename));
+      const fragment = readIfPresent(filename === SHARED_CORE ? NATIVE_CORE : path.join(fragmentsDir, filename));
       if (fragment) parts.push(fragment);
     }
   } catch {

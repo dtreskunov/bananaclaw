@@ -36,6 +36,14 @@ export interface AgentProvider {
   readonly mcpToolGuidance?: string;
 
   /**
+   * Optional. When true, the provider delivers final replies through its own
+   * reply tool and reports them as structured `replies` (or `silence`) on the
+   * `result` event. Its prompt drops the `<message to>` wrap contract, and the
+   * runner never parses its final text for delivery.
+   */
+  readonly replyTool?: boolean;
+
+  /**
    * Optional. Called by the poll-loop after each completed exchange (a
    * result, a wrapping retry, or an error). Providers whose harness keeps no
    * on-disk transcript implement this to persist exchanges themselves (e.g.
@@ -385,6 +393,12 @@ export function fingerprintToolInput(input: unknown): string | undefined {
     : createHash('sha256').update(normalized).digest('hex');
 }
 
+/** One reply sent through a provider's reply tool. No `to` means the conversation being answered. */
+export interface ProviderReply {
+  text: string;
+  to?: string;
+}
+
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   | { type: 'steering_applied'; id: string }
@@ -404,6 +418,14 @@ export type ProviderEvent =
       malformedToolCall?: boolean;
       finishReason?: string;
       recoveredFromUnclosedThink?: boolean;
+      /**
+       * Set only by `replyTool` providers: the replies the model sent through
+       * its reply tool this turn, in order. When present, `text` is not parsed
+       * for delivery.
+       */
+      replies?: ProviderReply[];
+      /** `replyTool` providers: the model explicitly chose not to reply, and why. */
+      silence?: string;
     }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
   | { type: 'progress'; step: ActivityStep; toolInputFingerprint?: string }

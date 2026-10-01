@@ -102,3 +102,20 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
     expect(prompt).toContain('`casa`');
   });
 });
+
+describe('buildSystemPromptAddendum — reply tool', () => {
+  it('replaces the <message> wrap contract with the reply tool', () => {
+    seedDestination('web-mg-web-0', 'web-mg-web-0', 'web', 'web:denis');
+    seedDestination('denis-bot', 'Denis (Bot)', 'resend', 'resend:denis@bananaclaw.app');
+    seedOrigin('web', 'web:denis');
+
+    const prompt = buildSystemPromptAddendum('Casa', { replyTool: true });
+
+    expect(prompt).toContain('calling the `reply` tool');
+    expect(prompt).toContain('This conversation lives on `web-mg-web-0`');
+    expect(prompt).toContain('`reply_allowed="false"` is one-way');
+    expect(prompt).toContain('end the turn with `no_reply`');
+    expect(prompt).not.toContain('<message to=');
+    expect(prompt).not.toContain('<internal>');
+  });
+});

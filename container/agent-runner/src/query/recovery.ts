@@ -14,7 +14,7 @@
 import { findByRouting, getAllDestinations } from '../destinations.js';
 import { getOutboundDb } from '../db/connection.js';
 import type { RoutingContext } from '../formatter.js';
-import type { AgentQuery, ProviderExchange } from '../providers/types.js';
+import type { AgentQuery, ProviderExchange, ProviderReply } from '../providers/types.js';
 import type { ToolStep } from './runaway-guard.js';
 
 const MAX_MALFORMED_TOOL_RECOVERY_ATTEMPTS = 2;
@@ -42,11 +42,20 @@ export interface RecoveryPort {
     duplicateSince: number,
     replyOnly: boolean,
   ): { sent: number; hasUnwrapped: boolean; internalCount: number };
+  dispatchReplies(
+    replies: ProviderReply[],
+    silence: string | undefined,
+    routing: RoutingContext,
+    duplicateSince: number,
+  ): { sent: number };
   exchangeComplete(result: string | null, status: ProviderExchange['status']): void;
 }
 
 export interface ResultInput {
   text: string | null;
+  /** Replies from a `replyTool` provider; when present, `text` is not parsed. */
+  replies?: ProviderReply[];
+  silence?: string;
   strippedToEmpty?: boolean;
   malformedToolCall?: boolean;
   routing: RoutingContext;
@@ -237,7 +246,30 @@ export class DeliveryRecovery {
   onResult(input: ResultInput): boolean {
     const reportOnly = this.mode === 'delivery';
     this.mode = null;
+    if (input.replies) return this.onReplies(input, input.replies);
     return input.text ? this.onTextResult(input, input.text, reportOnly) : this.onEmptyResult(input, reportOnly);
+  }
+
+  /**
+   * A `replyTool` provider already settled delivery inside its own loop, so
+   * nothing here is nudged: the replies are sent, an explicit `no_reply` is
+   * confirmed silence, and a turn with neither gets the empty-result notice.
+   */
+  private onReplies(input: ResultInput, replies: ProviderReply[]): boolean {
+    const mcpWroteReply = countTurnContentMessages(input.since, input.turnId, input.routing) > 0;
+    const { sent } = this.port.dispatchReplies(replies, input.silence, input.routing, input.since);
+    if (sent > 0 || mcpWroteReply) {
+      this.sentAny = true;
+      this.resetToolRecovery();
+    } else if (input.silence !== undefined) {
+      this.silenceConfirmed = true;
+    } else {
+      this.emptyResultSeen = true;
+    }
+    const delivered = this.sentAny || this.silenceConfirmed;
+    this.port.exchangeComplete(replies.map((reply) => reply.text).join('\n\n') || null, delivered ? 'completed' : 'undelivered');
+    if (!this.sentAny && this.port.queueEmpty()) this.port.endStream();
+    return true;
   }
 
   private measureMcpReply(input: ResultInput, needsRouteCheck: boolean) {

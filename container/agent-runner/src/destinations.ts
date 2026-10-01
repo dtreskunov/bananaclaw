@@ -80,19 +80,24 @@ export function findByRouting(
  * per-agent-group and changes when the operator renames an agent, while
  * the shared base is identical across all agents.
  */
-export function buildSystemPromptAddendum(assistantName?: string): string {
+export interface PromptAddendumOptions {
+  /** Final replies go through the provider's `reply` tool, not `<message>` wrapping. */
+  replyTool?: boolean;
+}
+
+export function buildSystemPromptAddendum(assistantName?: string, options: PromptAddendumOptions = {}): string {
   const sections: string[] = [];
 
   if (assistantName) {
     sections.push(['# You are ' + assistantName, '', `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`].join('\n'));
   }
 
-  sections.push(buildDestinationsSection());
+  sections.push(buildDestinationsSection(options.replyTool ?? false));
 
   return sections.join('\n\n');
 }
 
-function buildDestinationsSection(): string {
+function buildDestinationsSection(replyTool: boolean): string {
   const all = getAllDestinations();
 
   if (all.length === 0) {
@@ -130,6 +135,10 @@ function buildDestinationsSection(): string {
       lines.push(`- ${describeDestination(d)}${marker}`);
     }
   }
+  if (replyTool) {
+    appendReplyToolRules(lines, all, origin);
+    return lines.join('\n');
+  }
   lines.push('');
   lines.push(
     'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking to show in the activity trace but not send to a destination.',
@@ -159,6 +168,27 @@ function buildDestinationsSection(): string {
     '**Do not duplicate content between `send_message` and the final `<message>` wrap.** If you have already delivered the answer via `send_message`, do not also include the same body in a final-text `<message>` block — the user will see it twice. Either send the full reply via `send_message` *or* via the final-text `<message>` wrap, not both. Mixing the two is only correct when they carry different content (e.g. an "on it" `send_message` followed by the actual answer in the final `<message>`).',
   );
   return lines.join('\n');
+}
+
+function appendReplyToolRules(lines: string[], all: DestinationEntry[], origin: DestinationEntry | undefined): void {
+  lines.push('');
+  lines.push(
+    'Deliver your answer by calling the `reply` tool; only its `text` is sent. Without `to`, it answers the destination the latest message came `from`. Pass `to="name"` to answer elsewhere, or use the `send_message` MCP tool to send something mid-turn.',
+  );
+  lines.push('');
+  lines.push(
+    '**Routing rule:** inbound messages with an authorized reply destination carry a `from="name"` attribute; your reply goes back there — a human channel message gets a human-channel reply, a peer-agent message gets a peer-agent reply. A peer message with `reply_allowed="false"` is one-way: `sender_agent_id` is identity only, not an address. Do not invent a destination or substitute a human channel for an unavailable peer reply. Forwarding a human request to a peer agent, or relaying a peer\'s answer back to the human, is fine when the request explicitly asks for it.',
+  );
+  if (origin && all.length > 1) {
+    lines.push('');
+    lines.push(
+      `**This conversation lives on \`${origin.name}\`.** Human messages here are answered there unless you are explicitly asked to send elsewhere.`,
+    );
+  }
+  lines.push('');
+  lines.push(
+    'Each `send_message` call lands as its own message, delivered immediately. **Do not repeat content you already sent** — if a `send_message` already carried the whole answer, end the turn with `no_reply`.',
+  );
 }
 
 function describeDestination(d: DestinationEntry): string {

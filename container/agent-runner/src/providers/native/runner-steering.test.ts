@@ -28,11 +28,15 @@ async function until(predicate: () => boolean): Promise<void> {
   throw new Error('Timed out waiting for native runner steering');
 }
 
-function response(text: string): Response {
+function response(text: string, viaReplyTool = false): Response {
   const base = { id: 'native-integration', object: 'chat.completion.chunk', created: 1, model: 'test-model' };
+  const delta = viaReplyTool
+    ? { role: 'assistant', tool_calls: [{ index: 0, id: 'call_reply', type: 'function',
+      function: { name: 'reply', arguments: JSON.stringify({ text }) } }] }
+    : { role: 'assistant', content: text };
   const chunks = [
-    { ...base, choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] },
-    { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    { ...base, choices: [{ index: 0, delta, finish_reason: null }] },
+    { ...base, choices: [{ index: 0, delta: {}, finish_reason: viaReplyTool ? 'tool_calls' : 'stop' }],
       usage: { prompt_tokens: 4, completion_tokens: 3, total_tokens: 7 } },
   ];
   return new Response(
@@ -61,7 +65,7 @@ it('runs real native editing and cancellation through runPollLoop without stoppi
       requests.push(await request.json() as Record<string, unknown>);
       const index = requests.length;
       await (index === 1 ? firstRelease.promise : secondRelease.promise);
-      return response(index === 1 ? 'original draft' : '<message to="web-test">Steered reply</message>');
+      return index === 1 ? response('original draft') : response('Steered reply', true);
     },
   });
   process.env.NATIVE_BASE_URL = `http://127.0.0.1:${server.port}/v1`;

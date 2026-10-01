@@ -9,6 +9,7 @@ import { MockProvider } from './providers/mock.js';
 import {
   fingerprintToolInput,
   type FileAttachment,
+  type ProviderReply,
   type ProviderEvent,
   type ProviderExchange,
   type QueryInput,
@@ -2577,3 +2578,109 @@ class BlockingProvider {
     };
   }
 }
+
+/** A `replyTool` provider: one structured result, then blocks until the loop ends the stream. */
+class ReplyToolProvider {
+  readonly supportsNativeSlashCommands = false;
+  readonly replyTool = true;
+  ended = false;
+
+  constructor(private readonly result: { replies: ProviderReply[]; silence?: string }) {}
+
+  isSessionInvalid(): boolean {
+    return false;
+  }
+
+  query() {
+    const owner = this;
+    let aborted = false;
+    let wake: (() => void) | null = null;
+    return {
+      push() {
+        return true;
+      },
+      end: () => {
+        owner.ended = true;
+        wake?.();
+      },
+      abort: () => {
+        aborted = true;
+        wake?.();
+      },
+      events: (async function* () {
+        yield { type: 'init' as const, continuation: 'reply-tool-session' };
+        yield { type: 'result' as const, text: null, ...owner.result };
+        while (!owner.ended && !aborted) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+          wake = null;
+        }
+      })(),
+    };
+  }
+}
+
+describe('poll loop — reply tool results', () => {
+  async function run(provider: ReplyToolProvider, done: () => boolean): Promise<void> {
+    insertMessage('m-reply', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
+    const controller = new AbortController();
+    const loop = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
+    await waitFor(done, 2000);
+    controller.abort();
+    await loop.catch(() => {});
+  }
+
+  it('sends replies verbatim, by default to the conversation being answered', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('slack-other', 'Slack Other', 'channel', 'slack', 'chan-9', NULL)`,
+      )
+      .run();
+    const provider = new ReplyToolProvider({
+      replies: [{ text: 'Use `<message to="x">` tags.\n\n- one' }, { text: 'heads up', to: 'slack-other' }],
+    });
+    await run(provider, () => getUndeliveredMessages().length === 2);
+
+    const out = getUndeliveredMessages().map((row) => ({
+      channel: row.channel_type,
+      platform: row.platform_id,
+      text: JSON.parse(row.content).text,
+    }));
+    expect(out).toEqual([
+      { channel: 'discord', platform: 'chan-1', text: 'Use `<message to="x">` tags.\n\n- one' },
+      { channel: 'slack', platform: 'chan-9', text: 'heads up' },
+    ]);
+  });
+
+  it('unwraps legacy <message> and <internal> tags inside a reply', async () => {
+    const provider = new ReplyToolProvider({
+      replies: [{ text: '<internal>checked</internal><message to="discord-test">the answer</message>' }],
+    });
+    await run(provider, () => getUndeliveredMessages().length === 1);
+
+    expect(JSON.parse(getUndeliveredMessages()[0].content).text).toBe('the answer');
+    expect(getActivityBuffer().map((line) => JSON.parse(line.text))).toContainEqual(
+      expect.objectContaining({ kind: 'internal', text: 'checked' }),
+    );
+  });
+
+  it('treats no_reply as confirmed silence without an empty-result notice', async () => {
+    const provider = new ReplyToolProvider({ replies: [], silence: 'nothing new since the last check' });
+    await run(provider, () => provider.ended);
+    await sleep(100);
+
+    expect(getUndeliveredMessages()).toHaveLength(0);
+    expect(getActivityBuffer().map((line) => JSON.parse(line.text))).toContainEqual(
+      expect.objectContaining({ kind: 'internal', text: 'nothing new since the last check' }),
+    );
+  });
+
+  it('notifies the user when a turn sends no reply and no no_reply', async () => {
+    const provider = new ReplyToolProvider({ replies: [] });
+    await run(provider, () => getUndeliveredMessages().length === 1);
+
+    expect(JSON.parse(getUndeliveredMessages()[0].content).text).toContain('without producing a response');
+  });
+});

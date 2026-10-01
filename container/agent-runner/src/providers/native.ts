@@ -28,11 +28,23 @@ import { NativeTurnJournal } from './native/turn-journal.js';
 import { createNativeTools } from './native/tools.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
 import {
+  createReplyTools,
+  FORCE_REPLY_PROMPT,
+  isPointerReply,
+  isReplyTool,
+  POINTER_REPLY_PROMPT,
+  REPLY_TOOL,
+  ReplyCollector,
+  replyRepair,
+} from './native/reply.js';
+import {
   DeferredMcpTools,
   estimateMcpToolTokens,
   mcpToolSearchMode,
   shouldDeferMcpTools,
 } from './native/tool-search.js';
+
+const MAX_STEPS = 20;
 
 function log(message: string): void {
   console.error(`[native-provider] ${message}`);
@@ -240,6 +252,7 @@ export class NativeProvider implements AgentProvider {
   readonly supportsSteering = true;
   readonly supportsInputEditing = true;
   readonly supportsInputCancellation = true;
+  readonly replyTool = true;
   private readonly options: ProviderOptions;
   private readonly store: NativeStore;
 
@@ -324,9 +337,11 @@ export class NativeProvider implements AgentProvider {
               });
               journal.updateInput(incoming);
               abortController.signal.throwIfAborted();
+              const replies = new ReplyCollector();
+              const replyTools = createReplyTools(replies);
               const nativeTools: ToolSet = turn.toolsDisabled
-                ? {}
-                : createNativeTools(input.cwd, options.additionalDirectories, skills, todoState);
+                ? replyTools
+                : { ...createNativeTools(input.cwd, options.additionalDirectories, skills, todoState), ...replyTools };
               const mcpEntries = turn.toolsDisabled ? [] : await mcpManager.entries(abortController.signal);
               // Large external tool sets are loaded on demand via tool_search;
               // the loaded set can grow between steps, so rebuild per step.
@@ -351,14 +366,26 @@ export class NativeProvider implements AgentProvider {
                   : resolved.maxOutputTokens;
               const model = await languageModel(resolved);
               const messages: ModelMessage[] = [...prior, incoming];
+              const repairReply = replyRepair(replies);
               let stepsCompleted = 0;
-              let text: string | null = null;
               let finishReason = '';
               let checkpoint = journal.checkpoint;
               const appliedSteeringIds: string[] = [];
               const totalUsage: TurnUsage = usageFor(resolved, {}, {}, 0, 0);
-              while (stepsCompleted < 20) {
+              // A reply (or an explicit no_reply) is owed for the latest input.
+              let replyDue = true;
+              // Transient instruction for a step that must call `reply`; never persisted.
+              let forcing: string | null = null;
+              let forcedReply = false;
+              let pointerChecked = false;
+              let undeliveredChars = 0;
+              // What to deliver if even a forced step ends without calling reply.
+              let salvage: string | null = null;
+              while (true) {
                 abortController.signal.throwIfAborted();
+                const forcedStep = forcing;
+                forcing = null;
+                const repliesBefore = replies.replies.length;
                 const result = streamText({
                   model,
                   system: loadNativeInstructions(
@@ -366,9 +393,11 @@ export class NativeProvider implements AgentProvider {
                     [skills.instructions(), mcpCatalog].filter(Boolean).join('\n\n') || null,
                     turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
                   ),
-                  messages,
+                  messages: forcedStep ? [...messages, { role: 'user', content: forcedStep }] : messages,
                   tools: journal.wrap(stepTools(), abortController.signal),
-                  ...(deferredMcp ? { repairToolCall: deferredMcp.repairToolCall } : {}),
+                  repairToolCall: async (repair) =>
+                    (await repairReply(repair)) ?? (deferredMcp ? deferredMcp.repairToolCall(repair) : null),
+                  ...(forcedStep ? { toolChoice: { type: 'tool' as const, toolName: REPLY_TOOL } } : {}),
                   // Own the boundary: SDK prepareStep cannot resume a text-only
                   // final step and may race ahead of the consumer's event loop.
                   stopWhen: isStepCount(1),
@@ -409,6 +438,8 @@ export class NativeProvider implements AgentProvider {
                   yield* flushCallUsage();
                   yield { type: 'activity' };
                   const part = rawPart as unknown as Record<string, unknown>;
+                  // The reply itself is the message, not activity.
+                  if (isReplyTool(part.toolName)) continue;
                   if (part.type === 'tool-call') {
                     const toolInputFingerprint = fingerprintToolInput(part.input);
                     yield {
@@ -443,15 +474,28 @@ export class NativeProvider implements AgentProvider {
                 totalUsage.cache_write_tokens += segmentUsage.cache_write_tokens;
                 totalUsage.reasoning_tokens = (totalUsage.reasoning_tokens ?? 0) + (segmentUsage.reasoning_tokens ?? 0);
                 totalUsage.context_tokens = segmentUsage.context_tokens;
-                text = (await result.text).trim() || null;
+                const stepText = (await result.text).trim() || null;
                 finishReason = String(await result.finishReason);
+                const stepReplies = replies.replies.slice(repliesBefore);
+                const repliedThisStep = replies.takeStepCalls() > 0;
+                const pointer =
+                  !pointerChecked &&
+                  stepReplies.length === 1 &&
+                  isPointerReply(stepReplies[0].text, undeliveredChars + (stepText?.length ?? 0));
+                undeliveredChars += stepText?.length ?? 0;
+                if (pointer) {
+                  pointerChecked = true;
+                  replies.discardLast(1);
+                  log(`Rejected a reply that points at undelivered text: ${JSON.stringify(stepReplies[0].text.slice(0, 120))}`);
+                }
+                replyDue = pointer || (replyDue && !repliedThisStep);
 
                 let applied = false;
                 // Prepare all inputs before acknowledging any: preparation failures
                 // must not consume input for a generation that never starts.
                 const prepared: Array<{ input: SteeringInput; message: ModelMessage }> = [];
                 let inlineBytes = inlineHistoryBytes(messages);
-                while (!ended && stepsCompleted < 20 && prepared.length < steering.length) {
+                while (!ended && stepsCompleted < MAX_STEPS && prepared.length < steering.length) {
                   const guidance = steering[prepared.length];
                   // Lock before preparation can yield: an edit must never change
                   // the buffer while an attachment is being prepared for ingestion.
@@ -484,7 +528,28 @@ export class NativeProvider implements AgentProvider {
                   step.toolCalls.every((call) => step.content.some((part) =>
                     (part.type === 'tool-result' || part.type === 'tool-error') &&
                     part.toolCallId === call.toolCallId));
-                if (stepsCompleted >= 20 || (!applied && !continueTools)) break;
+                if (applied) {
+                  // New guidance needs its own reply.
+                  replyDue = true;
+                  forcedReply = false;
+                  salvage = null;
+                  continue;
+                }
+                if (pointer) {
+                  salvage = stepReplies[0].text;
+                  forcing = POINTER_REPLY_PROMPT;
+                  continue;
+                }
+                if (!replyDue) break;
+                if (stepsCompleted < MAX_STEPS && continueTools) continue;
+                salvage = stepText ?? salvage;
+                if (forcedReply) break;
+                forcedReply = true;
+                forcing = FORCE_REPLY_PROMPT;
+              }
+              if (replyDue && salvage) {
+                log('Turn ended without a reply call; delivering its final text as the reply');
+                replies.record({ text: salvage });
               }
               // No await or yield between closing acceptance and deciding the
               // final result; guidance arriving after this belongs to a later turn.
@@ -496,8 +561,10 @@ export class NativeProvider implements AgentProvider {
               yield { type: 'checkpoint', ref: checkpoint };
               yield {
                 type: 'result',
-                text,
+                text: null,
                 finishReason,
+                replies: replies.replies,
+                ...(replies.replies.length === 0 && replies.silence !== null ? { silence: replies.silence } : {}),
               };
             } catch (error) {
               active = false;
@@ -505,7 +572,9 @@ export class NativeProvider implements AgentProvider {
                 if (journal) {
                   await journal.settle();
                   yield* flushCallUsage();
-                  for (const step of journal.activity()) yield { type: 'progress', step };
+                  for (const step of journal.activity()) {
+                    if (step.kind !== 'tool' || !isReplyTool(step.tool)) yield { type: 'progress', step };
+                  }
                   yield { type: 'checkpoint', ref: journal.save(true, stoppedByUser) };
                 }
                 break;
