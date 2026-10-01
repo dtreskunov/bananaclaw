@@ -120,9 +120,7 @@ async function main(): Promise<void> {
   // memory lives in /workspace/agent/CLAUDE.local.md (auto-loaded).
   const instructions = (): string =>
     [
-      buildSystemPromptAddendum(config.assistantName || undefined, {
-        unwrappedReplies: Boolean(provider.unwrappedReplies && provider.complete),
-      }),
+      buildSystemPromptAddendum(config.assistantName || undefined),
       provider.mcpToolGuidance,
       threadTitleInstruction(),
     ]

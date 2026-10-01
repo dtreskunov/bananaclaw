@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { getConfig } from './config.js';
 import { findByName, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
@@ -779,14 +778,6 @@ export interface ForkQueryOptions {
   deferFailureSettlement?: boolean;
 }
 
-function runnerAssistantName(): string | undefined {
-  try {
-    return getConfig().assistantName || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Provider events still processed after the user stopped the turn. */
 const STOPPED_TURN_EVENTS = new Set(['init', 'progress', 'usage', 'usage_call', 'checkpoint', 'steering_applied']);
 
@@ -884,15 +875,9 @@ export async function processQuery(
           continuation: queryContinuation ?? initialContinuation,
           status,
         }),
-      ...(provider.complete ? { complete: (request) => provider.complete!(request) } : {}),
-      unwrappedReplies: Boolean(provider.unwrappedReplies && provider.complete),
-      assistantName: runnerAssistantName(),
-      recordUsage: (usage) => accounting.onRunnerCallUsage(usage),
     },
     routing,
   );
-  // Aborts an in-flight delivery turn when the user stops the turn.
-  const stopController = new AbortController();
   const publishTurn = (): void => steering.publishTurn(turnId, userStopped, activeTurnRouting);
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
@@ -1069,7 +1054,6 @@ export async function processQuery(
     // Ordinary queued messages have not been claimed and are not in this list.
     markCompleted([...consumedIds]);
     publishTurn();
-    stopController.abort();
     query.abort('user');
   });
   publishTurn();
@@ -1213,18 +1197,6 @@ export async function processQuery(
           drainedIds.push(...head.ids);
           resultRouting = head.routing;
         }
-        // FORK-HOOK:delivery-turn — route a draft that can't be delivered
-        // as-is while the typing indicator is still on.
-        let resultText = event.text;
-        try {
-          resultText = await recovery.routeDraft(
-            { text: event.text, routing: resultRouting, since: outboundMaxAtTurnStart, turnId },
-            stopController.signal,
-          );
-        } catch (err) {
-          if (!userStopped) throw err;
-        }
-        if (userStopped) continue;
         // Only end the turn (stop warming the heartbeat, mark
         // turn_ended_at so the host clears the typing indicator) when
         // no more queued batches remain. If there's still pending
@@ -1244,7 +1216,7 @@ export async function processQuery(
         setCurrentInReplyTo(resultRouting.inReplyTo);
         if (drainedIds.length > 0) markCompleted(drainedIds);
         const answered = recovery.onResult({
-          text: resultText,
+          text: event.text,
           strippedToEmpty: event.strippedToEmpty,
           malformedToolCall: event.malformedToolCall,
           routing: resultRouting,

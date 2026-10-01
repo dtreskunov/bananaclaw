@@ -80,24 +80,19 @@ export function findByRouting(
  * per-agent-group and changes when the operator renames an agent, while
  * the shared base is identical across all agents.
  */
-export interface PromptAddendumOptions {
-  /** The provider's final text is a draft routed by the delivery turn, not `<message>`-wrapped. */
-  unwrappedReplies?: boolean;
-}
-
-export function buildSystemPromptAddendum(assistantName?: string, options: PromptAddendumOptions = {}): string {
+export function buildSystemPromptAddendum(assistantName?: string): string {
   const sections: string[] = [];
 
   if (assistantName) {
     sections.push(['# You are ' + assistantName, '', `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`].join('\n'));
   }
 
-  sections.push(buildDestinationsSection(options.unwrappedReplies ?? false));
+  sections.push(buildDestinationsSection());
 
   return sections.join('\n\n');
 }
 
-function buildDestinationsSection(unwrappedReplies: boolean): string {
+function buildDestinationsSection(): string {
   const all = getAllDestinations();
 
   if (all.length === 0) {
@@ -113,7 +108,16 @@ function buildDestinationsSection(unwrappedReplies: boolean): string {
   // it explicitly. This stops the agent from picking a same-named-but-wrong
   // destination (e.g. an outbound email persona named after the user) instead
   // of the channel the human is actually waiting on.
-  const origin = sessionOriginDestination(all);
+  const routing = getSessionRouting();
+  const origin =
+    routing.channel_type && routing.platform_id
+      ? all.find(
+          (d) =>
+            d.type === 'channel' &&
+            d.channelType === routing.channel_type &&
+            d.platformId === routing.platform_id,
+        )
+      : undefined;
 
   const lines = ['## Sending messages', ''];
   if (all.length === 1) {
@@ -125,10 +129,6 @@ function buildDestinationsSection(unwrappedReplies: boolean): string {
       const marker = origin && d.name === origin.name ? ' — **← this conversation; reply here by default**' : '';
       lines.push(`- ${describeDestination(d)}${marker}`);
     }
-  }
-  if (unwrappedReplies) {
-    appendDraftReplyRules(lines, all, origin);
-    return lines.join('\n');
   }
   lines.push('');
   lines.push(
@@ -159,36 +159,6 @@ function buildDestinationsSection(unwrappedReplies: boolean): string {
     '**Do not duplicate content between `send_message` and the final `<message>` wrap.** If you have already delivered the answer via `send_message`, do not also include the same body in a final-text `<message>` block — the user will see it twice. Either send the full reply via `send_message` *or* via the final-text `<message>` wrap, not both. Mixing the two is only correct when they carry different content (e.g. an "on it" `send_message` followed by the actual answer in the final `<message>`).',
   );
   return lines.join('\n');
-}
-
-/** The destination this session's conversation lives on, if it is one. */
-export function sessionOriginDestination(all = getAllDestinations()): DestinationEntry | undefined {
-  const routing = getSessionRouting();
-  if (!routing.channel_type || !routing.platform_id) return undefined;
-  return all.find(
-    (d) => d.type === 'channel' && d.channelType === routing.channel_type && d.platformId === routing.platform_id,
-  );
-}
-
-function appendDraftReplyRules(lines: string[], all: DestinationEntry[], origin: DestinationEntry | undefined): void {
-  lines.push('');
-  lines.push(
-    'Your final response is your reply to the destination the latest message came `from`. Write it as plain text that starts with the answer; it is delivered verbatim, and anything before the answer reaches the user too. To reach any other destination, or to send an update mid-turn, call the `send_message` MCP tool with `to="name"`. `<internal>…</internal>` marks notes shown in the activity trace but never sent.',
-  );
-  lines.push('');
-  lines.push(
-    '**Routing rule:** inbound messages with an authorized reply destination carry a `from="name"` attribute; your reply goes back there — a human channel message gets a human-channel reply, a peer-agent message gets a peer-agent reply. A peer message with `reply_allowed="false"` is one-way: `sender_agent_id` is identity only, not an address. Do not invent a destination or substitute a human channel for an unavailable peer reply. Forwarding a human request to a peer agent, or relaying a peer\'s answer back to the human, is fine via `send_message` when the request explicitly asks for it.',
-  );
-  if (origin && all.length > 1) {
-    lines.push('');
-    lines.push(
-      `**This conversation lives on \`${origin.name}\`.** Human messages here are answered there unless you are explicitly asked to send elsewhere.`,
-    );
-  }
-  lines.push('');
-  lines.push(
-    'Each `send_message` call lands as its own message, delivered immediately. **Do not repeat content you already sent** — if a `send_message` already carried the whole answer, end the turn with a short `<internal>` note instead.',
-  );
 }
 
 function describeDestination(d: DestinationEntry): string {
