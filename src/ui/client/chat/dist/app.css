@@ -35,6 +35,7 @@
   --install-hint-border: #374151;
   --install-hint-muted: #9ca3af;
   --install-hint-shadow: rgba(0, 0, 0, 0.3);
+  --table-header-bg: color-mix(in srgb, var(--surface) 88%, #000);
   --danger: #c0392b;
   --danger-fill: #d93b3b;
   --danger-on-fill: #fff;
@@ -165,6 +166,7 @@
   --install-hint-border: var(--border-control);
   --install-hint-muted: var(--muted);
   --install-hint-shadow: var(--shadow-color);
+  --table-header-bg: color-mix(in srgb, var(--surface) 88%, #000);
   --danger: var(--error);
   --danger-fill: var(--error);
   --danger-on-fill: var(--error-on-fill);
@@ -2563,6 +2565,42 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg.markdown ol {
   margin: var(--text-block-gap) 0;
   padding-left: 20px;
+}
+.chat-main .msg.markdown:has(table) {
+  width: 100%;
+  max-width: 100%;
+}
+.chat-main .msg.markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--border);
+  border-spacing: 0;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+.chat-main .msg.markdown :is(th, td) {
+  padding: 6px 10px;
+  border-inline-end: 1px solid var(--border);
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+.chat-main .msg.markdown th {
+  background: var(--table-header-bg);
+  border-block-end-color: var(--border-strong);
+  font-weight: 500;
+}
+.chat-main .msg.markdown tr > :last-child {
+  border-inline-end: 0;
+}
+.chat-main .msg.markdown tbody tr:last-child td {
+  border-block-end: 0;
 }
 .chat-main .msg.markdown img {
   display: block;

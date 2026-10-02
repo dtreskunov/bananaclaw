@@ -116,6 +116,31 @@ describe('theme CSS contract', () => {
     expect(usage).toContain('white-space: nowrap');
   });
 
+  it('gives markdown tables full-width bubbles, local scrolling, legible cells and themed grid styling', () => {
+    const css = read('./components/ChatMain.css');
+    const bubble = css.match(/\.chat-main \.msg\.markdown:has\(table\) \{([^}]+)\}/)?.[1];
+    expect(bubble).toContain('width: 100%');
+    expect(bubble).toContain('max-width: 100%');
+    const table = css.match(/\.chat-main \.msg\.markdown table \{([^}]+)\}/)?.[1];
+    expect(table).toContain('display: block');
+    expect(table).toContain('width: max-content');
+    expect(table).toContain('max-width: 100%');
+    expect(table).toContain('overflow-x: auto');
+    expect(table).toContain('white-space: nowrap');
+    expect(table).toContain('border: 1px solid var(--border)');
+    const cells = css.match(/\.chat-main \.msg\.markdown :is\(th, td\) \{([^}]+)\}/)?.[1];
+    expect(cells).toContain('border-inline-end: 1px solid var(--border)');
+    expect(cells).toContain('border-block-end: 1px solid var(--border)');
+    expect(cells).toContain('word-break: normal');
+    expect(cells).toContain('overflow-wrap: normal');
+    const header = css.match(/\.chat-main \.msg\.markdown th \{([^}]+)\}/)?.[1];
+    expect(header).toContain('background: var(--table-header-bg)');
+    expect(header).toContain('border-block-end-color: var(--border-strong)');
+    for (const theme of THEMES) {
+      expect(read(`./styles/themes/${theme.id}.css`)).toContain('--table-header-bg:');
+    }
+  });
+
   it('keeps relative timestamps intact when metadata runs out of space', () => {
     const css = read('./components/ChatMain.css');
     const timestamp = css.match(/\.chat-main \.meta > \.ts \{([^}]+)\}/)?.[1];

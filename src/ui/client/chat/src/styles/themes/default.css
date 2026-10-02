@@ -36,6 +36,7 @@
   --install-hint-border: #374151;
   --install-hint-muted: #9ca3af;
   --install-hint-shadow: rgba(0, 0, 0, 0.3);
+  --table-header-bg: color-mix(in srgb, var(--surface) 88%, #000);
 
   --danger: #c0392b;
   --danger-fill: #d93b3b;

@@ -103,6 +103,11 @@ The appearance controller captures reading position before changing CSS and
 restores it immediately and after composer autosizing; new scrolling cancels
 the deferred restore. Density changes do not animate text or spacing.
 Shared density tokens live in `global.css`, separately from theme colors.
+
+Markdown messages containing tables use the full conversation width. Tables
+retain readable, non-wrapping cells and scroll horizontally inside the message
+when their intrinsic width exceeds the viewport. Subtle row and column borders
+and a darker theme-aware header background preserve structure in both modes.
 Themes define the font family, body and heading weights, and UI letter
 spacing through `--font-ui`, `--font-weight-body`,
 `--font-weight-heading`, and `--letter-spacing-ui`. Density defines the
