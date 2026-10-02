@@ -1382,15 +1382,14 @@ describe('final message', () => {
     expect(events.some((event) => event.type === 'progress' && event.step.tool === 'no_reply')).toBe(false);
   });
 
-  it('asks once for the full message when the final message points at undelivered text', async () => {
+  it('delivers a final message that points at undelivered text, without a retry', async () => {
     scriptedToolCalls = [sendCall('status')];
     toolCallText = 'Detailed findings. '.repeat(25);
-    scriptedTexts = ['See my summary above.', 'The full findings.'];
+    scriptedTexts = ['See my summary above.'];
     const events = await collect(new NativeProvider({ model: 'local/test-model' }));
 
-    expect(requests).toHaveLength(3);
-    expect(lastUserText(requests[2]!)).toContain('That message was not sent');
-    expect(replyTexts(events)).toEqual([['The full findings.']]);
+    expect(requests).toHaveLength(2);
+    expect(replyTexts(events)).toEqual([['See my summary above.']]);
   });
 
   it('asks for a final message without tools once the step limit is reached', async () => {

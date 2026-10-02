@@ -32,7 +32,6 @@ import {
   NO_REPLY_TOOL,
   NO_REPLY_TOOLS,
   noReplyReason,
-  POINTER_REPLY_PROMPT,
   STEP_LIMIT_PROMPT,
 } from './native/reply.js';
 import {
@@ -371,7 +370,6 @@ export class NativeProvider implements AgentProvider {
               const totalUsage: TurnUsage = usageFor(resolved, {}, {}, 0, 0);
               // One-off instruction for the next step; never persisted.
               let nudge: string | null = null;
-              let pointerChecked = false;
               // Past the step limit: one more step, without tools, to report progress.
               let wrappingUp = false;
               // Text written alongside tool calls, which is never delivered.
@@ -472,20 +470,8 @@ export class NativeProvider implements AgentProvider {
                 // A step without tool calls is the final message; text written
                 // alongside tool calls is working notes and is never delivered.
                 const finalStep = !step || step.toolCalls.length === 0;
-                let pointerRetry = false;
-                let finalText: string | null = null;
-                if (finalStep && stepText) {
-                  if (!pointerChecked && isPointerReply(stepText, undeliveredChars)) {
-                    pointerChecked = true;
-                    pointerRetry = true;
-                    nudge = POINTER_REPLY_PROMPT;
-                    log(`Final message points at undelivered text; asking for it in full: ${JSON.stringify(stepText.slice(0, 120))}`);
-                  } else {
-                    finalText = stepText;
-                  }
-                } else if (!finalStep) {
-                  undeliveredChars += stepText?.length ?? 0;
-                }
+                const finalText = finalStep ? stepText : null;
+                if (!finalStep) undeliveredChars += stepText?.length ?? 0;
                 const silenceCall = step?.toolCalls.find((call) => call.toolName === NO_REPLY_TOOL);
                 if (silenceCall) silence = noReplyReason(silenceCall.input);
 
@@ -533,7 +519,10 @@ export class NativeProvider implements AgentProvider {
                   continue;
                 }
                 reply = finalText;
-                if (pointerRetry) continue;
+                if (reply && isPointerReply(reply, undeliveredChars)) {
+                  // Data collection only: a retry was removed; revisit if this fires often.
+                  log(`Warning: final message may point at ${undeliveredChars} chars of undelivered text: ${JSON.stringify(reply.slice(0, 120))}`);
+                }
                 if (reply || silenceCall || !continueTools) break;
                 if (stepsCompleted < MAX_STEPS) continue;
                 if (wrappingUp) break;

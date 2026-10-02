@@ -354,9 +354,9 @@ Recovery happens inside the provider's step loop:
   is a superseded draft: it stays in history but is not sent, and the next
   final message answers both.
 - **Pointer reply.** A short final message like "see above", sent after at
-  least 400 characters of undelivered text, is discarded once and the model
-  is asked, with a transient instruction that is not stored, to write the
-  message itself.
+  least 400 characters of undelivered text, is delivered as is; the runner
+  only logs a warning (`final message may point at`) to measure how often
+  it happens.
 - **Step limit.** A turn runs at most 50 model steps (`MAX_STEPS`). If the
   model is still calling tools at the limit, one more step runs with no tools
   and a transient instruction to report what was done and what remains.
