@@ -6,6 +6,7 @@ import {
   turnConnected,
   groupId,
   threadId,
+  threads,
   channelType,
   messagingGroupId,
   chatMessages,
@@ -70,6 +71,16 @@ function find(node: any, type: string, label?: string): any {
   for (const child of [node.props?.children].flat(Infinity)) {
     if (child && typeof child === 'object') {
       const result = find(child, type, label);
+      if (result) return result;
+    }
+  }
+}
+function findComponent(node: any, name: string): any {
+  if (!node) return undefined;
+  if (typeof node.type === 'function' && node.type.name === name) return node;
+  for (const child of [node.props?.children].flat(Infinity)) {
+    if (child && typeof child === 'object') {
+      const result = findComponent(child, name);
       if (result) return result;
     }
   }
@@ -406,5 +417,39 @@ describe('main composer pending edits', () => {
     const pendingBubble = logContents.find((node: any) => node?.props?.m?.id === message.id);
     expect(pendingBubble?.type.name).toBe('Message');
     expect(find(view, 'h3')).toBeUndefined();
+  });
+
+  it('does not offer branching from the latest response', () => {
+    threads.value = [thread];
+    activeTurn.value = null;
+    chatMessages.value = [
+      { id: 'older-response', text: 'Older', files: null, ts: '1', direction: 'out' },
+      { id: 'latest-response', text: 'Latest', files: null, ts: '2', direction: 'out' },
+    ];
+
+    hooks.cursor = 0;
+    const chat = ChatMain();
+    const components = [chat.props.children].flat(Infinity);
+    const log = components.find((child: any) => typeof child?.type === 'function' && child.type.name === 'MessageLog');
+    hooks.slots = [];
+    hooks.cursor = 0;
+    const view = log.type(log.props);
+    const logNode = find(view, 'div');
+    const messages = [logNode.props.children[0].props.children]
+      .flat(Infinity)
+      .filter((node: any) => node?.type?.name === 'Message');
+
+    const forkButtons = messages.map((messageNode: any) => {
+      hooks.slots = [];
+      hooks.cursor = 0;
+      return findComponent(messageNode.type(messageNode.props), 'ForkButton');
+    });
+
+    hooks.slots = [];
+    hooks.cursor = 0;
+    expect(forkButtons[0].type(forkButtons[0].props)).not.toBeNull();
+    hooks.slots = [];
+    hooks.cursor = 0;
+    expect(forkButtons[1].type(forkButtons[1].props)).toBeNull();
   });
 });

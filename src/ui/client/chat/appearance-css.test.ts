@@ -51,7 +51,7 @@ function mix(fg: string, bg: string, fraction: number): string {
 describe('theme CSS contract', () => {
   it('uses matched, opaque foreground/background tokens for the scroll button, including hover', () => {
     const css = read('./components/ChatMain.css');
-    const normal = css.match(/\.chat-main \.scroll-to-bottom \{([^}]+)\}/)?.[1];
+    const normal = css.match(/\.chat-main \.scroll-jump \{([^}]+)\}/)?.[1];
     expect(normal).toContain('background: var(--surface)');
     expect(normal).toContain('color: var(--surface-fg)');
     const highlighted = css.match(
@@ -61,8 +61,25 @@ describe('theme CSS contract', () => {
     expect(highlighted).toContain('color: var(--primary-fg)');
   });
 
+  it('keeps message metadata controls on one row and truncates usage details', () => {
+    const css = read('./components/ChatMain.css');
+    const meta = css.match(/\.chat-main \.msg \.meta, \.chat-main \.typing \.meta \{([^}]+)\}/)?.[1];
+    expect(meta).toContain('flex-wrap: nowrap');
+    expect(meta).toContain('min-width: 0');
+    const usage = css.match(/\.chat-main \.usage \{([^}]+)\}/)?.[1];
+    expect(usage).toContain('text-overflow: ellipsis');
+    expect(usage).toContain('white-space: nowrap');
+  });
+
+  it('keeps relative timestamps intact when metadata runs out of space', () => {
+    const css = read('./components/ChatMain.css');
+    const timestamp = css.match(/\.chat-main \.meta > \.ts \{([^}]+)\}/)?.[1];
+    expect(timestamp).toContain('flex: none');
+    expect(timestamp).toContain('white-space: nowrap');
+  });
+
   it.each(THEMES.flatMap((theme) => ['light', 'dark'].map((mode) => [theme.id, mode])))(
-    '%s / %s scroll-button label meets 4.5:1 in normal and new-message states',
+    '%s / %s scroll-button symbols meet 4.5:1 in normal and new-message states',
     (theme, mode) => {
       const tokens = literals(theme, mode);
       const surface = theme === 'default' ? (mode === 'light' ? '#ffffff' : '#000000') : tokens['autumn-surface'];

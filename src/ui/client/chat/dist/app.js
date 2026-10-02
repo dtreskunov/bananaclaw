@@ -22250,10 +22250,10 @@ function canFork(t4) {
 function canForkMessage(m6) {
   return m6.direction === "out" && !!m6.id && canFork(activeThread());
 }
-function ForkButton({ m: m6 }) {
+function ForkButton({ m: m6, isLatest }) {
   const [busy, setBusy] = h2(false);
   const t4 = activeThread();
-  if (!canForkMessage(m6)) return null;
+  if (isLatest || !canForkMessage(m6)) return null;
   const anchorId = m6.id;
   const onFork = async () => {
     if (busy) return;
@@ -22536,7 +22536,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: m6.statsTurn }) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
             /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
-            /* @__PURE__ */ u4(ForkButton, { m: m6 }),
+            /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }),
             /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current })
           ] })
         ] }) : null

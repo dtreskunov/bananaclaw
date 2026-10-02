@@ -2135,6 +2135,7 @@ nav.tab-bar-strip.group-strip {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  flex: none;
 }
 @media (hover: hover) and (pointer: fine) {
   .chat-main .msg .msg-inline-actions {
@@ -2271,7 +2272,12 @@ nav.tab-bar-strip.group-strip {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.chat-main .meta > .ts {
+  flex: none;
+  white-space: nowrap;
 }
 .chat-main .msg .delivery-origin {
   font-style: italic;
@@ -2323,6 +2329,7 @@ nav.tab-bar-strip.group-strip {
 .chat-main .usage-wrap {
   position: relative;
   display: inline-flex;
+  min-width: 0;
 }
 .chat-main .usage {
   appearance: none;
@@ -2335,6 +2342,10 @@ nav.tab-bar-strip.group-strip {
   font: inherit;
   line-height: inherit;
   text-align: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-main .usage:hover {
   opacity: 1;

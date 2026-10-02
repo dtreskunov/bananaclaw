@@ -553,10 +553,10 @@ function canForkMessage(m: ChatMessage): boolean {
   return m.direction === 'out' && !!m.id && canFork(activeThread());
 }
 
-function ForkButton({ m }: { m: ChatMessage }) {
+function ForkButton({ m, isLatest }: { m: ChatMessage; isLatest: boolean }) {
   const [busy, setBusy] = useState(false);
   const t = activeThread();
-  if (!canForkMessage(m)) return null;
+  if (isLatest || !canForkMessage(m)) return null;
   const anchorId = m.id!;
   const onFork = async (): Promise<void> => {
     if (busy) return;
@@ -864,7 +864,7 @@ function Message(
         {m.direction === 'out' && m.statsTurn ? <ReplyTurnStats turn={m.statsTurn} /> : null}
         <span class="msg-inline-actions">
           <EditMessageButton m={m} />
-          <ForkButton m={m} />
+          <ForkButton m={m} isLatest={isLatest} />
           <CopyTranscriptButton getContent={() => mdRef.current} />
         </span>
       </div> : null}
