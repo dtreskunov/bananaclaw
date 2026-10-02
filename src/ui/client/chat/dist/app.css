@@ -1931,7 +1931,8 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
   min-height: 0;
   position: relative;
-  --chat-max: 760px;
+  --chat-max: 960px;
+  --chat-gutter: max(16px, calc((100% - var(--chat-max)) / 2));
 }
 .chat-main .log,
 .chat-main .status,
@@ -1939,11 +1940,9 @@ nav.tab-bar-strip.group-strip {
 .chat-main .pending,
 .chat-main .approvals-banner,
 .chat-main .readonly-banner,
-.chat-main .chat-subnotice {
-  padding-inline: max(16px, calc((100% - var(--chat-max)) / 2));
-}
+.chat-main .chat-subnotice,
 .chat-main form {
-  padding-inline: max(12px, calc((100% - var(--chat-max)) / 2));
+  padding-inline: var(--chat-gutter);
 }
 .chat-main .log-viewport {
   min-width: 0;
@@ -1966,7 +1965,7 @@ nav.tab-bar-strip.group-strip {
 .chat-main .scroll-jump {
   position: absolute;
   z-index: 2;
-  right: max(16px, calc((100% - var(--chat-max)) / 2));
+  right: var(--chat-gutter);
   width: var(--rail-control-height);
   height: var(--rail-control-height);
   padding: 0;
@@ -2044,7 +2043,7 @@ nav.tab-bar-strip.group-strip {
   position: relative;
   padding: 6px 10px;
   border-radius: var(--radius-lg);
-  max-width: 78%;
+  max-width: 90%;
   white-space: pre-wrap;
   word-break: break-word;
   font-size: var(--font-base);
@@ -3133,10 +3132,10 @@ nav.tab-bar-strip.group-strip {
     height: 100%;
   }
   .chat-main .msg {
-    max-width: 90%;
     font-size: var(--font-lg);
   }
   .chat-main form {
+    padding-inline: 12px;
     padding-block: 8px calc(8px + env(safe-area-inset-bottom));
     gap: 8px;
     align-items: flex-end;

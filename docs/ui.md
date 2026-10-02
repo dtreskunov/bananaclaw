@@ -116,6 +116,14 @@ Rebuild browser assets with `pnpm --dir src/ui/client/chat run build` after
 editing theme definitions or appearance logic; the watch script watches both
 the app and the bootstrap.
 
+#### Conversation layout
+
+Normal message bubbles use at most 90% of the conversation column. On desktop,
+the column and composer share a 960 px maximum and the same centered gutters,
+defined once by `--chat-max` / `--chat-gutter` in
+[`ChatMain.css`](../src/ui/client/chat/src/components/ChatMain.css). Mobile keeps
+its existing 90% bubbles and 12 px composer gutters.
+
 #### Access and file browsing
 
 **Access model.** A user sees an agent group if either:

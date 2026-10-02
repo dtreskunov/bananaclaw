@@ -37,7 +37,8 @@
      next to the FILES pane). Inner rows constrain their own content
      to --chat-max via padding-inline so the readable column stays
      centered. */
-  --chat-max: 760px;
+  --chat-max: 960px;
+  --chat-gutter: max(16px, calc((100% - var(--chat-max)) / 2));
 }
 .chat-main .log,
 .chat-main .status,
@@ -45,11 +46,9 @@
 .chat-main .pending,
 .chat-main .approvals-banner,
 .chat-main .readonly-banner,
-.chat-main .chat-subnotice {
-  padding-inline: max(16px, calc((100% - var(--chat-max)) / 2));
-}
+.chat-main .chat-subnotice,
 .chat-main form {
-  padding-inline: max(12px, calc((100% - var(--chat-max)) / 2));
+  padding-inline: var(--chat-gutter);
 }
 .chat-main .log-viewport { min-width: 0; min-height: 0; position: relative; }
 .chat-main .log { width: 100%; height: 100%; overflow: auto; padding-block: 12px 0; display: flex; flex-direction: column; gap: 6px; }
@@ -59,7 +58,7 @@
 .chat-main .scroll-jump {
   position: absolute;
   z-index: 2;
-  right: max(16px, calc((100% - var(--chat-max)) / 2));
+  right: var(--chat-gutter);
   width: var(--rail-control-height);
   height: var(--rail-control-height);
   padding: 0;
@@ -115,7 +114,7 @@
    rail. */
 .chat-main .log .task-indicator.msg.event .event-meta { margin-left: 4px; }
 .chat-main .log .task-indicator.paused .event-icon { opacity: 0.55; }
-.chat-main .msg { position: relative; padding: 6px 10px; border-radius: var(--radius-lg); max-width: 78%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
+.chat-main .msg { position: relative; padding: 6px 10px; border-radius: var(--radius-lg); max-width: 90%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
 .chat-main .transcript-copy-content { min-width: 0; }
 .chat-main .msg.in { align-self: flex-end; background: var(--accent); }
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }
@@ -560,8 +559,9 @@
 
 @media (max-width: 720px) {
   .image-viewer-dialog { height: 100%; }
-  .chat-main .msg { max-width: 90%; font-size: var(--font-lg); }
+  .chat-main .msg { font-size: var(--font-lg); }
   .chat-main form {
+    padding-inline: 12px;
     padding-block: 8px calc(8px + env(safe-area-inset-bottom));
     gap: 8px;
     align-items: flex-end;

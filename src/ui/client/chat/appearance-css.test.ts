@@ -81,6 +81,22 @@ describe('theme CSS contract', () => {
     );
   });
 
+  it('shares a 960 px column and desktop gutters between messages and composer, with 90% bubbles', () => {
+    const css = read('./components/ChatMain.css');
+    const column = css.match(/\.chat-main \{([^}]+)\}/)?.[1];
+    expect(column).toContain('--chat-max: 960px');
+    expect(column).toContain('--chat-gutter: max(16px, calc((100% - var(--chat-max)) / 2))');
+    const rows = css.match(/\.chat-main \.log,\s*([^{}]+)\{([^}]+)\}/);
+    expect(rows?.[1]).toContain('.chat-main form');
+    expect(rows?.[2]).toContain('padding-inline: var(--chat-gutter)');
+    const bubble = css.match(/\.chat-main \.msg \{([^}]+)\}/)?.[1];
+    expect(bubble).toContain('max-width: 90%');
+    const mobileComposer = css.match(/@media \(max-width: 720px\) \{[\s\S]*?\.chat-main form \{([^}]+)\}/)?.[1];
+    expect(mobileComposer).toContain('padding-inline: 12px');
+    expect(css.match(/--chat-max:/g)).toHaveLength(1);
+    expect(css.match(/max\(16px, calc\(\(100% - var\(--chat-max\)\)/g)).toHaveLength(1);
+  });
+
   it('keeps message metadata controls on one row and truncates usage details', () => {
     const css = read('./components/ChatMain.css');
     const meta = css.match(/\.chat-main \.msg \.meta, \.chat-main \.typing \.meta \{([^}]+)\}/)?.[1];
