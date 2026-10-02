@@ -56,13 +56,13 @@
 /* A flex item keeps trailing space in Chromium's scrollable overflow; with the
   preceding flex gap this leaves 12px between the last bubble and composer. */
 .chat-main .log::after { content: ''; flex: 0 0 6px; }
-.chat-main .scroll-to-bottom {
+.chat-main .scroll-jump {
   position: absolute;
   z-index: 2;
   right: max(16px, calc((100% - var(--chat-max)) / 2));
-  bottom: 10px;
-  height: var(--control-action-size);
-  padding: 0 10px;
+  width: var(--rail-control-height);
+  height: var(--rail-control-height);
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -77,16 +77,38 @@
   font-weight: 400;
   line-height: 1;
   white-space: nowrap;
-  opacity: 1;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.5s, visibility 0s linear 0.5s, background 0.15s, color 0.15s;
 }
-.chat-main .scroll-to-bottom[hidden] { display: none; }
-.chat-main .scroll-to-bottom:hover { color: var(--surface-fg); }
-.chat-main .scroll-to-bottom-arrow { font-size: var(--accent-icon-font-size); line-height: 1; }
+.chat-main .scroll-jump[data-visible="true"] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.5s, background 0.15s, color 0.15s;
+}
+.chat-main .scroll-jump[data-instant-hide="true"] { transition: none; }
+.chat-main .scroll-jump:hover { color: var(--surface-fg); }
+.chat-main .scroll-to-top { top: 10px; }
+.chat-main .scroll-to-bottom { bottom: 10px; }
+.chat-main .scroll-jump-arrow {
+  width: var(--accent-icon-font-size);
+  height: var(--accent-icon-font-size);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .chat-main .scroll-to-bottom.new-message,
 .chat-main .scroll-to-bottom.new-message:hover {
   background: var(--primary);
   color: var(--primary-fg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-main .scroll-jump,
+  .chat-main .scroll-jump[data-visible="true"] { transition: none; }
 }
 /* Persistent scheduled-task pill (same style as the task-run bubble), rendered
    as the last entry in the log so tasks are discoverable without expanding the

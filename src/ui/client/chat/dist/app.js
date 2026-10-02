@@ -21846,6 +21846,161 @@ function CopyTranscriptButton({ getContent }) {
   );
 }
 
+// src/components/ScrollNavigationButtons.tsx
+function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onBottom }) {
+  return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "scroll-jump scroll-to-top",
+        "data-instant-hide": direction === "down",
+        "data-visible": direction === "up",
+        "aria-hidden": direction !== "up",
+        disabled: direction !== "up",
+        title: "Scroll to top",
+        "aria-label": "Scroll to top",
+        onClick: onTop,
+        children: /* @__PURE__ */ u4("svg", { class: "scroll-jump-arrow", viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false", children: [
+          /* @__PURE__ */ u4("path", { d: "M5 4h14" }),
+          /* @__PURE__ */ u4("path", { d: "M12 20V8m-5 5 5-5 5 5" })
+        ] })
+      }
+    ),
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "scroll-jump scroll-to-bottom" + (newMessageBelow ? " new-message" : ""),
+        "data-instant-hide": direction === "up",
+        "data-visible": direction === "down",
+        "aria-hidden": direction !== "down",
+        disabled: direction !== "down",
+        title: newMessageBelow ? "New message below" : "Scroll to bottom",
+        "aria-label": newMessageBelow ? "New message below; scroll to bottom" : "Scroll to bottom",
+        onClick: onBottom,
+        children: /* @__PURE__ */ u4("svg", { class: "scroll-jump-arrow", viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false", children: [
+          /* @__PURE__ */ u4("path", { d: "M5 20h14" }),
+          /* @__PURE__ */ u4("path", { d: "M12 4v12m-5-5 5 5 5-5" })
+        ] })
+      }
+    )
+  ] });
+}
+
+// src/scroll-navigation.ts
+var SCROLL_NAVIGATION_IDLE_MS = 3e3;
+function attachScrollNavigation(viewport, onDirection, onUserInput) {
+  let direction = null;
+  let timer2 = null;
+  let inputUntil = null;
+  const pointers = /* @__PURE__ */ new Set();
+  const snapshot = () => {
+    const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    return {
+      top: Math.max(0, Math.min(maximum, viewport.scrollTop)),
+      maximum,
+      height: viewport.scrollHeight,
+      viewportHeight: viewport.clientHeight
+    };
+  };
+  let previous = snapshot();
+  function publish(next) {
+    if (direction === next) return;
+    direction = next;
+    onDirection(next);
+  }
+  function clearTimer() {
+    if (timer2 !== null) clearTimeout(timer2);
+    timer2 = null;
+  }
+  function hide() {
+    clearTimer();
+    publish(null);
+  }
+  function arm() {
+    onUserInput?.();
+    inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
+    previous = snapshot();
+  }
+  function available(next, position) {
+    return position.maximum > 1 && (next === "up" ? position.top > 1 : position.top < position.maximum - 1);
+  }
+  function onScroll() {
+    const position = snapshot();
+    const delta = position.top - previous.top;
+    const resized = position.height !== previous.height || position.viewportHeight !== previous.viewportHeight;
+    previous = position;
+    if (direction && !available(direction, position)) hide();
+    if (resized || delta === 0 || !pointers.size && (inputUntil === null || Date.now() > inputUntil)) return;
+    inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
+    const next = delta < 0 ? "up" : "down";
+    if (!available(next, position)) {
+      hide();
+      return;
+    }
+    publish(next);
+    clearTimer();
+    timer2 = setTimeout(() => {
+      timer2 = null;
+      if (inputUntil !== null && Date.now() >= inputUntil) inputUntil = null;
+      publish(null);
+    }, SCROLL_NAVIGATION_IDLE_MS);
+  }
+  function onWheel(event) {
+    if (event instanceof WheelEvent && !event.defaultPrevented && !event.ctrlKey && event.deltaY !== 0) arm();
+  }
+  function onTouchMove(event) {
+    if (!event.defaultPrevented) arm();
+  }
+  function onPointerDown(event) {
+    if (!(event instanceof PointerEvent) || event.defaultPrevented || event.target !== viewport || event.button !== 0 || !["mouse", "pen"].includes(event.pointerType))
+      return;
+    pointers.add(event.pointerId);
+    arm();
+  }
+  function onPointerEnd(event) {
+    if (event instanceof PointerEvent) pointers.delete(event.pointerId);
+  }
+  function onKeyDown(event) {
+    if (!(event instanceof KeyboardEvent) || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey)
+      return;
+    if (!["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) return;
+    if (event.target instanceof Element && event.target.closest('input, textarea, select, button, a[href], [contenteditable]:not([contenteditable="false"])'))
+      return;
+    arm();
+  }
+  function onScrollEnd() {
+    inputUntil = null;
+  }
+  const listeners = [
+    ["scroll", onScroll],
+    ["scrollend", onScrollEnd],
+    ["wheel", onWheel],
+    ["touchmove", onTouchMove],
+    ["pointerdown", onPointerDown],
+    ["keydown", onKeyDown]
+  ];
+  for (const [name, listener] of listeners) viewport.addEventListener(name, listener, { passive: true });
+  viewport.ownerDocument.addEventListener("pointerup", onPointerEnd);
+  viewport.ownerDocument.addEventListener("pointercancel", onPointerEnd);
+  onDirection(null);
+  return {
+    reset() {
+      inputUntil = null;
+      pointers.clear();
+      previous = snapshot();
+      hide();
+    },
+    dispose() {
+      clearTimer();
+      for (const [name, listener] of listeners) viewport.removeEventListener(name, listener);
+      viewport.ownerDocument.removeEventListener("pointerup", onPointerEnd);
+      viewport.ownerDocument.removeEventListener("pointercancel", onPointerEnd);
+    }
+  };
+}
+
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
 function imageFileName(src) {
@@ -22862,8 +23017,8 @@ function MessageLog() {
   const prevMsgCountRef = A2(0);
   const prevLayoutRef = A2("");
   const prevScrollTickRef = A2(scrollToBottomTick.value);
-  const [scrollable, setScrollable] = h2(false);
-  const [atBottom, setAtBottom] = h2(true);
+  const navigationRef = A2(null);
+  const [scrollDirection, setScrollDirection] = h2(null);
   const [newMessageBelow, setNewMessageBelow] = h2(false);
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
@@ -22875,30 +23030,52 @@ function MessageLog() {
   const activeThreadId = threadId.value;
   const atBottomRef = A2(true);
   const followingBottomRef = A2(true);
+  const leavingBottomRef = A2(false);
   const measureScroll = () => {
     const el = ref.current;
     if (!el) return true;
-    const nextScrollable = el.scrollHeight - el.clientHeight > 1;
-    const nextAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (!nearBottom || el.scrollTop <= 1) leavingBottomRef.current = false;
+    const nextAtBottom = nearBottom && !leavingBottomRef.current;
     atBottomRef.current = nextAtBottom;
-    setScrollable(nextScrollable);
-    setAtBottom(nextAtBottom);
     if (nextAtBottom) setNewMessageBelow(false);
     return nextAtBottom;
   };
   const scrollToBottom = (smooth = false) => {
     const el = ref.current;
     if (!el) return;
+    leavingBottomRef.current = false;
+    navigationRef.current?.reset();
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     else el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
     followingBottomRef.current = true;
-    setAtBottom(true);
     setNewMessageBelow(false);
+  };
+  const scrollToTop = () => {
+    const el = ref.current;
+    if (!el) return;
+    navigationRef.current?.reset();
+    leavingBottomRef.current = true;
+    atBottomRef.current = false;
+    followingBottomRef.current = false;
+    el.scrollTo({ top: 0, behavior: "smooth" });
   };
   const onLogScroll = () => {
     followingBottomRef.current = measureScroll();
   };
+  _2(() => {
+    const el = ref.current;
+    if (!el) return void 0;
+    const navigation = attachScrollNavigation(el, setScrollDirection, () => {
+      leavingBottomRef.current = false;
+    });
+    navigationRef.current = navigation;
+    return () => {
+      navigation.dispose();
+      navigationRef.current = null;
+    };
+  }, [activeThreadId]);
   y2(() => {
     const el = ref.current;
     const onResize = () => {
@@ -22927,7 +23104,7 @@ function MessageLog() {
     prevLayoutRef.current = "";
     atBottomRef.current = true;
     followingBottomRef.current = true;
-    setAtBottom(true);
+    leavingBottomRef.current = false;
     setNewMessageBelow(false);
   }, [activeThreadId]);
   y2(() => {
@@ -22945,6 +23122,7 @@ function MessageLog() {
       const el = ref.current.querySelector(`[data-msg-id="${CSS.escape(highlight)}"]`);
       if (el && (appliedHighlightRef.current !== highlight || prevLayoutRef.current !== layoutKey)) {
         appliedHighlightRef.current = highlight;
+        navigationRef.current?.reset();
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         el.classList.add("highlight-pulse");
         setTimeout(() => el.classList.remove("highlight-pulse"), 2e3);
@@ -23021,18 +23199,12 @@ function MessageLog() {
       /* @__PURE__ */ u4(TaskIndicator, {})
     ] }),
     /* @__PURE__ */ u4(
-      "button",
+      ScrollNavigationButtons,
       {
-        type: "button",
-        class: "scroll-to-bottom" + (newMessageBelow ? " new-message" : ""),
-        hidden: !scrollable || atBottom,
-        title: newMessageBelow ? "New message below" : "Scroll to bottom",
-        "aria-label": newMessageBelow ? "New message below; scroll to bottom" : "Scroll to bottom",
-        onClick: () => scrollToBottom(true),
-        children: [
-          /* @__PURE__ */ u4("span", { children: "Scroll to bottom" }),
-          /* @__PURE__ */ u4("span", { class: "scroll-to-bottom-arrow", "aria-hidden": "true", children: "\u2193" })
-        ]
+        direction: scrollDirection,
+        newMessageBelow,
+        onTop: scrollToTop,
+        onBottom: () => scrollToBottom(true)
       }
     )
   ] });

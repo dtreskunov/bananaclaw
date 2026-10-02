@@ -91,9 +91,22 @@ surfaces, text, borders, solid actions and their foregrounds, selection
 washes, focus rings, status colors, shadows and syntax highlighting. Keep
 responsive layout and touch-target sizes shared. Check text contrast at 4.5:1
 and essential control boundaries/focus indicators at 3:1.
-The floating **Scroll to bottom** button uses surface text normally and the
-paired `--primary` / `--primary-fg` colors when new messages arrive, including
-on hover. Keep this pair readable in both modes; do not use muted text on the
+The floating scroll controls are icon-only **Up** / **Down** arrows with an
+end bar marking the top/bottom destination and
+accessible labels. They appear only after the user scrolls in the corresponding
+direction, and jump to the beginning/end of the conversation. Fade-in and
+fade-out each take 500 ms (instantly with reduced motion). Reversing direction
+immediately hides the previous arrow and fades in the matching one; reaching
+the destination or 3 seconds without scrolling starts fade-out.
+Fading controls immediately stop accepting input and leave the accessibility tree.
+Automatic scrolling, streaming/layout changes,
+search jumps and thread changes do not reveal arrows. The controls support
+touch, mouse wheel, scrollbar dragging and keyboard scrolling.
+Jumping up pauses bottom-follow, including the first animation frames; new
+user input or returning to the bottom restores normal following.
+Both arrows use surface text normally. The Down arrow uses the paired
+`--primary` / `--primary-fg` colors when new messages arrive, including on
+hover. Keep this pair readable in both modes; do not use muted text on the
 filled button.
 
 The blocking `dist/appearance.js` script runs before the stylesheet in the

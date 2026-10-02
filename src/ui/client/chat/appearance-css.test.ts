@@ -61,6 +61,26 @@ describe('theme CSS contract', () => {
     expect(highlighted).toContain('color: var(--primary-fg)');
   });
 
+  it('fades scroll controls in and out over 500 ms while preserving reversal and reduced-motion hiding', () => {
+    const css = read('./components/ChatMain.css');
+    const resting = css.match(/\.chat-main \.scroll-jump \{([^}]+)\}/)?.[1];
+    expect(resting).toContain('opacity: 0');
+    expect(resting).toContain('visibility: hidden');
+    expect(resting).toContain('pointer-events: none');
+    expect(resting).toContain('opacity 0.5s, visibility 0s linear 0.5s');
+    const active = css.match(/\.chat-main \.scroll-jump\[data-visible="true"\] \{([^}]+)\}/)?.[1];
+    expect(active).toContain('opacity: 1');
+    expect(active).toContain('visibility: visible');
+    expect(active).toContain('pointer-events: auto');
+    expect(active).toContain('transition: opacity 0.5s');
+    expect(active).not.toContain('visibility 0s linear 0.5s');
+    const reversed = css.match(/\.chat-main \.scroll-jump\[data-instant-hide="true"\] \{([^}]+)\}/)?.[1];
+    expect(reversed).toContain('transition: none');
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.chat-main \.scroll-jump,\s*\.chat-main \.scroll-jump\[data-visible="true"\] \{ transition: none; \}/,
+    );
+  });
+
   it('keeps message metadata controls on one row and truncates usage details', () => {
     const css = read('./components/ChatMain.css');
     const meta = css.match(/\.chat-main \.msg \.meta, \.chat-main \.typing \.meta \{([^}]+)\}/)?.[1];

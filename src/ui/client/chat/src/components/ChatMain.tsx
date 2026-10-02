@@ -3,7 +3,7 @@
 import './ChatMain.css';
 import { signal } from '@preact/signals';
 import type { JSX } from 'preact';
-import { useRef, useEffect, useState } from 'preact/hooks';
+import { useRef, useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import {
   chatMessages, chatStatus, chatLoading, chatReady, threadId, channelType, canSend, pending,
   threads, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
@@ -44,6 +44,8 @@ import { MobileDialog } from './MobileDialog';
 import { ZoomableImage } from './ZoomableImage';
 import { BranchIcon, EditIcon } from './ActionIcons';
 import { CopyTranscriptButton } from './CopyTranscriptButton';
+import { ScrollNavigationButtons } from './ScrollNavigationButtons';
+import { attachScrollNavigation, type ScrollDirection, type ScrollNavigation } from '../scroll-navigation';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
@@ -1237,8 +1239,8 @@ function MessageLog() {
   const prevMsgCountRef = useRef<number>(0);
   const prevLayoutRef = useRef('');
   const prevScrollTickRef = useRef<number>(scrollToBottomTick.value);
-  const [scrollable, setScrollable] = useState(false);
-  const [atBottom, setAtBottom] = useState(true);
+  const navigationRef = useRef<ScrollNavigation | null>(null);
+  const [scrollDirection, setScrollDirection] = useState<ScrollDirection | null>(null);
   const [newMessageBelow, setNewMessageBelow] = useState(false);
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
@@ -1250,15 +1252,15 @@ function MessageLog() {
   const activeThreadId = threadId.value;
   const atBottomRef = useRef<boolean>(true);
   const followingBottomRef = useRef<boolean>(true);
+  const leavingBottomRef = useRef(false);
 
   const measureScroll = (): boolean => {
     const el = ref.current;
     if (!el) return true;
-    const nextScrollable = el.scrollHeight - el.clientHeight > 1;
-    const nextAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (!nearBottom || el.scrollTop <= 1) leavingBottomRef.current = false;
+    const nextAtBottom = nearBottom && !leavingBottomRef.current;
     atBottomRef.current = nextAtBottom;
-    setScrollable(nextScrollable);
-    setAtBottom(nextAtBottom);
     if (nextAtBottom) setNewMessageBelow(false);
     return nextAtBottom;
   };
@@ -1266,12 +1268,24 @@ function MessageLog() {
   const scrollToBottom = (smooth = false) => {
     const el = ref.current;
     if (!el) return;
+    leavingBottomRef.current = false;
+    navigationRef.current?.reset();
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     else el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
     followingBottomRef.current = true;
-    setAtBottom(true);
     setNewMessageBelow(false);
+  };
+
+  const scrollToTop = () => {
+    const el = ref.current;
+    if (!el) return;
+    navigationRef.current?.reset();
+    // The first smooth-scroll frames are still inside the bottom-follow zone.
+    leavingBottomRef.current = true;
+    atBottomRef.current = false;
+    followingBottomRef.current = false;
+    el.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Whether the user is pinned to the bottom of the log. Updated on every
@@ -1279,6 +1293,19 @@ function MessageLog() {
   // up to read history". Programmatic scrollToBottom also fires scroll, which
   // keeps this true while we tail the trace.
   const onLogScroll = () => { followingBottomRef.current = measureScroll(); };
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const navigation = attachScrollNavigation(el, setScrollDirection, () => {
+      leavingBottomRef.current = false;
+    });
+    navigationRef.current = navigation;
+    return () => {
+      navigation.dispose();
+      navigationRef.current = null;
+    };
+  }, [activeThreadId]);
 
   useEffect(() => {
     const el = ref.current;
@@ -1311,7 +1338,7 @@ function MessageLog() {
     prevLayoutRef.current = '';
     atBottomRef.current = true;
     followingBottomRef.current = true;
-    setAtBottom(true);
+    leavingBottomRef.current = false;
     setNewMessageBelow(false);
   }, [activeThreadId]);
 
@@ -1332,6 +1359,7 @@ function MessageLog() {
       const el = ref.current.querySelector(`[data-msg-id="${CSS.escape(highlight)}"]`);
       if (el && (appliedHighlightRef.current !== highlight || prevLayoutRef.current !== layoutKey)) {
         appliedHighlightRef.current = highlight;
+        navigationRef.current?.reset();
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('highlight-pulse');
         setTimeout(() => el.classList.remove('highlight-pulse'), 2000);
@@ -1423,17 +1451,12 @@ function MessageLog() {
         {!chatLoading.value && queued.map((message) => <Message key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
         <TaskIndicator />
       </div>
-      <button
-        type="button"
-        class={'scroll-to-bottom' + (newMessageBelow ? ' new-message' : '')}
-        hidden={!scrollable || atBottom}
-        title={newMessageBelow ? 'New message below' : 'Scroll to bottom'}
-        aria-label={newMessageBelow ? 'New message below; scroll to bottom' : 'Scroll to bottom'}
-        onClick={() => scrollToBottom(true)}
-      >
-        <span>Scroll to bottom</span>
-        <span class="scroll-to-bottom-arrow" aria-hidden="true">{'\u2193'}</span>
-      </button>
+      <ScrollNavigationButtons
+        direction={scrollDirection}
+        newMessageBelow={newMessageBelow}
+        onTop={scrollToTop}
+        onBottom={() => scrollToBottom(true)}
+      />
     </div>
   );
 }

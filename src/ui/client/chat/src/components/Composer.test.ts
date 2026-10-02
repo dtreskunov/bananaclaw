@@ -28,7 +28,13 @@ import { testSnapshot } from '../conversation-test-fixtures';
 // controls without adding a browser-DOM dependency to the repository.
 const hooks = vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
-  return { slots: [] as any[], cursor: 0, effects: [] as (() => void)[] };
+  return {
+    slots: [] as any[],
+    cursor: 0,
+    effects: [] as (() => void | (() => void))[],
+    capturePassive: false,
+    passiveEffects: [] as (() => void | (() => void))[],
+  };
 });
 vi.mock('preact/hooks', () => ({
   useRef: (initial: unknown) => {
@@ -45,8 +51,10 @@ vi.mock('preact/hooks', () => ({
       },
     ];
   },
-  useEffect: () => {},
-  useLayoutEffect: (effect: () => void, deps: unknown[]) => {
+  useEffect: (effect: () => void | (() => void)) => {
+    if (hooks.capturePassive) hooks.passiveEffects.push(effect);
+  },
+  useLayoutEffect: (effect: () => void | (() => void), deps: unknown[]) => {
     const index = hooks.cursor++;
     if (!hooks.slots[index] || deps.some((value, i) => value !== hooks.slots[index][i])) {
       hooks.slots[index] = deps;
@@ -116,6 +124,8 @@ async function save() {
 function resetMount(text = '') {
   hooks.slots = [];
   hooks.effects = [];
+  hooks.capturePassive = false;
+  hooks.passiveEffects = [];
   input = { value: text, style: {}, scrollHeight: 32, focus: vi.fn() };
 }
 
@@ -452,4 +462,85 @@ describe('main composer pending edits', () => {
     hooks.cursor = 0;
     expect(forkButtons[1].type(forkButtons[1].props)).toBeNull();
   });
+
+  it.each(['reaching the top', 'new user scrolling', 'the Down button'])(
+    'protects Up jumps from bottom-follow and resumes normal following after %s',
+    (resume) => {
+      const savedGlobals = {
+        window,
+        requestAnimationFrame: globalThis.requestAnimationFrame,
+        WheelEvent: globalThis.WheelEvent,
+      };
+      const fakeWindow = new EventTarget();
+      class Viewport extends EventTarget {
+        scrollHeight = 2000;
+        clientHeight = 500;
+        ownerDocument = new EventTarget();
+        top = 1470;
+        get scrollTop() {
+          return this.top;
+        }
+        set scrollTop(value: number) {
+          this.top = Math.max(0, Math.min(1500, value));
+        }
+        scrollTo = vi.fn<(options: ScrollToOptions) => void>();
+        querySelectorAll() {
+          return [];
+        }
+      }
+      class Wheel extends Event {
+        deltaY = 100;
+        ctrlKey = false;
+        constructor() {
+          super('wheel');
+        }
+      }
+      const el = new Viewport();
+      const disposers: (() => void)[] = [];
+      try {
+        vi.stubGlobal('window', fakeWindow);
+        vi.stubGlobal('requestAnimationFrame', () => 0);
+        vi.stubGlobal('WheelEvent', Wheel);
+        hooks.cursor = 0;
+        const chat = ChatMain();
+        const log = findComponent(chat, 'MessageLog');
+        hooks.slots = [];
+        hooks.effects = [];
+        hooks.cursor = 0;
+        hooks.capturePassive = true;
+        const view = log.type(log.props);
+        const logNode = view.props.children[0];
+        logNode.ref.current = el;
+        for (const effect of [...hooks.effects.splice(0), ...hooks.passiveEffects.splice(0)]) {
+          const dispose = effect();
+          if (dispose) disposers.push(dispose);
+        }
+        el.scrollTop = 1470;
+        logNode.props.onScroll();
+        const controls = findComponent(view, 'ScrollNavigationButtons');
+        controls.props.onTop();
+        expect(el.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
+        el.scrollTop = 1465;
+        logNode.props.onScroll();
+        fakeWindow.dispatchEvent(new Event('resize'));
+        expect(el.scrollTop).toBe(1465);
+        if (resume === 'reaching the top') {
+          el.scrollTop = 0;
+          logNode.props.onScroll();
+        } else if (resume === 'new user scrolling') {
+          el.dispatchEvent(new Wheel());
+        } else {
+          controls.props.onBottom();
+        }
+        el.scrollTop = 1490;
+        logNode.props.onScroll();
+        fakeWindow.dispatchEvent(new Event('resize'));
+        expect(el.scrollTop).toBe(1500);
+      } finally {
+        disposers.forEach((dispose) => dispose());
+        hooks.capturePassive = false;
+        for (const [key, value] of Object.entries(savedGlobals)) vi.stubGlobal(key, value);
+      }
+    },
+  );
 });
