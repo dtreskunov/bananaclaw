@@ -139,6 +139,9 @@ describe('theme CSS contract', () => {
     for (const theme of THEMES) {
       expect(read(`./styles/themes/${theme.id}.css`)).toContain('--table-header-bg:');
     }
+    expect(read('./styles/themes/default.css')).toContain(
+      '--table-header-bg: color-mix(in srgb, var(--surface-fg) 16%, var(--surface));',
+    );
   });
 
   it('keeps relative timestamps intact when metadata runs out of space', () => {

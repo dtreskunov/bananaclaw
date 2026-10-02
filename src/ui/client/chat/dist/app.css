@@ -35,7 +35,6 @@
   --install-hint-border: #374151;
   --install-hint-muted: #9ca3af;
   --install-hint-shadow: rgba(0, 0, 0, 0.3);
-  --table-header-bg: color-mix(in srgb, var(--surface) 88%, #000);
   --danger: #c0392b;
   --danger-fill: #d93b3b;
   --danger-on-fill: #fff;
@@ -99,6 +98,7 @@
   color-scheme: light;
   --surface: Canvas;
   --header-bg: var(--wash-strong);
+  --table-header-bg: color-mix(in srgb, var(--surface-fg) 16%, var(--surface));
   --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 70%, var(--surface));
   --syntax-keyword: #a26aff;
   --syntax-string: #c8923a;
@@ -110,6 +110,7 @@
   color-scheme: dark;
   --surface: #000;
   --header-bg: #151515;
+  --table-header-bg: color-mix(in srgb, var(--surface-fg) 6%, var(--surface));
   --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 35%, var(--surface));
   --syntax-keyword: #c792ea;
   --syntax-string: #ecc48d;
@@ -122,6 +123,7 @@
     color-scheme: dark;
     --surface: #000;
     --header-bg: #151515;
+    --table-header-bg: color-mix(in srgb, var(--surface-fg) 6%, var(--surface));
     --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 35%, var(--surface));
     --syntax-keyword: #c792ea;
     --syntax-string: #ecc48d;
@@ -166,7 +168,6 @@
   --install-hint-border: var(--border-control);
   --install-hint-muted: var(--muted);
   --install-hint-shadow: var(--shadow-color);
-  --table-header-bg: color-mix(in srgb, var(--surface) 88%, #000);
   --danger: var(--error);
   --danger-fill: var(--error);
   --danger-on-fill: var(--error-on-fill);
@@ -224,6 +225,7 @@
   --autumn-surface: #fff8ef;
   --autumn-raised: #fffcf7;
   --autumn-text: #35251c;
+  --table-header-bg: color-mix(in srgb, var(--surface-fg) 15%, var(--surface));
   --muted: #755b4b;
   --primary: #a3421b;
   --primary-fg: #ffffff;
@@ -249,6 +251,7 @@
   --autumn-surface: #1c1713;
   --autumn-raised: #28201a;
   --autumn-text: #f5e9d8;
+  --table-header-bg: color-mix(in srgb, var(--surface-fg) 7%, var(--surface));
   --muted: #c3aa91;
   --primary: #e9a16b;
   --primary-fg: #24170f;
