@@ -98,6 +98,7 @@ function focusComposerSoon(
     mobile?: boolean;
     draft?: string;
     expected?: { groupId: string; threadId: string };
+    scrollToBottom?: boolean;
   } = {},
 ): void {
   if (isMobile.value && !options.mobile) return;
@@ -118,6 +119,7 @@ function focusComposerSoon(
         draftApplied = true;
       }
       if (!el.disabled && el.offsetParent !== null) {
+        if (options.scrollToBottom) requestScrollToBottom();
         el.focus();
         return;
       }
@@ -125,6 +127,15 @@ function focusComposerSoon(
     if (++tries < 180) requestAnimationFrame(attempt);
   };
   requestAnimationFrame(attempt);
+}
+
+export function focusBranchComposerSoon(expected: { groupId: string; threadId: string }, draft?: string): void {
+  focusComposerSoon({
+    mobile: true,
+    scrollToBottom: true,
+    ...(draft !== undefined ? { draft } : {}),
+    expected,
+  });
 }
 
 /**
@@ -260,13 +271,7 @@ export async function forkThreadAt(
   await loadThreads(gid);
   const branch = threads.value.find((x) => x.threadId === created!.threadId) ?? null;
   await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
-  if (options.composerDraft !== undefined) {
-    focusComposerSoon({
-      mobile: true,
-      draft: options.composerDraft,
-      expected: { groupId: gid, threadId: created.threadId },
-    });
-  }
+  focusBranchComposerSoon({ groupId: gid, threadId: created.threadId }, options.composerDraft);
   return true;
 }
 
@@ -286,11 +291,7 @@ export async function editMessageInBranch(
   await openChat(gid, null, null);
   const targetThreadId = threadId.value;
   if (!targetThreadId || targetThreadId === thread.threadId) return false;
-  focusComposerSoon({
-    mobile: true,
-    draft,
-    expected: { groupId: gid, threadId: targetThreadId },
-  });
+  focusBranchComposerSoon({ groupId: gid, threadId: targetThreadId }, draft);
   return true;
 }
 

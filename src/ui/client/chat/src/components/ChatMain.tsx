@@ -37,6 +37,7 @@ import { turnRowView, type TurnRowView } from '../turn-row';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
+import { BRANCH_ACTION_EXPLANATION, editBranchActionExplanation } from '../transcript-action-copy';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { RelativeTime } from './RelativeTime';
@@ -576,13 +577,7 @@ function ForkButton({ m, isLatest }: { m: ChatMessage; isLatest: boolean }) {
     if (busy) return;
     const ok = await requestConfirm({
       title: 'Branch from here',
-      message:
-        'Start a new thread that continues from this message.\n\n' +
-        'The conversation up to here is copied into the branch. Anything after ' +
-        'it stays behind, and this thread is left untouched.\n\n' +
-        'Workspace files and the agent\u2019s memory are shared, not copied \u2014 work ' +
-        'done in one branch is visible from the other. Scheduled tasks stay with ' +
-        'this thread.',
+      message: BRANCH_ACTION_EXPLANATION,
       okLabel: 'Branch',
     });
     if (!ok) return;
@@ -613,6 +608,12 @@ function EditMessageButton({ m }: { m: ChatMessage }) {
   if (anchorId && (!canFork(thread) || !canSend.value)) return null;
   const onEdit = async (): Promise<void> => {
     if (busy) return;
+    const ok = await requestConfirm({
+      title: 'Edit in a new branch',
+      message: editBranchActionExplanation(!!anchorId),
+      okLabel: 'Start editing',
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await editMessageInBranch(thread, anchorId, m.text);
@@ -624,8 +625,8 @@ function EditMessageButton({ m }: { m: ChatMessage }) {
     <button
       type="button"
       class="msg-action-btn msg-edit-btn"
-      title="Edit this message in a new branch"
-      aria-label="Edit this message in a new branch"
+      title="Start a new branch and copy this message into the composer for editing"
+      aria-label="Start a new branch and copy this message into the composer for editing"
       disabled={busy}
       onClick={() => { onEdit().catch(console.error); }}
     ><EditIcon /></button>

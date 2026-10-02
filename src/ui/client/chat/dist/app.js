@@ -19058,6 +19058,7 @@ function focusComposerSoon(options = {}) {
         draftApplied = true;
       }
       if (!el.disabled && el.offsetParent !== null) {
+        if (options.scrollToBottom) requestScrollToBottom();
         el.focus();
         return;
       }
@@ -19065,6 +19066,14 @@ function focusComposerSoon(options = {}) {
     if (++tries < 180) requestAnimationFrame(attempt);
   };
   requestAnimationFrame(attempt);
+}
+function focusBranchComposerSoon(expected, draft) {
+  focusComposerSoon({
+    mobile: true,
+    scrollToBottom: true,
+    ...draft !== void 0 ? { draft } : {},
+    expected
+  });
 }
 function requestScrollToBottom() {
   scrollToBottomTick.value++;
@@ -19164,13 +19173,10 @@ async function forkThreadAt(thread, atMessageId, options = {}) {
   await loadThreads(gid);
   const branch = threads.value.find((x6) => x6.threadId === created.threadId) ?? null;
   await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
-  if (options.composerDraft !== void 0) {
-    focusComposerSoon({
-      mobile: true,
-      draft: options.composerDraft,
-      expected: { groupId: gid, threadId: created.threadId }
-    });
-  }
+  focusBranchComposerSoon(
+    { groupId: gid, threadId: created.threadId },
+    options.composerDraft
+  );
   return true;
 }
 async function editMessageInBranch(thread, previousMessageId, draft) {
@@ -19180,11 +19186,7 @@ async function editMessageInBranch(thread, previousMessageId, draft) {
   await openChat(gid, null, null);
   const targetThreadId = threadId.value;
   if (!targetThreadId || targetThreadId === thread.threadId) return false;
-  focusComposerSoon({
-    mobile: true,
-    draft,
-    expected: { groupId: gid, threadId: targetThreadId }
-  });
+  focusBranchComposerSoon({ groupId: gid, threadId: targetThreadId }, draft);
   return true;
 }
 function threadCtxOf(t4) {
@@ -21457,6 +21459,12 @@ function findEditBranchAnchorId(messages, targetMessageId) {
   return null;
 }
 
+// src/transcript-action-copy.ts
+var BRANCH_ACTION_EXPLANATION = "Start a new thread that continues from this message.\n\nThe conversation up to here is copied into the branch. Anything after it stays behind, and this thread is left untouched.\n\nWorkspace files and the agent\u2019s memory are shared, not copied \u2014 work done in one branch is visible from the other. Scheduled tasks stay with this thread.";
+function editBranchActionExplanation(hasAnchor) {
+  return hasAnchor ? "Start a new branch immediately before this message and copy its text into the composer for editing.\n\nNothing is sent until you review and send the edited text. The original thread and message stay unchanged. Workspace files and the agent\u2019s memory remain shared." : "This is the first conversational message, so there is no earlier point to branch from. A new blank web thread will open with this message copied into the composer.\n\nNothing is sent until you review and send the edited text. The original thread and message stay unchanged.";
+}
+
 // src/components/ComposerPlusMenu.tsx
 function ComposerPlusMenu({
   disabled,
@@ -22670,7 +22678,7 @@ function ForkButton({ m: m6, isLatest }) {
     if (busy) return;
     const ok = await requestConfirm({
       title: "Branch from here",
-      message: "Start a new thread that continues from this message.\n\nThe conversation up to here is copied into the branch. Anything after it stays behind, and this thread is left untouched.\n\nWorkspace files and the agent\u2019s memory are shared, not copied \u2014 work done in one branch is visible from the other. Scheduled tasks stay with this thread.",
+      message: BRANCH_ACTION_EXPLANATION,
       okLabel: "Branch"
     });
     if (!ok) return;
@@ -22702,6 +22710,12 @@ function EditMessageButton({ m: m6 }) {
   if (anchorId && (!canFork(thread) || !canSend.value)) return null;
   const onEdit = async () => {
     if (busy) return;
+    const ok = await requestConfirm({
+      title: "Edit in a new branch",
+      message: editBranchActionExplanation(!!anchorId),
+      okLabel: "Start editing"
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await editMessageInBranch(thread, anchorId, m6.text);
@@ -22714,8 +22728,8 @@ function EditMessageButton({ m: m6 }) {
     {
       type: "button",
       class: "msg-action-btn msg-edit-btn",
-      title: "Edit this message in a new branch",
-      "aria-label": "Edit this message in a new branch",
+      title: "Start a new branch and copy this message into the composer for editing",
+      "aria-label": "Start a new branch and copy this message into the composer for editing",
       disabled: busy,
       onClick: () => {
         onEdit().catch(console.error);

@@ -202,7 +202,10 @@ after the preceding conversational message so the original remains only in the
 source thread. Editing the first message starts a blank web thread instead.
 Historical attachments remain in the source thread and are not copied into the
 composer. Read-only channel threads offer Edit only for that first-message
-blank-thread case.
+blank-thread case. Branch and historical Edit show an explanation before making
+the copy. Opening a branch scrolls its inherited conversation to the end and
+focuses the composer; historical Edit also places the copied text there without
+sending it.
 
 Your own pending native web-chat messages instead offer **Edit**
 while the connected runner advertises input editing. This changes text in place,
