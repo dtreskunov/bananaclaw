@@ -335,6 +335,7 @@
   --text-block-gap: 4px;
   --paragraph-gap: 8px;
   --list-item-gap: 4px;
+  --ordered-list-padding: 32px;
   --code-padding: 8px;
   --thread-padding-block: 8px;
   --thread-padding-inline: 10px;
@@ -385,6 +386,7 @@
   --text-block-gap: 8px;
   --paragraph-gap: 12px;
   --list-item-gap: 6px;
+  --ordered-list-padding: 35px;
   --code-padding: 12px;
   --thread-padding-block: 12px;
   --thread-padding-inline: 12px;
@@ -2659,7 +2661,12 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg.markdown ul,
 .chat-main .msg.markdown ol {
   margin: var(--text-block-gap) 0;
+}
+.chat-main .msg.markdown ul {
   padding-left: 20px;
+}
+.chat-main .msg.markdown ol {
+  padding-left: var(--ordered-list-padding);
 }
 .chat-main .msg.markdown .transcript-copy-content li + li {
   margin-top: var(--list-item-gap);

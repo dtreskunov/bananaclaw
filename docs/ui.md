@@ -82,6 +82,9 @@ px, and paragraph spacing from 8 → 12 px, alongside roomier spacing in lists,
 menus, previews and settings. The selector includes a live sample message and
 thread row. Markdown list items are separated by 4 px in Compact and 6 px in
 Comfortable, without widening operational lists such as activity traces.
+Ordered lists reserve 32 px in Compact and 35 px in Comfortable so markers
+through at least three digits remain inside message bubbles; bullet lists keep
+their 20 px indentation.
 Density is independent of theme and mode, applies across the app, and does not
 restyle embedded websites, PDFs or media. Pane widths, conversation width limits
 and icons stay unchanged; existing touch targets never shrink and mobile text

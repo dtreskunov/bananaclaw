@@ -34,6 +34,7 @@ describe('text density CSS contract', () => {
       '--text-block-gap': '4px',
       '--paragraph-gap': '8px',
       '--list-item-gap': '4px',
+      '--ordered-list-padding': '32px',
       '--thread-padding-block': '8px',
       '--thread-padding-inline': '10px',
       '--file-padding-block': '4px',
@@ -61,6 +62,7 @@ describe('text density CSS contract', () => {
       '--text-block-gap': '8px',
       '--paragraph-gap': '12px',
       '--list-item-gap': '6px',
+      '--ordered-list-padding': '35px',
       '--thread-padding-block': '12px',
       '--thread-padding-inline': '12px',
       '--file-padding-block': '8px',
@@ -84,6 +86,7 @@ describe('text density CSS contract', () => {
         '--text-block-gap',
         '--paragraph-gap',
         '--list-item-gap',
+        '--ordered-list-padding',
       ],
       ['components/ThreadsRail.css', '--thread-padding-block', '--thread-padding-inline'],
       [

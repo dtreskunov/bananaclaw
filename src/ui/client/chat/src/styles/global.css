@@ -41,6 +41,7 @@
   --text-block-gap: 4px;
   --paragraph-gap: 8px;
   --list-item-gap: 4px;
+  --ordered-list-padding: 32px;
   --code-padding: 8px;
   --thread-padding-block: 8px;
   --thread-padding-inline: 10px;
@@ -97,6 +98,7 @@
   --text-block-gap: 8px;
   --paragraph-gap: 12px;
   --list-item-gap: 6px;
+  --ordered-list-padding: 35px;
   --code-padding: 12px;
   --thread-padding-block: 12px;
   --thread-padding-inline: 12px;
