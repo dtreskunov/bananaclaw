@@ -240,7 +240,7 @@
 .chat-main .msg .inline-media video { max-height: 320px; background: #000; }
 .chat-main .msg .inline-media-name { font-size: var(--font-2xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* No group opacity here — it would cap the branch chip's contrast too. */
-.chat-main .msg .meta, .chat-main .typing .meta { font-size: var(--font-2xs); color: var(--muted); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; min-width: 0; }
+.chat-main .msg .meta, .chat-main .typing .meta { font-size: var(--font-2xs); color: var(--message-meta, var(--muted)); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; min-width: 0; }
 .chat-main .meta > .ts { flex: none; white-space: nowrap; }
 .chat-main .msg .delivery-origin { font-style: italic; }
 .chat-main .message-actions { display: flex; margin-top: 8px; }

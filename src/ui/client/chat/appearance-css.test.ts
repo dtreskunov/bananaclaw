@@ -109,6 +109,7 @@ describe('theme CSS contract', () => {
   it('keeps message metadata controls on one row and truncates usage details', () => {
     const css = read('./components/ChatMain.css');
     const meta = css.match(/\.chat-main \.msg \.meta, \.chat-main \.typing \.meta \{([^}]+)\}/)?.[1];
+    expect(meta).toContain('color: var(--message-meta, var(--muted))');
     expect(meta).toContain('flex-wrap: nowrap');
     expect(meta).toContain('min-width: 0');
     const usage = css.match(/\.chat-main \.usage \{([^}]+)\}/)?.[1];
@@ -147,6 +148,15 @@ describe('theme CSS contract', () => {
     expect(read('./styles/themes/default.css')).toContain(
       '--table-header-bg: color-mix(in srgb, var(--surface-fg) 16%, var(--surface));',
     );
+  });
+
+  it('keeps Default/Light message metadata above AA contrast on outgoing bubbles', () => {
+    expect(read('./styles/themes/default.css')).toContain(
+      '--message-meta: color-mix(in srgb, var(--surface-fg) 60%, var(--surface));',
+    );
+    const metadata = mix('#000000', '#ffffff', 0.6);
+    const outgoingBubble = mix('#7f7f7f', '#ffffff', 0.18);
+    expect(contrast(metadata, outgoingBubble)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('keeps relative timestamps intact when metadata runs out of space', () => {

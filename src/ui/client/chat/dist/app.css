@@ -35,6 +35,7 @@
   --install-hint-border: #374151;
   --install-hint-muted: #9ca3af;
   --install-hint-shadow: rgba(0, 0, 0, 0.3);
+  --message-meta: var(--muted);
   --table-row-alt-bg: color-mix(in srgb, var(--surface-fg) 4%, transparent);
   --danger: #c0392b;
   --danger-fill: #d93b3b;
@@ -99,6 +100,7 @@
   color-scheme: light;
   --surface: Canvas;
   --header-bg: var(--wash-strong);
+  --message-meta: color-mix(in srgb, var(--surface-fg) 60%, var(--surface));
   --table-header-bg: color-mix(in srgb, var(--surface-fg) 16%, var(--surface));
   --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 70%, var(--surface));
   --syntax-keyword: #a26aff;
@@ -125,6 +127,7 @@
     --surface: #000;
     --header-bg: #151515;
     --table-header-bg: color-mix(in srgb, var(--surface-fg) 6%, var(--surface));
+    --message-meta: var(--muted);
     --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 35%, var(--surface));
     --syntax-keyword: #c792ea;
     --syntax-string: #ecc48d;
@@ -2409,7 +2412,7 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg .meta,
 .chat-main .typing .meta {
   font-size: var(--font-2xs);
-  color: var(--muted);
+  color: var(--message-meta, var(--muted));
   margin-top: 4px;
   display: flex;
   gap: 8px;
