@@ -55,6 +55,7 @@ import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
 
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
+const revealedMobileMessageActionsId = signal<string | null>(null);
 
 function imageFileName(src: string): string {
   try {
@@ -779,7 +780,8 @@ function Message(
   const activity = m.direction === 'out' ? m.activity ?? [] : [];
   const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '')
     + (systemNotice ? ` system-notice${systemNoticeTone}` : '')
-    + (inputPresentation ? ` ${inputPresentation.className}` : '') + (isLatest ? ' latest' : '');
+    + (inputPresentation ? ` ${inputPresentation.className}` : '') + (isLatest ? ' latest' : '')
+    + (revealedMobileMessageActionsId.value === m.id ? ' mobile-actions-visible' : '');
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === 'web';
@@ -1283,6 +1285,11 @@ function MessageLog() {
   const followingBottomRef = useRef<boolean>(true);
   const leavingBottomRef = useRef(false);
   const densityReflowRef = useRef(false);
+  const onLogClick = (event: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
+    if (!isMobile.value || !(event.target instanceof Element)) return;
+    const message = event.target.closest<HTMLElement>('.msg[data-msg-id]');
+    revealedMobileMessageActionsId.value = message?.dataset.msgId ?? null;
+  };
 
   const measureScroll = (): boolean => {
     const el = ref.current;
@@ -1463,7 +1470,7 @@ function MessageLog() {
   }
   return (
     <div class="log-viewport">
-      <div class="log" id="chat-log" ref={ref} tabIndex={-1} onScroll={onLogScroll} onLoadCapture={measureScroll}>
+      <div class="log" id="chat-log" ref={ref} tabIndex={-1} onClick={onLogClick} onScroll={onLogScroll} onLoadCapture={measureScroll}>
         {chatLoading.value
           ? null
           : !threadId.value

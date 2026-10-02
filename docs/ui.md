@@ -207,6 +207,13 @@ the copy. Opening a branch scrolls its inherited conversation to the end and
 focuses the composer; historical Edit also places the copied text there without
 sending it.
 
+On mobile, transcript bubble actions stay hidden until the user taps that
+bubble. Tapping another bubble moves the actions there; keyboard focus also
+reveals them. The metadata row reserves the actions' vertical touch-target
+height so revealing them does not resize the bubble. Desktop continues to
+reveal actions on hover or focus. User-message timestamps stay anchored to the
+left while actions occupy the right side of the row.
+
 Your own pending native web-chat messages instead offer **Edit**
 while the connected runner advertises input editing. This changes text in place,
 preserving attachments, ordering, message identity, and steering/queue intent;

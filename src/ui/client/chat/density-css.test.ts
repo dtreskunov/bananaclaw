@@ -166,6 +166,25 @@ describe('text density CSS contract', () => {
     expect(read('components/FilesPane.css')).toContain('min-height: 40px');
   });
 
+  it('reveals mobile bubble actions only after selecting or focusing a message', () => {
+    const css = read('components/ChatMain.css');
+    const source = read('components/ChatMain.tsx');
+    const mobile = css.slice(css.indexOf('@media (max-width: 720px)'));
+
+    expect(css).toContain('@media (min-width: 721px) and (hover: hover) and (pointer: fine)');
+    expect(mobile).toContain('.chat-main .msg .msg-inline-actions { display: none; }');
+    expect(mobile).toMatch(
+      /\.msg\.mobile-actions-visible \.msg-inline-actions,[\s\S]*\.msg:focus-within \.msg-inline-actions \{ display: inline-flex; \}/,
+    );
+    expect(mobile).toContain('.chat-main .msg .meta { min-height: 32px; }');
+    expect(css).toContain('.chat-main .msg.in .meta > .ts { margin-right: auto; }');
+    expect(read('components/ActionIcons.css')).toMatch(
+      /@media \(pointer: coarse\) \{[\s\S]*\.msg-action-btn \{ width: 32px; height: 32px; \}/,
+    );
+    expect(source).toContain("event.target.closest<HTMLElement>('.msg[data-msg-id]')");
+    expect(source).toContain("' mobile-actions-visible'");
+  });
+
   it('offers labeled density choices with visible focus and a live, noninteractive preview', () => {
     const css = read('components/AppearanceSettings.css');
     expect(css).toMatch(/\.appearance-mode, \.appearance-density \{[^}]*min-height: 44px/);

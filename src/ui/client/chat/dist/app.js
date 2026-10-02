@@ -22256,6 +22256,7 @@ function attachDensityReflow(controller, viewport, options) {
 
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
+var revealedMobileMessageActionsId = y3(null);
 function imageFileName(src) {
   try {
     const name = new URL(src, window.location.href).pathname.split("/").filter(Boolean).pop();
@@ -22877,7 +22878,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const systemNoticeTone = systemNotice && m6.statsTurn?.outcome === "failed" ? " provenance-error" : systemNotice && ["warning", "stopped", "interrupted"].includes(m6.statsTurn?.outcome ?? "") ? " provenance-warning" : "";
   const inputPresentation = m6.direction === "in" ? inputStatePresentation(m6.inputState) : null;
   const activity = m6.direction === "out" ? m6.activity ?? [] : [];
-  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (systemNotice ? ` system-notice${systemNoticeTone}` : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "");
+  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (systemNotice ? ` system-notice${systemNoticeTone}` : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "") + (revealedMobileMessageActionsId.value === m6.id ? " mobile-actions-visible" : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === "web";
@@ -23303,6 +23304,11 @@ function MessageLog() {
   const followingBottomRef = A2(true);
   const leavingBottomRef = A2(false);
   const densityReflowRef = A2(false);
+  const onLogClick = (event) => {
+    if (!isMobile.value || !(event.target instanceof Element)) return;
+    const message2 = event.target.closest(".msg[data-msg-id]");
+    revealedMobileMessageActionsId.value = message2?.dataset.msgId ?? null;
+  };
   const measureScroll = () => {
     const el = ref.current;
     if (!el) return true;
@@ -23455,7 +23461,7 @@ function MessageLog() {
     }
   }
   return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
-    /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
+    /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
       chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
         const key = `${threadId.value}:${groupKey(g8)}`;
         const body = g8.kind === "thoughts" ? /* @__PURE__ */ u4(

@@ -192,7 +192,7 @@
 }
 /* On pointer devices, only the hovered/focused bubble and the newest message
    show their actions; opacity keeps the row height stable. */
-@media (hover: hover) and (pointer: fine) {
+@media (min-width: 721px) and (hover: hover) and (pointer: fine) {
   .chat-main .msg .msg-inline-actions { opacity: 0; transition: opacity 0.12s ease; }
   .chat-main .msg:hover .msg-inline-actions,
   .chat-main .msg:focus-within .msg-inline-actions,
@@ -256,6 +256,7 @@
 /* No group opacity here — it would cap the branch chip's contrast too. */
 .chat-main .msg .meta, .chat-main .typing .meta { font-size: var(--font-2xs); color: var(--message-meta, var(--muted)); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; min-width: 0; }
 .chat-main .meta > .ts { flex: none; white-space: nowrap; }
+.chat-main .msg.in .meta > .ts { margin-right: auto; }
 .chat-main .msg .delivery-origin { font-style: italic; }
 .chat-main .message-actions { display: flex; margin-top: 8px; }
 .chat-main .message-action-btn { min-height: 32px; padding: 4px 12px; border: 1px solid var(--message-action-text); border-radius: var(--radius-md); background: var(--bg); color: var(--message-action-text); cursor: pointer; font: inherit; font-weight: 600; }
@@ -582,6 +583,10 @@
 @media (max-width: 720px) {
   .image-viewer-dialog { height: 100%; }
   .chat-main .msg { font-size: var(--font-lg); }
+  .chat-main .msg .msg-inline-actions { display: none; }
+  .chat-main .msg.mobile-actions-visible .msg-inline-actions,
+  .chat-main .msg:focus-within .msg-inline-actions { display: inline-flex; }
+  .chat-main .msg .meta { min-height: 32px; }
   .chat-main form {
     padding-inline: 12px;
     padding-block: 8px calc(8px + env(safe-area-inset-bottom));

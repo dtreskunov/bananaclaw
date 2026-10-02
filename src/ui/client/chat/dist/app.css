@@ -2374,7 +2374,7 @@ nav.tab-bar-strip.group-strip {
   gap: 2px;
   flex: none;
 }
-@media (hover: hover) and (pointer: fine) {
+@media (min-width: 721px) and (hover: hover) and (pointer: fine) {
   .chat-main .msg .msg-inline-actions {
     opacity: 0;
     transition: opacity 0.12s ease;
@@ -2515,6 +2515,9 @@ nav.tab-bar-strip.group-strip {
 .chat-main .meta > .ts {
   flex: none;
   white-space: nowrap;
+}
+.chat-main .msg.in .meta > .ts {
+  margin-right: auto;
 }
 .chat-main .msg .delivery-origin {
   font-style: italic;
@@ -3373,6 +3376,16 @@ nav.tab-bar-strip.group-strip {
   }
   .chat-main .msg {
     font-size: var(--font-lg);
+  }
+  .chat-main .msg .msg-inline-actions {
+    display: none;
+  }
+  .chat-main .msg.mobile-actions-visible .msg-inline-actions,
+  .chat-main .msg:focus-within .msg-inline-actions {
+    display: inline-flex;
+  }
+  .chat-main .msg .meta {
+    min-height: 32px;
   }
   .chat-main form {
     padding-inline: 12px;
