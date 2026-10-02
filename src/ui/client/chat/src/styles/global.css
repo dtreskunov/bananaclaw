@@ -114,6 +114,51 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-x pan-y; }
 
+:where(table:not([data-table-scroll="off"])) {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--border);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+:where(table:not([data-table-scroll="off"]) :is(th, td)) {
+  padding: 6px 10px;
+  border-inline-end: 1px solid var(--border);
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+:where(table:not([data-table-scroll="off"]) th) {
+  background: var(--table-header-bg);
+  border-block-end-color: var(--border-strong);
+  font-weight: 500;
+}
+:where(table:not([data-table-scroll="off"]) tbody tr:nth-child(even) td) {
+  background: var(--table-row-alt-bg);
+}
+:where(table:not([data-table-scroll="off"]) tr > :last-child) { border-inline-end: 0; }
+:where(table:not([data-table-scroll="off"]) tbody tr:last-child td) { border-block-end: 0; }
+table.scroll-fade-right {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 12px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 12px), transparent 100%);
+}
+table.scroll-fade-left {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 100%);
+}
+table.scroll-fade-left.scroll-fade-right {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
+}
+
 .chat-main textarea::placeholder,
 .rail-search-input::placeholder {
   font-family: inherit;

@@ -106,10 +106,11 @@ Shared density tokens live in `global.css`, separately from theme colors.
 
 Markdown messages containing tables use the full conversation width. Tables
 retain readable, non-wrapping cells and scroll horizontally inside the message
-when their intrinsic width exceeds the viewport. Subtle row and column borders
-and a darker theme-aware header background preserve structure in both modes.
-Even body rows receive a faint foreground-tinted stripe to aid horizontal
-tracking without competing with the table header.
+when their intrinsic width exceeds the viewport. Tables throughout the UI share
+the same subtle row and column borders, darker theme-aware header background,
+and faint even-row stripe. A short fade marks each edge that has additional
+horizontally scrolled content. Tables scroll horizontally by default;
+exceptional fixed-layout tables can opt out with `data-table-scroll="off"`.
 Themes define the font family, body and heading weights, and UI letter
 spacing through `--font-ui`, `--font-weight-body`,
 `--font-weight-heading`, and `--letter-spacing-ui`. Density defines the

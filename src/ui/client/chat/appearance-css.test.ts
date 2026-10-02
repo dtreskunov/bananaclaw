@@ -122,24 +122,27 @@ describe('theme CSS contract', () => {
     const bubble = css.match(/\.chat-main \.msg\.markdown:has\(table\) \{([^}]+)\}/)?.[1];
     expect(bubble).toContain('width: 100%');
     expect(bubble).toContain('max-width: 100%');
-    const table = css.match(/\.chat-main \.msg\.markdown table \{([^}]+)\}/)?.[1];
-    expect(table).toContain('display: block');
-    expect(table).toContain('width: max-content');
-    expect(table).toContain('max-width: 100%');
-    expect(table).toContain('overflow-x: auto');
-    expect(table).toContain('white-space: nowrap');
-    expect(table).toContain('border: 1px solid var(--border)');
-    const cells = css.match(/\.chat-main \.msg\.markdown :is\(th, td\) \{([^}]+)\}/)?.[1];
+    const globalCss = read('./styles/global.css');
+    const scrollableTable = globalCss.match(/:where\(table:not\(\[data-table-scroll="off"\]\)\) \{([^}]+)\}/)?.[1];
+    expect(scrollableTable).toContain('display: block');
+    expect(scrollableTable).toContain('width: max-content');
+    expect(scrollableTable).toContain('max-width: 100%');
+    expect(scrollableTable).toContain('overflow-x: auto');
+    expect(scrollableTable).toContain('white-space: nowrap');
+    expect(scrollableTable).toContain('border: 1px solid var(--border)');
+    expect(scrollableTable).toContain('border-collapse: separate');
+    expect(globalCss).toContain('table.scroll-fade-right');
+    expect(globalCss).toContain('table.scroll-fade-left');
+    expect(globalCss).toContain('calc(100% - 12px)');
+    const cells = globalCss.match(/:where\(table:not\(\[data-table-scroll="off"\]\) :is\(th, td\)\) \{([^}]+)\}/)?.[1];
     expect(cells).toContain('border-inline-end: 1px solid var(--border)');
     expect(cells).toContain('border-block-end: 1px solid var(--border)');
     expect(cells).toContain('word-break: normal');
     expect(cells).toContain('overflow-wrap: normal');
-    const header = css.match(/\.chat-main \.msg\.markdown th \{([^}]+)\}/)?.[1];
+    const header = globalCss.match(/:where\(table:not\(\[data-table-scroll="off"\]\) th\) \{([^}]+)\}/)?.[1];
     expect(header).toContain('background: var(--table-header-bg)');
     expect(header).toContain('border-block-end-color: var(--border-strong)');
-    expect(css).toContain(
-      '.chat-main .msg.markdown tbody tr:nth-child(even) td { background: var(--table-row-alt-bg); }',
-    );
+    expect(globalCss).toContain(':where(table:not([data-table-scroll="off"]) tbody tr:nth-child(even) td)');
     for (const theme of THEMES) {
       const themeCss = read(`./styles/themes/${theme.id}.css`);
       expect(themeCss).toContain('--table-header-bg:');
@@ -148,6 +151,11 @@ describe('theme CSS contract', () => {
     expect(read('./styles/themes/default.css')).toContain(
       '--table-header-bg: color-mix(in srgb, var(--surface-fg) 16%, var(--surface));',
     );
+    const settingsCss = read('./components/Settings.css');
+    expect(settingsCss).toContain('width: max-content');
+    expect(settingsCss).toContain('min-width: 100%');
+    expect(settingsCss).not.toContain('max-width: 0');
+    expect(settingsCss).not.toContain('td:nth-child(2) code');
   });
 
   it('keeps Default/Light message metadata above AA contrast on outgoing bubbles', () => {

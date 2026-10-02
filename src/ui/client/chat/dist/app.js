@@ -31011,6 +31011,53 @@ function App() {
   ] });
 }
 
+// src/table-scroll.ts
+var EDGE_EPSILON = 1;
+function tableScrollEdges(scrollLeft, clientWidth, scrollWidth) {
+  const maxScrollLeft = Math.max(0, scrollWidth - clientWidth);
+  return {
+    left: scrollLeft > EDGE_EPSILON,
+    right: scrollLeft < maxScrollLeft - EDGE_EPSILON
+  };
+}
+function attachTableScrollEdge(table) {
+  const update = () => {
+    const edges = tableScrollEdges(table.scrollLeft, table.clientWidth, table.scrollWidth);
+    table.classList.toggle("scroll-fade-left", edges.left);
+    table.classList.toggle("scroll-fade-right", edges.right);
+  };
+  table.addEventListener("scroll", update, { passive: true });
+  const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+  observer?.observe(table);
+  update();
+  return () => {
+    table.removeEventListener("scroll", update);
+    observer?.disconnect();
+  };
+}
+function observeTableScrollEdges(root) {
+  const attached = /* @__PURE__ */ new Map();
+  const sync = () => {
+    const tables = new Set(root.querySelectorAll('table:not([data-table-scroll="off"])'));
+    for (const table of tables) {
+      if (!attached.has(table)) attached.set(table, attachTableScrollEdge(table));
+    }
+    for (const [table, cleanup2] of attached) {
+      if (tables.has(table)) continue;
+      cleanup2();
+      attached.delete(table);
+    }
+  };
+  const observer = new MutationObserver(sync);
+  observer.observe(root, { childList: true, subtree: true });
+  sync();
+  return () => {
+    observer.disconnect();
+    for (const cleanup2 of attached.values()) cleanup2();
+    attached.clear();
+  };
+}
+
 // src/index.tsx
 function sortGroups(list) {
   return list.slice().sort((a4, b5) => {
@@ -31101,7 +31148,10 @@ async function init() {
   const parsed = parseHash();
   if (parsed && parsed.groupId) chatLoading.value = true;
   const app = document.getElementById("app");
-  if (app) D(/* @__PURE__ */ u4(App, {}), app);
+  if (app) {
+    D(/* @__PURE__ */ u4(App, {}), app);
+    observeTableScrollEdges(app);
+  }
   await applyHash(router).catch((err) => console.error("initial route failed", err));
   startSyncPoll();
   try {

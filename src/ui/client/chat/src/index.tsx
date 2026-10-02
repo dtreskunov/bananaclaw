@@ -15,6 +15,7 @@ import { applyPanelClasses } from './panels';
 import { applyHash, parseHash } from './hash';
 import { router } from './router';
 import { installLivenessHandlers, startSyncPoll } from './actions';
+import { observeTableScrollEdges } from './table-scroll';
 import type { Group } from './types';
 
 interface MeResponse { displayName?: string; userId: string; isElevated?: boolean }
@@ -112,7 +113,10 @@ async function init(): Promise<void> {
   const parsed = parseHash();
   if (parsed && parsed.groupId) chatLoading.value = true;
   const app = document.getElementById('app');
-  if (app) render(<App />, app);
+  if (app) {
+    render(<App />, app);
+    observeTableScrollEdges(app);
+  }
   await applyHash(router).catch((err) => console.error('initial route failed', err));
   startSyncPoll();
   try {

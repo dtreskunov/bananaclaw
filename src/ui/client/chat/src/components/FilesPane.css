@@ -224,8 +224,7 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 .markdown-preview code { background: var(--wash-strong); padding: 2px 4px; border-radius: var(--radius-sm); }
 .markdown-preview pre code { background: transparent; padding: 0; }
 .markdown-preview blockquote { border-left: 3px solid var(--border); margin: 8px 0; padding-left: 12px; color: var(--muted); }
-.markdown-preview table { border-collapse: collapse; margin: 8px 0; }
-.markdown-preview th, .markdown-preview td { border: 1px solid var(--border); padding: 4px 8px; }
+.markdown-preview table { margin: 8px 0; }
 
 /* Syntax highlighting for text-file preview. Minimal theme tuned
    to follow the rest of the chrome via CSS vars and currentColor.

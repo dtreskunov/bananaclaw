@@ -390,6 +390,86 @@ body {
   overscroll-behavior-x: none;
   touch-action: pan-x pan-y;
 }
+:where(table:not([data-table-scroll=off])) {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--border);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+:where(table:not([data-table-scroll=off]) :is(th, td)) {
+  padding: 6px 10px;
+  border-inline-end: 1px solid var(--border);
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+:where(table:not([data-table-scroll=off]) th) {
+  background: var(--table-header-bg);
+  border-block-end-color: var(--border-strong);
+  font-weight: 500;
+}
+:where(table:not([data-table-scroll=off]) tbody tr:nth-child(even) td) {
+  background: var(--table-row-alt-bg);
+}
+:where(table:not([data-table-scroll=off]) tr > :last-child) {
+  border-inline-end: 0;
+}
+:where(table:not([data-table-scroll=off]) tbody tr:last-child td) {
+  border-block-end: 0;
+}
+table.scroll-fade-right {
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      #000 0,
+      #000 calc(100% - 12px),
+      transparent 100%);
+  mask-image:
+    linear-gradient(
+      to right,
+      #000 0,
+      #000 calc(100% - 12px),
+      transparent 100%);
+}
+table.scroll-fade-left {
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      #000 12px,
+      #000 100%);
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      #000 12px,
+      #000 100%);
+}
+table.scroll-fade-left.scroll-fade-right {
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      #000 12px,
+      #000 calc(100% - 12px),
+      transparent 100%);
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      #000 12px,
+      #000 calc(100% - 12px),
+      transparent 100%);
+}
 .chat-main textarea::placeholder,
 .rail-search-input::placeholder {
   font-family: inherit;
@@ -959,37 +1039,11 @@ header .mobile-only {
   min-height: 96px;
 }
 .settings-table {
-  width: 100%;
-  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
   margin: 8px 0;
   font-size: var(--font-base);
   table-layout: auto;
-}
-.settings-table th,
-.settings-table td {
-  text-align: left;
-  padding: var(--control-padding-block) var(--control-padding-inline);
-  border-bottom: 1px solid var(--border);
-}
-.settings-table th {
-  font-weight: 600;
-  color: var(--muted);
-}
-.settings-table td:nth-child(1),
-.settings-table td:nth-child(3) {
-  white-space: nowrap;
-}
-.settings-table td:nth-child(2) {
-  width: 100%;
-  max-width: 0;
-}
-.settings-table td:nth-child(2) code {
-  display: block;
-  max-width: 100%;
-  white-space: nowrap;
-  overflow-x: auto;
-  word-break: normal;
-  overflow-wrap: normal;
 }
 .settings-status {
   margin-top: 12px;
@@ -1012,18 +1066,8 @@ header .mobile-only {
   .settings-table {
     font-size: var(--font-sm);
   }
-  .settings-table th,
-  .settings-table td {
-    padding: var(--control-padding-block) 4px;
-  }
   .settings-table th:nth-child(3),
   .settings-table td:nth-child(3) {
-    display: none;
-  }
-  .settings-table td:nth-child(2) code {
-    scrollbar-width: none;
-  }
-  .settings-table td:nth-child(2) code::-webkit-scrollbar {
     display: none;
   }
   .settings-row select,
@@ -2577,41 +2621,6 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg.markdown:has(table) {
   width: 100%;
   max-width: 100%;
-}
-.chat-main .msg.markdown table {
-  display: block;
-  width: max-content;
-  max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  border: 1px solid var(--border);
-  border-spacing: 0;
-  border-radius: var(--radius-md);
-  white-space: nowrap;
-  scrollbar-width: thin;
-}
-.chat-main .msg.markdown :is(th, td) {
-  padding: 6px 10px;
-  border-inline-end: 1px solid var(--border);
-  border-block-end: 1px solid var(--border);
-  text-align: start;
-  vertical-align: top;
-  word-break: normal;
-  overflow-wrap: normal;
-}
-.chat-main .msg.markdown th {
-  background: var(--table-header-bg);
-  border-block-end-color: var(--border-strong);
-  font-weight: 500;
-}
-.chat-main .msg.markdown tbody tr:nth-child(even) td {
-  background: var(--table-row-alt-bg);
-}
-.chat-main .msg.markdown tr > :last-child {
-  border-inline-end: 0;
-}
-.chat-main .msg.markdown tbody tr:last-child td {
-  border-block-end: 0;
 }
 .chat-main .msg.markdown img {
   display: block;
@@ -4174,13 +4183,7 @@ body.is-admin .files-pane.collapsed .admin-only {
   color: var(--muted);
 }
 .markdown-preview table {
-  border-collapse: collapse;
   margin: 8px 0;
-}
-.markdown-preview th,
-.markdown-preview td {
-  border: 1px solid var(--border);
-  padding: 4px 8px;
 }
 .files-pane pre.hljs {
   background: var(--wash-soft);
