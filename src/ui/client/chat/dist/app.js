@@ -21889,7 +21889,7 @@ function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onBottom }
 }
 
 // src/scroll-navigation.ts
-var SCROLL_NAVIGATION_IDLE_MS = 3e3;
+var SCROLL_NAVIGATION_IDLE_MS = 1e3;
 function attachScrollNavigation(viewport, onDirection, onUserInput) {
   let direction = null;
   let timer2 = null;
@@ -21919,9 +21919,11 @@ function attachScrollNavigation(viewport, onDirection, onUserInput) {
     publish(null);
   }
   function arm() {
+    const now = Date.now();
+    const active = inputUntil !== null && now <= inputUntil;
     onUserInput?.();
-    inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
-    previous = snapshot();
+    inputUntil = now + SCROLL_NAVIGATION_IDLE_MS;
+    if (!active) previous = snapshot();
   }
   function available(next, position) {
     return position.maximum > 1 && (next === "up" ? position.top > 1 : position.top < position.maximum - 1);

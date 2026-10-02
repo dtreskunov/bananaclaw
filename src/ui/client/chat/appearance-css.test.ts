@@ -81,6 +81,15 @@ describe('theme CSS contract', () => {
     );
   });
 
+  it('stacks Up above Down with an 8 px gap and a shared bottom anchor', () => {
+    const css = read('./components/ChatMain.css');
+    const shared = css.match(/\.chat-main \.scroll-jump \{([^}]+)\}/)?.[1];
+    expect(shared).toContain('bottom: 10px');
+    const up = css.match(/\.chat-main \.scroll-to-top \{([^}]+)\}/)?.[1];
+    expect(up).toContain('transform: translateY(calc(-100% - 8px))');
+    expect(up).not.toContain('top:');
+  });
+
   it('shares a 960 px column and desktop gutters between messages and composer, with 90% bubbles', () => {
     const css = read('./components/ChatMain.css');
     const column = css.match(/\.chat-main \{([^}]+)\}/)?.[1];

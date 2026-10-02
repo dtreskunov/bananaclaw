@@ -1,5 +1,5 @@
 export type ScrollDirection = 'up' | 'down';
-export const SCROLL_NAVIGATION_IDLE_MS = 3000;
+export const SCROLL_NAVIGATION_IDLE_MS = 1000;
 
 type ScrollViewport = EventTarget & {
   scrollTop: number;
@@ -50,9 +50,13 @@ export function attachScrollNavigation(
   }
 
   function arm(): void {
+    const now = Date.now();
+    const active = inputUntil !== null && now <= inputUntil;
     onUserInput?.();
-    inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
-    previous = snapshot();
+    inputUntil = now + SCROLL_NAVIGATION_IDLE_MS;
+    // Passive input may arrive after the compositor moves but before scroll.
+    // Keep the last observed position so an active reversal is not swallowed.
+    if (!active) previous = snapshot();
   }
 
   function available(next: ScrollDirection, position: ReturnType<typeof snapshot>): boolean {

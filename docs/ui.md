@@ -93,15 +93,18 @@ responsive layout and touch-target sizes shared. Check text contrast at 4.5:1
 and essential control boundaries/focus indicators at 3:1.
 The floating scroll controls are icon-only **Up** / **Down** arrows with an
 end bar marking the top/bottom destination and
-accessible labels. They appear only after the user scrolls in the corresponding
+accessible labels. They share a bottom-right anchor, with Up 8 px above Down.
+They appear only after the user scrolls in the corresponding
 direction, and jump to the beginning/end of the conversation. Fade-in and
 fade-out each take 500 ms (instantly with reduced motion). Reversing direction
 immediately hides the previous arrow and fades in the matching one; reaching
-the destination or 3 seconds without scrolling starts fade-out.
+the destination or 1 second without scrolling starts fade-out.
 Fading controls immediately stop accepting input and leave the accessibility tree.
 Automatic scrolling, streaming/layout changes,
 search jumps and thread changes do not reveal arrows. The controls support
 touch, mouse wheel, scrollbar dragging and keyboard scrolling.
+Active gestures retain the last observed scroll position so coalesced input
+and scroll events do not mask direction reversals.
 Jumping up pauses bottom-follow, including the first animation frames; new
 user input or returning to the bottom restores normal following.
 Both arrows use surface text normally. The Down arrow uses the paired

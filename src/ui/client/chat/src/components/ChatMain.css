@@ -59,6 +59,7 @@
   position: absolute;
   z-index: 2;
   right: var(--chat-gutter);
+  bottom: 10px;
   width: var(--rail-control-height);
   height: var(--rail-control-height);
   padding: 0;
@@ -89,8 +90,7 @@
 }
 .chat-main .scroll-jump[data-instant-hide="true"] { transition: none; }
 .chat-main .scroll-jump:hover { color: var(--surface-fg); }
-.chat-main .scroll-to-top { top: 10px; }
-.chat-main .scroll-to-bottom { bottom: 10px; }
+.chat-main .scroll-to-top { transform: translateY(calc(-100% - 8px)); }
 .chat-main .scroll-jump-arrow {
   width: var(--accent-icon-font-size);
   height: var(--accent-icon-font-size);

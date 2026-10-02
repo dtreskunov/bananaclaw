@@ -99,16 +99,37 @@ describe('directional scroll navigation', () => {
     expect(vi.getTimerCount()).toBe(1);
   });
 
-  it('expires exactly 3 seconds after the last matching scroll, not the last input', () => {
+  it.each([
+    ['wheel', () => new TestWheelEvent(-100)],
+    ['touch', () => new Event('touchmove')],
+    ['keyboard', () => new TestKeyboardEvent('ArrowUp')],
+  ])('detects a coalesced reversal during active %s scrolling', (_, reverseInput) => {
     const log = mount();
-    expect(SCROLL_NAVIGATION_IDLE_MS).toBe(3000);
+    log.viewport.dispatchEvent(new TestWheelEvent());
+    log.viewport.move(600);
+    expect(log.direction()).toBe('down');
+    // The compositor moves before passive input and its queued scroll event arrive.
+    log.viewport.scrollTop = 500;
+    log.viewport.dispatchEvent(reverseInput());
+    log.viewport.dispatchEvent(new Event('scroll'));
+    expect(log.direction()).toBe('up');
+    log.viewport.scrollTop = 550;
+    log.viewport.dispatchEvent(new TestWheelEvent());
+    log.viewport.dispatchEvent(new Event('scroll'));
+    expect(log.direction()).toBe('down');
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('expires exactly 1 second after the last matching scroll, not the last input', () => {
+    const log = mount();
+    expect(SCROLL_NAVIGATION_IDLE_MS).toBe(1000);
     log.viewport.dispatchEvent(new TestWheelEvent());
     log.viewport.move(500);
-    vi.advanceTimersByTime(2000);
+    vi.advanceTimersByTime(600);
     log.viewport.move(600);
-    vi.advanceTimersByTime(2000);
+    vi.advanceTimersByTime(600);
     log.viewport.dispatchEvent(new TestWheelEvent());
-    vi.advanceTimersByTime(999);
+    vi.advanceTimersByTime(399);
     expect(log.direction()).toBe('down');
     vi.advanceTimersByTime(1);
     expect(log.direction()).toBeNull();
@@ -119,13 +140,13 @@ describe('directional scroll navigation', () => {
     const log = mount();
     log.viewport.dispatchEvent(new TestWheelEvent());
     log.viewport.move(600);
-    vi.advanceTimersByTime(2500);
+    vi.advanceTimersByTime(750);
     log.viewport.dispatchEvent(new TestWheelEvent(-100));
     log.viewport.move(500);
     expect(log.direction()).toBe('up');
-    vi.advanceTimersByTime(500);
+    vi.advanceTimersByTime(250);
     expect(log.direction()).toBe('up');
-    vi.advanceTimersByTime(2500);
+    vi.advanceTimersByTime(750);
     expect(log.direction()).toBeNull();
   });
 
@@ -133,13 +154,13 @@ describe('directional scroll navigation', () => {
     const log = mount();
     log.viewport.dispatchEvent(new TestWheelEvent());
     log.viewport.move(500);
-    vi.advanceTimersByTime(2999);
+    vi.advanceTimersByTime(999);
     log.viewport.dispatchEvent(new TestWheelEvent());
     vi.advanceTimersByTime(11);
     expect(log.direction()).toBeNull();
     log.viewport.move(600);
     expect(log.direction()).toBe('down');
-    vi.advanceTimersByTime(3000);
+    vi.advanceTimersByTime(1000);
     expect(log.direction()).toBeNull();
   });
 
@@ -191,16 +212,16 @@ describe('directional scroll navigation', () => {
     log.viewport.dispatchEvent(new Event('touchmove'));
     log.viewport.move(350);
     log.viewport.ownerDocument.dispatchEvent(new TestPointerEvent('pointercancel'));
-    vi.advanceTimersByTime(2500);
+    vi.advanceTimersByTime(750);
     log.viewport.move(250);
     expect(log.direction()).toBe('up');
-    vi.advanceTimersByTime(2999);
+    vi.advanceTimersByTime(999);
     expect(log.direction()).toBe('up');
     vi.advanceTimersByTime(1);
     expect(log.direction()).toBeNull();
   });
 
-  it('supports a held scrollbar drag even after pausing for more than 3 seconds', () => {
+  it('supports a held scrollbar drag even after pausing for more than 1 second', () => {
     const log = mount();
     log.viewport.dispatchEvent(new TestPointerEvent('pointerdown'));
     log.viewport.move(600);
@@ -282,7 +303,7 @@ describe('directional scroll navigation', () => {
     log.viewport.dispatchEvent(new Event('scrollend'));
     log.viewport.move(400);
     expect(log.direction()).toBe('down');
-    vi.advanceTimersByTime(3000);
+    vi.advanceTimersByTime(1000);
     expect(log.direction()).toBeNull();
   });
 
