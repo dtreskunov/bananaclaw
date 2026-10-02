@@ -9,13 +9,20 @@ export const APPEARANCE_MODES = [
   { id: 'dark', name: 'Dark' },
 ] as const;
 
+export const TEXT_DENSITIES = [
+  { id: 'comfortable', name: 'Comfortable', description: 'Larger text and more breathing room.' },
+  { id: 'compact', name: 'Compact', description: 'Smaller text and tighter spacing.' },
+] as const;
+
 export type ThemeId = (typeof THEMES)[number]['id'];
 export type AppearanceMode = (typeof APPEARANCE_MODES)[number]['id'];
+export type TextDensity = (typeof TEXT_DENSITIES)[number]['id'];
 export type ResolvedMode = Exclude<AppearanceMode, 'system'>;
 export interface AppearancePreferences {
-  version: 1;
+  version: 2;
   theme: ThemeId;
   mode: AppearanceMode;
+  density: TextDensity;
 }
 export interface AppearanceSnapshot {
   preferences: AppearancePreferences;
@@ -24,7 +31,12 @@ export interface AppearanceSnapshot {
 }
 
 export const APPEARANCE_KEY = 'nanoclaw:appearance';
-export const DEFAULT_APPEARANCE: AppearancePreferences = { version: 1, theme: 'default', mode: 'system' };
+export const DEFAULT_APPEARANCE: AppearancePreferences = {
+  version: 2,
+  theme: 'default',
+  mode: 'system',
+  density: 'compact',
+};
 
 class InvalidAppearanceError extends Error {}
 
@@ -34,15 +46,21 @@ export function parseAppearance(raw: string | null): AppearancePreferences {
   if (!value || typeof value !== 'object') throw new InvalidAppearanceError('Invalid appearance preferences');
   if (
     !('version' in value) ||
-    value.version !== 1 ||
+    (value.version !== 1 && value.version !== 2) ||
     !('theme' in value) ||
     !isThemeId(value.theme) ||
     !('mode' in value) ||
-    !isAppearanceMode(value.mode)
+    !isAppearanceMode(value.mode) ||
+    (value.version === 2 && (!('density' in value) || !isTextDensity(value.density)))
   ) {
     throw new InvalidAppearanceError('Invalid appearance preferences');
   }
-  return { version: 1, theme: value.theme, mode: value.mode };
+  return {
+    version: 2,
+    theme: value.theme,
+    mode: value.mode,
+    density: value.version === 2 && 'density' in value && isTextDensity(value.density) ? value.density : 'compact',
+  };
 }
 
 function isThemeId(value: unknown): value is ThemeId {
@@ -51,6 +69,10 @@ function isThemeId(value: unknown): value is ThemeId {
 
 function isAppearanceMode(value: unknown): value is AppearanceMode {
   return APPEARANCE_MODES.some((mode) => mode.id === value);
+}
+
+function isTextDensity(value: unknown): value is TextDensity {
+  return TEXT_DENSITIES.some((density) => density.id === value);
 }
 
 function isStorageError(cause: unknown): cause is DOMException {
@@ -67,6 +89,8 @@ export interface AppearanceController {
   getSnapshot(): AppearanceSnapshot;
   setPreferences(preferences: AppearancePreferences): void;
   subscribe(listener: (snapshot: AppearanceSnapshot) => void): () => void;
+  // Capture layout before the CSS changes; the returned callback restores it.
+  beforeDensityChange(listener: () => () => void): () => void;
   dispose(): void;
 }
 
@@ -81,6 +105,7 @@ declare global {
 export function createAppearanceController(win: Window, doc: Document): AppearanceController {
   const media = win.matchMedia('(prefers-color-scheme: dark)');
   const listeners = new Set<(snapshot: AppearanceSnapshot) => void>();
+  const densityListeners = new Set<() => () => void>();
   let preferences = { ...DEFAULT_APPEARANCE };
   let error: string | null = null;
   const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute('content');
@@ -90,24 +115,39 @@ export function createAppearanceController(win: Window, doc: Document): Appearan
     error = message;
   }
 
-  function read(raw: string | null): void {
+  function read(raw: string | null, persistMigration = false): void {
     try {
       preferences = parseAppearance(raw);
     } catch (cause) {
       if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
       preferences = { ...DEFAULT_APPEARANCE };
-      report('Saved appearance was invalid and has been reset to Default / System.', cause);
+      report('Saved appearance was invalid and has been reset to Default / System / Compact.', cause);
       try {
         win.localStorage.removeItem(APPEARANCE_KEY);
       } catch (storageError) {
         if (!isStorageError(storageError)) throw storageError;
-        report('Saved appearance was invalid, but could not be cleared. Using Default / System for now.', storageError);
+        report(
+          'Saved appearance was invalid, but could not be cleared. Using Default / System / Compact for now.',
+          storageError,
+        );
+      }
+      return;
+    }
+    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report(
+          'Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.',
+          cause,
+        );
       }
     }
   }
 
   try {
-    read(win.localStorage.getItem(APPEARANCE_KEY));
+    read(win.localStorage.getItem(APPEARANCE_KEY), true);
   } catch (cause) {
     if (!isStorageError(cause)) throw cause;
     report('Appearance storage is unavailable. Changes will apply only until this page is closed.', cause);
@@ -125,9 +165,15 @@ export function createAppearanceController(win: Window, doc: Document): Appearan
 
   function apply(): void {
     const snapshot = getSnapshot();
+    const restoreDensity =
+      doc.documentElement.dataset.density !== preferences.density
+        ? Array.from(densityListeners, (listener) => listener())
+        : [];
     doc.documentElement.dataset.theme = preferences.theme;
     doc.documentElement.dataset.mode = snapshot.resolvedMode;
+    doc.documentElement.dataset.density = preferences.density;
     updateBrowserColor();
+    for (const restore of restoreDensity) restore();
     for (const listener of listeners) listener(snapshot);
   }
 
@@ -174,8 +220,15 @@ export function createAppearanceController(win: Window, doc: Document): Appearan
         listeners.delete(listener);
       };
     },
+    beforeDensityChange(listener) {
+      densityListeners.add(listener);
+      return () => {
+        densityListeners.delete(listener);
+      };
+    },
     dispose() {
       listeners.clear();
+      densityListeners.clear();
       media.removeEventListener('change', onSystemChange);
       win.removeEventListener('storage', onStorage);
       doc.removeEventListener('DOMContentLoaded', updateBrowserColor);

@@ -18907,7 +18907,7 @@ function PromptModal() {
   }
   return /* @__PURE__ */ u4(MobileDialog, { title: req.title, onClose: () => close(null), maxWidth: "420px", children: /* @__PURE__ */ u4("form", { class: "mobile-dialog-form", onSubmit, children: [
     /* @__PURE__ */ u4("div", { class: "settings-body", children: [
-      req.label ? /* @__PURE__ */ u4("label", { style: "display:block;margin-bottom:6px;font-size:12px;color:var(--muted)", children: req.label }) : null,
+      req.label ? /* @__PURE__ */ u4("label", { style: "display:block;margin-bottom:6px;font-size:var(--font-sm);color:var(--muted)", children: req.label }) : null,
       req.basePath !== void 0 ? /* @__PURE__ */ u4(BasePathBreadcrumb, { path: req.basePath }) : null,
       /* @__PURE__ */ u4(
         "input",
@@ -18926,7 +18926,7 @@ function PromptModal() {
           onKeyDown: onKey
         }
       ),
-      error ? /* @__PURE__ */ u4("div", { id: "prompt-input-error", style: "margin-top:6px;color:var(--danger);font-size:12px", children: error }) : null
+      error ? /* @__PURE__ */ u4("div", { id: "prompt-input-error", style: "margin-top:6px;color:var(--danger);font-size:var(--font-sm)", children: error }) : null
     ] }),
     /* @__PURE__ */ u4(MobileDialogFooter, { children: [
       /* @__PURE__ */ u4("button", { type: "button", onClick: () => close(null), children: "Cancel" }),
@@ -22003,6 +22003,242 @@ function attachScrollNavigation(viewport, onDirection, onUserInput) {
   };
 }
 
+// src/appearance.ts
+var THEMES = [
+  { id: "default", name: "Default", description: "The original look" },
+  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
+];
+var APPEARANCE_MODES = [
+  { id: "system", name: "System" },
+  { id: "light", name: "Light" },
+  { id: "dark", name: "Dark" }
+];
+var TEXT_DENSITIES = [
+  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
+  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
+];
+var APPEARANCE_KEY = "nanoclaw:appearance";
+var DEFAULT_APPEARANCE = {
+  version: 2,
+  theme: "default",
+  mode: "system",
+  density: "compact"
+};
+var InvalidAppearanceError = class extends Error {
+};
+function parseAppearance(raw) {
+  if (raw === null) return { ...DEFAULT_APPEARANCE };
+  const value = JSON.parse(raw);
+  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
+  if (!("version" in value) || value.version !== 1 && value.version !== 2 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version === 2 && (!("density" in value) || !isTextDensity(value.density))) {
+    throw new InvalidAppearanceError("Invalid appearance preferences");
+  }
+  return {
+    version: 2,
+    theme: value.theme,
+    mode: value.mode,
+    density: value.version === 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact"
+  };
+}
+function isThemeId(value) {
+  return THEMES.some((theme) => theme.id === value);
+}
+function isAppearanceMode(value) {
+  return APPEARANCE_MODES.some((mode) => mode.id === value);
+}
+function isTextDensity(value) {
+  return TEXT_DENSITIES.some((density) => density.id === value);
+}
+function isStorageError(cause) {
+  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
+}
+function resolveMode(mode, systemDark) {
+  return mode === "system" ? systemDark ? "dark" : "light" : mode;
+}
+function createAppearanceController(win, doc) {
+  const media = win.matchMedia("(prefers-color-scheme: dark)");
+  const listeners = /* @__PURE__ */ new Set();
+  const densityListeners = /* @__PURE__ */ new Set();
+  let preferences = { ...DEFAULT_APPEARANCE };
+  let error = null;
+  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
+  function report(message2, cause) {
+    console.warn(message2, cause);
+    error = message2;
+  }
+  function read(raw, persistMigration = false) {
+    try {
+      preferences = parseAppearance(raw);
+    } catch (cause) {
+      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
+      preferences = { ...DEFAULT_APPEARANCE };
+      report("Saved appearance was invalid and has been reset to Default / System / Compact.", cause);
+      try {
+        win.localStorage.removeItem(APPEARANCE_KEY);
+      } catch (storageError) {
+        if (!isStorageError(storageError)) throw storageError;
+        report("Saved appearance was invalid, but could not be cleared. Using Default / System / Compact for now.", storageError);
+      }
+      return;
+    }
+    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report("Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.", cause);
+      }
+    }
+  }
+  try {
+    read(win.localStorage.getItem(APPEARANCE_KEY), true);
+  } catch (cause) {
+    if (!isStorageError(cause)) throw cause;
+    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
+  }
+  function getSnapshot() {
+    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
+  }
+  function updateBrowserColor() {
+    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
+    const next = color || brandedBrowserColor;
+    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
+  }
+  function apply2() {
+    const snapshot = getSnapshot();
+    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
+    doc.documentElement.dataset.theme = preferences.theme;
+    doc.documentElement.dataset.mode = snapshot.resolvedMode;
+    doc.documentElement.dataset.density = preferences.density;
+    updateBrowserColor();
+    for (const restore of restoreDensity) restore();
+    for (const listener of listeners) listener(snapshot);
+  }
+  function onStorage(event) {
+    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
+    try {
+      if (event.storageArea !== win.localStorage) return;
+    } catch (cause) {
+      if (!isStorageError(cause)) throw cause;
+      report("Appearance could not be synchronized with another tab.", cause);
+      apply2();
+      return;
+    }
+    error = null;
+    read(event.key === null ? null : event.newValue);
+    apply2();
+  }
+  function onSystemChange() {
+    if (preferences.mode === "system") apply2();
+  }
+  apply2();
+  media.addEventListener("change", onSystemChange);
+  win.addEventListener("storage", onStorage);
+  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
+  return {
+    getSnapshot,
+    setPreferences(next) {
+      preferences = parseAppearance(JSON.stringify(next));
+      error = null;
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
+      }
+      apply2();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    beforeDensityChange(listener) {
+      densityListeners.add(listener);
+      return () => {
+        densityListeners.delete(listener);
+      };
+    },
+    dispose() {
+      listeners.clear();
+      densityListeners.clear();
+      media.removeEventListener("change", onSystemChange);
+      win.removeEventListener("storage", onStorage);
+      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
+    }
+  };
+}
+function getAppearanceController() {
+  return window.nanoclawAppearance ??= createAppearanceController(window, document);
+}
+
+// src/appearance-state.ts
+var appearance = y3({
+  preferences: { ...DEFAULT_APPEARANCE },
+  resolvedMode: "light",
+  error: null
+});
+function initAppearance(onError) {
+  const controller = getAppearanceController();
+  const update = (snapshot) => {
+    const previousError = appearance.value.error;
+    appearance.value = snapshot;
+    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
+  };
+  update(controller.getSnapshot());
+  return controller.subscribe(update);
+}
+function setAppearance(preferences) {
+  getAppearanceController().setPreferences(preferences);
+}
+
+// src/density-reflow.ts
+function captureReadingPosition(viewport, followingBottom) {
+  const top = () => viewport.getBoundingClientRect().top + viewport.clientTop;
+  const viewportTop = top();
+  const anchor = Array.from(viewport.children).find((child) => {
+    const rect = child.getBoundingClientRect();
+    return rect.bottom > viewportTop && rect.top < viewportTop + viewport.clientHeight;
+  });
+  const offset = anchor ? anchor.getBoundingClientRect().top - viewportTop : 0;
+  const originalTop = viewport.scrollTop;
+  return () => {
+    const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const next = followingBottom ? maximum : anchor && Array.from(viewport.children).includes(anchor) ? viewport.scrollTop + anchor.getBoundingClientRect().top - top() - offset : originalTop;
+    viewport.scrollTop = Math.max(0, Math.min(maximum, next));
+  };
+}
+function attachDensityReflow(controller, viewport, options) {
+  let frame = null;
+  const finish = () => {
+    if (frame === null) return;
+    cancelAnimationFrame(frame);
+    frame = null;
+    options.afterReflow();
+  };
+  const unsubscribe = controller.beforeDensityChange(() => {
+    finish();
+    const restore = captureReadingPosition(viewport, options.followingBottom());
+    options.beforeReflow();
+    return () => {
+      restore();
+      frame = requestAnimationFrame(() => {
+        restore();
+        frame = null;
+        options.afterReflow();
+      });
+    };
+  });
+  const inputs = ["wheel", "touchmove", "pointerdown", "keydown"];
+  for (const name of inputs) viewport.addEventListener(name, finish, { passive: true });
+  return () => {
+    unsubscribe();
+    finish();
+    for (const name of inputs) viewport.removeEventListener(name, finish);
+  };
+}
+
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
 function imageFileName(src) {
@@ -23022,6 +23258,7 @@ function MessageLog() {
   const navigationRef = A2(null);
   const [scrollDirection, setScrollDirection] = h2(null);
   const [newMessageBelow, setNewMessageBelow] = h2(false);
+  const [, setDensityReflowTick] = h2(0);
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
   const { transcript, queued } = splitPendingInputs(timeline);
@@ -23033,6 +23270,7 @@ function MessageLog() {
   const atBottomRef = A2(true);
   const followingBottomRef = A2(true);
   const leavingBottomRef = A2(false);
+  const densityReflowRef = A2(false);
   const measureScroll = () => {
     const el = ref.current;
     if (!el) return true;
@@ -23064,7 +23302,7 @@ function MessageLog() {
     el.scrollTo({ top: 0, behavior: "smooth" });
   };
   const onLogScroll = () => {
-    followingBottomRef.current = measureScroll();
+    if (!densityReflowRef.current) followingBottomRef.current = measureScroll();
   };
   _2(() => {
     const el = ref.current;
@@ -23078,9 +23316,26 @@ function MessageLog() {
       navigationRef.current = null;
     };
   }, [activeThreadId]);
+  _2(() => {
+    const el = ref.current;
+    if (!el) return void 0;
+    return attachDensityReflow(getAppearanceController(), el, {
+      followingBottom: () => followingBottomRef.current,
+      beforeReflow: () => {
+        densityReflowRef.current = true;
+        navigationRef.current?.reset();
+      },
+      afterReflow: () => {
+        densityReflowRef.current = false;
+        navigationRef.current?.reset();
+        setDensityReflowTick((tick) => tick + 1);
+      }
+    });
+  }, [activeThreadId]);
   y2(() => {
     const el = ref.current;
     const onResize = () => {
+      if (densityReflowRef.current) return;
       if (atBottomRef.current) scrollToBottom();
       else measureScroll();
     };
@@ -23096,7 +23351,7 @@ function MessageLog() {
     const bubble = Array.from(ref.current?.querySelectorAll("[data-turn-id]") ?? []).find((element) => element.getAttribute("data-turn-id") === activeTurnId);
     if (!bubble || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (followingBottomRef.current) scrollToBottom();
+      if (!densityReflowRef.current && followingBottomRef.current) scrollToBottom();
     });
     observer.observe(bubble);
     return () => observer.disconnect();
@@ -23111,6 +23366,7 @@ function MessageLog() {
   }, [activeThreadId]);
   y2(() => {
     if (!ref.current) return;
+    if (densityReflowRef.current) return;
     if (scrollTick !== prevScrollTickRef.current) {
       prevScrollTickRef.current = scrollTick;
       scrollToBottom();
@@ -23393,6 +23649,7 @@ function Composer() {
   const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
   const sendBusyRef = A2(false);
   const [multiLine, setMultiLine] = h2(false);
+  const density = appearance.value.preferences.density;
   const autosize = () => {
     const el = inputRef.current;
     if (!el) return;
@@ -23409,6 +23666,7 @@ function Composer() {
     setMultiLine(h5 > 44);
   };
   const edit = usePendingComposer(inputRef, autosize);
+  _2(autosize, [density]);
   y2(() => {
     autosize();
     const el = inputRef.current;
@@ -25458,159 +25716,6 @@ function useBackButtonCloses(open, onClose) {
   }, [open]);
 }
 
-// src/appearance.ts
-var THEMES = [
-  { id: "default", name: "Default", description: "The original look" },
-  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
-];
-var APPEARANCE_MODES = [
-  { id: "system", name: "System" },
-  { id: "light", name: "Light" },
-  { id: "dark", name: "Dark" }
-];
-var APPEARANCE_KEY = "nanoclaw:appearance";
-var DEFAULT_APPEARANCE = { version: 1, theme: "default", mode: "system" };
-var InvalidAppearanceError = class extends Error {
-};
-function parseAppearance(raw) {
-  if (raw === null) return { ...DEFAULT_APPEARANCE };
-  const value = JSON.parse(raw);
-  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
-  if (!("version" in value) || value.version !== 1 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode)) {
-    throw new InvalidAppearanceError("Invalid appearance preferences");
-  }
-  return { version: 1, theme: value.theme, mode: value.mode };
-}
-function isThemeId(value) {
-  return THEMES.some((theme) => theme.id === value);
-}
-function isAppearanceMode(value) {
-  return APPEARANCE_MODES.some((mode) => mode.id === value);
-}
-function isStorageError(cause) {
-  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
-}
-function resolveMode(mode, systemDark) {
-  return mode === "system" ? systemDark ? "dark" : "light" : mode;
-}
-function createAppearanceController(win, doc) {
-  const media = win.matchMedia("(prefers-color-scheme: dark)");
-  const listeners = /* @__PURE__ */ new Set();
-  let preferences = { ...DEFAULT_APPEARANCE };
-  let error = null;
-  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
-  function report(message2, cause) {
-    console.warn(message2, cause);
-    error = message2;
-  }
-  function read(raw) {
-    try {
-      preferences = parseAppearance(raw);
-    } catch (cause) {
-      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
-      preferences = { ...DEFAULT_APPEARANCE };
-      report("Saved appearance was invalid and has been reset to Default / System.", cause);
-      try {
-        win.localStorage.removeItem(APPEARANCE_KEY);
-      } catch (storageError) {
-        if (!isStorageError(storageError)) throw storageError;
-        report("Saved appearance was invalid, but could not be cleared. Using Default / System for now.", storageError);
-      }
-    }
-  }
-  try {
-    read(win.localStorage.getItem(APPEARANCE_KEY));
-  } catch (cause) {
-    if (!isStorageError(cause)) throw cause;
-    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
-  }
-  function getSnapshot() {
-    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
-  }
-  function updateBrowserColor() {
-    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
-    const next = color || brandedBrowserColor;
-    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
-  }
-  function apply2() {
-    const snapshot = getSnapshot();
-    doc.documentElement.dataset.theme = preferences.theme;
-    doc.documentElement.dataset.mode = snapshot.resolvedMode;
-    updateBrowserColor();
-    for (const listener of listeners) listener(snapshot);
-  }
-  function onStorage(event) {
-    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
-    try {
-      if (event.storageArea !== win.localStorage) return;
-    } catch (cause) {
-      if (!isStorageError(cause)) throw cause;
-      report("Appearance could not be synchronized with another tab.", cause);
-      apply2();
-      return;
-    }
-    error = null;
-    read(event.key === null ? null : event.newValue);
-    apply2();
-  }
-  function onSystemChange() {
-    if (preferences.mode === "system") apply2();
-  }
-  apply2();
-  media.addEventListener("change", onSystemChange);
-  win.addEventListener("storage", onStorage);
-  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
-  return {
-    getSnapshot,
-    setPreferences(next) {
-      preferences = parseAppearance(JSON.stringify(next));
-      error = null;
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
-      }
-      apply2();
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    dispose() {
-      listeners.clear();
-      media.removeEventListener("change", onSystemChange);
-      win.removeEventListener("storage", onStorage);
-      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
-    }
-  };
-}
-function getAppearanceController() {
-  return window.nanoclawAppearance ??= createAppearanceController(window, document);
-}
-
-// src/appearance-state.ts
-var appearance = y3({
-  preferences: { ...DEFAULT_APPEARANCE },
-  resolvedMode: "light",
-  error: null
-});
-function initAppearance(onError) {
-  const controller = getAppearanceController();
-  const update = (snapshot) => {
-    const previousError = appearance.value.error;
-    appearance.value = snapshot;
-    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
-  };
-  update(controller.getSnapshot());
-  return controller.subscribe(update);
-}
-function setAppearance(preferences) {
-  getAppearanceController().setPreferences(preferences);
-}
-
 // src/components/AppearanceSettings.tsx
 function AppearanceSettings() {
   const { preferences, resolvedMode, error } = appearance.value;
@@ -25664,6 +25769,30 @@ function AppearanceSettings() {
         ),
         /* @__PURE__ */ u4("span", { children: mode.name })
       ] }, mode.id)) })
+    ] }),
+    /* @__PURE__ */ u4("fieldset", { class: "appearance-fieldset", "aria-describedby": "density-description", children: [
+      /* @__PURE__ */ u4("legend", { children: "Text density" }),
+      /* @__PURE__ */ u4("div", { class: "appearance-densities", children: TEXT_DENSITIES.map((density) => /* @__PURE__ */ u4("label", { class: "appearance-density", children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "radio",
+            name: "appearance-density",
+            value: density.id,
+            checked: preferences.density === density.id,
+            onChange: () => setAppearance({ ...preferences, density: density.id })
+          }
+        ),
+        /* @__PURE__ */ u4("span", { children: density.name })
+      ] }, density.id)) }),
+      /* @__PURE__ */ u4("p", { class: "appearance-density-description", id: "density-description", children: TEXT_DENSITIES.find((density) => density.id === preferences.density).description }),
+      /* @__PURE__ */ u4("div", { class: "appearance-density-preview", "aria-hidden": "true", children: [
+        /* @__PURE__ */ u4("div", { class: "appearance-density-preview-message", children: "Here is a little more detail." }),
+        /* @__PURE__ */ u4("div", { class: "appearance-density-preview-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Example thread" }),
+          /* @__PURE__ */ u4("span", { children: "Just now" })
+        ] })
+      ] })
     ] }),
     /* @__PURE__ */ u4("p", { class: "muted", children: [
       "Applies immediately and is saved in this browser.",

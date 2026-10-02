@@ -11,6 +11,28 @@
   --font-base: 13px;
   --font-lg: 14px;
   --font-xl: 15px;
+  --font-body: 14px;
+  --line-height-ui: 1.4;
+  --message-gap: 6px;
+  --message-padding-block: 6px;
+  --message-padding-inline: 10px;
+  --text-block-gap: 4px;
+  --code-padding: 8px;
+  --thread-padding-block: 8px;
+  --thread-padding-inline: 10px;
+  --list-section-padding: 8px 10px;
+  --file-padding-block: 4px;
+  --file-padding-inline: 10px;
+  --settings-section-gap: 24px;
+  --settings-body-padding: 16px;
+  --settings-row-margin: 6px;
+  --field-gap: 8px;
+  --field-margin: 8px;
+  --control-padding-block: 6px;
+  --control-padding-inline: 8px;
+  --menu-padding-block: 6px;
+  --menu-roomy-padding-block: 8px;
+  --preview-padding: 12px;
   --message-input-font-size: var(--font-lg);
   --accent-icon-font-size: 18px;
   --rail-control-height: 32px;
@@ -32,6 +54,37 @@
   --bottom-row-h: 49px;
 }
 
+:root[data-density="comfortable"] {
+  --font-2xs: 12px;
+  --font-xs: 13px;
+  --font-sm: 14px;
+  --font-base: 15px;
+  --font-lg: 16px;
+  --font-xl: 17px;
+  --font-body: 16px;
+  --line-height-ui: 1.5;
+  --message-gap: 10px;
+  --message-padding-block: 10px;
+  --message-padding-inline: 14px;
+  --text-block-gap: 8px;
+  --code-padding: 12px;
+  --thread-padding-block: 12px;
+  --thread-padding-inline: 12px;
+  --list-section-padding: 12px 12px;
+  --file-padding-block: 8px;
+  --file-padding-inline: 12px;
+  --settings-section-gap: 32px;
+  --settings-body-padding: 20px;
+  --settings-row-margin: 10px;
+  --field-gap: 12px;
+  --field-margin: 12px;
+  --control-padding-block: 10px;
+  --control-padding-inline: 12px;
+  --menu-padding-block: 10px;
+  --menu-roomy-padding-block: 12px;
+  --preview-padding: 16px;
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-x pan-y; }
 
@@ -49,6 +102,11 @@ html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll
 
 @media (max-width: 720px) {
   :root {
+    --thread-padding-block: 12px;
+    --thread-padding-inline: 14px;
+    --file-padding-block: 10px;
+    --file-padding-inline: 12px;
+    --settings-body-padding: 12px;
     --message-input-font-size: 16px;
     --accent-icon-font-size: 22px;
     --rail-control-height: 48px;
@@ -57,8 +115,18 @@ html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll
     --menu-item-min-height: 44px;
     --menu-item-font-size: var(--font-lg);
   }
+  :root[data-density="comfortable"] {
+    --thread-padding-block: 16px;
+    --thread-padding-inline: 16px;
+    --file-padding-block: 14px;
+    --file-padding-inline: 14px;
+    --settings-body-padding: 16px;
+  }
+  :root[data-density] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select) {
+    font-size: max(16px, var(--message-input-font-size));
+  }
 }
-body { font: 14px/1.4 var(--font-ui); height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }
+body { font: var(--font-body)/var(--line-height-ui) var(--font-ui); height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }
 #app { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 button { font: inherit; padding: 4px 10px; border: 1px solid var(--border-control); background: transparent; border-radius: var(--radius-md); cursor: pointer; color: inherit; }
 button:hover { background: var(--wash); }

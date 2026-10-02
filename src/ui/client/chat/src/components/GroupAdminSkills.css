@@ -59,7 +59,7 @@
 .ga-skills-description,
 .ga-skills-source,
 .ga-skills-unavailable {
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .ga-skills-description {
@@ -76,7 +76,7 @@
 
 .ga-skills-badge,
 .ga-skills-license {
-  font-size: 10px;
+  font-size: var(--font-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 1px 6px;
@@ -160,7 +160,7 @@
 }
 
 .ga-catalog-title code {
-  font-size: 12px;
+  font-size: var(--font-sm);
   overflow-wrap: anywhere;
 }
 
@@ -172,7 +172,7 @@
 
 .ga-catalog-meta {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -184,7 +184,7 @@
 
 .ga-catalog-plugin-name {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-base);
   font-weight: 600;
   display: flex;
   flex-wrap: wrap;
@@ -252,7 +252,7 @@
   background: transparent;
   border: 0;
   padding: 0 2px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--muted);
   cursor: pointer;
   text-decoration: underline;
@@ -273,13 +273,13 @@
 
 .ga-audit-blocked {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--warning, #d99835);
 }
 
 .ga-audit-unknown {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--muted);
 }
 
@@ -302,11 +302,11 @@
   align-items: baseline;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .ga-audit-status {
-  font-size: 10px;
+  font-size: var(--font-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 1px 6px;
@@ -323,7 +323,7 @@
 
 .ga-audit-summary,
 .ga-audit-categories {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -347,7 +347,7 @@
   border-radius: 12px;
   background: var(--chip-bg, rgba(127, 127, 127, 0.15));
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .ga-skills-chip-label { line-height: 1.4; }
@@ -357,7 +357,7 @@
   border: 0;
   cursor: pointer;
   padding: 0 4px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1;
   color: inherit;
   opacity: 0.7;

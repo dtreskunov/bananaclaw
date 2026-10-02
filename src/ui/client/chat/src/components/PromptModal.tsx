@@ -79,7 +79,7 @@ export function PromptModal() {
     <MobileDialog title={req.title} onClose={() => close(null)} maxWidth="420px">
       <form class="mobile-dialog-form" onSubmit={onSubmit}>
         <div class="settings-body">
-          {req.label ? <label style="display:block;margin-bottom:6px;font-size:12px;color:var(--muted)">{req.label}</label> : null}
+          {req.label ? <label style="display:block;margin-bottom:6px;font-size:var(--font-sm);color:var(--muted)">{req.label}</label> : null}
           {req.basePath !== undefined ? <BasePathBreadcrumb path={req.basePath} /> : null}
           <input
             ref={inputRef}
@@ -95,7 +95,7 @@ export function PromptModal() {
             }}
             onKeyDown={onKey}
           />
-          {error ? <div id="prompt-input-error" style="margin-top:6px;color:var(--danger);font-size:12px">{error}</div> : null}
+          {error ? <div id="prompt-input-error" style="margin-top:6px;color:var(--danger);font-size:var(--font-sm)">{error}</div> : null}
         </div>
         <MobileDialogFooter>
           <button type="button" onClick={() => close(null)}>Cancel</button>

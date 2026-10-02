@@ -18,7 +18,7 @@
   color: var(--muted); font-size: var(--font-xs); border-bottom: 1px solid var(--border);
 }
 .user-menu-panel button {
-  display: flex; align-items: center; width: 100%; min-height: var(--menu-item-min-height); padding: 8px 12px;
+  display: flex; align-items: center; width: 100%; min-height: var(--menu-item-min-height); padding: var(--menu-roomy-padding-block) 12px;
   border: 0; background: transparent; color: inherit;
   font: inherit; font-size: var(--menu-item-font-size); text-align: left; cursor: pointer;
 }

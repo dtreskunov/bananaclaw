@@ -22,7 +22,7 @@
   width: 100%;
   box-sizing: border-box;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 13px;
+  font-size: var(--font-base);
 }
 
 .ga-mp-key-unknown {
@@ -44,7 +44,7 @@
 }
 
 .ga-mp-suggest-chip {
-  font-size: 12px;
+  font-size: var(--font-sm);
   padding: 2px 8px;
   border-radius: 12px;
   background: var(--chip-bg, rgba(127, 127, 127, 0.15));

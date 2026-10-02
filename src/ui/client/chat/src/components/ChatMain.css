@@ -51,10 +51,10 @@
   padding-inline: var(--chat-gutter);
 }
 .chat-main .log-viewport { min-width: 0; min-height: 0; position: relative; }
-.chat-main .log { width: 100%; height: 100%; overflow: auto; padding-block: 12px 0; display: flex; flex-direction: column; gap: 6px; }
+.chat-main .log { width: 100%; height: 100%; overflow: auto; padding-block: 12px 0; display: flex; flex-direction: column; gap: var(--message-gap); }
 /* A flex item keeps trailing space in Chromium's scrollable overflow; with the
-  preceding flex gap this leaves 12px between the last bubble and composer. */
-.chat-main .log::after { content: ''; flex: 0 0 6px; }
+  preceding flex gap this leaves two density gaps before the composer. */
+.chat-main .log::after { content: ''; flex: 0 0 var(--message-gap); }
 .chat-main .scroll-jump {
   position: absolute;
   z-index: 2;
@@ -114,7 +114,7 @@
    rail. */
 .chat-main .log .task-indicator.msg.event .event-meta { margin-left: 4px; }
 .chat-main .log .task-indicator.paused .event-icon { opacity: 0.55; }
-.chat-main .msg { position: relative; padding: 6px 10px; border-radius: var(--radius-lg); max-width: 90%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
+.chat-main .msg { position: relative; padding: var(--message-padding-block) var(--message-padding-inline); border-radius: var(--radius-lg); max-width: 90%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
 .chat-main .transcript-copy-content { min-width: 0; }
 .chat-main .msg.in { align-self: flex-end; background: var(--accent); }
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }
@@ -301,11 +301,11 @@
 .chat-main .msg.markdown { white-space: normal; }
 .chat-main .msg.markdown > :first-child { margin-top: 0; }
 .chat-main .msg.markdown > :last-child { margin-bottom: 0; }
-.chat-main .msg.markdown p { margin: 4px 0; }
-.chat-main .msg.markdown pre { background: var(--wash-strong); padding: 8px; border-radius: var(--radius-md); overflow: auto; font-size: var(--font-sm); }
+.chat-main .msg.markdown p { margin: var(--text-block-gap) 0; }
+.chat-main .msg.markdown pre { background: var(--wash-strong); padding: var(--code-padding); border-radius: var(--radius-md); overflow: auto; font-size: var(--font-sm); }
 .chat-main .msg.markdown code { background: var(--wash-strong); padding: 1px 4px; border-radius: var(--radius-sm); font-size: var(--font-sm); }
 .chat-main .msg.markdown pre code { background: transparent; padding: 0; }
-.chat-main .msg.markdown ul, .chat-main .msg.markdown ol { margin: 4px 0; padding-left: 20px; }
+.chat-main .msg.markdown ul, .chat-main .msg.markdown ol { margin: var(--text-block-gap) 0; padding-left: 20px; }
 .chat-main .msg.markdown img { display: block; width: auto; height: auto; max-width: 100%; max-height: min(420px, 50vh); border-radius: var(--radius-md); cursor: zoom-in; }
 .chat-main .msg.markdown img:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 .image-viewer-backdrop { z-index: 30; }
@@ -333,13 +333,13 @@
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
 /* Turn activity with no agent message to carry it (before a steer, live, or no reply): an
    agent-side system bubble, outlined rather than filled. */
-.chat-main .typing.turn-system { align-self: flex-start; background: transparent; border: 1px solid var(--border, var(--muted)); border-radius: var(--radius-lg); padding: 6px 10px; gap: 2px; }
+.chat-main .typing.turn-system { align-self: flex-start; background: transparent; border: 1px solid var(--border, var(--muted)); border-radius: var(--radius-lg); padding: var(--message-padding-block) var(--message-padding-inline); gap: 2px; }
 .chat-main .typing.turn-system .msg-activity { margin-top: 0; }
 .chat-main .msg .meta .turn-outcome-note { color: var(--surface-fg, inherit); opacity: 0.8; font-weight: 600; }
 .chat-main .activity-trace li .ts { margin-right: 6px; opacity: 0.6; font-variant-numeric: tabular-nums; }
 /* Persisted activity trace on a delivered message. Collapsed by default;
    the chevron button reveals the timestamped step list. */
-.chat-main .msg-activity { margin-top: 4px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; }
+.chat-main .msg-activity { margin-top: var(--text-block-gap); display: flex; flex-direction: column; align-items: flex-start; gap: var(--text-block-gap); max-width: 100%; }
 .chat-main .meta .trace-toggle { display: inline-flex; align-items: center; gap: 3px; padding: 1px 4px; border: none; background: none; color: inherit; cursor: pointer; border-radius: var(--radius-pill); font: inherit; }
 .chat-main .meta .trace-toggle:hover { background: var(--wash); color: var(--fg); }
 .chat-main .meta .trace-toggle:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
@@ -457,7 +457,7 @@
 .chat-main .question-response-mic.voice-stopwatch {
   width: 64px;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-variant-numeric: tabular-nums;
   opacity: 1;
 }
@@ -468,7 +468,7 @@
 .voice-spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: voice-spin 1s linear infinite; }
 @keyframes voice-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .voice-spinner { animation: none; } }
-.voice-error { color: var(--danger, #c44747); font-size: 12px; margin: 4px 0; }
+.voice-error { color: var(--danger, #c44747); font-size: var(--font-sm); margin: var(--text-block-gap) 0; }
 #chat-input[readonly], .question-card-input[readonly] { cursor: default; }
 /* Audio-attachment recording timer. */
 .chat-main .recording-time {
@@ -529,7 +529,7 @@
   background: transparent;
   border: 0;
   cursor: pointer;
-  padding: 8px 14px;
+  padding: var(--menu-roomy-padding-block) 14px;
   font-size: var(--menu-item-font-size);
   line-height: 1.4;
   color: inherit;

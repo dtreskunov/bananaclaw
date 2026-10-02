@@ -1,7 +1,7 @@
 .group-admin-field {
   align-items: baseline;
   gap: 12px;
-  margin: 8px 0;
+  margin: var(--field-margin) 0;
 }
 
 .group-admin-label {
@@ -18,7 +18,7 @@
   flex: 1;
   min-width: 0;
   display: flex;
-  gap: 8px;
+  gap: var(--field-gap);
 }
 
 .group-admin-control > input[type="text"],
@@ -27,7 +27,7 @@
   flex: 1;
   min-width: 0;
   font: inherit;
-  padding: 6px 8px;
+  padding: var(--control-padding-block) var(--control-padding-inline);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: transparent;

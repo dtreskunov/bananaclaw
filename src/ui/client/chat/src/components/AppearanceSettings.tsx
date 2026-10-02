@@ -1,5 +1,5 @@
 import './AppearanceSettings.css';
-import { THEMES, APPEARANCE_MODES } from '../appearance';
+import { THEMES, APPEARANCE_MODES, TEXT_DENSITIES } from '../appearance';
 import { appearance, setAppearance } from '../appearance-state';
 
 export function AppearanceSettings() {
@@ -48,6 +48,30 @@ export function AppearanceSettings() {
               <span>{mode.name}</span>
             </label>
           ))}
+        </div>
+      </fieldset>
+      <fieldset class="appearance-fieldset" aria-describedby="density-description">
+        <legend>Text density</legend>
+        <div class="appearance-densities">
+          {TEXT_DENSITIES.map((density) => (
+            <label class="appearance-density" key={density.id}>
+              <input
+                type="radio"
+                name="appearance-density"
+                value={density.id}
+                checked={preferences.density === density.id}
+                onChange={() => setAppearance({ ...preferences, density: density.id })}
+              />
+              <span>{density.name}</span>
+            </label>
+          ))}
+        </div>
+        <p class="appearance-density-description" id="density-description">
+          {TEXT_DENSITIES.find((density) => density.id === preferences.density)!.description}
+        </p>
+        <div class="appearance-density-preview" aria-hidden="true">
+          <div class="appearance-density-preview-message">Here is a little more detail.</div>
+          <div class="appearance-density-preview-row"><span>Example thread</span><span>Just now</span></div>
         </div>
       </fieldset>
       <p class="muted">

@@ -46,6 +46,9 @@ import { BranchIcon, EditIcon } from './ActionIcons';
 import { CopyTranscriptButton } from './CopyTranscriptButton';
 import { ScrollNavigationButtons } from './ScrollNavigationButtons';
 import { attachScrollNavigation, type ScrollDirection, type ScrollNavigation } from '../scroll-navigation';
+import { getAppearanceController } from '../appearance';
+import { appearance } from '../appearance-state';
+import { attachDensityReflow } from '../density-reflow';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
@@ -1242,6 +1245,7 @@ function MessageLog() {
   const navigationRef = useRef<ScrollNavigation | null>(null);
   const [scrollDirection, setScrollDirection] = useState<ScrollDirection | null>(null);
   const [newMessageBelow, setNewMessageBelow] = useState(false);
+  const [, setDensityReflowTick] = useState(0);
   const highlight = highlightMessageId.value;
   const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
   const { transcript, queued } = splitPendingInputs(timeline);
@@ -1253,6 +1257,7 @@ function MessageLog() {
   const atBottomRef = useRef<boolean>(true);
   const followingBottomRef = useRef<boolean>(true);
   const leavingBottomRef = useRef(false);
+  const densityReflowRef = useRef(false);
 
   const measureScroll = (): boolean => {
     const el = ref.current;
@@ -1292,7 +1297,9 @@ function MessageLog() {
   // scroll so trace-follow can distinguish "following along" from "scrolled
   // up to read history". Programmatic scrollToBottom also fires scroll, which
   // keeps this true while we tail the trace.
-  const onLogScroll = () => { followingBottomRef.current = measureScroll(); };
+  const onLogScroll = () => {
+    if (!densityReflowRef.current) followingBottomRef.current = measureScroll();
+  };
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -1307,9 +1314,27 @@ function MessageLog() {
     };
   }, [activeThreadId]);
 
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    return attachDensityReflow(getAppearanceController(), el, {
+      followingBottom: () => followingBottomRef.current,
+      beforeReflow: () => {
+        densityReflowRef.current = true;
+        navigationRef.current?.reset();
+      },
+      afterReflow: () => {
+        densityReflowRef.current = false;
+        navigationRef.current?.reset();
+        setDensityReflowTick((tick) => tick + 1);
+      },
+    });
+  }, [activeThreadId]);
+
   useEffect(() => {
     const el = ref.current;
     const onResize = (): void => {
+      if (densityReflowRef.current) return;
       if (atBottomRef.current) scrollToBottom();
       else measureScroll();
     };
@@ -1327,7 +1352,7 @@ function MessageLog() {
       .find((element) => element.getAttribute('data-turn-id') === activeTurnId);
     if (!bubble || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
-      if (followingBottomRef.current) scrollToBottom();
+      if (!densityReflowRef.current && followingBottomRef.current) scrollToBottom();
     });
     observer.observe(bubble);
     return () => observer.disconnect();
@@ -1344,6 +1369,7 @@ function MessageLog() {
 
   useEffect(() => {
     if (!ref.current) return;
+    if (densityReflowRef.current) return;
     // Check for explicit scroll-to-bottom request (e.g. user sent a message)
     if (scrollTick !== prevScrollTickRef.current) {
       prevScrollTickRef.current = scrollTick;
@@ -1645,6 +1671,7 @@ export function Composer() {
   const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || 'Live voice input is not configured.' : '');
   const sendBusyRef = useRef(false);
   const [multiLine, setMultiLine] = useState(false);
+  const density = appearance.value.preferences.density;
   const autosize = (): void => {
     const el = inputRef.current;
     if (!el) return;
@@ -1669,10 +1696,10 @@ export function Composer() {
     setMultiLine(h > 44);
   };
   const edit = usePendingComposer(inputRef, autosize);
+  useLayoutEffect(autosize, [density]);
   // Mount + width-change observer. The empty-value early return inside
   // autosize() means we don't need to re-run on focus or on wsDown
-  // placeholder changes — only the value and the available width can
-  // change the right height.
+  // placeholder changes. Font changes are handled by the density layout effect.
   useEffect(() => {
     autosize();
     const el = inputRef.current;

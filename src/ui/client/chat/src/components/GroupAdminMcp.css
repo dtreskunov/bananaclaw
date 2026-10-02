@@ -152,7 +152,7 @@
   width: 100%;
   box-sizing: border-box;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 13px;
+  font-size: var(--font-base);
 }
 
 .ga-mcp-input-invalid {

@@ -1,6 +1,6 @@
 /* Shared settings and dialog body styles. Dialog chrome lives in MobileDialog.css. */
-.settings-body { padding: 16px; overflow-y: auto; overflow-x: hidden; }
-.settings-body section { margin-bottom: 24px; }
+.settings-body { padding: var(--settings-body-padding); overflow-y: auto; overflow-x: hidden; }
+.settings-body section { margin-bottom: var(--settings-section-gap); }
 .settings-body section:last-child { margin-bottom: 0; }
 .settings-body h3 { margin: 0 0 8px; font-size: var(--font-lg); font-weight: 600; }
 .settings-body h4 { margin: 16px 0 8px; font-size: var(--font-base); font-weight: 600; }
@@ -15,12 +15,12 @@
   border-radius: var(--radius-md);
 }
 .settings-row {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  margin: 6px 0;
+  display: flex; align-items: center; gap: var(--field-gap); flex-wrap: wrap;
+  margin: var(--settings-row-margin) 0;
 }
 .settings-row input[type="text"], .settings-row input:not([type]),
 .settings-row select {
-  font: inherit; padding: 6px 8px;
+  font: inherit; padding: var(--control-padding-block) var(--control-padding-inline);
   border: 1px solid var(--border-control); border-radius: var(--radius-md);
   background: transparent; color: inherit;
 }
@@ -53,7 +53,7 @@
   width: 100%;
   box-sizing: border-box;
   font: inherit;
-  padding: 6px 8px;
+  padding: var(--control-padding-block) var(--control-padding-inline);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: transparent;
@@ -62,7 +62,7 @@
 .cg-field textarea { resize: vertical; min-height: 96px; }
 .settings-table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: var(--font-base); table-layout: auto; }
 .settings-table th, .settings-table td {
-  text-align: left; padding: 6px 8px;
+  text-align: left; padding: var(--control-padding-block) var(--control-padding-inline);
   border-bottom: 1px solid var(--border);
 }
 .settings-table th { font-weight: 600; color: var(--muted); }
@@ -80,9 +80,9 @@
 .settings-status.err { background: var(--error-bg); color: var(--error); }
 
 @media (max-width: 720px) {
-  .settings-body { padding: 12px; }
+  .settings-body { padding: var(--settings-body-padding); }
   .settings-table { font-size: var(--font-sm); }
-  .settings-table th, .settings-table td { padding: 6px 4px; }
+  .settings-table th, .settings-table td { padding: var(--control-padding-block) 4px; }
   .settings-table th:nth-child(3), .settings-table td:nth-child(3) { display: none; }
   .settings-table td:nth-child(2) code { scrollbar-width: none; }
   .settings-table td:nth-child(2) code::-webkit-scrollbar { display: none; }

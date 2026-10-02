@@ -38,7 +38,7 @@
   display: flex; flex-direction: column;
 }
 .rail-label { display: none; }
-.threads-rail .thread { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--border); position: relative; }
+.threads-rail .thread { padding: var(--thread-padding-block) var(--thread-padding-inline); cursor: pointer; border-bottom: 1px solid var(--border); position: relative; }
 .threads-rail .thread:hover { background: var(--wash-soft); }
 .threads-rail .thread.active { background: var(--accent); }
 .threads-rail .thread .title { font-size: var(--font-base); display: flex; align-items: center; min-width: 0; padding-right: 18px; }
@@ -82,7 +82,7 @@
 .threads-rail .thread-section-header {
   display: flex; flex-direction: column; align-items: stretch; gap: 2px; justify-content: center;
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--list-section-padding);
   background: var(--wash-subtle);
   border: 0;
   border-top: 1px solid var(--border);
@@ -197,7 +197,7 @@
   .threads-rail .list { position: static !important; flex: 1; }
   .threads-rail .search-results { position: static !important; flex: 1; overflow-y: auto; }
   .threads-rail .search-error button { min-height: 40px; }
-  .threads-rail .thread { padding: 12px 14px; }
+  .threads-rail .thread { padding: var(--thread-padding-block) var(--thread-padding-inline); }
   .threads-rail .thread .title { font-size: var(--font-lg); }
   .threads-rail .thread .meta { font-size: var(--font-sm); }
 }

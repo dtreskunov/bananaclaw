@@ -33,7 +33,7 @@
   color: var(--private-web-text);
   background: var(--private-web-surface);
   text-align: center;
-  font: 14px/1.5 var(--font-ui, Georgia, serif);
+  font: var(--font-body, 14px)/1.5 var(--font-ui, Georgia, serif);
 }
 .private-web-state p {
   margin: 0;

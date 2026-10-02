@@ -16,7 +16,7 @@
 .combobox-input {
   flex: 1;
   min-width: 0;
-  padding: 6px 8px;
+  padding: var(--control-padding-block) var(--control-padding-inline);
   border: 0;
   /* Browsers (notably Safari/iOS) apply a default rounded corner to
      <input type="text"> via -webkit-appearance. Force square right edges
@@ -66,7 +66,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: var(--menu-padding-block) 10px;
   cursor: pointer;
   background: transparent;
 }

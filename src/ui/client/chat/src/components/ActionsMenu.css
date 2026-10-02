@@ -21,7 +21,7 @@
   display: flex; align-items: center; gap: 8px; width: 100%;
   min-height: var(--menu-item-min-height);
   background: transparent; border: 0; cursor: pointer;
-  padding: 6px 12px; font-size: var(--menu-item-font-size); line-height: 1.4;
+  padding: var(--menu-padding-block) 12px; font-size: var(--menu-item-font-size); line-height: var(--line-height-ui);
   color: inherit; text-align: left; font-family: inherit;
 }
 .action-item:hover:not(:disabled) { background: var(--wash); }

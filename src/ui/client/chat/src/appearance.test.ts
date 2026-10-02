@@ -3,6 +3,7 @@ import {
   APPEARANCE_KEY,
   DEFAULT_APPEARANCE,
   THEMES,
+  TEXT_DENSITIES,
   createAppearanceController,
   getAppearanceController,
   parseAppearance,
@@ -12,7 +13,7 @@ import type { AppearanceController, AppearancePreferences } from './appearance';
 import { appearance, initAppearance, setAppearance } from './appearance-state';
 import { AppearanceSettings } from './components/AppearanceSettings';
 
-const autumnDark: AppearancePreferences = { version: 1, theme: 'autumn', mode: 'dark' };
+const autumnDark: AppearancePreferences = { version: 2, theme: 'autumn', mode: 'dark', density: 'comfortable' };
 const controllers: AppearanceController[] = [];
 
 function browser(raw: string | null = null, dark = false) {
@@ -99,9 +100,11 @@ afterEach(() => {
 });
 
 describe('appearance preferences', () => {
-  it('defaults to Default / System only when no preference exists', () => {
+  it('defaults to Default / System / Compact only when no preference exists', () => {
     expect(parseAppearance(null)).toEqual(DEFAULT_APPEARANCE);
     expect(THEMES.map((theme) => theme.id)).toEqual(['default', 'autumn']);
+    expect(TEXT_DENSITIES.map((density) => density.id)).toEqual(['comfortable', 'compact']);
+    expect(DEFAULT_APPEARANCE.density).toBe('compact');
   });
 
   it.each([
@@ -110,6 +113,9 @@ describe('appearance preferences', () => {
     'null',
     '[]',
     '{"version":2,"theme":"autumn","mode":"dark"}',
+    '{"version":3,"theme":"autumn","mode":"dark","density":"comfortable"}',
+    '{"version":2,"theme":"autumn","mode":"dark","density":"dense"}',
+    '{"version":2,"theme":"default","mode":"light","density":null}',
     '{"version":1,"theme":"missing","mode":"light"}',
     '{"version":1,"theme":"default","mode":"auto"}',
   ])('rejects corrupt or unsupported preferences: %s', (raw) => {
@@ -118,8 +124,23 @@ describe('appearance preferences', () => {
 
   it.each(['default', 'autumn'] as const)('roundtrips every mode of %s', (theme) => {
     for (const mode of ['system', 'light', 'dark'] as const) {
-      const prefs: AppearancePreferences = { version: 1, theme, mode };
-      expect(parseAppearance(JSON.stringify(prefs))).toEqual(prefs);
+      for (const density of ['comfortable', 'compact'] as const) {
+        const prefs: AppearancePreferences = { version: 2, theme, mode, density };
+        expect(parseAppearance(JSON.stringify(prefs))).toEqual(prefs);
+      }
+    }
+  });
+
+  it('migrates version 1 without changing the selected theme or mode', () => {
+    for (const theme of ['default', 'autumn']) {
+      for (const mode of ['system', 'light', 'dark']) {
+        expect(parseAppearance(JSON.stringify({ version: 1, theme, mode }))).toEqual({
+          version: 2,
+          theme,
+          mode,
+          density: 'compact',
+        });
+      }
     }
   });
 
@@ -135,7 +156,7 @@ describe('appearance controller', () => {
   it('applies saved preferences synchronously before styles load', () => {
     const page = browser(JSON.stringify(autumnDark));
     const controller = page.start();
-    expect(page.dataset).toEqual({ theme: 'autumn', mode: 'dark' });
+    expect(page.dataset).toEqual({ theme: 'autumn', mode: 'dark', density: 'comfortable' });
     expect(controller.getSnapshot().preferences).toEqual(autumnDark);
     expect(page.meta.setAttribute).toHaveBeenCalledWith('content', '#151515');
     page.cssLoaded('#28201a');
@@ -147,11 +168,11 @@ describe('appearance controller', () => {
     const controller = page.start();
     controller.setPreferences({ ...autumnDark, mode: 'system' });
     page.systemChange(true);
-    expect(page.dataset).toEqual({ theme: 'autumn', mode: 'dark' });
+    expect(page.dataset).toEqual({ theme: 'autumn', mode: 'dark', density: 'comfortable' });
     controller.setPreferences({ ...autumnDark, mode: 'light' });
     page.systemChange(false);
     page.systemChange(true);
-    expect(page.dataset).toEqual({ theme: 'autumn', mode: 'light' });
+    expect(page.dataset).toEqual({ theme: 'autumn', mode: 'light', density: 'comfortable' });
   });
 
   it('saves changes, preserves mode when switching theme, and restores on reload', () => {
@@ -163,7 +184,7 @@ describe('appearance controller', () => {
     expect(parseAppearance(saved)).toEqual({ ...autumnDark, theme: 'default' });
     const reloaded = browser(saved, false);
     reloaded.start();
-    expect(reloaded.dataset).toEqual({ theme: 'default', mode: 'dark' });
+    expect(reloaded.dataset).toEqual({ theme: 'default', mode: 'dark', density: 'comfortable' });
   });
 
   it('synchronizes changes and removal across tabs without writing them back', () => {
@@ -173,11 +194,12 @@ describe('appearance controller', () => {
     controller.subscribe(listener);
     page.storageChange(APPEARANCE_KEY, JSON.stringify(autumnDark));
     expect(page.dataset.theme).toBe('autumn');
+    expect(page.dataset.density).toBe('comfortable');
     page.storageChange('unrelated', null);
     page.storageChange(APPEARANCE_KEY, JSON.stringify(DEFAULT_APPEARANCE), {});
     expect(listener).toHaveBeenCalledTimes(1);
     page.storageChange(APPEARANCE_KEY, null);
-    expect(page.dataset).toEqual({ theme: 'default', mode: 'dark' });
+    expect(page.dataset).toEqual({ theme: 'default', mode: 'dark', density: 'compact' });
     page.storageChange(null, null);
     expect(page.storage.setItem).not.toHaveBeenCalled();
   });
@@ -185,7 +207,7 @@ describe('appearance controller', () => {
   it('diagnoses and clears invalid startup preferences', () => {
     const page = browser('{"version":1,"theme":"missing","mode":"light"}');
     const controller = page.start();
-    expect(page.dataset).toEqual({ theme: 'default', mode: 'light' });
+    expect(page.dataset).toEqual({ theme: 'default', mode: 'light', density: 'compact' });
     expect(controller.getSnapshot().error).toContain('invalid');
     expect(page.storage.removeItem).toHaveBeenCalledWith(APPEARANCE_KEY);
     expect(console.warn).toHaveBeenCalledOnce();
@@ -202,9 +224,52 @@ describe('appearance controller', () => {
     const controller = page.start();
     expect(controller.getSnapshot().error).toContain('unavailable');
     controller.setPreferences(autumnDark);
-    expect(page.dataset).toEqual({ theme: 'autumn', mode: 'dark' });
+    expect(page.dataset).toEqual({ theme: 'autumn', mode: 'dark', density: 'comfortable' });
     expect(controller.getSnapshot().error).toContain('could not be saved');
     expect(console.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists migrated preferences at startup and reports migration storage failures', () => {
+    const old = '{"version":1,"theme":"autumn","mode":"dark"}';
+    const page = browser(old);
+    const controller = page.start();
+    expect(page.stored.get(APPEARANCE_KEY)).toBe(
+      JSON.stringify({
+        ...autumnDark,
+        density: 'compact',
+      }),
+    );
+    expect(controller.getSnapshot().error).toBeNull();
+    const denied = browser(old);
+    denied.storage.setItem.mockImplementation(() => {
+      throw new DOMException('Denied', 'SecurityError');
+    });
+    const inMemory = denied.start();
+    expect(inMemory.getSnapshot().preferences).toEqual({ ...autumnDark, density: 'compact' });
+    expect(inMemory.getSnapshot().error).toContain('could not be saved');
+  });
+
+  it('captures layout before density changes and restores before notifying subscribers', () => {
+    const page = browser();
+    const controller = page.start();
+    const order: string[] = [];
+    const unsubscribe = controller.beforeDensityChange(() => {
+      order.push(`before:${page.dataset.density}`);
+      return () => order.push(`after:${page.dataset.density}`);
+    });
+    controller.subscribe(() => order.push(`subscriber:${page.dataset.density}`));
+    controller.setPreferences(autumnDark);
+    expect(order).toEqual(['before:compact', 'after:comfortable', 'subscriber:comfortable']);
+    order.length = 0;
+    controller.setPreferences({ ...autumnDark, mode: 'light' });
+    expect(order).toEqual(['subscriber:comfortable']);
+    order.length = 0;
+    page.storageChange(APPEARANCE_KEY, JSON.stringify({ ...autumnDark, density: 'compact' }));
+    expect(order).toEqual(['before:comfortable', 'after:compact', 'subscriber:compact']);
+    unsubscribe();
+    order.length = 0;
+    controller.setPreferences(autumnDark);
+    expect(order).toEqual(['subscriber:comfortable']);
   });
 
   it('reports reset failures and invalid cross-tab values', () => {
@@ -264,10 +329,33 @@ describe('appearance controller', () => {
     expect(node.props['aria-labelledby']).toBe('appearance-heading');
     expect(children[1].type).toBe('fieldset');
     expect(children[2].type).toBe('fieldset');
-    expect(children[3].props.children[0]).toContain('saved in this browser');
-    expect(children[4].props.role).toBe('alert');
+    expect(children[3].type).toBe('fieldset');
+    expect(children[3].props.children[0].props.children).toBe('Text density');
+    expect(children[4].props.children[0]).toContain('saved in this browser');
+    expect(children[5].props.role).toBe('alert');
     const cards = children[1].props.children[1].props.children;
     const autumnRadio = cards[1].props.children[0].props.children[0];
     expect(autumnRadio.props).toMatchObject({ type: 'radio', name: 'appearance-theme', checked: true });
+    const densityOptions = children[3].props.children[1].props.children;
+    expect(densityOptions[0].props.children[0].props).toMatchObject({
+      type: 'radio',
+      name: 'appearance-density',
+      value: 'comfortable',
+      checked: true,
+    });
+    expect(densityOptions[1].props.children[0].props.checked).toBe(false);
+    expect(children[3].props.children[2].props.children).toContain('Larger text');
+    expect(children[3].props.children[3].props['aria-hidden']).toBe('true');
+  });
+
+  it('density selection preserves the theme and mode', () => {
+    const page = browser(JSON.stringify(autumnDark));
+    const controller = page.start();
+    window.nanoclawAppearance = controller;
+    appearance.value = controller.getSnapshot();
+    const node = AppearanceSettings();
+    const compact = node.props.children[3].props.children[1].props.children[1].props.children[0];
+    compact.props.onChange();
+    expect(controller.getSnapshot().preferences).toEqual({ ...autumnDark, density: 'compact' });
   });
 });

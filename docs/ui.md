@@ -72,13 +72,35 @@ System preserves the original appearance, including the black dark-mode
 background. Autumn uses parchment and copper in light mode, and walnut and
 amber in dark mode.
 
+**Text density**, below Mode, offers **Comfortable** (larger text and more
+breathing room) and **Compact** (smaller text and tighter spacing). Compact is
+the default and preserves the existing layout. Comfortable increases the shared
+font scale by 2 px (chat body 13 → 15 px), chat message gaps from 6 → 10 px,
+message padding from 6/10 → 10/14 px, and spacing in lists, menus, previews and
+settings. The selector includes a live sample message and thread row.
+Density is independent of theme and mode, applies across the app, and does not
+restyle embedded websites, PDFs or media. Pane widths, conversation width limits
+and icons stay unchanged; existing touch targets never shrink and mobile text
+inputs remain at least 16 px.
+
 Changes apply immediately, including to the open settings dialog, and are
-saved in this browser (`localStorage`, key `nanoclaw:appearance`, version 1).
+saved in this browser (`localStorage`, key `nanoclaw:appearance`, version 2).
+Version-1 preferences migrate automatically, preserving theme and mode and
+adding Compact density.
 They synchronize across tabs on the same origin, not across devices or
 accounts. System follows OS changes live; explicit Light / Dark overrides the
 OS. Storage failures show an error while leaving the current in-memory
 selection usable. Invalid saved preferences are diagnosed and cleared.
 Themes affect application chrome, not embedded or user-authored websites.
+
+Density changes preserve drafts and expanded panels. A conversation already
+following the bottom stays there; otherwise the first visible message retains
+its viewport offset through reflow (clamped if the content no longer overflows).
+The change does not reveal scroll arrows or mark existing messages as new.
+The appearance controller captures reading position before changing CSS and
+restores it immediately and after composer autosizing; new scrolling cancels
+the deferred restore. Density changes do not animate text or spacing.
+Shared density tokens live in `global.css`, separately from theme colors.
 
 Theme values live in
 [`default.css`](../src/ui/client/chat/src/styles/themes/default.css) and
@@ -113,7 +135,7 @@ hover. Keep this pair readable in both modes; do not use muted text on the
 filled button.
 
 The blocking `dist/appearance.js` script runs before the stylesheet in the
-chat shell to prevent wrong-theme flashes. The main bundle reuses its
+chat shell to prevent wrong-theme and wrong-density flashes. The main bundle reuses its
 controller, and the service worker caches the bootstrap for offline loads.
 Rebuild browser assets with `pnpm --dir src/ui/client/chat run build` after
 editing theme definitions or appearance logic; the watch script watches both

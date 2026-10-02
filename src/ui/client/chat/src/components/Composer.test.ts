@@ -23,6 +23,8 @@ import { sendChat } from '../actions';
 import type { ChatMessage, Thread } from '../types';
 import { applyConversationFrame, resetConversation } from '../conversation-state';
 import { testSnapshot } from '../conversation-test-fixtures';
+import { appearance } from '../appearance-state';
+import { DEFAULT_APPEARANCE } from '../appearance';
 
 // Exercise the real Composer's refs, layout transitions, handlers and rendered
 // controls without adding a browser-DOM dependency to the repository.
@@ -131,6 +133,7 @@ function resetMount(text = '') {
 
 beforeEach(() => {
   resetConversation();
+  appearance.value = { preferences: { ...DEFAULT_APPEARANCE }, resolvedMode: 'light', error: null };
   resetMount('Unsent composer draft');
   pendingEditorSessions.value = new Map();
   composerSendInFlight.value = false;
@@ -169,6 +172,21 @@ beforeEach(() => {
 });
 
 describe('main composer pending edits', () => {
+  it('autosizes an existing draft on a density change without replacing it', () => {
+    const draft = input.value;
+    const files = pending.value;
+    expect(input.style.height).toBe('32px');
+    input.scrollHeight = 76;
+    appearance.value = {
+      ...appearance.value,
+      preferences: { ...DEFAULT_APPEARANCE, density: 'comfortable' },
+    };
+    render();
+    expect(input.style.height).toBe('76px');
+    expect(input.value).toBe(draft);
+    expect(pending.value).toBe(files);
+  });
+
   it('uses the existing textarea and a checkmark, preserving the ordinary draft and attachments on save', async () => {
     const files = pending.value;
     const attachments = message.files;
@@ -471,7 +489,9 @@ describe('main composer pending edits', () => {
         requestAnimationFrame: globalThis.requestAnimationFrame,
         WheelEvent: globalThis.WheelEvent,
       };
-      const fakeWindow = new EventTarget();
+      const fakeWindow = Object.assign(new EventTarget(), {
+        nanoclawAppearance: { beforeDensityChange: () => () => {} },
+      });
       class Viewport extends EventTarget {
         scrollHeight = 2000;
         clientHeight = 500;
