@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BananaClaw - Compact typography study</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1c1713;
+      --panel: #28201a;
+      --ink: #f5e9d8;
+      --muted: #c3aa91;
+      --border: #94785e;
+      --accent: #e9a16b;
+      --bubble: #352a22;
+      --input: #1c1713;
+      --sample-size: 14px;
+      --sample-weight: 400;
+      --sample-tracking: 0em;
+      --sample-line-height: 1.4;
+    }
+    :root[data-mode="light"] {
+      color-scheme: light;
+      --bg: #fff8ef;
+      --panel: #fffcf7;
+      --ink: #35251c;
+      --muted: #755b4b;
+      --border: #9a7960;
+      --accent: #a3421b;
+      --bubble: #f2e8dc;
+      --input: #fff8ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 30px;
+      color: var(--ink);
+      background: var(--bg);
+      font: 14px/1.5 system-ui, sans-serif;
+      letter-spacing: normal;
+      overflow-y: auto;
+    }
+    .wrap { max-width: 760px; margin: auto; }
+    header { display: flex; flex-direction: column; gap: 18px; margin-bottom: 22px; }
+    h1 { margin: 0 0 6px; font: 600 26px/1.2 system-ui, sans-serif; letter-spacing: -.02em; }
+    h2 { font-family: system-ui, sans-serif; }
+    .intro, footer { color: var(--muted); }
+    .intro { margin: 0; }
+    .controls, .actions, .secondary, .sample-switch {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .actions, .secondary { justify-content: center; margin: 18px 0; }
+    .sample-switch { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 12px; }
+    button {
+      min-height: 44px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--panel);
+      font: inherit;
+      cursor: pointer;
+    }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    .actions button { min-width: 130px; font-weight: 600; }
+    .sample-switch button[aria-pressed="true"] {
+      border-color: var(--accent);
+      color: var(--bg);
+      background: var(--accent);
+    }
+    [hidden] { display: none !important; }
+    .progress { margin-bottom: 12px; color: var(--muted); }
+    .candidate[data-sample="a"] .option:nth-child(2),
+    .candidate[data-sample="b"] .option:nth-child(1) { display: none; }
+    .option {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: var(--ink);
+      background: var(--panel);
+    }
+    .label {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .number {
+      display: grid;
+      place-items: center;
+      flex: none;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      color: var(--bg);
+      background: var(--accent);
+      font-weight: 600;
+    }
+    .label h2 { margin: 0; font-size: 17px; line-height: 1.4; }
+    .vibe { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+    .sample {
+      padding: 18px;
+      font-family: var(--sample-font);
+      font-size: var(--sample-size);
+      font-weight: var(--sample-weight);
+      font-synthesis: none;
+      line-height: var(--sample-line-height);
+      letter-spacing: var(--sample-tracking);
+    }
+    .sample-title {
+      margin: 0 0 12px;
+      font-family: var(--sample-font);
+      font-size: calc(var(--sample-size) + 3px);
+      font-weight: 500;
+      line-height: 1.45;
+      letter-spacing: var(--sample-tracking);
+    }
+    .bubble { padding: 12px 14px; border-radius: 10px; background: var(--bubble); }
+    .bubble p, .glyphs { margin: 0; }
+    .meta, .list-row, .composer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .meta { margin-top: 10px; color: var(--muted); font-size: calc(var(--sample-size) - 3px); }
+    .list-row { margin-top: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+    .list-row span:last-child, .glyphs { color: var(--muted); font-size: calc(var(--sample-size) - 3px); }
+    .composer { padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--input); }
+    .composer span:first-child { color: var(--muted); font-size: calc(var(--sample-size) - 1px); }
+    .send { color: var(--accent); font-size: calc(var(--sample-size) - 1px); font-weight: 500; }
+    .glyphs { margin-top: 12px; }
+    .reference { margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--border); }
+    .reference > h2 { margin: 0 0 6px; font-size: 18px; }
+    .reference .option { margin-top: 12px; }
+    .summary { padding: 18px; }
+    footer { margin-top: 24px; font-size: 13px; }
+    dialog {
+      max-width: min(440px, calc(100% - 36px));
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: var(--ink);
+      background: var(--panel);
+    }
+    dialog::backdrop { background: rgb(0 0 0 / .65); }
+    @media (max-width: 620px) {
+      body { padding: 18px; }
+      .controls { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Tune Compact typography.</h1>
+        <p class="intro">Figtree is fixed. Adaptive comparisons change one Compact variable at a time.</p>
+      </div>
+      <div class="controls">
+        <button type="button" id="mode">Switch to light</button>
+        <button type="button" id="restart">New Compact study</button>
+      </div>
+    </header>
+    <main>
+      <section id="test" aria-label="Compact typography study">
+        <p id="progress" class="progress" role="status" tabindex="-1"></p>
+        <div class="sample-switch" aria-label="Choose a sample to view">
+          <button type="button" id="show-a" aria-controls="candidate" aria-pressed="true">Sample A</button>
+          <button type="button" id="show-b" aria-controls="candidate" aria-pressed="false">Sample B</button>
+        </div>
+        <div id="candidate" class="candidate" data-sample="a"></div>
+        <div class="actions" aria-label="Compare these samples">
+          <button type="button" id="prefer-a">Prefer A</button>
+          <button type="button" id="prefer-b">Prefer B</button>
+          <button type="button" id="tie">No preference</button>
+          <button type="button" id="skip">Skip pair</button>
+        </div>
+        <div class="secondary">
+          <button type="button" id="undo" disabled>Undo last choice</button>
+          <button type="button" id="finish">Stop and see settings</button>
+        </div>
+      </section>
+      <section id="results" hidden>
+        <h2 id="results-title" tabindex="-1">Compact result</h2>
+        <p id="summary" class="summary" role="status"></p>
+        <div id="result-card"></div>
+      </section>
+      <section class="reference" aria-labelledby="reference-title">
+        <h2 id="reference-title">Current Compact reference</h2>
+        <p class="intro">The pre-Figtree look: Avenir Next / Segoe UI / system font at 14 px, weight 400, normal spacing, and 1.4 line height.</p>
+        <div id="reference-card"></div>
+      </section>
+    </main>
+    <footer>
+      <p>Preview only - no app preferences are changed. Study progress is stored in this browser.</p>
+      <p>Each matchup ends at two wins or three judgments. A preferred challenger becomes the incumbent; ties keep the incumbent; skips advance without promotion.</p>
+    </footer>
+  </div>
+  <dialog id="confirmation" aria-labelledby="confirmation-title" aria-describedby="confirmation-message">
+    <h2 id="confirmation-title"></h2>
+    <p id="confirmation-message"></p>
+    <div class="actions">
+      <button type="button" id="cancel">Cancel</button>
+      <button type="button" id="confirm">Confirm</button>
+    </div>
+  </dialog>
+  <template id="sample">
+    <div class="sample">
+      <h3 class="sample-title">A little more room to think.</h3>
+      <div class="bubble">
+        <p>Here's the plan for today. Let's keep the details clear, the conversation calm, and leave a little space for the next idea.</p>
+        <div class="meta"><span>BananaClaw</span><span>Just now</span></div>
+      </div>
+      <div class="list-row"><span>Notes for the weekend</span><span>3 messages</span></div>
+      <div class="composer"><span>Message the agent...</span><span class="send">Send</span></div>
+      <p class="glyphs">Aa Bb Gg &middot; 0123456789 &middot; $24.80 &middot; Il1 O0</p>
+    </div>
+  </template>
+  <script>
+    const STORAGE_KEY = 'nanoclaw:compact-typography-study:v1';
+    const DEFINITIONS = [
+      { key: 'size', name: 'font size', values: ['13', '14', '15'], format: value => `${value} px` },
+      { key: 'weight', name: 'font weight', values: ['300', '400'], format: value => value },
+      { key: 'tracking', name: 'letter spacing', values: ['0', '0.005', '0.015'], format: value => `${value}em` },
+      { key: 'lineHeight', name: 'line height', values: ['1.35', '1.4', '1.5', '1.6'], format: value => value },
+    ];
+    const INITIAL_SETTINGS = { size: '14', weight: '400', tracking: '0', lineHeight: '1.4' };
+    const get = selector => document.querySelector(selector);
+    const clone = value => JSON.parse(JSON.stringify(value));
+    const pairKey = pair => [...pair].sort().join('|');
+    const pick = values => values[Math.floor(Math.random() * values.length)];
+    const orient = (incumbent, challenger) => Math.random() < .5 ? [incumbent, challenger] : [challenger, incumbent];
+
+    function attemptsFor(state, key, value) {
+      return Object.entries(state.counters[key]).reduce((sum, [pair, counts]) =>
+        pair.split('|').includes(value) ? sum + counts.a + counts.b + counts.tie : sum, 0);
+    }
+
+    function chooseChallenger(state, definition) {
+      const incumbent = state.settings[definition.key];
+      const alternatives = definition.values.filter(value => value !== incumbent);
+      const minimum = Math.min(...alternatives.map(value => attemptsFor(state, definition.key, value)));
+      const leastTested = alternatives.filter(value => attemptsFor(state, definition.key, value) === minimum);
+      const maximum = Math.max(...leastTested.map(value => state.ratings[definition.key][value]));
+      return pick(leastTested.filter(value => state.ratings[definition.key][value] === maximum));
+    }
+
+    function prepare(state) {
+      const definition = DEFINITIONS[state.activeIndex];
+      state.challenger = chooseChallenger(state, definition);
+      state.pair = orient(state.settings[definition.key], state.challenger);
+      state.evidence = { incumbent: 0, challenger: 0, tie: 0 };
+    }
+
+    function freshState() {
+      const state = {
+        version: 1,
+        settings: { ...INITIAL_SETTINGS },
+        activeIndex: 0,
+        challenger: null,
+        pair: [],
+        evidence: { incumbent: 0, challenger: 0, tie: 0 },
+        matchups: 0,
+        counters: Object.fromEntries(DEFINITIONS.map(definition => [
+          definition.key,
+          Object.fromEntries(definition.values.flatMap((value, index) =>
+            definition.values.slice(index + 1).map(other => [pairKey([value, other]), { a: 0, b: 0, tie: 0, skip: 0 }]))),
+        ])),
+        ratings: Object.fromEntries(DEFINITIONS.map(definition => [
+          definition.key,
+          Object.fromEntries(definition.values.map(value => [value, 1000])),
+        ])),
+        finished: false,
+        mode: 'dark',
+        last: null,
+      };
+      prepare(state);
+      return state;
+    }
+
+    function valid(state) {
+      if (!state || state.version !== 1 || typeof state.finished !== 'boolean' ||
+        !['light', 'dark'].includes(state.mode) || !state.settings ||
+        !Number.isInteger(state.activeIndex) || state.activeIndex < 0 || state.activeIndex >= DEFINITIONS.length ||
+        !Number.isSafeInteger(state.matchups) || state.matchups < 0 || !Array.isArray(state.pair) ||
+        state.pair.length !== 2 || new Set(state.pair).size !== 2 || !state.evidence ||
+        !state.counters || !state.ratings) return false;
+      for (const definition of DEFINITIONS) {
+        const expectedPairs = definition.values.flatMap((value, index) =>
+          definition.values.slice(index + 1).map(other => pairKey([value, other])));
+        if (!definition.values.includes(state.settings[definition.key]) ||
+          !state.counters[definition.key] || !state.ratings[definition.key] ||
+          Object.keys(state.counters[definition.key]).length !== expectedPairs.length ||
+          !expectedPairs.every(pair => state.counters[definition.key][pair] &&
+            ['a', 'b', 'tie', 'skip'].every(outcome =>
+              Number.isSafeInteger(state.counters[definition.key][pair][outcome]) &&
+              state.counters[definition.key][pair][outcome] >= 0)) ||
+          Object.keys(state.ratings[definition.key]).length !== definition.values.length ||
+          !definition.values.every(value => Number.isFinite(state.ratings[definition.key][value]))) return false;
+      }
+      const definition = DEFINITIONS[state.activeIndex];
+      if (!definition.values.includes(state.challenger) ||
+        !state.pair.includes(state.settings[definition.key]) || !state.pair.includes(state.challenger) ||
+        !['incumbent', 'challenger', 'tie'].every(key =>
+          Number.isSafeInteger(state.evidence[key]) && state.evidence[key] >= 0) ||
+        state.evidence.incumbent >= 2 || state.evidence.challenger >= 2 ||
+        state.evidence.incumbent + state.evidence.challenger + state.evidence.tie >= 3) return false;
+      return state.last === null || (!!state.last && state.last.last === null && !state.last.finished && valid(state.last));
+    }
+
+    function totalAttempts(state) {
+      return Object.values(state.counters).reduce((total, pairs) =>
+        total + Object.values(pairs).reduce((sum, counts) =>
+          sum + counts.a + counts.b + counts.tie + counts.skip, 0), 0);
+    }
+
+    function record(state, choice) {
+      if (state.finished || !['left', 'right', 'tie', 'skip'].includes(choice)) {
+        throw new Error('Invalid Compact study choice');
+      }
+      const previous = clone({ ...state, last: null });
+      const next = clone(state);
+      next.last = previous;
+      const definition = DEFINITIONS[next.activeIndex];
+      const incumbent = next.settings[definition.key];
+      const winner = choice === 'left' ? next.pair[0] : choice === 'right' ? next.pair[1] : null;
+      const canonical = [...next.pair].sort();
+      const outcome = choice === 'tie' || choice === 'skip' ? choice : winner === canonical[0] ? 'a' : 'b';
+      next.counters[definition.key][pairKey(next.pair)][outcome]++;
+      if (choice !== 'skip') {
+        const [a, b] = canonical;
+        const expected = 1 / (1 + 10 ** ((next.ratings[definition.key][b] - next.ratings[definition.key][a]) / 400));
+        const actual = outcome === 'tie' ? .5 : outcome === 'a' ? 1 : 0;
+        const delta = 24 * (actual - expected);
+        next.ratings[definition.key][a] += delta;
+        next.ratings[definition.key][b] -= delta;
+        if (winner === incumbent) next.evidence.incumbent++;
+        else if (winner === next.challenger) next.evidence.challenger++;
+        else next.evidence.tie++;
+      }
+      const judgments = next.evidence.incumbent + next.evidence.challenger + next.evidence.tie;
+      if (choice === 'skip' || next.evidence.incumbent >= 2 || next.evidence.challenger >= 2 || judgments >= 3) {
+        if (next.evidence.challenger > next.evidence.incumbent) next.settings[definition.key] = next.challenger;
+        next.matchups++;
+        next.activeIndex = (next.activeIndex + 1) % DEFINITIONS.length;
+        prepare(next);
+      } else {
+        next.pair = orient(incumbent, next.challenger);
+      }
+      return next;
+    }
+
+    let state = freshState();
+    let visibleSample = 'a';
+    let pendingAction = null;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw !== null) {
+        const saved = JSON.parse(raw);
+        if (!valid(saved)) throw new Error('Invalid saved Compact study');
+        state = saved;
+      }
+    } catch (error) {
+      console.error('The Compact study was reset because saved data was invalid.', error);
+      localStorage.removeItem(STORAGE_KEY);
+    }
+
+    function save() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function settingsText(settings) {
+      return `${settings.size} px, weight ${settings.weight}, letter spacing ${settings.tracking}em, line height ${settings.lineHeight}`;
+    }
+
+    function makeCard(label, settings, reference = false) {
+      const card = document.createElement('article');
+      card.className = 'option';
+      card.style.setProperty('--sample-font', reference
+        ? '"Avenir Next", "Segoe UI", system-ui, sans-serif'
+        : '"Figtree", system-ui, sans-serif');
+      card.style.setProperty('--sample-size', `${settings.size}px`);
+      card.style.setProperty('--sample-weight', settings.weight);
+      card.style.setProperty('--sample-tracking', `${settings.tracking}em`);
+      card.style.setProperty('--sample-line-height', settings.lineHeight);
+      const heading = document.createElement('div');
+      heading.className = 'label';
+      const number = document.createElement('span');
+      number.className = 'number';
+      number.textContent = label;
+      const details = document.createElement('div');
+      const title = document.createElement('h2');
+      title.textContent = reference ? 'Current Compact' : `Sample ${label}`;
+      const vibe = document.createElement('p');
+      vibe.className = 'vibe';
+      vibe.textContent = reference ? settingsText(settings) : 'Judge the text, not the setting.';
+      details.append(title, vibe);
+      heading.append(number, details);
+      card.append(heading, get('#sample').content.cloneNode(true));
+      return card;
+    }
+
+    function render() {
+      document.documentElement.dataset.mode = state.mode;
+      get('#mode').textContent = state.mode === 'dark' ? 'Switch to light' : 'Switch to dark';
+      get('#test').hidden = state.finished;
+      get('#results').hidden = !state.finished;
+      get('#candidate').dataset.sample = visibleSample;
+      get('#show-a').setAttribute('aria-pressed', String(visibleSample === 'a'));
+      get('#show-b').setAttribute('aria-pressed', String(visibleSample === 'b'));
+      const definition = DEFINITIONS[state.activeIndex];
+      get('#progress').textContent = state.finished
+        ? 'Compact typography study complete.'
+        : `${definition.name} · Comparison ${totalAttempts(state) + 1} · ${state.evidence.incumbent + state.evidence.challenger + state.evidence.tie} judgments in this matchup`;
+      get('#undo').disabled = state.finished || state.last === null;
+      ['#prefer-a', '#prefer-b', '#tie', '#skip', '#show-a', '#show-b', '#finish']
+        .forEach(selector => { get(selector).disabled = state.finished; });
+      get('#candidate').replaceChildren();
+      if (!state.finished) {
+        const [left, right] = state.pair;
+        get('#candidate').append(
+          makeCard('A', { ...state.settings, [definition.key]: left }),
+          makeCard('B', { ...state.settings, [definition.key]: right }),
+        );
+      }
+      get('#reference-card').replaceChildren(makeCard('R', INITIAL_SETTINGS, true));
+      if (state.finished) {
+        get('#summary').textContent = `Figtree Compact incumbent: ${settingsText(state.settings)} after ${totalAttempts(state)} judgments and ${state.matchups} completed matchups.`;
+        get('#result-card').replaceChildren(makeCard('1', state.settings));
+      } else {
+        get('#summary').textContent = '';
+        get('#result-card').replaceChildren();
+      }
+    }
+
+    function commit() {
+      save();
+      render();
+    }
+
+    function vote(choice) {
+      if (state.finished) return;
+      state = record(state, choice);
+      visibleSample = 'a';
+      commit();
+    }
+
+    function confirm(title, message, actionLabel, action) {
+      pendingAction = action;
+      get('#confirmation-title').textContent = title;
+      get('#confirmation-message').textContent = message;
+      get('#confirm').textContent = actionLabel;
+      get('#confirmation').showModal();
+    }
+
+    get('#show-a').addEventListener('click', () => { visibleSample = 'a'; render(); });
+    get('#show-b').addEventListener('click', () => { visibleSample = 'b'; render(); });
+    get('#prefer-a').addEventListener('click', () => vote('left'));
+    get('#prefer-b').addEventListener('click', () => vote('right'));
+    get('#tie').addEventListener('click', () => vote('tie'));
+    get('#skip').addEventListener('click', () => vote('skip'));
+    get('#undo').addEventListener('click', () => {
+      if (!state.last || state.finished) return;
+      state = clone(state.last);
+      visibleSample = 'a';
+      commit();
+    });
+    get('#finish').addEventListener('click', () => {
+      confirm(
+        'Finish the Compact study?',
+        `The current Figtree incumbent is ${settingsText(state.settings)}. You can continue refining or finish now.`,
+        'Finish study',
+        () => {
+          state.finished = true;
+          commit();
+          get('#results-title').focus();
+        },
+      );
+    });
+    get('#restart').addEventListener('click', () => {
+      const restart = () => {
+        const mode = state.mode;
+        state = freshState();
+        state.mode = mode;
+        visibleSample = 'a';
+        commit();
+        get('#progress').focus();
+      };
+      if (totalAttempts(state) || state.finished) {
+        confirm('Start a new Compact study?', 'This clears all saved Compact comparisons.', 'Start new study', restart);
+      } else {
+        restart();
+      }
+    });
+    get('#mode').addEventListener('click', () => {
+      state.mode = state.mode === 'dark' ? 'light' : 'dark';
+      commit();
+    });
+    get('#cancel').addEventListener('click', () => get('#confirmation').close());
+    get('#confirmation').addEventListener('close', () => { pendingAction = null; });
+    get('#confirm').addEventListener('click', () => {
+      const action = pendingAction;
+      pendingAction = null;
+      get('#confirmation').close();
+      if (action) action();
+    });
+
+    save();
+    render();
+    document.fonts.load('300 14px "Figtree"').then(faces => {
+      if (faces.length !== 1) throw new Error('Figtree 300 did not load');
+      return document.fonts.load('400 14px "Figtree"');
+    }).then(faces => {
+      if (faces.length !== 1) throw new Error('Figtree 400 did not load');
+    }).catch(error => {
+      console.error('Figtree could not be loaded.', error);
+      ['#prefer-a', '#prefer-b', '#tie', '#skip'].forEach(selector => { get(selector).disabled = true; });
+      get('#progress').textContent = 'Figtree failed to load. Voting is disabled; reload to retry.';
+    });
+  </script>
+</body>
+</html>

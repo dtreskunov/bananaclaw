@@ -6,7 +6,7 @@
   "description": "Browser chat UI for NanoClaw. Bundled with esbuild; output checked in at dist/app.js.",
   "scripts": {
     "build": "tsc --noEmit && npm run build:no-typecheck",
-    "build:no-typecheck": "esbuild src/appearance-bootstrap.ts --bundle --format=iife --target=es2022 --outfile=dist/appearance.js && esbuild src/index.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/app.js && esbuild src/private-web-entry.tsx --bundle --format=esm --target=es2022 --sourcemap --outfile=dist/private-web.js",
+    "build:no-typecheck": "esbuild src/appearance-bootstrap.ts --bundle --format=iife --target=es2022 --outfile=dist/appearance.js && esbuild src/index.tsx --bundle --format=esm --target=es2022 --sourcemap --loader:.ttf=file --asset-names=fonts/[name]-[hash] --outfile=dist/app.js && esbuild src/private-web-entry.tsx --bundle --format=esm --target=es2022 --sourcemap --loader:.ttf=file --asset-names=fonts/[name]-[hash] --outfile=dist/private-web.js",
     "watch": "esbuild appearance=src/appearance-bootstrap.ts app=src/index.tsx --bundle --format=iife --target=es2022 --sourcemap --outdir=dist --watch",
     "typecheck": "tsc --noEmit"
   },

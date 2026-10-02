@@ -73,11 +73,13 @@ background. Autumn uses parchment and copper in light mode, and walnut and
 amber in dark mode.
 
 **Text density**, below Mode, offers **Comfortable** (larger text and more
-breathing room) and **Compact** (smaller text and tighter spacing). Compact is
-the default and preserves the existing layout. Comfortable increases the shared
-font scale by 2 px (chat body 13 → 15 px), chat message gaps from 6 → 10 px,
-message padding from 6/10 → 10/14 px, and spacing in lists, menus, previews and
-settings. The selector includes a live sample message and thread row.
+breathing room) and **Compact** (smaller text and tighter spacing). Both use
+locally bundled Figtree at weight 300 with 0.015em letter spacing. Compact is
+the default and uses 15 px text with 1.4 line height while preserving the
+tighter layout spacing. Comfortable uses 16 px text with 1.75 line height and
+increases chat message gaps from 6 → 10 px, message padding from 6/10 → 10/14
+px, and spacing in lists, menus, previews and settings. The selector includes
+a live sample message and thread row.
 Density is independent of theme and mode, applies across the app, and does not
 restyle embedded websites, PDFs or media. Pane widths, conversation width limits
 and icons stay unchanged; existing touch targets never shrink and mobile text
@@ -101,6 +103,11 @@ The appearance controller captures reading position before changing CSS and
 restores it immediately and after composer autosizing; new scrolling cancels
 the deferred restore. Density changes do not animate text or spacing.
 Shared density tokens live in `global.css`, separately from theme colors.
+Themes define the font family, body and heading weights, and UI letter
+spacing through `--font-ui`, `--font-weight-body`,
+`--font-weight-heading`, and `--letter-spacing-ui`. Density defines the
+font-size scale and `--line-height-ui`, so typography can be tuned without
+coupling the color theme to Compact or Comfortable spacing.
 
 Theme values live in
 [`default.css`](../src/ui/client/chat/src/styles/themes/default.css) and

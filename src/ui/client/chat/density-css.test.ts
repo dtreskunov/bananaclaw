@@ -14,7 +14,7 @@ describe('text density CSS contract', () => {
   const compact = tokens(global.match(/:root \{([^}]+)\}/)![1]);
   const comfortable = tokens(global.match(/:root\[data-density="comfortable"\] \{([^}]+)\}/)![1]);
 
-  it('preserves Compact and defines the exact Comfortable font and spacing scales', () => {
+  it('defines the selected Compact and Comfortable typography and spacing scales', () => {
     const scale = ['2xs', 'xs', 'sm', 'base', 'lg', 'xl'];
     expect(scale.map((size) => compact[`--font-${size}`])).toEqual(['10px', '11px', '12px', '13px', '14px', '15px']);
     expect(scale.map((size) => comfortable[`--font-${size}`])).toEqual([
@@ -26,7 +26,7 @@ describe('text density CSS contract', () => {
       '17px',
     ]);
     expect(compact).toMatchObject({
-      '--font-body': '14px',
+      '--font-body': '15px',
       '--line-height-ui': '1.4',
       '--message-gap': '6px',
       '--message-padding-block': '6px',
@@ -38,9 +38,21 @@ describe('text density CSS contract', () => {
       '--file-padding-inline': '10px',
       '--settings-section-gap': '24px',
     });
+    for (const theme of ['default', 'autumn']) {
+      expect(tokens(read(`styles/themes/${theme}.css`).match(/\{([^}]+)\}/)![1])).toMatchObject({
+        '--font-ui': "'Figtree', system-ui, sans-serif",
+        '--font-weight-body': '300',
+        '--font-weight-heading': '500',
+        '--letter-spacing-ui': '0.015em',
+      });
+    }
     expect(comfortable).toMatchObject({
+      '--font-ui': "'Figtree', system-ui, sans-serif",
+      '--font-weight-body': '300',
+      '--font-weight-heading': '500',
+      '--letter-spacing-ui': '0.015em',
       '--font-body': '16px',
-      '--line-height-ui': '1.5',
+      '--line-height-ui': '1.75',
       '--message-gap': '10px',
       '--message-padding-block': '10px',
       '--message-padding-inline': '14px',
@@ -51,7 +63,11 @@ describe('text density CSS contract', () => {
       '--file-padding-inline': '12px',
       '--settings-section-gap': '32px',
     });
-    expect(global).toContain('font: var(--font-body)/var(--line-height-ui) var(--font-ui)');
+    expect(global).toContain('font: var(--font-weight-body) var(--font-body)/var(--line-height-ui) var(--font-ui)');
+    expect(global.match(/font-family: 'Figtree'/g)).toHaveLength(3);
+    expect(global).toContain("src: url('./fonts/figtree-300.ttf') format('truetype')");
+    expect(global).toContain("src: url('./fonts/figtree-400.ttf') format('truetype')");
+    expect(global).toContain("src: url('./fonts/figtree-500.ttf') format('truetype')");
   });
 
   it('uses shared tokens on chat, lists, menus, settings and native previews', () => {
@@ -77,7 +93,7 @@ describe('text density CSS contract', () => {
     }
   });
 
-  it('keeps density independent of theme, icons, widths, media and control sizes', () => {
+  it('keeps density typography and spacing independent of theme, icons, widths, media and control sizes', () => {
     for (const name of Object.keys(comfortable)) {
       expect(name).not.toMatch(
         /theme|surface|color|radius|icon|glyph|rail-w|chat-max|control-size|control-height|bottom-row/,

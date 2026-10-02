@@ -1492,13 +1492,18 @@ function serveShell(ctx: Ctx, relName: string): void {
 }
 
 function serveStatic(ctx: Ctx, relName: string): void {
-  // Lexical guard: no traversal, no absolute paths. Allow exactly one level
-  // of subdirectory (e.g. `dist/app.js`) but reject anything deeper.
+  // Lexical guard: no traversal or absolute paths. Static bundles may use one
+  // subdirectory; generated Figtree assets are the only allowed nested files.
   if (relName.includes('..') || path.isAbsolute(relName)) {
     return text(ctx, 400, 'Bad request');
   }
   const segments = relName.split('/');
-  if (segments.length > 2 || segments.some((s) => s === '')) {
+  const isFigtreeAsset =
+    segments.length === 3 &&
+    segments[0] === 'dist' &&
+    segments[1] === 'fonts' &&
+    /^figtree-(300|400|500)-[A-Z0-9]{8}\.ttf$/.test(segments[2]);
+  if ((segments.length > 2 && !isFigtreeAsset) || segments.some((s) => s === '')) {
     return text(ctx, 400, 'Bad request');
   }
   let full = path.join(UI_DIR, ...segments);
@@ -1535,9 +1540,11 @@ function serveStatic(ctx: Ctx, relName: string): void {
             ? 'image/svg+xml'
             : ext === '.png'
               ? 'image/png'
-              : ext === '.webmanifest'
-                ? 'application/manifest+json; charset=utf-8'
-                : 'application/octet-stream';
+              : ext === '.ttf'
+                ? 'font/ttf'
+                : ext === '.webmanifest'
+                  ? 'application/manifest+json; charset=utf-8'
+                  : 'application/octet-stream';
   if (ext === '.html') {
     let body = fs
       .readFileSync(full, 'utf8')

@@ -3,6 +3,28 @@
 @import './themes/default.css';
 @import './themes/autumn.css';
 
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('./fonts/figtree-300.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/figtree-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/figtree-500.ttf') format('truetype');
+}
+
 :root {
   /* Font-size scale. */
   --font-2xs: 10px;
@@ -11,7 +33,7 @@
   --font-base: 13px;
   --font-lg: 14px;
   --font-xl: 15px;
-  --font-body: 14px;
+  --font-body: 15px;
   --line-height-ui: 1.4;
   --message-gap: 6px;
   --message-padding-block: 6px;
@@ -55,6 +77,10 @@
 }
 
 :root[data-density="comfortable"] {
+  --font-ui: 'Figtree', system-ui, sans-serif;
+  --font-weight-body: 300;
+  --font-weight-heading: 500;
+  --letter-spacing-ui: 0.015em;
   --font-2xs: 12px;
   --font-xs: 13px;
   --font-sm: 14px;
@@ -62,7 +88,7 @@
   --font-lg: 16px;
   --font-xl: 17px;
   --font-body: 16px;
-  --line-height-ui: 1.5;
+  --line-height-ui: 1.75;
   --message-gap: 10px;
   --message-padding-block: 10px;
   --message-padding-inline: 14px;
@@ -126,7 +152,8 @@ html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll
     font-size: max(16px, var(--message-input-font-size));
   }
 }
-body { font: var(--font-body)/var(--line-height-ui) var(--font-ui); height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }
+body { font: var(--font-weight-body) var(--font-body)/var(--line-height-ui) var(--font-ui); letter-spacing: var(--letter-spacing-ui); height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }
+h1, h2, h3, h4, h5, h6 { font-weight: var(--font-weight-heading); }
 #app { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 button { font: inherit; padding: 4px 10px; border: 1px solid var(--border-control); background: transparent; border-radius: var(--radius-md); cursor: pointer; color: inherit; }
 button:hover { background: var(--wash); }

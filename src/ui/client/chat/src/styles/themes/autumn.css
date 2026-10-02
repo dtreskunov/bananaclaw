@@ -63,8 +63,11 @@
   --syntax-deletion: var(--error-bg);
   --syntax-addition: var(--success-bg);
 
-  --font-ui: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-ui: 'Figtree', system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-weight-body: 300;
+  --font-weight-heading: 500;
+  --letter-spacing-ui: 0.015em;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;

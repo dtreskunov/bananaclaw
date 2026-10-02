@@ -140,10 +140,16 @@ describe('theme CSS contract', () => {
     for (const theme of THEMES) {
       expect(global).toContain(`@import './themes/${theme.id}.css'`);
       const css = read(`./styles/themes/${theme.id}.css`);
+      for (const token of ['--font-ui', '--font-weight-body', '--font-weight-heading', '--letter-spacing-ui']) {
+        expect(css, `${theme.id}: ${token}`).toContain(token);
+      }
       for (const mode of ['light', 'dark']) {
         expect(css).toContain(`[data-theme="${theme.id}"][data-mode="${mode}"]`);
       }
     }
+    expect(global).toContain('font: var(--font-weight-body) var(--font-body)/var(--line-height-ui) var(--font-ui)');
+    expect(global).toContain('letter-spacing: var(--letter-spacing-ui)');
+    expect(global).toContain('h1, h2, h3, h4, h5, h6 { font-weight: var(--font-weight-heading); }');
     const files = fs.readdirSync(new URL('./src/components/', import.meta.url)).filter((name) => name.endsWith('.css'));
     for (const name of files) expect(read(`./components/${name}`)).not.toContain('prefers-color-scheme');
   });
