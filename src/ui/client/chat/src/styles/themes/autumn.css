@@ -33,6 +33,7 @@
   --install-hint-border: var(--border-control);
   --install-hint-muted: var(--muted);
   --install-hint-shadow: var(--shadow-color);
+  --table-row-alt-bg: color-mix(in srgb, var(--surface-fg) 4%, transparent);
   --danger: var(--error);
   --danger-fill: var(--error);
   --danger-on-fill: var(--error-on-fill);

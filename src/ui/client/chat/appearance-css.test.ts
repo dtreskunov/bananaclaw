@@ -136,8 +136,13 @@ describe('theme CSS contract', () => {
     const header = css.match(/\.chat-main \.msg\.markdown th \{([^}]+)\}/)?.[1];
     expect(header).toContain('background: var(--table-header-bg)');
     expect(header).toContain('border-block-end-color: var(--border-strong)');
+    expect(css).toContain(
+      '.chat-main .msg.markdown tbody tr:nth-child(even) td { background: var(--table-row-alt-bg); }',
+    );
     for (const theme of THEMES) {
-      expect(read(`./styles/themes/${theme.id}.css`)).toContain('--table-header-bg:');
+      const themeCss = read(`./styles/themes/${theme.id}.css`);
+      expect(themeCss).toContain('--table-header-bg:');
+      expect(themeCss).toContain('--table-row-alt-bg: color-mix(in srgb, var(--surface-fg) 4%, transparent);');
     }
     expect(read('./styles/themes/default.css')).toContain(
       '--table-header-bg: color-mix(in srgb, var(--surface-fg) 16%, var(--surface));',

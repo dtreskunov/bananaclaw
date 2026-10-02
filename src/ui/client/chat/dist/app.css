@@ -35,6 +35,7 @@
   --install-hint-border: #374151;
   --install-hint-muted: #9ca3af;
   --install-hint-shadow: rgba(0, 0, 0, 0.3);
+  --table-row-alt-bg: color-mix(in srgb, var(--surface-fg) 4%, transparent);
   --danger: #c0392b;
   --danger-fill: #d93b3b;
   --danger-on-fill: #fff;
@@ -168,6 +169,7 @@
   --install-hint-border: var(--border-control);
   --install-hint-muted: var(--muted);
   --install-hint-shadow: var(--shadow-color);
+  --table-row-alt-bg: color-mix(in srgb, var(--surface-fg) 4%, transparent);
   --danger: var(--error);
   --danger-fill: var(--error);
   --danger-on-fill: var(--error-on-fill);
@@ -2598,6 +2600,9 @@ nav.tab-bar-strip.group-strip {
   background: var(--table-header-bg);
   border-block-end-color: var(--border-strong);
   font-weight: 500;
+}
+.chat-main .msg.markdown tbody tr:nth-child(even) td {
+  background: var(--table-row-alt-bg);
 }
 .chat-main .msg.markdown tr > :last-child {
   border-inline-end: 0;

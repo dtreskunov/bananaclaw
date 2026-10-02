@@ -333,6 +333,7 @@
   border-block-end-color: var(--border-strong);
   font-weight: 500;
 }
+.chat-main .msg.markdown tbody tr:nth-child(even) td { background: var(--table-row-alt-bg); }
 .chat-main .msg.markdown tr > :last-child { border-inline-end: 0; }
 .chat-main .msg.markdown tbody tr:last-child td { border-block-end: 0; }
 .chat-main .msg.markdown img { display: block; width: auto; height: auto; max-width: 100%; max-height: min(420px, 50vh); border-radius: var(--radius-md); cursor: zoom-in; }
