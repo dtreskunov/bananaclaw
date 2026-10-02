@@ -9,7 +9,7 @@
 
 .task-panel .task-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   padding: 10px 12px;
   margin-bottom: 10px;
   display: flex;
@@ -35,7 +35,7 @@
   word-break: break-word;
 }
 .task-panel .task-card-summary:hover {
-  color: var(--accent, #4a90d9);
+  color: var(--accent-text);
 }
 
 /* ---- Shared meta row (schedule · next · status) ---- */
@@ -78,7 +78,7 @@
   border: 0;
   padding: 0;
   cursor: pointer;
-  color: var(--accent, #4a90d9);
+  color: var(--accent-text);
   font: inherit;
   font-size: var(--font-sm, 13px);
 }
@@ -92,9 +92,9 @@
   word-break: break-word;
 }
 .task-panel .task-failure-banner {
-  border-left: 3px solid #b7791f;
+  border-left: 3px solid var(--warning-border);
   padding: 7px 10px;
-  background: rgba(183, 121, 31, 0.1);
+  background: var(--warning-bg);
   color: var(--fg, inherit);
   font-size: var(--font-xs, 12px);
 }
@@ -132,8 +132,8 @@
   font-size: var(--font-xs, 12px);
 }
 .task-panel .task-sec-edit:hover:not(:disabled) {
-  border-color: var(--accent, #4a90d9);
-  color: var(--accent, #4a90d9);
+  border-color: var(--accent-text);
+  color: var(--accent-text);
 }
 .task-panel .task-sec-edit:disabled {
   opacity: 0.5;
@@ -302,8 +302,8 @@
   cursor: pointer;
 }
 .task-panel .task-info-btn:hover {
-  border-color: var(--accent, #4a90d9);
-  color: var(--accent, #4a90d9);
+  border-color: var(--accent-text);
+  color: var(--accent-text);
 }
 .task-panel .task-info-backdrop {
   position: fixed;
@@ -319,10 +319,10 @@
   max-width: 70vw;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface, var(--bg, #fff));
   color: var(--surface-fg, inherit);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 4px 16px var(--popover-shadow);
   font-size: var(--font-xs, 12px);
   line-height: 1.4;
 }

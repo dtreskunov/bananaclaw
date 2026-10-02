@@ -25284,6 +25284,221 @@ function useBackButtonCloses(open, onClose) {
   }, [open]);
 }
 
+// src/appearance.ts
+var THEMES = [
+  { id: "default", name: "Default", description: "The original look" },
+  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
+];
+var APPEARANCE_MODES = [
+  { id: "system", name: "System" },
+  { id: "light", name: "Light" },
+  { id: "dark", name: "Dark" }
+];
+var APPEARANCE_KEY = "nanoclaw:appearance";
+var DEFAULT_APPEARANCE = { version: 1, theme: "default", mode: "system" };
+var InvalidAppearanceError = class extends Error {
+};
+function parseAppearance(raw) {
+  if (raw === null) return { ...DEFAULT_APPEARANCE };
+  const value = JSON.parse(raw);
+  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
+  if (!("version" in value) || value.version !== 1 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode)) {
+    throw new InvalidAppearanceError("Invalid appearance preferences");
+  }
+  return { version: 1, theme: value.theme, mode: value.mode };
+}
+function isThemeId(value) {
+  return THEMES.some((theme) => theme.id === value);
+}
+function isAppearanceMode(value) {
+  return APPEARANCE_MODES.some((mode) => mode.id === value);
+}
+function isStorageError(cause) {
+  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
+}
+function resolveMode(mode, systemDark) {
+  return mode === "system" ? systemDark ? "dark" : "light" : mode;
+}
+function createAppearanceController(win, doc) {
+  const media = win.matchMedia("(prefers-color-scheme: dark)");
+  const listeners = /* @__PURE__ */ new Set();
+  let preferences = { ...DEFAULT_APPEARANCE };
+  let error = null;
+  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
+  function report(message2, cause) {
+    console.warn(message2, cause);
+    error = message2;
+  }
+  function read(raw) {
+    try {
+      preferences = parseAppearance(raw);
+    } catch (cause) {
+      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
+      preferences = { ...DEFAULT_APPEARANCE };
+      report("Saved appearance was invalid and has been reset to Default / System.", cause);
+      try {
+        win.localStorage.removeItem(APPEARANCE_KEY);
+      } catch (storageError) {
+        if (!isStorageError(storageError)) throw storageError;
+        report("Saved appearance was invalid, but could not be cleared. Using Default / System for now.", storageError);
+      }
+    }
+  }
+  try {
+    read(win.localStorage.getItem(APPEARANCE_KEY));
+  } catch (cause) {
+    if (!isStorageError(cause)) throw cause;
+    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
+  }
+  function getSnapshot() {
+    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
+  }
+  function updateBrowserColor() {
+    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
+    const next = color || brandedBrowserColor;
+    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
+  }
+  function apply2() {
+    const snapshot = getSnapshot();
+    doc.documentElement.dataset.theme = preferences.theme;
+    doc.documentElement.dataset.mode = snapshot.resolvedMode;
+    updateBrowserColor();
+    for (const listener of listeners) listener(snapshot);
+  }
+  function onStorage(event) {
+    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
+    try {
+      if (event.storageArea !== win.localStorage) return;
+    } catch (cause) {
+      if (!isStorageError(cause)) throw cause;
+      report("Appearance could not be synchronized with another tab.", cause);
+      apply2();
+      return;
+    }
+    error = null;
+    read(event.key === null ? null : event.newValue);
+    apply2();
+  }
+  function onSystemChange() {
+    if (preferences.mode === "system") apply2();
+  }
+  apply2();
+  media.addEventListener("change", onSystemChange);
+  win.addEventListener("storage", onStorage);
+  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
+  return {
+    getSnapshot,
+    setPreferences(next) {
+      preferences = parseAppearance(JSON.stringify(next));
+      error = null;
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
+      }
+      apply2();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    dispose() {
+      listeners.clear();
+      media.removeEventListener("change", onSystemChange);
+      win.removeEventListener("storage", onStorage);
+      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
+    }
+  };
+}
+function getAppearanceController() {
+  return window.nanoclawAppearance ??= createAppearanceController(window, document);
+}
+
+// src/appearance-state.ts
+var appearance = y3({
+  preferences: { ...DEFAULT_APPEARANCE },
+  resolvedMode: "light",
+  error: null
+});
+function initAppearance(onError) {
+  const controller = getAppearanceController();
+  const update = (snapshot) => {
+    const previousError = appearance.value.error;
+    appearance.value = snapshot;
+    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
+  };
+  update(controller.getSnapshot());
+  return controller.subscribe(update);
+}
+function setAppearance(preferences) {
+  getAppearanceController().setPreferences(preferences);
+}
+
+// src/components/AppearanceSettings.tsx
+function AppearanceSettings() {
+  const { preferences, resolvedMode, error } = appearance.value;
+  return /* @__PURE__ */ u4("section", { "aria-labelledby": "appearance-heading", children: [
+    /* @__PURE__ */ u4("h3", { id: "appearance-heading", children: "Appearance" }),
+    /* @__PURE__ */ u4("fieldset", { class: "appearance-fieldset", children: [
+      /* @__PURE__ */ u4("legend", { children: "Theme" }),
+      /* @__PURE__ */ u4("div", { class: "appearance-themes", children: THEMES.map((theme) => /* @__PURE__ */ u4("label", { class: "appearance-theme", children: [
+        /* @__PURE__ */ u4("span", { class: "appearance-choice", children: [
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "radio",
+              name: "appearance-theme",
+              value: theme.id,
+              checked: preferences.theme === theme.id,
+              onChange: () => setAppearance({ ...preferences, theme: theme.id })
+            }
+          ),
+          /* @__PURE__ */ u4("span", { children: theme.name }),
+          /* @__PURE__ */ u4("span", { class: "appearance-check", "aria-hidden": "true", children: preferences.theme === theme.id ? "\u2713" : "" })
+        ] }),
+        /* @__PURE__ */ u4("span", { class: "appearance-preview", "data-theme": theme.id, "data-mode": resolvedMode, "aria-hidden": "true", children: [
+          /* @__PURE__ */ u4("span", { class: "appearance-preview-header" }),
+          /* @__PURE__ */ u4("span", { class: "appearance-preview-sidebar", children: [
+            /* @__PURE__ */ u4("i", {}),
+            /* @__PURE__ */ u4("i", {}),
+            /* @__PURE__ */ u4("i", {})
+          ] }),
+          /* @__PURE__ */ u4("span", { class: "appearance-preview-chat", children: [
+            /* @__PURE__ */ u4("i", {}),
+            /* @__PURE__ */ u4("i", {}),
+            /* @__PURE__ */ u4("b", {})
+          ] })
+        ] }),
+        /* @__PURE__ */ u4("span", { class: "appearance-description", children: theme.description })
+      ] }, theme.id)) })
+    ] }),
+    /* @__PURE__ */ u4("fieldset", { class: "appearance-fieldset", children: [
+      /* @__PURE__ */ u4("legend", { children: "Mode" }),
+      /* @__PURE__ */ u4("div", { class: "appearance-modes", children: APPEARANCE_MODES.map((mode) => /* @__PURE__ */ u4("label", { class: "appearance-mode", children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "radio",
+            name: "appearance-mode",
+            value: mode.id,
+            checked: preferences.mode === mode.id,
+            onChange: () => setAppearance({ ...preferences, mode: mode.id })
+          }
+        ),
+        /* @__PURE__ */ u4("span", { children: mode.name })
+      ] }, mode.id)) })
+    ] }),
+    /* @__PURE__ */ u4("p", { class: "muted", children: [
+      "Applies immediately and is saved in this browser.",
+      preferences.mode === "system" ? ` System is currently using ${resolvedMode} mode.` : ""
+    ] }),
+    error ? /* @__PURE__ */ u4("p", { class: "appearance-error", role: "alert", children: error }) : null
+  ] });
+}
+
 // src/components/Settings.tsx
 var API = "/ui/settings/api";
 async function jget(p5) {
@@ -25531,6 +25746,7 @@ function Settings() {
             " chat headers and approval messages. Does not change how channels address you."
           ] })
         ] }),
+        /* @__PURE__ */ u4(AppearanceSettings, {}),
         /* @__PURE__ */ u4("section", { children: [
           /* @__PURE__ */ u4("h3", { children: "Notifications" }),
           /* @__PURE__ */ u4("label", { class: "settings-row", children: [
@@ -30530,8 +30746,8 @@ function maybeShowIosInstallHint() {
   }
   const el = document.createElement("div");
   el.setAttribute("role", "note");
-  el.style.cssText = "position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;background:#1f2937;color:#e5e7eb;border:1px solid #374151;border-radius:8px;padding:12px 14px;font:13px system-ui;-webkit-font-smoothing:antialiased;box-shadow:0 4px 12px rgba(0,0,0,0.3);display:flex;gap:10px;align-items:flex-start";
-  el.innerHTML = '<div style="flex:1">Add to Home Screen to receive notifications when the app is closed. Tap the Share button, then "Add to Home Screen".</div><button type="button" aria-label="Dismiss" style="background:transparent;color:#9ca3af;border:0;font-size:18px;line-height:1;cursor:pointer;padding:0 4px">\xD7</button>';
+  el.style.cssText = "position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;background:var(--install-hint-bg);color:var(--install-hint-fg);border:1px solid var(--install-hint-border);border-radius:var(--radius-xl);padding:12px 14px;font:13px var(--font-ui);-webkit-font-smoothing:antialiased;box-shadow:0 4px 12px var(--install-hint-shadow);display:flex;gap:10px;align-items:flex-start";
+  el.innerHTML = '<div style="flex:1">Add to Home Screen to receive notifications when the app is closed. Tap the Share button, then "Add to Home Screen".</div><button type="button" aria-label="Dismiss" style="background:transparent;color:var(--install-hint-muted);border:0;font-size:18px;line-height:1;cursor:pointer;padding:0 4px">\xD7</button>';
   const btn = el.querySelector("button");
   if (btn) {
     btn.addEventListener("click", () => {
@@ -30545,6 +30761,7 @@ function maybeShowIosInstallHint() {
   document.body.appendChild(el);
 }
 async function init() {
+  initAppearance((message2) => showToast(message2, "err"));
   initNotif();
   initSound();
   initInstall();
@@ -30569,7 +30786,7 @@ async function init() {
   }
   if (groups.value.length === 0) {
     const app2 = document.getElementById("app");
-    if (app2) app2.innerHTML = '<div style="padding:24px;font:14px system-ui">No accessible groups.</div>';
+    if (app2) app2.innerHTML = '<div style="padding:24px;font:14px var(--font-ui)">No accessible groups.</div>';
     return;
   }
   const parsed = parseHash();

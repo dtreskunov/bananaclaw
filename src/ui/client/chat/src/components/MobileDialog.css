@@ -21,7 +21,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   box-shadow: 0 10px 32px var(--shadow-color-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--surface-fg);
 }
 .mobile-dialog-head {
@@ -59,7 +59,7 @@
   line-height: 1;
 }
 .mobile-dialog-icon:focus-visible {
-  outline: 2px solid var(--accent-strong);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .mobile-dialog-icon:disabled { opacity: 0.35; cursor: default; }

@@ -1,13 +1,9 @@
 /* Header bar: brand, group strip, action buttons. */
 
-header { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; background: var(--wash-strong); }
+header { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; background: var(--header-bg); }
 header .brand { font-size: var(--font-lg); font-weight: 600; white-space: nowrap; }
 header .mobile-only { display: none; }
 .desktop-only { }
-
-@media (prefers-color-scheme: dark) {
-  header { background: var(--header-dark); }
-}
 
 @media (max-width: 720px) {
   header {

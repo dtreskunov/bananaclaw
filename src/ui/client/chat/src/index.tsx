@@ -9,6 +9,8 @@ import { initNotif, shouldShowIosInstallHint } from './notify';
 import { initSound } from './sound';
 import { initInstall } from './install';
 import { initBadge } from './badge';
+import { initAppearance } from './appearance-state';
+import { showToast } from './components/Toast';
 import { applyPanelClasses } from './panels';
 import { applyHash, parseHash } from './hash';
 import { router } from './router';
@@ -60,14 +62,14 @@ function maybeShowIosInstallHint(): void {
   el.setAttribute('role', 'note');
   el.style.cssText =
     'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;' +
-    'background:#1f2937;color:#e5e7eb;border:1px solid #374151;border-radius:8px;' +
-    'padding:12px 14px;font:13px system-ui;-webkit-font-smoothing:antialiased;' +
-    'box-shadow:0 4px 12px rgba(0,0,0,0.3);display:flex;gap:10px;align-items:flex-start';
+    'background:var(--install-hint-bg);color:var(--install-hint-fg);border:1px solid var(--install-hint-border);border-radius:var(--radius-xl);' +
+    'padding:12px 14px;font:13px var(--font-ui);-webkit-font-smoothing:antialiased;' +
+    'box-shadow:0 4px 12px var(--install-hint-shadow);display:flex;gap:10px;align-items:flex-start';
   el.innerHTML =
     '<div style="flex:1">Add to Home Screen to receive notifications when the app is closed. ' +
     'Tap the Share button, then "Add to Home Screen".</div>' +
     '<button type="button" aria-label="Dismiss" ' +
-    'style="background:transparent;color:#9ca3af;border:0;font-size:18px;line-height:1;cursor:pointer;padding:0 4px">×</button>';
+    'style="background:transparent;color:var(--install-hint-muted);border:0;font-size:18px;line-height:1;cursor:pointer;padding:0 4px">×</button>';
   const btn = el.querySelector('button');
   if (btn) {
     btn.addEventListener('click', () => {
@@ -79,6 +81,7 @@ function maybeShowIosInstallHint(): void {
 }
 
 async function init(): Promise<void> {
+  initAppearance((message) => showToast(message, 'err'));
   initNotif();
   initSound();
   initInstall();
@@ -103,7 +106,7 @@ async function init(): Promise<void> {
   }
   if (groups.value.length === 0) {
     const app = document.getElementById('app');
-    if (app) app.innerHTML = '<div style="padding:24px;font:14px system-ui">No accessible groups.</div>';
+    if (app) app.innerHTML = '<div style="padding:24px;font:14px var(--font-ui)">No accessible groups.</div>';
     return;
   }
   const parsed = parseHash();

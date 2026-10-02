@@ -1,0 +1,125 @@
+[data-theme="autumn"] {
+  --surface-raised: var(--autumn-raised);
+  --surface: var(--autumn-surface);
+  --surface-fg: var(--autumn-text);
+  --bg: var(--surface);
+  --fg: var(--surface-fg);
+  --header-bg: var(--surface-raised);
+  --browser-theme-color: var(--autumn-raised);
+  --border: color-mix(in srgb, var(--border-control) 45%, var(--surface));
+  --border-strong: var(--border-control);
+  --placeholder-opacity: 1;
+  --accent: color-mix(in srgb, var(--primary) 12%, var(--surface));
+  --accent-strong: color-mix(in srgb, var(--primary) 24%, var(--surface));
+  --accent-strong-opaque: var(--primary);
+  --accent-fg: var(--primary-fg);
+  --accent-text: var(--primary);
+  --message-action-text: var(--primary);
+  --action-fill: var(--primary);
+  --dialog-action-fill: var(--primary);
+  --action-fg: var(--primary-fg);
+
+  --wash-subtle: color-mix(in srgb, var(--surface-fg) 3%, var(--surface));
+  --wash-soft: color-mix(in srgb, var(--surface-fg) 5%, var(--surface));
+  --wash: color-mix(in srgb, var(--surface-fg) 8%, var(--surface));
+  --wash-strong: color-mix(in srgb, var(--surface-fg) 12%, var(--surface));
+  --chip-bg: var(--wash);
+  --head-tint: var(--wash-subtle);
+  --selection: var(--accent);
+  --drag-target: var(--accent-strong);
+  --popover-shadow: var(--shadow-color);
+  --install-hint-bg: var(--surface-raised);
+  --install-hint-fg: var(--surface-fg);
+  --install-hint-border: var(--border-control);
+  --install-hint-muted: var(--muted);
+  --install-hint-shadow: var(--shadow-color);
+
+  --danger: var(--error);
+  --danger-fill: var(--error);
+  --danger-on-fill: var(--error-on-fill);
+  --error-soft: var(--error);
+  --error-bg: color-mix(in srgb, var(--error) 10%, var(--surface));
+  --warn: var(--warning);
+  --warning-border: var(--warning);
+  --warning-bg: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  --success-bg: color-mix(in srgb, var(--success) 10%, var(--surface));
+  --ok: var(--success);
+  --approve: var(--success);
+  --approve-fg: var(--success-on-fill);
+  --reject: var(--error);
+  --reject-fg: var(--error-on-fill);
+  --toast-error: var(--error);
+  --toast-error-fg: var(--error-on-fill);
+  --recording: var(--error);
+  --recording-fg: var(--error);
+  --recording-bg: var(--error-bg);
+  --recording-border: var(--error);
+  --recording-hover: color-mix(in srgb, var(--error) 16%, var(--surface));
+  --input-queued-accent: var(--warning);
+  --input-steering-accent: var(--success);
+  --highlight: color-mix(in srgb, var(--warning) 20%, var(--surface));
+  --highlight-strong: color-mix(in srgb, var(--warning) 35%, var(--surface));
+  --gradient-pop: linear-gradient(135deg, var(--primary), var(--warning), var(--success));
+  --syntax-deletion: var(--error-bg);
+  --syntax-addition: var(--success-bg);
+
+  --font-ui: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+}
+
+[data-theme="autumn"][data-mode="light"] {
+  color-scheme: light;
+  --autumn-surface: #fff8ef;
+  --autumn-raised: #fffcf7;
+  --autumn-text: #35251c;
+  --muted: #755b4b;
+  --primary: #a3421b;
+  --primary-fg: #ffffff;
+  --border-control: #9a7960;
+  --focus-ring: #9b451f;
+  --error: #a12e25;
+  --error-on-fill: #ffffff;
+  --warning: #80520c;
+  --warning-on-fill: #ffffff;
+  --success: #4b642d;
+  --success-on-fill: #ffffff;
+  --scrim: rgba(35, 23, 15, 0.45);
+  --shadow-color: rgba(53, 37, 28, 0.18);
+  --shadow-color-strong: rgba(53, 37, 28, 0.28);
+  --syntax-keyword: #81422f;
+  --syntax-string: #52672c;
+  --syntax-number: #884f16;
+  --syntax-title: #76503c;
+  --syntax-type: #803d59;
+}
+
+[data-theme="autumn"][data-mode="dark"] {
+  color-scheme: dark;
+  --autumn-surface: #1c1713;
+  --autumn-raised: #28201a;
+  --autumn-text: #f5e9d8;
+  --muted: #c3aa91;
+  --primary: #e9a16b;
+  --primary-fg: #24170f;
+  --border-control: #94785e;
+  --focus-ring: #f0b67f;
+  --error: #ef9a86;
+  --error-on-fill: #24170f;
+  --warning: #e3b65d;
+  --warning-on-fill: #24170f;
+  --success: #b0c484;
+  --success-on-fill: #1c2414;
+  --scrim: rgba(12, 8, 5, 0.65);
+  --shadow-color: rgba(0, 0, 0, 0.35);
+  --shadow-color-strong: rgba(0, 0, 0, 0.5);
+  --syntax-keyword: #edab86;
+  --syntax-string: #c2cc91;
+  --syntax-number: #e7bc75;
+  --syntax-title: #e7c4a5;
+  --syntax-type: #d6acc0;
+}

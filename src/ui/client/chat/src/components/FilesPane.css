@@ -74,7 +74,7 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 .files-pane .text-btn:hover { color: inherit; background: var(--wash); }
 
 .files-pane .files-actions .attach-btn.active { background: var(--accent); opacity: 1; }
-.files-pane .files-actions .save-btn { color: var(--accent); opacity: 1; }
+.files-pane .files-actions .save-btn { color: var(--accent-text); opacity: 1; }
 
 /* In-place text editor for the file preview. */
 .files-pane .file-editor {
@@ -192,7 +192,7 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
   margin-top: 4px;
 }
 .upload-strip .footer button {
-  background: var(--accent); color: white; border: 0;
+  background: var(--action-fill); color: var(--action-fg); border: 0;
   font-size: var(--font-sm); padding: 3px 10px; border-radius: var(--radius-sm); cursor: pointer;
 }
 .upload-strip .footer button[disabled] { opacity: 0.5; cursor: not-allowed; }
@@ -248,34 +248,26 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 }
 .hljs-comment, .hljs-quote { color: var(--muted); font-style: italic; }
 .hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-name, .hljs-tag {
-  color: #a26aff;
+  color: var(--syntax-keyword);
 }
 .hljs-string, .hljs-doctag, .hljs-template-tag, .hljs-template-variable,
 .hljs-regexp, .hljs-link, .hljs-meta-string {
-  color: #c8923a;
+  color: var(--syntax-string);
 }
 .hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet, .hljs-variable {
-  color: #2da671;
+  color: var(--syntax-number);
 }
 .hljs-title, .hljs-section, .hljs-attr, .hljs-attribute, .hljs-function .hljs-title {
-  color: #2f7be0;
+  color: var(--syntax-title);
 }
 .hljs-type, .hljs-class .hljs-title, .hljs-params {
-  color: #b8632a;
+  color: var(--syntax-type);
 }
 .hljs-meta, .hljs-meta-keyword { color: var(--muted); }
-.hljs-deletion { background: rgba(220, 80, 80, 0.18); }
-.hljs-addition { background: rgba(80, 200, 100, 0.18); }
+.hljs-deletion { background: var(--syntax-deletion); }
+.hljs-addition { background: var(--syntax-addition); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 600; }
-@media (prefers-color-scheme: dark) {
-  .hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-name, .hljs-tag { color: #c792ea; }
-  .hljs-string, .hljs-doctag, .hljs-template-tag, .hljs-template-variable,
-  .hljs-regexp, .hljs-link, .hljs-meta-string { color: #ecc48d; }
-  .hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet, .hljs-variable { color: #addb67; }
-  .hljs-title, .hljs-section, .hljs-attr, .hljs-attribute, .hljs-function .hljs-title { color: #82aaff; }
-  .hljs-type, .hljs-class .hljs-title, .hljs-params { color: #f78c6c; }
-}
 
 @media (max-width: 720px) {
   .nc-pane.files-pane {

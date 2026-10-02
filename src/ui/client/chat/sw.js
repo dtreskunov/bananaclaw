@@ -25,6 +25,7 @@ const CACHE_VERSION = '__CACHE_VERSION__';
 const SHELL_CACHE = 'nanoclaw-shell-' + CACHE_VERSION;
 const SHELL_ASSETS = [
   '/ui/chat/',
+  '/ui/chat/dist/appearance.js',
   '/ui/chat/dist/app.js',
   '/ui/chat/dist/app.css',
   '/ui/chat/icon.svg',

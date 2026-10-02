@@ -1241,10 +1241,19 @@ function serveServiceWorker(ctx: Ctx): void {
   try {
     const appStat = fs.statSync(appJsPath);
     let maxMtime = Math.max(Math.floor(swStat.mtimeMs), Math.floor(appStat.mtimeMs));
-    // Roll the cache key when a shell-cached static asset (icons, manifest)
+    // Roll the cache key when a shell-cached static asset (bootstrap, CSS, icons)
     // changes on disk, so installed PWAs pick up the new file on next launch
     // instead of holding the previous version forever via stale-while-revalidate.
-    for (const name of ['icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'manifest.webmanifest']) {
+    for (const name of [
+      'index.html',
+      'dist/appearance.js',
+      'dist/app.css',
+      'icon.svg',
+      'icon-192.png',
+      'icon-512.png',
+      'icon-maskable-512.png',
+      'manifest.webmanifest',
+    ]) {
       try {
         const s = fs.statSync(path.join(UI_DIR, name));
         if (Math.floor(s.mtimeMs) > maxMtime) maxMtime = Math.floor(s.mtimeMs);

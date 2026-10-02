@@ -64,6 +64,47 @@ After redeem the browser lands on `/ui/chat/`. Log out via the button in the hea
 
 In-browser chat + read-only browser for the per-agent-group filesystem at `groups/<folder>/`.
 
+#### Appearance
+
+In **My Profile / Settings → Appearance**, choose **Default** or **Autumn**,
+and independently select **System**, **Light**, or **Dark** mode. Default /
+System preserves the original appearance, including the black dark-mode
+background. Autumn uses parchment and copper in light mode, and walnut and
+amber in dark mode.
+
+Changes apply immediately, including to the open settings dialog, and are
+saved in this browser (`localStorage`, key `nanoclaw:appearance`, version 1).
+They synchronize across tabs on the same origin, not across devices or
+accounts. System follows OS changes live; explicit Light / Dark overrides the
+OS. Storage failures show an error while leaving the current in-memory
+selection usable. Invalid saved preferences are diagnosed and cleared.
+Themes affect application chrome, not embedded or user-authored websites.
+
+Theme values live in
+[`default.css`](../src/ui/client/chat/src/styles/themes/default.css) and
+[`autumn.css`](../src/ui/client/chat/src/styles/themes/autumn.css). Theme
+metadata lives in [`appearance.ts`](../src/ui/client/chat/src/appearance.ts).
+To add a theme, add its registry entry, import its CSS in `global.css`, and
+define common typography/radii plus `[data-theme="<id>"][data-mode="light"]`
+and `dark` token branches. Override all theme-sensitive values, including
+surfaces, text, borders, solid actions and their foregrounds, selection
+washes, focus rings, status colors, shadows and syntax highlighting. Keep
+responsive layout and touch-target sizes shared. Check text contrast at 4.5:1
+and essential control boundaries/focus indicators at 3:1.
+The floating **Scroll to bottom** button uses surface text normally and the
+paired `--primary` / `--primary-fg` colors when new messages arrive, including
+on hover. Keep this pair readable in both modes; do not use muted text on the
+filled button.
+
+The blocking `dist/appearance.js` script runs before the stylesheet in the
+chat shell to prevent wrong-theme flashes. The main bundle reuses its
+controller, and the service worker caches the bootstrap for offline loads.
+Rebuild browser assets with `pnpm --dir src/ui/client/chat run build` after
+editing theme definitions or appearance logic; the watch script watches both
+the app and the bootstrap.
+
+#### Access and file browsing
+
 **Access model.** A user sees an agent group if either:
 
 - the user has an `owner` or `admin` role for the group (or globally), or

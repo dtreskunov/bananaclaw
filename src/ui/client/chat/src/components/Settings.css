@@ -21,22 +21,22 @@
 .settings-row input[type="text"], .settings-row input:not([type]),
 .settings-row select {
   font: inherit; padding: 6px 8px;
-  border: 1px solid var(--border); border-radius: var(--radius-md);
+  border: 1px solid var(--border-control); border-radius: var(--radius-md);
   background: transparent; color: inherit;
 }
 .settings-row input { flex: 1; min-width: 0; }
 .settings-row input[type="checkbox"] { flex: none; }
 .settings-body button.danger { color: var(--danger); border-color: var(--danger); }
-.settings-body button.danger:hover { background: var(--danger); color: #fff; }
+.settings-body button.danger:hover { background: var(--danger); color: var(--danger-on-fill); }
 .settings-body button.ghost { background: transparent; }
 .choice-dialog-footer { flex-wrap: wrap; }
 .choice-dialog-footer button.primary {
   border-color: transparent;
-  background: var(--accent-strong, var(--accent));
-  color: var(--accent-fg, #fff);
+  background: var(--dialog-action-fill);
+  color: var(--action-fg);
 }
 .choice-dialog-footer button.danger { color: var(--danger); border-color: var(--danger); }
-.choice-dialog-footer button.danger:hover { background: var(--danger); color: #fff; }
+.choice-dialog-footer button.danger:hover { background: var(--danger); color: var(--danger-on-fill); }
 
 /* "Create agent group" modal — stacked label-above-input fields. */
 .create-group-body { display: flex; flex-direction: column; gap: 12px; }
@@ -76,8 +76,8 @@
 .settings-status {
   margin-top: 12px; padding: 8px 12px; border-radius: var(--radius-md); font-size: var(--font-base);
 }
-.settings-status.ok { background: rgba(108, 198, 108, 0.15); color: var(--success); }
-.settings-status.err { background: rgba(228, 68, 68, 0.15); color: var(--error); }
+.settings-status.ok { background: var(--success-bg); color: var(--success); }
+.settings-status.err { background: var(--error-bg); color: var(--error); }
 
 @media (max-width: 720px) {
   .settings-body { padding: 12px; }

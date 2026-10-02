@@ -1,56 +1,9 @@
 /* Design tokens, resets, base typography, top-level layout. */
 
+@import './themes/default.css';
+@import './themes/autumn.css';
+
 :root {
-  color-scheme: light dark;
-
-  /* Surface (auto-themed by `color-scheme`, with an OLED dark override). */
-  --surface: Canvas;
-  --surface-fg: CanvasText;
-
-  /* Lines and text. */
-  --border: rgba(127, 127, 127, 0.25);
-  --border-strong: rgba(127, 127, 127, 0.40);
-  --muted: rgba(127, 127, 127, 0.7);
-
-  /* Accent wash (used for selected rows, in-bubble bg, etc.). */
-  --accent: rgba(100, 150, 255, 0.18);
-  --accent-strong: rgba(100, 150, 255, 0.35);
-  --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 70%, var(--surface));
-  --header-dark: #151515;
-
-  /* Neutral overlays — mid-gray so they read identically in light
-     and dark. Used for hover, dividers, code blocks, fills. */
-  --wash-subtle: rgba(127, 127, 127, 0.05);
-  --wash-soft:   rgba(127, 127, 127, 0.08);
-  --wash:        rgba(127, 127, 127, 0.12);
-  --wash-strong: rgba(127, 127, 127, 0.18);
-
-  /* One-offs. */
-  --head-tint:    rgba(255, 255, 255, 0.02);
-  --selection:    rgba(127, 127, 255, 0.08);
-  --drag-target:  rgba(80, 140, 220, 0.18);
-
-  /* Overlays and shadows. */
-  --scrim:                rgba(0, 0, 0, 0.40);
-  --shadow-color:         rgba(0, 0, 0, 0.28);
-  --shadow-color-strong:  rgba(0, 0, 0, 0.35);
-
-  /* Status colors. */
-  --danger:     #c0392b;
-  --error:      #e44;
-  --error-soft: #e66;
-  --warning:    #e90;
-  --success:    #6c6;
-  --input-queued-accent: color-mix(in srgb, var(--warning) 70%, var(--surface));
-  --input-steering-accent: color-mix(in srgb, var(--approve) 70%, var(--surface));
-
-  /* Border-radius scale. */
-  --radius-sm: 3px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --radius-xl: 8px;
-  --radius-pill: 999px;
-
   /* Font-size scale. */
   --font-2xs: 10px;
   --font-xs: 11px;
@@ -66,20 +19,6 @@
   --menu-item-min-height: 32px;
   --menu-item-font-size: var(--font-sm);
 
-  /* Monospace font stack. */
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-
-  /* Named accent / status colors not covered by the semantic set. */
-  --primary: #1a73e8;
-  --approve: #2e7d32;
-  --reject: #c62828;
-  --toast-error: #d8392b;
-  --highlight: rgba(255, 200, 0, 0.35);
-  --highlight-strong: rgba(255, 200, 0, 0.7);
-
-  /* Gradient used for placeholder shimmer + send button border. */
-  --gradient-pop: linear-gradient(135deg, #8be4d4 0%, #3fbfae 40%, #b07cff 100%);
-
   /* Pane shell sizing (consumed by Pane.css and rail/files siblings). */
   --handle-h: 40px;
   --collapsed-w: 40px;
@@ -91,13 +30,6 @@
      column (chat composer / files drop-hint / collapsed channel
      section). Mirrors --handle-h's role at the top. */
   --bottom-row-h: 49px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #000;
-    --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 35%, var(--surface));
-  }
 }
 
 * { box-sizing: border-box; }
@@ -112,7 +44,7 @@ html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll
   line-height: inherit;
   letter-spacing: inherit;
   color: var(--muted);
-  opacity: 0.7;
+  opacity: var(--placeholder-opacity);
 }
 
 @media (max-width: 720px) {
@@ -126,10 +58,19 @@ html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; overscroll
     --menu-item-font-size: var(--font-lg);
   }
 }
-body { font: 14px/1.4 system-ui, -apple-system, sans-serif; height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }
+body { font: 14px/1.4 var(--font-ui); height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow-y: hidden; background: var(--surface); color: var(--surface-fg); }
 #app { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-button { font: inherit; padding: 4px 10px; border: 1px solid var(--border); background: transparent; border-radius: var(--radius-md); cursor: pointer; color: inherit; }
+button { font: inherit; padding: 4px 10px; border: 1px solid var(--border-control); background: transparent; border-radius: var(--radius-md); cursor: pointer; color: inherit; }
 button:hover { background: var(--wash); }
+:root[data-theme]:not([data-theme="default"]) :is(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+:root[data-theme]:not([data-theme="default"]) :is(input, select, textarea) {
+  accent-color: var(--primary);
+  border-color: var(--border-control);
+}
+:root[data-theme]:not([data-theme="default"]) a { color: var(--primary); }
 .accent-icon-btn {
   display: flex;
   align-items: center;

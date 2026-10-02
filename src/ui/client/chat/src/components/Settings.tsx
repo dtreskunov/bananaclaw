@@ -13,6 +13,7 @@ import { requestConfirm } from './PromptModal';
 import { BRAND } from '../brand';
 import type { Identity } from '../types';
 import { MobileDialog } from './MobileDialog';
+import { AppearanceSettings } from './AppearanceSettings';
 
 const API = '/ui/settings/api';
 
@@ -274,6 +275,8 @@ export function Settings() {
             </div>
             <p class="muted">Shown in {BRAND.name} chat headers and approval messages. Does not change how channels address you.</p>
           </section>
+
+          <AppearanceSettings />
 
           <section>
             <h3>Notifications</h3>

@@ -1,8 +1,8 @@
 /* src/components/PrivateWebView.css */
 :root {
-  --private-web-border: #cbd5e1;
-  --private-web-surface: #f8fafc;
-  --private-web-text: #334155;
+  --private-web-border: var(--border, #cbd5e1);
+  --private-web-surface: var(--surface-raised, #f8fafc);
+  --private-web-text: var(--surface-fg, #334155);
 }
 .private-web-view {
   position: relative;
@@ -33,18 +33,18 @@
   color: var(--private-web-text);
   background: var(--private-web-surface);
   text-align: center;
-  font: 14px/1.5 Georgia, serif;
+  font: 14px/1.5 var(--font-ui, Georgia, serif);
 }
 .private-web-state p {
   margin: 0;
 }
 .private-web-state button {
   justify-self: center;
-  border: 1px solid #64748b;
-  border-radius: 4px;
+  border: 1px solid var(--border-control, #64748b);
+  border-radius: var(--radius-md, 4px);
   padding: 7px 12px;
-  color: #0f172a;
-  background: #fff;
+  color: var(--surface-fg, #0f172a);
+  background: var(--surface, #fff);
   font: inherit;
   cursor: pointer;
 }

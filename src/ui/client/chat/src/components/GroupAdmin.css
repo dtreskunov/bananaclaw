@@ -120,9 +120,9 @@
 }
 .group-admin-danger-zone button.danger,
 .ga-confirm-foot button.danger {
-  background: var(--danger-fg, #d93b3b);
-  color: #fff;
-  border: 1px solid var(--danger-fg, #d93b3b);
+  background: var(--danger-fill);
+  color: var(--danger-on-fill);
+  border: 1px solid var(--danger-fill);
 }
 .group-admin-danger-zone button.danger:disabled,
 .ga-confirm-foot button.danger:disabled {
