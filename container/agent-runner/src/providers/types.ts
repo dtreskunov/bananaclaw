@@ -36,12 +36,12 @@ export interface AgentProvider {
   readonly mcpToolGuidance?: string;
 
   /**
-   * Optional. When true, the provider delivers final replies through its own
-   * reply tool and reports them as structured `replies` (or `silence`) on the
-   * `result` event. Its prompt drops the `<message to>` wrap contract, and the
-   * runner never parses its final text for delivery.
+   * Optional. When true, the provider decides its final replies itself and
+   * reports them as structured `replies` (or `silence`) on the `result` event.
+   * Its prompt drops the `<message to>` wrap contract, and the runner never
+   * parses its final text for delivery.
    */
-  readonly replyTool?: boolean;
+  readonly structuredReplies?: boolean;
 
   /**
    * Optional. Called by the poll-loop after each completed exchange (a
@@ -393,7 +393,7 @@ export function fingerprintToolInput(input: unknown): string | undefined {
     : createHash('sha256').update(normalized).digest('hex');
 }
 
-/** One reply sent through a provider's reply tool. No `to` means the conversation being answered. */
+/** One structured reply, sent verbatim. No `to` means the conversation being answered. */
 export interface ProviderReply {
   text: string;
   to?: string;
@@ -419,12 +419,11 @@ export type ProviderEvent =
       finishReason?: string;
       recoveredFromUnclosedThink?: boolean;
       /**
-       * Set only by `replyTool` providers: the replies the model sent through
-       * its reply tool this turn, in order. When present, `text` is not parsed
-       * for delivery.
+       * Set only by `structuredReplies` providers: the messages to deliver for
+       * this turn, in order. When present, `text` is not parsed for delivery.
        */
       replies?: ProviderReply[];
-      /** `replyTool` providers: the model explicitly chose not to reply, and why. */
+      /** `structuredReplies` providers: the model explicitly chose not to reply, and why. */
       silence?: string;
     }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }

@@ -53,7 +53,7 @@ export interface RecoveryPort {
 
 export interface ResultInput {
   text: string | null;
-  /** Replies from a `replyTool` provider; when present, `text` is not parsed. */
+  /** Replies from a `structuredReplies` provider; when present, `text` is not parsed. */
   replies?: ProviderReply[];
   silence?: string;
   strippedToEmpty?: boolean;
@@ -251,7 +251,7 @@ export class DeliveryRecovery {
   }
 
   /**
-   * A `replyTool` provider already settled delivery inside its own loop, so
+   * A `structuredReplies` provider already settled delivery inside its own loop, so
    * nothing here is nudged: the replies are sent, an explicit `no_reply` is
    * confirmed silence, and a turn with neither gets the empty-result notice.
    */

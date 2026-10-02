@@ -30,22 +30,12 @@ let holdModelResponse: boolean;
 let releaseModelResponse: (() => void) | undefined;
 let modelRequestStarted: (() => void) | undefined;
 let slowToolMode: boolean;
-/** Answer with plain text even when the reply tool is offered (unless it is forced). */
-let plainTextMode: boolean;
-let replyText: string;
-/** Texts for successive reply calls; `replyText` once empty. */
-let scriptedReplies: string[];
-/** Content of a plain-text answer. */
-let stubText: string;
-/** Stream `stubText` before the reply call, in the same step. */
-let textBeforeReply: boolean;
+/** Texts for successive text-only answers; `hello from stub` once empty. */
+let scriptedTexts: string[];
+/** Text streamed before each tool call, in the same step. */
+let toolCallText: string;
 let catalogFetch: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 let catalogModels: Record<string, unknown>;
-
-function replyAllowed(requestBody: Record<string, unknown>): boolean {
-  const forced = JSON.stringify(requestBody.tool_choice ?? '').includes('reply');
-  return forced || !plainTextMode;
-}
 
 function replyTexts(events: ProviderEvent[]): string[][] {
   return events.flatMap((event) => (event.type === 'result' ? [(event.replies ?? []).map((reply) => reply.text)] : []));
@@ -85,11 +75,8 @@ beforeEach(() => {
   releaseModelResponse = undefined;
   modelRequestStarted = undefined;
   slowToolMode = false;
-  plainTextMode = false;
-  replyText = 'hello from stub';
-  scriptedReplies = [];
-  stubText = 'hello from stub';
-  textBeforeReply = false;
+  scriptedTexts = [];
+  toolCallText = '';
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -121,25 +108,23 @@ beforeEach(() => {
       if (new URL(request.url).pathname.endsWith('/messages')) {
         const requestBody = requests.at(-1)!;
         const hasToolResult = JSON.stringify(requestBody.messages).includes('tool_result');
-        const offersReply = ((requestBody.tools ?? []) as Array<{ name?: string }>).some((item) => item.name === 'reply');
-        const callReply = offersReply && !(anthropicToolMode && !hasToolResult) && replyAllowed(requestBody);
         const body =
-          anthropicToolMode && !hasToolResult || callReply
+          anthropicToolMode && !hasToolResult
             ? [
                 'event: message_start',
-                `data: {"type":"message_start","message":{"id":"msg_minimax_tool","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":${callReply ? '{"input_tokens":4,"output_tokens":0,"cache_read_input_tokens":20,"cache_creation_input_tokens":3}' : '{"input_tokens":4,"output_tokens":0}'}}}`,
+                'data: {"type":"message_start","message":{"id":"msg_minimax_tool","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0}}}',
                 '',
                 'event: content_block_start',
-                `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_minimax_${requests.length}","name":"${callReply ? 'reply' : slowToolMode ? 'bash' : 'mcp__nanoclaw__send_message'}","input":{}}}`,
+                `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_minimax_1","name":"${slowToolMode ? 'bash' : 'mcp__nanoclaw__send_message'}","input":{}}}`,
                 '',
                 'event: content_block_delta',
-                `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":${JSON.stringify(callReply ? JSON.stringify({ text: 'hello from direct minimax' }) : slowToolMode ? '{"command":"sleep 30"}' : '{"text":"hello from direct tool"}')}}}`,
+                `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":${JSON.stringify(slowToolMode ? '{"command":"sleep 30"}' : '{"text":"hello from direct tool"}')}}}`,
                 '',
                 'event: content_block_stop',
                 'data: {"type":"content_block_stop","index":0}',
                 '',
                 'event: message_delta',
-                `data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":${callReply ? 5 : 10}}}`,
+                'data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":10}}',
                 '',
                 'event: message_stop',
                 'data: {"type":"message_stop"}',
@@ -194,27 +179,23 @@ beforeEach(() => {
           : externalMcpToolMode
             ? '{"value":"from-model"}'
             : '{"text":"hello user"}';
-      const offersReply = ((requestBody.tools ?? []) as Array<{ function?: { name?: string } }>).some(
-        (item) => item.function?.name === 'reply',
-      );
-      const callReply = !shouldCallTool && offersReply && replyAllowed(requestBody);
-      const body = shouldCallTool || callReply
+      const body = shouldCallTool
         ? [
-            ...(callReply && textBeforeReply
+            ...(toolCallText
               ? [
-                  `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(stubText)}},"finish_reason":null}]}`,
+                  `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(toolCallText)}},"finish_reason":null}]}`,
                   '',
                 ]
               : []),
-            `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_${requests.length}","type":"function","function":{"name":"${callReply ? 'reply' : toolName}","arguments":${JSON.stringify(callReply ? JSON.stringify({ text: scriptedReplies.shift() ?? replyText }) : toolArguments)}}}]},"finish_reason":null}]}`,
+            `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_${requests.length}","type":"function","function":{"name":"${toolName}","arguments":${JSON.stringify(toolArguments)}}}]},"finish_reason":null}]}`,
             '',
-            `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":${callReply ? '{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}' : '{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}'}}`,
+            'data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}',
             '',
             'data: [DONE]',
             '',
           ].join('\n')
         : [
-            `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(stubText)}},"finish_reason":null}]}`,
+            `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(scriptedTexts.shift() ?? 'hello from stub')}},"finish_reason":null}]}`,
             '',
             'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}',
             '',
@@ -927,86 +908,7 @@ describe('NativeProvider', () => {
     const second = await collect(restartedProvider, continuation);
     expect(replyTexts(second)).toEqual([['hello from stub']]);
     const messages = requests[1]?.messages as Array<{ role: string; content: unknown }>;
-    expect(messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'tool', 'user']);
-  });
-
-  describe('reply tool', () => {
-    const resultOf = (events: ProviderEvent[]) =>
-      events.find((event) => event.type === 'result') as Extract<ProviderEvent, { type: 'result' }>;
-
-    it('ends the turn at the reply call and keeps the reply out of activity', async () => {
-      const events = await collect(new NativeProvider({ model: 'local/test-model' }));
-
-      expect(requests).toHaveLength(1);
-      expect(resultOf(events)).toMatchObject({ text: null, replies: [{ text: 'hello from stub' }] });
-      expect(resultOf(events).silence).toBeUndefined();
-      expect(events.some((event) => event.type === 'progress' && 'tool' in event.step && event.step.tool === 'reply'))
-        .toBe(false);
-    });
-
-    it('delivers a plain-text ending directly, without an extra step', async () => {
-      plainTextMode = true;
-      stubText = 'plain answer';
-      const events = await collect(new NativeProvider({ model: 'local/test-model' }));
-
-      expect(requests).toHaveLength(1);
-      expect(requests[0]?.tool_choice).toBe('auto');
-      expect(replyTexts(events)).toEqual([['plain answer']]);
-    });
-
-    it('retries a reply that only points at undelivered text', async () => {
-      textBeforeReply = true;
-      stubText = 'Here is the full itinerary, day by day. '.repeat(12);
-      scriptedReplies = ['See the itinerary above.', 'Day one: arrive and check in.'];
-      const events = await collect(new NativeProvider({ model: 'local/test-model' }));
-
-      expect(requests).toHaveLength(2);
-      expect(JSON.stringify((requests[1]?.messages as unknown[]).at(-1))).toContain('refers to text the user cannot see');
-      expect(replyTexts(events)).toEqual([['Day one: arrive and check in.']]);
-    });
-
-    it('asks for a progress reply with only the reply tools once the step limit is reached', async () => {
-      scriptedToolCalls = Array.from({ length: MAX_STEPS }, () =>
-        ['todowrite', '{"todos":[{"id":"work","content":"keep going","status":"in_progress"}]}'] as [string, string]);
-      replyText = 'progress so far';
-      const events = await collect(new NativeProvider({ model: 'local/test-model' }));
-
-      expect(requests).toHaveLength(MAX_STEPS + 1);
-      const toolNames = (body: Record<string, unknown> | undefined) =>
-        ((body?.tools ?? []) as Array<{ function?: { name?: string } }>).map((item) => item.function?.name).sort();
-      expect(toolNames(requests[MAX_STEPS - 1])).toContain('todowrite');
-      expect(toolNames(requests[MAX_STEPS])).toEqual(['no_reply', 'reply']);
-      expect(JSON.stringify((requests[MAX_STEPS]?.messages as unknown[]).at(-1))).toContain('step limit');
-      expect(replyTexts(events)).toEqual([['progress so far']]);
-    });
-
-    it('reports an explicit no_reply as silence', async () => {
-      scriptedToolCalls = [['no_reply', '{"reason":"nothing new"}']];
-      const events = await collect(new NativeProvider({ model: 'local/test-model' }));
-
-      expect(requests).toHaveLength(1);
-      expect(resultOf(events)).toMatchObject({ replies: [], silence: 'nothing new' });
-    });
-
-    it('returns the first malformed reply to the model and salvages the second', async () => {
-      scriptedToolCalls = [
-        ['reply', '{"text":"first try'],
-        ['reply', '{"text":"Line one\\nLine \\"two\\"'],
-      ];
-      const events = await collect(new NativeProvider({ model: 'local/test-model' }));
-
-      expect(requests).toHaveLength(2);
-      expect(replyTexts(events)).toEqual([['Line one\nLine "two"']]);
-    });
-
-    it('rejects a reply to an unknown destination so the model can correct it', async () => {
-      scriptedToolCalls = [['reply', '{"text":"hi","to":"nowhere"}']];
-      const events = await collect(new NativeProvider({ model: 'local/test-model' }));
-
-      expect(requests).toHaveLength(2);
-      expect(JSON.stringify(requests[1]?.messages)).toContain('Unknown destination');
-      expect(replyTexts(events)).toEqual([['hello from stub']]);
-    });
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
   });
 
   it('executes BananaClaw built-ins directly without an MCP subprocess', async () => {
@@ -1204,10 +1106,7 @@ describe('NativeProvider', () => {
 
     expect(JSON.stringify(requests[0]?.tools)).toContain('todowrite');
     expect(JSON.stringify(requests[0]?.messages)).toContain('## In-turn todos');
-    expect((requests[1]?.tools as Array<{ function: { name: string } }>).map((item) => item.function.name)).toEqual([
-      'reply',
-      'no_reply',
-    ]);
+    expect(requests[1]?.tools).toBeUndefined();
     expect(JSON.stringify(requests[1]?.messages)).not.toContain('## In-turn todos');
   });
 
@@ -1453,5 +1352,72 @@ describe('NativeProvider', () => {
     expect(JSON.parse(row.content).text).toBe('hello from direct tool');
     expect(requests).toHaveLength(2);
     expect(JSON.stringify(requests[1]?.messages)).toContain('tool_result');
+  });
+});
+
+describe('final message', () => {
+  const sendCall = (text: string): [string, string] => ['mcp__nanoclaw__send_message', JSON.stringify({ text })];
+  const lastUserText = (request: Record<string, unknown>) =>
+    JSON.stringify((request.messages as Array<{ role: string }>).filter((message) => message.role === 'user').at(-1));
+
+  it('delivers the final message but not text written alongside tool calls', async () => {
+    scriptedToolCalls = [sendCall('mid-turn update')];
+    toolCallText = 'Let me send that first.';
+    scriptedTexts = ['All done.'];
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }));
+
+    expect(replyTexts(events)).toEqual([['All done.']]);
+    expect(events.find((event) => event.type === 'result')).not.toHaveProperty('silence');
+    expect(requests[0]?.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ function: expect.objectContaining({ name: 'no_reply' }) }),
+    ]));
+  });
+
+  it('ends silently through no_reply and keeps it out of the activity trace', async () => {
+    scriptedToolCalls = [['no_reply', '{"reason":"nothing new"}']];
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }));
+
+    expect(requests).toHaveLength(1);
+    expect(events.find((event) => event.type === 'result')).toMatchObject({ replies: [], silence: 'nothing new' });
+    expect(events.some((event) => event.type === 'progress' && event.step.tool === 'no_reply')).toBe(false);
+  });
+
+  it('asks once for the full message when the final message points at undelivered text', async () => {
+    scriptedToolCalls = [sendCall('status')];
+    toolCallText = 'Detailed findings. '.repeat(25);
+    scriptedTexts = ['See my summary above.', 'The full findings.'];
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }));
+
+    expect(requests).toHaveLength(3);
+    expect(lastUserText(requests[2]!)).toContain('That message was not sent');
+    expect(replyTexts(events)).toEqual([['The full findings.']]);
+  });
+
+  it('asks for a final message without tools once the step limit is reached', async () => {
+    scriptedToolCalls = Array.from({ length: MAX_STEPS }, (_, index) => sendCall(`update ${index}`));
+    scriptedTexts = ['Progress so far.'];
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }));
+
+    expect(requests).toHaveLength(MAX_STEPS + 1);
+    expect(requests[MAX_STEPS - 1]?.tools).toBeDefined();
+    expect(requests[MAX_STEPS]?.tools).toBeUndefined();
+    expect(lastUserText(requests[MAX_STEPS]!)).toContain('step limit');
+    expect(replyTexts(events)).toEqual([['Progress so far.']]);
+  });
+
+  it('replaces a drafted final message when guidance arrives', async () => {
+    scriptedTexts = ['draft answer', 'steered answer'];
+    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'original', cwd: root });
+    const events: ProviderEvent[] = [];
+    let steered = false;
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'assistant_message' && !steered) steered = query.steer!({ id: 'g', prompt: 'guidance' });
+      if (event.type === 'result') query.end();
+    }
+
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]?.messages)).toContain('draft answer');
+    expect(replyTexts(events)).toEqual([['steered answer']]);
   });
 });

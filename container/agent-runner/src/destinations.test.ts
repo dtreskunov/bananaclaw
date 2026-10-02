@@ -103,15 +103,15 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
   });
 });
 
-describe('buildSystemPromptAddendum — reply tool', () => {
-  it('replaces the <message> wrap contract with the reply tool', () => {
+describe('buildSystemPromptAddendum — structured replies', () => {
+  it('replaces the <message> wrap contract with the final-message rules', () => {
     seedDestination('web-mg-web-0', 'web-mg-web-0', 'web', 'web:denis');
     seedDestination('denis-bot', 'Denis (Bot)', 'resend', 'resend:denis@bananaclaw.app');
     seedOrigin('web', 'web:denis');
 
-    const prompt = buildSystemPromptAddendum('Casa', { replyTool: true });
+    const prompt = buildSystemPromptAddendum('Casa', { structuredReplies: true });
 
-    expect(prompt).toContain('calling the `reply` tool');
+    expect(prompt).toContain('Your final message (the one you end the turn with');
     expect(prompt).toContain('This conversation lives on `web-mg-web-0`');
     expect(prompt).toContain('`reply_allowed="false"` is one-way');
     expect(prompt).toContain('end the turn with `no_reply`');

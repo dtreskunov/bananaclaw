@@ -1418,7 +1418,7 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
 }
 
 /**
- * Conversations that predate the reply tool are full of `<message to>`
+ * Conversations that predate structured replies are full of `<message to>`
  * wrapping, so a model may still wrap a reply's text. Unwrap it rather than
  * send the tags: each block goes to its own destination, the rest to the
  * reply's, and `<internal>` notes go to the activity trace.
@@ -1439,9 +1439,9 @@ function unwrapLegacyReply(reply: ProviderReply): ProviderReply[] {
 }
 
 /**
- * Deliver replies a `replyTool` provider sent through its reply tool. Each
- * text is sent verbatim; no `to` means the conversation being answered. A
- * silence reason is recorded in the activity trace and sends nothing.
+ * Deliver replies from a `structuredReplies` provider. Each text is sent
+ * verbatim; no `to` means the conversation being answered. A silence reason
+ * is recorded in the activity trace and sends nothing.
  */
 function dispatchReplies(
   replies: ProviderReply[],

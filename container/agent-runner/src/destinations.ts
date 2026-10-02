@@ -81,8 +81,8 @@ export function findByRouting(
  * the shared base is identical across all agents.
  */
 export interface PromptAddendumOptions {
-  /** Final replies go through the provider's `reply` tool, not `<message>` wrapping. */
-  replyTool?: boolean;
+  /** The provider sends the final message as the reply, without `<message>` wrapping. */
+  structuredReplies?: boolean;
 }
 
 export function buildSystemPromptAddendum(assistantName?: string, options: PromptAddendumOptions = {}): string {
@@ -92,12 +92,12 @@ export function buildSystemPromptAddendum(assistantName?: string, options: Promp
     sections.push(['# You are ' + assistantName, '', `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`].join('\n'));
   }
 
-  sections.push(buildDestinationsSection(options.replyTool ?? false));
+  sections.push(buildDestinationsSection(options.structuredReplies ?? false));
 
   return sections.join('\n\n');
 }
 
-function buildDestinationsSection(replyTool: boolean): string {
+function buildDestinationsSection(structuredReplies: boolean): string {
   const all = getAllDestinations();
 
   if (all.length === 0) {
@@ -135,8 +135,8 @@ function buildDestinationsSection(replyTool: boolean): string {
       lines.push(`- ${describeDestination(d)}${marker}`);
     }
   }
-  if (replyTool) {
-    appendReplyToolRules(lines, all, origin);
+  if (structuredReplies) {
+    appendFinalMessageRules(lines, all, origin);
     return lines.join('\n');
   }
   lines.push('');
@@ -170,14 +170,14 @@ function buildDestinationsSection(replyTool: boolean): string {
   return lines.join('\n');
 }
 
-function appendReplyToolRules(lines: string[], all: DestinationEntry[], origin: DestinationEntry | undefined): void {
+function appendFinalMessageRules(lines: string[], all: DestinationEntry[], origin: DestinationEntry | undefined): void {
   lines.push('');
   lines.push(
-    'Deliver your answer by calling the `reply` tool; only its `text` is sent. Without `to`, it answers the destination the latest message came `from`. Pass `to="name"` to answer elsewhere, or use the `send_message` MCP tool to send something mid-turn.',
+    'Your final message (the one you end the turn with, after your last tool call) is sent to the destination the latest message came `from`. To send to any other destination, or to send something mid-turn, use the `send_message` MCP tool.',
   );
   lines.push('');
   lines.push(
-    '**Routing rule:** inbound messages with an authorized reply destination carry a `from="name"` attribute; your reply goes back there — a human channel message gets a human-channel reply, a peer-agent message gets a peer-agent reply. A peer message with `reply_allowed="false"` is one-way: `sender_agent_id` is identity only, not an address. Do not invent a destination or substitute a human channel for an unavailable peer reply. Forwarding a human request to a peer agent, or relaying a peer\'s answer back to the human, is fine when the request explicitly asks for it.',
+    '**Routing rule:** inbound messages with an authorized reply destination carry a `from="name"` attribute; your final message goes back there — a human channel message gets a human-channel reply, a peer-agent message gets a peer-agent reply. A peer message with `reply_allowed="false"` is one-way: `sender_agent_id` is identity only, not an address. Do not invent a destination or substitute a human channel for an unavailable peer reply. Forwarding a human request to a peer agent, or relaying a peer\'s answer back to the human, is fine when the request explicitly asks for it.',
   );
   if (origin && all.length > 1) {
     lines.push('');

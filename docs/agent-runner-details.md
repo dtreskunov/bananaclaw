@@ -85,7 +85,7 @@ type ProviderEvent =
 ### Provider event semantics
 
 - **`init`** — emitted once per query when the provider establishes or resumes a session. The agent-runner captures `sessionId` for future resume.
-- **`result`** — emitted when the agent produces a complete response. May be emitted multiple times per query (e.g., Claude's multi-turn with subagents). The agent-runner writes each result to messages_out. Providers that declare `replyTool` (native) attach structured `replies` / `silence` instead of text to parse.
+- **`result`** — emitted when the agent produces a complete response. May be emitted multiple times per query (e.g., Claude's multi-turn with subagents). The agent-runner writes each result to messages_out. Providers that declare `structuredReplies` (native) attach structured `replies` / `silence` instead of text to parse.
 - **`error`** — emitted on failure. `retryable` indicates whether the agent-runner should retry. `classification` is optional detail (e.g., 'quota', 'auth', 'transport').
 - **`progress`** — optional, for logging. The agent-runner logs these but doesn't act on them.
 
@@ -333,45 +333,43 @@ are loaded on demand (`native/tool-search.ts`):
 ncl groups config set-param --id <group> --key mcp_tool_search --value always
 ```
 
-### Native Provider: Reply Tool
+### Native Provider: Final Message
 
 Other providers end a turn with final text that must wrap each delivery in
 `<message to="name">` blocks, with runner nudges when the wrapping is missing.
-The native provider instead declares `replyTool` and gives the model two
-in-process tools (`native/reply.ts`):
+The native provider declares `structuredReplies` and uses a simpler contract:
+**the final message is the reply.**
 
-- `reply({ text, to? })` sends `text` verbatim. Without `to`, it goes to the
-  conversation being answered; an unknown `to` is returned to the model as a
-  tool error. A step that calls it ends the turn once that step's other tool
-  calls finish, unless steering arrived, which then needs its own reply.
-- `no_reply({ reason })` ends the turn without sending anything. The reason
-  goes to the activity trace, and no empty-result notice is shown.
+- The text of the step that ends the turn (a step with no tool calls) is sent
+  verbatim to the conversation being answered.
+- Text written alongside tool calls is working notes and is never delivered.
+- `send_message` (with `to`) covers other destinations and mid-turn updates.
+- `no_reply({ reason })` (`native/reply.ts`) ends the turn without sending
+  anything. Its reason, not the tool call, goes to the activity trace, and
+  no empty-result notice is shown.
 
-Text the model writes outside `reply` is never delivered. Recovery happens
-inside the provider's step loop:
+Recovery happens inside the provider's step loop:
 
-- **Plain-text ending.** A turn that ends without calling `reply` delivers
-  its final text as the reply, and the runner logs a warning. There is no
-  extra step: MiniMax ignores `tool_choice`, so a step forced to `reply`
-  mostly repeats the same text at extra cost.
-- **Pointer reply.** A short reply like "see above", sent after at least
-  400 characters of undelivered text, is discarded once and the model is
-  asked, with a transient instruction that is not stored, to resend the
+- **Steering.** If guidance is applied after a final message, that message
+  is a superseded draft: it stays in history but is not sent, and the next
+  final message answers both.
+- **Pointer reply.** A short final message like "see above", sent after at
+  least 400 characters of undelivered text, is discarded once and the model
+  is asked, with a transient instruction that is not stored, to write the
   message itself.
 - **Step limit.** A turn runs at most 50 model steps (`MAX_STEPS`). If the
-  model is still calling tools at the limit, one more step offers only
-  `reply` and `no_reply`, with a transient instruction to report what was
-  done and what remains.
-- **Malformed arguments.** The first `reply` call with invalid arguments goes
-  back to the model as a tool error. The text of a second one is salvaged
-  from the raw arguments.
+  model is still calling tools at the limit, one more step runs with no tools
+  and a transient instruction to report what was done and what remains.
+
+There is no `reply` tool: MiniMax ignores `tool_choice` and prefers to end
+with plain text, so a tool-based reply was mostly bypassed anyway.
 
 The `result` event carries `replies` (and `silence`), and the poll loop sends
-them as they are, without parsing `<message>` blocks or nudging. Older
-conversations contain wrapped turns, so a reply whose text still has
-`<message>` or `<internal>` tags is unwrapped before it is sent. The native
-prompt swaps the shared `module-core.md` fragment for `native/core.md`, and
-the destinations section for a reply-tool version.
+them as they are, without nudging. Older conversations contain wrapped turns,
+so a reply whose text still has `<message>` or `<internal>` tags is unwrapped
+before it is sent. The native prompt swaps the shared `module-core.md`
+fragment for `native/core.md`, and the destinations section for a
+final-message version.
 
 ## Agent-Runner Core
 

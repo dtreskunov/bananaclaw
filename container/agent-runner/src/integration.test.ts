@@ -2579,10 +2579,10 @@ class BlockingProvider {
   }
 }
 
-/** A `replyTool` provider: one structured result, then blocks until the loop ends the stream. */
-class ReplyToolProvider {
+/** A `structuredReplies` provider: one structured result, then blocks until the loop ends the stream. */
+class StructuredReplyProvider {
   readonly supportsNativeSlashCommands = false;
-  readonly replyTool = true;
+  readonly structuredReplies = true;
   ended = false;
 
   constructor(private readonly result: { replies: ProviderReply[]; silence?: string }) {}
@@ -2621,8 +2621,8 @@ class ReplyToolProvider {
   }
 }
 
-describe('poll loop — reply tool results', () => {
-  async function run(provider: ReplyToolProvider, done: () => boolean): Promise<void> {
+describe('poll loop — structured replies', () => {
+  async function run(provider: StructuredReplyProvider, done: () => boolean): Promise<void> {
     insertMessage('m-reply', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
     const controller = new AbortController();
     const loop = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 3000);
@@ -2638,7 +2638,7 @@ describe('poll loop — reply tool results', () => {
          VALUES ('slack-other', 'Slack Other', 'channel', 'slack', 'chan-9', NULL)`,
       )
       .run();
-    const provider = new ReplyToolProvider({
+    const provider = new StructuredReplyProvider({
       replies: [{ text: 'Use `<message to="x">` tags.\n\n- one' }, { text: 'heads up', to: 'slack-other' }],
     });
     await run(provider, () => getUndeliveredMessages().length === 2);
@@ -2655,7 +2655,7 @@ describe('poll loop — reply tool results', () => {
   });
 
   it('unwraps legacy <message> and <internal> tags inside a reply', async () => {
-    const provider = new ReplyToolProvider({
+    const provider = new StructuredReplyProvider({
       replies: [{ text: '<internal>checked</internal><message to="discord-test">the answer</message>' }],
     });
     await run(provider, () => getUndeliveredMessages().length === 1);
@@ -2667,7 +2667,7 @@ describe('poll loop — reply tool results', () => {
   });
 
   it('treats no_reply as confirmed silence without an empty-result notice', async () => {
-    const provider = new ReplyToolProvider({ replies: [], silence: 'nothing new since the last check' });
+    const provider = new StructuredReplyProvider({ replies: [], silence: 'nothing new since the last check' });
     await run(provider, () => provider.ended);
     await sleep(100);
 
@@ -2678,7 +2678,7 @@ describe('poll loop — reply tool results', () => {
   });
 
   it('notifies the user when a turn sends no reply and no no_reply', async () => {
-    const provider = new ReplyToolProvider({ replies: [] });
+    const provider = new StructuredReplyProvider({ replies: [] });
     await run(provider, () => getUndeliveredMessages().length === 1);
 
     expect(JSON.parse(getUndeliveredMessages()[0].content).text).toContain('without producing a response');
