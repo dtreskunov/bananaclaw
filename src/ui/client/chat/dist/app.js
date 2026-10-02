@@ -17671,6 +17671,9 @@ async function applyHash(router2) {
 function showsMidTurnLabel(deliveryOrigin, turnActive) {
   return deliveryOrigin === "send_message" && turnActive;
 }
+function isSystemNotice(direction, systemGenerated, suggestedAction) {
+  return direction === "out" && (systemGenerated === true || suggestedAction !== void 0);
+}
 function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
@@ -17736,6 +17739,7 @@ var message = shape({
   canEditPending: optional(bool),
   author: optional(shape({ userId: id, displayName: text })),
   deliveryOrigin: optional(oneOf("send_message", "send_file", "response")),
+  systemGenerated: optional(bool),
   suggestedAction: optional(oneOf("continue", "retry", "report")),
   files: optional(
     array(
@@ -22299,6 +22303,14 @@ function parseStep(text2) {
     return {};
   }
 }
+function traceStatusClass(step) {
+  if (step.kind !== "tool") return "trace-status-neutral";
+  if (step.status === "pending") return "trace-status-queued";
+  if (step.status === "running") return "trace-status-running";
+  if (step.status === "completed") return "trace-status-completed";
+  if (step.status === "error") return "trace-status-failed";
+  return "trace-status-neutral";
+}
 function cleanToolName(tool) {
   if (tool.startsWith("mcp__")) {
     const rest = tool.slice(5);
@@ -22439,7 +22451,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle }) {
   const code = open ? known ? stepBody(step) : line.text : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt2) : null;
   const meta = open ? stepMeta(step, elapsedMs) : null;
-  return /* @__PURE__ */ u4("li", { class: `trace-row${open ? " open" : ""}`, children: [
+  return /* @__PURE__ */ u4("li", { class: `trace-row ${traceStatusClass(step)}${open ? " open" : ""}`, children: [
     /* @__PURE__ */ u4(
       "button",
       {
@@ -22850,9 +22862,11 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
     if (q5 && ref.current) highlightTextNodes(ref.current, q5);
   }, [m6.text, md != null, q5]);
   const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
+  const systemNotice = isSystemNotice(m6.direction, m6.systemGenerated, m6.suggestedAction);
+  const systemNoticeTone = systemNotice && m6.statsTurn?.outcome === "failed" ? " provenance-error" : systemNotice && ["warning", "stopped", "interrupted"].includes(m6.statsTurn?.outcome ?? "") ? " provenance-warning" : "";
   const inputPresentation = m6.direction === "in" ? inputStatePresentation(m6.inputState) : null;
   const activity = m6.direction === "out" ? m6.activity ?? [] : [];
-  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "");
+  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (systemNotice ? ` system-notice${systemNoticeTone}` : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === "web";
@@ -22932,7 +22946,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             m6.deliveryOrigin,
             !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
           ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-          m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: m6.statsTurn }) : null,
+          m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: m6.statsTurn, showOutcomeNote: !systemNotice }) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
             /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
             /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }),
@@ -23174,10 +23188,10 @@ function TurnStats({ turn: turn2, view }) {
     view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null
   ] });
 }
-function ReplyTurnStats({ turn: turn2 }) {
+function ReplyTurnStats({ turn: turn2, showOutcomeNote = true }) {
   const view = turnRowView(turn2, Date.now());
   return /* @__PURE__ */ u4(k, { children: [
-    view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null,
+    showOutcomeNote && view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null,
     /* @__PURE__ */ u4(TurnStats, { turn: turn2, view })
   ] });
 }
@@ -23197,6 +23211,7 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
   }, [turn2.startedAt, live]);
   const view = turnRowView(turn2, now);
   const liveHeadline = latestActivityHeadline(lines);
+  const provenanceTone = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
   const [openLatestOnExpand, setOpenLatestOnExpand] = h2(false);
   if (!lines.length && !status) return null;
   const toggleFromPreview = () => {
@@ -23210,7 +23225,7 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: `typing turn-system${traceExpanded ? " expanded" : ""}`,
+      class: `typing turn-system${status ? " turn-status" : ""}${traceExpanded ? " expanded" : ""}${provenanceTone}`,
       "data-turn-id": status ? turn2.id : void 0,
       "aria-live": live ? "polite" : "off",
       children: [

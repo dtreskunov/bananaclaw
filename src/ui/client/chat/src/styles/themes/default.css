@@ -90,6 +90,10 @@
 [data-theme="default"][data-mode="light"] {
   color-scheme: light;
   --surface: Canvas;
+  --activity-status-queued: #946200;
+  --activity-status-running: #1a66c2;
+  --activity-status-completed: #28752c;
+  --activity-status-failed: #b73329;
   --header-bg: var(--wash-strong);
   --message-meta: color-mix(in srgb, var(--surface-fg) 60%, var(--surface));
   --table-header-bg: color-mix(in srgb, var(--surface-fg) 16%, var(--surface));
@@ -104,6 +108,10 @@
 [data-theme="default"][data-mode="dark"] {
   color-scheme: dark;
   --surface: #000;
+  --activity-status-queued: #f0bd62;
+  --activity-status-running: #82aaff;
+  --activity-status-completed: #8fd694;
+  --activity-status-failed: #ff8f88;
   --header-bg: #151515;
   --table-header-bg: color-mix(in srgb, var(--surface-fg) 6%, var(--surface));
   --accent-strong-opaque: color-mix(in srgb, rgb(100, 150, 255) 35%, var(--surface));
@@ -119,6 +127,10 @@
   :root:not([data-mode]) {
     color-scheme: dark;
     --surface: #000;
+    --activity-status-queued: #f0bd62;
+    --activity-status-running: #82aaff;
+    --activity-status-completed: #8fd694;
+    --activity-status-failed: #ff8f88;
     --header-bg: #151515;
     --table-header-bg: color-mix(in srgb, var(--surface-fg) 6%, var(--surface));
     --message-meta: var(--muted);

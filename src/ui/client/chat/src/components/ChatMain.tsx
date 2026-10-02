@@ -30,7 +30,7 @@ import { canEditMessageInBranch, composerSendInFlight, currentPendingEditor } fr
 import { usePendingComposer } from '../pending-composer';
 import { mergeQuestionTimeline } from '../question-timeline';
 import { splitPendingInputs, timelineLayoutKey } from '../queued-followups';
-import { showsMidTurnLabel } from '../chat-protocol';
+import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import { conversationState } from '../conversation-state';
 import { turnRowView, type TurnRowView } from '../turn-row';
@@ -131,6 +131,15 @@ function parseStep(text: string): TraceStep {
     const o = JSON.parse(text) as TraceStep;
     return o && typeof o === 'object' ? o : {};
   } catch { return {}; }
+}
+
+function traceStatusClass(step: TraceStep): string {
+  if (step.kind !== 'tool') return 'trace-status-neutral';
+  if (step.status === 'pending') return 'trace-status-queued';
+  if (step.status === 'running') return 'trace-status-running';
+  if (step.status === 'completed') return 'trace-status-completed';
+  if (step.status === 'error') return 'trace-status-failed';
+  return 'trace-status-neutral';
 }
 
 /** Turn a raw tool name into what we show the user: `mcp__server__name`
@@ -320,7 +329,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle }: { line: ActivityL
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
   const meta = open ? stepMeta(step, elapsedMs) : null;
   return (
-    <li class={`trace-row${open ? ' open' : ''}`}>
+    <li class={`trace-row ${traceStatusClass(step)}${open ? ' open' : ''}`}>
       <button
         type="button"
         class="trace-row-toggle"
@@ -759,9 +768,16 @@ function Message(
     if (q && ref.current) highlightTextNodes(ref.current, q);
   }, [m.text, md != null, q]);
   const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
+  const systemNotice = isSystemNotice(m.direction, m.systemGenerated, m.suggestedAction);
+  const systemNoticeTone = systemNotice && m.statsTurn?.outcome === 'failed'
+    ? ' provenance-error'
+    : systemNotice && ['warning', 'stopped', 'interrupted'].includes(m.statsTurn?.outcome ?? '')
+      ? ' provenance-warning'
+      : '';
   const inputPresentation = m.direction === 'in' ? inputStatePresentation(m.inputState) : null;
   const activity = m.direction === 'out' ? m.activity ?? [] : [];
   const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '')
+    + (systemNotice ? ` system-notice${systemNoticeTone}` : '')
     + (inputPresentation ? ` ${inputPresentation.className}` : '') + (isLatest ? ' latest' : '');
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
@@ -866,7 +882,9 @@ function Message(
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
-        {m.direction === 'out' && m.statsTurn ? <ReplyTurnStats turn={m.statsTurn} /> : null}
+        {m.direction === 'out' && m.statsTurn
+          ? <ReplyTurnStats turn={m.statsTurn} showOutcomeNote={!systemNotice} />
+          : null}
         <span class="msg-inline-actions">
           <EditMessageButton m={m} />
           <ForkButton m={m} isLatest={isLatest} />
@@ -1153,11 +1171,11 @@ function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }
 }
 
 /** A settled turn's outcome note and accounting, in the meta line of its last reply. */
-function ReplyTurnStats({ turn }: { turn: ConversationTurn }) {
+function ReplyTurnStats({ turn, showOutcomeNote = true }: { turn: ConversationTurn; showOutcomeNote?: boolean }) {
   const view = turnRowView(turn, Date.now());
   return (
     <>
-      {view.note ? <span class="turn-outcome-note">{view.note}</span> : null}
+      {showOutcomeNote && view.note ? <span class="turn-outcome-note">{view.note}</span> : null}
       <TurnStats turn={turn} view={view} />
     </>
   );
@@ -1184,6 +1202,12 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
   }, [turn.startedAt, live]);
   const view = turnRowView(turn, now);
   const liveHeadline = latestActivityHeadline(lines);
+  const provenanceTone = stop?.error || (settled && turn.outcome === 'failed')
+    ? ' provenance-error'
+    : (settled && ['warning', 'stopped', 'interrupted'].includes(turn.outcome)) ||
+        (live && !turnConnected.value)
+      ? ' provenance-warning'
+      : '';
   const [openLatestOnExpand, setOpenLatestOnExpand] = useState(false);
   if (!lines.length && !status) return null;
   const toggleFromPreview = () => {
@@ -1196,7 +1220,7 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
   };
   return (
     <div
-      class={`typing turn-system${traceExpanded ? ' expanded' : ''}`}
+      class={`typing turn-system${status ? ' turn-status' : ''}${traceExpanded ? ' expanded' : ''}${provenanceTone}`}
       data-turn-id={status ? turn.id : undefined}
       aria-live={live ? 'polite' : 'off'}
     >

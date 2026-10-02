@@ -168,7 +168,12 @@ it('stops only the matching active turn, waits for settlement, preserves queue a
       content: string;
     }[];
     expect(rows).toHaveLength(1);
-    expect(JSON.parse(rows[0].content)).toMatchObject({ text: 'Stopped by user.', stopped: true, turn_id: running.id });
+    expect(JSON.parse(rows[0].content)).toMatchObject({
+      text: 'Stopped by user.',
+      stopped: true,
+      turn_id: running.id,
+      system_generated: true,
+    });
     const activity = getOutboundDb().prepare('SELECT text FROM turn_activity WHERE message_out_id = ?').all(rows[0].id);
     expect(JSON.stringify(activity)).toContain('completed');
     expect(JSON.stringify(activity)).toContain('outcome unknown');
@@ -310,6 +315,7 @@ it('persists Stop without changing an existing question card', async () => {
     expect(stoppedContent).toMatchObject({
       text: 'Stopped by user.',
       stopped: true,
+      system_generated: true,
     });
     expect(stoppedContent.cancelled_question_ids).toBeUndefined();
   } finally {

@@ -39,7 +39,10 @@ export async function writeTurnNotice(execution: TurnExecution, notice: Terminal
   try {
     await waitForTurnTools(execution);
     execution.endedAt ??= new Date().toISOString();
-    writeResponseRow(notice.routing, notice.text, { suggested_action: notice.action });
+    writeResponseRow(notice.routing, notice.text, {
+      suggested_action: notice.action,
+      system_generated: true,
+    });
     if (!execution.failure) await settleTurn(execution, 'warning');
   } catch (e) {
     log(`Failed to write ${notice.label}: ${e instanceof Error ? e.message : String(e)}`);
@@ -81,7 +84,11 @@ export async function finalizeStoppedTurn(opts: {
     }
   }
   appendActivity({ kind: 'notification', id: `stopped:${execution.turnId}`, text: 'Stopped by user.' });
-  const noticeId = writeResponseRow(opts.routing, 'Stopped by user.', { stopped: true, turn_id: execution.turnId });
+  const noticeId = writeResponseRow(opts.routing, 'Stopped by user.', {
+    stopped: true,
+    turn_id: execution.turnId,
+    system_generated: true,
+  });
   if (opts.checkpoint && opts.continuation) {
     writeTurnCheckpoint(noticeId, opts.providerName, opts.continuation, opts.checkpoint);
   }

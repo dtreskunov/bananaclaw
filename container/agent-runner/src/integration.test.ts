@@ -980,6 +980,7 @@ describe('poll loop — empty result notice', () => {
     expect(text).toContain('without producing a response');
     expect(text).toContain('without reporting an error');
     expect(JSON.parse(out[0].content).suggested_action).toBe('retry');
+    expect(JSON.parse(out[0].content).system_generated).toBe(true);
     // The loop, not the provider, ended the otherwise-open stream.
     expect(provider.ended).toBe(true);
   });

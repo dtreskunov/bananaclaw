@@ -959,6 +959,8 @@ export interface HistoryMessage {
   text: string;
   /** How an agent chat row was emitted. Absent for legacy/unclassified rows. */
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+  /** True for host/runner notices rather than agent-authored content. */
+  systemGenerated?: boolean;
   /** Safe next-turn action suggested by the agent runner. */
   suggestedAction?: SuggestedAction;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */
@@ -1264,6 +1266,7 @@ export function readChatHistory(
           files: parsed.files,
           ...(r.turn_id ? { turnId: r.turn_id } : {}),
           ...(parsed.deliveryOrigin ? { deliveryOrigin: parsed.deliveryOrigin } : {}),
+          ...(parsed.systemGenerated ? { systemGenerated: true } : {}),
           ...(parsed.suggestedAction ? { suggestedAction: parsed.suggestedAction } : {}),
           ...(parsed.timelinePosition !== undefined ? { timelinePosition: parsed.timelinePosition } : {}),
         });
@@ -1959,6 +1962,7 @@ export function parseOutboundContent(content: string): {
   text: string;
   files?: { filename: string; size: number; path?: string }[];
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+  systemGenerated?: boolean;
   suggestedAction?: SuggestedAction;
   timelinePosition?: number;
 } {
@@ -1969,6 +1973,7 @@ export function parseOutboundContent(content: string): {
     o?.delivery_origin === 'send_message' || o?.delivery_origin === 'send_file' || o?.delivery_origin === 'response'
       ? o.delivery_origin
       : undefined;
+  const systemGenerated = o?.system_generated === true;
   const suggestedAction =
     o?.suggested_action === 'continue' || o?.suggested_action === 'retry' || o?.suggested_action === 'report'
       ? o.suggested_action
@@ -1999,6 +2004,7 @@ export function parseOutboundContent(content: string): {
     text,
     files,
     ...(deliveryOrigin ? { deliveryOrigin } : {}),
+    ...(systemGenerated ? { systemGenerated: true } : {}),
     ...(suggestedAction ? { suggestedAction } : {}),
     ...(timelinePosition !== undefined ? { timelinePosition } : {}),
   };

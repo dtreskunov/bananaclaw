@@ -107,6 +107,7 @@ const message = shape({
   canEditPending: optional(bool),
   author: optional(shape({ userId: id, displayName: text })),
   deliveryOrigin: optional(oneOf('send_message', 'send_file', 'response')),
+  systemGenerated: optional(bool),
   suggestedAction: optional(oneOf('continue', 'retry', 'report')),
   files: optional(
     array(

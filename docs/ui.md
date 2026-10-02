@@ -75,11 +75,13 @@ amber in dark mode.
 **Text density**, below Mode, offers **Comfortable** (larger text and more
 breathing room) and **Compact** (smaller text and tighter spacing). Both use
 locally bundled Figtree at weight 300 with 0.015em letter spacing. Compact is
-the default and uses 15 px text with 1.4 line height while preserving the
-tighter layout spacing. Comfortable uses 16 px text with 1.75 line height and
+the default and uses 15 px text with 1.3 line height while preserving the
+tighter layout spacing. Comfortable uses 16 px text with 1.5 line height and
 increases chat message gaps from 6 → 10 px, message padding from 6/10 → 10/14
-px, and spacing in lists, menus, previews and settings. The selector includes
-a live sample message and thread row.
+px, and paragraph spacing from 8 → 12 px, alongside roomier spacing in lists,
+menus, previews and settings. The selector includes a live sample message and
+thread row. Markdown list items are separated by 4 px in Compact and 6 px in
+Comfortable, without widening operational lists such as activity traces.
 Density is independent of theme and mode, applies across the app, and does not
 restyle embedded websites, PDFs or media. Pane widths, conversation width limits
 and icons stay unchanged; existing touch targets never shrink and mobile text
@@ -111,6 +113,21 @@ the same subtle row and column borders, darker theme-aware header background,
 and faint even-row stripe. A short fade marks each edge that has additional
 horizontally scrolled content. Tables scroll horizontally by default;
 exceptional fixed-layout tables can opt out with `data-table-scroll="off"`.
+Non-standard transcript entries share a subtle inset provenance rail without
+changing their geometry. Tool, file, card and question output uses an accent
+rail; runner notices, internal traces and turn-system state use a neutral rail;
+warning and failed turn state use semantic warning and error rails. Normal
+agent replies have no rail. Runner-authored notices use the same background as
+agent replies, but retain the neutral or semantic rail and omit a redundant
+status label from the metadata row.
+Turn-system bubbles carrying status span the full conversation column, and
+their timing and model metadata stay on one line while flexible usage details
+truncate. Trace-only turn-system bubbles remain content-sized.
+Activity trace previews and expanded rows use the same small type scale as
+status metadata so operational detail remains secondary to message content.
+Tool row headers use distinct theme-aware colors for queued, running, completed,
+and failed states. The activity schema supports queued (`pending`) tool rows,
+although providers normally begin emitting them once execution is running.
 Themes define the font family, body and heading weights, and UI letter
 spacing through `--font-ui`, `--font-weight-body`,
 `--font-weight-heading`, and `--letter-spacing-ui`. Density defines the
@@ -143,11 +160,9 @@ touch, mouse wheel, scrollbar dragging and keyboard scrolling.
 Active gestures retain the last observed scroll position so coalesced input
 and scroll events do not mask direction reversals.
 Jumping up pauses bottom-follow, including the first animation frames; new
-user input or returning to the bottom restores normal following.
-Both arrows use surface text normally. The Down arrow uses the paired
-`--primary` / `--primary-fg` colors when new messages arrive, including on
-hover. Keep this pair readable in both modes; do not use muted text on the
-filled button.
+user input or returning to the bottom restores normal following. Up and Down
+always use the same surface, border, shadow and icon styling, including when
+new messages arrive.
 
 The blocking `dist/appearance.js` script runs before the stylesheet in the
 chat shell to prevent wrong-theme and wrong-density flashes. The main bundle reuses its

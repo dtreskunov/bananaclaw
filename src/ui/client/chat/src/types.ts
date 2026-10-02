@@ -189,6 +189,8 @@ export interface ChatMessage {
   author?: { userId: string; displayName: string };
   /** How the agent emitted this row. Absent for legacy/unclassified messages. */
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+  /** True for host/runner notices rather than agent-authored content. */
+  systemGenerated?: boolean;
   /** Safe next-turn action suggested by the agent runner. */
   suggestedAction?: SuggestedAction;
   /** Normalized fire-and-forget display card. `text` remains its fallback. */

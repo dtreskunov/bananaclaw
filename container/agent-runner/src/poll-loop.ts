@@ -433,6 +433,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
               thread_id: errorRouting.threadId,
               content: JSON.stringify({
                 delivery_origin: 'response',
+                system_generated: true,
                 text: `⚠️ Agent provider error${tag}: ${result.unsurfacedError.message}\n\nYour message was not processed.`,
               }),
             });
@@ -486,7 +487,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
               platform_id: failureRouting.platformId,
               channel_type: failureRouting.channelType,
               thread_id: failureRouting.threadId,
-              content: JSON.stringify({ text: friendlyProviderErrorFallback(errMsg), delivery_origin: 'response' }),
+              content: JSON.stringify({
+                text: friendlyProviderErrorFallback(errMsg),
+                delivery_origin: 'response',
+                system_generated: true,
+              }),
             });
           }
           await settleTurn(execution.current, 'failed');

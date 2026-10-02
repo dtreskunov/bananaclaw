@@ -115,6 +115,18 @@ describe('parseOutboundContent', () => {
       files: undefined,
     });
   });
+
+  it('preserves the explicit system-generated marker', () => {
+    expect(parseOutboundContent(JSON.stringify({ text: 'Stopped by user.', system_generated: true }))).toEqual({
+      text: 'Stopped by user.',
+      files: undefined,
+      systemGenerated: true,
+    });
+    expect(parseOutboundContent(JSON.stringify({ text: 'Agent reply', system_generated: false }))).toEqual({
+      text: 'Agent reply',
+      files: undefined,
+    });
+  });
 });
 
 describe('chatSdkHistoryContent', () => {

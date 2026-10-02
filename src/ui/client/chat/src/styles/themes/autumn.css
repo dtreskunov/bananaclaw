@@ -77,6 +77,10 @@
 
 [data-theme="autumn"][data-mode="light"] {
   color-scheme: light;
+  --activity-status-queued: #80520c;
+  --activity-status-running: #a3421b;
+  --activity-status-completed: #4b642d;
+  --activity-status-failed: #a12e25;
   --autumn-surface: #fff8ef;
   --autumn-raised: #fffcf7;
   --autumn-text: #35251c;
@@ -104,6 +108,10 @@
 
 [data-theme="autumn"][data-mode="dark"] {
   color-scheme: dark;
+  --activity-status-queued: #e3b65d;
+  --activity-status-running: #e9a16b;
+  --activity-status-completed: #b0c484;
+  --activity-status-failed: #ef9a86;
   --autumn-surface: #1c1713;
   --autumn-raised: #28201a;
   --autumn-text: #f5e9d8;

@@ -223,6 +223,7 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 .markdown-preview pre { background: var(--wash-strong); padding: var(--preview-padding); border-radius: var(--radius-lg); overflow: auto; }
 .markdown-preview code { background: var(--wash-strong); padding: 2px 4px; border-radius: var(--radius-sm); }
 .markdown-preview pre code { background: transparent; padding: 0; }
+.markdown-preview li + li { margin-top: var(--list-item-gap); }
 .markdown-preview blockquote { border-left: 3px solid var(--border); margin: 8px 0; padding-left: 12px; color: var(--muted); }
 .markdown-preview table { margin: 8px 0; }
 

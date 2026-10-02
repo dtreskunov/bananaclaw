@@ -49,16 +49,12 @@ function mix(fg: string, bg: string, fraction: number): string {
 }
 
 describe('theme CSS contract', () => {
-  it('uses matched, opaque foreground/background tokens for the scroll button, including hover', () => {
+  it('uses the same surface styling for both scroll buttons in every state', () => {
     const css = read('./components/ChatMain.css');
     const normal = css.match(/\.chat-main \.scroll-jump \{([^}]+)\}/)?.[1];
     expect(normal).toContain('background: var(--surface)');
     expect(normal).toContain('color: var(--surface-fg)');
-    const highlighted = css.match(
-      /\.chat-main \.scroll-to-bottom\.new-message,\s*\.chat-main \.scroll-to-bottom\.new-message:hover \{([^}]+)\}/,
-    )?.[1];
-    expect(highlighted).toContain('background: var(--primary)');
-    expect(highlighted).toContain('color: var(--primary-fg)');
+    expect(css).not.toContain('.scroll-to-bottom.new-message');
   });
 
   it('fades scroll controls in and out over 500 ms while preserving reversal and reduced-motion hiding', () => {
@@ -115,6 +111,58 @@ describe('theme CSS contract', () => {
     const usage = css.match(/\.chat-main \.usage \{([^}]+)\}/)?.[1];
     expect(usage).toContain('text-overflow: ellipsis');
     expect(usage).toContain('white-space: nowrap');
+  });
+
+  it('uses one inset provenance rail with accent, neutral and semantic tones', () => {
+    const css = read('./components/ChatMain.css');
+    const rail = css.match(
+      /\.chat-main \.msg\.agent-action,[\s\S]*?\.chat-main \.msg\.input-steering \{([^}]+)\}/,
+    )?.[1];
+    expect(rail).toContain('box-shadow: inset 2px 0 var(--provenance-rail-color, var(--border-strong))');
+    const action = css.match(/\.chat-main \.msg\.agent-action \{([^}]+)\}/)?.[1];
+    expect(action).toContain('--provenance-rail-color: var(--accent-strong-opaque, var(--accent-strong))');
+    const neutral = css.match(
+      /\.chat-main :where\(\.msg\.out\.system-notice, \.msg\.internal, \.typing\.turn-system\) \{([^}]+)\}/,
+    )?.[1];
+    expect(neutral).toContain('--provenance-rail-color: var(--border-strong, var(--muted))');
+    expect(css).not.toContain('.chat-main .msg.out.system-notice { background: transparent; }');
+    const warning = css.match(
+      /\.chat-main :is\(\.msg, \.typing\)\.provenance-warning,[\s\S]*?\.chat-main \.msg\.input-follow-up \{([^}]+)\}/,
+    )?.[1];
+    expect(warning).toContain('--provenance-rail-color: var(--warning-border, var(--warning))');
+    const error = css.match(/\.chat-main :is\(\.msg, \.typing\)\.provenance-error \{([^}]+)\}/)?.[1];
+    expect(error).toContain('--provenance-rail-color: var(--error-soft, var(--danger))');
+  });
+
+  it('gives turn-status bubbles the full row while keeping timing metadata on one line', () => {
+    const css = read('./components/ChatMain.css');
+    const turnStatus = css.match(/\.chat-main \.typing\.turn-system\.turn-status \{([^}]+)\}/)?.[1];
+    expect(turnStatus).toContain('width: 100%');
+    expect(turnStatus).toContain('max-width: 100%');
+    const timing = css.match(/\.chat-main \.typing \.typing-meta \{([^}]+)\}/)?.[1];
+    expect(timing).toContain('flex: none');
+    expect(timing).toContain('white-space: nowrap');
+  });
+
+  it('keeps activity trace typography comparable to the status line', () => {
+    const css = read('./components/ChatMain.css');
+    const trace = css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1];
+    expect(trace).toContain('font-size: var(--font-2xs)');
+    const toggle = css.match(/\.chat-main \.activity-trace \.trace-row-toggle \{([^}]+)\}/)?.[1];
+    expect(toggle).toContain('font-size: inherit');
+    expect(toggle).toContain('color: var(--trace-status-color, var(--muted))');
+    for (const status of ['queued', 'running', 'completed', 'failed']) {
+      const rule = css.match(new RegExp(`\\.chat-main \\.activity-trace \\.trace-status-${status} \\{([^}]+)\\}`))?.[1];
+      expect(rule).toContain(`--trace-status-color: var(--activity-status-${status})`);
+    }
+    const subject = css.match(/\.chat-main \.activity-trace code\.trace-subject \{([^}]+)\}/)?.[1];
+    expect(subject).toContain('font-size: inherit');
+    const code = css.match(/\.chat-main \.activity-trace pre\.trace-code \{([^}]+)\}/)?.[1];
+    expect(code).toContain('font-size: inherit');
+    const codeContent = css.match(/\.chat-main \.activity-trace pre\.trace-code code \{([^}]+)\}/)?.[1];
+    expect(codeContent).toContain('font-size: inherit');
+    const preview = css.match(/\.chat-main \.typing \.trace-preview \{([^}]+)\}/)?.[1];
+    expect(preview).toContain('font-size: var(--font-2xs)');
   });
 
   it('gives markdown tables full-width bubbles, local scrolling, legible cells and themed grid styling', () => {
@@ -196,6 +244,12 @@ describe('theme CSS contract', () => {
       }
       for (const mode of ['light', 'dark']) {
         expect(css).toContain(`[data-theme="${theme.id}"][data-mode="${mode}"]`);
+        const branch = css.match(
+          new RegExp(`\\[data-theme="${theme.id}"\\]\\[data-mode="${mode}"\\] \\{([^}]+)\\}`),
+        )?.[1];
+        for (const status of ['queued', 'running', 'completed', 'failed']) {
+          expect(branch, `${theme.id}/${mode}: activity ${status}`).toContain(`--activity-status-${status}:`);
+        }
       }
     }
     expect(global).toContain('font: var(--font-weight-body) var(--font-body)/var(--line-height-ui) var(--font-ui)');

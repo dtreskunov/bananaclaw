@@ -100,11 +100,6 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.chat-main .scroll-to-bottom.new-message,
-.chat-main .scroll-to-bottom.new-message:hover {
-  background: var(--primary);
-  color: var(--primary-fg);
-}
 @media (prefers-reduced-motion: reduce) {
   .chat-main .scroll-jump,
   .chat-main .scroll-jump[data-visible="true"] { transition: none; }
@@ -119,9 +114,28 @@
 .chat-main .msg.in { align-self: flex-end; background: var(--accent); }
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }
 .chat-main .msg.out { align-self: flex-start; background: var(--wash-strong); }
-.chat-main .msg.agent-action { box-shadow: inset 2px 0 var(--accent-strong); }
+.chat-main .msg.agent-action,
+.chat-main .msg.out.system-notice,
+.chat-main .msg.internal,
+.chat-main .typing.turn-system,
+.chat-main .msg.input-applied,
+.chat-main .msg.input-queued,
+.chat-main .msg.input-follow-up,
+.chat-main .msg.input-steering {
+  box-shadow: inset 2px 0 var(--provenance-rail-color, var(--border-strong));
+}
+.chat-main .msg.agent-action { --provenance-rail-color: var(--accent-strong-opaque, var(--accent-strong)); }
+.chat-main :where(.msg.out.system-notice, .msg.internal, .typing.turn-system) {
+  --provenance-rail-color: var(--border-strong, var(--muted));
+}
+.chat-main :is(.msg, .typing).provenance-warning,
+.chat-main .msg.input-queued,
+.chat-main .msg.input-follow-up { --provenance-rail-color: var(--warning-border, var(--warning)); }
+.chat-main :is(.msg, .typing).provenance-error { --provenance-rail-color: var(--error-soft, var(--danger)); }
+.chat-main .msg.input-applied,
+.chat-main .msg.input-steering { --provenance-rail-color: var(--input-steering-accent, var(--approve)); }
 .chat-main .input-state-caption { color: var(--surface-fg); opacity: 0.75; }
-.chat-main .msg.internal { align-self: flex-start; background: transparent !important; border: 1px dashed var(--muted); color: var(--muted); opacity: 0.85; max-width: 92%; }
+.chat-main .msg.internal { align-self: flex-start; background: transparent !important; color: var(--muted); opacity: 0.85; max-width: 92%; }
 .chat-main .msg.internal, .chat-main .msg.internal * { font-style: italic; }
 .chat-main .msg.internal .internal-label { font-size: var(--font-2xs); font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; opacity: 0.7; }
 .chat-main .msg.internal pre, .chat-main .msg.internal code { background: transparent; }
@@ -301,11 +315,12 @@
 .chat-main .msg.markdown { white-space: normal; }
 .chat-main .msg.markdown > :first-child { margin-top: 0; }
 .chat-main .msg.markdown > :last-child { margin-bottom: 0; }
-.chat-main .msg.markdown p { margin: var(--text-block-gap) 0; }
+.chat-main .msg.markdown p { margin: var(--paragraph-gap) 0; }
 .chat-main .msg.markdown pre { background: var(--wash-strong); padding: var(--code-padding); border-radius: var(--radius-md); overflow: auto; font-size: var(--font-sm); }
 .chat-main .msg.markdown code { background: var(--wash-strong); padding: 1px 4px; border-radius: var(--radius-sm); font-size: var(--font-sm); }
 .chat-main .msg.markdown pre code { background: transparent; padding: 0; }
 .chat-main .msg.markdown ul, .chat-main .msg.markdown ol { margin: var(--text-block-gap) 0; padding-left: 20px; }
+.chat-main .msg.markdown .transcript-copy-content li + li { margin-top: var(--list-item-gap); }
 .chat-main .msg.markdown:has(table) { width: 100%; max-width: 100%; }
 .chat-main .msg.markdown img { display: block; width: auto; height: auto; max-width: 100%; max-height: min(420px, 50vh); border-radius: var(--radius-md); cursor: zoom-in; }
 .chat-main .msg.markdown img:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
@@ -324,17 +339,17 @@
 .chat-main .typing .typing-dots > span:nth-child(2) { animation-delay: 0.15s; }
 .chat-main .typing .typing-dots > span:nth-child(3) { animation-delay: 0.3s; }
 .chat-main .typing .hint { flex: 1; font-size: var(--font-xs); color: var(--muted); font-style: italic; margin-left: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.chat-main .typing .trace-preview { padding: 0; border: none; background: none; color: var(--muted); font-family: var(--font-mono, monospace); font-size: var(--font-xs); font-style: normal; text-align: left; cursor: pointer; opacity: 0.85; }
+.chat-main .typing .trace-preview { padding: 0; border: none; background: none; color: var(--muted); font-family: var(--font-mono, monospace); font-size: var(--font-2xs); font-style: normal; text-align: left; cursor: pointer; opacity: 0.85; }
 .chat-main .typing .trace-preview:hover { color: var(--fg); opacity: 1; }
 .chat-main .typing .trace-preview:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; border-radius: 2px; }
-.chat-main .typing .typing-meta { font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
+.chat-main .typing .typing-meta { flex: none; white-space: nowrap; font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
 /* The bubble is inline-flex and normally shrinks to the dots' width; when the
    trace is expanded, widen it so command hints don't truncate to a sliver
   (especially on narrow mobile viewports). Capped by the 78% max-width. */
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
-/* Turn activity with no agent message to carry it (before a steer, live, or no reply): an
-   agent-side system bubble, outlined rather than filled. */
-.chat-main .typing.turn-system { align-self: flex-start; background: transparent; border: 1px solid var(--border, var(--muted)); border-radius: var(--radius-lg); padding: var(--message-padding-block) var(--message-padding-inline); gap: 2px; }
+/* Turn activity with no agent message to carry it (before a steer, live, or no reply). */
+.chat-main .typing.turn-system { align-self: flex-start; background: transparent; border-radius: var(--radius-lg); padding: var(--message-padding-block) var(--message-padding-inline); gap: 2px; }
+.chat-main .typing.turn-system.turn-status { width: 100%; max-width: 100%; }
 .chat-main .typing.turn-system .msg-activity { margin-top: 0; }
 .chat-main .msg .meta .turn-outcome-note { color: var(--surface-fg, inherit); opacity: 0.8; font-weight: 600; }
 .chat-main .activity-trace li .ts { margin-right: 6px; opacity: 0.6; font-variant-numeric: tabular-nums; }
@@ -347,24 +362,28 @@
 .chat-main .meta .trace-toggle .chevron { display: inline-block; font-size: 1.3em; line-height: 1; transition: transform 0.15s ease; }
 .chat-main .meta .trace-toggle .chevron.open { transform: rotate(90deg); }
 .chat-main .meta .trace-count { white-space: nowrap; }
-.chat-main .msg-activity .activity-trace { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; width: 100%; max-height: 30vh; overflow-y: auto; }
+.chat-main .msg-activity .activity-trace { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; width: 100%; max-height: 30vh; overflow-y: auto; font-size: var(--font-2xs); }
 .chat-main .msg.markdown .msg-activity .activity-trace { padding-left: 0; }
 .chat-main .msg-activity .activity-trace li { flex: none; }
 
 /* Accordion trace row: chevron + timestamp + preview when collapsed; when
    open the full step text renders below as wrapping Markdown. */
 .chat-main .activity-trace .trace-row { display: flex; flex-direction: column; gap: 2px; }
-.chat-main .activity-trace .trace-row-toggle { display: flex; align-items: baseline; gap: 4px; width: 100%; min-width: 0; padding: 0; border: none; background: none; text-align: left; cursor: pointer; font-size: var(--font-xs); color: var(--muted); font-family: var(--font-mono, monospace); opacity: 0.85; }
+.chat-main .activity-trace .trace-row-toggle { display: flex; align-items: baseline; gap: 4px; width: 100%; min-width: 0; padding: 0; border: none; background: none; text-align: left; cursor: pointer; font-size: inherit; color: var(--trace-status-color, var(--muted)); font-family: var(--font-mono, monospace); opacity: 0.85; }
+.chat-main .activity-trace .trace-status-queued { --trace-status-color: var(--activity-status-queued); }
+.chat-main .activity-trace .trace-status-running { --trace-status-color: var(--activity-status-running); }
+.chat-main .activity-trace .trace-status-completed { --trace-status-color: var(--activity-status-completed); }
+.chat-main .activity-trace .trace-status-failed { --trace-status-color: var(--activity-status-failed); }
 .chat-main .activity-trace .trace-row-toggle:hover { opacity: 1; color: var(--fg); }
 .chat-main .activity-trace .trace-row-toggle .chevron { flex: none; display: inline-block; font-size: 13px; line-height: 1.2; transition: transform 0.15s ease; opacity: 0.6; }
 .chat-main .activity-trace .trace-row-toggle .chevron.open { transform: rotate(90deg); }
 .chat-main .activity-trace .trace-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-main .trace-subject { padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); font-family: var(--font-mono, monospace); font-size: inherit; }
-.chat-main .activity-trace .trace-meta { margin: 0 0 0 17px; color: var(--muted); font-family: var(--font-mono, monospace); font-size: var(--font-xs); opacity: 0.8; }
+.chat-main .activity-trace code.trace-subject { padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); font-family: var(--font-mono, monospace); font-size: inherit; }
+.chat-main .activity-trace .trace-meta { margin: 0 0 0 17px; color: var(--muted); font-family: var(--font-mono, monospace); font-size: inherit; opacity: 0.8; }
 .chat-main .activity-trace .trace-prefix { flex: 1; min-width: 0; color: var(--fg); white-space: normal; overflow-wrap: anywhere; word-break: break-word; opacity: 0.95; }
-.chat-main .activity-trace .trace-prefix .trace-tool { font-family: var(--font-mono, monospace); font-size: var(--font-xs); padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); }
-.chat-main .activity-trace .trace-code { margin: 2px 0 4px 17px; padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: var(--font-xs); color: var(--fg); background: var(--wash); border-radius: var(--radius-md); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-height: 40vh; overflow: auto; }
-.chat-main .activity-trace .trace-code code { font-family: inherit; }
+.chat-main .activity-trace .trace-prefix .trace-tool { font-family: var(--font-mono, monospace); font-size: inherit; padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); }
+.chat-main .activity-trace pre.trace-code { margin: 2px 0 4px 17px; padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: inherit; color: var(--fg); background: var(--wash); border-radius: var(--radius-md); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-height: 40vh; overflow: auto; }
+.chat-main .activity-trace pre.trace-code code { font-family: inherit; font-size: inherit; }
 @keyframes typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.35; } 30% { transform: translateY(-3px); opacity: 0.85; } }
 .chat-main .msg.markdown h1, .chat-main .msg.markdown h2, .chat-main .msg.markdown h3 { margin: 8px 0 4px; font-size: 1.05em; }
 .chat-main .msg.markdown a { color: inherit; text-decoration: underline; }

@@ -27,6 +27,7 @@ export interface ConversationMessage {
   canEditPending?: boolean;
   author?: { userId: string; displayName: string };
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
+  systemGenerated?: boolean;
   suggestedAction?: 'continue' | 'retry' | 'report';
   files?: { filename: string; size: number; path?: string; url?: string; contentType?: string }[];
   card?: {
