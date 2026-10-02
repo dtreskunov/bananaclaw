@@ -493,6 +493,7 @@ function Row({ e, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntry
   const selected = pinnedContext.value.includes(e.path);
   const resultPath = showPath ? pathBelowRoot(parentPath(e.path), fileSearchRoot.value) : '';
   const siteUrl = publicSiteUrl(e);
+  const sizeLabel = fmtBytes(e.size);
   const onClick = (ev: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
     const t = ev.target as HTMLElement;
     if (t.closest('.row-sel') || t.closest('.action-menu')) return;
@@ -506,24 +507,38 @@ function Row({ e, onEdit, onNewFile, onUpload, onOpen, showPath = false, onEntry
         <input type="checkbox" checked={selected} onChange={() => togglePinnedFile(e.path)} />
       </label>
       <div>{e.type === 'dir' ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}</div>
-      <div class="name">
-        <span class="name-line">
-          <span class="entry-label">{e.name}</span>
-          {siteUrl ? (
-            <a
-              class="web-link"
-              href={siteUrl}
-              target="_blank"
-              rel="noopener"
-              title={`Open ${new URL(siteUrl).hostname}`}
-              onClick={(ev) => ev.stopPropagation()}
-            >web</a>
+      <div class="details">
+        <div class="name">
+          <span class="name-line">
+            <span class="entry-label">{e.name}</span>
+            {siteUrl ? (
+              <a
+                class="web-link"
+                href={siteUrl}
+                target="_blank"
+                rel="noopener"
+                title={`Open ${new URL(siteUrl).hostname}`}
+                onClick={(ev) => ev.stopPropagation()}
+              >web</a>
+            ) : null}
+          </span>
+        </div>
+        <span class="file-meta">
+          {resultPath ? (
+            <>
+              <span class="result-path">{resultPath}</span>
+              <span class="meta-separator" aria-hidden="true">·</span>
+            </>
+          ) : null}
+          <span class="meta"><RelativeTime ts={e.mtime} /></span>
+          {sizeLabel ? (
+            <>
+              <span class="meta-separator" aria-hidden="true">·</span>
+              <span class="size">{sizeLabel}</span>
+            </>
           ) : null}
         </span>
-        {resultPath ? <span class="result-path">{resultPath}</span> : null}
       </div>
-      <div class="size">{fmtBytes(e.size)}</div>
-      <div class="meta"><RelativeTime ts={e.mtime} /></div>
       <div class="row-actions">
         <ActionsMenu
           mode={e.type === 'dir' ? 'directory' : 'entry'}

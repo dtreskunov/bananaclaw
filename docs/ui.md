@@ -248,6 +248,14 @@ and unsent composer drafts/attachments are retained.
 
 Admin-tier files (`container.json`, `bot.json`, `allowed-senders.txt`) are visible only to admins. `.git`, `node_modules`, `.claude-fragments`, dotfiles, and the composed `CLAUDE.md` are always hidden. `CLAUDE.local.md` is visible read-only.
 
+On mobile, file-browser rows follow the thread rail's two-line hierarchy: the
+filename is the primary line, while modified time and size share a compact
+secondary line. Search results place their relative path at the start of that
+secondary line. Desktop file rows keep this information on one line.
+Checkboxes, type icons and the actions menu remain outside the text block.
+Thread-browser rows use the table alternate-row color while preserving stronger
+hover and active states.
+
 **Inline preview** in-browser:
 
 - Images (`png`, `jpg`, `jpeg`, `gif`, `webp`)

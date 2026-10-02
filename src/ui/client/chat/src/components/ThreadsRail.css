@@ -39,6 +39,10 @@
 }
 .rail-label { display: none; }
 .threads-rail .thread { padding: var(--thread-padding-block) var(--thread-padding-inline); cursor: pointer; border-bottom: 1px solid var(--border); position: relative; }
+:where(
+  .threads-rail .thread-section-body > .thread:nth-child(even),
+  .threads-rail .search-results > .thread:nth-child(even)
+) { background: var(--table-row-alt-bg); }
 .threads-rail .thread:hover { background: var(--wash-soft); }
 .threads-rail .thread.active { background: var(--accent); }
 .threads-rail .thread .title { font-size: var(--font-base); display: flex; align-items: center; min-width: 0; padding-right: 18px; }

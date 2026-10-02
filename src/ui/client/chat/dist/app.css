@@ -1562,6 +1562,9 @@ nav.tab-bar-strip.group-strip {
   border-bottom: 1px solid var(--border);
   position: relative;
 }
+:where(.threads-rail .thread-section-body > .thread:nth-child(even), .threads-rail .search-results > .thread:nth-child(even)) {
+  background: var(--table-row-alt-bg);
+}
 .threads-rail .thread:hover {
   background: var(--wash-soft);
 }
@@ -3885,16 +3888,15 @@ nav.tab-bar-strip.group-strip {
 .files-pane .row.selected.active {
   background: var(--accent);
 }
+.files-pane .row .details {
+  display: contents;
+}
 .files-pane .row .name {
   flex: 1;
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.files-pane .search-listing .row .name {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .files-pane .row .name-line {
   display: flex;
@@ -3906,6 +3908,7 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .files-pane .row .web-link {
   flex: none;
@@ -3922,13 +3925,25 @@ nav.tab-bar-strip.group-strip {
   background: var(--wash-strong);
   color: inherit;
 }
-.files-pane .search-listing .row .result-path {
+.files-pane .row .file-meta {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 50%;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+.files-pane .row .result-path {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.files-pane .search-listing .result-path {
-  color: var(--muted);
-  font-size: var(--font-xs);
+.files-pane .row .meta-separator {
+  flex: none;
 }
 .files-pane .search-listing .search-limit {
   padding: 6px 10px;
@@ -3937,14 +3952,11 @@ nav.tab-bar-strip.group-strip {
   font-size: var(--font-xs);
 }
 .files-pane .row .size {
-  font-size: var(--font-xs);
-  color: var(--muted);
+  flex: none;
   font-variant-numeric: tabular-nums;
 }
 .files-pane .row .meta {
-  font-size: var(--font-xs);
-  color: var(--muted);
-  white-space: nowrap;
+  flex: none;
   opacity: 0.7;
 }
 .files-pane .row .row-sel {
@@ -4400,6 +4412,21 @@ body.is-admin .files-pane.collapsed .admin-only {
     padding: var(--file-padding-block) var(--file-padding-inline);
     font-size: var(--font-lg);
     min-height: 40px;
+  }
+  .files-pane .row .details {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .files-pane .row .name {
+    flex: none;
+  }
+  .files-pane .row .file-meta {
+    width: 100%;
+    max-width: none;
+    margin-top: 2px;
   }
   .files-pane:not(.previewing) .drop-hint {
     display: none !important;

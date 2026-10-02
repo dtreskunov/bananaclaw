@@ -19173,10 +19173,7 @@ async function forkThreadAt(thread, atMessageId, options = {}) {
   await loadThreads(gid);
   const branch = threads.value.find((x6) => x6.threadId === created.threadId) ?? null;
   await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
-  focusBranchComposerSoon(
-    { groupId: gid, threadId: created.threadId },
-    options.composerDraft
-  );
+  focusBranchComposerSoon({ groupId: gid, threadId: created.threadId }, options.composerDraft);
   return true;
 }
 async function editMessageInBranch(thread, previousMessageId, draft) {
@@ -25278,6 +25275,7 @@ function Row({ e: e4, onEdit, onNewFile, onUpload, onOpen, showPath = false, onE
   const selected = pinnedContext.value.includes(e4.path);
   const resultPath = showPath ? pathBelowRoot(parentPath(e4.path), fileSearchRoot.value) : "";
   const siteUrl = publicSiteUrl(e4);
+  const sizeLabel = fmtBytes(e4.size);
   const onClick = (ev) => {
     const t4 = ev.target;
     if (t4.closest(".row-sel") || t4.closest(".action-menu")) return;
@@ -25288,8 +25286,8 @@ function Row({ e: e4, onEdit, onNewFile, onUpload, onOpen, showPath = false, onE
   return /* @__PURE__ */ u4("div", { class: "row tier-" + e4.tier + (active ? " active" : "") + (selected ? " selected" : ""), "data-path": e4.path, onClick, children: [
     /* @__PURE__ */ u4("label", { class: "row-sel", onClick: (ev) => ev.stopPropagation(), title: selected ? "Detach from next message" : "Attach to next message", children: /* @__PURE__ */ u4("input", { type: "checkbox", checked: selected, onChange: () => togglePinnedFile(e4.path) }) }),
     /* @__PURE__ */ u4("div", { children: e4.type === "dir" ? "\u{1F4C1}" : "\u{1F4C4}" }),
-    /* @__PURE__ */ u4("div", { class: "name", children: [
-      /* @__PURE__ */ u4("span", { class: "name-line", children: [
+    /* @__PURE__ */ u4("div", { class: "details", children: [
+      /* @__PURE__ */ u4("div", { class: "name", children: /* @__PURE__ */ u4("span", { class: "name-line", children: [
         /* @__PURE__ */ u4("span", { class: "entry-label", children: e4.name }),
         siteUrl ? /* @__PURE__ */ u4(
           "a",
@@ -25303,11 +25301,19 @@ function Row({ e: e4, onEdit, onNewFile, onUpload, onOpen, showPath = false, onE
             children: "web"
           }
         ) : null
-      ] }),
-      resultPath ? /* @__PURE__ */ u4("span", { class: "result-path", children: resultPath }) : null
+      ] }) }),
+      /* @__PURE__ */ u4("span", { class: "file-meta", children: [
+        resultPath ? /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("span", { class: "result-path", children: resultPath }),
+          /* @__PURE__ */ u4("span", { class: "meta-separator", "aria-hidden": "true", children: "\xB7" })
+        ] }) : null,
+        /* @__PURE__ */ u4("span", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: e4.mtime }) }),
+        sizeLabel ? /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("span", { class: "meta-separator", "aria-hidden": "true", children: "\xB7" }),
+          /* @__PURE__ */ u4("span", { class: "size", children: sizeLabel })
+        ] }) : null
+      ] })
     ] }),
-    /* @__PURE__ */ u4("div", { class: "size", children: fmtBytes(e4.size) }),
-    /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: e4.mtime }) }),
     /* @__PURE__ */ u4("div", { class: "row-actions", children: /* @__PURE__ */ u4(
       ActionsMenu,
       {

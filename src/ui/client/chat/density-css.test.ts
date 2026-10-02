@@ -108,6 +108,26 @@ describe('text density CSS contract', () => {
     }
   });
 
+  it('uses the table and thread-list hierarchy for browser rows', () => {
+    const threads = read('components/ThreadsRail.css');
+    const files = read('components/FilesPane.css');
+    const source = read('components/FilesPane.tsx');
+
+    expect(threads).toMatch(/\.thread \.title \{[^}]*font-size: var\(--font-base\)/);
+    expect(threads).toMatch(/\.thread \.meta \{[^}]*font-size: var\(--font-xs\)[^}]*margin-top: 2px/);
+    expect(threads).toMatch(/\.thread-section-body > \.thread:nth-child\(even\)[\s\S]*var\(--table-row-alt-bg\)/);
+    expect(files).toMatch(/\.row \{[^}]*font-size: var\(--font-base\)/);
+    expect(files).not.toMatch(/\.listing > \.row:nth-child\(even of \.row\)/);
+    expect(files.match(/\.row \{([^}]+)\}/)?.[1]).not.toContain('border-bottom');
+    expect(files).toMatch(/\.row \.details \{ display: contents; \}/);
+    expect(files).toMatch(/\.row \.file-meta \{[^}]*font-size: var\(--font-xs\)/);
+    expect(files).toMatch(
+      /@media \(max-width: 720px\)[\s\S]*\.row \.details \{[^}]*flex-direction: column[^}]*\}[\s\S]*\.row \.file-meta \{[^}]*margin-top: 2px/,
+    );
+    expect(files).toMatch(/\.row \.entry-label \{[^}]*text-overflow: ellipsis[^}]*white-space: nowrap/);
+    expect(source).toMatch(/<span class="file-meta">[\s\S]*result-path[\s\S]*class="meta"[\s\S]*class="size"/);
+  });
+
   it('keeps density typography and spacing independent of theme, icons, widths, media and control sizes', () => {
     for (const name of Object.keys(comfortable)) {
       expect(name).not.toMatch(
