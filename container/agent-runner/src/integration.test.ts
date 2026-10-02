@@ -2631,16 +2631,9 @@ describe('poll loop — structured replies', () => {
     await loop.catch(() => {});
   }
 
-  it('sends replies verbatim, by default to the conversation being answered', async () => {
-    getInboundDb()
-      .prepare(
-        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
-         VALUES ('slack-other', 'Slack Other', 'channel', 'slack', 'chan-9', NULL)`,
-      )
-      .run();
-    const provider = new StructuredReplyProvider({
-      replies: [{ text: 'Use `<message to="x">` tags.\n\n- one' }, { text: 'heads up', to: 'slack-other' }],
-    });
+  it('sends replies verbatim to the conversation being answered, tags included', async () => {
+    const text = '<internal>kept</internal> Use <message to="x">tags</message>.\n\n- one';
+    const provider = new StructuredReplyProvider({ replies: [{ text }, { text: 'second' }] });
     await run(provider, () => getUndeliveredMessages().length === 2);
 
     const out = getUndeliveredMessages().map((row) => ({
@@ -2649,21 +2642,9 @@ describe('poll loop — structured replies', () => {
       text: JSON.parse(row.content).text,
     }));
     expect(out).toEqual([
-      { channel: 'discord', platform: 'chan-1', text: 'Use `<message to="x">` tags.\n\n- one' },
-      { channel: 'slack', platform: 'chan-9', text: 'heads up' },
+      { channel: 'discord', platform: 'chan-1', text },
+      { channel: 'discord', platform: 'chan-1', text: 'second' },
     ]);
-  });
-
-  it('unwraps legacy <message> and <internal> tags inside a reply', async () => {
-    const provider = new StructuredReplyProvider({
-      replies: [{ text: '<internal>checked</internal><message to="discord-test">the answer</message>' }],
-    });
-    await run(provider, () => getUndeliveredMessages().length === 1);
-
-    expect(JSON.parse(getUndeliveredMessages()[0].content).text).toBe('the answer');
-    expect(getActivityBuffer().map((line) => JSON.parse(line.text))).toContainEqual(
-      expect.objectContaining({ kind: 'internal', text: 'checked' }),
-    );
   });
 
   it('treats no_reply as confirmed silence without an empty-result notice', async () => {

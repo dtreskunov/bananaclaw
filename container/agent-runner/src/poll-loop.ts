@@ -1418,30 +1418,9 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
 }
 
 /**
- * Conversations that predate structured replies are full of `<message to>`
- * wrapping, so a model may still wrap a reply's text. Unwrap it rather than
- * send the tags: each block goes to its own destination, the rest to the
- * reply's, and `<internal>` notes go to the activity trace.
- */
-function unwrapLegacyReply(reply: ProviderReply): ProviderReply[] {
-  const parsed = parseAssistantOutput(reply.text);
-  if (parsed.deliveries.length === 0 && parsed.internal.length === 0 && parsed.diagnostics.length === 0) {
-    return [reply];
-  }
-  for (let i = 0; i < parsed.internal.length; i++) {
-    appendActivity({ kind: 'internal', id: `internal:${generateId()}:${i}`, text: parsed.internal[i] });
-  }
-  const unwrapped = parsed.unwrapped.trim();
-  return [
-    ...(unwrapped ? [{ ...reply, text: unwrapped }] : []),
-    ...parsed.deliveries.map((delivery) => ({ text: delivery.body, to: delivery.to })),
-  ];
-}
-
-/**
- * Deliver replies from a `structuredReplies` provider. Each text is sent
- * verbatim; no `to` means the conversation being answered. A silence reason
- * is recorded in the activity trace and sends nothing.
+ * Deliver replies from a `structuredReplies` provider verbatim to the
+ * conversation being answered. A silence reason is recorded in the activity
+ * trace and sends nothing.
  */
 function dispatchReplies(
   replies: ProviderReply[],
@@ -1455,13 +1434,9 @@ function dispatchReplies(
     return { sent: 0 };
   }
   let sent = 0;
-  for (const reply of replies.flatMap(unwrapLegacyReply)) {
+  const dest = findByRouting(routing.channelType, routing.platformId);
+  for (const reply of replies) {
     if (!reply.text.trim()) continue;
-    const dest = reply.to ? findByName(reply.to) : findByRouting(routing.channelType, routing.platformId);
-    if (reply.to && !dest) {
-      log(`Unknown destination "${reply.to}" in reply, dropping it: ${reply.text.slice(0, 200)}`);
-      continue;
-    }
     if (dest && isDuplicateSendMessage(dest, reply.text, routing, duplicateSince)) {
       log(`Duplicate reply to "${dest.name}" already sent via send_message, dropping it`);
       continue;

@@ -365,11 +365,11 @@ There is no `reply` tool: MiniMax ignores `tool_choice` and prefers to end
 with plain text, so a tool-based reply was mostly bypassed anyway.
 
 The `result` event carries `replies` (and `silence`), and the poll loop sends
-them as they are, without nudging. Older conversations contain wrapped turns,
-so a reply whose text still has `<message>` or `<internal>` tags is unwrapped
-before it is sent. The native prompt swaps the shared `module-core.md`
-fragment for `native/core.md`, and the destinations section for a
-final-message version.
+them verbatim to the conversation being answered, without parsing tags or
+nudging. Native histories written under the old wrap contract were rewritten
+once to drop `<message>`/`<internal>` tags, so the model has no examples to
+copy. The native prompt swaps the shared `module-core.md` fragment for
+`native/core.md`, and the destinations section for a final-message version.
 
 ## Agent-Runner Core
 

@@ -393,10 +393,9 @@ export function fingerprintToolInput(input: unknown): string | undefined {
     : createHash('sha256').update(normalized).digest('hex');
 }
 
-/** One structured reply, sent verbatim. No `to` means the conversation being answered. */
+/** One structured reply, sent verbatim to the conversation being answered. */
 export interface ProviderReply {
   text: string;
-  to?: string;
 }
 
 export type ProviderEvent =
