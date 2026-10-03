@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { jsonSchema, tool } from 'ai';
@@ -36,6 +37,10 @@ let scriptedTexts: string[];
 let toolCallText: string;
 let catalogFetch: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 let catalogModels: Record<string, unknown>;
+
+const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
+  (executable) => spawnSync(executable, ['-version'], { stdio: 'ignore' }).status === 0,
+);
 
 function replyTexts(events: ProviderEvent[]): string[][] {
   return events.flatMap((event) => (event.type === 'result' ? [(event.replies ?? []).map((reply) => reply.text)] : []));
@@ -1190,55 +1195,57 @@ describe('NativeProvider', () => {
     }
   });
 
-  it('normalizes real Opus audio on initial and pushed turns, and replays without source files', async () => {
-    catalogModels = { local: { models: { 'audio-model': { modalities: { input: ['text', 'audio'], output: ['text'] } } } } };
-    const originalPath = path.join(root, 'voice.ogg');
-    const fixture = Bun.spawnSync(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.1',
-      '-c:a', 'libopus', originalPath]);
-    expect(fixture.exitCode).toBe(0);
-    const original = fs.readFileSync(originalPath);
-    const prepareAudio = nativeAudio.prepareAudio;
-    const tempDir = path.join(root, 'audio-temp');
-    fs.mkdirSync(tempDir);
-    const prepared: Array<Awaited<ReturnType<typeof prepareAudio>>> = [];
-    const audio = spyOn(nativeAudio, 'prepareAudio').mockImplementation(async (file, options) => {
-      const result = await prepareAudio(file, { ...options, tempDir });
-      prepared.push(result);
-      return result;
+  describe.skipIf(!haveAudioTools)('real audio tools', () => {
+    it('normalizes real Opus audio on initial and pushed turns, and replays without source files', async () => {
+      catalogModels = { local: { models: { 'audio-model': { modalities: { input: ['text', 'audio'], output: ['text'] } } } } };
+      const originalPath = path.join(root, 'voice.ogg');
+      const fixture = Bun.spawnSync(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.1',
+        '-c:a', 'libopus', originalPath]);
+      expect(fixture.exitCode).toBe(0);
+      const original = fs.readFileSync(originalPath);
+      const prepareAudio = nativeAudio.prepareAudio;
+      const tempDir = path.join(root, 'audio-temp');
+      fs.mkdirSync(tempDir);
+      const prepared: Array<Awaited<ReturnType<typeof prepareAudio>>> = [];
+      const audio = spyOn(nativeAudio, 'prepareAudio').mockImplementation(async (file, options) => {
+        const result = await prepareAudio(file, { ...options, tempDir });
+        prepared.push(result);
+        return result;
+      });
+      try {
+        const file = { path: originalPath, filename: 'voice.ogg', mime: 'audio/ogg' };
+        const query = new NativeProvider({ model: 'local/audio-model' }).query({ prompt: 'listen', cwd: root, files: [file] });
+        query.push('listen again', [file]);
+        query.end();
+        let continuation: string | undefined;
+        for await (const event of query.events) {
+          expect(event.type).not.toBe('error');
+          if (event.type === 'init') continuation = event.continuation;
+        }
+        expect(prepared).toMatchObject([
+          { kind: 'inline', converted: true },
+          { kind: 'inline', converted: true },
+        ]);
+        expect(fs.readFileSync(originalPath)).toEqual(original);
+        const firstAudio = prepared[0];
+        if (firstAudio?.kind !== 'inline') throw new Error('Expected real converted audio');
+        expect(firstAudio.file.mime).toBe('audio/mpeg');
+        expect(firstAudio.bytes.equals(original)).toBe(false);
+        expect(continuation).toBeDefined();
+        fs.unlinkSync(originalPath);
+        expect(fs.readdirSync(tempDir)).toEqual([]);
+        await collect(new NativeProvider({ model: 'local/audio-model' }), continuation);
+        expect(requests).toHaveLength(3);
+        for (const request of requests) {
+          expect(JSON.stringify(request.messages)).toContain(JSON.stringify({
+            input_audio: { data: firstAudio.bytes.toString('base64'), format: 'mp3' },
+          }).slice(1, -1));
+        }
+        expect(prepared).toHaveLength(2);
+      } finally {
+        audio.mockRestore();
+      }
     });
-    try {
-      const file = { path: originalPath, filename: 'voice.ogg', mime: 'audio/ogg' };
-      const query = new NativeProvider({ model: 'local/audio-model' }).query({ prompt: 'listen', cwd: root, files: [file] });
-      query.push('listen again', [file]);
-      query.end();
-      let continuation: string | undefined;
-      for await (const event of query.events) {
-        expect(event.type).not.toBe('error');
-        if (event.type === 'init') continuation = event.continuation;
-      }
-      expect(prepared).toMatchObject([
-        { kind: 'inline', converted: true },
-        { kind: 'inline', converted: true },
-      ]);
-      expect(fs.readFileSync(originalPath)).toEqual(original);
-      const firstAudio = prepared[0];
-      if (firstAudio?.kind !== 'inline') throw new Error('Expected real converted audio');
-      expect(firstAudio.file.mime).toBe('audio/mpeg');
-      expect(firstAudio.bytes.equals(original)).toBe(false);
-      expect(continuation).toBeDefined();
-      fs.unlinkSync(originalPath);
-      expect(fs.readdirSync(tempDir)).toEqual([]);
-      await collect(new NativeProvider({ model: 'local/audio-model' }), continuation);
-      expect(requests).toHaveLength(3);
-      for (const request of requests) {
-        expect(JSON.stringify(request.messages)).toContain(JSON.stringify({
-          input_audio: { data: firstAudio.bytes.toString('base64'), format: 'mp3' },
-        }).slice(1, -1));
-      }
-      expect(prepared).toHaveLength(2);
-    } finally {
-      audio.mockRestore();
-    }
   });
 
   it('surfaces an audio rejection without retrying the turn as a file reference', async () => {
