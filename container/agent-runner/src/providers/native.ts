@@ -336,7 +336,7 @@ export class NativeProvider implements AgentProvider {
               abortController.signal.throwIfAborted();
               const nativeTools: ToolSet = turn.toolsDisabled
                 ? {}
-                : { ...createNativeTools(input.cwd, options.additionalDirectories, skills, todoState), ...NO_REPLY_TOOLS };
+                : { ...createNativeTools(input.cwd, skills, todoState), ...NO_REPLY_TOOLS };
               const mcpEntries = turn.toolsDisabled ? [] : await mcpManager.entries(abortController.signal);
               // Large external tool sets are loaded on demand via tool_search;
               // the loaded set can grow between steps, so rebuild per step.

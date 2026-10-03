@@ -15,33 +15,6 @@ const MAX_PROCESS_OUTPUT = 128 * 1024;
 const MAX_SHELL_TIMEOUT_MS = 120_000;
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist']);
 
-function roots(cwd: string, additionalDirectories: string[]): string[] {
-  return [cwd, ...additionalDirectories].map((root) => fs.realpathSync(root));
-}
-
-function resolveAllowed(input: string, cwd: string, additionalDirectories: string[], forWrite = false): string {
-  const candidate = path.resolve(cwd, input);
-  const existing = fs.existsSync(candidate);
-  let canonical: string;
-  if (existing) {
-    canonical = fs.realpathSync(candidate);
-  } else {
-    let ancestor = path.dirname(candidate);
-    while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
-    const realAncestor = fs.realpathSync(ancestor);
-    canonical = path.join(realAncestor, path.relative(ancestor, candidate));
-  }
-  if (
-    !roots(cwd, additionalDirectories).some((root) => canonical === root || canonical.startsWith(`${root}${path.sep}`))
-  ) {
-    throw new Error(`Path is outside the mounted workspace: ${input}`);
-  }
-  if (forWrite && canonical !== fs.realpathSync(cwd) && !canonical.startsWith(`${fs.realpathSync(cwd)}${path.sep}`)) {
-    throw new Error(`Writes are restricted to ${cwd}`);
-  }
-  return canonical;
-}
-
 function walk(root: string): string[] {
   const output: string[] = [];
   const pending = [root];
@@ -138,7 +111,6 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
 
 export function createNativeTools(
   cwd: string,
-  additionalDirectories: string[] = [],
   skills?: NativeSkillRegistry,
   todoState?: NativeTodoState,
 ): ToolSet {
@@ -153,10 +125,10 @@ export function createNativeTools(
   }
 
   tools.read = tool({
-    description: 'Read a UTF-8 text file from a mounted workspace root.',
+    description: 'Read a UTF-8 text file inside the agent container. Paths may be absolute or relative to the workspace.',
     inputSchema: jsonSchema({ type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }),
     execute: async (input) => {
-      const filename = resolveAllowed(String((input as { path: string }).path), cwd, additionalDirectories);
+      const filename = path.resolve(cwd, String((input as { path: string }).path));
       const stat = fs.statSync(filename);
       if (stat.size > MAX_FILE_BYTES) throw new Error(`File exceeds ${MAX_FILE_BYTES} byte read limit`);
       return fs.readFileSync(filename, 'utf8');
@@ -164,7 +136,7 @@ export function createNativeTools(
   });
 
   tools.write = tool({
-    description: 'Write a UTF-8 text file under the persistent workspace.',
+    description: 'Write a UTF-8 text file inside the agent container. Paths may be absolute or relative to the workspace.',
     inputSchema: jsonSchema({
       type: 'object',
       properties: { path: { type: 'string' }, content: { type: 'string' } },
@@ -172,7 +144,7 @@ export function createNativeTools(
     }),
     execute: async (input) => {
       const args = input as { path: string; content: string };
-      const filename = resolveAllowed(args.path, cwd, additionalDirectories, true);
+      const filename = path.resolve(cwd, args.path);
       fs.mkdirSync(path.dirname(filename), { recursive: true });
       fs.writeFileSync(filename, args.content, 'utf8');
       return `Wrote ${Buffer.byteLength(args.content)} bytes to ${filename}`;
@@ -180,7 +152,7 @@ export function createNativeTools(
   });
 
   tools.edit = tool({
-    description: 'Replace one exact string in a UTF-8 file. Fails unless the old string occurs exactly once.',
+    description: 'Replace one exact string in a UTF-8 file. Paths may be absolute or relative to the workspace. Fails unless the old string occurs exactly once.',
     inputSchema: jsonSchema({
       type: 'object',
       properties: { path: { type: 'string' }, oldText: { type: 'string' }, newText: { type: 'string' } },
@@ -188,7 +160,7 @@ export function createNativeTools(
     }),
     execute: async (input) => {
       const args = input as { path: string; oldText: string; newText: string };
-      const filename = resolveAllowed(args.path, cwd, additionalDirectories, true);
+      const filename = path.resolve(cwd, args.path);
       const current = fs.readFileSync(filename, 'utf8');
       const first = current.indexOf(args.oldText);
       if (first < 0 || current.indexOf(args.oldText, first + args.oldText.length) >= 0) {
@@ -200,7 +172,7 @@ export function createNativeTools(
   });
 
   tools.patch = tool({
-    description: 'Apply a unified diff to files under the persistent workspace.',
+    description: 'Apply a Git-style unified diff inside the agent container, using a/ and b/ file headers. Paths after those prefixes may be absolute or relative to the workspace.',
     inputSchema: jsonSchema({
       type: 'object',
       properties: { patch: { type: 'string' } },
@@ -213,14 +185,15 @@ export function createNativeTools(
         .filter((filename) => filename !== '/dev/null')
         .map((filename) => filename.replace(/^[ab]\//, ''));
       if (paths.length === 0) throw new Error('Patch contains no file headers');
-      for (const filename of paths) resolveAllowed(filename, cwd, additionalDirectories, true);
 
       const patchFile = path.join(cwd, `.native-patch-${randomUUID()}.diff`);
       fs.writeFileSync(patchFile, patch, 'utf8');
       try {
         const quoted = JSON.stringify(patchFile);
+        // Disable repository discovery so a nested working directory cannot filter out patch paths.
+        const apply = 'git --git-dir=/dev/null apply --no-index --unsafe-paths';
         const result = await runShell(
-          `git apply --check --no-index ${quoted} && git apply --no-index ${quoted}`,
+          `${apply} --check ${quoted} && ${apply} ${quoted}`,
           cwd,
           30_000,
           options.abortSignal,
@@ -234,12 +207,21 @@ export function createNativeTools(
   });
 
   tools.glob = tool({
-    description: 'List files matching a glob pattern under the persistent workspace.',
-    inputSchema: jsonSchema({ type: 'object', properties: { pattern: { type: 'string' } }, required: ['pattern'] }),
+    description: 'List files matching a glob pattern. Defaults to the workspace; an optional directory path can select another search root. Results are relative to that directory.',
+    inputSchema: jsonSchema({
+      type: 'object',
+      properties: {
+        pattern: { type: 'string' },
+        path: { type: 'string', description: 'Directory to search, absolute or relative to the workspace. Defaults to the workspace.' },
+      },
+      required: ['pattern'],
+    }),
     execute: async (input) => {
-      const matcher = wildcard(String((input as { pattern: string }).pattern));
-      return walk(cwd)
-        .map((filename) => path.relative(cwd, filename).replaceAll(path.sep, '/'))
+      const args = input as { pattern: string; path?: string };
+      const directory = path.resolve(cwd, args.path ?? '.');
+      const matcher = wildcard(String(args.pattern));
+      return walk(directory)
+        .map((filename) => path.relative(directory, filename).replaceAll(path.sep, '/'))
         .filter((filename) => matcher.test(filename))
         .slice(0, MAX_RESULTS)
         .join('\n');
@@ -247,12 +229,21 @@ export function createNativeTools(
   });
 
   tools.grep = tool({
-    description: 'Search UTF-8 workspace files for a literal string.',
-    inputSchema: jsonSchema({ type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }),
+    description: 'Search UTF-8 files for a literal string. Defaults to the workspace; an optional directory path can select another search root. Result paths are relative to that directory.',
+    inputSchema: jsonSchema({
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        path: { type: 'string', description: 'Directory to search, absolute or relative to the workspace. Defaults to the workspace.' },
+      },
+      required: ['query'],
+    }),
     execute: async (input) => {
-      const query = String((input as { query: string }).query);
+      const args = input as { query: string; path?: string };
+      const directory = path.resolve(cwd, args.path ?? '.');
+      const query = String(args.query);
       const matches: string[] = [];
-      for (const filename of walk(cwd)) {
+      for (const filename of walk(directory)) {
         if (matches.length >= MAX_RESULTS) break;
         let text: string;
         try {
@@ -262,7 +253,7 @@ export function createNativeTools(
           continue;
         }
         for (const [index, line] of text.split('\n').entries()) {
-          if (line.includes(query)) matches.push(`${path.relative(cwd, filename)}:${index + 1}:${line}`);
+          if (line.includes(query)) matches.push(`${path.relative(directory, filename)}:${index + 1}:${line}`);
           if (matches.length >= MAX_RESULTS) break;
         }
       }

@@ -306,6 +306,30 @@ class OpenCodeProvider implements AgentProvider {
 - System prompt injected via `<system>` prefix in prompt text
 - No resume support (sessions are always new or reused by ID)
 
+### Native Provider: File and Shell Tools
+
+The native provider's `read`, `write`, and `edit` tools accept absolute paths
+or paths relative to the agent workspace, including paths outside it.
+Symlinks follow normal filesystem behavior. The `patch` tool accepts Git-style
+unified diffs with `a/` and `b/` file headers; paths after those prefixes may
+also be absolute or relative to the workspace, including `../` paths.
+It checks the entire patch before applying it.
+
+These tools have the same filesystem access boundary as `bash`: the agent
+container's mounts and operating-system permissions, not a tool-level workspace
+allow-list. Read-only mounts remain read-only. The read size limit, exact-match
+edit validation, and shell output/time limits still apply.
+
+`glob` and `grep` accept an optional `path` argument selecting a directory to
+search. It may be absolute or relative to the workspace, including outside
+directories. Omitting it preserves workspace-only search. Results use paths
+relative to the selected directory. Existing ignored directories, file-size
+limits, and the 200-result cap are unchanged.
+
+For example, `glob({ pattern: "*.txt", path: "/tmp" })` lists matching files
+under `/tmp`, and `grep({ query: "needle", path: "../shared" })` searches a
+sibling directory.
+
 ### Native Provider: External MCP Tools
 
 The native provider (`providers/native.ts`) runs its built-in tools in-process
