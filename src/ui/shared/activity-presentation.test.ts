@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activityChapters,
+  chapterEntryHeadline,
   displayStep,
   parseStep,
   stepSummary,
@@ -82,7 +83,7 @@ describe('activity presentation', () => {
   it('treats legacy tool records without a status as unknown, even in live traces', () => {
     const value = line(0, { kind: 'tool', tool: 'bash' });
     expect(stepSummary(displayStep(value, true))).toBe('Outcome unknown: bash');
-    expect(activityChapters([value, line(1, { kind: 'tool', tool: 'bash' })], true)[0].title).toBe('Commands');
+    expect(activityChapters([value, line(1, { kind: 'tool', tool: 'bash' })], true)[0].title).toBe('2 commands');
   });
 
   it('preserves the raw-text fallback for malformed and legacy lines', () => {
@@ -117,12 +118,12 @@ describe('activity chapters', () => {
   });
 
   it.each([
-    ['write', 'completed', 'Changed files'],
-    ['edit', 'running', 'Changing files'],
-    ['bash', 'completed', 'Ran commands'],
-    ['bash', 'running', 'Running commands'],
-    ['bash', 'unknown', 'Commands'],
-    ['write', 'interrupted', 'File changes'],
+    ['write', 'completed', 'Edited files · 2 steps'],
+    ['edit', 'running', 'Editing files · 2 steps'],
+    ['bash', 'completed', 'Ran 2 commands'],
+    ['bash', 'running', 'Running 2 commands'],
+    ['bash', 'unknown', '2 commands'],
+    ['write', 'interrupted', 'File changes · 2 steps'],
   ] as const)('uses the latest %s/%s step for chapter wording', (name, status, title) => {
     expect(activityChapters([line(0, tool('first', name)), line(1, tool('last', name, status))], true)[0].title).toBe(
       title,
@@ -131,8 +132,35 @@ describe('activity chapters', () => {
 
   it('does not hide earlier failures after a later successful step', () => {
     const chapter = activityChapters([line(0, tool('failed', 'bash', 'error')), line(1, tool('passed', 'bash'))])[0];
-    expect(chapter).toMatchObject({ title: 'Ran commands', status: 'failed', failures: 1 });
+    expect(chapter).toMatchObject({ title: 'Ran 2 commands', status: 'failed', failures: 1 });
     expect(chapter.entries[1].step.status).toBe('completed');
+  });
+
+  it('counts distinct recorded file paths instead of claiming every edit touched a different file', () => {
+    const same = { ...tool('first', 'write'), detail: 'example.ts' };
+    const repeated = { ...tool('second', 'edit'), detail: 'example.ts' };
+    expect(activityChapters([line(0, same), line(1, repeated)])[0].title).toBe('Edited 1 file');
+    expect(
+      activityChapters([
+        line(0, same),
+        line(1, repeated),
+        line(2, { kind: 'patch', files: ['example.ts', 'other.ts'] }),
+      ])[0].title,
+    ).toBe('Edited 2 files');
+    expect(activityChapters([line(0, same), line(1, tool('patch', 'patch'))])[0].title).toBe('Edited files · 2 steps');
+  });
+
+  it('removes repeated verbs from child labels and collapsed previews without losing the primary argument', () => {
+    expect(chapterEntryHeadline({ ...tool('a', 'bash'), detail: 'pnpm test' })).toEqual({
+      action: '',
+      subject: 'pnpm test',
+      codeSubject: true,
+    });
+    expect(chapterEntryHeadline({ ...tool('b', 'edit'), detail: 'example.ts' }).subject).toBe('example.ts');
+    expect(chapterEntryHeadline({ ...tool('c', 'todo'), detail: 'Completed: Inspect\nPending: Verify' }).action).toBe(
+      '2 TODO items',
+    );
+    expect(chapterEntryHeadline(tool('d', 'mcp__nanoclaw__set_thread_title')).action).toBe('Title not recorded');
   });
 
   it('keeps chapter identity and the selected activity stable across live updates', () => {

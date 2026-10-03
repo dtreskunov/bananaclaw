@@ -246,6 +246,73 @@ export function stepSummary(step: TraceStep): string {
   return [headline.action, headline.subject].filter(Boolean).join(' ');
 }
 
+export function chapterEntryHeadline(step: TraceStep): StepHeadline {
+  if (isTodoStep(step)) {
+    const items = todoItems(step);
+    return { action: items ? `${items.length} TODO item${items.length === 1 ? '' : 's'}` : 'TODO items' };
+  }
+  if (isTitleStep(step) && !step.detail) return { action: 'Title not recorded' };
+  if (step.kind === 'tool' && step.detail) {
+    return { action: '', subject: singleLine(step.detail), codeSubject: !isTitleStep(step) };
+  }
+  const headline = stepHeadline(step);
+  return headline.subject
+    ? { action: '', subject: headline.subject, codeSubject: headline.codeSubject }
+    : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
+}
+
+function recordedFileCount(entries: TraceEntry[]): number | null {
+  const paths = new Set<string>();
+  for (const { step } of entries) {
+    const targets =
+      step.kind === 'patch'
+        ? step.files
+        : step.kind === 'file'
+          ? step.path
+            ? [step.path]
+            : undefined
+          : ['read', 'write', 'edit'].includes(toolKind(step)) && step.detail
+            ? [step.detail]
+            : undefined;
+    if (!targets || targets.some((path) => !path.trim())) return null;
+    targets.forEach((path) => paths.add(path.trim()));
+  }
+  return paths.size;
+}
+
+function chapterTitle(category: string, entries: TraceEntry[]): string {
+  const latest = entries[entries.length - 1].step;
+  const status = traceStatus(latest);
+  const executing = status === 'running' || status === 'queued';
+  const uncertain = status === 'unknown' || status === 'interrupted';
+  const count = entries.length;
+  if (category === 'commands') {
+    const label = `${count} command${count === 1 ? '' : 's'}`;
+    return uncertain ? label : `${executing ? 'Running' : 'Ran'} ${label}`;
+  }
+  if (category === 'read' || category === 'change') {
+    const files = recordedFileCount(entries);
+    const verb = category === 'read' ? (executing ? 'Reading' : 'Read') : executing ? 'Editing' : 'Edited';
+    if (uncertain) {
+      const label = category === 'read' ? 'File reads' : 'File changes';
+      return files === null ? `${label} · ${count} steps` : `${label} · ${files} file${files === 1 ? '' : 's'}`;
+    }
+    return files === null ? `${verb} files · ${count} steps` : `${verb} ${files} file${files === 1 ? '' : 's'}`;
+  }
+  if (category === 'search')
+    return uncertain ? `${count} searches` : `${executing ? 'Searching' : 'Searched'} · ${count} searches`;
+  if (isTodoStep(latest))
+    return `${uncertain ? 'TODO items' : executing ? 'Updating TODO items' : 'Updated TODO items'} · ${count} updates`;
+  if (isTitleStep(latest))
+    return uncertain ? `${count} title changes` : `${executing ? 'Setting' : 'Set'} ${count} titles`;
+  const headline = stepHeadline(latest);
+  const label =
+    headline.action === 'Used' || headline.action === 'Using'
+      ? `${headline.action} ${cleanToolName(latest.tool || 'tool')}`
+      : headline.action || 'Activities';
+  return `${label} · ${count} steps`;
+}
+
 export function traceStatus(step: TraceStep): TraceStatus {
   if (step.kind === 'retry') return 'queued';
   if (step.kind !== 'tool') return 'neutral';
@@ -289,16 +356,6 @@ export function activityChapters(lines: TraceLine[], live = false): TraceChapter
     else groups.push({ category, entries: [entry] });
   });
   return groups.map(({ category, entries }) => {
-    const latest = entries[entries.length - 1].step;
-    const latestStatus = traceStatus(latest);
-    const executing = latestStatus === 'running' || latestStatus === 'queued';
-    const uncertain = latestStatus === 'unknown' || latestStatus === 'interrupted';
-    const titles: Record<string, string> = {
-      read: uncertain ? 'File reads' : executing ? 'Reading files' : 'Read files',
-      change: uncertain ? 'File changes' : executing ? 'Changing files' : 'Changed files',
-      commands: uncertain ? 'Commands' : executing ? 'Running commands' : 'Ran commands',
-      search: uncertain ? 'Searches' : executing ? 'Searching' : 'Searched',
-    };
     const statuses = entries.map((entry) => traceStatus(entry.step));
     const status =
       (['running', 'queued', 'failed', 'interrupted', 'unknown', 'completed', 'neutral'] as const).find((candidate) =>
@@ -307,7 +364,7 @@ export function activityChapters(lines: TraceLine[], live = false): TraceChapter
     return {
       id: entries[0].id,
       entries,
-      title: titles[category] || stepSummary(latest) || 'Activities',
+      title: chapterTitle(category, entries),
       status,
       failures: statuses.filter((item) => item === 'failed').length,
     };

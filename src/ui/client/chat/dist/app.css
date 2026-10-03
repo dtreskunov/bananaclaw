@@ -454,49 +454,54 @@ body {
 :where(table:not([data-table-scroll=off]) tbody tr:last-child td) {
   border-block-end: 0;
 }
-table.scroll-fade-right {
+.scroll-edge-fade,
+table:is(.scroll-fade-left, .scroll-fade-right) {
+  --fade-left: 0px;
+  --fade-right: 0px;
+  --fade-top: 0px;
+  --fade-bottom: 0px;
   -webkit-mask-image:
     linear-gradient(
       to right,
-      #000 0,
-      #000 calc(100% - 12px),
+      transparent 0,
+      #000 var(--fade-left),
+      #000 calc(100% - var(--fade-right)),
+      transparent 100%),
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--fade-top),
+      #000 calc(100% - var(--fade-bottom)),
       transparent 100%);
   mask-image:
     linear-gradient(
       to right,
-      #000 0,
-      #000 calc(100% - 12px),
+      transparent 0,
+      #000 var(--fade-left),
+      #000 calc(100% - var(--fade-right)),
+      transparent 100%),
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--fade-top),
+      #000 calc(100% - var(--fade-bottom)),
       transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
 }
-table.scroll-fade-left {
-  -webkit-mask-image:
-    linear-gradient(
-      to right,
-      transparent 0,
-      #000 12px,
-      #000 100%);
-  mask-image:
-    linear-gradient(
-      to right,
-      transparent 0,
-      #000 12px,
-      #000 100%);
+table.scroll-fade-left,
+.scroll-edge-fade.scroll-fade-left {
+  --fade-left: 12px;
 }
-table.scroll-fade-left.scroll-fade-right {
-  -webkit-mask-image:
-    linear-gradient(
-      to right,
-      transparent 0,
-      #000 12px,
-      #000 calc(100% - 12px),
-      transparent 100%);
-  mask-image:
-    linear-gradient(
-      to right,
-      transparent 0,
-      #000 12px,
-      #000 calc(100% - 12px),
-      transparent 100%);
+table.scroll-fade-right,
+.scroll-edge-fade.scroll-fade-right {
+  --fade-right: 12px;
+}
+.scroll-edge-fade.scroll-fade-top {
+  --fade-top: 12px;
+}
+.scroll-edge-fade.scroll-fade-bottom {
+  --fade-bottom: 12px;
 }
 .chat-main textarea::placeholder,
 .rail-search-input::placeholder {
@@ -2889,14 +2894,21 @@ nav.tab-bar-strip.group-strip {
   gap: 0;
   width: 100%;
   max-height: 30vh;
-  overflow-y: auto;
+  overflow: auto;
   font-size: var(--font-2xs);
+  scrollbar-width: thin;
 }
 .chat-main .msg.markdown .msg-activity .activity-trace {
   padding-left: 0;
 }
 .chat-main .msg-activity .activity-trace li {
   flex: none;
+  min-width: 0;
+}
+.chat-main .activity-trace:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-radius: var(--radius-sm);
 }
 .chat-main .activity-trace .trace-row {
   position: relative;
@@ -2923,8 +2935,8 @@ nav.tab-bar-strip.group-strip {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
-  min-width: 0;
+  width: max-content;
+  min-width: 100%;
   padding: 0;
   border: none;
   background: none;
@@ -3025,23 +3037,18 @@ nav.tab-bar-strip.group-strip {
   flex: 1;
   min-width: 0;
 }
-.chat-main .activity-trace .trace-chapter-title,
-.chat-main .activity-trace .trace-chapter-preview {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-main .activity-trace .trace-chapter-preview {
-  color: var(--muted);
-}
-.chat-main .activity-trace .trace-chapter-count {
+.chat-main .activity-trace .trace-chapter-heading {
   display: flex;
-  flex-direction: column;
-  flex: none;
-  color: var(--muted);
-  font-size: inherit;
+  align-items: baseline;
+  gap: 8px;
   white-space: nowrap;
+}
+.chat-main .activity-trace .trace-chapter-title {
+  display: block;
+  white-space: nowrap;
+}
+.chat-main .activity-trace .trace-chapter-notice {
+  color: var(--muted);
 }
 .chat-main .activity-trace .trace-chapter-failures {
   color: var(--activity-status-failed);
@@ -3055,8 +3062,6 @@ nav.tab-bar-strip.group-strip {
   flex: 1;
   min-width: 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .chat-main .activity-trace .trace-duration {
   flex: none;
@@ -3069,12 +3074,16 @@ nav.tab-bar-strip.group-strip {
   font-family: var(--font-mono, monospace);
   font-size: inherit;
 }
-.chat-main .activity-trace .trace-meta {
+.chat-main .activity-trace .trace-meta,
+.chat-main .activity-trace .trace-note {
   margin: 0 0 0 17px;
   color: var(--muted);
   font-family: var(--font-mono, monospace);
   font-size: inherit;
   opacity: 0.8;
+}
+.chat-main .activity-trace .trace-meta {
+  white-space: nowrap;
 }
 .chat-main .activity-trace .trace-prefix {
   flex: 1;
@@ -3103,8 +3112,6 @@ nav.tab-bar-strip.group-strip {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  max-height: 40vh;
-  overflow: auto;
 }
 .chat-main .activity-trace pre.trace-code code {
   font-family: inherit;

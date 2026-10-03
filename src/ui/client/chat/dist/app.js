@@ -21537,9 +21537,55 @@ function stepHeadline(step) {
       return { action: "" };
   }
 }
-function stepSummary(step) {
+function chapterEntryHeadline(step) {
+  if (isTodoStep(step)) {
+    const items = todoItems(step);
+    return { action: items ? `${items.length} TODO item${items.length === 1 ? "" : "s"}` : "TODO items" };
+  }
+  if (isTitleStep(step) && !step.detail) return { action: "Title not recorded" };
+  if (step.kind === "tool" && step.detail) {
+    return { action: "", subject: singleLine(step.detail), codeSubject: !isTitleStep(step) };
+  }
   const headline = stepHeadline(step);
-  return [headline.action, headline.subject].filter(Boolean).join(" ");
+  return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
+}
+function recordedFileCount(entries) {
+  const paths = /* @__PURE__ */ new Set();
+  for (const { step } of entries) {
+    const targets = step.kind === "patch" ? step.files : step.kind === "file" ? step.path ? [step.path] : void 0 : ["read", "write", "edit"].includes(toolKind(step)) && step.detail ? [step.detail] : void 0;
+    if (!targets || targets.some((path) => !path.trim())) return null;
+    targets.forEach((path) => paths.add(path.trim()));
+  }
+  return paths.size;
+}
+function chapterTitle(category, entries) {
+  const latest = entries[entries.length - 1].step;
+  const status = traceStatus(latest);
+  const executing = status === "running" || status === "queued";
+  const uncertain = status === "unknown" || status === "interrupted";
+  const count = entries.length;
+  if (category === "commands") {
+    const label2 = `${count} command${count === 1 ? "" : "s"}`;
+    return uncertain ? label2 : `${executing ? "Running" : "Ran"} ${label2}`;
+  }
+  if (category === "read" || category === "change") {
+    const files = recordedFileCount(entries);
+    const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
+    if (uncertain) {
+      const label2 = category === "read" ? "File reads" : "File changes";
+      return files === null ? `${label2} \xB7 ${count} steps` : `${label2} \xB7 ${files} file${files === 1 ? "" : "s"}`;
+    }
+    return files === null ? `${verb} files \xB7 ${count} steps` : `${verb} ${files} file${files === 1 ? "" : "s"}`;
+  }
+  if (category === "search")
+    return uncertain ? `${count} searches` : `${executing ? "Searching" : "Searched"} \xB7 ${count} searches`;
+  if (isTodoStep(latest))
+    return `${uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items"} \xB7 ${count} updates`;
+  if (isTitleStep(latest))
+    return uncertain ? `${count} title changes` : `${executing ? "Setting" : "Set"} ${count} titles`;
+  const headline = stepHeadline(latest);
+  const label = headline.action === "Used" || headline.action === "Using" ? `${headline.action} ${cleanToolName(latest.tool || "tool")}` : headline.action || "Activities";
+  return `${label} \xB7 ${count} steps`;
 }
 function traceStatus(step) {
   if (step.kind === "retry") return "queued";
@@ -21577,16 +21623,6 @@ function activityChapters(lines, live = false) {
     else groups2.push({ category, entries: [entry] });
   });
   return groups2.map(({ category, entries }) => {
-    const latest = entries[entries.length - 1].step;
-    const latestStatus = traceStatus(latest);
-    const executing = latestStatus === "running" || latestStatus === "queued";
-    const uncertain = latestStatus === "unknown" || latestStatus === "interrupted";
-    const titles = {
-      read: uncertain ? "File reads" : executing ? "Reading files" : "Read files",
-      change: uncertain ? "File changes" : executing ? "Changing files" : "Changed files",
-      commands: uncertain ? "Commands" : executing ? "Running commands" : "Ran commands",
-      search: uncertain ? "Searches" : executing ? "Searching" : "Searched"
-    };
     const statuses = entries.map((entry) => traceStatus(entry.step));
     const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
       (candidate) => statuses.includes(candidate)
@@ -21594,7 +21630,7 @@ function activityChapters(lines, live = false) {
     return {
       id: entries[0].id,
       entries,
-      title: titles[category] || stepSummary(latest) || "Activities",
+      title: chapterTitle(category, entries),
       status,
       failures: statuses.filter((item) => item === "failed").length
     };
@@ -22463,6 +22499,51 @@ function attachDensityReflow(controller, viewport, options) {
   };
 }
 
+// src/scroll-edges.ts
+var EDGE_EPSILON = 1;
+function axisScrollEdges(offset, clientSize, scrollSize) {
+  const maxOffset = Math.max(0, scrollSize - clientSize);
+  return { start: offset > EDGE_EPSILON, end: offset < maxOffset - EDGE_EPSILON };
+}
+function scrollEdges(element, { horizontal = true, vertical = true } = {}) {
+  const x6 = axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth);
+  const y5 = axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight);
+  return {
+    left: horizontal && x6.start,
+    right: horizontal && x6.end,
+    top: vertical && y5.start,
+    bottom: vertical && y5.end
+  };
+}
+function attachScrollEdges(element, axes = {}) {
+  const update = () => {
+    const edges = scrollEdges(element, axes);
+    for (const edge of ["left", "right", "top", "bottom"]) {
+      element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+    }
+  };
+  element.addEventListener("scroll", update, { passive: true });
+  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+  const observeSize = () => {
+    resize?.disconnect();
+    resize?.observe(element);
+    for (const child of element.children) {
+      resize?.observe(child);
+      if (child.firstElementChild) resize?.observe(child.firstElementChild);
+    }
+    update();
+  };
+  const mutations = new MutationObserver(observeSize);
+  mutations.observe(element, { childList: true, subtree: true, characterData: true });
+  observeSize();
+  return () => {
+    element.removeEventListener("scroll", update);
+    resize?.disconnect();
+    mutations.disconnect();
+    for (const edge of ["left", "right", "top", "bottom"]) element.classList.remove(`scroll-fade-${edge}`);
+  };
+}
+
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
 var revealedMobileMessageActionsId = y3(null);
@@ -22514,7 +22595,7 @@ function StepHeadlineContent({ headline }) {
   return /* @__PURE__ */ u4(k, { children: [
     headline.action,
     headline.subject ? /* @__PURE__ */ u4(k, { children: [
-      " ",
+      headline.action ? " " : null,
       headline.codeSubject ? /* @__PURE__ */ u4("code", { class: "trace-subject", children: headline.subject }) : headline.subject
     ] }) : null
   ] });
@@ -22546,17 +22627,18 @@ function formatRecordingDuration(ms) {
 }
 function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
   const step = displayStep(line, live);
-  const described = stepHeadline(step);
+  const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
   const known = !!(described.action || described.subject);
   const headline = known ? described : { action: line.text };
+  const summary = [headline.action, headline.subject].filter(Boolean).join(" ");
   const running = live && step.kind === "tool" && step.status === "running";
   const startedAt2 = Number(line.ts);
   const hasStartedAt = !!line.ts && Number.isFinite(startedAt2);
   const code = open ? known ? stepBody(step) : line.text : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt2) : null;
   const statusText = stepMeta(step, elapsedMs);
-  const meta = open ? statusText : null;
   const timestamp = open ? fmtActivityTs(line.ts) : "";
+  const meta = open ? [timestamp, statusText].filter(Boolean).join(" \xB7 ") : "";
   const duration = running ? elapsedMs : step.durationMs;
   const todos = open ? todoItems(step) : null;
   return /* @__PURE__ */ u4("li", { class: `trace-row ${traceStatusClass(step)}${open ? " open" : ""}${child ? " trace-child" : ""}`, children: [
@@ -22566,19 +22648,18 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
         type: "button",
         class: "trace-row-toggle",
         "aria-expanded": open,
-        title: open ? "Collapse step" : `${stepSummary(step) || line.text}${statusText ? ` \xB7 ${statusText}` : ""}`,
-        "aria-label": `${stepSummary(step) || line.text}${statusText ? ` \xB7 ${statusText}` : ""}`,
+        title: open ? "Collapse step" : `${summary}${statusText ? ` \xB7 ${statusText}` : ""}`,
+        "aria-label": `${summary}${statusText ? ` \xB7 ${statusText}` : ""}`,
         onClick: onToggle,
         children: [
           /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
           /* @__PURE__ */ u4("span", { class: "trace-text", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }),
-          typeof duration === "number" && (duration >= 2e3 || running || step.status === "error") ? /* @__PURE__ */ u4("span", { class: "trace-duration", children: formatDuration(duration) }) : null
+          !open && typeof duration === "number" && (duration >= 2e3 || running || step.status === "error") ? /* @__PURE__ */ u4("span", { class: "trace-duration", children: formatDuration(duration) }) : null
         ]
       }
     ),
-    timestamp ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: timestamp }) : null,
     meta ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: meta }) : null,
-    open && isTitleStep(step) && !step.detail ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: "The title was not recorded for this activity." }) : null,
+    open && isTitleStep(step) && !step.detail ? /* @__PURE__ */ u4("div", { class: "trace-note", children: "The title was not recorded for this activity." }) : null,
     todos ? /* @__PURE__ */ u4("ul", { class: "trace-todos", children: todos.map((todo, index) => {
       const status = todo.status === "completed" ? "completed" : todo.status === "in_progress" ? "running" : todo.status === "pending" ? "queued" : todo.status === "cancelled" ? "interrupted" : "unknown";
       const label = todo.status === "in_progress" ? "In progress" : todo.status[0].toUpperCase() + todo.status.slice(1);
@@ -22593,7 +22674,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
         ] })
       ] }, index);
     }) }) : null,
-    open && isTodoStep(step) && !code ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: "TODO items were not recorded for this activity." }) : null,
+    open && isTodoStep(step) && !code ? /* @__PURE__ */ u4("div", { class: "trace-note", children: "TODO items were not recorded for this activity." }) : null,
     open && code != null && !todos ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: code }) }) : null,
     open && todos && step.error ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: step.error }) }) : null
   ] });
@@ -22602,21 +22683,20 @@ function ActivityTraceList({ lines, live = false, now = null, openLatest = false
   const listRef = A2(null);
   const follow = A2(true);
   y2(() => {
+    if (listRef.current) return attachScrollEdges(listRef.current);
+  }, []);
+  y2(() => {
     if (live && follow.current && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [lines, live]);
   const [sel, setSel] = h2(() => openLatest && lines.length ? activityLineId(lines[lines.length - 1], lines.length - 1) : null);
   const toggle = (id2) => setSel((cur) => cur === id2 ? null : id2);
   const chapters = activityChapters(lines, live);
-  const [openChapters, setOpenChapters] = h2(() => new Set(
-    openLatest && chapters.length ? [chapters[chapters.length - 1].id] : []
-  ));
-  const toggleChapter = (id2) => setOpenChapters((current) => {
-    const next = new Set(current);
-    if (next.has(id2)) next.delete(id2);
-    else next.add(id2);
-    return next;
-  });
-  return /* @__PURE__ */ u4("ul", { class: "activity-trace", ref: listRef, onScroll: () => {
+  const [openChapter, setOpenChapter] = h2(() => openLatest && chapters.length ? chapters[chapters.length - 1].id : null);
+  const toggleChapter = (id2) => {
+    setOpenChapter((current) => current === id2 ? null : id2);
+    setSel(null);
+  };
+  return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, onScroll: () => {
     const element = listRef.current;
     if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
   }, children: chapters.map((chapter) => {
@@ -22624,8 +22704,7 @@ function ActivityTraceList({ lines, live = false, now = null, openLatest = false
       const { line, id: id2 } = chapter.entries[0];
       return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, onToggle: () => toggle(id2) }, chapter.id);
     }
-    const open = openChapters.has(chapter.id);
-    const latest = chapter.entries[chapter.entries.length - 1];
+    const open = openChapter === chapter.id;
     return /* @__PURE__ */ u4("li", { class: `trace-chapter trace-status-${chapter.status}${open ? " open" : ""}`, children: [
       /* @__PURE__ */ u4(
         "button",
@@ -22633,23 +22712,18 @@ function ActivityTraceList({ lines, live = false, now = null, openLatest = false
           type: "button",
           class: "trace-chapter-toggle",
           "aria-expanded": open,
-          "aria-label": `${chapter.title} \xB7 ${chapter.entries.length} steps \xB7 ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` \xB7 ${chapter.failures} failed` : ""}`,
+          "aria-label": `${chapter.title} \xB7 ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` \xB7 ${chapter.failures} failed` : ""}`,
           onClick: () => toggleChapter(chapter.id),
           children: [
             /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
-            /* @__PURE__ */ u4("span", { class: "trace-chapter-label", children: [
+            /* @__PURE__ */ u4("span", { class: "trace-chapter-label", children: /* @__PURE__ */ u4("span", { class: "trace-chapter-heading", children: [
               /* @__PURE__ */ u4("span", { class: "trace-chapter-title", children: chapter.title }),
-              /* @__PURE__ */ u4("span", { class: "trace-chapter-preview", children: stepSummary(latest.step) || latest.line.text })
-            ] }),
-            /* @__PURE__ */ u4("span", { class: "trace-chapter-count", children: [
-              chapter.entries.length,
-              " steps",
               chapter.failures ? /* @__PURE__ */ u4("span", { class: "trace-chapter-failures", children: [
                 chapter.failures,
                 " failed"
               ] }) : null,
-              chapter.status === "unknown" || chapter.status === "interrupted" ? /* @__PURE__ */ u4("span", { children: chapter.status === "unknown" ? "Outcome unknown" : "Interrupted" }) : null
-            ] })
+              chapter.status === "unknown" || chapter.status === "interrupted" ? /* @__PURE__ */ u4("span", { class: "trace-chapter-notice", children: chapter.status === "unknown" ? "Outcome unknown" : "Interrupted" }) : null
+            ] }) })
           ]
         }
       ),
@@ -31239,35 +31313,12 @@ function App() {
 }
 
 // src/table-scroll.ts
-var EDGE_EPSILON = 1;
-function tableScrollEdges(scrollLeft, clientWidth, scrollWidth) {
-  const maxScrollLeft = Math.max(0, scrollWidth - clientWidth);
-  return {
-    left: scrollLeft > EDGE_EPSILON,
-    right: scrollLeft < maxScrollLeft - EDGE_EPSILON
-  };
-}
-function attachTableScrollEdge(table) {
-  const update = () => {
-    const edges = tableScrollEdges(table.scrollLeft, table.clientWidth, table.scrollWidth);
-    table.classList.toggle("scroll-fade-left", edges.left);
-    table.classList.toggle("scroll-fade-right", edges.right);
-  };
-  table.addEventListener("scroll", update, { passive: true });
-  const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-  observer?.observe(table);
-  update();
-  return () => {
-    table.removeEventListener("scroll", update);
-    observer?.disconnect();
-  };
-}
 function observeTableScrollEdges(root) {
   const attached = /* @__PURE__ */ new Map();
   const sync = () => {
     const tables = new Set(root.querySelectorAll('table:not([data-table-scroll="off"])'));
     for (const table of tables) {
-      if (!attached.has(table)) attached.set(table, attachTableScrollEdge(table));
+      if (!attached.has(table)) attached.set(table, attachScrollEdges(table, { vertical: false }));
     }
     for (const [table, cleanup2] of attached) {
       if (tables.has(table)) continue;

@@ -191,6 +191,26 @@ describe('theme CSS contract', () => {
     expect(css).toContain('ul.trace-todos');
   });
 
+  it('shares table transparency fades with the scrollable activity viewport', () => {
+    const css = read('./components/ChatMain.css');
+    const trace = css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1];
+    expect(trace).toContain('overflow: auto');
+    expect(css).toMatch(/\.trace-meta \{ white-space: nowrap/);
+    expect(css).toContain('width: max-content; min-width: 100%');
+    const global = read('./styles/global.css');
+    expect(global).toContain('mask-composite: intersect');
+    for (const edge of ['top', 'right', 'bottom'])
+      expect(global).toContain(`.scroll-edge-fade.scroll-fade-${edge} { --fade-${edge}: 12px; }`);
+  });
+
+  it('keeps chapter headers free of the last step argument preview', () => {
+    const component = read('./components/ChatMain.tsx');
+    expect(component).not.toContain('trace-chapter-preview');
+    expect(component).toContain('chapterEntryHeadline(step)');
+    expect(component).toContain('trace-chapter-title');
+    expect(component).toContain('trace-chapter-failures');
+  });
+
   it('gives markdown tables full-width bubbles, local scrolling, legible cells and themed grid styling', () => {
     const css = read('./components/ChatMain.css');
     const bubble = css.match(/\.chat-main \.msg\.markdown:has\(table\) \{([^}]+)\}/)?.[1];
@@ -207,7 +227,8 @@ describe('theme CSS contract', () => {
     expect(scrollableTable).toContain('border-collapse: separate');
     expect(globalCss).toContain('table.scroll-fade-right');
     expect(globalCss).toContain('table.scroll-fade-left');
-    expect(globalCss).toContain('calc(100% - 12px)');
+    expect(globalCss).toContain('calc(100% - var(--fade-right))');
+    expect(globalCss).toContain('--fade-right: 12px');
     const cells = globalCss.match(/:where\(table:not\(\[data-table-scroll="off"\]\) :is\(th, td\)\) \{([^}]+)\}/)?.[1];
     expect(cells).toContain('border-inline-end: 1px solid var(--border)');
     expect(cells).toContain('border-block-end: 1px solid var(--border)');

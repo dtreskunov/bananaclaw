@@ -33,7 +33,7 @@ import { splitPendingInputs, timelineLayoutKey } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import {
-  activityChapters, activityLineId, displayStep, isTitleStep, isTodoStep, parseStep, stepHeadline, stepSummary,
+  activityChapters, activityLineId, chapterEntryHeadline, displayStep, isTitleStep, isTodoStep, parseStep, stepHeadline,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
 } from '../../../../shared/activity-presentation';
 import { conversationState } from '../conversation-state';
@@ -54,6 +54,7 @@ import { attachScrollNavigation, type ScrollDirection, type ScrollNavigation } f
 import { getAppearanceController } from '../appearance';
 import { appearance } from '../appearance-state';
 import { attachDensityReflow } from '../density-reflow';
+import { attachScrollEdges } from '../scroll-edges';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
@@ -117,7 +118,7 @@ function StepHeadlineContent({ headline }: { headline: StepHeadline }) {
     <>
       {headline.action}
       {headline.subject
-        ? <>{' '}{headline.codeSubject ? <code class="trace-subject">{headline.subject}</code> : headline.subject}</>
+        ? <>{headline.action ? ' ' : null}{headline.codeSubject ? <code class="trace-subject">{headline.subject}</code> : headline.subject}</>
         : null}
     </>
   );
@@ -158,17 +159,18 @@ function formatRecordingDuration(ms: number): string {
 
 function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void; child?: boolean }) {
   const step = displayStep(line, live);
-  const described = stepHeadline(step);
+  const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
   const known = !!(described.action || described.subject);
   const headline = known ? described : { action: line.text };
+  const summary = [headline.action, headline.subject].filter(Boolean).join(' ');
   const running = live && step.kind === 'tool' && step.status === 'running';
   const startedAt = Number(line.ts);
   const hasStartedAt = !!line.ts && Number.isFinite(startedAt);
   const code = open ? (known ? stepBody(step) : line.text) : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
   const statusText = stepMeta(step, elapsedMs);
-  const meta = open ? statusText : null;
   const timestamp = open ? fmtActivityTs(line.ts) : '';
+  const meta = open ? [timestamp, statusText].filter(Boolean).join(' · ') : '';
   const duration = running ? elapsedMs : step.durationMs;
   const todos = open ? todoItems(step) : null;
   return (
@@ -177,18 +179,17 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
         type="button"
         class="trace-row-toggle"
         aria-expanded={open}
-        title={open ? 'Collapse step' : `${stepSummary(step) || line.text}${statusText ? ` · ${statusText}` : ''}`}
-        aria-label={`${stepSummary(step) || line.text}${statusText ? ` · ${statusText}` : ''}`}
+        title={open ? 'Collapse step' : `${summary}${statusText ? ` · ${statusText}` : ''}`}
+        aria-label={`${summary}${statusText ? ` · ${statusText}` : ''}`}
         onClick={onToggle}
       >
         <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
         <span class="trace-text"><StepHeadlineContent headline={headline} /></span>
-        {typeof duration === 'number' && (duration >= 2000 || running || step.status === 'error')
+        {!open && typeof duration === 'number' && (duration >= 2000 || running || step.status === 'error')
           ? <span class="trace-duration">{formatDuration(duration)}</span> : null}
       </button>
-      {timestamp ? <div class="trace-meta">{timestamp}</div> : null}
       {meta ? <div class="trace-meta">{meta}</div> : null}
-      {open && isTitleStep(step) && !step.detail ? <div class="trace-meta">The title was not recorded for this activity.</div> : null}
+      {open && isTitleStep(step) && !step.detail ? <div class="trace-note">The title was not recorded for this activity.</div> : null}
       {todos ? <ul class="trace-todos">
         {todos.map((todo, index) => {
           const status = todo.status === 'completed' ? 'completed' : todo.status === 'in_progress' ? 'running'
@@ -200,7 +201,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
           </li>;
         })}
       </ul> : null}
-      {open && isTodoStep(step) && !code ? <div class="trace-meta">TODO items were not recorded for this activity.</div> : null}
+      {open && isTodoStep(step) && !code ? <div class="trace-note">TODO items were not recorded for this activity.</div> : null}
       {open && code != null && !todos
         ? <pre class="trace-code"><code>{code}</code></pre>
         : null}
@@ -213,6 +214,9 @@ export function ActivityTraceList({ lines, live = false, now = null, openLatest 
   const listRef = useRef<HTMLUListElement | null>(null);
   const follow = useRef(true);
   useEffect(() => {
+    if (listRef.current) return attachScrollEdges(listRef.current);
+  }, []);
+  useEffect(() => {
     if (live && follow.current && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [lines, live]);
   const [sel, setSel] = useState<string | null>(() => openLatest && lines.length
@@ -220,17 +224,14 @@ export function ActivityTraceList({ lines, live = false, now = null, openLatest 
     : null);
   const toggle = (id: string) => setSel((cur) => (cur === id ? null : id));
   const chapters = activityChapters(lines, live);
-  const [openChapters, setOpenChapters] = useState<Set<string>>(() => new Set(
-    openLatest && chapters.length ? [chapters[chapters.length - 1].id] : [],
-  ));
-  const toggleChapter = (id: string) => setOpenChapters(current => {
-    const next = new Set(current);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    return next;
-  });
+  const [openChapter, setOpenChapter] = useState<string | null>(() =>
+    openLatest && chapters.length ? chapters[chapters.length - 1].id : null);
+  const toggleChapter = (id: string) => {
+    setOpenChapter(current => current === id ? null : id);
+    setSel(null);
+  };
   return (
-    <ul class="activity-trace" ref={listRef} onScroll={() => {
+    <ul class="activity-trace scroll-edge-fade" tabIndex={0} aria-label="Activity steps" ref={listRef} onScroll={() => {
       const element = listRef.current;
       if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
     }}>
@@ -239,21 +240,18 @@ export function ActivityTraceList({ lines, live = false, now = null, openLatest 
           const { line, id } = chapter.entries[0];
           return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(id)} />;
         }
-        const open = openChapters.has(chapter.id);
-        const latest = chapter.entries[chapter.entries.length - 1];
+        const open = openChapter === chapter.id;
         return <li key={chapter.id} class={`trace-chapter trace-status-${chapter.status}${open ? ' open' : ''}`}>
           <button type="button" class="trace-chapter-toggle" aria-expanded={open}
-            aria-label={`${chapter.title} · ${chapter.entries.length} steps · ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` · ${chapter.failures} failed` : ''}`}
+            aria-label={`${chapter.title} · ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` · ${chapter.failures} failed` : ''}`}
             onClick={() => toggleChapter(chapter.id)}>
             <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
             <span class="trace-chapter-label">
-              <span class="trace-chapter-title">{chapter.title}</span>
-              <span class="trace-chapter-preview">{stepSummary(latest.step) || latest.line.text}</span>
-            </span>
-            <span class="trace-chapter-count">
-              {chapter.entries.length} steps
-              {chapter.failures ? <span class="trace-chapter-failures">{chapter.failures} failed</span> : null}
-              {chapter.status === 'unknown' || chapter.status === 'interrupted' ? <span>{chapter.status === 'unknown' ? 'Outcome unknown' : 'Interrupted'}</span> : null}
+              <span class="trace-chapter-heading">
+                <span class="trace-chapter-title">{chapter.title}</span>
+                {chapter.failures ? <span class="trace-chapter-failures">{chapter.failures} failed</span> : null}
+                {chapter.status === 'unknown' || chapter.status === 'interrupted' ? <span class="trace-chapter-notice">{chapter.status === 'unknown' ? 'Outcome unknown' : 'Interrupted'}</span> : null}
+              </span>
             </span>
           </button>
           {open ? <ul class="trace-children">

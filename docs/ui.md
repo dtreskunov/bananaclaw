@@ -134,17 +134,27 @@ status metadata so operational detail remains secondary to message content.
 Activity uses expandable **chapters** of consecutive related steps, without
 reordering or omitting activities. Chapter headers have filled dots on a
 continuous rail; child steps are indented with smaller hollow dots and branches.
-Singleton steps stay directly on the rail. Exact timestamps, full arguments,
-errors and status metadata appear when a step is expanded; slow or failed
+Singleton steps stay directly on the rail. Only one chapter can be expanded at
+a time. Headers show only the group heading and outcome notices, without a
+preview of the last step's argument. Child labels omit the parent's repeated verb.
+Exact timestamps, status and duration share one line with dot separators when
+a step is expanded; full arguments and errors appear beneath. Slow or failed
 steps retain a compact duration beside the label.
 
-Chapter wording follows its latest step: **Changing files / Changed files**
-and **Running commands / Ran commands**. Earlier failures remain counted even
+Chapter wording follows its latest step: **Editing files / Edited files**
+and **Running 2 commands / Ran 2 commands**, with counts in the heading instead
+of a separate badge. File headings count distinct recorded paths when all
+targets are known; incomplete legacy/patch records retain an explicit step
+count rather than inventing a file count. Earlier failures remain counted even
 after later successes. Queued, running, completed and failed states use
 theme-aware colors, interrupted states use warning colors, and unknown outcomes
 are muted. Accessible labels and expanded metadata convey status without
 relying on color. Historical unfinished steps become **Outcome unknown**, not
 successful or still-running steps.
+The activity viewport scrolls vertically and horizontally instead of clipping
+long labels. Hidden edges use the same 12 px transparency fades as tables,
+including top and bottom fades. Expanded command bodies wrap within the
+viewport and share its scrolling, without a second nested scrollbar.
 
 Thread-title actions read **Set title to TITLE**. New runner events retain the
 title argument; historical events without it say **Set title** and explain the
