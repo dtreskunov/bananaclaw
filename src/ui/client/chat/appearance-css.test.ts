@@ -160,7 +160,9 @@ describe('theme CSS contract', () => {
     const css = read('./components/ChatMain.css');
     const trace = css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1];
     expect(trace).toContain('font-size: var(--font-2xs)');
-    const toggle = css.match(/\.chat-main \.activity-trace \.trace-row-toggle \{([^}]+)\}/)?.[1];
+    const toggle = css.match(
+      /\.chat-main \.activity-trace \.trace-row-toggle,\s*\.chat-main \.activity-trace \.trace-chapter-toggle \{([^}]+)\}/,
+    )?.[1];
     expect(toggle).toContain('font-size: inherit');
     expect(toggle).toContain('color: var(--trace-status-color, var(--muted))');
     for (const status of ['queued', 'running', 'completed', 'failed']) {
@@ -175,6 +177,18 @@ describe('theme CSS contract', () => {
     expect(codeContent).toContain('font-size: inherit');
     const preview = css.match(/\.chat-main \.typing \.trace-preview \{([^}]+)\}/)?.[1];
     expect(preview).toContain('font-size: var(--font-2xs)');
+  });
+
+  it('uses continuous chapter rails, indented hollow child dots and expanded TODO checklists', () => {
+    const css = read('./components/ChatMain.css');
+    expect(css).toContain('--trace-child-indent: 20px');
+    expect(css).toContain('.trace-child::before { left: calc(4px - var(--trace-child-indent))');
+    expect(css).toContain('.trace-child::after');
+    expect(css).toMatch(/\.trace-child \.trace-dot \{[^}]*width: 5px;[^}]*border: 1px solid/);
+    expect(css).toContain('.trace-chapter::before');
+    expect(css).toContain('.trace-status-interrupted');
+    expect(css).toContain('.trace-status-unknown');
+    expect(css).toContain('ul.trace-todos');
   });
 
   it('gives markdown tables full-width bubbles, local scrolling, legible cells and themed grid styling', () => {

@@ -2880,12 +2880,13 @@ nav.tab-bar-strip.group-strip {
   white-space: nowrap;
 }
 .chat-main .msg-activity .activity-trace {
+  --trace-child-indent: 20px;
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   width: 100%;
   max-height: 30vh;
   overflow-y: auto;
@@ -2898,14 +2899,30 @@ nav.tab-bar-strip.group-strip {
   flex: none;
 }
 .chat-main .activity-trace .trace-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  position: relative;
+  display: flow-root;
 }
-.chat-main .activity-trace .trace-row-toggle {
+.chat-main .activity-trace .trace-row::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--border-strong);
+  pointer-events: none;
+}
+.chat-main .activity-trace > .trace-row:first-child::before {
+  top: 16px;
+}
+.chat-main .activity-trace > .trace-row:last-child::before,
+.chat-main .activity-trace > .trace-chapter:last-child .trace-children > .trace-row:last-child::before {
+  bottom: calc(100% - 16px);
+}
+.chat-main .activity-trace .trace-row-toggle,
+.chat-main .activity-trace .trace-chapter-toggle {
   display: flex;
-  align-items: baseline;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   min-width: 0;
   padding: 0;
@@ -2917,6 +2934,42 @@ nav.tab-bar-strip.group-strip {
   color: var(--trace-status-color, var(--muted));
   font-family: var(--font-mono, monospace);
   opacity: 0.85;
+}
+.chat-main .activity-trace .trace-row-toggle {
+  min-height: 32px;
+}
+.chat-main .activity-trace .trace-marker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 9px;
+  height: 9px;
+}
+.chat-main .activity-trace .trace-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--trace-status-color, var(--muted));
+}
+.chat-main .activity-trace .trace-child::before {
+  left: calc(4px - var(--trace-child-indent));
+}
+.chat-main .activity-trace .trace-child::after {
+  content: "";
+  position: absolute;
+  left: calc(4px - var(--trace-child-indent));
+  top: 16px;
+  width: calc(var(--trace-child-indent) - 2px);
+  border-top: 1px solid var(--border-strong);
+  pointer-events: none;
+}
+.chat-main .activity-trace .trace-child .trace-dot {
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--trace-status-color, var(--muted));
+  background: var(--surface);
 }
 .chat-main .activity-trace .trace-status-queued {
   --trace-status-color: var(--activity-status-queued);
@@ -2930,20 +2983,73 @@ nav.tab-bar-strip.group-strip {
 .chat-main .activity-trace .trace-status-failed {
   --trace-status-color: var(--activity-status-failed);
 }
-.chat-main .activity-trace .trace-row-toggle:hover {
+.chat-main .activity-trace .trace-status-interrupted {
+  --trace-status-color: var(--activity-status-queued);
+}
+.chat-main .activity-trace .trace-status-unknown,
+.chat-main .activity-trace .trace-status-neutral {
+  --trace-status-color: var(--muted);
+}
+.chat-main .activity-trace .trace-row-toggle:hover,
+.chat-main .activity-trace .trace-chapter-toggle:hover {
   opacity: 1;
-  color: var(--fg);
 }
-.chat-main .activity-trace .trace-row-toggle .chevron {
+.chat-main .activity-trace .trace-row-toggle:focus-visible,
+.chat-main .activity-trace .trace-chapter-toggle:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-radius: var(--radius-sm);
+}
+.chat-main .activity-trace .trace-chapter {
+  position: relative;
+}
+.chat-main .activity-trace .trace-chapter::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: var(--chapter-rail-start, 0px);
+  height: calc(var(--chapter-rail-end, 44px) - var(--chapter-rail-start, 0px));
+  border-left: 1px solid var(--border-strong);
+  pointer-events: none;
+}
+.chat-main .activity-trace > .trace-chapter:first-child {
+  --chapter-rail-start: 22px;
+}
+.chat-main .activity-trace > .trace-chapter:last-child:not(.open) {
+  --chapter-rail-end: 22px;
+}
+.chat-main .activity-trace .trace-chapter-toggle {
+  height: 44px;
+}
+.chat-main .activity-trace .trace-chapter-label {
+  flex: 1;
+  min-width: 0;
+}
+.chat-main .activity-trace .trace-chapter-title,
+.chat-main .activity-trace .trace-chapter-preview {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-main .activity-trace .trace-chapter-preview {
+  color: var(--muted);
+}
+.chat-main .activity-trace .trace-chapter-count {
+  display: flex;
+  flex-direction: column;
   flex: none;
-  display: inline-block;
-  font-size: 13px;
-  line-height: 1.2;
-  transition: transform 0.15s ease;
-  opacity: 0.6;
+  color: var(--muted);
+  font-size: inherit;
+  white-space: nowrap;
 }
-.chat-main .activity-trace .trace-row-toggle .chevron.open {
-  transform: rotate(90deg);
+.chat-main .activity-trace .trace-chapter-failures {
+  color: var(--activity-status-failed);
+}
+.chat-main .activity-trace ul.trace-children {
+  list-style: none;
+  margin: 0 0 0 var(--trace-child-indent);
+  padding: 0;
 }
 .chat-main .activity-trace .trace-text {
   flex: 1;
@@ -2951,6 +3057,10 @@ nav.tab-bar-strip.group-strip {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.chat-main .activity-trace .trace-duration {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
 .chat-main .activity-trace code.trace-subject {
   padding: 0 4px;
@@ -2999,6 +3109,34 @@ nav.tab-bar-strip.group-strip {
 .chat-main .activity-trace pre.trace-code code {
   font-family: inherit;
   font-size: inherit;
+}
+.chat-main .activity-trace ul.trace-todos {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 8px 17px;
+}
+.chat-main .activity-trace .trace-todo {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-block: 2px;
+}
+.chat-main .activity-trace .trace-todo-icon {
+  flex: none;
+  width: 12px;
+  color: var(--trace-status-color, var(--muted));
+}
+.chat-main .activity-trace .trace-todo-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--fg);
+  font-family: var(--font-ui);
+}
+.chat-main .activity-trace .trace-todo-content small {
+  display: block;
+  font-size: inherit;
+  color: var(--muted);
 }
 @keyframes typing-bounce {
   0%, 60%, 100% {

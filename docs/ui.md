@@ -131,9 +131,27 @@ live Stop control shares the progress-summary row rather than creating a
 separate metadata row.
 Activity trace previews and expanded rows use the same small type scale as
 status metadata so operational detail remains secondary to message content.
-Tool row headers use distinct theme-aware colors for queued, running, completed,
-and failed states. The activity schema supports queued (`pending`) tool rows,
-although providers normally begin emitting them once execution is running.
+Activity uses expandable **chapters** of consecutive related steps, without
+reordering or omitting activities. Chapter headers have filled dots on a
+continuous rail; child steps are indented with smaller hollow dots and branches.
+Singleton steps stay directly on the rail. Exact timestamps, full arguments,
+errors and status metadata appear when a step is expanded; slow or failed
+steps retain a compact duration beside the label.
+
+Chapter wording follows its latest step: **Changing files / Changed files**
+and **Running commands / Ran commands**. Earlier failures remain counted even
+after later successes. Queued, running, completed and failed states use
+theme-aware colors, interrupted states use warning colors, and unknown outcomes
+are muted. Accessible labels and expanded metadata convey status without
+relying on color. Historical unfinished steps become **Outcome unknown**, not
+successful or still-running steps.
+
+Thread-title actions read **Set title to TITLE**. New runner events retain the
+title argument; historical events without it say **Set title** and explain the
+missing recording when expanded. TODO updates read **Updated TODO items** and
+expand into a checklist with item statuses and recorded priorities. Unrecognized
+legacy TODO details remain visible as raw text. The same chapters are used for
+live and completed traces, and remain gated by **Show technical information**.
 Themes define the font family, body and heading weights, and UI letter
 spacing through `--font-ui`, `--font-weight-body`,
 `--font-weight-heading`, and `--letter-spacing-ui`. Density defines the

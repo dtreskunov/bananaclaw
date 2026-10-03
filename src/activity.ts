@@ -1,4 +1,5 @@
 import type { ActivityLine } from './channels/adapter.js';
+import { stepSummary } from './ui/shared/activity-presentation.js';
 
 export type ActivityStep =
   | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; title?: string; error?: string; durationMs?: number; rejectedBeforeExecution?: boolean }
@@ -69,59 +70,7 @@ export function activityHint(lines: ActivityLine[]): string | null {
   return null;
 }
 
-function cleanToolName(tool: string): string {
-  if (tool.startsWith('mcp__')) {
-    const rest = tool.slice(5);
-    const [server, ...name] = rest.split('__');
-    return `${server}.${name.join('.') || rest}`;
-  }
-  return tool.toLowerCase();
-}
-
-/** File-operation tools carry the target path but no verb (and OpenCode's
- *  title is just the path), so map the tool name to a verb to make read vs.
- *  write vs. edit explicit in the label. Case-insensitive so it covers both
- *  Claude (`Read`/`Write`/`Edit`) and OpenCode (`read`/`write`/`edit`). */
-const FILE_OP_VERBS: Record<string, { present: string; past: string }> = {
-  read: { present: 'Reading', past: 'Read' },
-  write: { present: 'Writing', past: 'Wrote' },
-  edit: { present: 'Editing', past: 'Edited' },
-};
-
-const COMMAND_TOOLS = new Set(['bash', 'shell', 'run', 'run_in_terminal']);
-
 /** Canonical plain-text primary label used by typing hints. */
 export function activityLabel(step: ActivityStep): string {
-  switch (step.kind) {
-      case 'tool': {
-        if (step.status === 'interrupted' || step.status === 'unknown') {
-          const status = step.status === 'interrupted' ? 'Interrupted (outcome unknown)' : 'Outcome unknown';
-          const detail = step.detail?.replace(/\s+/g, ' ').trim();
-          return `${status}: ${cleanToolName(step.tool)}${detail ? ` ${detail}` : ''}`;
-        }
-        const toolName = (step.tool || '').toLowerCase();
-        const finished = step.status === 'completed' || step.status === 'error';
-        const fileOp = FILE_OP_VERBS[toolName];
-        if (fileOp) {
-          const target = step.detail || step.title || '';
-          const suffix = target ? ` ${target}` : '';
-          return `${finished ? fileOp.past : fileOp.present}${suffix}`;
-        }
-        if (COMMAND_TOOLS.has(toolName) && step.detail) {
-          return `${finished ? 'Ran' : 'Running'} ${step.detail.replace(/\s+/g, ' ').trim()}`;
-        }
-        if (step.title) {
-          return step.detail ? `${step.title} ${step.detail.replace(/\s+/g, ' ').trim()}` : step.title;
-        }
-        const tool = cleanToolName(step.tool);
-        return `${finished ? 'Used' : 'Using'} ${tool}`;
-      }
-      case 'internal': return 'Internal activity';
-      case 'file': return `Opened ${step.name || step.path || 'file'}`;
-      case 'patch': return `Updated ${step.files.length === 1 ? step.files[0] : `${step.files.length} files`}`;
-      case 'retry': return `Retrying attempt ${step.attempt}`;
-      case 'compaction': return step.auto ? 'Compacted context automatically' : 'Compacted context';
-      case 'subtask': return step.agent ? `Started subtask with ${step.agent}` : step.description || 'Started subtask';
-      case 'notification': return step.text;
-  }
+  return stepSummary(step);
 }

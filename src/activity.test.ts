@@ -61,7 +61,7 @@ describe('activityHint', () => {
     expect(activityHint([
       line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running' }),
       line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
-    ])).toBe('Used bash');
+    ])).toBe('Ran bash');
     expect(activityHint([
       line('1', { kind: 'internal', id: 'i1', text: 'Checking constraints' }),
     ])).toBe('Internal activity');
@@ -69,9 +69,9 @@ describe('activityHint', () => {
 
   it('uses the same success and error labels shown in trace rows', () => {
     expect(activityHint([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'running' })]))
-      .toBe('Using bash');
+      .toBe('Running bash');
     expect(activityHint([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'error' })]))
-      .toBe('Used bash');
+      .toBe('Ran bash');
   });
 
   it('prefers a provider tool title over the bare tool name', () => {

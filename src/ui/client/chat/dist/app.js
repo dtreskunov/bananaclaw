@@ -21391,6 +21391,216 @@ function timelineLayoutKey(messages) {
   );
 }
 
+// ../../shared/activity-presentation.ts
+var TRACE_STATUS_LABELS = {
+  queued: "Pending",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  interrupted: "Interrupted (outcome unknown)",
+  unknown: "Outcome unknown",
+  neutral: "Activity"
+};
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function isStep(value) {
+  if (!isRecord(value)) return false;
+  for (const key of ["id", "tool", "detail", "title", "error", "text", "path", "name", "agent", "description"]) {
+    if (value[key] !== void 0 && typeof value[key] !== "string") return false;
+  }
+  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification"].includes(value.kind)))
+    return false;
+  if (value.status !== void 0 && (typeof value.status !== "string" || !["pending", "running", "completed", "error", "interrupted", "unknown"].includes(value.status)))
+    return false;
+  if (value.durationMs !== void 0 && (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs < 0))
+    return false;
+  if (value.attempt !== void 0 && typeof value.attempt !== "number") return false;
+  if (value.auto !== void 0 && typeof value.auto !== "boolean") return false;
+  return value.files === void 0 || Array.isArray(value.files) && value.files.every((file) => typeof file === "string");
+}
+function parseStep(text2) {
+  try {
+    const value = JSON.parse(text2);
+    return isStep(value) ? value : {};
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return {};
+  }
+}
+function cleanToolName(tool) {
+  if (!tool.startsWith("mcp__")) return tool.toLowerCase();
+  const [server, ...name] = tool.slice(5).split("__");
+  return `${server}.${name.join(".") || server}`.toLowerCase();
+}
+function toolKind(step) {
+  return cleanToolName(step.tool || "").split(".").at(-1) || "";
+}
+function isTodoStep(step) {
+  return step.kind === "tool" && ["todo", "todowrite", "todo_write"].includes(toolKind(step));
+}
+function isTitleStep(step) {
+  return step.kind === "tool" && ["nanoclaw.set_thread_title", "set_thread_title"].includes(cleanToolName(step.tool || ""));
+}
+function todoItems(step) {
+  if (!isTodoStep(step) || !step.detail) return null;
+  const items = [];
+  for (const line of step.detail.split("\n")) {
+    const match2 = line.match(/^(Completed|In progress|Pending|Cancelled|Task):\s*(.*)$/i);
+    if (!match2) {
+      if (!items.length) return null;
+      items[items.length - 1].content += `
+${line}`;
+      continue;
+    }
+    const status = match2[1].toLowerCase();
+    const priority = match2[2].match(/\s+\(([^()\n]+) priority\)$/i);
+    items.push({
+      content: priority ? match2[2].slice(0, priority.index).trimEnd() : match2[2],
+      status: status === "completed" ? "completed" : status === "in progress" ? "in_progress" : status === "pending" ? "pending" : status === "cancelled" ? "cancelled" : "unknown",
+      ...priority ? { priority: priority[1] } : {}
+    });
+  }
+  return items.length ? items : null;
+}
+function singleLine(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+var FILE_OP_VERBS = {
+  read: { present: "Reading", past: "Read" },
+  write: { present: "Writing", past: "Wrote" },
+  edit: { present: "Editing", past: "Edited" }
+};
+var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
+var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
+function stepHeadline(step) {
+  switch (step.kind) {
+    case "tool": {
+      const tool = toolKind(step);
+      if (!step.status || step.status === "interrupted" || step.status === "unknown") {
+        return {
+          action: step.status === "interrupted" ? "Interrupted (outcome unknown):" : "Outcome unknown:",
+          subject: [cleanToolName(step.tool || "tool"), singleLine(step.detail || step.title || "")].filter(Boolean).join(" "),
+          codeSubject: true
+        };
+      }
+      const finished = step.status === "completed" || step.status === "error";
+      if (isTitleStep(step))
+        return {
+          action: finished ? step.detail ? "Set title to" : "Set title" : step.detail ? "Setting title to" : "Setting title",
+          ...step.detail ? { subject: singleLine(step.detail) } : {}
+        };
+      if (isTodoStep(step)) return { action: finished ? "Updated TODO items" : "Updating TODO items" };
+      const fileOp = FILE_OP_VERBS[tool];
+      if (fileOp) {
+        const target = step.detail || step.title || "";
+        return {
+          action: finished ? fileOp.past : fileOp.present,
+          ...target ? { subject: singleLine(target), codeSubject: true } : {}
+        };
+      }
+      if (COMMAND_TOOLS.has(tool))
+        return {
+          action: step.status === "pending" ? "Queued" : finished ? "Ran" : "Running",
+          subject: singleLine(step.detail || cleanToolName(step.tool || "command")),
+          codeSubject: true
+        };
+      if (SEARCH_TOOLS.has(tool) && (step.detail || step.title))
+        return {
+          action: finished ? "Searched for" : "Searching for",
+          subject: singleLine(step.detail || step.title || ""),
+          codeSubject: true
+        };
+      if (step.title)
+        return { action: step.title, ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {} };
+      return { action: finished ? "Used" : "Using", subject: cleanToolName(step.tool || "tool"), codeSubject: true };
+    }
+    case "internal":
+      return { action: "Internal activity" };
+    case "file":
+      return { action: "Opened", subject: step.name || step.path || "file", codeSubject: true };
+    case "patch":
+      return {
+        action: "Updated",
+        subject: step.files?.length === 1 ? step.files[0] : `${step.files?.length || 0} files`,
+        codeSubject: step.files?.length === 1
+      };
+    case "retry":
+      return { action: "Retrying", subject: `attempt ${step.attempt ?? 0}` };
+    case "compaction":
+      return { action: step.auto ? "Compacted context automatically" : "Compacted context" };
+    case "subtask":
+      return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
+    case "notification":
+      return { action: step.text || "Notification" };
+    default:
+      return { action: "" };
+  }
+}
+function stepSummary(step) {
+  const headline = stepHeadline(step);
+  return [headline.action, headline.subject].filter(Boolean).join(" ");
+}
+function traceStatus(step) {
+  if (step.kind === "retry") return "queued";
+  if (step.kind !== "tool") return "neutral";
+  return step.status === "pending" ? "queued" : step.status === "error" ? "failed" : step.status || "unknown";
+}
+function traceStatusClass(step) {
+  return `trace-status-${traceStatus(step)}`;
+}
+function activityLineId(line, index) {
+  if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
+  const step = parseStep(line.text);
+  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
+}
+function displayStep(line, live) {
+  const step = parseStep(line.text);
+  return step.kind === "tool" && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
+}
+function chapterCategory(step, index) {
+  if (step.kind === "file" || step.kind === "tool" && toolKind(step) === "read") return "read";
+  if (step.kind === "patch" || step.kind === "tool" && ["write", "edit", "patch"].includes(toolKind(step)))
+    return "change";
+  if (step.kind === "tool" && COMMAND_TOOLS.has(toolKind(step))) return "commands";
+  if (step.kind === "tool" && SEARCH_TOOLS.has(toolKind(step))) return "search";
+  return step.kind === "tool" ? `tool:${cleanToolName(step.tool || "tool")}` : `event:${index}`;
+}
+function activityChapters(lines, live = false) {
+  const groups2 = [];
+  lines.forEach((line, index) => {
+    const step = displayStep(line, live);
+    const entry = { id: activityLineId(line, index), line, step };
+    const category = chapterCategory(step, index);
+    const last = groups2.at(-1);
+    if (last?.category === category) last.entries.push(entry);
+    else groups2.push({ category, entries: [entry] });
+  });
+  return groups2.map(({ category, entries }) => {
+    const latest = entries[entries.length - 1].step;
+    const latestStatus = traceStatus(latest);
+    const executing = latestStatus === "running" || latestStatus === "queued";
+    const uncertain = latestStatus === "unknown" || latestStatus === "interrupted";
+    const titles = {
+      read: uncertain ? "File reads" : executing ? "Reading files" : "Read files",
+      change: uncertain ? "File changes" : executing ? "Changing files" : "Changed files",
+      commands: uncertain ? "Commands" : executing ? "Running commands" : "Ran commands",
+      search: uncertain ? "Searches" : executing ? "Searching" : "Searched"
+    };
+    const statuses = entries.map((entry) => traceStatus(entry.step));
+    const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
+      (candidate) => statuses.includes(candidate)
+    ) || "neutral";
+    return {
+      id: entries[0].id,
+      entries,
+      title: titles[category] || stepSummary(latest) || "Activities",
+      status,
+      failures: statuses.filter((item) => item === "failed").length
+    };
+  });
+}
+
 // src/input-state.ts
 function inputStatePresentation(state) {
   if (!state) return null;
@@ -22300,116 +22510,6 @@ function fmtActivityTs(ts) {
   if (!Number.isFinite(n3)) return "";
   return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-function parseStep(text2) {
-  try {
-    const o4 = JSON.parse(text2);
-    return o4 && typeof o4 === "object" ? o4 : {};
-  } catch {
-    return {};
-  }
-}
-function traceStatusClass(step) {
-  if (step.kind !== "tool") return "trace-status-neutral";
-  if (step.status === "pending") return "trace-status-queued";
-  if (step.status === "running") return "trace-status-running";
-  if (step.status === "completed") return "trace-status-completed";
-  if (step.status === "error") return "trace-status-failed";
-  return "trace-status-neutral";
-}
-function cleanToolName(tool) {
-  if (tool.startsWith("mcp__")) {
-    const rest = tool.slice(5);
-    const [server, ...name] = rest.split("__");
-    return `${server}.${name.join(".") || rest}`;
-  }
-  return tool.toLowerCase();
-}
-var FILE_OP_VERBS = {
-  read: { present: "Reading", past: "Read" },
-  write: { present: "Writing", past: "Wrote" },
-  edit: { present: "Editing", past: "Edited" }
-};
-var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
-var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
-var TODO_TOOLS = /* @__PURE__ */ new Set(["todowrite", "todo_write"]);
-function singleLine(value) {
-  return value.replace(/\s+/g, " ").trim();
-}
-function stepHeadline(s5) {
-  switch (s5.kind) {
-    case "tool": {
-      const tool = (s5.tool || "").toLowerCase();
-      if (s5.status === "interrupted" || s5.status === "unknown") {
-        return {
-          action: s5.status === "interrupted" ? "Interrupted" : "Outcome unknown:",
-          subject: [cleanToolName(s5.tool || "tool"), singleLine(s5.detail || s5.title || "")].filter(Boolean).join(" "),
-          codeSubject: true
-        };
-      }
-      const finished = s5.status === "completed" || s5.status === "error";
-      const fileOp = FILE_OP_VERBS[tool];
-      if (fileOp) {
-        const target = s5.detail || s5.title || "";
-        return {
-          action: finished ? fileOp.past : fileOp.present,
-          ...target ? { subject: singleLine(target), codeSubject: true } : {}
-        };
-      }
-      if (COMMAND_TOOLS.has(tool) && s5.detail) {
-        return { action: finished ? "Ran" : "Running", subject: singleLine(s5.detail), codeSubject: true };
-      }
-      if (SEARCH_TOOLS.has(tool) && (s5.detail || s5.title)) {
-        return {
-          action: finished ? "Searched for" : "Searching for",
-          subject: singleLine(s5.detail || s5.title || ""),
-          codeSubject: true
-        };
-      }
-      if (TODO_TOOLS.has(tool)) {
-        const titleCount = s5.title?.match(/^(\d+)\s+todos?$/i)?.[1];
-        const detailCount = s5.detail?.split("\n").filter(Boolean).length;
-        const count = titleCount ? Number(titleCount) : detailCount;
-        return {
-          action: finished ? "Updated task list" : "Updating task list",
-          ...typeof count === "number" ? { subject: `${count} ${count === 1 ? "task" : "tasks"}` } : {}
-        };
-      }
-      if (s5.title) {
-        return {
-          action: s5.title,
-          ...s5.detail ? { subject: singleLine(s5.detail), codeSubject: true } : {}
-        };
-      }
-      return {
-        action: finished ? "Used" : "Using",
-        subject: cleanToolName(s5.tool || "tool"),
-        codeSubject: true
-      };
-    }
-    case "internal":
-      return { action: "Internal activity" };
-    case "file":
-      return { action: "Opened", subject: s5.name || s5.path || "file", codeSubject: true };
-    case "patch": {
-      const files = s5.files || [];
-      return files.length === 1 ? { action: "Updated", subject: files[0], codeSubject: true } : { action: "Updated", subject: `${files.length} files` };
-    }
-    case "retry":
-      return { action: "Retrying", subject: `attempt ${s5.attempt ?? 0}` };
-    case "compaction":
-      return { action: s5.auto ? "Compacted context automatically" : "Compacted context" };
-    case "subtask":
-      return s5.agent ? { action: "Started subtask with", subject: s5.agent, codeSubject: true } : { action: s5.description || "Started subtask" };
-    case "notification":
-      return { action: s5.text || "Notification" };
-    default:
-      return { action: "" };
-  }
-}
-function stepSummary(s5) {
-  const headline = stepHeadline(s5);
-  return [headline.action, headline.subject].filter(Boolean).join(" ");
-}
 function StepHeadlineContent({ headline }) {
   return /* @__PURE__ */ u4(k, { children: [
     headline.action,
@@ -22429,7 +22529,7 @@ function stepBody(s5) {
 }
 function stepMeta(s5, elapsedMs) {
   if (s5.kind !== "tool") return null;
-  const status = s5.status === "interrupted" ? "Interrupted (outcome unknown)" : s5.status === "unknown" ? "Outcome unknown" : s5.status === "error" ? "Failed" : s5.status === "completed" ? "Completed" : s5.status === "running" ? "Running" : "Pending";
+  const status = TRACE_STATUS_LABELS[traceStatus(s5)];
   const duration = s5.status === "running" ? elapsedMs : s5.durationMs;
   const formattedDuration = typeof duration !== "number" ? "" : s5.status === "running" ? `${Math.floor(duration / 1e3)}s` : formatDuration(duration);
   return `${status}${formattedDuration ? ` \xB7 ${formattedDuration}` : ""}`;
@@ -22444,42 +22544,59 @@ function formatRecordingDuration(ms) {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
-function ActivityTraceRow({ line, open, live, now, onToggle }) {
-  const parsedStep = parseStep(line.text);
-  const step = !live && parsedStep.kind === "tool" && (parsedStep.status === "pending" || parsedStep.status === "running") ? { ...parsedStep, status: "unknown" } : parsedStep;
+function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
+  const step = displayStep(line, live);
   const described = stepHeadline(step);
   const known = !!(described.action || described.subject);
   const headline = known ? described : { action: line.text };
   const running = live && step.kind === "tool" && step.status === "running";
   const startedAt2 = Number(line.ts);
-  const hasStartedAt = Number.isFinite(startedAt2);
+  const hasStartedAt = !!line.ts && Number.isFinite(startedAt2);
   const code = open ? known ? stepBody(step) : line.text : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt2) : null;
-  const meta = open ? stepMeta(step, elapsedMs) : null;
-  return /* @__PURE__ */ u4("li", { class: `trace-row ${traceStatusClass(step)}${open ? " open" : ""}`, children: [
+  const statusText = stepMeta(step, elapsedMs);
+  const meta = open ? statusText : null;
+  const timestamp = open ? fmtActivityTs(line.ts) : "";
+  const duration = running ? elapsedMs : step.durationMs;
+  const todos = open ? todoItems(step) : null;
+  return /* @__PURE__ */ u4("li", { class: `trace-row ${traceStatusClass(step)}${open ? " open" : ""}${child ? " trace-child" : ""}`, children: [
     /* @__PURE__ */ u4(
       "button",
       {
         type: "button",
         class: "trace-row-toggle",
         "aria-expanded": open,
-        title: open ? "Collapse step" : stepSummary(step),
+        title: open ? "Collapse step" : `${stepSummary(step) || line.text}${statusText ? ` \xB7 ${statusText}` : ""}`,
+        "aria-label": `${stepSummary(step) || line.text}${statusText ? ` \xB7 ${statusText}` : ""}`,
         onClick: onToggle,
         children: [
-          /* @__PURE__ */ u4("span", { class: `chevron${open ? " open" : ""}`, children: "\u203A" }),
-          line.ts ? /* @__PURE__ */ u4("span", { class: "ts", children: fmtActivityTs(line.ts) }) : null,
-          /* @__PURE__ */ u4("span", { class: "trace-text", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) })
+          /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
+          /* @__PURE__ */ u4("span", { class: "trace-text", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }),
+          typeof duration === "number" && (duration >= 2e3 || running || step.status === "error") ? /* @__PURE__ */ u4("span", { class: "trace-duration", children: formatDuration(duration) }) : null
         ]
       }
     ),
+    timestamp ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: timestamp }) : null,
     meta ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: meta }) : null,
-    open && code != null ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: code }) }) : null
+    open && isTitleStep(step) && !step.detail ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: "The title was not recorded for this activity." }) : null,
+    todos ? /* @__PURE__ */ u4("ul", { class: "trace-todos", children: todos.map((todo, index) => {
+      const status = todo.status === "completed" ? "completed" : todo.status === "in_progress" ? "running" : todo.status === "pending" ? "queued" : todo.status === "cancelled" ? "interrupted" : "unknown";
+      const label = todo.status === "in_progress" ? "In progress" : todo.status[0].toUpperCase() + todo.status.slice(1);
+      return /* @__PURE__ */ u4("li", { class: `trace-todo trace-status-${status}`, children: [
+        /* @__PURE__ */ u4("span", { class: "trace-todo-icon", role: "img", "aria-label": label, children: todo.status === "completed" ? "\u2713" : todo.status === "in_progress" ? "\u25B8" : todo.status === "cancelled" ? "\u2013" : "\u25CB" }),
+        /* @__PURE__ */ u4("span", { class: "trace-todo-content", children: [
+          todo.content,
+          todo.priority ? /* @__PURE__ */ u4("small", { children: [
+            todo.priority,
+            " priority"
+          ] }) : null
+        ] })
+      ] }, index);
+    }) }) : null,
+    open && isTodoStep(step) && !code ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: "TODO items were not recorded for this activity." }) : null,
+    open && code != null && !todos ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: code }) }) : null,
+    open && todos && step.error ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: step.error }) }) : null
   ] });
-}
-function activityLineId(line, index) {
-  if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
-  const step = parseStep(line.text);
-  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
 }
 function ActivityTraceList({ lines, live = false, now = null, openLatest = false }) {
   const listRef = A2(null);
@@ -22489,12 +22606,66 @@ function ActivityTraceList({ lines, live = false, now = null, openLatest = false
   }, [lines, live]);
   const [sel, setSel] = h2(() => openLatest && lines.length ? activityLineId(lines[lines.length - 1], lines.length - 1) : null);
   const toggle = (id2) => setSel((cur) => cur === id2 ? null : id2);
+  const chapters = activityChapters(lines, live);
+  const [openChapters, setOpenChapters] = h2(() => new Set(
+    openLatest && chapters.length ? [chapters[chapters.length - 1].id] : []
+  ));
+  const toggleChapter = (id2) => setOpenChapters((current) => {
+    const next = new Set(current);
+    if (next.has(id2)) next.delete(id2);
+    else next.add(id2);
+    return next;
+  });
   return /* @__PURE__ */ u4("ul", { class: "activity-trace", ref: listRef, onScroll: () => {
     const element = listRef.current;
     if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
-  }, children: lines.map((line, i5) => {
-    const id2 = activityLineId(line, i5);
-    return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, onToggle: () => toggle(id2) }, id2);
+  }, children: chapters.map((chapter) => {
+    if (chapter.entries.length === 1) {
+      const { line, id: id2 } = chapter.entries[0];
+      return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, onToggle: () => toggle(id2) }, chapter.id);
+    }
+    const open = openChapters.has(chapter.id);
+    const latest = chapter.entries[chapter.entries.length - 1];
+    return /* @__PURE__ */ u4("li", { class: `trace-chapter trace-status-${chapter.status}${open ? " open" : ""}`, children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "trace-chapter-toggle",
+          "aria-expanded": open,
+          "aria-label": `${chapter.title} \xB7 ${chapter.entries.length} steps \xB7 ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` \xB7 ${chapter.failures} failed` : ""}`,
+          onClick: () => toggleChapter(chapter.id),
+          children: [
+            /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
+            /* @__PURE__ */ u4("span", { class: "trace-chapter-label", children: [
+              /* @__PURE__ */ u4("span", { class: "trace-chapter-title", children: chapter.title }),
+              /* @__PURE__ */ u4("span", { class: "trace-chapter-preview", children: stepSummary(latest.step) || latest.line.text })
+            ] }),
+            /* @__PURE__ */ u4("span", { class: "trace-chapter-count", children: [
+              chapter.entries.length,
+              " steps",
+              chapter.failures ? /* @__PURE__ */ u4("span", { class: "trace-chapter-failures", children: [
+                chapter.failures,
+                " failed"
+              ] }) : null,
+              chapter.status === "unknown" || chapter.status === "interrupted" ? /* @__PURE__ */ u4("span", { children: chapter.status === "unknown" ? "Outcome unknown" : "Interrupted" }) : null
+            ] })
+          ]
+        }
+      ),
+      open ? /* @__PURE__ */ u4("ul", { class: "trace-children", children: chapter.entries.map(({ line, id: id2 }) => /* @__PURE__ */ u4(
+        ActivityTraceRow,
+        {
+          line,
+          open: id2 === sel,
+          live,
+          now,
+          onToggle: () => toggle(id2),
+          child: true
+        },
+        id2
+      )) }) : null
+    ] }, chapter.id);
   }) });
 }
 function latestActivityHeadline(lines) {

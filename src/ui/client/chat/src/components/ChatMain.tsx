@@ -32,6 +32,10 @@ import { mergeQuestionTimeline } from '../question-timeline';
 import { splitPendingInputs, timelineLayoutKey } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
+import {
+  activityChapters, activityLineId, displayStep, isTitleStep, isTodoStep, parseStep, stepHeadline, stepSummary,
+  todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
+} from '../../../../shared/activity-presentation';
 import { conversationState } from '../conversation-state';
 import { turnRowView, type TurnRowView } from '../turn-row';
 import { inputStatePresentation } from '../input-state';
@@ -108,156 +112,6 @@ function fmtActivityTs(ts: string): string {
   return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-interface TraceStep {
-  kind?: 'tool' | 'internal' | 'file' | 'patch' | 'retry' | 'compaction' | 'subtask' | 'notification';
-  id?: string;
-  tool?: string;
-  status?: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
-  detail?: string;
-  title?: string;
-  error?: string;
-  durationMs?: number;
-  text?: string;
-  path?: string;
-  name?: string;
-  mime?: string;
-  files?: string[];
-  attempt?: number;
-  auto?: boolean;
-  agent?: string;
-  description?: string;
-}
-
-function parseStep(text: string): TraceStep {
-  try {
-    const o = JSON.parse(text) as TraceStep;
-    return o && typeof o === 'object' ? o : {};
-  } catch { return {}; }
-}
-
-function traceStatusClass(step: TraceStep): string {
-  if (step.kind !== 'tool') return 'trace-status-neutral';
-  if (step.status === 'pending') return 'trace-status-queued';
-  if (step.status === 'running') return 'trace-status-running';
-  if (step.status === 'completed') return 'trace-status-completed';
-  if (step.status === 'error') return 'trace-status-failed';
-  return 'trace-status-neutral';
-}
-
-/** Turn a raw tool name into what we show the user: `mcp__server__name`
- *  collapses to `server.name`; ordinary names lower-case. */
-function cleanToolName(tool: string): string {
-  if (tool.startsWith('mcp__')) {
-    const rest = tool.slice(5);
-    const [server, ...name] = rest.split('__');
-    return `${server}.${name.join('.') || rest}`;
-  }
-  return tool.toLowerCase();
-}
-
-/** File-operation tools carry the target path but no verb (and OpenCode's
- *  title is just the path), so map the tool name to a verb to make read vs.
- *  write vs. edit explicit. Case-insensitive to cover Claude (`Read`/`Write`/
- *  `Edit`) and OpenCode (`read`/`write`/`edit`). */
-const FILE_OP_VERBS: Record<string, { present: string; past: string }> = {
-  read: { present: 'Reading', past: 'Read' },
-  write: { present: 'Writing', past: 'Wrote' },
-  edit: { present: 'Editing', past: 'Edited' },
-};
-
-const COMMAND_TOOLS = new Set(['bash', 'shell', 'run', 'run_in_terminal']);
-const SEARCH_TOOLS = new Set(['grep', 'glob', 'search', 'websearch', 'web_search']);
-const TODO_TOOLS = new Set(['todowrite', 'todo_write']);
-
-interface StepHeadline {
-  action: string;
-  subject?: string;
-  codeSubject?: boolean;
-}
-
-function singleLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-function stepHeadline(s: TraceStep): StepHeadline {
-  switch (s.kind) {
-    case 'tool': {
-      const tool = (s.tool || '').toLowerCase();
-      if (s.status === 'interrupted' || s.status === 'unknown') {
-        return {
-          action: s.status === 'interrupted' ? 'Interrupted' : 'Outcome unknown:',
-          subject: [cleanToolName(s.tool || 'tool'), singleLine(s.detail || s.title || '')].filter(Boolean).join(' '),
-          codeSubject: true,
-        };
-      }
-      const finished = s.status === 'completed' || s.status === 'error';
-      const fileOp = FILE_OP_VERBS[tool];
-      if (fileOp) {
-        const target = s.detail || s.title || '';
-        return {
-          action: finished ? fileOp.past : fileOp.present,
-          ...(target ? { subject: singleLine(target), codeSubject: true } : {}),
-        };
-      }
-      if (COMMAND_TOOLS.has(tool) && s.detail) {
-        return { action: finished ? 'Ran' : 'Running', subject: singleLine(s.detail), codeSubject: true };
-      }
-      if (SEARCH_TOOLS.has(tool) && (s.detail || s.title)) {
-        return {
-          action: finished ? 'Searched for' : 'Searching for',
-          subject: singleLine(s.detail || s.title || ''),
-          codeSubject: true,
-        };
-      }
-      if (TODO_TOOLS.has(tool)) {
-        const titleCount = s.title?.match(/^(\d+)\s+todos?$/i)?.[1];
-        const detailCount = s.detail?.split('\n').filter(Boolean).length;
-        const count = titleCount ? Number(titleCount) : detailCount;
-        return {
-          action: finished ? 'Updated task list' : 'Updating task list',
-          ...(typeof count === 'number'
-            ? { subject: `${count} ${count === 1 ? 'task' : 'tasks'}` }
-            : {}),
-        };
-      }
-      if (s.title) {
-        // Preserve provider-supplied titles and details for unrecognized tools.
-        return {
-          action: s.title,
-          ...(s.detail ? { subject: singleLine(s.detail), codeSubject: true } : {}),
-        };
-      }
-      return {
-        action: finished ? 'Used' : 'Using',
-        subject: cleanToolName(s.tool || 'tool'),
-        codeSubject: true,
-      };
-    }
-    case 'internal': return { action: 'Internal activity' };
-    case 'file': return { action: 'Opened', subject: s.name || s.path || 'file', codeSubject: true };
-    case 'patch': {
-      const files = s.files || [];
-      return files.length === 1
-        ? { action: 'Updated', subject: files[0], codeSubject: true }
-        : { action: 'Updated', subject: `${files.length} files` };
-    }
-    case 'retry': return { action: 'Retrying', subject: `attempt ${s.attempt ?? 0}` };
-    case 'compaction': return { action: s.auto ? 'Compacted context automatically' : 'Compacted context' };
-    case 'subtask': return s.agent
-      ? { action: 'Started subtask with', subject: s.agent, codeSubject: true }
-      : { action: s.description || 'Started subtask' };
-    case 'notification': return { action: s.text || 'Notification' };
-    default: return { action: '' };
-  }
-}
-
-/** One-line collapsed summary for a step (whitespace-collapsed so a
- *  multi-line command still fits one truncated row). */
-function stepSummary(s: TraceStep): string {
-  const headline = stepHeadline(s);
-  return [headline.action, headline.subject].filter(Boolean).join(' ');
-}
-
 function StepHeadlineContent({ headline }: { headline: StepHeadline }) {
   return (
     <>
@@ -280,17 +134,7 @@ function stepBody(s: TraceStep): string | null {
 
 function stepMeta(s: TraceStep, elapsedMs: number | null): string | null {
   if (s.kind !== 'tool') return null;
-  const status = s.status === 'interrupted'
-    ? 'Interrupted (outcome unknown)'
-    : s.status === 'unknown'
-      ? 'Outcome unknown'
-      : s.status === 'error'
-    ? 'Failed'
-    : s.status === 'completed'
-      ? 'Completed'
-      : s.status === 'running'
-        ? 'Running'
-        : 'Pending';
+  const status = TRACE_STATUS_LABELS[traceStatus(s)];
   const duration = s.status === 'running' ? elapsedMs : s.durationMs;
   const formattedDuration = typeof duration !== 'number'
     ? ''
@@ -312,57 +156,60 @@ function formatRecordingDuration(ms: number): string {
   return `${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
 
-/** One accordion row of an activity trace. Collapsed shows a single
- *  truncated summary line (timestamp + summary). Expanded shows a rich
- *  prefix inline next to the timestamp; a tool step additionally renders its
- *  raw primary argument as a multi-line code block below, newlines intact. */
-function ActivityTraceRow({ line, open, live, now, onToggle }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void }) {
-  const parsedStep = parseStep(line.text);
-  const step = !live && parsedStep.kind === 'tool' && (parsedStep.status === 'pending' || parsedStep.status === 'running')
-    ? { ...parsedStep, status: 'unknown' as const }
-    : parsedStep;
+function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void; child?: boolean }) {
+  const step = displayStep(line, live);
   const described = stepHeadline(step);
   const known = !!(described.action || described.subject);
   const headline = known ? described : { action: line.text };
   const running = live && step.kind === 'tool' && step.status === 'running';
   const startedAt = Number(line.ts);
-  const hasStartedAt = Number.isFinite(startedAt);
+  const hasStartedAt = !!line.ts && Number.isFinite(startedAt);
   const code = open ? (known ? stepBody(step) : line.text) : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
-  const meta = open ? stepMeta(step, elapsedMs) : null;
+  const statusText = stepMeta(step, elapsedMs);
+  const meta = open ? statusText : null;
+  const timestamp = open ? fmtActivityTs(line.ts) : '';
+  const duration = running ? elapsedMs : step.durationMs;
+  const todos = open ? todoItems(step) : null;
   return (
-    <li class={`trace-row ${traceStatusClass(step)}${open ? ' open' : ''}`}>
+    <li class={`trace-row ${traceStatusClass(step)}${open ? ' open' : ''}${child ? ' trace-child' : ''}`}>
       <button
         type="button"
         class="trace-row-toggle"
         aria-expanded={open}
-        title={open ? 'Collapse step' : stepSummary(step)}
+        title={open ? 'Collapse step' : `${stepSummary(step) || line.text}${statusText ? ` · ${statusText}` : ''}`}
+        aria-label={`${stepSummary(step) || line.text}${statusText ? ` · ${statusText}` : ''}`}
         onClick={onToggle}
       >
-        <span class={`chevron${open ? ' open' : ''}`}>{'\u203A'}</span>
-        {line.ts ? <span class="ts">{fmtActivityTs(line.ts)}</span> : null}
+        <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
         <span class="trace-text"><StepHeadlineContent headline={headline} /></span>
+        {typeof duration === 'number' && (duration >= 2000 || running || step.status === 'error')
+          ? <span class="trace-duration">{formatDuration(duration)}</span> : null}
       </button>
+      {timestamp ? <div class="trace-meta">{timestamp}</div> : null}
       {meta ? <div class="trace-meta">{meta}</div> : null}
-      {open && code != null
+      {open && isTitleStep(step) && !step.detail ? <div class="trace-meta">The title was not recorded for this activity.</div> : null}
+      {todos ? <ul class="trace-todos">
+        {todos.map((todo, index) => {
+          const status = todo.status === 'completed' ? 'completed' : todo.status === 'in_progress' ? 'running'
+            : todo.status === 'pending' ? 'queued' : todo.status === 'cancelled' ? 'interrupted' : 'unknown';
+          const label = todo.status === 'in_progress' ? 'In progress' : todo.status[0].toUpperCase() + todo.status.slice(1);
+          return <li key={index} class={`trace-todo trace-status-${status}`}>
+            <span class="trace-todo-icon" role="img" aria-label={label}>{todo.status === 'completed' ? '\u2713' : todo.status === 'in_progress' ? '\u25b8' : todo.status === 'cancelled' ? '\u2013' : '\u25cb'}</span>
+            <span class="trace-todo-content">{todo.content}{todo.priority ? <small>{todo.priority} priority</small> : null}</span>
+          </li>;
+        })}
+      </ul> : null}
+      {open && isTodoStep(step) && !code ? <div class="trace-meta">TODO items were not recorded for this activity.</div> : null}
+      {open && code != null && !todos
         ? <pre class="trace-code"><code>{code}</code></pre>
         : null}
+      {open && todos && step.error ? <pre class="trace-code"><code>{step.error}</code></pre> : null}
     </li>
   );
 }
 
-/** A timestamped step list where each entry is an accordion row. Nothing is
- *  expanded by default; expanding a row shows its prefix inline next to the
- *  timestamp and, for a command step, the code body as a multi-line block.
- *  Single-open accordion. Shared by the persisted trace and the live typing
- *  bubble. */
-function activityLineId(line: ActivityLine, index: number): string {
-  if (line.ordinal !== undefined) return `activity-${line.ordinal}`;
-  const step = parseStep(line.text);
-  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
-}
-
-function ActivityTraceList({ lines, live = false, now = null, openLatest = false }: { lines: ActivityLine[]; live?: boolean; now?: number | null; openLatest?: boolean }) {
+export function ActivityTraceList({ lines, live = false, now = null, openLatest = false }: { lines: ActivityLine[]; live?: boolean; now?: number | null; openLatest?: boolean }) {
   const listRef = useRef<HTMLUListElement | null>(null);
   const follow = useRef(true);
   useEffect(() => {
@@ -372,14 +219,48 @@ function ActivityTraceList({ lines, live = false, now = null, openLatest = false
     ? activityLineId(lines[lines.length - 1], lines.length - 1)
     : null);
   const toggle = (id: string) => setSel((cur) => (cur === id ? null : id));
+  const chapters = activityChapters(lines, live);
+  const [openChapters, setOpenChapters] = useState<Set<string>>(() => new Set(
+    openLatest && chapters.length ? [chapters[chapters.length - 1].id] : [],
+  ));
+  const toggleChapter = (id: string) => setOpenChapters(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
   return (
     <ul class="activity-trace" ref={listRef} onScroll={() => {
       const element = listRef.current;
       if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
     }}>
-      {lines.map((line, i) => {
-        const id = activityLineId(line, i);
-        return <ActivityTraceRow key={id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(id)} />;
+      {chapters.map(chapter => {
+        if (chapter.entries.length === 1) {
+          const { line, id } = chapter.entries[0];
+          return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(id)} />;
+        }
+        const open = openChapters.has(chapter.id);
+        const latest = chapter.entries[chapter.entries.length - 1];
+        return <li key={chapter.id} class={`trace-chapter trace-status-${chapter.status}${open ? ' open' : ''}`}>
+          <button type="button" class="trace-chapter-toggle" aria-expanded={open}
+            aria-label={`${chapter.title} · ${chapter.entries.length} steps · ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` · ${chapter.failures} failed` : ''}`}
+            onClick={() => toggleChapter(chapter.id)}>
+            <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
+            <span class="trace-chapter-label">
+              <span class="trace-chapter-title">{chapter.title}</span>
+              <span class="trace-chapter-preview">{stepSummary(latest.step) || latest.line.text}</span>
+            </span>
+            <span class="trace-chapter-count">
+              {chapter.entries.length} steps
+              {chapter.failures ? <span class="trace-chapter-failures">{chapter.failures} failed</span> : null}
+              {chapter.status === 'unknown' || chapter.status === 'interrupted' ? <span>{chapter.status === 'unknown' ? 'Outcome unknown' : 'Interrupted'}</span> : null}
+            </span>
+          </button>
+          {open ? <ul class="trace-children">
+            {chapter.entries.map(({ line, id }) => <ActivityTraceRow key={id} line={line} open={id === sel}
+              live={live} now={now} onToggle={() => toggle(id)} child />)}
+          </ul> : null}
+        </li>;
       })}
     </ul>
   );

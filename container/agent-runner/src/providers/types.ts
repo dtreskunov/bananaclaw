@@ -311,7 +311,7 @@ export type ActivityStep =
 // other bulky fields are deliberately absent — we never ship file bodies.
 const ACTIVITY_DETAIL_KEYS = [
   'command', 'pattern', 'query', 'filePath', 'file_path',
-  'notebook_path', 'url', 'description', 'prompt', 'path',
+  'notebook_path', 'url', 'description', 'prompt', 'path', 'title',
 ];
 
 const TODO_STATUS_LABELS: Record<string, string> = {
@@ -348,7 +348,7 @@ function singleWordLabel(value: string): string {
  * Provider-agnostic: pick the first string-valued "primary argument" from a
  * tool input, preserving internal newlines (only leading blank lines and
  * trailing whitespace are trimmed). Returns undefined when nothing suitable
- * is present (e.g. `todowrite`).
+ * is present. Todo inputs use the compact activity checklist below.
  */
 export function pickActivityDetail(input: Record<string, unknown> | undefined): string | undefined {
   if (!input) return undefined;
