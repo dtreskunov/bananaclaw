@@ -22088,10 +22088,7 @@ function createAppearanceController(win, doc) {
         win.localStorage.removeItem(APPEARANCE_KEY);
       } catch (storageError) {
         if (!isStorageError(storageError)) throw storageError;
-        report(
-          "Saved appearance was invalid, but could not be cleared. Using the defaults for now.",
-          storageError
-        );
+        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
       }
       return;
     }
@@ -23259,25 +23256,28 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
       "data-turn-id": status ? turn2.id : void 0,
       "aria-live": live ? "polite" : "off",
       children: [
-        /* @__PURE__ */ u4("div", { class: "typing-summary", children: /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
-          live ? /* @__PURE__ */ u4(k, { children: [
-            /* @__PURE__ */ u4("span", {}),
-            /* @__PURE__ */ u4("span", {}),
-            /* @__PURE__ */ u4("span", {})
-          ] }) : null,
-          showTechnicalStatus && liveHeadline ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "hint trace-preview",
-              "aria-expanded": traceExpanded,
-              "aria-label": traceExpanded ? "Hide activity" : "Show latest activity",
-              title: traceExpanded ? "Hide activity" : "Show latest activity",
-              onClick: toggleFromPreview,
-              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
-            }
-          ) : live && view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
-        ] }) }),
+        /* @__PURE__ */ u4("div", { class: "typing-summary", children: [
+          /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
+            live ? /* @__PURE__ */ u4(k, { children: [
+              /* @__PURE__ */ u4("span", {}),
+              /* @__PURE__ */ u4("span", {}),
+              /* @__PURE__ */ u4("span", {})
+            ] }) : null,
+            showTechnicalStatus && liveHeadline ? /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "button",
+                class: "hint trace-preview",
+                "aria-expanded": traceExpanded,
+                "aria-label": traceExpanded ? "Hide activity" : "Show latest activity",
+                title: traceExpanded ? "Hide activity" : "Show latest activity",
+                onClick: toggleFromPreview,
+                children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
+              }
+            ) : live && view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
+          ] }),
+          showStop ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null
+        ] }),
         status && stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
         status && view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,
         live && !turnConnected.value && !stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: "Runner disconnected. The outcome is not yet confirmed." }) : null,
@@ -23291,10 +23291,9 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
             openLatest: openLatestOnExpand
           }
         ) : null,
-        showTechnicalStatus && (status || lines.length) || showStop ? /* @__PURE__ */ u4("div", { class: "meta", children: [
-          showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTraceToggle, { count: lines.length, expanded: traceExpanded, onToggle: toggleFromCount }) : null,
-          showTechnicalStatus && status ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null,
-          showStop ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null
+        showTechnicalStatus && (status || lines.length) ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+          /* @__PURE__ */ u4(ActivityTraceToggle, { count: lines.length, expanded: traceExpanded, onToggle: toggleFromCount }),
+          status ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
         ] }) : null
       ]
     }

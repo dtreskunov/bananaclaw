@@ -37,7 +37,7 @@
      next to the FILES pane). Inner rows constrain their own content
      to --chat-max via padding-inline so the readable column stays
      centered. */
-  --chat-max: 960px;
+  --chat-max: 760px;
   --chat-gutter: max(16px, calc((100% - var(--chat-max)) / 2));
 }
 .chat-main .log,
@@ -109,7 +109,7 @@
    rail. */
 .chat-main .log .task-indicator.msg.event .event-meta { margin-left: 4px; }
 .chat-main .log .task-indicator.paused .event-icon { opacity: 0.55; }
-.chat-main .msg { position: relative; padding: var(--message-padding-block) var(--message-padding-inline); border-radius: var(--radius-lg); max-width: 90%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
+.chat-main .msg { position: relative; padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block); border-radius: var(--radius-lg); max-width: 90%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
 .chat-main .transcript-copy-content { min-width: 0; }
 .chat-main .msg.in { align-self: flex-end; background: var(--accent); }
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }
@@ -333,6 +333,8 @@
 .chat-main .typing { align-self: flex-start; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px; background: var(--wash); border-radius: var(--radius-lg); max-width: 78%; }
 .chat-main .typing-usage { color: var(--muted); font-size: var(--font-2xs); }
 .chat-main .typing .typing-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; min-width: 0; }
+.chat-main .typing.turn-system .typing-summary { flex-direction: row; align-items: center; }
+.chat-main .typing.turn-system .typing-summary .turn-stop-inline { margin-left: 6px; }
 .chat-main .typing .meta { width: 100%; }
 .chat-main .typing .turn-stop-error { color: var(--danger, #b42318); font-size: var(--font-xs); max-width: 44ch; }
 .chat-main .typing .turn-stop-note { color: var(--muted); font-size: var(--font-xs); }
@@ -350,7 +352,7 @@
   (especially on narrow mobile viewports). Capped by the 78% max-width. */
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
 /* Turn activity with no agent message to carry it (before a steer, live, or no reply). */
-.chat-main .typing.turn-system { align-self: flex-start; background: transparent; border-radius: var(--radius-lg); padding: var(--message-padding-block) var(--message-padding-inline); gap: 2px; }
+.chat-main .typing.turn-system { align-self: flex-start; background: transparent; border-radius: var(--radius-lg); padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block); gap: 2px; }
 .chat-main .typing.turn-system.turn-status { width: fit-content; }
 .chat-main .typing.turn-system .msg-activity { margin-top: 0; }
 .chat-main .msg .meta .turn-outcome-note { color: var(--surface-fg, inherit); opacity: 0.8; font-weight: 600; }

@@ -1262,6 +1262,7 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
               ><StepHeadlineContent headline={liveHeadline} /></button>
             : live && view.status ? <span class="hint">{view.status}</span> : null}
         </div>
+        {showStop ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton /></span> : null}
       </div>
       {status && stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
       {status && view.note ? <div class="turn-stop-note">{view.note}</div> : null}
@@ -1275,14 +1276,9 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
             openLatest={openLatestOnExpand}
           />
         : null}
-      {(showTechnicalStatus && (status || lines.length)) || showStop ? <div class="meta">
-        {showTechnicalStatus
-          ? <ActivityTraceToggle count={lines.length} expanded={traceExpanded} onToggle={toggleFromCount} />
-          : null}
-        {showTechnicalStatus && status ? <TurnStats turn={turn} view={view} /> : null}
-        {showStop
-          ? <span class="msg-inline-actions"><ActiveTurnStopButton /></span>
-          : null}
+      {showTechnicalStatus && (status || lines.length) ? <div class="meta">
+        <ActivityTraceToggle count={lines.length} expanded={traceExpanded} onToggle={toggleFromCount} />
+        {status ? <TurnStats turn={turn} view={view} /> : null}
       </div> : null}
     </div>
   );

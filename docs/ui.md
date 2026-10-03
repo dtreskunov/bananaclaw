@@ -126,7 +126,9 @@ the neutral or semantic rail and omit a redundant status label from the
 metadata row.
 Turn-system bubbles remain content-sized so live controls stay beside the
 status instead of at the far edge of the conversation column. Their timing and
-model metadata stay on one line while flexible usage details truncate.
+model metadata stay on one line while flexible usage details truncate. The
+live Stop control shares the progress-summary row rather than creating a
+separate metadata row.
 Activity trace previews and expanded rows use the same small type scale as
 status metadata so operational detail remains secondary to message content.
 Tool row headers use distinct theme-aware colors for queued, running, completed,
@@ -178,7 +180,7 @@ the app and the bootstrap.
 #### Conversation layout
 
 Normal message bubbles use at most 90% of the conversation column. On desktop,
-the column and composer share a 960 px maximum and the same centered gutters,
+the column and composer share a 760 px maximum and the same centered gutters,
 defined once by `--chat-max` / `--chat-gutter` in
 [`ChatMain.css`](../src/ui/client/chat/src/components/ChatMain.css). Mobile keeps
 its existing 90% bubbles and 12 px composer gutters.

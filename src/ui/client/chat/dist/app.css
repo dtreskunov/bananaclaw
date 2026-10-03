@@ -330,6 +330,7 @@
   --font-body: 15px;
   --line-height-ui: 1.3;
   --message-gap: 6px;
+  --message-padding-top: 4px;
   --message-padding-block: 6px;
   --message-padding-inline: 10px;
   --text-block-gap: 4px;
@@ -381,6 +382,7 @@
   --font-body: 16px;
   --line-height-ui: 1.5;
   --message-gap: 10px;
+  --message-padding-top: 6px;
   --message-padding-block: 10px;
   --message-padding-inline: 14px;
   --text-block-gap: 8px;
@@ -2123,7 +2125,7 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
   min-height: 0;
   position: relative;
-  --chat-max: 960px;
+  --chat-max: 760px;
   --chat-gutter: max(16px, calc((100% - var(--chat-max)) / 2));
 }
 .chat-main .log,
@@ -2226,7 +2228,7 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .msg {
   position: relative;
-  padding: var(--message-padding-block) var(--message-padding-inline);
+  padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block);
   border-radius: var(--radius-lg);
   max-width: 90%;
   white-space: pre-wrap;
@@ -2732,6 +2734,13 @@ nav.tab-bar-strip.group-strip {
   max-width: 100%;
   min-width: 0;
 }
+.chat-main .typing.turn-system .typing-summary {
+  flex-direction: row;
+  align-items: center;
+}
+.chat-main .typing.turn-system .typing-summary .turn-stop-inline {
+  margin-left: 6px;
+}
 .chat-main .typing .meta {
   width: 100%;
 }
@@ -2812,7 +2821,7 @@ nav.tab-bar-strip.group-strip {
   align-self: flex-start;
   background: transparent;
   border-radius: var(--radius-lg);
-  padding: var(--message-padding-block) var(--message-padding-inline);
+  padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block);
   gap: 2px;
 }
 .chat-main .typing.turn-system.turn-status {

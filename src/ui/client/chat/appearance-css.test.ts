@@ -86,10 +86,10 @@ describe('theme CSS contract', () => {
     expect(up).not.toContain('top:');
   });
 
-  it('shares a 960 px column and desktop gutters between messages and composer, with 90% bubbles', () => {
+  it('shares a 760 px column and desktop gutters between messages and composer, with 90% bubbles', () => {
     const css = read('./components/ChatMain.css');
     const column = css.match(/\.chat-main \{([^}]+)\}/)?.[1];
-    expect(column).toContain('--chat-max: 960px');
+    expect(column).toContain('--chat-max: 760px');
     expect(column).toContain('--chat-gutter: max(16px, calc((100% - var(--chat-max)) / 2))');
     const rows = css.match(/\.chat-main \.log,\s*([^{}]+)\{([^}]+)\}/);
     expect(rows?.[1]).toContain('.chat-main form');
@@ -134,11 +134,23 @@ describe('theme CSS contract', () => {
 
   it('keeps turn-status bubbles content-sized and timing metadata on one line', () => {
     const css = read('./components/ChatMain.css');
+    const message = css.match(/\.chat-main \.msg \{([^}]+)\}/)?.[1];
+    expect(message).toContain(
+      'padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block)',
+    );
     const turnStatus = css.match(/\.chat-main \.typing\.turn-system\.turn-status \{([^}]+)\}/)?.[1];
     expect(turnStatus).toContain('width: fit-content');
     expect(turnStatus).not.toContain('max-width: 100%');
+    const summary = css.match(/\.chat-main \.typing\.turn-system \.typing-summary \{([^}]+)\}/)?.[1];
+    expect(summary).toContain('flex-direction: row');
+    expect(summary).toContain('align-items: center');
+    const stop = css.match(/\.chat-main \.typing\.turn-system \.typing-summary \.turn-stop-inline \{([^}]+)\}/)?.[1];
+    expect(stop).toContain('margin-left: 6px');
     const turn = css.match(/\.chat-main \.typing\.turn-system \{([^}]+)\}/)?.[1];
     expect(turn).toContain('background: transparent');
+    expect(turn).toContain(
+      'padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block)',
+    );
     const timing = css.match(/\.chat-main \.typing \.typing-meta \{([^}]+)\}/)?.[1];
     expect(timing).toContain('flex: none');
     expect(timing).toContain('white-space: nowrap');

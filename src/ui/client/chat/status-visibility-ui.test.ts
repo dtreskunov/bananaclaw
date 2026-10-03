@@ -8,8 +8,8 @@ describe('technical status UI', () => {
     expect(source.match(/appearance\.value\.preferences\.showTechnicalStatus/g)).toHaveLength(4);
     expect(source.match(/showTechnicalDetails=\{showTechnicalStatus\}/g)).toHaveLength(2);
     expect(source.match(/count=\{showTechnicalStatus \?/g)).toHaveLength(3);
-    expect(source).toContain('(showTechnicalStatus && (status || lines.length)) || showStop');
-    expect(source).toContain('showStop');
+    expect(source).toContain('showStop ? <span class="msg-inline-actions turn-stop-inline">');
+    expect(source).toContain('showTechnicalStatus && (status || lines.length)');
     expect(source).toContain('showOutcomeNote && view.note');
   });
 });

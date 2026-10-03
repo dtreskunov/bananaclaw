@@ -36,6 +36,7 @@
   --font-body: 15px;
   --line-height-ui: 1.3;
   --message-gap: 6px;
+  --message-padding-top: 4px;
   --message-padding-block: 6px;
   --message-padding-inline: 10px;
   --text-block-gap: 4px;
@@ -93,6 +94,7 @@
   --font-body: 16px;
   --line-height-ui: 1.5;
   --message-gap: 10px;
+  --message-padding-top: 6px;
   --message-padding-block: 10px;
   --message-padding-inline: 14px;
   --text-block-gap: 8px;

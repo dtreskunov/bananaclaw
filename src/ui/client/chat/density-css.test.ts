@@ -29,6 +29,7 @@ describe('text density CSS contract', () => {
       '--font-body': '15px',
       '--line-height-ui': '1.3',
       '--message-gap': '6px',
+      '--message-padding-top': '4px',
       '--message-padding-block': '6px',
       '--message-padding-inline': '10px',
       '--text-block-gap': '4px',
@@ -57,6 +58,7 @@ describe('text density CSS contract', () => {
       '--font-body': '16px',
       '--line-height-ui': '1.5',
       '--message-gap': '10px',
+      '--message-padding-top': '6px',
       '--message-padding-block': '10px',
       '--message-padding-inline': '14px',
       '--text-block-gap': '8px',
@@ -136,7 +138,7 @@ describe('text density CSS contract', () => {
     }
     const bubble = read('components/ChatMain.css').match(/\.chat-main \.msg \{([^}]+)\}/)![1];
     expect(bubble).toContain('max-width: 90%');
-    expect(read('components/ChatMain.css')).toContain('--chat-max: 960px');
+    expect(read('components/ChatMain.css')).toContain('--chat-max: 760px');
     expect(global).not.toMatch(/(?:zoom|transform:\s*scale)\s*:/);
   });
 

@@ -76,10 +76,7 @@
           win.localStorage.removeItem(APPEARANCE_KEY);
         } catch (storageError) {
           if (!isStorageError(storageError)) throw storageError;
-          report(
-            "Saved appearance was invalid, but could not be cleared. Using the defaults for now.",
-            storageError
-          );
+          report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
         }
         return;
       }
