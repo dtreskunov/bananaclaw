@@ -227,3 +227,10 @@ describe('container boot-failure tripwire (structural)', () => {
     expect(src).toMatch(/exited non-zero[\s\S]*stderr: tail/);
   });
 });
+
+describe('agent-group image build limits (structural)', () => {
+  it('caps build memory so package installation cannot starve the host', () => {
+    const src = fs.readFileSync(path.join(process.cwd(), 'src', 'container-runner.ts'), 'utf-8');
+    expect(src).toContain('${CONTAINER_RUNTIME_BIN} build --memory=2g');
+  });
+});
