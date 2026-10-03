@@ -189,13 +189,12 @@
   gap: 2px;
   flex: none;
 }
-/* On pointer devices, only the hovered/focused bubble and the newest message
-   show their actions; opacity keeps the row height stable. */
+/* On pointer devices, only the hovered/focused bubble shows its actions;
+   opacity keeps the row height stable. */
 @media (min-width: 721px) and (hover: hover) and (pointer: fine) {
   .chat-main .msg .msg-inline-actions { opacity: 0; transition: opacity 0.12s ease; }
   .chat-main .msg:hover .msg-inline-actions,
-  .chat-main .msg:focus-within .msg-inline-actions,
-  .chat-main .msg.latest .msg-inline-actions { opacity: 1; }
+  .chat-main .msg:focus-within .msg-inline-actions { opacity: 1; }
 }
 .chat-main .events-group.open {
   align-self: stretch;

@@ -2381,8 +2381,7 @@ nav.tab-bar-strip.group-strip {
     transition: opacity 0.12s ease;
   }
   .chat-main .msg:hover .msg-inline-actions,
-  .chat-main .msg:focus-within .msg-inline-actions,
-  .chat-main .msg.latest .msg-inline-actions {
+  .chat-main .msg:focus-within .msg-inline-actions {
     opacity: 1;
   }
 }

@@ -173,6 +173,7 @@ describe('text density CSS contract', () => {
     const mobile = css.slice(css.indexOf('@media (max-width: 720px)'));
 
     expect(css).toContain('@media (min-width: 721px) and (hover: hover) and (pointer: fine)');
+    expect(css).not.toContain('.msg.latest .msg-inline-actions');
     expect(mobile).toContain('.chat-main .msg .msg-inline-actions { display: none; }');
     expect(mobile).toMatch(
       /\.msg\.mobile-actions-visible \.msg-inline-actions,[\s\S]*\.msg:focus-within \.msg-inline-actions \{ display: inline-flex; \}/,
@@ -186,7 +187,7 @@ describe('text density CSS contract', () => {
     expect(source).toContain("' mobile-actions-visible'");
   });
 
-  it('offers labeled density choices with visible focus and a live, noninteractive preview', () => {
+  it('offers labeled appearance choices with visible focus and an unboxed technical-information toggle', () => {
     const css = read('components/AppearanceSettings.css');
     expect(css).toMatch(/\.appearance-mode, \.appearance-density \{[^}]*min-height: 44px/);
     expect(css).toContain('.appearance-density:has(:checked)');
