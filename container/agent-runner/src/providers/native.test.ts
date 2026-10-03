@@ -512,7 +512,7 @@ describe('NativeProvider', () => {
       .toMatchObject({ data: { num_turns: MAX_STEPS, input_tokens: 4 * MAX_STEPS } });
     const continuation = events.find((event) => event.type === 'init')!.continuation;
     expect(provider.appliedSteering(continuation, [`s${MAX_STEPS - 1}`, `s${MAX_STEPS}`])).toEqual([`s${MAX_STEPS - 1}`]);
-  });
+  }, 10_000);
 
   it.each(['end', 'abort'] as const)('does not consume queued guidance after %s at a boundary', async (action) => {
     const provider = new NativeProvider({ model: 'local/test-model' });
@@ -1402,7 +1402,7 @@ describe('final message', () => {
     expect(requests[MAX_STEPS]?.tools).toBeUndefined();
     expect(lastUserText(requests[MAX_STEPS]!)).toContain('step limit');
     expect(replyTexts(events)).toEqual([['Progress so far.']]);
-  });
+  }, 10_000);
 
   it('replaces a drafted final message when guidance arrives', async () => {
     scriptedTexts = ['draft answer', 'steered answer'];

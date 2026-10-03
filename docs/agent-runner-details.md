@@ -357,7 +357,7 @@ Recovery happens inside the provider's step loop:
   least 400 characters of undelivered text, is delivered as is; the runner
   only logs a warning (`final message may point at`) to measure how often
   it happens.
-- **Step limit.** A turn runs at most 50 model steps (`MAX_STEPS`). If the
+- **Step limit.** A turn runs at most 100 model steps (`MAX_STEPS`). If the
   model is still calling tools at the limit, one more step runs with no tools
   and a transient instruction to report what was done and what remains.
 

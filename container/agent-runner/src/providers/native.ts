@@ -41,7 +41,7 @@ import {
   shouldDeferMcpTools,
 } from './native/tool-search.js';
 
-export const MAX_STEPS = 50;
+export const MAX_STEPS = 100;
 
 function log(message: string): void {
   console.error(`[native-provider] ${message}`);
