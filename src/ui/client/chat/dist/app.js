@@ -18625,10 +18625,324 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+// ../../shared/activity-presentation.ts
+var TRACE_STATUS_LABELS = {
+  queued: "Pending",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  interrupted: "Interrupted (outcome unknown)",
+  unknown: "Outcome unknown",
+  neutral: "Activity"
+};
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function isStep(value) {
+  if (!isRecord(value)) return false;
+  for (const key of ["id", "tool", "detail", "title", "error", "text", "path", "name", "agent", "description"]) {
+    if (value[key] !== void 0 && typeof value[key] !== "string") return false;
+  }
+  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification"].includes(value.kind)))
+    return false;
+  if (value.status !== void 0 && (typeof value.status !== "string" || !["pending", "running", "completed", "error", "interrupted", "unknown"].includes(value.status)))
+    return false;
+  if (value.durationMs !== void 0 && (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs < 0))
+    return false;
+  if (value.attempt !== void 0 && typeof value.attempt !== "number") return false;
+  if (value.auto !== void 0 && typeof value.auto !== "boolean") return false;
+  return value.files === void 0 || Array.isArray(value.files) && value.files.every((file) => typeof file === "string");
+}
+function parseStep(text2) {
+  try {
+    const value = JSON.parse(text2);
+    return isStep(value) ? value : {};
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return {};
+  }
+}
+function cleanToolName(tool) {
+  if (!tool.startsWith("mcp__")) return tool.toLowerCase();
+  const [server, ...name] = tool.slice(5).split("__");
+  return `${server}.${name.join(".") || server}`.toLowerCase();
+}
+function toolKind(step) {
+  return cleanToolName(step.tool || "").split(".").at(-1) || "";
+}
+function isTodoStep(step) {
+  return step.kind === "tool" && ["todo", "todowrite", "todo_write"].includes(toolKind(step));
+}
+function isTitleStep(step) {
+  return step.kind === "tool" && ["nanoclaw.set_thread_title", "set_thread_title"].includes(cleanToolName(step.tool || ""));
+}
+function todoItems(step) {
+  if (!isTodoStep(step) || !step.detail) return null;
+  const items = [];
+  for (const line of step.detail.split("\n")) {
+    const match2 = line.match(/^(Completed|In progress|Pending|Cancelled|Task):\s*(.*)$/i);
+    if (!match2) {
+      if (!items.length) return null;
+      items[items.length - 1].content += `
+${line}`;
+      continue;
+    }
+    const status = match2[1].toLowerCase();
+    const priority = match2[2].match(/\s+\(([^()\n]+) priority\)$/i);
+    items.push({
+      content: priority ? match2[2].slice(0, priority.index).trimEnd() : match2[2],
+      status: status === "completed" ? "completed" : status === "in progress" ? "in_progress" : status === "pending" ? "pending" : status === "cancelled" ? "cancelled" : "unknown",
+      ...priority ? { priority: priority[1] } : {}
+    });
+  }
+  return items.length ? items : null;
+}
+function singleLine(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+var FILE_OP_VERBS = {
+  read: { present: "Reading", past: "Read" },
+  write: { present: "Writing", past: "Wrote" },
+  edit: { present: "Editing", past: "Edited" }
+};
+var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
+var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
+function stepHeadline(step) {
+  switch (step.kind) {
+    case "tool": {
+      const tool = toolKind(step);
+      if (!step.status || step.status === "interrupted" || step.status === "unknown") {
+        return {
+          action: step.status === "interrupted" ? "Interrupted (outcome unknown):" : "Outcome unknown:",
+          subject: [cleanToolName(step.tool || "tool"), singleLine(step.detail || step.title || "")].filter(Boolean).join(" "),
+          codeSubject: true
+        };
+      }
+      const finished = step.status === "completed" || step.status === "error";
+      if (isTitleStep(step))
+        return {
+          action: finished ? step.detail ? "Set title to" : "Set title" : step.detail ? "Setting title to" : "Setting title",
+          ...step.detail ? { subject: singleLine(step.detail) } : {}
+        };
+      if (isTodoStep(step)) return { action: finished ? "Updated TODO items" : "Updating TODO items" };
+      const fileOp = FILE_OP_VERBS[tool];
+      if (fileOp) {
+        const target = step.detail || step.title || "";
+        return {
+          action: finished ? fileOp.past : fileOp.present,
+          ...target ? { subject: singleLine(target), codeSubject: true } : {}
+        };
+      }
+      if (COMMAND_TOOLS.has(tool))
+        return {
+          action: step.status === "pending" ? "Queued" : finished ? "Ran" : "Running",
+          subject: singleLine(step.detail || cleanToolName(step.tool || "command")),
+          codeSubject: true
+        };
+      if (SEARCH_TOOLS.has(tool) && (step.detail || step.title))
+        return {
+          action: finished ? "Searched for" : "Searching for",
+          subject: singleLine(step.detail || step.title || ""),
+          codeSubject: true
+        };
+      if (step.title)
+        return { action: step.title, ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {} };
+      return { action: finished ? "Used" : "Using", subject: cleanToolName(step.tool || "tool"), codeSubject: true };
+    }
+    case "internal":
+      return { action: "Internal activity" };
+    case "file":
+      return { action: "Opened", subject: step.name || step.path || "file", codeSubject: true };
+    case "patch":
+      return {
+        action: "Updated",
+        subject: step.files?.length === 1 ? step.files[0] : `${step.files?.length || 0} files`,
+        codeSubject: step.files?.length === 1
+      };
+    case "retry":
+      return { action: "Retrying", subject: `attempt ${step.attempt ?? 0}` };
+    case "compaction":
+      return { action: step.auto ? "Compacted context automatically" : "Compacted context" };
+    case "subtask":
+      return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
+    case "notification":
+      return { action: step.text || "Notification" };
+    default:
+      return { action: "" };
+  }
+}
+function chapterEntryHeadline(step) {
+  if (isTodoStep(step)) {
+    const items = todoItems(step);
+    return { action: items ? `${items.length} TODO item${items.length === 1 ? "" : "s"}` : "TODO items" };
+  }
+  if (isTitleStep(step) && !step.detail) return { action: "Title not recorded" };
+  if (step.kind === "tool" && step.detail) {
+    return { action: "", subject: singleLine(step.detail), codeSubject: !isTitleStep(step) };
+  }
+  const headline = stepHeadline(step);
+  return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
+}
+function recordedFileCount(entries) {
+  const paths = /* @__PURE__ */ new Set();
+  for (const { step } of entries) {
+    const targets = step.kind === "patch" ? step.files : step.kind === "file" ? step.path ? [step.path] : void 0 : ["read", "write", "edit"].includes(toolKind(step)) && step.detail ? [step.detail] : void 0;
+    if (!targets || targets.some((path) => !path.trim())) return null;
+    targets.forEach((path) => paths.add(path.trim()));
+  }
+  return paths.size;
+}
+function chapterTitle(category, entries) {
+  const latest = entries[entries.length - 1].step;
+  const status = traceStatus(latest);
+  const executing = status === "running" || status === "queued";
+  const uncertain = status === "unknown" || status === "interrupted";
+  const count = entries.length;
+  if (category === "commands") {
+    const label2 = `${count} command${count === 1 ? "" : "s"}`;
+    return uncertain ? label2 : `${executing ? "Running" : "Ran"} ${label2}`;
+  }
+  if (category === "read" || category === "change") {
+    const files = recordedFileCount(entries);
+    const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
+    if (uncertain) {
+      const label2 = category === "read" ? "File reads" : "File changes";
+      return files === null ? `${label2} \xB7 ${count} steps` : `${label2} \xB7 ${files} file${files === 1 ? "" : "s"}`;
+    }
+    return files === null ? `${verb} files \xB7 ${count} steps` : `${verb} ${files} file${files === 1 ? "" : "s"}`;
+  }
+  if (category === "search")
+    return uncertain ? `${count} searches` : `${executing ? "Searching" : "Searched"} \xB7 ${count} searches`;
+  if (isTodoStep(latest))
+    return `${uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items"} \xB7 ${count} updates`;
+  if (isTitleStep(latest))
+    return uncertain ? `${count} title changes` : `${executing ? "Setting" : "Set"} ${count} titles`;
+  const headline = stepHeadline(latest);
+  const label = headline.action === "Used" || headline.action === "Using" ? `${headline.action} ${cleanToolName(latest.tool || "tool")}` : headline.action || "Activities";
+  return `${label} \xB7 ${count} steps`;
+}
+function traceStatus(step) {
+  if (step.kind === "retry") return "queued";
+  if (step.kind !== "tool") return "neutral";
+  return step.status === "pending" ? "queued" : step.status === "error" ? "failed" : step.status || "unknown";
+}
+function traceStatusClass(step) {
+  return `trace-status-${traceStatus(step)}`;
+}
+function activityLineId(line, index) {
+  if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
+  const step = parseStep(line.text);
+  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
+}
+function displayStep(line, live) {
+  const step = parseStep(line.text);
+  return step.kind === "tool" && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
+}
+function chapterCategory(step, index) {
+  if (step.kind === "file" || step.kind === "tool" && toolKind(step) === "read") return "read";
+  if (step.kind === "patch" || step.kind === "tool" && ["write", "edit", "patch"].includes(toolKind(step)))
+    return "change";
+  if (step.kind === "tool" && COMMAND_TOOLS.has(toolKind(step))) return "commands";
+  if (step.kind === "tool" && SEARCH_TOOLS.has(toolKind(step))) return "search";
+  return step.kind === "tool" ? `tool:${cleanToolName(step.tool || "tool")}` : `event:${index}`;
+}
+function activityChapters(lines, live = false) {
+  const groups2 = [];
+  lines.forEach((line, index) => {
+    const step = displayStep(line, live);
+    const entry = { id: activityLineId(line, index), line, step };
+    const category = chapterCategory(step, index);
+    const last = groups2.at(-1);
+    if (last?.category === category) last.entries.push(entry);
+    else groups2.push({ category, entries: [entry] });
+  });
+  return groups2.map(({ category, entries }) => {
+    const statuses = entries.map((entry) => traceStatus(entry.step));
+    const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
+      (candidate) => statuses.includes(candidate)
+    ) || "neutral";
+    return {
+      id: entries[0].id,
+      entries,
+      title: chapterTitle(category, entries),
+      status,
+      failures: statuses.filter((item) => item === "failed").length
+    };
+  });
+}
+
+// src/activity-trace-state.ts
+var DEFAULT_TRACE_VIEW = { expanded: false, selectedEntry: null, openChapter: null };
+var views = y3(/* @__PURE__ */ new Map());
+function activityTraceId(message2) {
+  return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
+}
+function activityTraceView(id2) {
+  return views.value.get(id2) ?? DEFAULT_TRACE_VIEW;
+}
+function updateActivityTraceView(id2, update) {
+  const next = new Map(views.peek());
+  next.set(id2, update(next.get(id2) ?? DEFAULT_TRACE_VIEW));
+  views.value = next;
+}
+function resetActivityTraceViews() {
+  views.value = /* @__PURE__ */ new Map();
+}
+function toggleActivityTrace(view, lines, latest = false) {
+  if (view.expanded) return { ...view, expanded: false };
+  return {
+    expanded: true,
+    selectedEntry: latest && lines.length ? activityLineId(lines[lines.length - 1], lines.length - 1) : null,
+    openChapter: latest ? activityChapters(lines, true).at(-1)?.id ?? null : null
+  };
+}
+function transferActivityTraceViews(previous, next) {
+  const current = views.peek();
+  if (!current.size) return;
+  const retained = new Set(next.map(activityTraceId));
+  const migrated = new Map(current);
+  for (const message2 of previous) {
+    const id2 = activityTraceId(message2);
+    if (retained.has(id2)) continue;
+    const view = current.get(id2);
+    if (view?.expanded && message2.direction === "turn" && message2.turn) {
+      const entries = new Set(message2.activity?.map(activityLineId));
+      const reply = next.find(
+        (item) => item.direction === "out" && item.turnId === message2.turn?.id && item.activity?.some((line, index) => entries.has(activityLineId(line, index)))
+      );
+      if (reply) {
+        const chapters = activityChapters(reply.activity ?? []);
+        const openChapter = chapters.find((chapter) => chapter.entries.some((entry) => entry.id === view.openChapter));
+        migrated.set(activityTraceId(reply), {
+          ...view,
+          openChapter: openChapter?.id ?? null,
+          selectedEntry: chapters.some((chapter) => chapter.entries.some((entry) => entry.id === view.selectedEntry)) ? view.selectedEntry : null
+        });
+      }
+    }
+    migrated.delete(id2);
+  }
+  views.value = migrated;
+}
+
+// src/turn-completion.ts
+function completedResponseId(previous, messages) {
+  const live = new Set(previous?.turns.filter((turn2) => turn2.phase !== "settled").map((turn2) => turn2.id));
+  return messages.filter(
+    (message2) => message2.direction === "out" && message2.statsTurn?.phase === "settled" && live.has(message2.statsTurn.id)
+  ).at(-1)?.id ?? null;
+}
+function responseScrollTop(scrollTop, responseTop, viewportTop) {
+  return Math.max(0, scrollTop + responseTop - viewportTop);
+}
+
 // src/conversation-state.ts
 var conversationState = y3(null);
+var completedResponse = y3(null);
 function resetConversation() {
   conversationState.value = null;
+  completedResponse.value = null;
+  resetActivityTraceViews();
 }
 function activityKey(ts) {
   const ms = Number(ts);
@@ -18705,12 +19019,18 @@ function applyConversationFrame(raw, expectedThreadId) {
   const view = next.conversation;
   const current = view.turns.find((turn2) => turn2.id === view.connection.activeTurnId);
   const caps = view.capabilities;
+  const messages = conversationMessages(view);
   n2(() => {
     conversationState.value = next;
     for (const message2 of view.messages) {
       if (message2.inputState?.status === "cancelled") confirmCancelledInput(message2.id);
     }
-    chatMessages.value = conversationMessages(view);
+    transferActivityTraceViews(chatMessages.peek(), messages);
+    chatMessages.value = messages;
+    if (frame.kind === "update") {
+      const response = completedResponseId(previous?.conversation ?? null, messages);
+      if (response) completedResponse.value = response;
+    }
     pendingQuestions.value = view.questions;
     const inputs = new Set(view.messages.filter((m6) => m6.direction === "in").map((m6) => m6.id));
     pendingWebSends.value = pendingWebSends.value.filter(
@@ -21391,252 +21711,6 @@ function timelineLayoutKey(messages) {
   );
 }
 
-// ../../shared/activity-presentation.ts
-var TRACE_STATUS_LABELS = {
-  queued: "Pending",
-  running: "Running",
-  completed: "Completed",
-  failed: "Failed",
-  interrupted: "Interrupted (outcome unknown)",
-  unknown: "Outcome unknown",
-  neutral: "Activity"
-};
-function isRecord(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-function isStep(value) {
-  if (!isRecord(value)) return false;
-  for (const key of ["id", "tool", "detail", "title", "error", "text", "path", "name", "agent", "description"]) {
-    if (value[key] !== void 0 && typeof value[key] !== "string") return false;
-  }
-  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification"].includes(value.kind)))
-    return false;
-  if (value.status !== void 0 && (typeof value.status !== "string" || !["pending", "running", "completed", "error", "interrupted", "unknown"].includes(value.status)))
-    return false;
-  if (value.durationMs !== void 0 && (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs < 0))
-    return false;
-  if (value.attempt !== void 0 && typeof value.attempt !== "number") return false;
-  if (value.auto !== void 0 && typeof value.auto !== "boolean") return false;
-  return value.files === void 0 || Array.isArray(value.files) && value.files.every((file) => typeof file === "string");
-}
-function parseStep(text2) {
-  try {
-    const value = JSON.parse(text2);
-    return isStep(value) ? value : {};
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
-    return {};
-  }
-}
-function cleanToolName(tool) {
-  if (!tool.startsWith("mcp__")) return tool.toLowerCase();
-  const [server, ...name] = tool.slice(5).split("__");
-  return `${server}.${name.join(".") || server}`.toLowerCase();
-}
-function toolKind(step) {
-  return cleanToolName(step.tool || "").split(".").at(-1) || "";
-}
-function isTodoStep(step) {
-  return step.kind === "tool" && ["todo", "todowrite", "todo_write"].includes(toolKind(step));
-}
-function isTitleStep(step) {
-  return step.kind === "tool" && ["nanoclaw.set_thread_title", "set_thread_title"].includes(cleanToolName(step.tool || ""));
-}
-function todoItems(step) {
-  if (!isTodoStep(step) || !step.detail) return null;
-  const items = [];
-  for (const line of step.detail.split("\n")) {
-    const match2 = line.match(/^(Completed|In progress|Pending|Cancelled|Task):\s*(.*)$/i);
-    if (!match2) {
-      if (!items.length) return null;
-      items[items.length - 1].content += `
-${line}`;
-      continue;
-    }
-    const status = match2[1].toLowerCase();
-    const priority = match2[2].match(/\s+\(([^()\n]+) priority\)$/i);
-    items.push({
-      content: priority ? match2[2].slice(0, priority.index).trimEnd() : match2[2],
-      status: status === "completed" ? "completed" : status === "in progress" ? "in_progress" : status === "pending" ? "pending" : status === "cancelled" ? "cancelled" : "unknown",
-      ...priority ? { priority: priority[1] } : {}
-    });
-  }
-  return items.length ? items : null;
-}
-function singleLine(value) {
-  return value.replace(/\s+/g, " ").trim();
-}
-var FILE_OP_VERBS = {
-  read: { present: "Reading", past: "Read" },
-  write: { present: "Writing", past: "Wrote" },
-  edit: { present: "Editing", past: "Edited" }
-};
-var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
-var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
-function stepHeadline(step) {
-  switch (step.kind) {
-    case "tool": {
-      const tool = toolKind(step);
-      if (!step.status || step.status === "interrupted" || step.status === "unknown") {
-        return {
-          action: step.status === "interrupted" ? "Interrupted (outcome unknown):" : "Outcome unknown:",
-          subject: [cleanToolName(step.tool || "tool"), singleLine(step.detail || step.title || "")].filter(Boolean).join(" "),
-          codeSubject: true
-        };
-      }
-      const finished = step.status === "completed" || step.status === "error";
-      if (isTitleStep(step))
-        return {
-          action: finished ? step.detail ? "Set title to" : "Set title" : step.detail ? "Setting title to" : "Setting title",
-          ...step.detail ? { subject: singleLine(step.detail) } : {}
-        };
-      if (isTodoStep(step)) return { action: finished ? "Updated TODO items" : "Updating TODO items" };
-      const fileOp = FILE_OP_VERBS[tool];
-      if (fileOp) {
-        const target = step.detail || step.title || "";
-        return {
-          action: finished ? fileOp.past : fileOp.present,
-          ...target ? { subject: singleLine(target), codeSubject: true } : {}
-        };
-      }
-      if (COMMAND_TOOLS.has(tool))
-        return {
-          action: step.status === "pending" ? "Queued" : finished ? "Ran" : "Running",
-          subject: singleLine(step.detail || cleanToolName(step.tool || "command")),
-          codeSubject: true
-        };
-      if (SEARCH_TOOLS.has(tool) && (step.detail || step.title))
-        return {
-          action: finished ? "Searched for" : "Searching for",
-          subject: singleLine(step.detail || step.title || ""),
-          codeSubject: true
-        };
-      if (step.title)
-        return { action: step.title, ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {} };
-      return { action: finished ? "Used" : "Using", subject: cleanToolName(step.tool || "tool"), codeSubject: true };
-    }
-    case "internal":
-      return { action: "Internal activity" };
-    case "file":
-      return { action: "Opened", subject: step.name || step.path || "file", codeSubject: true };
-    case "patch":
-      return {
-        action: "Updated",
-        subject: step.files?.length === 1 ? step.files[0] : `${step.files?.length || 0} files`,
-        codeSubject: step.files?.length === 1
-      };
-    case "retry":
-      return { action: "Retrying", subject: `attempt ${step.attempt ?? 0}` };
-    case "compaction":
-      return { action: step.auto ? "Compacted context automatically" : "Compacted context" };
-    case "subtask":
-      return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
-    case "notification":
-      return { action: step.text || "Notification" };
-    default:
-      return { action: "" };
-  }
-}
-function chapterEntryHeadline(step) {
-  if (isTodoStep(step)) {
-    const items = todoItems(step);
-    return { action: items ? `${items.length} TODO item${items.length === 1 ? "" : "s"}` : "TODO items" };
-  }
-  if (isTitleStep(step) && !step.detail) return { action: "Title not recorded" };
-  if (step.kind === "tool" && step.detail) {
-    return { action: "", subject: singleLine(step.detail), codeSubject: !isTitleStep(step) };
-  }
-  const headline = stepHeadline(step);
-  return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
-}
-function recordedFileCount(entries) {
-  const paths = /* @__PURE__ */ new Set();
-  for (const { step } of entries) {
-    const targets = step.kind === "patch" ? step.files : step.kind === "file" ? step.path ? [step.path] : void 0 : ["read", "write", "edit"].includes(toolKind(step)) && step.detail ? [step.detail] : void 0;
-    if (!targets || targets.some((path) => !path.trim())) return null;
-    targets.forEach((path) => paths.add(path.trim()));
-  }
-  return paths.size;
-}
-function chapterTitle(category, entries) {
-  const latest = entries[entries.length - 1].step;
-  const status = traceStatus(latest);
-  const executing = status === "running" || status === "queued";
-  const uncertain = status === "unknown" || status === "interrupted";
-  const count = entries.length;
-  if (category === "commands") {
-    const label2 = `${count} command${count === 1 ? "" : "s"}`;
-    return uncertain ? label2 : `${executing ? "Running" : "Ran"} ${label2}`;
-  }
-  if (category === "read" || category === "change") {
-    const files = recordedFileCount(entries);
-    const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
-    if (uncertain) {
-      const label2 = category === "read" ? "File reads" : "File changes";
-      return files === null ? `${label2} \xB7 ${count} steps` : `${label2} \xB7 ${files} file${files === 1 ? "" : "s"}`;
-    }
-    return files === null ? `${verb} files \xB7 ${count} steps` : `${verb} ${files} file${files === 1 ? "" : "s"}`;
-  }
-  if (category === "search")
-    return uncertain ? `${count} searches` : `${executing ? "Searching" : "Searched"} \xB7 ${count} searches`;
-  if (isTodoStep(latest))
-    return `${uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items"} \xB7 ${count} updates`;
-  if (isTitleStep(latest))
-    return uncertain ? `${count} title changes` : `${executing ? "Setting" : "Set"} ${count} titles`;
-  const headline = stepHeadline(latest);
-  const label = headline.action === "Used" || headline.action === "Using" ? `${headline.action} ${cleanToolName(latest.tool || "tool")}` : headline.action || "Activities";
-  return `${label} \xB7 ${count} steps`;
-}
-function traceStatus(step) {
-  if (step.kind === "retry") return "queued";
-  if (step.kind !== "tool") return "neutral";
-  return step.status === "pending" ? "queued" : step.status === "error" ? "failed" : step.status || "unknown";
-}
-function traceStatusClass(step) {
-  return `trace-status-${traceStatus(step)}`;
-}
-function activityLineId(line, index) {
-  if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
-  const step = parseStep(line.text);
-  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
-}
-function displayStep(line, live) {
-  const step = parseStep(line.text);
-  return step.kind === "tool" && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
-}
-function chapterCategory(step, index) {
-  if (step.kind === "file" || step.kind === "tool" && toolKind(step) === "read") return "read";
-  if (step.kind === "patch" || step.kind === "tool" && ["write", "edit", "patch"].includes(toolKind(step)))
-    return "change";
-  if (step.kind === "tool" && COMMAND_TOOLS.has(toolKind(step))) return "commands";
-  if (step.kind === "tool" && SEARCH_TOOLS.has(toolKind(step))) return "search";
-  return step.kind === "tool" ? `tool:${cleanToolName(step.tool || "tool")}` : `event:${index}`;
-}
-function activityChapters(lines, live = false) {
-  const groups2 = [];
-  lines.forEach((line, index) => {
-    const step = displayStep(line, live);
-    const entry = { id: activityLineId(line, index), line, step };
-    const category = chapterCategory(step, index);
-    const last = groups2.at(-1);
-    if (last?.category === category) last.entries.push(entry);
-    else groups2.push({ category, entries: [entry] });
-  });
-  return groups2.map(({ category, entries }) => {
-    const statuses = entries.map((entry) => traceStatus(entry.step));
-    const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
-      (candidate) => statuses.includes(candidate)
-    ) || "neutral";
-    return {
-      id: entries[0].id,
-      entries,
-      title: chapterTitle(category, entries),
-      status,
-      failures: statuses.filter((item) => item === "failed").length
-    };
-  });
-}
-
 // src/input-state.ts
 function inputStatePresentation(state) {
   if (!state) return null;
@@ -22549,7 +22623,7 @@ function latestActivityScrollTop(scrollTop, entryBottom, viewportTop, viewportHe
   return Math.max(0, scrollTop + entryBottom - viewportTop - viewportHeight + 12);
 }
 function revealLatestActivity(viewport) {
-  const rows = viewport.querySelectorAll(".trace-row-toggle");
+  const rows = viewport.querySelectorAll(".trace-row-toggle, .trace-chapter-toggle");
   const target = rows[rows.length - 1];
   if (!target) return;
   const bounds = viewport.getBoundingClientRect();
@@ -22697,7 +22771,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
     open && todos && step.error ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: step.error }) }) : null
   ] });
 }
-function ActivityTraceList({ lines, live = false, now = null, openLatest = false }) {
+function ActivityTraceList({ lines, live = false, now = null, openLatest = false, traceId }) {
   const listRef = A2(null);
   const follow = A2(true);
   y2(() => {
@@ -22709,18 +22783,25 @@ function ActivityTraceList({ lines, live = false, now = null, openLatest = false
     if (!revealed.current || live && follow.current) revealLatestActivity(listRef.current);
     revealed.current = true;
   }, [lines, live]);
-  const [sel, setSel] = h2(() => openLatest && lines.length ? activityLineId(lines[lines.length - 1], lines.length - 1) : null);
-  const toggle = (id2) => setSel((cur) => cur === id2 ? null : id2);
-  const chapters = activityChapters(lines, live);
-  const [openChapter, setOpenChapter] = h2(() => chapters.length ? chapters[chapters.length - 1].id : null);
-  const toggleChapter = (id2) => {
-    setOpenChapter((current) => current === id2 ? null : id2);
-    setSel(null);
+  const [localView, setLocalView] = h2(() => toggleActivityTrace(DEFAULT_TRACE_VIEW, lines, openLatest));
+  const traceView = traceId ? activityTraceView(traceId) : localView;
+  const setView = (update) => {
+    if (traceId) updateActivityTraceView(traceId, update);
+    else setLocalView(update);
   };
+  const sel = traceView.selectedEntry;
+  const toggle = (id2) => setView((view) => ({ ...view, selectedEntry: view.selectedEntry === id2 ? null : id2 }));
+  const chapters = activityChapters(lines, live);
+  const openChapter = traceView.openChapter;
+  const toggleChapter = (id2) => setView((view) => ({
+    ...view,
+    openChapter: view.openChapter === id2 ? null : id2,
+    selectedEntry: null
+  }));
   return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, onScroll: () => {
     const element = listRef.current;
     if (element) {
-      const rows = element.querySelectorAll(".trace-row-toggle");
+      const rows = element.querySelectorAll(".trace-row-toggle, .trace-chapter-toggle");
       const latest = rows[rows.length - 1];
       follow.current = !!latest && latest.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom < 40;
     }
@@ -22800,10 +22881,10 @@ function ActivityTracePanel({
   expanded,
   live = false,
   now = null,
-  openLatest = false
+  traceId
 }) {
   if (!lines.length || !expanded) return null;
-  return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now, openLatest }) });
+  return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now, traceId }) });
 }
 function fmtCost(usd) {
   if (usd >= 1) return "$" + usd.toFixed(2);
@@ -23063,8 +23144,10 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
   const [continueState, setContinueState] = h2("idle");
-  const [traceExpanded, setTraceExpanded] = h2(false);
-  if (m6.direction === "turn" && m6.turn) return /* @__PURE__ */ u4(ConversationTurnRow, { turn: m6.turn, lines: m6.activity ?? [], status: !!m6.turnStatus });
+  const traceId = activityTraceId(m6);
+  const traceExpanded = activityTraceView(traceId).expanded;
+  const toggleTrace = () => updateActivityTraceView(traceId, (view) => toggleActivityTrace(view, m6.activity ?? []));
+  if (m6.direction === "turn" && m6.turn) return /* @__PURE__ */ u4(ConversationTurnRow, { turn: m6.turn, lines: m6.activity ?? [], status: !!m6.turnStatus, traceId });
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -23217,11 +23300,11 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             children: continueState === "sent" ? "Sent" : continueState === "sending" ? action.sendingLabel : action.label
           }
         ) }) : null,
-        activity.length && showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded }) : null,
+        activity.length && showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded, traceId }) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
         m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
           m6.ts && /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-          /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? activity.length : 0, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
+          /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? activity.length : 0, expanded: traceExpanded, onToggle: toggleTrace }),
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
           showsMidTurnLabel(
@@ -23247,7 +23330,8 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   );
 }
 function DisplayCardMessage({ message: message2, card }) {
-  const [traceExpanded, setTraceExpanded] = h2(false);
+  const traceId = activityTraceId(message2);
+  const traceExpanded = activityTraceView(traceId).expanded;
   const activity = message2.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message2.id, children: [
@@ -23271,18 +23355,25 @@ function DisplayCardMessage({ message: message2, card }) {
       },
       `${action.label}:${action.url}`
     )) }) : null,
-    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded }) : null,
+    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded, traceId }) : null,
     message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
     message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
-      /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? activity.length : 0, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
+      /* @__PURE__ */ u4(
+        ActivityTraceToggle,
+        {
+          count: showTechnicalStatus ? activity.length : 0,
+          expanded: traceExpanded,
+          onToggle: () => updateActivityTraceView(traceId, (view) => toggleActivityTrace(view, activity))
+        }
+      ),
       /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }),
       message2.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: message2.statsTurn, showTechnicalDetails: showTechnicalStatus }) : null
     ] }) : null
   ] });
 }
 function messageKey(message2) {
-  return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
+  return activityTraceId(message2);
 }
 function groupKey(group) {
   if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
@@ -23495,9 +23586,8 @@ function ReplyTurnStats({
     showTechnicalDetails ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
   ] });
 }
-function ConversationTurnRow({ turn: turn2, lines, status }) {
-  const [traceExpanded, setTraceExpanded] = h2(false);
-  const onToggleTrace = () => setTraceExpanded((value) => !value);
+function ConversationTurnRow({ turn: turn2, lines, status, traceId }) {
+  const traceExpanded = activityTraceView(traceId).expanded;
   const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
   const settled = turn2.phase === "settled";
   const live = status && !settled;
@@ -23514,16 +23604,13 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
   const showStop = status && activeTurn.value?.id === turn2.id;
   const liveHeadline = latestActivityHeadline(lines);
   const provenanceTone = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
-  const [openLatestOnExpand, setOpenLatestOnExpand] = h2(false);
   if (!lines.length && !status) return null;
   if (settled && !showTechnicalStatus && !view.note && !stop?.error) return null;
   const toggleFromPreview = () => {
-    setOpenLatestOnExpand(!traceExpanded);
-    onToggleTrace();
+    updateActivityTraceView(traceId, (view2) => toggleActivityTrace(view2, lines, true));
   };
   const toggleFromCount = () => {
-    setOpenLatestOnExpand(false);
-    onToggleTrace();
+    updateActivityTraceView(traceId, (view2) => toggleActivityTrace(view2, lines));
   };
   return /* @__PURE__ */ u4(
     "div",
@@ -23564,7 +23651,7 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
             expanded: traceExpanded,
             live: !settled,
             now: endedAt ?? now,
-            openLatest: openLatestOnExpand
+            traceId
           }
         ) : null,
         showTechnicalStatus && (status || lines.length) ? /* @__PURE__ */ u4("div", { class: "meta", children: [
@@ -23582,6 +23669,8 @@ function MessageLog() {
   const prevLayoutRef = A2("");
   const prevScrollTickRef = A2(scrollToBottomTick.value);
   const navigationRef = A2(null);
+  const pendingScrollFrame = A2(null);
+  const revealedResponse = A2(completedResponse.value);
   const [scrollDirection, setScrollDirection] = h2(null);
   const [newMessageBelow, setNewMessageBelow] = h2(false);
   const [, setDensityReflowTick] = h2(0);
@@ -23593,6 +23682,7 @@ function MessageLog() {
   const activeTurnId = activeTurn.value?.id;
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
+  const responseId = completedResponse.value;
   const atBottomRef = A2(true);
   const followingBottomRef = A2(true);
   const leavingBottomRef = A2(false);
@@ -23632,6 +23722,17 @@ function MessageLog() {
     followingBottomRef.current = false;
     el.scrollTo({ top: 0, behavior: "smooth" });
   };
+  const cancelScheduledScroll = () => {
+    if (pendingScrollFrame.current !== null) cancelAnimationFrame(pendingScrollFrame.current);
+    pendingScrollFrame.current = null;
+  };
+  const scheduleScroll = (callback) => {
+    cancelScheduledScroll();
+    pendingScrollFrame.current = requestAnimationFrame(() => {
+      pendingScrollFrame.current = null;
+      callback();
+    });
+  };
   const onLogScroll = () => {
     if (!densityReflowRef.current) followingBottomRef.current = measureScroll();
   };
@@ -23643,10 +23744,35 @@ function MessageLog() {
     });
     navigationRef.current = navigation;
     return () => {
+      cancelScheduledScroll();
       navigation.dispose();
       navigationRef.current = null;
     };
   }, [activeThreadId]);
+  _2(() => {
+    if (!responseId) {
+      revealedResponse.current = null;
+      return;
+    }
+    if (responseId === revealedResponse.current) return;
+    const log = ref.current;
+    const response = log?.querySelector(`.msg[data-msg-id="${CSS.escape(responseId)}"]`);
+    if (!log || !response) return;
+    revealedResponse.current = responseId;
+    cancelScheduledScroll();
+    navigationRef.current?.reset();
+    leavingBottomRef.current = true;
+    atBottomRef.current = false;
+    followingBottomRef.current = false;
+    log.scrollTop = responseScrollTop(
+      log.scrollTop,
+      response.getBoundingClientRect().top,
+      log.getBoundingClientRect().top + log.clientTop
+    );
+    prevMsgCountRef.current = msgCount;
+    prevLayoutRef.current = layoutKey;
+    setNewMessageBelow(false);
+  }, [responseId, activeThreadId, msgCount, layoutKey]);
   _2(() => {
     const el = ref.current;
     if (!el) return void 0;
@@ -23701,7 +23827,7 @@ function MessageLog() {
     if (scrollTick !== prevScrollTickRef.current) {
       prevScrollTickRef.current = scrollTick;
       scrollToBottom();
-      requestAnimationFrame(() => scrollToBottom());
+      scheduleScroll(() => scrollToBottom());
       return;
     }
     if (highlight) {
@@ -23726,9 +23852,9 @@ function MessageLog() {
       if ((newMessages || repositioned) && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {
         scrollToBottom();
-        requestAnimationFrame(() => scrollToBottom());
+        scheduleScroll(() => scrollToBottom());
       } else {
-        requestAnimationFrame(measureScroll);
+        scheduleScroll(measureScroll);
       }
       prevMsgCountRef.current = msgCount;
     }
@@ -23821,7 +23947,8 @@ function PendingTray() {
 }
 function QuestionCardItem({ question: q5, busy }) {
   const [answer, setAnswer] = h2("");
-  const [traceExpanded, setTraceExpanded] = h2(false);
+  const traceId = `question:${q5.questionId}`;
+  const traceExpanded = activityTraceView(traceId).expanded;
   const answerRef = A2("");
   const textareaRef = A2(null);
   const gid = groupId.value;
@@ -23951,10 +24078,17 @@ function QuestionCardItem({ question: q5, busy }) {
         }
       )
     ] }),
-    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: q5.activity ?? [], expanded: traceExpanded }) : null,
+    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: q5.activity ?? [], expanded: traceExpanded, traceId }) : null,
     /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }),
-      /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? q5.activity?.length ?? 0 : 0, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
+      /* @__PURE__ */ u4(
+        ActivityTraceToggle,
+        {
+          count: showTechnicalStatus ? q5.activity?.length ?? 0 : 0,
+          expanded: traceExpanded,
+          onToggle: () => updateActivityTraceView(traceId, (view) => toggleActivityTrace(view, q5.activity ?? []))
+        }
+      ),
       !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null
     ] })
   ] });

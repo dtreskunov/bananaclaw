@@ -8,8 +8,8 @@ export function latestActivityScrollTop(
 }
 
 export function revealLatestActivity(viewport: HTMLElement): void {
-  // The last row can be inside an expanded chapter or directly on the rail.
-  const rows = viewport.querySelectorAll<HTMLButtonElement>('.trace-row-toggle');
+  // A collapsed chapter is the visible representative of its latest step.
+  const rows = viewport.querySelectorAll<HTMLButtonElement>('.trace-row-toggle, .trace-chapter-toggle');
   const target = rows[rows.length - 1];
   if (!target) return;
   const bounds = viewport.getBoundingClientRect();

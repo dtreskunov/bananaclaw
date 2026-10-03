@@ -21,7 +21,7 @@ import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
 import { sendChat } from '../actions';
 import type { ChatMessage, Thread } from '../types';
-import { applyConversationFrame, resetConversation } from '../conversation-state';
+import { applyConversationFrame, completedResponse, resetConversation } from '../conversation-state';
 import { testSnapshot } from '../conversation-test-fixtures';
 import { appearance } from '../appearance-state';
 import { DEFAULT_APPEARANCE } from '../appearance';
@@ -487,6 +487,7 @@ describe('main composer pending edits', () => {
       const savedGlobals = {
         window,
         requestAnimationFrame: globalThis.requestAnimationFrame,
+        cancelAnimationFrame: globalThis.cancelAnimationFrame,
         WheelEvent: globalThis.WheelEvent,
       };
       const fakeWindow = Object.assign(new EventTarget(), {
@@ -520,6 +521,7 @@ describe('main composer pending edits', () => {
       try {
         vi.stubGlobal('window', fakeWindow);
         vi.stubGlobal('requestAnimationFrame', () => 0);
+        vi.stubGlobal('cancelAnimationFrame', vi.fn());
         vi.stubGlobal('WheelEvent', Wheel);
         hooks.cursor = 0;
         const chat = ChatMain();
@@ -563,4 +565,79 @@ describe('main composer pending edits', () => {
       }
     },
   );
+
+  it('cancels pending bottom-follow when revealing the top of a completed response', () => {
+    const savedGlobals = {
+      window,
+      requestAnimationFrame: globalThis.requestAnimationFrame,
+      cancelAnimationFrame: globalThis.cancelAnimationFrame,
+      CSS: globalThis.CSS,
+    };
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    const cancel = vi.fn((id: number) => frames.delete(id));
+    class Viewport extends EventTarget {
+      scrollTop = 1470;
+      scrollHeight = 2000;
+      clientHeight = 500;
+      clientTop = 0;
+      ownerDocument = new EventTarget();
+      getBoundingClientRect() {
+        return { top: 50 };
+      }
+      querySelectorAll() {
+        return [];
+      }
+      querySelector() {
+        return { getBoundingClientRect: () => ({ top: 50 + 1400 - this.scrollTop }) };
+      }
+    }
+    const viewport = new Viewport();
+    const disposers: (() => void)[] = [];
+    try {
+      vi.stubGlobal(
+        'window',
+        Object.assign(new EventTarget(), {
+          nanoclawAppearance: { beforeDensityChange: () => () => {} },
+        }),
+      );
+      vi.stubGlobal('CSS', { escape: (id: string) => id });
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.set(++nextFrame, callback);
+        return nextFrame;
+      });
+      vi.stubGlobal('cancelAnimationFrame', cancel);
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      hooks.slots = [];
+      hooks.effects = [];
+      hooks.cursor = 0;
+      hooks.capturePassive = true;
+      const view = log.type(log.props);
+      view.props.children[0].ref.current = viewport;
+      for (const effect of [...hooks.effects.splice(0), ...hooks.passiveEffects.splice(0)]) {
+        const dispose = effect();
+        if (dispose) disposers.push(dispose);
+      }
+      const pendingTail = nextFrame;
+      viewport.scrollHeight = 4500;
+      completedResponse.value = 'response';
+      chatMessages.value = [{ id: 'response', direction: 'out', text: 'Long reply', ts: '2', files: null }];
+      hooks.cursor = 0;
+      log.type(log.props);
+      for (const effect of hooks.effects.splice(0)) effect();
+      hooks.passiveEffects.splice(0).at(-1)?.();
+      expect(cancel).toHaveBeenCalledWith(pendingTail);
+      for (const [id, callback] of [...frames]) {
+        frames.delete(id);
+        callback(0);
+      }
+      expect(viewport.scrollTop).toBe(1400);
+      expect(viewport.querySelector().getBoundingClientRect().top).toBe(50);
+    } finally {
+      disposers.forEach((dispose) => dispose());
+      hooks.capturePassive = false;
+      for (const [key, value] of Object.entries(savedGlobals)) vi.stubGlobal(key, value);
+    }
+  });
 });

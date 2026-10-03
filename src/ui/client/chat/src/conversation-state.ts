@@ -23,11 +23,16 @@ import { applyTurnState } from './stop-turn';
 import { confirmCancelledInput } from './pending-cancel';
 import { playCompletionChime, playProgressTick } from './sound';
 import { maybeNotify } from './notify';
+import { resetActivityTraceViews, transferActivityTraceViews } from './activity-trace-state';
+import { completedResponseId } from './turn-completion';
 import type { ChatMessage } from './types';
 
 export const conversationState = signal<ConversationSnapshot | null>(null);
+export const completedResponse = signal<string | null>(null);
 export function resetConversation(): void {
   conversationState.value = null;
+  completedResponse.value = null;
+  resetActivityTraceViews();
 }
 
 /** Activity `ts` is epoch milliseconds. */
@@ -141,12 +146,18 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
   const view = next.conversation;
   const current = view.turns.find((turn) => turn.id === view.connection.activeTurnId);
   const caps = view.capabilities;
+  const messages = conversationMessages(view);
   batch(() => {
     conversationState.value = next;
     for (const message of view.messages) {
       if (message.inputState?.status === 'cancelled') confirmCancelledInput(message.id);
     }
-    chatMessages.value = conversationMessages(view);
+    transferActivityTraceViews(chatMessages.peek(), messages);
+    chatMessages.value = messages;
+    if (frame.kind === 'update') {
+      const response = completedResponseId(previous?.conversation ?? null, messages);
+      if (response) completedResponse.value = response;
+    }
     pendingQuestions.value = view.questions;
     const inputs = new Set(view.messages.filter((m) => m.direction === 'in').map((m) => m.id));
     pendingWebSends.value = pendingWebSends.value.filter(

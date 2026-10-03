@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat } from './actions';
-import { conversationState } from './conversation-state';
+import { completedResponse, conversationState } from './conversation-state';
+import { activityTraceView, toggleActivityTrace, updateActivityTraceView } from './activity-trace-state';
 import { diffConversation } from '../../../shared/conversation-protocol';
 import type { Conversation } from '../../../shared/conversation';
 import { testSnapshot, testTurn } from './conversation-test-fixtures';
@@ -64,6 +65,35 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('authoritative turn presentation', () => {
+  it('moves an expanded live trace to the reply and requests its top on completion', () => {
+    updateActivityTraceView('turn:turn-1', (view) => toggleActivityTrace(view, testTurn.activity));
+    const settled: Conversation = {
+      ...initial,
+      messages: [
+        { id: 'reply', direction: 'out', turnId: testTurn.id, text: 'Done', timestamp: '2026-09-29T00:00:02Z' },
+      ],
+      turns: [{ ...testTurn, phase: 'settled', outcome: 'replied', outputIds: ['reply'] }],
+      connection: { connected: true, activeTurnId: null },
+    };
+    update(settled);
+    expect(activityTraceView('reply').expanded).toBe(true);
+    expect(activityTraceView('reply').openChapter).toBeNull();
+    expect(completedResponse.value).toBe('reply');
+  });
+
+  it('does not request completion scrolling for a settled reconnect snapshot', () => {
+    const settled: Conversation = {
+      ...initial,
+      messages: [
+        { id: 'old-reply', direction: 'out', turnId: testTurn.id, text: 'Done', timestamp: '2026-09-29T00:00:02Z' },
+      ],
+      turns: [{ ...testTurn, phase: 'settled', outcome: 'replied', outputIds: ['old-reply'] }],
+      connection: { connected: true, activeTurnId: null },
+    };
+    receive(testSnapshot(settled, 'reconnect'));
+    expect(completedResponse.value).toBeNull();
+  });
+
   it('retains a migrated partial accounting record without synthesizing the absent counters', () => {
     const imported = {
       ...testTurn,

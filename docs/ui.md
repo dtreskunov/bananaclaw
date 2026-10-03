@@ -135,10 +135,16 @@ Activity uses expandable **chapters** of consecutive related steps, without
 reordering or omitting activities. Chapter headers have filled dots on a
 continuous rail; child steps are indented with smaller hollow dots and branches.
 Singleton steps stay directly on the rail. Only one chapter can be expanded at
-a time. Opening a trace expands the latest entry's chapter, if grouped, and
-scrolls that entry's header into the trace viewport without moving the surrounding
-conversation. Historical traces leave the entry's details collapsed; the live
-preview can also open its details. Headers show only the group heading and outcome notices, without a
+a time. Opening via **N steps** leaves every group and step collapsed until
+the user expands one, and scrolls to the latest visible group/step header.
+Opening via the live activity summary expands the latest step and its group.
+These reveal operations scroll only the trace viewport.
+On turn completion, an open trace (including its selected group and step)
+stays open when its activity moves into the response. The transcript scrolls
+the response's top into view instead of following its bottom. This applies
+to observed completion updates, not initial history loads or reconnect snapshots;
+outputless turns retain their trace without inventing a response to scroll to.
+Headers show only the group heading and outcome notices, without a
 preview of the last step's argument. Child labels omit the parent's repeated verb.
 Exact timestamps, status and duration share one line with dot separators when
 a step is expanded; full arguments and errors appear beneath. Slow or failed
