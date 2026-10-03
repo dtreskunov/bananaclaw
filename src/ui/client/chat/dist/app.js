@@ -22028,10 +22028,11 @@ var TEXT_DENSITIES = [
 ];
 var APPEARANCE_KEY = "nanoclaw:appearance";
 var DEFAULT_APPEARANCE = {
-  version: 2,
+  version: 3,
   theme: "default",
   mode: "system",
-  density: "compact"
+  density: "compact",
+  showTechnicalStatus: false
 };
 var InvalidAppearanceError = class extends Error {
 };
@@ -22039,14 +22040,15 @@ function parseAppearance(raw) {
   if (raw === null) return { ...DEFAULT_APPEARANCE };
   const value = JSON.parse(raw);
   if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
-  if (!("version" in value) || value.version !== 1 && value.version !== 2 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version === 2 && (!("density" in value) || !isTextDensity(value.density))) {
+  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
     throw new InvalidAppearanceError("Invalid appearance preferences");
   }
   return {
-    version: 2,
+    version: 3,
     theme: value.theme,
     mode: value.mode,
-    density: value.version === 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact"
+    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
+    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
   };
 }
 function isThemeId(value) {
@@ -22081,13 +22083,13 @@ function createAppearanceController(win, doc) {
     } catch (cause) {
       if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
       preferences = { ...DEFAULT_APPEARANCE };
-      report("Saved appearance was invalid and has been reset to Default / System / Compact.", cause);
+      report("Saved appearance was invalid and has been reset to the defaults.", cause);
       try {
         win.localStorage.removeItem(APPEARANCE_KEY);
       } catch (storageError) {
         if (!isStorageError(storageError)) throw storageError;
         report(
-          "Saved appearance was invalid, but could not be cleared. Using Default / System / Compact for now.",
+          "Saved appearance was invalid, but could not be cleared. Using the defaults for now.",
           storageError
         );
       }
@@ -22878,6 +22880,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const systemNoticeTone = systemNotice && m6.statsTurn?.outcome === "failed" ? " provenance-error" : systemNotice && ["warning", "stopped", "interrupted"].includes(m6.statsTurn?.outcome ?? "") ? " provenance-warning" : "";
   const inputPresentation = m6.direction === "in" ? inputStatePresentation(m6.inputState) : null;
   const activity = m6.direction === "out" ? m6.activity ?? [] : [];
+  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (systemNotice ? ` system-notice${systemNoticeTone}` : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "") + (revealedMobileMessageActionsId.value === m6.id ? " mobile-actions-visible" : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
@@ -22947,18 +22950,25 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             children: continueState === "sent" ? "Sent" : continueState === "sending" ? action.sendingLabel : action.label
           }
         ) }) : null,
-        activity.length ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded }) : null,
+        activity.length && showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded }) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
         m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
           m6.ts && /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-          /* @__PURE__ */ u4(ActivityTraceToggle, { count: activity.length, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
+          /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? activity.length : 0, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
           showsMidTurnLabel(
             m6.deliveryOrigin,
             !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
           ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-          m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: m6.statsTurn, showOutcomeNote: !systemNotice }) : null,
+          m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(
+            ReplyTurnStats,
+            {
+              turn: m6.statsTurn,
+              showOutcomeNote: !systemNotice,
+              showTechnicalDetails: showTechnicalStatus
+            }
+          ) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
             /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
             /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }),
@@ -22972,6 +22982,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
 function DisplayCardMessage({ message: message2, card }) {
   const [traceExpanded, setTraceExpanded] = h2(false);
   const activity = message2.activity ?? [];
+  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message2.id, children: [
     card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
     card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
@@ -22993,13 +23004,13 @@ function DisplayCardMessage({ message: message2, card }) {
       },
       `${action.label}:${action.url}`
     )) }) : null,
-    /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded }),
+    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded }) : null,
     message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
     message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
-      /* @__PURE__ */ u4(ActivityTraceToggle, { count: activity.length, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
+      /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? activity.length : 0, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
       /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }),
-      message2.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: message2.statsTurn }) : null
+      message2.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: message2.statsTurn, showTechnicalDetails: showTechnicalStatus }) : null
     ] }) : null
   ] });
 }
@@ -23200,11 +23211,15 @@ function TurnStats({ turn: turn2, view }) {
     view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null
   ] });
 }
-function ReplyTurnStats({ turn: turn2, showOutcomeNote = true }) {
+function ReplyTurnStats({
+  turn: turn2,
+  showOutcomeNote = true,
+  showTechnicalDetails = true
+}) {
   const view = turnRowView(turn2, Date.now());
   return /* @__PURE__ */ u4(k, { children: [
     showOutcomeNote && view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null,
-    /* @__PURE__ */ u4(TurnStats, { turn: turn2, view })
+    showTechnicalDetails ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
   ] });
 }
 function ConversationTurnRow({ turn: turn2, lines, status }) {
@@ -23222,10 +23237,13 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
     return () => window.clearInterval(timer2);
   }, [turn2.startedAt, live]);
   const view = turnRowView(turn2, now);
+  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
+  const showStop = status && activeTurn.value?.id === turn2.id;
   const liveHeadline = latestActivityHeadline(lines);
   const provenanceTone = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
   const [openLatestOnExpand, setOpenLatestOnExpand] = h2(false);
   if (!lines.length && !status) return null;
+  if (settled && !showTechnicalStatus && !view.note && !stop?.error) return null;
   const toggleFromPreview = () => {
     setOpenLatestOnExpand(!traceExpanded);
     onToggleTrace();
@@ -23247,7 +23265,7 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
             /* @__PURE__ */ u4("span", {}),
             /* @__PURE__ */ u4("span", {})
           ] }) : null,
-          liveHeadline ? /* @__PURE__ */ u4(
+          showTechnicalStatus && liveHeadline ? /* @__PURE__ */ u4(
             "button",
             {
               type: "button",
@@ -23263,7 +23281,7 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
         status && stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
         status && view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,
         live && !turnConnected.value && !stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: "Runner disconnected. The outcome is not yet confirmed." }) : null,
-        /* @__PURE__ */ u4(
+        showTechnicalStatus ? /* @__PURE__ */ u4(
           ActivityTracePanel,
           {
             lines,
@@ -23272,11 +23290,11 @@ function ConversationTurnRow({ turn: turn2, lines, status }) {
             now: endedAt ?? now,
             openLatest: openLatestOnExpand
           }
-        ),
-        status || lines.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
-          /* @__PURE__ */ u4(ActivityTraceToggle, { count: lines.length, expanded: traceExpanded, onToggle: toggleFromCount }),
-          status ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null,
-          status && activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null
+        ) : null,
+        showTechnicalStatus && (status || lines.length) || showStop ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+          showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTraceToggle, { count: lines.length, expanded: traceExpanded, onToggle: toggleFromCount }) : null,
+          showTechnicalStatus && status ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null,
+          showStop ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null
         ] }) : null
       ]
     }
@@ -23545,6 +23563,7 @@ function QuestionCardItem({ question: q5, busy }) {
   const sendBusyRef = A2(false);
   const canType = q5.responseMode === "text" || q5.responseMode === "choice_or_text";
   const answered = q5.status === "answered";
+  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const submitAnswer = async (value = answerRef.current) => {
     const trimmed = value.trim();
     if (!trimmed || busy || sendBusyRef.current || !pendingRef.current) return false;
@@ -23657,10 +23676,10 @@ function QuestionCardItem({ question: q5, busy }) {
         }
       )
     ] }),
-    /* @__PURE__ */ u4(ActivityTracePanel, { lines: q5.activity ?? [], expanded: traceExpanded }),
+    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: q5.activity ?? [], expanded: traceExpanded }) : null,
     /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }),
-      /* @__PURE__ */ u4(ActivityTraceToggle, { count: q5.activity?.length ?? 0, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
+      /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? q5.activity?.length ?? 0 : 0, expanded: traceExpanded, onToggle: () => setTraceExpanded((v5) => !v5) }),
       !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null
     ] })
   ] });
@@ -25838,6 +25857,26 @@ function AppearanceSettings() {
         /* @__PURE__ */ u4("div", { class: "appearance-density-preview-row", children: [
           /* @__PURE__ */ u4("span", { children: "Example thread" }),
           /* @__PURE__ */ u4("span", { children: "Just now" })
+        ] })
+      ] })
+    ] }),
+    /* @__PURE__ */ u4("fieldset", { class: "appearance-fieldset", "aria-describedby": "status-details-description", children: [
+      /* @__PURE__ */ u4("legend", { children: "Transcript details" }),
+      /* @__PURE__ */ u4("label", { class: "appearance-toggle", children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "checkbox",
+            checked: preferences.showTechnicalStatus,
+            onChange: () => setAppearance({
+              ...preferences,
+              showTechnicalStatus: !preferences.showTechnicalStatus
+            })
+          }
+        ),
+        /* @__PURE__ */ u4("span", { children: [
+          /* @__PURE__ */ u4("strong", { children: "Show status details" }),
+          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, cost, duration, model, and context use." })
         ] })
       ] })
     ] }),

@@ -118,14 +118,15 @@ horizontally scrolled content. Tables scroll horizontally by default;
 exceptional fixed-layout tables can opt out with `data-table-scroll="off"`.
 Non-standard transcript entries share a subtle inset provenance rail without
 changing their geometry. Tool, file, card and question output uses an accent
-rail; runner notices, internal traces and turn-system state use a neutral rail;
-warning and failed turn state use semantic warning and error rails. Normal
-agent replies have no rail. Runner-authored notices use the same background as
-agent replies, but retain the neutral or semantic rail and omit a redundant
-status label from the metadata row.
-Turn-system bubbles carrying status span the full conversation column, and
-their timing and model metadata stay on one line while flexible usage details
-truncate. Trace-only turn-system bubbles remain content-sized.
+rail; runner notices and internal traces use a neutral rail; warning and failed
+message state use semantic warning and error rails. Normal agent replies have
+no rail. Live turn-system status is intentionally transparent and rail-free.
+Runner-authored notices use the same background as agent replies, but retain
+the neutral or semantic rail and omit a redundant status label from the
+metadata row.
+Turn-system bubbles remain content-sized so live controls stay beside the
+status instead of at the far edge of the conversation column. Their timing and
+model metadata stay on one line while flexible usage details truncate.
 Activity trace previews and expanded rows use the same small type scale as
 status metadata so operational detail remains secondary to message content.
 Tool row headers use distinct theme-aware colors for queued, running, completed,
@@ -213,6 +214,13 @@ reveals them. The metadata row reserves the actions' vertical touch-target
 height so revealing them does not resize the bubble. Desktop continues to
 reveal actions on hover or focus. User-message timestamps stay anchored to the
 left while actions occupy the right side of the row.
+
+**Appearance → Transcript details → Show status details** controls technical
+details on all bubbles: activity trace, cost, duration, model, and context use.
+It is off by default, including for preferences migrated from older versions.
+Live bubbles retain essential progress feedback and Stop controls. Notable
+completed outcomes such as failures, warnings, interruptions, and silent turns
+remain visible even when technical details are hidden.
 
 Your own pending native web-chat messages instead offer **Edit**
 while the connected runner advertises input editing. This changes text in place,

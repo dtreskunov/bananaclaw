@@ -16,10 +16,11 @@
   ];
   var APPEARANCE_KEY = "nanoclaw:appearance";
   var DEFAULT_APPEARANCE = {
-    version: 2,
+    version: 3,
     theme: "default",
     mode: "system",
-    density: "compact"
+    density: "compact",
+    showTechnicalStatus: false
   };
   var InvalidAppearanceError = class extends Error {
   };
@@ -27,14 +28,15 @@
     if (raw === null) return { ...DEFAULT_APPEARANCE };
     const value = JSON.parse(raw);
     if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
-    if (!("version" in value) || value.version !== 1 && value.version !== 2 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version === 2 && (!("density" in value) || !isTextDensity(value.density))) {
+    if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
       throw new InvalidAppearanceError("Invalid appearance preferences");
     }
     return {
-      version: 2,
+      version: 3,
       theme: value.theme,
       mode: value.mode,
-      density: value.version === 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact"
+      density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
+      showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
     };
   }
   function isThemeId(value) {
@@ -69,13 +71,13 @@
       } catch (cause) {
         if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
         preferences = { ...DEFAULT_APPEARANCE };
-        report("Saved appearance was invalid and has been reset to Default / System / Compact.", cause);
+        report("Saved appearance was invalid and has been reset to the defaults.", cause);
         try {
           win.localStorage.removeItem(APPEARANCE_KEY);
         } catch (storageError) {
           if (!isStorageError(storageError)) throw storageError;
           report(
-            "Saved appearance was invalid, but could not be cleared. Using Default / System / Compact for now.",
+            "Saved appearance was invalid, but could not be cleared. Using the defaults for now.",
             storageError
           );
         }

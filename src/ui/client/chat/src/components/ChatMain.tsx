@@ -778,6 +778,7 @@ function Message(
       : '';
   const inputPresentation = m.direction === 'in' ? inputStatePresentation(m.inputState) : null;
   const activity = m.direction === 'out' ? m.activity ?? [] : [];
+  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '')
     + (systemNotice ? ` system-notice${systemNoticeTone}` : '')
     + (inputPresentation ? ` ${inputPresentation.className}` : '') + (isLatest ? ' latest' : '')
@@ -864,7 +865,9 @@ function Message(
           </div>
         )
         : null}
-      {activity.length ? <ActivityTracePanel lines={activity} expanded={traceExpanded} /> : null}
+      {activity.length && showTechnicalStatus
+        ? <ActivityTracePanel lines={activity} expanded={traceExpanded} />
+        : null}
       {m.reactions && m.reactions.length
         ? (
           <div class="reactions">
@@ -876,7 +879,7 @@ function Message(
         : null}
       {m.ts || m.inputState || activity.length ? <div class="meta">
         {m.ts && <RelativeTime ts={m.ts} />}
-        <ActivityTraceToggle count={activity.length} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
+        <ActivityTraceToggle count={showTechnicalStatus ? activity.length : 0} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
         <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} />
         {showsMidTurnLabel(m.deliveryOrigin,
@@ -886,7 +889,11 @@ function Message(
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
         {m.direction === 'out' && m.statsTurn
-          ? <ReplyTurnStats turn={m.statsTurn} showOutcomeNote={!systemNotice} />
+          ? <ReplyTurnStats
+              turn={m.statsTurn}
+              showOutcomeNote={!systemNotice}
+              showTechnicalDetails={showTechnicalStatus}
+            />
           : null}
         <span class="msg-inline-actions">
           <EditMessageButton m={m} />
@@ -901,6 +908,7 @@ function Message(
 function DisplayCardMessage({ message, card }: { message: ChatMessage; card: DisplayCard }) {
   const [traceExpanded, setTraceExpanded] = useState(false);
   const activity = message.activity ?? [];
+  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return (
     <div class="msg out display-card agent-action" data-msg-id={message.id}>
       {card.title ? <div class="display-card-title">{card.title}</div> : null}
@@ -923,7 +931,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      <ActivityTracePanel lines={activity} expanded={traceExpanded} />
+      {showTechnicalStatus ? <ActivityTracePanel lines={activity} expanded={traceExpanded} /> : null}
       {message.reactions?.length ? (
         <div class="reactions">
           {message.reactions.map((reaction, index) => (
@@ -933,9 +941,11 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
       ) : null}
       {message.ts || activity.length ? <div class="meta">
         {message.ts ? <RelativeTime ts={message.ts} /> : null}
-        <ActivityTraceToggle count={activity.length} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
+        <ActivityTraceToggle count={showTechnicalStatus ? activity.length : 0} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
         <AgentActionLabel label="card" title="Sent with send_card" />
-        {message.statsTurn ? <ReplyTurnStats turn={message.statsTurn} /> : null}
+        {message.statsTurn
+          ? <ReplyTurnStats turn={message.statsTurn} showTechnicalDetails={showTechnicalStatus} />
+          : null}
       </div> : null}
     </div>
   );
@@ -1174,12 +1184,20 @@ function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }
 }
 
 /** A settled turn's outcome note and accounting, in the meta line of its last reply. */
-function ReplyTurnStats({ turn, showOutcomeNote = true }: { turn: ConversationTurn; showOutcomeNote?: boolean }) {
+function ReplyTurnStats({
+  turn,
+  showOutcomeNote = true,
+  showTechnicalDetails = true,
+}: {
+  turn: ConversationTurn;
+  showOutcomeNote?: boolean;
+  showTechnicalDetails?: boolean;
+}) {
   const view = turnRowView(turn, Date.now());
   return (
     <>
       {showOutcomeNote && view.note ? <span class="turn-outcome-note">{view.note}</span> : null}
-      <TurnStats turn={turn} view={view} />
+      {showTechnicalDetails ? <TurnStats turn={turn} view={view} /> : null}
     </>
   );
 }
@@ -1204,6 +1222,8 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
     return () => window.clearInterval(timer);
   }, [turn.startedAt, live]);
   const view = turnRowView(turn, now);
+  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
+  const showStop = status && activeTurn.value?.id === turn.id;
   const liveHeadline = latestActivityHeadline(lines);
   const provenanceTone = stop?.error || (settled && turn.outcome === 'failed')
     ? ' provenance-error'
@@ -1213,6 +1233,7 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
       : '';
   const [openLatestOnExpand, setOpenLatestOnExpand] = useState(false);
   if (!lines.length && !status) return null;
+  if (settled && !showTechnicalStatus && !view.note && !stop?.error) return null;
   const toggleFromPreview = () => {
     setOpenLatestOnExpand(!traceExpanded);
     onToggleTrace();
@@ -1230,7 +1251,7 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
       <div class="typing-summary">
         <div class="typing-dots">
           {live ? <><span></span><span></span><span></span></> : null}
-          {liveHeadline
+          {showTechnicalStatus && liveHeadline
             ? <button
                 type="button"
                 class="hint trace-preview"
@@ -1245,17 +1266,21 @@ function ConversationTurnRow({ turn, lines, status }: { turn: ConversationTurn; 
       {status && stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
       {status && view.note ? <div class="turn-stop-note">{view.note}</div> : null}
       {live && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Runner disconnected. The outcome is not yet confirmed.</div> : null}
-      <ActivityTracePanel
-        lines={lines}
-        expanded={traceExpanded}
-        live={!settled}
-        now={endedAt ?? now}
-        openLatest={openLatestOnExpand}
-      />
-      {status || lines.length ? <div class="meta">
-        <ActivityTraceToggle count={lines.length} expanded={traceExpanded} onToggle={toggleFromCount} />
-        {status ? <TurnStats turn={turn} view={view} /> : null}
-        {status && activeTurn.value?.id === turn.id
+      {showTechnicalStatus
+        ? <ActivityTracePanel
+            lines={lines}
+            expanded={traceExpanded}
+            live={!settled}
+            now={endedAt ?? now}
+            openLatest={openLatestOnExpand}
+          />
+        : null}
+      {(showTechnicalStatus && (status || lines.length)) || showStop ? <div class="meta">
+        {showTechnicalStatus
+          ? <ActivityTraceToggle count={lines.length} expanded={traceExpanded} onToggle={toggleFromCount} />
+          : null}
+        {showTechnicalStatus && status ? <TurnStats turn={turn} view={view} /> : null}
+        {showStop
           ? <span class="msg-inline-actions"><ActiveTurnStopButton /></span>
           : null}
       </div> : null}
@@ -1569,6 +1594,7 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
   const sendBusyRef = useRef(false);
   const canType = q.responseMode === 'text' || q.responseMode === 'choice_or_text';
   const answered = q.status === 'answered';
+  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
 
   const submitAnswer = async (value = answerRef.current): Promise<boolean> => {
     const trimmed = value.trim();
@@ -1667,10 +1693,12 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
           )}
         </>
       )}
-      <ActivityTracePanel lines={q.activity ?? []} expanded={traceExpanded} />
+      {showTechnicalStatus
+        ? <ActivityTracePanel lines={q.activity ?? []} expanded={traceExpanded} />
+        : null}
       <div class="meta question-card-meta">
         <RelativeTime ts={answered && q.answeredAt ? q.answeredAt : q.createdAt} />
-        <ActivityTraceToggle count={q.activity?.length ?? 0} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
+        <ActivityTraceToggle count={showTechnicalStatus ? q.activity?.length ?? 0 : 0} expanded={traceExpanded} onToggle={() => setTraceExpanded((v) => !v)} />
         {!answered ? <AgentActionLabel label="question" title="Sent with ask_user_question" /> : null}
       </div>
     </div>

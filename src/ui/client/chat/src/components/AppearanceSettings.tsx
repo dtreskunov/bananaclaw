@@ -74,6 +74,25 @@ export function AppearanceSettings() {
           <div class="appearance-density-preview-row"><span>Example thread</span><span>Just now</span></div>
         </div>
       </fieldset>
+      <fieldset class="appearance-fieldset" aria-describedby="status-details-description">
+        <legend>Transcript details</legend>
+        <label class="appearance-toggle">
+          <input
+            type="checkbox"
+            checked={preferences.showTechnicalStatus}
+            onChange={() => setAppearance({
+              ...preferences,
+              showTechnicalStatus: !preferences.showTechnicalStatus,
+            })}
+          />
+          <span>
+            <strong>Show status details</strong>
+            <small id="status-details-description">
+              Activity trace, cost, duration, model, and context use.
+            </small>
+          </span>
+        </label>
+      </fieldset>
       <p class="muted">
         Applies immediately and is saved in this browser.
         {preferences.mode === 'system' ? ` System is currently using ${resolvedMode} mode.` : ''}

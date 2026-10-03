@@ -117,7 +117,6 @@
 .chat-main .msg.agent-action,
 .chat-main .msg.out.system-notice,
 .chat-main .msg.internal,
-.chat-main .typing.turn-system,
 .chat-main .msg.input-applied,
 .chat-main .msg.input-queued,
 .chat-main .msg.input-follow-up,
@@ -125,7 +124,7 @@
   box-shadow: inset 2px 0 var(--provenance-rail-color, var(--border-strong));
 }
 .chat-main .msg.agent-action { --provenance-rail-color: var(--accent-strong-opaque, var(--accent-strong)); }
-.chat-main :where(.msg.out.system-notice, .msg.internal, .typing.turn-system) {
+.chat-main :where(.msg.out.system-notice, .msg.internal) {
   --provenance-rail-color: var(--border-strong, var(--muted));
 }
 .chat-main :is(.msg, .typing).provenance-warning,
@@ -352,7 +351,7 @@
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
 /* Turn activity with no agent message to carry it (before a steer, live, or no reply). */
 .chat-main .typing.turn-system { align-self: flex-start; background: transparent; border-radius: var(--radius-lg); padding: var(--message-padding-block) var(--message-padding-inline); gap: 2px; }
-.chat-main .typing.turn-system.turn-status { width: 100%; max-width: 100%; }
+.chat-main .typing.turn-system.turn-status { width: fit-content; }
 .chat-main .typing.turn-system .msg-activity { margin-top: 0; }
 .chat-main .msg .meta .turn-outcome-note { color: var(--surface-fg, inherit); opacity: 0.8; font-weight: 600; }
 .chat-main .activity-trace li .ts { margin-right: 6px; opacity: 0.6; font-variant-numeric: tabular-nums; }

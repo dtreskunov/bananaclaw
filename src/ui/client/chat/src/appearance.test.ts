@@ -13,7 +13,13 @@ import type { AppearanceController, AppearancePreferences } from './appearance';
 import { appearance, initAppearance, setAppearance } from './appearance-state';
 import { AppearanceSettings } from './components/AppearanceSettings';
 
-const autumnDark: AppearancePreferences = { version: 2, theme: 'autumn', mode: 'dark', density: 'comfortable' };
+const autumnDark: AppearancePreferences = {
+  version: 3,
+  theme: 'autumn',
+  mode: 'dark',
+  density: 'comfortable',
+  showTechnicalStatus: false,
+};
 const controllers: AppearanceController[] = [];
 
 function browser(raw: string | null = null, dark = false) {
@@ -100,11 +106,12 @@ afterEach(() => {
 });
 
 describe('appearance preferences', () => {
-  it('defaults to Default / System / Compact only when no preference exists', () => {
+  it('defaults to Default / System / Compact with technical status hidden', () => {
     expect(parseAppearance(null)).toEqual(DEFAULT_APPEARANCE);
     expect(THEMES.map((theme) => theme.id)).toEqual(['default', 'autumn']);
     expect(TEXT_DENSITIES.map((density) => density.id)).toEqual(['comfortable', 'compact']);
     expect(DEFAULT_APPEARANCE.density).toBe('compact');
+    expect(DEFAULT_APPEARANCE.showTechnicalStatus).toBe(false);
   });
 
   it.each([
@@ -113,9 +120,11 @@ describe('appearance preferences', () => {
     'null',
     '[]',
     '{"version":2,"theme":"autumn","mode":"dark"}',
-    '{"version":3,"theme":"autumn","mode":"dark","density":"comfortable"}',
+    '{"version":4,"theme":"autumn","mode":"dark","density":"comfortable","showTechnicalStatus":false}',
     '{"version":2,"theme":"autumn","mode":"dark","density":"dense"}',
     '{"version":2,"theme":"default","mode":"light","density":null}',
+    '{"version":3,"theme":"default","mode":"light","density":"compact"}',
+    '{"version":3,"theme":"default","mode":"light","density":"compact","showTechnicalStatus":"yes"}',
     '{"version":1,"theme":"missing","mode":"light"}',
     '{"version":1,"theme":"default","mode":"auto"}',
   ])('rejects corrupt or unsupported preferences: %s', (raw) => {
@@ -125,8 +134,10 @@ describe('appearance preferences', () => {
   it.each(['default', 'autumn'] as const)('roundtrips every mode of %s', (theme) => {
     for (const mode of ['system', 'light', 'dark'] as const) {
       for (const density of ['comfortable', 'compact'] as const) {
-        const prefs: AppearancePreferences = { version: 2, theme, mode, density };
-        expect(parseAppearance(JSON.stringify(prefs))).toEqual(prefs);
+        for (const showTechnicalStatus of [false, true]) {
+          const prefs: AppearancePreferences = { version: 3, theme, mode, density, showTechnicalStatus };
+          expect(parseAppearance(JSON.stringify(prefs))).toEqual(prefs);
+        }
       }
     }
   });
@@ -135,13 +146,21 @@ describe('appearance preferences', () => {
     for (const theme of ['default', 'autumn']) {
       for (const mode of ['system', 'light', 'dark']) {
         expect(parseAppearance(JSON.stringify({ version: 1, theme, mode }))).toEqual({
-          version: 2,
+          version: 3,
           theme,
           mode,
           density: 'compact',
+          showTechnicalStatus: false,
         });
       }
     }
+  });
+
+  it('migrates version 2 with technical status hidden', () => {
+    expect(parseAppearance('{"version":2,"theme":"autumn","mode":"dark","density":"comfortable"}')).toEqual({
+      ...autumnDark,
+      showTechnicalStatus: false,
+    });
   });
 
   it('resolves explicit modes independently of the OS', () => {
@@ -331,8 +350,10 @@ describe('appearance controller', () => {
     expect(children[2].type).toBe('fieldset');
     expect(children[3].type).toBe('fieldset');
     expect(children[3].props.children[0].props.children).toBe('Text density');
-    expect(children[4].props.children[0]).toContain('saved in this browser');
-    expect(children[5].props.role).toBe('alert');
+    expect(children[4].type).toBe('fieldset');
+    expect(children[4].props.children[0].props.children).toBe('Transcript details');
+    expect(children[5].props.children[0]).toContain('saved in this browser');
+    expect(children[6].props.role).toBe('alert');
     const cards = children[1].props.children[1].props.children;
     const autumnRadio = cards[1].props.children[0].props.children[0];
     expect(autumnRadio.props).toMatchObject({ type: 'radio', name: 'appearance-theme', checked: true });
@@ -346,6 +367,8 @@ describe('appearance controller', () => {
     expect(densityOptions[1].props.children[0].props.checked).toBe(false);
     expect(children[3].props.children[2].props.children).toContain('Larger text');
     expect(children[3].props.children[3].props['aria-hidden']).toBe('true');
+    const completedStatus = children[4].props.children[1].props.children[0];
+    expect(completedStatus.props).toMatchObject({ type: 'checkbox', checked: false });
   });
 
   it('density selection preserves the theme and mode', () => {
@@ -357,5 +380,16 @@ describe('appearance controller', () => {
     const compact = node.props.children[3].props.children[1].props.children[1].props.children[0];
     compact.props.onChange();
     expect(controller.getSnapshot().preferences).toEqual({ ...autumnDark, density: 'compact' });
+  });
+
+  it('technical status selection preserves all other appearance preferences', () => {
+    const page = browser(JSON.stringify(autumnDark));
+    const controller = page.start();
+    window.nanoclawAppearance = controller;
+    appearance.value = controller.getSnapshot();
+    const node = AppearanceSettings();
+    const toggle = node.props.children[4].props.children[1].props.children[0];
+    toggle.props.onChange();
+    expect(controller.getSnapshot().preferences).toEqual({ ...autumnDark, showTechnicalStatus: true });
   });
 });

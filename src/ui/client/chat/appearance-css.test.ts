@@ -115,15 +115,13 @@ describe('theme CSS contract', () => {
 
   it('uses one inset provenance rail with accent, neutral and semantic tones', () => {
     const css = read('./components/ChatMain.css');
-    const rail = css.match(
-      /\.chat-main \.msg\.agent-action,[\s\S]*?\.chat-main \.msg\.input-steering \{([^}]+)\}/,
-    )?.[1];
+    const railRule = css.match(/\.chat-main \.msg\.agent-action,[\s\S]*?\.chat-main \.msg\.input-steering \{([^}]+)\}/);
+    const rail = railRule?.[1];
     expect(rail).toContain('box-shadow: inset 2px 0 var(--provenance-rail-color, var(--border-strong))');
+    expect(railRule?.[0]).not.toContain('.typing.turn-system');
     const action = css.match(/\.chat-main \.msg\.agent-action \{([^}]+)\}/)?.[1];
     expect(action).toContain('--provenance-rail-color: var(--accent-strong-opaque, var(--accent-strong))');
-    const neutral = css.match(
-      /\.chat-main :where\(\.msg\.out\.system-notice, \.msg\.internal, \.typing\.turn-system\) \{([^}]+)\}/,
-    )?.[1];
+    const neutral = css.match(/\.chat-main :where\(\.msg\.out\.system-notice, \.msg\.internal\) \{([^}]+)\}/)?.[1];
     expect(neutral).toContain('--provenance-rail-color: var(--border-strong, var(--muted))');
     expect(css).not.toContain('.chat-main .msg.out.system-notice { background: transparent; }');
     const warning = css.match(
@@ -134,11 +132,13 @@ describe('theme CSS contract', () => {
     expect(error).toContain('--provenance-rail-color: var(--error-soft, var(--danger))');
   });
 
-  it('gives turn-status bubbles the full row while keeping timing metadata on one line', () => {
+  it('keeps turn-status bubbles content-sized and timing metadata on one line', () => {
     const css = read('./components/ChatMain.css');
     const turnStatus = css.match(/\.chat-main \.typing\.turn-system\.turn-status \{([^}]+)\}/)?.[1];
-    expect(turnStatus).toContain('width: 100%');
-    expect(turnStatus).toContain('max-width: 100%');
+    expect(turnStatus).toContain('width: fit-content');
+    expect(turnStatus).not.toContain('max-width: 100%');
+    const turn = css.match(/\.chat-main \.typing\.turn-system \{([^}]+)\}/)?.[1];
+    expect(turn).toContain('background: transparent');
     const timing = css.match(/\.chat-main \.typing \.typing-meta \{([^}]+)\}/)?.[1];
     expect(timing).toContain('flex: none');
     expect(timing).toContain('white-space: nowrap');
