@@ -23400,6 +23400,12 @@ function ApprovalsBanner() {
     /* @__PURE__ */ u4("div", { class: "approvals-list", children: list.map((a4) => /* @__PURE__ */ u4("div", { class: "approval-row", children: [
       /* @__PURE__ */ u4("div", { class: "approval-text", children: [
         /* @__PURE__ */ u4("div", { class: "approval-title", children: a4.title || a4.action }),
+        a4.packages ? /* @__PURE__ */ u4("div", { class: "approval-packages", children: ["apt", "npm", "pip"].map(
+          (manager) => a4.packages[manager].length > 0 ? /* @__PURE__ */ u4("div", { class: "approval-package-list", children: [
+            /* @__PURE__ */ u4("span", { class: "approval-package-manager", children: manager }),
+            /* @__PURE__ */ u4("span", { children: a4.packages[manager].join(", ") })
+          ] }, manager) : null
+        ) }) : null,
         a4.details ? /* @__PURE__ */ u4("div", { class: "approval-details", children: a4.details }) : null,
         /* @__PURE__ */ u4("div", { class: "approval-meta", children: [
           /* @__PURE__ */ u4("span", { class: "approval-group", children: a4.agentGroupName || "Global" }),

@@ -3611,6 +3611,26 @@ nav.tab-bar-strip.group-strip {
   font-size: var(--font-base);
   font-weight: 600;
 }
+.chat-main .approval-packages {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+.chat-main .approval-package-list {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--font-sm);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+.chat-main .approval-package-manager {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
 .chat-main .approval-details {
   font-size: var(--font-sm);
   font-family: var(--font-mono);

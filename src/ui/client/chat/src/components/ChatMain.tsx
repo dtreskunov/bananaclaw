@@ -978,6 +978,18 @@ function ApprovalsBanner() {
           <div class="approval-row" key={a.approvalId}>
             <div class="approval-text">
               <div class="approval-title">{a.title || a.action}</div>
+              {a.packages ? (
+                <div class="approval-packages">
+                  {(['apt', 'npm', 'pip'] as const).map((manager) =>
+                    a.packages![manager].length > 0 ? (
+                      <div class="approval-package-list" key={manager}>
+                        <span class="approval-package-manager">{manager}</span>
+                        <span>{a.packages![manager].join(', ')}</span>
+                      </div>
+                    ) : null,
+                  )}
+                </div>
+              ) : null}
               {a.details ? <div class="approval-details">{a.details}</div> : null}
               <div class="approval-meta">
                 <span class="approval-group">{a.agentGroupName || 'Global'}</span>

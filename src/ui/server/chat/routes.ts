@@ -27,6 +27,7 @@ import { deleteSubscriptionByEndpoint, upsertSubscription } from '../../../modul
 import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
 import type { PendingApproval } from '../../../types.js';
+import { presentApproval, type ApprovalPackageLists } from './approval-presentation.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
 import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js';
@@ -536,50 +537,11 @@ interface ApprovalDto {
   action: string;
   title: string;
   details: string | null;
+  packages: ApprovalPackageLists | null;
   options: { label: string; selectedLabel: string; value: string }[];
   agentGroupId: string | null;
   agentGroupName: string | null;
   createdAt: string;
-}
-
-/** Build a one-line description of the approval from the persisted payload
- * for known actions. The original `question` text from requestApproval is
- * not stored on the row, so we re-derive a comparable summary here. */
-function describeApproval(action: string, payloadJson: string): string | null {
-  let payload: Record<string, unknown>;
-  try {
-    payload = JSON.parse(payloadJson) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  if (action === 'install_packages') {
-    const apt = Array.isArray(payload.apt) ? (payload.apt as string[]) : [];
-    const npm = Array.isArray(payload.npm) ? (payload.npm as string[]) : [];
-    const pkgs = [...apt.map((p) => `apt: ${p}`), ...npm.map((p) => `npm: ${p}`)].join(', ');
-    const reason = typeof payload.reason === 'string' && payload.reason ? ` — ${payload.reason}` : '';
-    return pkgs ? `${pkgs}${reason}` : reason || null;
-  }
-  if (action === 'add_mcp_server') {
-    const name = typeof payload.name === 'string' ? payload.name : '';
-    const url = typeof payload.url === 'string' ? payload.url : '';
-    const command = typeof payload.command === 'string' ? payload.command : '';
-    const transport = typeof payload.transport === 'string' ? payload.transport.toUpperCase() : '';
-    if (url) return `${name} (${transport} ${url})`;
-    if (command) return `${name} (stdio: ${command})`;
-    return name || null;
-  }
-  if (action === 'cli_command') {
-    const frame = (payload.frame as Record<string, unknown> | undefined) || undefined;
-    if (frame) {
-      const cmd = typeof frame.command === 'string' ? frame.command : '';
-      const args = (frame.args as Record<string, unknown> | undefined) || {};
-      const argStr = Object.entries(args)
-        .map(([k, v]) => `--${k} ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-        .join(' ');
-      return cmd ? `ncl ${cmd}${argStr ? ' ' + argStr : ''}` : null;
-    }
-  }
-  return null;
 }
 
 function listApprovalsForUser(userId: string): ApprovalDto[] {
@@ -631,11 +593,13 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
     } catch {
       // ignore — fall back to empty options
     }
+    const presentation = presentApproval(r.action, r.payload);
     visible.push({
       approvalId: r.approval_id,
       action: r.action,
       title: r.title,
-      details: describeApproval(r.action, r.payload),
+      details: presentation.details,
+      packages: presentation.packages,
       options,
       agentGroupId: displayGroupId,
       agentGroupName: groupName,

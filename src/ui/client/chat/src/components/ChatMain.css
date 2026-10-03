@@ -643,6 +643,9 @@
 .chat-main .approval-row { display: flex; align-items: flex-start; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 10px; }
 .chat-main .approval-text { flex: 1; min-width: 0; }
 .chat-main .approval-title { font-size: var(--font-base); font-weight: 600; }
+.chat-main .approval-packages { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.chat-main .approval-package-list { display: flex; gap: 6px; min-width: 0; font-size: var(--font-sm); font-family: var(--font-mono); word-break: break-word; }
+.chat-main .approval-package-manager { flex: 0 0 auto; color: var(--muted); font-weight: 600; text-transform: uppercase; }
 .chat-main .approval-details { font-size: var(--font-sm); font-family: var(--font-mono); color: var(--fg); margin-top: 4px; word-break: break-word; opacity: 0.9; background: var(--wash); border-radius: var(--radius-sm); padding: 4px 6px; }
 .chat-main .approval-meta { font-size: var(--font-xs); color: var(--muted); display: flex; gap: 4px; align-items: center; margin-top: 4px; }
 .chat-main .approval-meta .approval-group { color: var(--fg); font-weight: 500; }

@@ -317,6 +317,11 @@ export interface PendingApprovalDto {
   action: string;
   title: string;
   details: string | null;
+  packages: {
+    apt: string[];
+    npm: string[];
+    pip: string[];
+  } | null;
   options: { label: string; selectedLabel: string; value: string }[];
   agentGroupId: string | null;
   agentGroupName: string | null;
