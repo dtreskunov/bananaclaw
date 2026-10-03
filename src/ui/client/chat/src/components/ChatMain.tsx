@@ -55,6 +55,7 @@ import { getAppearanceController } from '../appearance';
 import { appearance } from '../appearance-state';
 import { attachDensityReflow } from '../density-reflow';
 import { attachScrollEdges } from '../scroll-edges';
+import { revealLatestActivity } from '../activity-trace-scroll';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
@@ -216,8 +217,11 @@ export function ActivityTraceList({ lines, live = false, now = null, openLatest 
   useEffect(() => {
     if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
-  useEffect(() => {
-    if (live && follow.current && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  const revealed = useRef(false);
+  useLayoutEffect(() => {
+    if (!listRef.current || !lines.length) return;
+    if (!revealed.current || (live && follow.current)) revealLatestActivity(listRef.current);
+    revealed.current = true;
   }, [lines, live]);
   const [sel, setSel] = useState<string | null>(() => openLatest && lines.length
     ? activityLineId(lines[lines.length - 1], lines.length - 1)
@@ -225,7 +229,7 @@ export function ActivityTraceList({ lines, live = false, now = null, openLatest 
   const toggle = (id: string) => setSel((cur) => (cur === id ? null : id));
   const chapters = activityChapters(lines, live);
   const [openChapter, setOpenChapter] = useState<string | null>(() =>
-    openLatest && chapters.length ? chapters[chapters.length - 1].id : null);
+    chapters.length ? chapters[chapters.length - 1].id : null);
   const toggleChapter = (id: string) => {
     setOpenChapter(current => current === id ? null : id);
     setSel(null);
@@ -233,7 +237,11 @@ export function ActivityTraceList({ lines, live = false, now = null, openLatest 
   return (
     <ul class="activity-trace scroll-edge-fade" tabIndex={0} aria-label="Activity steps" ref={listRef} onScroll={() => {
       const element = listRef.current;
-      if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+      if (element) {
+        const rows = element.querySelectorAll<HTMLButtonElement>('.trace-row-toggle');
+        const latest = rows[rows.length - 1];
+        follow.current = !!latest && latest.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom < 40;
+      }
     }}>
       {chapters.map(chapter => {
         if (chapter.entries.length === 1) {

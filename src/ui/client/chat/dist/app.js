@@ -22544,6 +22544,24 @@ function attachScrollEdges(element, axes = {}) {
   };
 }
 
+// src/activity-trace-scroll.ts
+function latestActivityScrollTop(scrollTop, entryBottom, viewportTop, viewportHeight) {
+  return Math.max(0, scrollTop + entryBottom - viewportTop - viewportHeight + 12);
+}
+function revealLatestActivity(viewport) {
+  const rows = viewport.querySelectorAll(".trace-row-toggle");
+  const target = rows[rows.length - 1];
+  if (!target) return;
+  const bounds = viewport.getBoundingClientRect();
+  const entry = target.getBoundingClientRect();
+  viewport.scrollTop = latestActivityScrollTop(
+    viewport.scrollTop,
+    entry.bottom,
+    bounds.top + viewport.clientTop,
+    viewport.clientHeight
+  );
+}
+
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
 var revealedMobileMessageActionsId = y3(null);
@@ -22685,20 +22703,27 @@ function ActivityTraceList({ lines, live = false, now = null, openLatest = false
   y2(() => {
     if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
-  y2(() => {
-    if (live && follow.current && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  const revealed = A2(false);
+  _2(() => {
+    if (!listRef.current || !lines.length) return;
+    if (!revealed.current || live && follow.current) revealLatestActivity(listRef.current);
+    revealed.current = true;
   }, [lines, live]);
   const [sel, setSel] = h2(() => openLatest && lines.length ? activityLineId(lines[lines.length - 1], lines.length - 1) : null);
   const toggle = (id2) => setSel((cur) => cur === id2 ? null : id2);
   const chapters = activityChapters(lines, live);
-  const [openChapter, setOpenChapter] = h2(() => openLatest && chapters.length ? chapters[chapters.length - 1].id : null);
+  const [openChapter, setOpenChapter] = h2(() => chapters.length ? chapters[chapters.length - 1].id : null);
   const toggleChapter = (id2) => {
     setOpenChapter((current) => current === id2 ? null : id2);
     setSel(null);
   };
   return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, onScroll: () => {
     const element = listRef.current;
-    if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+    if (element) {
+      const rows = element.querySelectorAll(".trace-row-toggle");
+      const latest = rows[rows.length - 1];
+      follow.current = !!latest && latest.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom < 40;
+    }
   }, children: chapters.map((chapter) => {
     if (chapter.entries.length === 1) {
       const { line, id: id2 } = chapter.entries[0];
