@@ -355,8 +355,9 @@ describe('appearance controller', () => {
     expect(children[5].props.children[0]).toContain('saved in this browser');
     expect(children[6].props.role).toBe('alert');
     const cards = children[1].props.children[1].props.children;
-    const autumnRadio = cards[1].props.children[0].props.children[0];
+    const autumnRadio = cards[1].props.children[0];
     expect(autumnRadio.props).toMatchObject({ type: 'radio', name: 'appearance-theme', checked: true });
+    expect(children[1].props.children[2].props.children).toContain('warm copper');
     const densityOptions = children[3].props.children[1].props.children;
     expect(densityOptions[0].props.children[0].props).toMatchObject({
       type: 'radio',
@@ -366,8 +367,10 @@ describe('appearance controller', () => {
     });
     expect(densityOptions[1].props.children[0].props.checked).toBe(false);
     expect(children[3].props.children[2].props.children).toContain('Larger text');
-    expect(children[3].props.children[3].props['aria-hidden']).toBe('true');
-    const completedStatus = children[4].props.children[1].props.children[0];
+    expect(children[3].props.children).toHaveLength(3);
+    const statusToggle = children[4].props.children[1];
+    expect(statusToggle.props.children[1].props.children[0].props.children).toBe('Show technical information');
+    const completedStatus = statusToggle.props.children[0];
     expect(completedStatus.props).toMatchObject({ type: 'checkbox', checked: false });
   });
 

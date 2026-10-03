@@ -7,31 +7,25 @@ export function AppearanceSettings() {
   return (
     <section aria-labelledby="appearance-heading">
       <h3 id="appearance-heading">Appearance</h3>
-      <fieldset class="appearance-fieldset">
+      <fieldset class="appearance-fieldset" aria-describedby="theme-description">
         <legend>Theme</legend>
         <div class="appearance-themes">
           {THEMES.map((theme) => (
             <label class="appearance-theme" key={theme.id}>
-              <span class="appearance-choice">
-                <input
-                  type="radio"
-                  name="appearance-theme"
-                  value={theme.id}
-                  checked={preferences.theme === theme.id}
-                  onChange={() => setAppearance({ ...preferences, theme: theme.id })}
-                />
-                <span>{theme.name}</span>
-                <span class="appearance-check" aria-hidden="true">{preferences.theme === theme.id ? '\u2713' : ''}</span>
-              </span>
-              <span class="appearance-preview" data-theme={theme.id} data-mode={resolvedMode} aria-hidden="true">
-                <span class="appearance-preview-header" />
-                <span class="appearance-preview-sidebar"><i /><i /><i /></span>
-                <span class="appearance-preview-chat"><i /><i /><b /></span>
-              </span>
-              <span class="appearance-description">{theme.description}</span>
+              <input
+                type="radio"
+                name="appearance-theme"
+                value={theme.id}
+                checked={preferences.theme === theme.id}
+                onChange={() => setAppearance({ ...preferences, theme: theme.id })}
+              />
+              <span>{theme.name}</span>
             </label>
           ))}
         </div>
+        <p class="appearance-theme-description" id="theme-description">
+          {THEMES.find((theme) => theme.id === preferences.theme)!.description}
+        </p>
       </fieldset>
       <fieldset class="appearance-fieldset">
         <legend>Mode</legend>
@@ -69,10 +63,6 @@ export function AppearanceSettings() {
         <p class="appearance-density-description" id="density-description">
           {TEXT_DENSITIES.find((density) => density.id === preferences.density)!.description}
         </p>
-        <div class="appearance-density-preview" aria-hidden="true">
-          <div class="appearance-density-preview-message">Here is a little more detail.</div>
-          <div class="appearance-density-preview-row"><span>Example thread</span><span>Just now</span></div>
-        </div>
       </fieldset>
       <fieldset class="appearance-fieldset" aria-describedby="status-details-description">
         <legend>Transcript details</legend>
@@ -86,7 +76,7 @@ export function AppearanceSettings() {
             })}
           />
           <span>
-            <strong>Show status details</strong>
+            <strong>Show technical information</strong>
             <small id="status-details-description">
               Activity trace, cost, duration, model, and context use.
             </small>

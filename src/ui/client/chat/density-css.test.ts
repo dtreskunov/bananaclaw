@@ -102,7 +102,6 @@ describe('text density CSS contract', () => {
       ['components/GroupAdminField.css', '--control-padding-block', '--field-margin'],
       ['components/ActionsMenu.css', '--menu-padding-block'],
       ['components/UserMenu.css', '--menu-roomy-padding-block'],
-      ['components/AppearanceSettings.css', '--message-gap', '--message-padding-block', '--thread-padding-block'],
     ];
     for (const [file, ...names] of consumers) {
       const css = read(file);
@@ -192,7 +191,10 @@ describe('text density CSS contract', () => {
     expect(css).toMatch(/\.appearance-mode, \.appearance-density \{[^}]*min-height: 44px/);
     expect(css).toContain('.appearance-density:has(:checked)');
     expect(css).toContain('.appearance-density:has(:focus-visible)');
-    expect(css).toMatch(/\.appearance-density-preview \{[^}]*pointer-events: none/);
+    expect(css).not.toContain('.appearance-density-preview');
+    const toggle = css.match(/\.appearance-toggle \{([^}]+)\}/)?.[1];
+    expect(toggle).not.toContain('border:');
+    expect(toggle).not.toContain('border-radius:');
     expect(css).not.toContain('transition:');
   });
 });

@@ -217,7 +217,7 @@ height so revealing them does not resize the bubble. Desktop continues to
 reveal actions on hover or focus. User-message timestamps stay anchored to the
 left while actions occupy the right side of the row.
 
-**Appearance → Transcript details → Show status details** controls technical
+**Appearance → Transcript details → Show technical information** controls technical
 details on all bubbles: activity trace, cost, duration, model, and context use.
 It is off by default, including for preferences migrated from older versions.
 Live bubbles retain essential progress feedback and Stop controls. Notable

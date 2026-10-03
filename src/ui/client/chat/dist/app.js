@@ -25786,38 +25786,22 @@ function AppearanceSettings() {
   const { preferences, resolvedMode, error } = appearance.value;
   return /* @__PURE__ */ u4("section", { "aria-labelledby": "appearance-heading", children: [
     /* @__PURE__ */ u4("h3", { id: "appearance-heading", children: "Appearance" }),
-    /* @__PURE__ */ u4("fieldset", { class: "appearance-fieldset", children: [
+    /* @__PURE__ */ u4("fieldset", { class: "appearance-fieldset", "aria-describedby": "theme-description", children: [
       /* @__PURE__ */ u4("legend", { children: "Theme" }),
       /* @__PURE__ */ u4("div", { class: "appearance-themes", children: THEMES.map((theme) => /* @__PURE__ */ u4("label", { class: "appearance-theme", children: [
-        /* @__PURE__ */ u4("span", { class: "appearance-choice", children: [
-          /* @__PURE__ */ u4(
-            "input",
-            {
-              type: "radio",
-              name: "appearance-theme",
-              value: theme.id,
-              checked: preferences.theme === theme.id,
-              onChange: () => setAppearance({ ...preferences, theme: theme.id })
-            }
-          ),
-          /* @__PURE__ */ u4("span", { children: theme.name }),
-          /* @__PURE__ */ u4("span", { class: "appearance-check", "aria-hidden": "true", children: preferences.theme === theme.id ? "\u2713" : "" })
-        ] }),
-        /* @__PURE__ */ u4("span", { class: "appearance-preview", "data-theme": theme.id, "data-mode": resolvedMode, "aria-hidden": "true", children: [
-          /* @__PURE__ */ u4("span", { class: "appearance-preview-header" }),
-          /* @__PURE__ */ u4("span", { class: "appearance-preview-sidebar", children: [
-            /* @__PURE__ */ u4("i", {}),
-            /* @__PURE__ */ u4("i", {}),
-            /* @__PURE__ */ u4("i", {})
-          ] }),
-          /* @__PURE__ */ u4("span", { class: "appearance-preview-chat", children: [
-            /* @__PURE__ */ u4("i", {}),
-            /* @__PURE__ */ u4("i", {}),
-            /* @__PURE__ */ u4("b", {})
-          ] })
-        ] }),
-        /* @__PURE__ */ u4("span", { class: "appearance-description", children: theme.description })
-      ] }, theme.id)) })
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "radio",
+            name: "appearance-theme",
+            value: theme.id,
+            checked: preferences.theme === theme.id,
+            onChange: () => setAppearance({ ...preferences, theme: theme.id })
+          }
+        ),
+        /* @__PURE__ */ u4("span", { children: theme.name })
+      ] }, theme.id)) }),
+      /* @__PURE__ */ u4("p", { class: "appearance-theme-description", id: "theme-description", children: THEMES.find((theme) => theme.id === preferences.theme).description })
     ] }),
     /* @__PURE__ */ u4("fieldset", { class: "appearance-fieldset", children: [
       /* @__PURE__ */ u4("legend", { children: "Mode" }),
@@ -25850,14 +25834,7 @@ function AppearanceSettings() {
         ),
         /* @__PURE__ */ u4("span", { children: density.name })
       ] }, density.id)) }),
-      /* @__PURE__ */ u4("p", { class: "appearance-density-description", id: "density-description", children: TEXT_DENSITIES.find((density) => density.id === preferences.density).description }),
-      /* @__PURE__ */ u4("div", { class: "appearance-density-preview", "aria-hidden": "true", children: [
-        /* @__PURE__ */ u4("div", { class: "appearance-density-preview-message", children: "Here is a little more detail." }),
-        /* @__PURE__ */ u4("div", { class: "appearance-density-preview-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Example thread" }),
-          /* @__PURE__ */ u4("span", { children: "Just now" })
-        ] })
-      ] })
+      /* @__PURE__ */ u4("p", { class: "appearance-density-description", id: "density-description", children: TEXT_DENSITIES.find((density) => density.id === preferences.density).description })
     ] }),
     /* @__PURE__ */ u4("fieldset", { class: "appearance-fieldset", "aria-describedby": "status-details-description", children: [
       /* @__PURE__ */ u4("legend", { children: "Transcript details" }),
@@ -25874,7 +25851,7 @@ function AppearanceSettings() {
           }
         ),
         /* @__PURE__ */ u4("span", { children: [
-          /* @__PURE__ */ u4("strong", { children: "Show status details" }),
+          /* @__PURE__ */ u4("strong", { children: "Show technical information" }),
           /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, cost, duration, model, and context use." })
         ] })
       ] })
