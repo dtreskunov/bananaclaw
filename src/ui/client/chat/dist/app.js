@@ -19709,7 +19709,10 @@ async function sendChat(text2, files) {
     return false;
   const clientMessageId = retry?.clientMessageId ?? crypto.randomUUID();
   const messageId = publicWebMessageId(clientMessageId);
-  requestScrollToBottom();
+  n2(() => {
+    highlightMessageId.value = null;
+    requestScrollToBottom();
+  });
   if (isWeb) {
     retryWebSend = { generation: generation2, gid, tid, text: text2, files: files?.slice() ?? [], clientMessageId, inputHandling };
     if (!pendingWebSends.value.some((send) => send.messageId === messageId)) {

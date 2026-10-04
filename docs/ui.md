@@ -173,6 +173,10 @@ its bottom. Reconnect snapshots clear transient trace state. Completion
 scrolling applies only to observed updates, not initial history loads or
 reconnect snapshots; outputless turns retain their trace without inventing a
 response to scroll to.
+Submitting a message scrolls to the transcript bottom and clears any previous
+search-result highlight so the authoritative input echo cannot pull the viewer
+back into history. Cancelling a steering/queue choice preserves the draft,
+highlight and scroll position. A rejected send retains the draft and attachments.
 Questions contribute display-only **Asked a question `<question>`** markers
 at their recorded output positions. Every settled turn ends with one
 display-only **Done** marker, including stopped or failed turns: it means the

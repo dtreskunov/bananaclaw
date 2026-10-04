@@ -12,10 +12,12 @@ import {
   chatMessages,
   chatReady,
   groupId,
+  highlightMessageId,
   messagingGroupId,
   pending,
   pendingWebSends,
   pinnedContext,
+  scrollToBottomTick,
   threadId,
 } from './state';
 import { splitPendingInputs } from './queued-followups';
@@ -29,6 +31,8 @@ beforeEach(() => {
   threadId.value = 'thread';
   chatReady.value = true;
   canSend.value = true;
+  highlightMessageId.value = null;
+  scrollToBottomTick.value = 0;
   applyTurnState({ id: 'captured-turn', status: 'running', supportsSteering: true }, true);
   vi.mocked(requestChoice).mockReset().mockResolvedValue('steer');
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ approvals: [] }) }));
@@ -44,7 +48,10 @@ afterEach(() => {
 describe('native command intent', () => {
   it.each(['steer', 'queue'] as const)('sends %s with immutable identity, not proof of application', async (mode) => {
     vi.mocked(requestChoice).mockResolvedValue(mode);
+    highlightMessageId.value = 'earlier-search-result';
     expect(await sendChat('New direction', null)).toBe(true);
+    expect(highlightMessageId.value).toBeNull();
+    expect(scrollToBottomTick.value).toBe(1);
     expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)).toMatchObject({
       text: 'New direction',
       inputHandling: { mode, turnId: 'captured-turn' },
@@ -57,7 +64,10 @@ describe('native command intent', () => {
     const files = [{ name: 'draft.txt', size: 1, file: new File(['x'], 'draft.txt') }];
     pending.value = files;
     pinnedContext.value = ['docs/spec.md'];
+    highlightMessageId.value = 'earlier-search-result';
     expect(await sendChat('draft', files)).toBe(false);
+    expect(highlightMessageId.value).toBe('earlier-search-result');
+    expect(scrollToBottomTick.value).toBe(0);
     expect(pending.value).toBe(files);
     expect(pinnedContext.value).toEqual(['docs/spec.md']);
     expect(fetch).not.toHaveBeenCalled();
@@ -84,6 +94,25 @@ describe('native command intent', () => {
     applyTurnState({ id: 'outside', status: 'running', supportsSteering: true }, true);
     expect(await sendChat('external', null)).toBe(true);
     expect(requestChoice).not.toHaveBeenCalled();
+  });
+  it.each(['web', 'telegram'])('leaves search navigation and scrolls when submitting on %s', async (channel) => {
+    channelType.value = channel;
+    messagingGroupId.value = channel === 'web' ? null : 'room';
+    applyTurnState(null, true);
+    highlightMessageId.value = 'earlier-search-result';
+    expect(await sendChat('new message', null)).toBe(true);
+    expect(highlightMessageId.value).toBeNull();
+    expect(scrollToBottomTick.value).toBe(1);
+  });
+  it('keeps a failed send at the bottom without discarding the draft attachments', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Rejected' }), { status: 400 }));
+    const files = [{ name: 'draft.txt', size: 1, file: new File(['x'], 'draft.txt') }];
+    pending.value = files;
+    highlightMessageId.value = 'earlier-search-result';
+    expect(await sendChat('draft', files)).toBe(false);
+    expect(highlightMessageId.value).toBeNull();
+    expect(scrollToBottomTick.value).toBe(1);
+    expect(pending.value).toBe(files);
   });
   it('never retargets an open choice to the successor turn', async () => {
     vi.mocked(requestChoice).mockImplementation(async () => {

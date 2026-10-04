@@ -858,8 +858,10 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
     return false;
   const clientMessageId = retry?.clientMessageId ?? crypto.randomUUID();
   const messageId = publicWebMessageId(clientMessageId);
-  // Scroll to bottom immediately so user sees their message area
-  requestScrollToBottom();
+  batch(() => {
+    highlightMessageId.value = null;
+    requestScrollToBottom();
+  });
   if (isWeb) {
     retryWebSend = { generation, gid, tid, text, files: files?.slice() ?? [], clientMessageId, inputHandling };
     if (!pendingWebSends.value.some((send) => send.messageId === messageId)) {
