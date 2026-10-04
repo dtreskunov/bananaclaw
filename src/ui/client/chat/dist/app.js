@@ -23849,7 +23849,10 @@ function MessageLog() {
   const { queued } = splitPendingInputs(chatMessages.value);
   const queuedIds = new Set(queued.map((message2) => message2.id));
   const transcript = timeline.filter((row) => row.kind !== "message" || !queuedIds.has(row.message.id));
-  const layoutKey = JSON.stringify(timeline);
+  const layoutKey = JSON.stringify({
+    timeline,
+    notices: activeTurnNotices(activeTurn.value, turnConnected.value, stopRequest.value)
+  });
   const msgCount = timeline.length;
   const activeTurnId = activeTurn.value?.id;
   const scrollTick = scrollToBottomTick.value;

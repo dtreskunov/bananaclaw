@@ -164,6 +164,8 @@ Transient runner-disconnection, stopping and Stop-error notices appear at the
 bottom of the transcript, after queued inputs, independently of the trace's
 anchor. The disconnect text is **Runner disconnected.** Notices clear when the
 active state changes; settled outcome notes remain with their original turn.
+Notice layout changes keep bottom-following viewers pinned; readers scrolled
+up into history retain their position.
 The trace uses its turn as the owner, so expansion survives movement between
 the live bubble and a response. Moving the live bubble preserves local group
 and step selection; moving onto a response resets them.
