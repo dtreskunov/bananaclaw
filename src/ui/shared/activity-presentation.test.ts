@@ -3,7 +3,9 @@ import {
   activityChapters,
   chapterEntryHeadline,
   displayStep,
+  headlineSummary,
   parseStep,
+  stepHeadline,
   stepSummary,
   todoItems,
   traceStatusClass,
@@ -40,8 +42,8 @@ describe('activity presentation', () => {
     const chapters = activityChapters(values);
     expect(chapters.map((chapter) => chapter.entries.length)).toEqual([1, 1, 1, 1]);
     expect(chapters.slice(1, 3).map((chapter) => chapter.title)).toEqual([
-      'Steering message injected · 1 steps',
-      'Steering message injected · 1 steps',
+      'Steering message injected Use the revised approach. Keep <literal text> intact.',
+      'Steering message injected Use the revised approach. Keep <literal text> intact.',
     ]);
     expect(displayStep(values[1], true).detail).toBe(marker.detail);
     expect(stepSummary(displayStep(values[1], true))).toBe(
@@ -63,6 +65,11 @@ describe('activity presentation', () => {
     const step = tool('a', 'mcp__nanoclaw__set_thread_title');
     expect(stepSummary({ ...step, detail: 'A useful thread title' })).toBe('Set title to A useful thread title');
     expect(stepSummary({ ...step, status: 'running', detail: 'New title' })).toBe('Setting title to New title');
+    expect(stepHeadline({ ...step, detail: 'A useful thread title' })).toEqual({
+      action: 'Set title to',
+      subject: 'A useful thread title',
+      codeSubject: true,
+    });
     expect(stepSummary(step)).toBe('Set title');
   });
 
@@ -109,7 +116,7 @@ describe('activity presentation', () => {
   it('treats legacy tool records without a status as unknown, even in live traces', () => {
     const value = line(0, { kind: 'tool', tool: 'bash' });
     expect(stepSummary(displayStep(value, true))).toBe('Outcome unknown: bash');
-    expect(activityChapters([value, line(1, { kind: 'tool', tool: 'bash' })], true)[0].title).toBe('2 commands');
+    expect(activityChapters([value, line(1, { kind: 'tool', tool: 'bash' })], true)[0].title).toBe('Command · 2 times');
   });
 
   it('preserves the raw-text fallback for malformed and legacy lines', () => {
@@ -129,6 +136,63 @@ describe('activity presentation', () => {
 });
 
 describe('activity chapters', () => {
+  it('formats repetition counts uniformly and omits them for a singleton', () => {
+    const headline = { action: 'Used', subject: 'tavily.tavily_search', codeSubject: true };
+    expect(headlineSummary(headline)).toBe('Used tavily.tavily_search');
+    expect(headlineSummary(headline, 4)).toBe('Used tavily.tavily_search · 4 times');
+  });
+
+  it('keeps different commands in their existing group with a generic command summary', () => {
+    const values = Array.from({ length: 4 }, (_, index) =>
+      line(index, { ...tool(`command-${index}`, 'bash'), detail: `echo different-${index}` }),
+    );
+    const chapters = activityChapters(values);
+    expect(chapters).toHaveLength(1);
+    expect(chapters[0].headline).toEqual({ action: 'Ran command' });
+    expect(chapters[0].title).toBe('Ran command · 4 times');
+    expect(chapters[0].entries.map((entry) => entry.line)).toEqual(values);
+  });
+
+  it('keeps different file targets grouped and only code-styles a single recorded path', () => {
+    const values = [
+      line(0, { ...tool('a', 'read'), detail: 'first.ts' }),
+      line(1, { ...tool('b', 'read'), detail: 'second.ts' }),
+      line(2, { ...tool('c', 'edit'), detail: 'first.ts' }),
+      line(3, { ...tool('d', 'write'), detail: 'first.ts' }),
+    ];
+    const chapters = activityChapters(values);
+    expect(chapters.map((chapter) => chapter.entries.length)).toEqual([2, 2]);
+    expect(chapters[0].headline).toEqual({ action: 'Read', subject: '2 files', codeSubject: false });
+    expect(chapters[1].headline).toEqual({ action: 'Edited', subject: 'first.ts', codeSubject: true });
+    expect(chapters.flatMap((chapter) => chapter.entries.map((entry) => entry.line))).toEqual(values);
+  });
+
+  it('renders ordinary grouped tool names as code arguments', () => {
+    const chapter = activityChapters([
+      line(0, tool('a', 'mcp__Tavily__tavily_search')),
+      line(1, tool('b', 'mcp__Tavily__tavily_search')),
+    ])[0];
+    expect(chapter.headline).toEqual({ action: 'Used', subject: 'tavily.tavily_search', codeSubject: true });
+    expect(chapter.title).toBe('Used tavily.tavily_search · 2 times');
+  });
+
+  it('uses common recorded arguments generically without splitting groups with differing arguments', () => {
+    const values = Array.from({ length: 4 }, (_, index) =>
+      line(index, { ...tool(`custom-${index}`, 'custom'), title: 'Prepared resource', detail: 'resource:key' }),
+    );
+    const same = activityChapters(values);
+    expect(same[0].headline).toEqual({ action: 'Prepared resource', subject: 'resource:key', codeSubject: true });
+    expect(same[0].title).toBe('Prepared resource resource:key · 4 times');
+    const different = activityChapters([
+      ...values.slice(0, 3),
+      line(3, { ...tool('custom-3', 'custom'), title: 'Prepared resource', detail: 'other:key' }),
+    ]);
+    expect(different).toHaveLength(1);
+    expect(different[0].headline.subject).toBeUndefined();
+    expect(different[0].title).toBe('Prepared resource · 4 times');
+    expect(different[0].entries.map((entry) => entry.id)).toEqual(same[0].entries.map((entry) => entry.id));
+  });
+
   it('groups only consecutive compatible tools and retains every entry in recorded order', () => {
     const values = [
       line(0, tool('r1', 'Read')),
@@ -144,12 +208,12 @@ describe('activity chapters', () => {
   });
 
   it.each([
-    ['write', 'completed', 'Edited files · 2 steps'],
-    ['edit', 'running', 'Editing files · 2 steps'],
-    ['bash', 'completed', 'Ran 2 commands'],
-    ['bash', 'running', 'Running 2 commands'],
-    ['bash', 'unknown', '2 commands'],
-    ['write', 'interrupted', 'File changes · 2 steps'],
+    ['write', 'completed', 'Edited files · 2 times'],
+    ['edit', 'running', 'Editing files · 2 times'],
+    ['bash', 'completed', 'Ran command · 2 times'],
+    ['bash', 'running', 'Running command · 2 times'],
+    ['bash', 'unknown', 'Command · 2 times'],
+    ['write', 'interrupted', 'File changes · 2 times'],
   ] as const)('uses the latest %s/%s step for chapter wording', (name, status, title) => {
     expect(activityChapters([line(0, tool('first', name)), line(1, tool('last', name, status))], true)[0].title).toBe(
       title,
@@ -158,29 +222,29 @@ describe('activity chapters', () => {
 
   it('does not hide earlier failures after a later successful step', () => {
     const chapter = activityChapters([line(0, tool('failed', 'bash', 'error')), line(1, tool('passed', 'bash'))])[0];
-    expect(chapter).toMatchObject({ title: 'Ran 2 commands', status: 'failed', failures: 1 });
+    expect(chapter).toMatchObject({ title: 'Ran command · 2 times', status: 'failed', failures: 1 });
     expect(chapter.entries[1].step.status).toBe('completed');
   });
 
   it('counts distinct recorded file paths instead of claiming every edit touched a different file', () => {
     const same = { ...tool('first', 'write'), detail: 'example.ts' };
     const repeated = { ...tool('second', 'edit'), detail: 'example.ts' };
-    expect(activityChapters([line(0, same), line(1, repeated)])[0].title).toBe('Edited example.ts * 2 steps');
+    expect(activityChapters([line(0, same), line(1, repeated)])[0].title).toBe('Edited example.ts · 2 times');
     expect(
       activityChapters([
         line(0, same),
         line(1, repeated),
         line(2, { kind: 'patch', files: ['example.ts', 'other.ts'] }),
       ])[0].title,
-    ).toBe('Edited 2 files');
-    expect(activityChapters([line(0, same), line(1, tool('patch', 'patch'))])[0].title).toBe('Edited files · 2 steps');
+    ).toBe('Edited 2 files · 3 times');
+    expect(activityChapters([line(0, same), line(1, tool('patch', 'patch'))])[0].title).toBe('Edited files · 2 times');
   });
 
   it('names one repeatedly edited file and keeps execution-phase wording', () => {
     const edits = Array.from({ length: 4 }, (_, index) =>
       line(index, { ...tool(`edit-${index}`, index % 2 ? 'write' : 'edit'), detail: '/workspace/agent/file.txt' }),
     );
-    expect(activityChapters(edits)[0].title).toBe('Edited /workspace/agent/file.txt * 4 steps');
+    expect(activityChapters(edits)[0].title).toBe('Edited /workspace/agent/file.txt · 4 times');
     expect(
       activityChapters(
         edits.map((entry, index) =>
@@ -190,7 +254,7 @@ describe('activity chapters', () => {
         ),
         true,
       )[0].title,
-    ).toBe('Editing /workspace/agent/file.txt * 4 steps');
+    ).toBe('Editing /workspace/agent/file.txt · 4 times');
   });
 
   it('removes repeated verbs from child labels and collapsed previews without losing the primary argument', () => {
@@ -204,6 +268,11 @@ describe('activity chapters', () => {
       '2 TODO items',
     );
     expect(chapterEntryHeadline(tool('d', 'mcp__nanoclaw__set_thread_title')).action).toBe('Title not recorded');
+    expect(chapterEntryHeadline({ ...tool('d', 'mcp__nanoclaw__set_thread_title'), detail: 'New title' })).toEqual({
+      action: '',
+      subject: 'New title',
+      codeSubject: true,
+    });
   });
 
   it('keeps chapter identity and the selected activity stable across live updates', () => {

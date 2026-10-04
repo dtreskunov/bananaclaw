@@ -46,6 +46,7 @@ export interface TraceEntry {
 export interface TraceChapter {
   id: string;
   entries: TraceEntry[];
+  headline: StepHeadline;
   title: string;
   status: TraceStatus;
   failures: number;
@@ -189,7 +190,7 @@ export function stepHeadline(step: TraceStep): StepHeadline {
             : step.detail
               ? 'Setting title to'
               : 'Setting title',
-          ...(step.detail ? { subject: singleLine(step.detail) } : {}),
+          ...(step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {}),
         };
       if (isTodoStep(step)) return { action: finished ? 'Updated TODO items' : 'Updating TODO items' };
       const fileOp = FILE_OP_VERBS[tool];
@@ -245,8 +246,13 @@ export function stepHeadline(step: TraceStep): StepHeadline {
 }
 
 export function stepSummary(step: TraceStep): string {
-  const headline = stepHeadline(step);
-  return [headline.action, headline.subject].filter(Boolean).join(' ');
+  return headlineSummary(stepHeadline(step));
+}
+
+export function headlineSummary(headline: StepHeadline, repetitions = 1): string {
+  return (
+    [headline.action, headline.subject].filter(Boolean).join(' ') + (repetitions > 1 ? ` · ${repetitions} times` : '')
+  );
 }
 
 export function chapterEntryHeadline(step: TraceStep): StepHeadline {
@@ -256,7 +262,7 @@ export function chapterEntryHeadline(step: TraceStep): StepHeadline {
   }
   if (isTitleStep(step) && !step.detail) return { action: 'Title not recorded' };
   if (step.kind === 'tool' && step.detail) {
-    return { action: '', subject: singleLine(step.detail), codeSubject: !isTitleStep(step) };
+    return { action: '', subject: singleLine(step.detail), codeSubject: true };
   }
   const headline = stepHeadline(step);
   return headline.subject
@@ -283,44 +289,42 @@ function recordedFilePaths(entries: TraceEntry[]): Set<string> | null {
   return paths;
 }
 
-function chapterTitle(category: string, entries: TraceEntry[]): string {
+function chapterHeadline(category: string, entries: TraceEntry[]): StepHeadline {
   const latest = entries[entries.length - 1].step;
   const status = traceStatus(latest);
   const executing = status === 'running' || status === 'queued';
   const uncertain = status === 'unknown' || status === 'interrupted';
-  const count = entries.length;
   if (category === 'commands') {
-    const label = `${count} command${count === 1 ? '' : 's'}`;
-    return uncertain ? label : `${executing ? 'Running' : 'Ran'} ${label}`;
+    return { action: uncertain ? 'Command' : executing ? 'Running command' : 'Ran command' };
   }
   if (category === 'read' || category === 'change') {
     const files = recordedFilePaths(entries);
     const verb = category === 'read' ? (executing ? 'Reading' : 'Read') : executing ? 'Editing' : 'Edited';
-    if (uncertain) {
-      const label = category === 'read' ? 'File reads' : 'File changes';
-      return files === null
-        ? `${label} · ${count} steps`
-        : `${label} · ${files.size} file${files.size === 1 ? '' : 's'}`;
-    }
-    if (category === 'change' && count > 1 && files?.size === 1) {
-      return `${verb} ${files.values().next().value} * ${count} steps`;
-    }
-    return files === null
-      ? `${verb} files · ${count} steps`
-      : `${verb} ${files.size} file${files.size === 1 ? '' : 's'}`;
+    return {
+      action: uncertain ? (category === 'read' ? 'File reads' : 'File changes') : verb,
+      subject:
+        files?.size === 1
+          ? files.values().next().value
+          : files
+            ? `${files.size} files`
+            : uncertain
+              ? undefined
+              : 'files',
+      codeSubject: files?.size === 1,
+    };
   }
-  if (category === 'search')
-    return uncertain ? `${count} searches` : `${executing ? 'Searching' : 'Searched'} · ${count} searches`;
+  if (category === 'search') return { action: uncertain ? 'Search' : executing ? 'Searching' : 'Searched' };
   if (isTodoStep(latest))
-    return `${uncertain ? 'TODO items' : executing ? 'Updating TODO items' : 'Updated TODO items'} · ${count} updates`;
-  if (isTitleStep(latest))
-    return uncertain ? `${count} title changes` : `${executing ? 'Setting' : 'Set'} ${count} titles`;
+    return { action: uncertain ? 'TODO items' : executing ? 'Updating TODO items' : 'Updated TODO items' };
+  if (isTitleStep(latest)) return { action: uncertain ? 'Title change' : executing ? 'Setting title' : 'Set title' };
   const headline = stepHeadline(latest);
-  const label =
-    headline.action === 'Used' || headline.action === 'Using'
-      ? `${headline.action} ${cleanToolName(latest.tool || 'tool')}`
-      : headline.action || 'Activities';
-  return `${label} · ${count} steps`;
+  return {
+    ...headline,
+    action: headline.action || 'Activities',
+    subject: entries.every((entry) => stepHeadline(entry.step).subject === headline.subject)
+      ? headline.subject
+      : undefined,
+  };
 }
 
 export function traceStatus(step: TraceStep): TraceStatus {
@@ -371,10 +375,12 @@ export function activityChapters(lines: TraceLine[], live = false): TraceChapter
       (['running', 'queued', 'failed', 'interrupted', 'unknown', 'completed', 'neutral'] as const).find((candidate) =>
         statuses.includes(candidate),
       ) || 'neutral';
+    const headline = chapterHeadline(category, entries);
     return {
       id: entries[0].id,
       entries,
-      title: chapterTitle(category, entries),
+      headline,
+      title: headlineSummary(headline, entries.length),
       status,
       failures: statuses.filter((item) => item === 'failed').length,
     };

@@ -2794,7 +2794,7 @@ nav.tab-bar-strip.group-strip {
   border: none;
   background: none;
   color: var(--muted);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-ui);
   font-size: var(--font-2xs);
   font-style: normal;
   text-align: left;
@@ -2954,7 +2954,7 @@ nav.tab-bar-strip.group-strip {
   cursor: pointer;
   font-size: inherit;
   color: var(--trace-status-color, var(--muted));
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-ui);
   opacity: 0.85;
 }
 .chat-main .activity-trace .trace-row-toggle {
@@ -3077,6 +3077,7 @@ nav.tab-bar-strip.group-strip {
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+.chat-main .typing .trace-preview code.trace-subject,
 .chat-main .activity-trace code.trace-subject {
   padding: 0 4px;
   background: var(--chip-bg);

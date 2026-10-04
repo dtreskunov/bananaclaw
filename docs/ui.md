@@ -132,6 +132,9 @@ progress-summary row places Stop between the bouncing dots and label text;
 the controls keep their size while long labels truncate.
 Activity trace previews and expanded rows use the same small type scale as
 status metadata so operational detail remains secondary to message content.
+Actions and repetition counts use the UI font; tool names, paths, commands,
+and title arguments use inline-code styling in individual rows, chapter
+headers, and the latest-activity hint.
 Activity uses expandable **chapters** of consecutive related steps, without
 reordering or omitting activities. Chapter headers have filled dots on a
 continuous rail; child steps are indented with smaller hollow dots and branches.
@@ -157,19 +160,21 @@ its bottom. Reconnect snapshots clear transient trace state. Completion
 scrolling applies only to observed updates, not initial history loads or
 reconnect snapshots; outputless turns retain their trace without inventing a
 response to scroll to.
-Headers show only the group heading and outcome notices, without a
-preview of the last step's argument. Child labels omit the parent's repeated verb.
+Headers show the group heading and outcome notices. Recorded file targets and
+arguments shared by every entry can appear in the heading; a differing last
+argument is not presented as the whole group's target. Child labels omit the parent's repeated verb.
 Exact timestamps, status and duration share one line with dot separators when
 a step is expanded; full arguments and errors appear beneath. Slow or failed
 steps retain a compact duration beside the label.
 
 Chapter wording follows its latest step: **Editing files / Edited files**
-and **Running 2 commands / Ran 2 commands**, with counts in the heading instead
-of a separate badge. Consecutive changes to one recorded path name that file
-and retain the operation count, such as **Edited /workspace/agent/file.txt *
-4 steps**. Otherwise file headings count distinct recorded paths when all
-targets are known; incomplete legacy/patch records retain an explicit step
-count rather than inventing a file count. Standalone steps, chapter headers,
+and **Running command / Ran command**. Repeated groups append **· N times**;
+single entries omit the repetition suffix. These counts describe operations,
+not identical arguments: existing consecutive grouping remains unchanged.
+Consecutive changes to one recorded path name that file and retain the operation
+count, such as **Edited `path` · 4 times**. Otherwise file headings count
+distinct recorded paths when all targets are known; incomplete records do not
+invent a file count. Standalone steps, chapter headers,
 and child rows share a compact 28 px rhythm. Earlier failures remain counted even
 after later successes. Queued, running, completed and failed states use
 theme-aware colors, interrupted states use warning colors, and unknown outcomes

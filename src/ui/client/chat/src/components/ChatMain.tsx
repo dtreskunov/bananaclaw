@@ -32,7 +32,7 @@ import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import {
-  activityChapters, chapterEntryHeadline, displayStep, isTitleStep, isTodoStep, parseStep, stepHeadline,
+  activityChapters, chapterEntryHeadline, displayStep, headlineSummary, isTitleStep, isTodoStep, parseStep, stepHeadline,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
 } from '../../../../shared/activity-presentation';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
@@ -117,13 +117,14 @@ function fmtActivityTs(ts: string): string {
   return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function StepHeadlineContent({ headline }: { headline: StepHeadline }) {
+function StepHeadlineContent({ headline, repetitions = 1 }: { headline: StepHeadline; repetitions?: number }) {
   return (
     <>
       {headline.action}
       {headline.subject
         ? <>{headline.action ? ' ' : null}{headline.codeSubject ? <code class="trace-subject">{headline.subject}</code> : headline.subject}</>
         : null}
+      {repetitions > 1 ? ` · ${repetitions} times` : null}
     </>
   );
 }
@@ -167,7 +168,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
   const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
   const known = !!(described.action || described.subject);
   const headline = known ? described : { action: line.text };
-  const summary = [headline.action, headline.subject].filter(Boolean).join(' ');
+  const summary = headlineSummary(headline);
   const running = live && step.kind === 'tool' && step.status === 'running';
   const startedAt = Number(line.ts);
   const hasStartedAt = !!line.ts && Number.isFinite(startedAt);
@@ -280,7 +281,7 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
             <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
             <span class="trace-chapter-label">
               <span class="trace-chapter-heading">
-                <span class="trace-chapter-title">{chapter.title}</span>
+                <span class="trace-chapter-title"><StepHeadlineContent headline={chapter.headline} repetitions={chapter.entries.length} /></span>
                 {chapter.failures ? <span class="trace-chapter-failures">{chapter.failures} failed</span> : null}
                 {chapter.status === 'unknown' || chapter.status === 'interrupted' ? <span class="trace-chapter-notice">{chapter.status === 'unknown' ? 'Outcome unknown' : 'Interrupted'}</span> : null}
               </span>

@@ -173,6 +173,7 @@ describe('theme CSS contract', () => {
       /\.chat-main \.activity-trace \.trace-row-toggle,\s*\.chat-main \.activity-trace \.trace-chapter-toggle \{([^}]+)\}/,
     )?.[1];
     expect(toggle).toContain('font-size: inherit');
+    expect(toggle).toContain('font-family: var(--font-ui)');
     expect(toggle).toContain('color: var(--trace-status-color, var(--muted))');
     for (const status of ['queued', 'running', 'completed', 'failed']) {
       const rule = css.match(new RegExp(`\\.chat-main \\.activity-trace \\.trace-status-${status} \\{([^}]+)\\}`))?.[1];
@@ -180,12 +181,15 @@ describe('theme CSS contract', () => {
     }
     const subject = css.match(/\.chat-main \.activity-trace code\.trace-subject \{([^}]+)\}/)?.[1];
     expect(subject).toContain('font-size: inherit');
+    expect(subject).toContain('font-family: var(--font-mono, monospace)');
+    expect(css).toContain('.chat-main .typing .trace-preview code.trace-subject,');
     const code = css.match(/\.chat-main \.activity-trace pre\.trace-code \{([^}]+)\}/)?.[1];
     expect(code).toContain('font-size: inherit');
     const codeContent = css.match(/\.chat-main \.activity-trace pre\.trace-code code \{([^}]+)\}/)?.[1];
     expect(codeContent).toContain('font-size: inherit');
     const preview = css.match(/\.chat-main \.typing \.trace-preview \{([^}]+)\}/)?.[1];
     expect(preview).toContain('font-size: var(--font-2xs)');
+    expect(preview).toContain('font-family: var(--font-ui)');
   });
 
   it('uses continuous chapter rails, indented hollow child dots and expanded TODO checklists', () => {

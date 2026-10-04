@@ -21504,7 +21504,7 @@ function stepHeadline(step) {
       if (isTitleStep(step))
         return {
           action: finished ? step.detail ? "Set title to" : "Set title" : step.detail ? "Setting title to" : "Setting title",
-          ...step.detail ? { subject: singleLine(step.detail) } : {}
+          ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {}
         };
       if (isTodoStep(step)) return { action: finished ? "Updated TODO items" : "Updating TODO items" };
       const fileOp = FILE_OP_VERBS[tool];
@@ -21556,6 +21556,9 @@ function stepHeadline(step) {
       return { action: "" };
   }
 }
+function headlineSummary(headline, repetitions = 1) {
+  return [headline.action, headline.subject].filter(Boolean).join(" ") + (repetitions > 1 ? ` \xB7 ${repetitions} times` : "");
+}
 function chapterEntryHeadline(step) {
   if (isTodoStep(step)) {
     const items = todoItems(step);
@@ -21563,7 +21566,7 @@ function chapterEntryHeadline(step) {
   }
   if (isTitleStep(step) && !step.detail) return { action: "Title not recorded" };
   if (step.kind === "tool" && step.detail) {
-    return { action: "", subject: singleLine(step.detail), codeSubject: !isTitleStep(step) };
+    return { action: "", subject: singleLine(step.detail), codeSubject: true };
   }
   const headline = stepHeadline(step);
   return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
@@ -21577,37 +21580,33 @@ function recordedFilePaths(entries) {
   }
   return paths;
 }
-function chapterTitle(category, entries) {
+function chapterHeadline(category, entries) {
   const latest = entries[entries.length - 1].step;
   const status = traceStatus(latest);
   const executing = status === "running" || status === "queued";
   const uncertain = status === "unknown" || status === "interrupted";
-  const count = entries.length;
   if (category === "commands") {
-    const label2 = `${count} command${count === 1 ? "" : "s"}`;
-    return uncertain ? label2 : `${executing ? "Running" : "Ran"} ${label2}`;
+    return { action: uncertain ? "Command" : executing ? "Running command" : "Ran command" };
   }
   if (category === "read" || category === "change") {
     const files = recordedFilePaths(entries);
     const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
-    if (uncertain) {
-      const label2 = category === "read" ? "File reads" : "File changes";
-      return files === null ? `${label2} \xB7 ${count} steps` : `${label2} \xB7 ${files.size} file${files.size === 1 ? "" : "s"}`;
-    }
-    if (category === "change" && count > 1 && files?.size === 1) {
-      return `${verb} ${files.values().next().value} * ${count} steps`;
-    }
-    return files === null ? `${verb} files \xB7 ${count} steps` : `${verb} ${files.size} file${files.size === 1 ? "" : "s"}`;
+    return {
+      action: uncertain ? category === "read" ? "File reads" : "File changes" : verb,
+      subject: files?.size === 1 ? files.values().next().value : files ? `${files.size} files` : uncertain ? void 0 : "files",
+      codeSubject: files?.size === 1
+    };
   }
-  if (category === "search")
-    return uncertain ? `${count} searches` : `${executing ? "Searching" : "Searched"} \xB7 ${count} searches`;
+  if (category === "search") return { action: uncertain ? "Search" : executing ? "Searching" : "Searched" };
   if (isTodoStep(latest))
-    return `${uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items"} \xB7 ${count} updates`;
-  if (isTitleStep(latest))
-    return uncertain ? `${count} title changes` : `${executing ? "Setting" : "Set"} ${count} titles`;
+    return { action: uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items" };
+  if (isTitleStep(latest)) return { action: uncertain ? "Title change" : executing ? "Setting title" : "Set title" };
   const headline = stepHeadline(latest);
-  const label = headline.action === "Used" || headline.action === "Using" ? `${headline.action} ${cleanToolName(latest.tool || "tool")}` : headline.action || "Activities";
-  return `${label} \xB7 ${count} steps`;
+  return {
+    ...headline,
+    action: headline.action || "Activities",
+    subject: entries.every((entry) => stepHeadline(entry.step).subject === headline.subject) ? headline.subject : void 0
+  };
 }
 function traceStatus(step) {
   if (step.kind === "retry") return "queued";
@@ -21649,10 +21648,12 @@ function activityChapters(lines, live = false) {
     const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
       (candidate) => statuses.includes(candidate)
     ) || "neutral";
+    const headline = chapterHeadline(category, entries);
     return {
       id: entries[0].id,
       entries,
-      title: chapterTitle(category, entries),
+      headline,
+      title: headlineSummary(headline, entries.length),
       status,
       failures: statuses.filter((item) => item === "failed").length
     };
@@ -22680,13 +22681,14 @@ function fmtActivityTs(ts) {
   if (!Number.isFinite(n3)) return "";
   return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-function StepHeadlineContent({ headline }) {
+function StepHeadlineContent({ headline, repetitions = 1 }) {
   return /* @__PURE__ */ u4(k, { children: [
     headline.action,
     headline.subject ? /* @__PURE__ */ u4(k, { children: [
       headline.action ? " " : null,
       headline.codeSubject ? /* @__PURE__ */ u4("code", { class: "trace-subject", children: headline.subject }) : headline.subject
-    ] }) : null
+    ] }) : null,
+    repetitions > 1 ? ` \xB7 ${repetitions} times` : null
   ] });
 }
 function stepBody(s5) {
@@ -22720,7 +22722,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
   const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
   const known = !!(described.action || described.subject);
   const headline = known ? described : { action: line.text };
-  const summary = [headline.action, headline.subject].filter(Boolean).join(" ");
+  const summary = headlineSummary(headline);
   const running = live && step.kind === "tool" && step.status === "running";
   const startedAt2 = Number(line.ts);
   const hasStartedAt = !!line.ts && Number.isFinite(startedAt2);
@@ -22818,7 +22820,7 @@ function ActivityTraceList({ lines, live = false, now = null, following = false,
           children: [
             /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
             /* @__PURE__ */ u4("span", { class: "trace-chapter-label", children: /* @__PURE__ */ u4("span", { class: "trace-chapter-heading", children: [
-              /* @__PURE__ */ u4("span", { class: "trace-chapter-title", children: chapter.title }),
+              /* @__PURE__ */ u4("span", { class: "trace-chapter-title", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: chapter.headline, repetitions: chapter.entries.length }) }),
               chapter.failures ? /* @__PURE__ */ u4("span", { class: "trace-chapter-failures", children: [
                 chapter.failures,
                 " failed"

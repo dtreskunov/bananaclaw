@@ -342,7 +342,7 @@
 .chat-main .typing .typing-dots > span:nth-child(2) { animation-delay: 0.15s; }
 .chat-main .typing .typing-dots > span:nth-child(3) { animation-delay: 0.3s; }
 .chat-main .typing .hint { flex: 1; font-size: var(--font-xs); color: var(--muted); font-style: italic; margin-left: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.chat-main .typing .trace-preview { padding: 0; border: none; background: none; color: var(--muted); font-family: var(--font-mono, monospace); font-size: var(--font-2xs); font-style: normal; text-align: left; cursor: pointer; opacity: 0.85; }
+.chat-main .typing .trace-preview { padding: 0; border: none; background: none; color: var(--muted); font-family: var(--font-ui); font-size: var(--font-2xs); font-style: normal; text-align: left; cursor: pointer; opacity: 0.85; }
 .chat-main .typing .trace-preview:hover { color: var(--fg); opacity: 1; }
 .chat-main .typing .trace-preview:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; border-radius: 2px; }
 .chat-main .typing .typing-meta { flex: none; white-space: nowrap; font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
@@ -376,7 +376,7 @@
 .chat-main .activity-trace > .trace-row:last-child::before,
 .chat-main .activity-trace > .trace-chapter:last-child .trace-children > .trace-row:last-child::before { bottom: calc(100% - var(--trace-row-height) / 2); }
 .chat-main .activity-trace .trace-row-toggle,
-.chat-main .activity-trace .trace-chapter-toggle { display: flex; align-items: center; gap: 6px; width: max-content; min-width: 100%; padding: 0; border: none; background: none; text-align: left; cursor: pointer; font-size: inherit; color: var(--trace-status-color, var(--muted)); font-family: var(--font-mono, monospace); opacity: 0.85; }
+.chat-main .activity-trace .trace-chapter-toggle { display: flex; align-items: center; gap: 6px; width: max-content; min-width: 100%; padding: 0; border: none; background: none; text-align: left; cursor: pointer; font-size: inherit; color: var(--trace-status-color, var(--muted)); font-family: var(--font-ui); opacity: 0.85; }
 .chat-main .activity-trace .trace-row-toggle { height: var(--trace-row-height); }
 .chat-main .activity-trace .trace-marker { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 9px; height: 9px; }
 .chat-main .activity-trace .trace-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--trace-status-color, var(--muted)); }
@@ -407,6 +407,7 @@
 .chat-main .activity-trace ul.trace-children { list-style: none; margin: 0 0 0 var(--trace-child-indent); padding: 0; }
 .chat-main .activity-trace .trace-text { flex: 1; min-width: 0; white-space: nowrap; }
 .chat-main .activity-trace .trace-duration { flex: none; font-variant-numeric: tabular-nums; }
+.chat-main .typing .trace-preview code.trace-subject,
 .chat-main .activity-trace code.trace-subject { padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); font-family: var(--font-mono, monospace); font-size: inherit; }
 .chat-main .activity-trace .trace-meta,
 .chat-main .activity-trace .trace-note { margin: 0 0 0 17px; color: var(--muted); font-family: var(--font-mono, monospace); font-size: inherit; opacity: 0.8; }
