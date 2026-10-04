@@ -290,6 +290,10 @@ the column and composer share a 760 px maximum and the same centered gutters,
 defined once by `--chat-max` / `--chat-gutter` in
 [`ChatMain.css`](../src/ui/client/chat/src/components/ChatMain.css). Mobile keeps
 its existing 90% bubbles and 12 px composer gutters.
+The normal composer placeholder uses the selected agent group's display name,
+such as **Message Denis's Lab…**, and follows group switches and renames. While
+group metadata is unavailable it uses **Message the agent…**. Editing, pending
+question and reconnecting prompts retain their specific wording.
 
 #### Access and file browsing
 

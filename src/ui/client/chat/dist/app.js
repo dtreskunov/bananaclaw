@@ -24284,6 +24284,7 @@ function Composer() {
   );
   const composerDisabled = wsDown || hasQuestion;
   const gid = groupId.value;
+  const groupName = groups.value.find((group) => group.id === gid)?.name || "the agent";
   const tid = threadId.value;
   const target = `${gid}:${tid}:composer`;
   const channel = channelType.value;
@@ -24467,7 +24468,7 @@ function Composer() {
               {
                 id: "chat-input",
                 rows: 1,
-                placeholder: edit.editing ? "Edit pending message\u2026" : hasQuestion ? "Answer the question above to continue\u2026" : wsDown ? "Reconnecting\u2026" : "Message the agent\u2026",
+                placeholder: edit.editing ? "Edit pending message\u2026" : hasQuestion ? "Answer the question above to continue\u2026" : wsDown ? "Reconnecting\u2026" : `Message ${groupName}\u2026`,
                 ref: inputRef,
                 "aria-label": edit.editing ? "Pending message text" : "Message",
                 onInput: (event) => {
