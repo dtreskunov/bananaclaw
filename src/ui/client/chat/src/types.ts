@@ -197,6 +197,10 @@ export interface ChatMessage {
   card?: DisplayCard;
   /** Persisted activity trace for an outbound turn, in emit order. */
   activity?: ActivityLine[];
+  /** This row currently owns the active/final trace state for its turn. */
+  turnTraceOwner?: boolean;
+  /** The owning turn trace is still receiving activity. */
+  turnTraceLive?: boolean;
   /** Timeline event payload; present when direction === 'event'. */
   event?: TimelineEvent;
   /** Emoji reactions the agent added to this message (already resolved to

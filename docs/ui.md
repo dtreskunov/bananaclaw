@@ -143,14 +143,20 @@ details, and follows subsequent steps the same way, switching groups when
 necessary. Only one group and one step's details are open within a trace.
 Reveal operations scroll only the trace viewport: short details are shown
 fully, while oversized details align at their beginning so the header remains
-visible. Selecting a group/step manually or scrolling up to inspect older
-activity pauses following; collapse the trace and reopen via the live summary
-to resume. The **N steps** disclosure does not enable detail following.
-On turn completion, an open trace (including its selected group and step)
-stays open when its activity moves into the response. The transcript scrolls
-the response's top into view instead of following its bottom. This applies
-to observed completion updates, not initial history loads or reconnect snapshots;
-outputless turns retain their trace without inventing a response to scroll to.
+visible. Selecting a group or step manually pauses following; scrolling does
+not. Collapse the trace and reopen it via the live summary to resume. The **N
+steps** disclosure opens every group collapsed and does not enable following.
+Only one activity trace can be expanded across the transcript. Its global
+state stores only the owning row and whether live activity is being followed;
+the selected group and step are local to the mounted trace.
+The active or final trace uses its turn as the owner, so expansion survives
+movement between a live row and a response. A move resets group and step
+selection. On completion, the trace stays expanded with every group collapsed,
+and the transcript scrolls the response's top into view instead of following
+its bottom. Reconnect snapshots clear transient trace state. Completion
+scrolling applies only to observed updates, not initial history loads or
+reconnect snapshots; outputless turns retain their trace without inventing a
+response to scroll to.
 Headers show only the group heading and outcome notices, without a
 preview of the last step's argument. Child labels omit the parent's repeated verb.
 Exact timestamps, status and duration share one line with dot separators when

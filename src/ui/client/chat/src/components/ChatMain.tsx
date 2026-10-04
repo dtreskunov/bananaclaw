@@ -38,7 +38,7 @@ import {
 } from '../../../../shared/activity-presentation';
 import { completedResponse, conversationState } from '../conversation-state';
 import {
-  activityTraceId, activityTraceView, DEFAULT_TRACE_VIEW, latestActivityTraceView, toggleActivityTrace, updateActivityTraceView, type ActivityTraceView,
+  activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
 import { turnRowView, type TurnRowView } from '../turn-row';
@@ -215,57 +215,55 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
   );
 }
 
-export function ActivityTraceList({ lines, live = false, now = null, openLatest = false, traceId }: { lines: ActivityLine[]; live?: boolean; now?: number | null; openLatest?: boolean; traceId?: string }) {
+type ActivityTraceTarget = { kind: 'chapter' | 'entry'; id: string } | null;
+
+export function ActivityTraceList({ lines, live = false, now = null, following = false, onBrowse }: { lines: ActivityLine[]; live?: boolean; now?: number | null; following?: boolean; onBrowse?: () => void }) {
   const listRef = useRef<HTMLUListElement | null>(null);
-  const follow = useRef(true);
-  const navigation = useRef<ScrollNavigation | null>(null);
-  const [localView, setLocalView] = useState<ActivityTraceView>(() =>
-    toggleActivityTrace(DEFAULT_TRACE_VIEW, lines, openLatest));
-  const currentView = traceId ? activityTraceView(traceId) : localView;
-  const resolveView = (view: ActivityTraceView) => live && view.followLatest ? latestActivityTraceView(view, lines) : view;
-  const traceView = resolveView(currentView);
-  const setView = (update: (view: ActivityTraceView) => ActivityTraceView) => {
-    if (traceId) updateActivityTraceView(traceId, view => update(resolveView(view)));
-    else setLocalView(view => update(resolveView(view)));
-  };
-  const updateView = useRef(setView);
-  updateView.current = setView;
+  const [target, setTarget] = useState<ActivityTraceTarget>(null);
   useEffect(() => {
-    if (!listRef.current) return;
-    const disposeEdges = attachScrollEdges(listRef.current);
-    const scroll = attachScrollNavigation(listRef.current, () => {}, undefined, direction => {
-      if (direction !== 'up') return;
-      follow.current = false;
-      updateView.current(view => ({ ...view, followLatest: false }));
-    });
-    navigation.current = scroll;
-    return () => {
-      disposeEdges();
-      scroll.dispose();
-      navigation.current = null;
-    };
-  }, [traceId]);
+    if (listRef.current) return attachScrollEdges(listRef.current);
+  }, []);
   const revealed = useRef(false);
   useLayoutEffect(() => {
     if (!listRef.current || !lines.length) return;
-    if (!revealed.current || (live && follow.current)) {
-      navigation.current?.reset();
-      revealLatestActivity(listRef.current, live && traceView.followLatest);
-    }
+    if (!revealed.current || (live && following)) revealLatestActivity(listRef.current, live && following);
     revealed.current = true;
-  }, [lines, live, traceView.followLatest]);
-  const sel = traceView.selectedEntry;
-  const toggle = (id: string) => {
-    follow.current = false;
-    setView(view => ({ ...view, followLatest: false, selectedEntry: view.selectedEntry === id ? null : id }));
-  };
+  }, [lines, live, following]);
   const chapters = activityChapters(lines, live);
-  const openChapter = traceView.openChapter;
+  const latestChapter = following ? chapters.at(-1) : null;
+  const sel = following
+    ? latestChapter?.entries.at(-1)?.id ?? null
+    : target?.kind === 'entry'
+      ? target.id
+      : null;
+  const openChapter = following
+    ? latestChapter && latestChapter.entries.length > 1
+      ? latestChapter.id
+      : null
+    : target?.kind === 'chapter'
+      ? target.id
+      : target?.kind === 'entry'
+        ? chapters.find(chapter => chapter.entries.some(entry => entry.id === target.id))?.id ?? null
+        : null;
+  const toggle = (id: string) => {
+    onBrowse?.();
+    setTarget(current => {
+      if (current?.kind !== 'entry' || current.id !== id) return { kind: 'entry', id };
+      const chapter = chapters.find(candidate => candidate.entries.some(entry => entry.id === id));
+      return chapter && chapter.entries.length > 1 ? { kind: 'chapter', id: chapter.id } : null;
+    });
+  };
   const toggleChapter = (id: string) => {
-    follow.current = false;
-    setView(view => ({
-      ...view, followLatest: false, openChapter: view.openChapter === id ? null : id, selectedEntry: null,
-    }));
+    onBrowse?.();
+    setTarget(current => {
+      const selectedChapter =
+        current?.kind === 'chapter'
+          ? current.id
+          : current?.kind === 'entry'
+            ? chapters.find(chapter => chapter.entries.some(entry => entry.id === current.id))?.id
+            : null;
+      return selectedChapter === id ? null : { kind: 'chapter', id };
+    });
   };
   return (
     <ul class="activity-trace scroll-edge-fade" tabIndex={0} aria-label="Activity steps" ref={listRef}>
@@ -329,18 +327,21 @@ function ActivityTracePanel({
   expanded,
   live = false,
   now = null,
-  traceId,
+  ownerId,
+  following = false,
 }: {
   lines: ActivityLine[];
   expanded: boolean;
   live?: boolean;
   now?: number | null;
-  traceId: string;
+  ownerId: string;
+  following?: boolean;
 }) {
   if (!lines.length || !expanded) return null;
   return (
     <div class="msg-activity expanded">
-      <ActivityTraceList lines={lines} live={live} now={now} traceId={traceId} />
+      <ActivityTraceList key={`${ownerId}:${live}`} lines={lines} live={live} now={now}
+        following={following} onBrowse={() => pauseActivityTrace(ownerId)} />
     </div>
   );
 }
@@ -608,10 +609,10 @@ function Message(
   const ref = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
-  const traceId = activityTraceId(m);
-  const traceExpanded = activityTraceView(traceId).expanded;
-  const toggleTrace = () => updateActivityTraceView(traceId, view => toggleActivityTrace(view, m.activity ?? []));
-  if (m.direction === 'turn' && m.turn) return <ConversationTurnRow turn={m.turn} lines={m.activity ?? []} status={!!m.turnStatus} traceId={traceId} />;
+  const traceOwner = activityTraceOwner(m);
+  const traceView = activityTraceView(traceOwner, !!m.turnTraceLive);
+  const toggleTrace = () => toggleActivityTrace(traceOwner);
+  if (m.direction === 'turn' && m.turn) return <ConversationTurnRow turn={m.turn} lines={m.activity ?? []} status={!!m.turnStatus} ownerId={traceOwner} />;
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
@@ -781,7 +782,8 @@ function Message(
         )
         : null}
       {activity.length && showTechnicalStatus
-        ? <ActivityTracePanel lines={activity} expanded={traceExpanded} traceId={traceId} />
+        ? <ActivityTracePanel lines={activity} expanded={traceView.expanded} live={m.turnTraceLive}
+            ownerId={traceOwner} following={traceView.following} />
         : null}
       {m.reactions && m.reactions.length
         ? (
@@ -794,7 +796,7 @@ function Message(
         : null}
       {m.ts || m.inputState || activity.length ? <div class="meta">
         {m.ts && <RelativeTime ts={m.ts} />}
-        <ActivityTraceToggle count={showTechnicalStatus ? activity.length : 0} expanded={traceExpanded} onToggle={toggleTrace} />
+        <ActivityTraceToggle count={showTechnicalStatus ? activity.length : 0} expanded={traceView.expanded} onToggle={toggleTrace} />
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
         <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} />
         {showsMidTurnLabel(m.deliveryOrigin,
@@ -821,8 +823,8 @@ function Message(
 }
 
 function DisplayCardMessage({ message, card }: { message: ChatMessage; card: DisplayCard }) {
-  const traceId = activityTraceId(message);
-  const traceExpanded = activityTraceView(traceId).expanded;
+  const traceOwner = activityTraceOwner(message);
+  const traceView = activityTraceView(traceOwner, !!message.turnTraceLive);
   const activity = message.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return (
@@ -847,7 +849,8 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      {showTechnicalStatus ? <ActivityTracePanel lines={activity} expanded={traceExpanded} traceId={traceId} /> : null}
+      {showTechnicalStatus ? <ActivityTracePanel lines={activity} expanded={traceView.expanded}
+        live={message.turnTraceLive} ownerId={traceOwner} following={traceView.following} /> : null}
       {message.reactions?.length ? (
         <div class="reactions">
           {message.reactions.map((reaction, index) => (
@@ -857,8 +860,8 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
       ) : null}
       {message.ts || activity.length ? <div class="meta">
         {message.ts ? <RelativeTime ts={message.ts} /> : null}
-        <ActivityTraceToggle count={showTechnicalStatus ? activity.length : 0} expanded={traceExpanded}
-          onToggle={() => updateActivityTraceView(traceId, view => toggleActivityTrace(view, activity))} />
+        <ActivityTraceToggle count={showTechnicalStatus ? activity.length : 0} expanded={traceView.expanded}
+          onToggle={() => toggleActivityTrace(traceOwner)} />
         <AgentActionLabel label="card" title="Sent with send_card" />
         {message.statsTurn
           ? <ReplyTurnStats turn={message.statsTurn} showTechnicalDetails={showTechnicalStatus} />
@@ -874,7 +877,7 @@ interface EventsGroup { kind: 'events'; events: ChatMessage[] }
 type MsgGroup = ThoughtsGroup | SingleGroup | EventsGroup;
 
 function messageKey(message: ChatMessage): string {
-  return activityTraceId(message);
+  return message.id || `${message.direction}:${message.ts}:${message.text}`;
 }
 
 function groupKey(group: MsgGroup): string {
@@ -1136,11 +1139,11 @@ function ReplyTurnStats({
  * The status bubble also carries the live headline, timer, usage and Stop control, or settled stats
  * for a turn without a reply.
  */
-function ConversationTurnRow({ turn, lines, status, traceId }: { turn: ConversationTurn; lines: ActivityLine[]; status: boolean; traceId: string }) {
-  const traceExpanded = activityTraceView(traceId).expanded;
+function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: ConversationTurn; lines: ActivityLine[]; status: boolean; ownerId: string }) {
   const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
   const settled = turn.phase === 'settled';
   const live = status && !settled;
+  const traceView = activityTraceView(ownerId, live);
   const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : null;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1162,14 +1165,14 @@ function ConversationTurnRow({ turn, lines, status, traceId }: { turn: Conversat
   if (!lines.length && !status) return null;
   if (settled && !showTechnicalStatus && !view.note && !stop?.error) return null;
   const toggleFromPreview = () => {
-    updateActivityTraceView(traceId, view => toggleActivityTrace(view, lines, true));
+    toggleActivityTrace(ownerId, true);
   };
   const toggleFromCount = () => {
-    updateActivityTraceView(traceId, view => toggleActivityTrace(view, lines));
+    toggleActivityTrace(ownerId);
   };
   return (
     <div
-      class={`typing turn-system${status ? ' turn-status' : ''}${live ? ' turn-live' : ''}${traceExpanded ? ' expanded' : ''}${provenanceTone}`}
+      class={`typing turn-system${status ? ' turn-status' : ''}${live ? ' turn-live' : ''}${traceView.expanded ? ' expanded' : ''}${provenanceTone}`}
       data-turn-id={status ? turn.id : undefined}
       aria-live={live ? 'polite' : 'off'}
     >
@@ -1180,9 +1183,9 @@ function ConversationTurnRow({ turn, lines, status, traceId }: { turn: Conversat
           ? <button
               type="button"
               class="hint trace-preview"
-              aria-expanded={traceExpanded}
-              aria-label={traceExpanded ? 'Hide activity' : 'Show latest activity'}
-              title={traceExpanded ? 'Hide activity' : 'Show latest activity'}
+              aria-expanded={traceView.expanded}
+              aria-label={traceView.expanded ? 'Hide activity' : 'Show latest activity'}
+              title={traceView.expanded ? 'Hide activity' : 'Show latest activity'}
               onClick={toggleFromPreview}
             ><StepHeadlineContent headline={liveHeadline} /></button>
           : live && view.status ? <span class="hint">{view.status}</span> : null}
@@ -1193,14 +1196,15 @@ function ConversationTurnRow({ turn, lines, status, traceId }: { turn: Conversat
       {showTechnicalStatus
         ? <ActivityTracePanel
             lines={lines}
-            expanded={traceExpanded}
+            expanded={traceView.expanded}
             live={!settled}
             now={endedAt ?? now}
-            traceId={traceId}
+            ownerId={ownerId}
+            following={traceView.following}
           />
         : null}
       {showTechnicalStatus && (status || lines.length) ? <div class="meta">
-        <ActivityTraceToggle count={lines.length} expanded={traceExpanded} onToggle={toggleFromCount} />
+        <ActivityTraceToggle count={lines.length} expanded={traceView.expanded} onToggle={toggleFromCount} />
         {status ? <TurnStats turn={turn} view={view} /> : null}
       </div> : null}
     </div>
@@ -1652,12 +1656,12 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
         </>
       )}
       {showTechnicalStatus
-        ? <ActivityTracePanel lines={q.activity ?? []} expanded={traceExpanded} traceId={traceId} />
+        ? <ActivityTracePanel lines={q.activity ?? []} expanded={traceExpanded} ownerId={traceId} />
         : null}
       <div class="meta question-card-meta">
         <RelativeTime ts={answered && q.answeredAt ? q.answeredAt : q.createdAt} />
         <ActivityTraceToggle count={showTechnicalStatus ? q.activity?.length ?? 0 : 0} expanded={traceExpanded}
-          onToggle={() => updateActivityTraceView(traceId, view => toggleActivityTrace(view, q.activity ?? []))} />
+          onToggle={() => toggleActivityTrace(traceId)} />
         {!answered ? <AgentActionLabel label="question" title="Sent with ask_user_question" /> : null}
       </div>
     </div>

@@ -15786,9 +15786,9 @@ var VoiceController = class {
           this.fail("No complete transcript was received. Review current text before using it.");
           return;
         }
-        const intent = this.intent;
+        const intent2 = this.intent;
         this.release();
-        if (intent === "send") void this.sendDraft();
+        if (intent2 === "send") void this.sendDraft();
         else this.detach();
       } else if (message2.type === "error") {
         this.fail(
@@ -15829,9 +15829,9 @@ var VoiceController = class {
       if (this.current(generation2)) this.update({ sending: false });
     }
   }
-  finalize(intent) {
+  finalize(intent2) {
     if (this.state.value.phase !== "listening") return;
-    this.intent = intent;
+    this.intent = intent2;
     this.update({ phase: "finalizing" });
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
@@ -17927,14 +17927,14 @@ function clearPendingStop() {
   requestController?.abort();
   requestController = null;
 }
-function boundRequest(turnId) {
+function boundRequest(turnId2) {
   requestTimer = setTimeout(() => {
     requestTimer = null;
     requestController?.abort();
     requestController = null;
-    if (activeTurn.value?.id !== turnId) return;
+    if (activeTurn.value?.id !== turnId2) return;
     stopRequest.value = {
-      turnId,
+      turnId: turnId2,
       busy: false,
       error: "Stop request timed out. Reconnect to check the authoritative turn state."
     };
@@ -17965,18 +17965,18 @@ function resetTurnState() {
     stopRequest.value = null;
   });
 }
-async function stopActiveTurn(turnId) {
+async function stopActiveTurn(turnId2) {
   const gid = groupId.value;
   const tid = threadId.value;
-  if (!gid || !tid || !canSend.value || !turnConnected.value || activeTurn.value?.id !== turnId || stopRequest.value?.busy)
+  if (!gid || !tid || !canSend.value || !turnConnected.value || activeTurn.value?.id !== turnId2 || stopRequest.value?.busy)
     return;
   const generation2 = refs.chatGeneration;
-  const isCurrent = () => generation2 === refs.chatGeneration && groupId.value === gid && threadId.value === tid && activeTurn.value?.id === turnId;
+  const isCurrent = () => generation2 === refs.chatGeneration && groupId.value === gid && threadId.value === tid && activeTurn.value?.id === turnId2;
   clearPendingStop();
-  stopRequest.value = { turnId, busy: true, error: "" };
+  stopRequest.value = { turnId: turnId2, busy: true, error: "" };
   const controller = new AbortController();
   requestController = controller;
-  boundRequest(turnId);
+  boundRequest(turnId2);
   let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/stop`;
   if (channelType.value !== "web" && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
@@ -17986,7 +17986,7 @@ async function stopActiveTurn(turnId) {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ turnId }),
+      body: JSON.stringify({ turnId: turnId2 }),
       signal: controller.signal
     });
     if (!isCurrent()) return;
@@ -18006,7 +18006,7 @@ async function stopActiveTurn(turnId) {
     clearPendingStop();
     console.error("Stop request failed", error);
     stopRequest.value = {
-      turnId,
+      turnId: turnId2,
       busy: false,
       error: error instanceof Error ? error.message : "Stop request failed. Try again."
     };
@@ -18625,348 +18625,29 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// ../../shared/activity-presentation.ts
-var TRACE_STATUS_LABELS = {
-  queued: "Pending",
-  running: "Running",
-  completed: "Completed",
-  failed: "Failed",
-  interrupted: "Interrupted (outcome unknown)",
-  unknown: "Outcome unknown",
-  neutral: "Activity"
-};
-function isRecord(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-function isStep(value) {
-  if (!isRecord(value)) return false;
-  for (const key of ["id", "tool", "detail", "title", "error", "text", "path", "name", "agent", "description"]) {
-    if (value[key] !== void 0 && typeof value[key] !== "string") return false;
-  }
-  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification"].includes(value.kind)))
-    return false;
-  if (value.status !== void 0 && (typeof value.status !== "string" || !["pending", "running", "completed", "error", "interrupted", "unknown"].includes(value.status)))
-    return false;
-  if (value.durationMs !== void 0 && (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs < 0))
-    return false;
-  if (value.attempt !== void 0 && typeof value.attempt !== "number") return false;
-  if (value.auto !== void 0 && typeof value.auto !== "boolean") return false;
-  return value.files === void 0 || Array.isArray(value.files) && value.files.every((file) => typeof file === "string");
-}
-function parseStep(text2) {
-  try {
-    const value = JSON.parse(text2);
-    return isStep(value) ? value : {};
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
-    return {};
-  }
-}
-function cleanToolName(tool) {
-  if (!tool.startsWith("mcp__")) return tool.toLowerCase();
-  const [server, ...name] = tool.slice(5).split("__");
-  return `${server}.${name.join(".") || server}`.toLowerCase();
-}
-function toolKind(step) {
-  return cleanToolName(step.tool || "").split(".").at(-1) || "";
-}
-function isTodoStep(step) {
-  return step.kind === "tool" && ["todo", "todowrite", "todo_write"].includes(toolKind(step));
-}
-function isTitleStep(step) {
-  return step.kind === "tool" && ["nanoclaw.set_thread_title", "set_thread_title"].includes(cleanToolName(step.tool || ""));
-}
-function todoItems(step) {
-  if (!isTodoStep(step) || !step.detail) return null;
-  const items = [];
-  for (const line of step.detail.split("\n")) {
-    const match2 = line.match(/^(Completed|In progress|Pending|Cancelled|Task):\s*(.*)$/i);
-    if (!match2) {
-      if (!items.length) return null;
-      items[items.length - 1].content += `
-${line}`;
-      continue;
-    }
-    const status = match2[1].toLowerCase();
-    const priority = match2[2].match(/\s+\(([^()\n]+) priority\)$/i);
-    items.push({
-      content: priority ? match2[2].slice(0, priority.index).trimEnd() : match2[2],
-      status: status === "completed" ? "completed" : status === "in progress" ? "in_progress" : status === "pending" ? "pending" : status === "cancelled" ? "cancelled" : "unknown",
-      ...priority ? { priority: priority[1] } : {}
-    });
-  }
-  return items.length ? items : null;
-}
-function singleLine(value) {
-  return value.replace(/\s+/g, " ").trim();
-}
-var FILE_OP_VERBS = {
-  read: { present: "Reading", past: "Read" },
-  write: { present: "Writing", past: "Wrote" },
-  edit: { present: "Editing", past: "Edited" }
-};
-var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
-var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
-function stepHeadline(step) {
-  switch (step.kind) {
-    case "tool": {
-      const tool = toolKind(step);
-      if (!step.status || step.status === "interrupted" || step.status === "unknown") {
-        return {
-          action: step.status === "interrupted" ? "Interrupted (outcome unknown):" : "Outcome unknown:",
-          subject: [cleanToolName(step.tool || "tool"), singleLine(step.detail || step.title || "")].filter(Boolean).join(" "),
-          codeSubject: true
-        };
-      }
-      const finished = step.status === "completed" || step.status === "error";
-      if (isTitleStep(step))
-        return {
-          action: finished ? step.detail ? "Set title to" : "Set title" : step.detail ? "Setting title to" : "Setting title",
-          ...step.detail ? { subject: singleLine(step.detail) } : {}
-        };
-      if (isTodoStep(step)) return { action: finished ? "Updated TODO items" : "Updating TODO items" };
-      const fileOp = FILE_OP_VERBS[tool];
-      if (fileOp) {
-        const target = step.detail || step.title || "";
-        return {
-          action: finished ? fileOp.past : fileOp.present,
-          ...target ? { subject: singleLine(target), codeSubject: true } : {}
-        };
-      }
-      if (COMMAND_TOOLS.has(tool))
-        return {
-          action: step.status === "pending" ? "Queued" : finished ? "Ran" : "Running",
-          subject: singleLine(step.detail || cleanToolName(step.tool || "command")),
-          codeSubject: true
-        };
-      if (SEARCH_TOOLS.has(tool) && (step.detail || step.title))
-        return {
-          action: finished ? "Searched for" : "Searching for",
-          subject: singleLine(step.detail || step.title || ""),
-          codeSubject: true
-        };
-      if (step.title)
-        return { action: step.title, ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {} };
-      return { action: finished ? "Used" : "Using", subject: cleanToolName(step.tool || "tool"), codeSubject: true };
-    }
-    case "internal":
-      return { action: "Internal activity" };
-    case "file":
-      return { action: "Opened", subject: step.name || step.path || "file", codeSubject: true };
-    case "patch":
-      return {
-        action: "Updated",
-        subject: step.files?.length === 1 ? step.files[0] : `${step.files?.length || 0} files`,
-        codeSubject: step.files?.length === 1
-      };
-    case "retry":
-      return { action: "Retrying", subject: `attempt ${step.attempt ?? 0}` };
-    case "compaction":
-      return { action: step.auto ? "Compacted context automatically" : "Compacted context" };
-    case "subtask":
-      return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
-    case "notification":
-      return { action: step.text || "Notification" };
-    default:
-      return { action: "" };
-  }
-}
-function chapterEntryHeadline(step) {
-  if (isTodoStep(step)) {
-    const items = todoItems(step);
-    return { action: items ? `${items.length} TODO item${items.length === 1 ? "" : "s"}` : "TODO items" };
-  }
-  if (isTitleStep(step) && !step.detail) return { action: "Title not recorded" };
-  if (step.kind === "tool" && step.detail) {
-    return { action: "", subject: singleLine(step.detail), codeSubject: !isTitleStep(step) };
-  }
-  const headline = stepHeadline(step);
-  return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
-}
-function recordedFilePaths(entries) {
-  const paths = /* @__PURE__ */ new Set();
-  for (const { step } of entries) {
-    const targets = step.kind === "patch" ? step.files : step.kind === "file" ? step.path ? [step.path] : void 0 : ["read", "write", "edit"].includes(toolKind(step)) && step.detail ? [step.detail] : void 0;
-    if (!targets || targets.some((path) => !path.trim())) return null;
-    targets.forEach((path) => paths.add(path.trim()));
-  }
-  return paths;
-}
-function chapterTitle(category, entries) {
-  const latest = entries[entries.length - 1].step;
-  const status = traceStatus(latest);
-  const executing = status === "running" || status === "queued";
-  const uncertain = status === "unknown" || status === "interrupted";
-  const count = entries.length;
-  if (category === "commands") {
-    const label2 = `${count} command${count === 1 ? "" : "s"}`;
-    return uncertain ? label2 : `${executing ? "Running" : "Ran"} ${label2}`;
-  }
-  if (category === "read" || category === "change") {
-    const files = recordedFilePaths(entries);
-    const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
-    if (uncertain) {
-      const label2 = category === "read" ? "File reads" : "File changes";
-      return files === null ? `${label2} \xB7 ${count} steps` : `${label2} \xB7 ${files.size} file${files.size === 1 ? "" : "s"}`;
-    }
-    if (category === "change" && count > 1 && files?.size === 1) {
-      return `${verb} ${files.values().next().value} * ${count} steps`;
-    }
-    return files === null ? `${verb} files \xB7 ${count} steps` : `${verb} ${files.size} file${files.size === 1 ? "" : "s"}`;
-  }
-  if (category === "search")
-    return uncertain ? `${count} searches` : `${executing ? "Searching" : "Searched"} \xB7 ${count} searches`;
-  if (isTodoStep(latest))
-    return `${uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items"} \xB7 ${count} updates`;
-  if (isTitleStep(latest))
-    return uncertain ? `${count} title changes` : `${executing ? "Setting" : "Set"} ${count} titles`;
-  const headline = stepHeadline(latest);
-  const label = headline.action === "Used" || headline.action === "Using" ? `${headline.action} ${cleanToolName(latest.tool || "tool")}` : headline.action || "Activities";
-  return `${label} \xB7 ${count} steps`;
-}
-function traceStatus(step) {
-  if (step.kind === "retry") return "queued";
-  if (step.kind !== "tool") return "neutral";
-  return step.status === "pending" ? "queued" : step.status === "error" ? "failed" : step.status || "unknown";
-}
-function traceStatusClass(step) {
-  return `trace-status-${traceStatus(step)}`;
-}
-function activityLineId(line, index) {
-  if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
-  const step = parseStep(line.text);
-  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
-}
-function displayStep(line, live) {
-  const step = parseStep(line.text);
-  return step.kind === "tool" && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
-}
-function chapterCategory(step, index) {
-  if (step.kind === "file" || step.kind === "tool" && toolKind(step) === "read") return "read";
-  if (step.kind === "patch" || step.kind === "tool" && ["write", "edit", "patch"].includes(toolKind(step)))
-    return "change";
-  if (step.kind === "tool" && COMMAND_TOOLS.has(toolKind(step))) return "commands";
-  if (step.kind === "tool" && SEARCH_TOOLS.has(toolKind(step))) return "search";
-  return step.kind === "tool" ? `tool:${cleanToolName(step.tool || "tool")}` : `event:${index}`;
-}
-function activityChapters(lines, live = false) {
-  const groups2 = [];
-  lines.forEach((line, index) => {
-    const step = displayStep(line, live);
-    const entry = { id: activityLineId(line, index), line, step };
-    const category = chapterCategory(step, index);
-    const last = groups2.at(-1);
-    if (last?.category === category) last.entries.push(entry);
-    else groups2.push({ category, entries: [entry] });
-  });
-  return groups2.map(({ category, entries }) => {
-    const statuses = entries.map((entry) => traceStatus(entry.step));
-    const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
-      (candidate) => statuses.includes(candidate)
-    ) || "neutral";
-    return {
-      id: entries[0].id,
-      entries,
-      title: chapterTitle(category, entries),
-      status,
-      failures: statuses.filter((item) => item === "failed").length
-    };
-  });
-}
-
 // src/activity-trace-state.ts
-var DEFAULT_TRACE_VIEW = {
-  expanded: false,
-  selectedEntry: null,
-  openChapter: null,
-  followLatest: false
-};
-var views = y3(/* @__PURE__ */ new Map());
-function activityTraceId(message2) {
-  return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
+var intent = y3(null);
+function turnId(message2) {
+  return message2.turn?.id ?? message2.turnId ?? message2.statsTurn?.id ?? null;
 }
-function activityTraceView(id2) {
-  return views.value.get(id2) ?? DEFAULT_TRACE_VIEW;
+function activityTraceOwner(message2) {
+  const turn2 = message2.turnTraceOwner ? turnId(message2) : null;
+  return turn2 ? `turn:${turn2}` : `message:${message2.id ?? `${message2.direction}:${message2.ts}:${message2.text}`}`;
 }
-function updateActivityTraceView(id2, update) {
-  const next = new Map(views.peek());
-  next.set(id2, update(next.get(id2) ?? DEFAULT_TRACE_VIEW));
-  views.value = next;
+function activityTraceView(ownerId, live = false) {
+  const current = intent.value;
+  const expanded = current?.ownerId === ownerId;
+  return { expanded, following: expanded && current.mode === "follow" && live };
 }
-function resetActivityTraceViews() {
-  views.value = /* @__PURE__ */ new Map();
+function toggleActivityTrace(ownerId, follow = false) {
+  const current = intent.peek();
+  intent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? "follow" : "open" };
 }
-function toggleActivityTrace(view, lines, latest = false) {
-  if (view.expanded) return { ...view, expanded: false, followLatest: false };
-  const opened = { ...DEFAULT_TRACE_VIEW, expanded: true, followLatest: latest };
-  return latest ? latestActivityTraceView(opened, lines) : opened;
+function pauseActivityTrace(ownerId) {
+  if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: "open" };
 }
-function latestActivityTraceView(view, lines) {
-  const chapter = activityChapters(lines, true).at(-1);
-  return {
-    ...view,
-    selectedEntry: chapter?.entries.at(-1)?.id ?? null,
-    openChapter: chapter && chapter.entries.length > 1 ? chapter.id : null
-  };
-}
-function transferActivityTraceViews(previous, next) {
-  const current = views.peek();
-  if (!current.size) return;
-  const retained = new Set(next.map(activityTraceId));
-  const migrated = new Map(current);
-  const followingTurns = new Set(
-    previous.flatMap((message2) => {
-      const view = current.get(activityTraceId(message2));
-      return message2.direction === "turn" && message2.turnStatus && message2.turn && message2.turn.phase !== "settled" && view?.expanded && view.followLatest ? [message2.turn.id] : [];
-    })
-  );
-  for (const message2 of previous) {
-    const id2 = activityTraceId(message2);
-    if (retained.has(id2)) continue;
-    const view = current.get(id2);
-    if (view?.expanded && message2.direction === "turn" && message2.turn) {
-      const entries = new Set(message2.activity?.map(activityLineId));
-      const reply = next.find(
-        (item) => item.direction === "out" && item.turnId === message2.turn?.id && item.activity?.some((line, index) => entries.has(activityLineId(line, index)))
-      );
-      if (reply) {
-        const chapters = activityChapters(reply.activity ?? []);
-        const openChapter = chapters.find((chapter) => chapter.entries.some((entry) => entry.id === view.openChapter));
-        const transferred = {
-          ...view,
-          followLatest: false,
-          openChapter: openChapter?.id ?? null,
-          selectedEntry: chapters.some((chapter) => chapter.entries.some((entry) => entry.id === view.selectedEntry)) ? view.selectedEntry : null
-        };
-        migrated.set(
-          activityTraceId(reply),
-          view.followLatest ? { ...latestActivityTraceView(transferred, reply.activity ?? []), followLatest: false } : transferred
-        );
-      }
-    }
-    migrated.delete(id2);
-  }
-  for (const message2 of next) {
-    if (message2.direction !== "turn" || !message2.turn || !followingTurns.has(message2.turn.id)) continue;
-    const id2 = activityTraceId(message2);
-    const view = migrated.get(id2);
-    if (message2.turnStatus) {
-      migrated.set(
-        id2,
-        latestActivityTraceView(
-          {
-            ...view ?? DEFAULT_TRACE_VIEW,
-            expanded: true,
-            followLatest: message2.turn.phase !== "settled"
-          },
-          message2.activity ?? []
-        )
-      );
-    } else if (view?.followLatest) {
-      migrated.set(id2, { ...view, followLatest: false });
-    }
-  }
-  views.value = migrated;
+function resetActivityTraceView() {
+  intent.value = null;
 }
 
 // src/turn-completion.ts
@@ -18986,7 +18667,7 @@ var completedResponse = y3(null);
 function resetConversation() {
   conversationState.value = null;
   completedResponse.value = null;
-  resetActivityTraceViews();
+  resetActivityTraceView();
 }
 function activityKey(ts) {
   const ms = Number(ts);
@@ -19032,8 +18713,9 @@ function conversationMessages(view) {
       const next = boundaries[index];
       const target = next?.direction === "out" ? next.id : !next && settled ? host : void 0;
       const message2 = target ? byId.get(target) : void 0;
-      if (message2) message2.activity = [...message2.activity ?? [], ...lines];
-      else bubbles.set(index, lines);
+      if (message2) {
+        message2.activity = [...message2.activity ?? [], ...lines];
+      } else bubbles.set(index, lines);
     }
     const statusSegment = !settled ? boundaries.length : host || turnRowView(turn2, 0).hidden ? null : Math.max(0, ...bubbles.keys());
     if (statusSegment !== null && !bubbles.has(statusSegment)) bubbles.set(statusSegment, []);
@@ -19050,6 +18732,15 @@ function conversationMessages(view) {
         ts,
         ...position !== null ? { timelinePosition: position } : {}
       });
+    }
+    const traced = messages.filter((message2) => {
+      const messageTurn = message2.turn?.id ?? message2.turnId ?? message2.statsTurn?.id;
+      return messageTurn === turn2.id && !!message2.activity?.length;
+    }).sort((a4, b5) => timelineSortKey(a4.ts, a4.timelinePosition) - timelineSortKey(b5.ts, b5.timelinePosition));
+    const owner = settled && host ? byId.get(host) : traced.at(-1);
+    if (owner) {
+      owner.turnTraceOwner = true;
+      if (!settled) owner.turnTraceLive = true;
     }
   }
   return messages.sort((a4, b5) => timelineSortKey(a4.ts, a4.timelinePosition) - timelineSortKey(b5.ts, b5.timelinePosition));
@@ -19069,7 +18760,7 @@ function applyConversationFrame(raw, expectedThreadId) {
     for (const message2 of view.messages) {
       if (message2.inputState?.status === "cancelled") confirmCancelledInput(message2.id);
     }
-    transferActivityTraceViews(chatMessages.peek(), messages);
+    if (frame.kind === "snapshot") resetActivityTraceView();
     chatMessages.value = messages;
     if (frame.kind === "update") {
       const response = completedResponseId(previous?.conversation ?? null, messages);
@@ -21755,6 +21446,255 @@ function timelineLayoutKey(messages) {
   );
 }
 
+// ../../shared/activity-presentation.ts
+var TRACE_STATUS_LABELS = {
+  queued: "Pending",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  interrupted: "Interrupted (outcome unknown)",
+  unknown: "Outcome unknown",
+  neutral: "Activity"
+};
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function isStep(value) {
+  if (!isRecord(value)) return false;
+  for (const key of ["id", "tool", "detail", "title", "error", "text", "path", "name", "agent", "description"]) {
+    if (value[key] !== void 0 && typeof value[key] !== "string") return false;
+  }
+  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification"].includes(value.kind)))
+    return false;
+  if (value.status !== void 0 && (typeof value.status !== "string" || !["pending", "running", "completed", "error", "interrupted", "unknown"].includes(value.status)))
+    return false;
+  if (value.durationMs !== void 0 && (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs < 0))
+    return false;
+  if (value.attempt !== void 0 && typeof value.attempt !== "number") return false;
+  if (value.auto !== void 0 && typeof value.auto !== "boolean") return false;
+  return value.files === void 0 || Array.isArray(value.files) && value.files.every((file) => typeof file === "string");
+}
+function parseStep(text2) {
+  try {
+    const value = JSON.parse(text2);
+    return isStep(value) ? value : {};
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return {};
+  }
+}
+function cleanToolName(tool) {
+  if (!tool.startsWith("mcp__")) return tool.toLowerCase();
+  const [server, ...name] = tool.slice(5).split("__");
+  return `${server}.${name.join(".") || server}`.toLowerCase();
+}
+function toolKind(step) {
+  return cleanToolName(step.tool || "").split(".").at(-1) || "";
+}
+function isTodoStep(step) {
+  return step.kind === "tool" && ["todo", "todowrite", "todo_write"].includes(toolKind(step));
+}
+function isTitleStep(step) {
+  return step.kind === "tool" && ["nanoclaw.set_thread_title", "set_thread_title"].includes(cleanToolName(step.tool || ""));
+}
+function todoItems(step) {
+  if (!isTodoStep(step) || !step.detail) return null;
+  const items = [];
+  for (const line of step.detail.split("\n")) {
+    const match2 = line.match(/^(Completed|In progress|Pending|Cancelled|Task):\s*(.*)$/i);
+    if (!match2) {
+      if (!items.length) return null;
+      items[items.length - 1].content += `
+${line}`;
+      continue;
+    }
+    const status = match2[1].toLowerCase();
+    const priority = match2[2].match(/\s+\(([^()\n]+) priority\)$/i);
+    items.push({
+      content: priority ? match2[2].slice(0, priority.index).trimEnd() : match2[2],
+      status: status === "completed" ? "completed" : status === "in progress" ? "in_progress" : status === "pending" ? "pending" : status === "cancelled" ? "cancelled" : "unknown",
+      ...priority ? { priority: priority[1] } : {}
+    });
+  }
+  return items.length ? items : null;
+}
+function singleLine(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+var FILE_OP_VERBS = {
+  read: { present: "Reading", past: "Read" },
+  write: { present: "Writing", past: "Wrote" },
+  edit: { present: "Editing", past: "Edited" }
+};
+var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
+var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
+function stepHeadline(step) {
+  switch (step.kind) {
+    case "tool": {
+      const tool = toolKind(step);
+      if (!step.status || step.status === "interrupted" || step.status === "unknown") {
+        return {
+          action: step.status === "interrupted" ? "Interrupted (outcome unknown):" : "Outcome unknown:",
+          subject: [cleanToolName(step.tool || "tool"), singleLine(step.detail || step.title || "")].filter(Boolean).join(" "),
+          codeSubject: true
+        };
+      }
+      const finished = step.status === "completed" || step.status === "error";
+      if (isTitleStep(step))
+        return {
+          action: finished ? step.detail ? "Set title to" : "Set title" : step.detail ? "Setting title to" : "Setting title",
+          ...step.detail ? { subject: singleLine(step.detail) } : {}
+        };
+      if (isTodoStep(step)) return { action: finished ? "Updated TODO items" : "Updating TODO items" };
+      const fileOp = FILE_OP_VERBS[tool];
+      if (fileOp) {
+        const target = step.detail || step.title || "";
+        return {
+          action: finished ? fileOp.past : fileOp.present,
+          ...target ? { subject: singleLine(target), codeSubject: true } : {}
+        };
+      }
+      if (COMMAND_TOOLS.has(tool))
+        return {
+          action: step.status === "pending" ? "Queued" : finished ? "Ran" : "Running",
+          subject: singleLine(step.detail || cleanToolName(step.tool || "command")),
+          codeSubject: true
+        };
+      if (SEARCH_TOOLS.has(tool) && (step.detail || step.title))
+        return {
+          action: finished ? "Searched for" : "Searching for",
+          subject: singleLine(step.detail || step.title || ""),
+          codeSubject: true
+        };
+      if (step.title)
+        return { action: step.title, ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {} };
+      return { action: finished ? "Used" : "Using", subject: cleanToolName(step.tool || "tool"), codeSubject: true };
+    }
+    case "internal":
+      return { action: "Internal activity" };
+    case "file":
+      return { action: "Opened", subject: step.name || step.path || "file", codeSubject: true };
+    case "patch":
+      return {
+        action: "Updated",
+        subject: step.files?.length === 1 ? step.files[0] : `${step.files?.length || 0} files`,
+        codeSubject: step.files?.length === 1
+      };
+    case "retry":
+      return { action: "Retrying", subject: `attempt ${step.attempt ?? 0}` };
+    case "compaction":
+      return { action: step.auto ? "Compacted context automatically" : "Compacted context" };
+    case "subtask":
+      return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
+    case "notification":
+      return { action: step.text || "Notification" };
+    default:
+      return { action: "" };
+  }
+}
+function chapterEntryHeadline(step) {
+  if (isTodoStep(step)) {
+    const items = todoItems(step);
+    return { action: items ? `${items.length} TODO item${items.length === 1 ? "" : "s"}` : "TODO items" };
+  }
+  if (isTitleStep(step) && !step.detail) return { action: "Title not recorded" };
+  if (step.kind === "tool" && step.detail) {
+    return { action: "", subject: singleLine(step.detail), codeSubject: !isTitleStep(step) };
+  }
+  const headline = stepHeadline(step);
+  return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
+}
+function recordedFilePaths(entries) {
+  const paths = /* @__PURE__ */ new Set();
+  for (const { step } of entries) {
+    const targets = step.kind === "patch" ? step.files : step.kind === "file" ? step.path ? [step.path] : void 0 : ["read", "write", "edit"].includes(toolKind(step)) && step.detail ? [step.detail] : void 0;
+    if (!targets || targets.some((path) => !path.trim())) return null;
+    targets.forEach((path) => paths.add(path.trim()));
+  }
+  return paths;
+}
+function chapterTitle(category, entries) {
+  const latest = entries[entries.length - 1].step;
+  const status = traceStatus(latest);
+  const executing = status === "running" || status === "queued";
+  const uncertain = status === "unknown" || status === "interrupted";
+  const count = entries.length;
+  if (category === "commands") {
+    const label2 = `${count} command${count === 1 ? "" : "s"}`;
+    return uncertain ? label2 : `${executing ? "Running" : "Ran"} ${label2}`;
+  }
+  if (category === "read" || category === "change") {
+    const files = recordedFilePaths(entries);
+    const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
+    if (uncertain) {
+      const label2 = category === "read" ? "File reads" : "File changes";
+      return files === null ? `${label2} \xB7 ${count} steps` : `${label2} \xB7 ${files.size} file${files.size === 1 ? "" : "s"}`;
+    }
+    if (category === "change" && count > 1 && files?.size === 1) {
+      return `${verb} ${files.values().next().value} * ${count} steps`;
+    }
+    return files === null ? `${verb} files \xB7 ${count} steps` : `${verb} ${files.size} file${files.size === 1 ? "" : "s"}`;
+  }
+  if (category === "search")
+    return uncertain ? `${count} searches` : `${executing ? "Searching" : "Searched"} \xB7 ${count} searches`;
+  if (isTodoStep(latest))
+    return `${uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items"} \xB7 ${count} updates`;
+  if (isTitleStep(latest))
+    return uncertain ? `${count} title changes` : `${executing ? "Setting" : "Set"} ${count} titles`;
+  const headline = stepHeadline(latest);
+  const label = headline.action === "Used" || headline.action === "Using" ? `${headline.action} ${cleanToolName(latest.tool || "tool")}` : headline.action || "Activities";
+  return `${label} \xB7 ${count} steps`;
+}
+function traceStatus(step) {
+  if (step.kind === "retry") return "queued";
+  if (step.kind !== "tool") return "neutral";
+  return step.status === "pending" ? "queued" : step.status === "error" ? "failed" : step.status || "unknown";
+}
+function traceStatusClass(step) {
+  return `trace-status-${traceStatus(step)}`;
+}
+function activityLineId(line, index) {
+  if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
+  const step = parseStep(line.text);
+  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
+}
+function displayStep(line, live) {
+  const step = parseStep(line.text);
+  return step.kind === "tool" && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
+}
+function chapterCategory(step, index) {
+  if (step.kind === "file" || step.kind === "tool" && toolKind(step) === "read") return "read";
+  if (step.kind === "patch" || step.kind === "tool" && ["write", "edit", "patch"].includes(toolKind(step)))
+    return "change";
+  if (step.kind === "tool" && COMMAND_TOOLS.has(toolKind(step))) return "commands";
+  if (step.kind === "tool" && SEARCH_TOOLS.has(toolKind(step))) return "search";
+  return step.kind === "tool" ? `tool:${cleanToolName(step.tool || "tool")}` : `event:${index}`;
+}
+function activityChapters(lines, live = false) {
+  const groups2 = [];
+  lines.forEach((line, index) => {
+    const step = displayStep(line, live);
+    const entry = { id: activityLineId(line, index), line, step };
+    const category = chapterCategory(step, index);
+    const last = groups2.at(-1);
+    if (last?.category === category) last.entries.push(entry);
+    else groups2.push({ category, entries: [entry] });
+  });
+  return groups2.map(({ category, entries }) => {
+    const statuses = entries.map((entry) => traceStatus(entry.step));
+    const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
+      (candidate) => statuses.includes(candidate)
+    ) || "neutral";
+    return {
+      id: entries[0].id,
+      entries,
+      title: chapterTitle(category, entries),
+      status,
+      failures: statuses.filter((item) => item === "failed").length
+    };
+  });
+}
+
 // src/input-state.ts
 function inputStatePresentation(state) {
   if (!state) return null;
@@ -22835,60 +22775,36 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
     open && todos && step.error ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: step.error }) }) : null
   ] });
 }
-function ActivityTraceList({ lines, live = false, now = null, openLatest = false, traceId }) {
+function ActivityTraceList({ lines, live = false, now = null, following = false, onBrowse }) {
   const listRef = A2(null);
-  const follow = A2(true);
-  const navigation = A2(null);
-  const [localView, setLocalView] = h2(() => toggleActivityTrace(DEFAULT_TRACE_VIEW, lines, openLatest));
-  const currentView = traceId ? activityTraceView(traceId) : localView;
-  const resolveView = (view) => live && view.followLatest ? latestActivityTraceView(view, lines) : view;
-  const traceView = resolveView(currentView);
-  const setView = (update) => {
-    if (traceId) updateActivityTraceView(traceId, (view) => update(resolveView(view)));
-    else setLocalView((view) => update(resolveView(view)));
-  };
-  const updateView = A2(setView);
-  updateView.current = setView;
+  const [target, setTarget] = h2(null);
   y2(() => {
-    if (!listRef.current) return;
-    const disposeEdges = attachScrollEdges(listRef.current);
-    const scroll = attachScrollNavigation(listRef.current, () => {
-    }, void 0, (direction) => {
-      if (direction !== "up") return;
-      follow.current = false;
-      updateView.current((view) => ({ ...view, followLatest: false }));
-    });
-    navigation.current = scroll;
-    return () => {
-      disposeEdges();
-      scroll.dispose();
-      navigation.current = null;
-    };
-  }, [traceId]);
+    if (listRef.current) return attachScrollEdges(listRef.current);
+  }, []);
   const revealed = A2(false);
   _2(() => {
     if (!listRef.current || !lines.length) return;
-    if (!revealed.current || live && follow.current) {
-      navigation.current?.reset();
-      revealLatestActivity(listRef.current, live && traceView.followLatest);
-    }
+    if (!revealed.current || live && following) revealLatestActivity(listRef.current, live && following);
     revealed.current = true;
-  }, [lines, live, traceView.followLatest]);
-  const sel = traceView.selectedEntry;
-  const toggle = (id2) => {
-    follow.current = false;
-    setView((view) => ({ ...view, followLatest: false, selectedEntry: view.selectedEntry === id2 ? null : id2 }));
-  };
+  }, [lines, live, following]);
   const chapters = activityChapters(lines, live);
-  const openChapter = traceView.openChapter;
+  const latestChapter = following ? chapters.at(-1) : null;
+  const sel = following ? latestChapter?.entries.at(-1)?.id ?? null : target?.kind === "entry" ? target.id : null;
+  const openChapter = following ? latestChapter && latestChapter.entries.length > 1 ? latestChapter.id : null : target?.kind === "chapter" ? target.id : target?.kind === "entry" ? chapters.find((chapter) => chapter.entries.some((entry) => entry.id === target.id))?.id ?? null : null;
+  const toggle = (id2) => {
+    onBrowse?.();
+    setTarget((current) => {
+      if (current?.kind !== "entry" || current.id !== id2) return { kind: "entry", id: id2 };
+      const chapter = chapters.find((candidate) => candidate.entries.some((entry) => entry.id === id2));
+      return chapter && chapter.entries.length > 1 ? { kind: "chapter", id: chapter.id } : null;
+    });
+  };
   const toggleChapter = (id2) => {
-    follow.current = false;
-    setView((view) => ({
-      ...view,
-      followLatest: false,
-      openChapter: view.openChapter === id2 ? null : id2,
-      selectedEntry: null
-    }));
+    onBrowse?.();
+    setTarget((current) => {
+      const selectedChapter = current?.kind === "chapter" ? current.id : current?.kind === "entry" ? chapters.find((chapter) => chapter.entries.some((entry) => entry.id === current.id))?.id : null;
+      return selectedChapter === id2 ? null : { kind: "chapter", id: id2 };
+    });
   };
   return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, children: chapters.map((chapter) => {
     if (chapter.entries.length === 1) {
@@ -22966,10 +22882,21 @@ function ActivityTracePanel({
   expanded,
   live = false,
   now = null,
-  traceId
+  ownerId,
+  following = false
 }) {
   if (!lines.length || !expanded) return null;
-  return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now, traceId }) });
+  return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: /* @__PURE__ */ u4(
+    ActivityTraceList,
+    {
+      lines,
+      live,
+      now,
+      following,
+      onBrowse: () => pauseActivityTrace(ownerId)
+    },
+    `${ownerId}:${live}`
+  ) });
 }
 function fmtCost(usd) {
   if (usd >= 1) return "$" + usd.toFixed(2);
@@ -23229,10 +23156,10 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
   const [continueState, setContinueState] = h2("idle");
-  const traceId = activityTraceId(m6);
-  const traceExpanded = activityTraceView(traceId).expanded;
-  const toggleTrace = () => updateActivityTraceView(traceId, (view) => toggleActivityTrace(view, m6.activity ?? []));
-  if (m6.direction === "turn" && m6.turn) return /* @__PURE__ */ u4(ConversationTurnRow, { turn: m6.turn, lines: m6.activity ?? [], status: !!m6.turnStatus, traceId });
+  const traceOwner = activityTraceOwner(m6);
+  const traceView = activityTraceView(traceOwner, !!m6.turnTraceLive);
+  const toggleTrace = () => toggleActivityTrace(traceOwner);
+  if (m6.direction === "turn" && m6.turn) return /* @__PURE__ */ u4(ConversationTurnRow, { turn: m6.turn, lines: m6.activity ?? [], status: !!m6.turnStatus, ownerId: traceOwner });
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -23385,11 +23312,20 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             children: continueState === "sent" ? "Sent" : continueState === "sending" ? action.sendingLabel : action.label
           }
         ) }) : null,
-        activity.length && showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded, traceId }) : null,
+        activity.length && showTechnicalStatus ? /* @__PURE__ */ u4(
+          ActivityTracePanel,
+          {
+            lines: activity,
+            expanded: traceView.expanded,
+            live: m6.turnTraceLive,
+            ownerId: traceOwner,
+            following: traceView.following
+          }
+        ) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
         m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
           m6.ts && /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-          /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? activity.length : 0, expanded: traceExpanded, onToggle: toggleTrace }),
+          /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? activity.length : 0, expanded: traceView.expanded, onToggle: toggleTrace }),
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
           showsMidTurnLabel(
@@ -23415,8 +23351,8 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   );
 }
 function DisplayCardMessage({ message: message2, card }) {
-  const traceId = activityTraceId(message2);
-  const traceExpanded = activityTraceView(traceId).expanded;
+  const traceOwner = activityTraceOwner(message2);
+  const traceView = activityTraceView(traceOwner, !!message2.turnTraceLive);
   const activity = message2.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message2.id, children: [
@@ -23440,7 +23376,16 @@ function DisplayCardMessage({ message: message2, card }) {
       },
       `${action.label}:${action.url}`
     )) }) : null,
-    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: activity, expanded: traceExpanded, traceId }) : null,
+    showTechnicalStatus ? /* @__PURE__ */ u4(
+      ActivityTracePanel,
+      {
+        lines: activity,
+        expanded: traceView.expanded,
+        live: message2.turnTraceLive,
+        ownerId: traceOwner,
+        following: traceView.following
+      }
+    ) : null,
     message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
     message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
       message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
@@ -23448,8 +23393,8 @@ function DisplayCardMessage({ message: message2, card }) {
         ActivityTraceToggle,
         {
           count: showTechnicalStatus ? activity.length : 0,
-          expanded: traceExpanded,
-          onToggle: () => updateActivityTraceView(traceId, (view) => toggleActivityTrace(view, activity))
+          expanded: traceView.expanded,
+          onToggle: () => toggleActivityTrace(traceOwner)
         }
       ),
       /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }),
@@ -23458,7 +23403,7 @@ function DisplayCardMessage({ message: message2, card }) {
   ] });
 }
 function messageKey(message2) {
-  return activityTraceId(message2);
+  return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
 }
 function groupKey(group) {
   if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
@@ -23671,11 +23616,11 @@ function ReplyTurnStats({
     showTechnicalDetails ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
   ] });
 }
-function ConversationTurnRow({ turn: turn2, lines, status, traceId }) {
-  const traceExpanded = activityTraceView(traceId).expanded;
+function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
   const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
   const settled = turn2.phase === "settled";
   const live = status && !settled;
+  const traceView = activityTraceView(ownerId, live);
   const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : null;
   const [now, setNow] = h2(() => Date.now());
   y2(() => {
@@ -23692,15 +23637,15 @@ function ConversationTurnRow({ turn: turn2, lines, status, traceId }) {
   if (!lines.length && !status) return null;
   if (settled && !showTechnicalStatus && !view.note && !stop?.error) return null;
   const toggleFromPreview = () => {
-    updateActivityTraceView(traceId, (view2) => toggleActivityTrace(view2, lines, true));
+    toggleActivityTrace(ownerId, true);
   };
   const toggleFromCount = () => {
-    updateActivityTraceView(traceId, (view2) => toggleActivityTrace(view2, lines));
+    toggleActivityTrace(ownerId);
   };
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: `typing turn-system${status ? " turn-status" : ""}${live ? " turn-live" : ""}${traceExpanded ? " expanded" : ""}${provenanceTone}`,
+      class: `typing turn-system${status ? " turn-status" : ""}${live ? " turn-live" : ""}${traceView.expanded ? " expanded" : ""}${provenanceTone}`,
       "data-turn-id": status ? turn2.id : void 0,
       "aria-live": live ? "polite" : "off",
       children: [
@@ -23716,9 +23661,9 @@ function ConversationTurnRow({ turn: turn2, lines, status, traceId }) {
             {
               type: "button",
               class: "hint trace-preview",
-              "aria-expanded": traceExpanded,
-              "aria-label": traceExpanded ? "Hide activity" : "Show latest activity",
-              title: traceExpanded ? "Hide activity" : "Show latest activity",
+              "aria-expanded": traceView.expanded,
+              "aria-label": traceView.expanded ? "Hide activity" : "Show latest activity",
+              title: traceView.expanded ? "Hide activity" : "Show latest activity",
               onClick: toggleFromPreview,
               children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
             }
@@ -23731,14 +23676,15 @@ function ConversationTurnRow({ turn: turn2, lines, status, traceId }) {
           ActivityTracePanel,
           {
             lines,
-            expanded: traceExpanded,
+            expanded: traceView.expanded,
             live: !settled,
             now: endedAt ?? now,
-            traceId
+            ownerId,
+            following: traceView.following
           }
         ) : null,
         showTechnicalStatus && (status || lines.length) ? /* @__PURE__ */ u4("div", { class: "meta", children: [
-          /* @__PURE__ */ u4(ActivityTraceToggle, { count: lines.length, expanded: traceExpanded, onToggle: toggleFromCount }),
+          /* @__PURE__ */ u4(ActivityTraceToggle, { count: lines.length, expanded: traceView.expanded, onToggle: toggleFromCount }),
           status ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
         ] }) : null
       ]
@@ -24161,7 +24107,7 @@ function QuestionCardItem({ question: q5, busy }) {
         }
       )
     ] }),
-    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: q5.activity ?? [], expanded: traceExpanded, traceId }) : null,
+    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: q5.activity ?? [], expanded: traceExpanded, ownerId: traceId }) : null,
     /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }),
       /* @__PURE__ */ u4(
@@ -24169,7 +24115,7 @@ function QuestionCardItem({ question: q5, busy }) {
         {
           count: showTechnicalStatus ? q5.activity?.length ?? 0 : 0,
           expanded: traceExpanded,
-          onToggle: () => updateActivityTraceView(traceId, (view) => toggleActivityTrace(view, q5.activity ?? []))
+          onToggle: () => toggleActivityTrace(traceId)
         }
       ),
       !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null

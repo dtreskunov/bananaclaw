@@ -23,7 +23,7 @@ import { applyTurnState } from './stop-turn';
 import { confirmCancelledInput } from './pending-cancel';
 import { playCompletionChime, playProgressTick } from './sound';
 import { maybeNotify } from './notify';
-import { resetActivityTraceViews, transferActivityTraceViews } from './activity-trace-state';
+import { resetActivityTraceView } from './activity-trace-state';
 import { completedResponseId } from './turn-completion';
 import type { ChatMessage } from './types';
 
@@ -32,7 +32,7 @@ export const completedResponse = signal<string | null>(null);
 export function resetConversation(): void {
   conversationState.value = null;
   completedResponse.value = null;
-  resetActivityTraceViews();
+  resetActivityTraceView();
 }
 
 /** Activity `ts` is epoch milliseconds. */
@@ -109,8 +109,9 @@ export function conversationMessages(view: Conversation): ChatMessage[] {
       const next = boundaries[index];
       const target = next?.direction === 'out' ? next.id : !next && settled ? host : undefined;
       const message = target ? byId.get(target) : undefined;
-      if (message) message.activity = [...(message.activity ?? []), ...lines];
-      else bubbles.set(index, lines);
+      if (message) {
+        message.activity = [...(message.activity ?? []), ...lines];
+      } else bubbles.set(index, lines);
     }
     // Live status follows the newest turn message; settled status needs a bubble only without a reply.
     const statusSegment = !settled
@@ -133,6 +134,17 @@ export function conversationMessages(view: Conversation): ChatMessage[] {
         ...(position !== null ? { timelinePosition: position } : {}),
       });
     }
+    const traced = messages
+      .filter((message) => {
+        const messageTurn = message.turn?.id ?? message.turnId ?? message.statsTurn?.id;
+        return messageTurn === turn.id && !!message.activity?.length;
+      })
+      .sort((a, b) => timelineSortKey(a.ts, a.timelinePosition) - timelineSortKey(b.ts, b.timelinePosition));
+    const owner = settled && host ? byId.get(host) : traced.at(-1);
+    if (owner) {
+      owner.turnTraceOwner = true;
+      if (!settled) owner.turnTraceLive = true;
+    }
   }
   return messages.sort((a, b) => timelineSortKey(a.ts, a.timelinePosition) - timelineSortKey(b.ts, b.timelinePosition));
 }
@@ -152,7 +164,7 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
     for (const message of view.messages) {
       if (message.inputState?.status === 'cancelled') confirmCancelledInput(message.id);
     }
-    transferActivityTraceViews(chatMessages.peek(), messages);
+    if (frame.kind === 'snapshot') resetActivityTraceView();
     chatMessages.value = messages;
     if (frame.kind === 'update') {
       const response = completedResponseId(previous?.conversation ?? null, messages);

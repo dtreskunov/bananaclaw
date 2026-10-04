@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat } from './actions';
 import { completedResponse, conversationState } from './conversation-state';
-import { activityTraceView, toggleActivityTrace, updateActivityTraceView } from './activity-trace-state';
+import { activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace } from './activity-trace-state';
 import { diffConversation } from '../../../shared/conversation-protocol';
 import type { Conversation } from '../../../shared/conversation';
 import { testSnapshot, testTurn } from './conversation-test-fixtures';
@@ -71,14 +71,11 @@ describe('authoritative turn presentation', () => {
       ts: String(1000 + ordinal),
       text: JSON.stringify({ kind: 'tool', id: `step-${ordinal}`, tool: 'bash', status: 'running' }),
     }));
-    updateActivityTraceView('turn:turn-1', (view) => toggleActivityTrace(view, testTurn.activity, true));
+    const traceId = 'turn:turn-1';
+    toggleActivityTrace(traceId, true);
     update({ ...initial, turns: [{ ...testTurn, activity: steps }] });
-    expect(activityTraceView('turn:turn-1')).toMatchObject({
-      followLatest: true,
-      openChapter: 'activity-0',
-      selectedEntry: 'activity-1',
-    });
-    updateActivityTraceView('turn:turn-1', (view) => toggleActivityTrace(toggleActivityTrace(view, steps), steps));
+    expect(activityTraceView(traceId, true)).toEqual({ expanded: true, following: true });
+    pauseActivityTrace(traceId);
     update({
       ...initial,
       turns: [
@@ -95,14 +92,11 @@ describe('authoritative turn presentation', () => {
         },
       ],
     });
-    expect(activityTraceView('turn:turn-1')).toMatchObject({
-      followLatest: false,
-      openChapter: null,
-      selectedEntry: null,
-    });
+    expect(activityTraceView(traceId, true)).toEqual({ expanded: true, following: false });
   });
   it('moves an expanded live trace to the reply and requests its top on completion', () => {
-    updateActivityTraceView('turn:turn-1', (view) => toggleActivityTrace(view, testTurn.activity));
+    const traceId = 'turn:turn-1';
+    toggleActivityTrace(traceId);
     const settled: Conversation = {
       ...initial,
       messages: [
@@ -112,9 +106,48 @@ describe('authoritative turn presentation', () => {
       connection: { connected: true, activeTurnId: null },
     };
     update(settled);
-    expect(activityTraceView('reply').expanded).toBe(true);
-    expect(activityTraceView('reply').openChapter).toBeNull();
+    const reply = chatMessages.value.find((message) => message.id === 'reply')!;
+    expect(reply.turnTraceOwner).toBe(true);
+    expect(activityTraceOwner(reply)).toBe(traceId);
+    expect(activityTraceView(traceId)).toEqual({ expanded: true, following: false });
     expect(completedResponse.value).toBe('reply');
+  });
+
+  it('moves turn ownership from an early response to new tail activity without changing intent', () => {
+    const traceId = 'turn:turn-1';
+    toggleActivityTrace(traceId, true);
+    const reply = {
+      id: 'early-reply',
+      direction: 'out' as const,
+      turnId: testTurn.id,
+      text: 'Still working',
+      timestamp: '2026-09-29T00:00:02Z',
+    };
+    const early = {
+      ...initial,
+      messages: [reply],
+      turns: [{ ...testTurn, outputIds: [reply.id] }],
+    };
+    update(early);
+    expect(chatMessages.value.find((message) => message.id === reply.id)).toMatchObject({
+      turnTraceOwner: true,
+      turnTraceLive: true,
+    });
+    expect(activityTraceView(traceId, true).following).toBe(true);
+
+    const tail = {
+      ordinal: 1,
+      ts: String(Date.parse('2026-09-29T00:00:03Z')),
+      text: JSON.stringify({ kind: 'tool', id: 'tail', tool: 'bash', status: 'running' }),
+    };
+    update({ ...early, turns: [{ ...testTurn, outputIds: [reply.id], activity: [...testTurn.activity, tail] }] });
+    expect(chatMessages.value.find((message) => message.id === reply.id)?.turnTraceOwner).toBeUndefined();
+    expect(
+      chatMessages.value.find(
+        (message) => message.direction === 'turn' && message.activity?.some((line) => line.ordinal === tail.ordinal),
+      ),
+    ).toMatchObject({ turnTraceOwner: true, turnTraceLive: true });
+    expect(activityTraceView(traceId, true).following).toBe(true);
   });
 
   it('does not request completion scrolling for a settled reconnect snapshot', () => {
@@ -128,6 +161,12 @@ describe('authoritative turn presentation', () => {
     };
     receive(testSnapshot(settled, 'reconnect'));
     expect(completedResponse.value).toBeNull();
+  });
+
+  it('clears transient trace state on a reconnect snapshot', () => {
+    toggleActivityTrace('turn:turn-1', true);
+    receive(testSnapshot(initial, 'reconnect'));
+    expect(activityTraceView('turn:turn-1', true)).toEqual({ expanded: false, following: false });
   });
 
   it('retains a migrated partial accounting record without synthesizing the absent counters', () => {
