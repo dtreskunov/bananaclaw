@@ -362,6 +362,7 @@ describe('session signal link', () => {
           status: 'error',
           error: 'invalid arguments',
           rejectedBeforeExecution: true,
+          description: 'Subject: <literal>\nSecond line',
         },
       })}\n`,
     );
@@ -385,11 +386,12 @@ describe('session signal link', () => {
     await waitFor(() => getSessionSignalUsage(SESSION_ID)?.duration_api_ms === 250);
     expect(JSON.parse(getSessionSignalActivity(SESSION_ID)[0].text)).toMatchObject({
       rejectedBeforeExecution: true,
+      description: 'Subject: <literal>\nSecond line',
     });
     socket.destroy();
   });
 
-  it('preserves steering text on reconnect without blocking the durable reply', async () => {
+  it('preserves steering and builtin metadata on reconnect without blocking the durable reply', async () => {
     const step = {
       kind: 'notification',
       id: 'steering-1',
@@ -405,6 +407,10 @@ describe('session signal link', () => {
         content_base64: Buffer.from('{"text":"Elapsed: 5002 ms - cool"}').toString('base64'),
       } },
     };
+    const email = {
+      kind: 'tool', id: 'email-1', tool: 'mcp__nanoclaw__send_email', status: 'completed',
+      detail: 'alice@example.test', description: 'Subject: <literal>\nSecond line',
+    };
     for (let attempt = 0; attempt < 2; attempt++) {
       const socket = await connect();
       let received = '';
@@ -415,13 +421,17 @@ describe('session signal link', () => {
           v: 5, type: 'activity', turnId: ACTIVE_TURN.id, ts: '1791139732667',
           ordinal: 0, timelinePosition: 1791139732667000, step,
         })}\n`);
+        socket.write(`${JSON.stringify({
+          v: 5, type: 'activity', turnId: ACTIVE_TURN.id, ts: '1791139732668',
+          ordinal: 1, timelinePosition: 1791139732668000, step: email,
+        })}\n`);
         socket.write(`${JSON.stringify({ v: 5, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
         socket.write(`${JSON.stringify(reply)}\n`);
         await waitFor(() => received.endsWith('\n') && parsedFrames(received).some(
           (frame) => frame.type === 'ack' && frame.eventId === reply.eventId,
         ));
         expect(getSessionActiveTurn(SESSION_ID).connected).toBe(true);
-        expect(JSON.parse(getSessionSignalActivity(SESSION_ID)[0].text)).toEqual(step);
+        expect(getSessionSignalActivity(SESSION_ID).map((line) => JSON.parse(line.text))).toEqual([step, email]);
         const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
         try {
           expect(db.prepare('SELECT content FROM messages_out').pluck().all())

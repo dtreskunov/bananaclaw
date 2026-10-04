@@ -32,7 +32,7 @@ import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import {
-  activityChapters, chapterEntryHeadline, displayStep, headlineSummary, isTitleStep, isTodoStep, parseStep, stepHeadline,
+  activityChapters, chapterEntryHeadline, displayStep, headlineSummary, isTitleStep, isTodoStep, parseStep, stepHeadline, stepBody,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
 } from '../../../../shared/activity-presentation';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
@@ -127,16 +127,6 @@ function StepHeadlineContent({ headline, repetitions = 1 }: { headline: StepHead
       {repetitions > 1 ? ` · ${repetitions} times` : null}
     </>
   );
-}
-
-function stepBody(s: TraceStep): string | null {
-  if (s.kind === 'tool') return [s.detail, s.error].filter(Boolean).join('\n\n') || null;
-  if (s.kind === 'notification') return s.detail || null;
-  if (s.kind === 'internal') return s.text || null;
-  if (s.kind === 'patch') return s.files?.join('\n') || null;
-  if (s.kind === 'retry') return s.error || null;
-  if (s.kind === 'file') return s.path || null;
-  return null;
 }
 
 function stepMeta(s: TraceStep, elapsedMs: number | null): string | null {

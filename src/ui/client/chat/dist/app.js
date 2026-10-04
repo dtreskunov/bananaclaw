@@ -21470,6 +21470,8 @@ function parseStep(text2) {
   }
 }
 function cleanToolName(tool) {
+  if (tool.toLowerCase().startsWith("nanoclaw_"))
+    return `nanoclaw.${tool.slice("nanoclaw_".length).replace(/^_/, "")}`.toLowerCase();
   if (!tool.startsWith("mcp__")) return tool.toLowerCase();
   const [server, ...name] = tool.slice(5).split("__");
   return `${server}.${name.join(".") || server}`.toLowerCase();
@@ -21514,9 +21516,55 @@ var FILE_OP_VERBS = {
 };
 var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
 var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
+var BUILTIN_TOOL_PRESENTATIONS = /* @__PURE__ */ new Map([
+  ["send_message", ["Sending message", "Sent message", "send message", "Message", "to"]],
+  ["send_file", ["Sending file", "Sent file", "send file", "File send"]],
+  ["edit_message", ["Editing message", "Edited message", "edit message", "Message edit"]],
+  ["add_reaction", ["Reacting", "Reacted", "react", "Reaction", "with"]],
+  ["send_email", ["Emailing", "Emailed", "email", "Email"]],
+  ["ask_user_question", ["Requesting an answer", "Requested an answer", "request an answer", "Question request", "to"]],
+  ["send_card", ["Sending card", "Sent card", "send card", "Card send"]],
+  ["schedule_task", ["Scheduling task", "Scheduled task", "schedule task", "Task scheduling", "for"]],
+  ["list_tasks", ["Listing tasks", "Listed tasks", "list tasks", "Task listing", "with status"]],
+  ["update_task", ["Requesting task update", "Requested task update", "request task update", "Task update request", "for"]],
+  ["cancel_task", ["Requesting task cancellation", "Requested task cancellation", "request task cancellation", "Task cancellation request", "for"]],
+  ["pause_task", ["Requesting task pause", "Requested task pause", "request task pause", "Task pause request", "for"]],
+  ["resume_task", ["Requesting task resume", "Requested task resume", "request task resume", "Task resume request", "for"]],
+  ["create_agent", ["Requesting agent creation", "Requested agent creation", "request agent creation", "Agent creation request", "for"]],
+  ["add_agent_destination", ["Requesting agent link", "Requested agent link", "request agent link", "Agent link request", "for"]],
+  ["install_packages", ["Requesting package installation", "Requested package installation", "request package installation", "Package installation request", "for"]],
+  ["add_mcp_server", ["Requesting MCP server setup", "Requested MCP server setup", "request MCP server setup", "MCP server setup request", "for"]],
+  ["set_thread_title", ["Setting title", "Set title", "set title", "Title change", "to"]],
+  ["request_login_link", ["Requesting login link", "Requested login link", "request login link", "Login link request", "for"]],
+  ["mint_file_link", ["Requesting download link", "Requested download link", "request download link", "Download link request", "for"]]
+]);
+function builtinHeadline(step) {
+  const name = cleanToolName(step.tool || "");
+  const verbs = name.startsWith("nanoclaw.") ? BUILTIN_TOOL_PRESENTATIONS.get(name.slice("nanoclaw.".length)) : void 0;
+  if (!verbs) return null;
+  const [present, past, infinitive, noun, joiner] = verbs;
+  const subject = singleLine(step.detail || "");
+  const uncertain = !step.status || step.status === "unknown" || step.status === "interrupted";
+  const action = uncertain ? `${noun} ${step.status === "interrupted" ? "interrupted (outcome unknown)" : "outcome unknown"}${subject ? ":" : ""}` : step.status === "error" ? `Failed to ${infinitive}` : step.status === "pending" ? `Queued ${noun.toLowerCase()}` : step.status === "completed" ? past : present;
+  return {
+    action: joiner && subject && !uncertain ? `${action} ${joiner}` : action,
+    ...subject ? { subject, codeSubject: true } : {}
+  };
+}
+function stepBody(step) {
+  if (step.kind === "tool") return [step.detail, step.description, step.error].filter(Boolean).join("\n\n") || null;
+  if (step.kind === "notification") return step.detail || null;
+  if (step.kind === "internal") return step.text || null;
+  if (step.kind === "patch") return step.files?.join("\n") || null;
+  if (step.kind === "retry") return step.error || null;
+  if (step.kind === "file") return step.path || null;
+  return null;
+}
 function stepHeadline(step) {
   switch (step.kind) {
     case "tool": {
+      const builtin = builtinHeadline(step);
+      if (builtin) return builtin;
       const tool = toolKind(step);
       if (!step.status || step.status === "interrupted" || step.status === "unknown") {
         return {
@@ -21625,6 +21673,11 @@ function chapterHeadline(category, entries) {
   if (category === "search") return { action: uncertain ? "Search" : executing ? "Searching" : "Searched" };
   if (isTodoStep(latest))
     return { action: uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items" };
+  const builtin = builtinHeadline(latest);
+  if (builtin) {
+    const shared = entries.every((entry) => stepHeadline(entry.step).subject === builtin.subject);
+    return shared ? builtin : builtinHeadline({ ...latest, detail: void 0 }) ?? { action: builtin.action };
+  }
   if (isTitleStep(latest)) return { action: uncertain ? "Title change" : executing ? "Setting title" : "Set title" };
   const headline = stepHeadline(latest);
   return {
@@ -22715,15 +22768,6 @@ function StepHeadlineContent({ headline, repetitions = 1 }) {
     ] }) : null,
     repetitions > 1 ? ` \xB7 ${repetitions} times` : null
   ] });
-}
-function stepBody(s5) {
-  if (s5.kind === "tool") return [s5.detail, s5.error].filter(Boolean).join("\n\n") || null;
-  if (s5.kind === "notification") return s5.detail || null;
-  if (s5.kind === "internal") return s5.text || null;
-  if (s5.kind === "patch") return s5.files?.join("\n") || null;
-  if (s5.kind === "retry") return s5.error || null;
-  if (s5.kind === "file") return s5.path || null;
-  return null;
 }
 function stepMeta(s5, elapsedMs) {
   if (s5.kind !== "tool") return null;

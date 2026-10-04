@@ -288,13 +288,14 @@ export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms' | 'duration_
  * `bash` tool", code block, truncation) is done in the UI layer, as late as
  * possible. `detail` carries the primary raw argument (bash command, grep
  * pattern, file path, url, …) with its newlines INTACT, so the UI can render
- * a real multi-line code block.
+ * a real multi-line code block. `description` carries additional allowlisted
+ * builtin metadata, such as an email subject, without copying bodies or secrets.
  */
 export type ActivityStep =
   | {
       kind: 'tool'; id: string; tool: string;
       status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
-      detail?: string; title?: string; error?: string; durationMs?: number;
+      detail?: string; description?: string; title?: string; error?: string; durationMs?: number;
       rejectedBeforeExecution?: boolean;
     }
   | { kind: 'internal'; id: string; text: string }

@@ -736,6 +736,19 @@ describe('NativeProvider', () => {
   });
 
   it('formats canonical native tool activity with safe resource details', () => {
+    const email = {
+      toolCallId: 'email-1', toolName: 'mcp__nanoclaw__send_email',
+      input: { to: 'alice@example.test', subject: 'Report', body: 'private body' },
+    };
+    expect(formatNativeToolStep(email, 'running')).toMatchObject({
+      status: 'running', detail: 'alice@example.test', description: 'Subject: Report',
+    });
+    expect(formatNativeToolStep({ ...email, output: {
+      isError: true, content: [{ type: 'text', text: 'Not permitted' }],
+    } }, 'completed')).toEqual({
+      kind: 'tool', id: 'email-1', tool: email.toolName, status: 'error',
+      detail: 'alice@example.test', description: 'Subject: Report', error: 'Not permitted',
+    });
     expect(formatNativeToolStep(
       { toolCallId: 'read-1', toolName: 'read', input: { path: 'src/index.ts' } },
       'running',

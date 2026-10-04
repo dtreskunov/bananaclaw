@@ -194,6 +194,9 @@ export function truncateActivityStep(step: ActivityStep): ActivityStep {
   if ('detail' in s && typeof s.detail === 'string' && s.detail.length > ACTIVITY_MAX_CHARS) {
     s = { ...s, detail: s.detail.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
   }
+  if ('description' in s && typeof s.description === 'string' && s.description.length > ACTIVITY_MAX_CHARS) {
+    s = { ...s, description: s.description.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
+  }
   if ('text' in s && typeof s.text === 'string') {
     if (s.text.length > ACTIVITY_MAX_CHARS) {
       s = { ...s, text: s.text.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };

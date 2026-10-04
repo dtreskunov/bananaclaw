@@ -9,7 +9,8 @@ import { appendActivity } from '../db/session-state.js';
 import { registerProvider } from './provider-registry.js';
 import { audioReferencePrompt } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
-import { fingerprintToolInput, pickActivityDetail } from './types.js';
+import { fingerprintToolInput } from './types.js';
+import { builtinToolResultError, toolActivityFields } from './tool-activity.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
@@ -236,14 +237,18 @@ const postToolUseHook: HookCallback = async (input) => {
   try {
     clearContainerToolInFlight();
     if (input.hook_event_name === 'PostToolUse' || input.hook_event_name === 'PostToolUseFailure') {
+      const resultError = input.hook_event_name === 'PostToolUse'
+        ? builtinToolResultError(input.tool_name, input.tool_response) : undefined;
       appendActivity({
         kind: 'tool',
         id: input.tool_use_id,
         tool: input.tool_name,
-        status: input.hook_event_name === 'PostToolUse' ? 'completed' : input.is_interrupt ? 'interrupted' : 'error',
+        status: input.hook_event_name === 'PostToolUse'
+          ? resultError ? 'error' : 'completed' : input.is_interrupt ? 'interrupted' : 'error',
+        ...toolActivityFields(input.tool_name, input.tool_input),
         ...(input.hook_event_name === 'PostToolUseFailure'
           ? { error: input.is_interrupt ? 'Interrupted; outcome unknown. External side effects may have occurred.' : input.error }
-          : {}),
+          : resultError ? { error: resultError } : {}),
       });
     }
   } catch (err) {
@@ -263,8 +268,7 @@ const postToolUseHook: HookCallback = async (input) => {
  *  tool name through and picks the primary raw argument (newlines intact);
  *  the UI renders "Using `<tool>` tool" and the argument as a code block. */
 export function formatClaudeToolUse(id: string, name: string, input: Record<string, unknown>): ActivityStep {
-  const detail = pickActivityDetail(input);
-  return { kind: 'tool', id, tool: name, status: 'running', ...(detail ? { detail } : {}) };
+  return { kind: 'tool', id, tool: name, status: 'running', ...toolActivityFields(name, input) };
 }
 
 export interface ClaudeMessageUsage {

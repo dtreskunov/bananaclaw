@@ -23,10 +23,12 @@ describe('truncateActivityStep', () => {
     const step = truncateActivityStep({
       kind: 'tool', id: 'call-1', tool: 'bash', status: 'error',
       detail: 'd'.repeat(3000), error: 'e'.repeat(3000),
+      description: 's'.repeat(3000),
     });
     expect(step).toMatchObject({ kind: 'tool', id: 'call-1', tool: 'bash', status: 'error' });
     if (step.kind !== 'tool') throw new Error('unexpected kind');
     expect(step.detail?.length).toBe(2000);
     expect(step.error?.length).toBe(2000);
+    expect(step.description).toBe('s'.repeat(1999) + '…');
   });
 });

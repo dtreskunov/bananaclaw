@@ -203,6 +203,27 @@ long labels. Hidden edges use the same 12 px transparency fades as tables,
 including top and bottom fades. Expanded command bodies wrap within the
 viewport and share its scrolling, without a second nested scrollbar.
 
+Every registered `nanoclaw.*` builtin has action-specific trace wording across
+queued, running, completed, failed and uncertain states. For example, a completed
+email call reads **Emailed `recipient`**; expansion includes its subject and
+attachment paths. Messages name their destination, files name their paths,
+reactions name their emoji, task actions name their task ID or scheduled time,
+and title changes name the title. Cards name the card and question calls name
+the question; the separate UI-only **Asked a question** marker records emission,
+not receipt of an answer. Agent, package, MCP-server and link actions say
+**Requested …** where completion only confirms submission to the host or an
+approval flow. **Emailed** confirms the email tool accepted the request, not
+delivery to the recipient.
+
+Providers capture only a per-tool allowlist of primary and supplementary
+arguments. Expansion preserves literal multiline subjects and questions.
+Message/email bodies, scripts, agent instructions, MCP commands/arguments,
+credential environment variables/headers and generated URLs are not captured.
+Metadata is bounded to 2,000 characters per field. Existing stored events are
+not backfilled; missing arguments are not guessed. Consecutive grouping and
+whole-turn ownership remain unchanged; differing targets yield a target-free
+group heading such as **Sent message · 2 times**, with individual targets below.
+
 Thread-title actions read **Set title to TITLE**. New runner events retain the
 title argument; historical events without it say **Set title** and explain the
 missing recording when expanded. TODO updates read **Updated TODO items** and

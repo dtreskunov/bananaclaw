@@ -6,6 +6,30 @@ import { INTERRUPTED_TOOL, NativeTurnJournal } from './turn-journal.js';
 const options = (toolCallId: string): ToolExecutionOptions => ({ toolCallId, messages: [] });
 
 describe('incremental native turn journal', () => {
+  it('retains builtin inputs and MCP error outcomes without changing model result history', async () => {
+    const store = new NativeStore(':memory:');
+    try {
+      const conversation = store.createConversation();
+      const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'Send report' });
+      const output = { isError: true, content: [{ type: 'text', text: 'Not permitted' }] };
+      const name = 'mcp__nanoclaw__send_email';
+      const tools = journal.wrap({
+        [name]: tool({ inputSchema: jsonSchema({ type: 'object' }), execute: async () => output }),
+      }, new AbortController().signal);
+      expect(await tools[name].execute!({ to: 'alice@example.test', subject: 'Report', body: 'private body' }, options('email'))).toEqual(output);
+      expect(journal.activity()).toEqual([{
+        kind: 'tool', id: 'email', tool: name, status: 'error',
+        detail: 'alice@example.test', description: 'Subject: Report', error: 'Not permitted',
+      }]);
+      expect(store.messages(conversation).at(-1)).toMatchObject({
+        role: 'tool',
+        content: [{ type: 'tool-result', output: { type: 'text', value: JSON.stringify(output) } }],
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   it('keeps steering and earlier completed actions across later saves, stops and forks', async () => {
     const store = new NativeStore(':memory:');
     try {
@@ -95,7 +119,7 @@ describe('incremental native turn journal', () => {
     const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'run external action' });
     const tools = journal.wrap(
       {
-        remote: tool({
+        'mcp__nanoclaw__send_email': tool({
           inputSchema: jsonSchema({ type: 'object' }),
           execute: async (_input, options) =>
             new Promise((_, reject) => {
@@ -106,7 +130,9 @@ describe('incremental native turn journal', () => {
       controller.signal,
     );
     try {
-      const execution = tools.remote.execute!({}, options('external'));
+      const execution = tools.mcp__nanoclaw__send_email.execute!(
+        { to: 'alice@example.test', subject: 'Report', body: 'private body' }, options('external'),
+      );
       controller.abort();
       await expect(execution).rejects.toThrow('AbortError');
       await journal.settle();
@@ -116,7 +142,8 @@ describe('incremental native turn journal', () => {
       expect(fork).not.toBeNull();
       expect(store.messages(fork!)).toEqual(store.messages(conversation));
       expect(journal.activity()).toEqual([
-        { kind: 'tool', id: 'external', tool: 'remote', status: 'interrupted', error: INTERRUPTED_TOOL },
+        { kind: 'tool', id: 'external', tool: 'mcp__nanoclaw__send_email', status: 'interrupted',
+          detail: 'alice@example.test', description: 'Subject: Report', error: INTERRUPTED_TOOL },
       ]);
     } finally {
       store.close();

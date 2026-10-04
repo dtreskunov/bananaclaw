@@ -62,6 +62,20 @@ describe('buildOpenCodeToolOverrides', () => {
 });
 
 describe('formatProgressFromPart', () => {
+  it('captures builtin email metadata in both completed and failed lifecycle updates', () => {
+    for (const status of ['running', 'completed', 'error']) {
+      expect(formatProgressFromPart({
+        id: 'email-1', type: 'tool', tool: 'nanoclaw_send_email',
+        state: { status, input: { to: 'alice@example.test', subject: 'Report', body: 'private body' },
+          ...(status === 'error' ? { error: 'Not permitted' } : {}), output: 'private result' },
+      })).toEqual({
+        kind: 'tool', id: 'email-1', tool: 'nanoclaw_send_email', status,
+        detail: 'alice@example.test', description: 'Subject: Report',
+        ...(status === 'error' ? { error: 'Not permitted' } : {}),
+      });
+    }
+  });
+
   it('ignores missing, streaming text, snapshots, and private thinking', () => {
     expect(formatProgressFromPart(undefined)).toBeNull();
     expect(formatProgressFromPart({ id: 't', type: 'text', text: 'reply' })).toBeNull();

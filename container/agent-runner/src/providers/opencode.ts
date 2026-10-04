@@ -6,7 +6,8 @@ import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 import { registerProvider } from './provider-registry.js';
 import { audioReferencePrompt, isAudioAttachment } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, CallUsage, FileAttachment, ForkContinuationInput, ModelLimits, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions, TurnUsage } from './types.js';
-import { fingerprintToolInput, pickActivityDetail } from './types.js';
+import { fingerprintToolInput } from './types.js';
+import { toolActivityFields } from './tool-activity.js';
 import { accumulateCallUsage } from './usage.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { createModelCatalog, type RawLimits } from './model-catalog.js';
@@ -307,13 +308,12 @@ export function formatProgressFromPart(
     case 'tool': {
       const tool = part.tool || '';
       if (!tool) return null;
-      const detail = pickActivityDetail(inp);
       const status = part.state?.status ?? 'pending';
       const start = part.state?.time?.start;
       const end = part.state?.time?.end;
       return {
         kind: 'tool', id: part.callID || part.id, tool, status,
-        ...(detail ? { detail } : {}),
+        ...toolActivityFields(tool, inp),
         ...(isSchemaRejectedNativeToolPart(part) ? { rejectedBeforeExecution: true } : {}),
         ...(part.state?.title ? { title: part.state.title } : {}),
         ...(status === 'error' && part.state?.error ? { error: part.state.error } : {}),

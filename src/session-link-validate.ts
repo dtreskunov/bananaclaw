@@ -94,6 +94,7 @@ const ACTIVITY_STEP_FIELDS = new Map<string, readonly FieldSpec[]>(
       required('tool', text(MAX_ID_CHARS)),
       required('status', oneOf('pending', 'running', 'completed', 'error', 'interrupted', 'unknown')),
       optional('detail', optionalText),
+      optional('description', optionalText),
       optional('title', optionalText),
       optional('error', optionalText),
       optional('durationMs', isNonNegativeNumber),

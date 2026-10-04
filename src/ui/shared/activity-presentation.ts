@@ -102,6 +102,8 @@ export function parseStep(text: string): TraceStep {
 }
 
 export function cleanToolName(tool: string): string {
+  if (tool.toLowerCase().startsWith('nanoclaw_'))
+    return `nanoclaw.${tool.slice('nanoclaw_'.length).replace(/^_/, '')}`.toLowerCase();
   if (!tool.startsWith('mcp__')) return tool.toLowerCase();
   const [server, ...name] = tool.slice(5).split('__');
   return `${server}.${name.join('.') || server}`.toLowerCase();
@@ -167,9 +169,120 @@ const FILE_OP_VERBS: Record<string, { present: string; past: string }> = {
 const COMMAND_TOOLS = new Set(['bash', 'shell', 'run', 'run_in_terminal']);
 const SEARCH_TOOLS = new Set(['grep', 'glob', 'search', 'websearch', 'web_search']);
 
+type BuiltinVerbs = readonly [present: string, past: string, infinitive: string, noun: string, joiner?: string];
+export const BUILTIN_TOOL_PRESENTATIONS = new Map<string, BuiltinVerbs>([
+  ['send_message', ['Sending message', 'Sent message', 'send message', 'Message', 'to']],
+  ['send_file', ['Sending file', 'Sent file', 'send file', 'File send']],
+  ['edit_message', ['Editing message', 'Edited message', 'edit message', 'Message edit']],
+  ['add_reaction', ['Reacting', 'Reacted', 'react', 'Reaction', 'with']],
+  ['send_email', ['Emailing', 'Emailed', 'email', 'Email']],
+  ['ask_user_question', ['Requesting an answer', 'Requested an answer', 'request an answer', 'Question request', 'to']],
+  ['send_card', ['Sending card', 'Sent card', 'send card', 'Card send']],
+  ['schedule_task', ['Scheduling task', 'Scheduled task', 'schedule task', 'Task scheduling', 'for']],
+  ['list_tasks', ['Listing tasks', 'Listed tasks', 'list tasks', 'Task listing', 'with status']],
+  [
+    'update_task',
+    ['Requesting task update', 'Requested task update', 'request task update', 'Task update request', 'for'],
+  ],
+  [
+    'cancel_task',
+    [
+      'Requesting task cancellation',
+      'Requested task cancellation',
+      'request task cancellation',
+      'Task cancellation request',
+      'for',
+    ],
+  ],
+  ['pause_task', ['Requesting task pause', 'Requested task pause', 'request task pause', 'Task pause request', 'for']],
+  [
+    'resume_task',
+    ['Requesting task resume', 'Requested task resume', 'request task resume', 'Task resume request', 'for'],
+  ],
+  [
+    'create_agent',
+    [
+      'Requesting agent creation',
+      'Requested agent creation',
+      'request agent creation',
+      'Agent creation request',
+      'for',
+    ],
+  ],
+  [
+    'add_agent_destination',
+    ['Requesting agent link', 'Requested agent link', 'request agent link', 'Agent link request', 'for'],
+  ],
+  [
+    'install_packages',
+    [
+      'Requesting package installation',
+      'Requested package installation',
+      'request package installation',
+      'Package installation request',
+      'for',
+    ],
+  ],
+  [
+    'add_mcp_server',
+    [
+      'Requesting MCP server setup',
+      'Requested MCP server setup',
+      'request MCP server setup',
+      'MCP server setup request',
+      'for',
+    ],
+  ],
+  ['set_thread_title', ['Setting title', 'Set title', 'set title', 'Title change', 'to']],
+  [
+    'request_login_link',
+    ['Requesting login link', 'Requested login link', 'request login link', 'Login link request', 'for'],
+  ],
+  [
+    'mint_file_link',
+    ['Requesting download link', 'Requested download link', 'request download link', 'Download link request', 'for'],
+  ],
+]);
+
+function builtinHeadline(step: TraceStep): StepHeadline | null {
+  const name = cleanToolName(step.tool || '');
+  const verbs = name.startsWith('nanoclaw.')
+    ? BUILTIN_TOOL_PRESENTATIONS.get(name.slice('nanoclaw.'.length))
+    : undefined;
+  if (!verbs) return null;
+  const [present, past, infinitive, noun, joiner] = verbs;
+  const subject = singleLine(step.detail || '');
+  const uncertain = !step.status || step.status === 'unknown' || step.status === 'interrupted';
+  const action = uncertain
+    ? `${noun} ${step.status === 'interrupted' ? 'interrupted (outcome unknown)' : 'outcome unknown'}${subject ? ':' : ''}`
+    : step.status === 'error'
+      ? `Failed to ${infinitive}`
+      : step.status === 'pending'
+        ? `Queued ${noun.toLowerCase()}`
+        : step.status === 'completed'
+          ? past
+          : present;
+  return {
+    action: joiner && subject && !uncertain ? `${action} ${joiner}` : action,
+    ...(subject ? { subject, codeSubject: true } : {}),
+  };
+}
+
+export function stepBody(step: TraceStep): string | null {
+  if (step.kind === 'tool') return [step.detail, step.description, step.error].filter(Boolean).join('\n\n') || null;
+  if (step.kind === 'notification') return step.detail || null;
+  if (step.kind === 'internal') return step.text || null;
+  if (step.kind === 'patch') return step.files?.join('\n') || null;
+  if (step.kind === 'retry') return step.error || null;
+  if (step.kind === 'file') return step.path || null;
+  return null;
+}
+
 export function stepHeadline(step: TraceStep): StepHeadline {
   switch (step.kind) {
     case 'tool': {
+      const builtin = builtinHeadline(step);
+      if (builtin) return builtin;
       const tool = toolKind(step);
       if (!step.status || step.status === 'interrupted' || step.status === 'unknown') {
         return {
@@ -316,6 +429,11 @@ function chapterHeadline(category: string, entries: TraceEntry[]): StepHeadline 
   if (category === 'search') return { action: uncertain ? 'Search' : executing ? 'Searching' : 'Searched' };
   if (isTodoStep(latest))
     return { action: uncertain ? 'TODO items' : executing ? 'Updating TODO items' : 'Updated TODO items' };
+  const builtin = builtinHeadline(latest);
+  if (builtin) {
+    const shared = entries.every((entry) => stepHeadline(entry.step).subject === builtin.subject);
+    return shared ? builtin : (builtinHeadline({ ...latest, detail: undefined }) ?? { action: builtin.action });
+  }
   if (isTitleStep(latest)) return { action: uncertain ? 'Title change' : executing ? 'Setting title' : 'Set title' };
   const headline = stepHeadline(latest);
   return {

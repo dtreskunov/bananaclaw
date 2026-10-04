@@ -2,7 +2,7 @@ import type { ActivityLine } from './channels/adapter.js';
 import { stepSummary } from './ui/shared/activity-presentation.js';
 
 export type ActivityStep =
-  | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; title?: string; error?: string; durationMs?: number; rejectedBeforeExecution?: boolean }
+  | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; description?: string; title?: string; error?: string; durationMs?: number; rejectedBeforeExecution?: boolean }
   | { kind: 'internal'; id: string; text: string }
   | { kind: 'file'; id: string; path?: string; name?: string; mime?: string }
   | { kind: 'patch'; id: string; files: string[] }

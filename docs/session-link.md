@@ -84,6 +84,11 @@ Supported live runner signals:
   status and originating channel/platform/thread, or `null` after settlement
 
 Activity is capped at 128 current steps and text fields are bounded.
+Tool activities may carry optional `description` text (at most 2,000 characters)
+for allowlisted argument metadata alongside their primary `detail`, such as an
+email subject. The runner caps both fields before journaling or live delivery,
+and reconnect preserves them. Deploy the host validator before starting runners
+that emit this field; older hosts reject unknown activity fields.
 Notification activities may include an optional `detail` string of at most
 2,000 characters, including steering text; whitespace and literal markup are
 preserved. Both initial delivery and reconnect replay accept this field.

@@ -5,6 +5,20 @@ import { activityHint, reduceActivityLines } from './activity.js';
 const line = (ts: string, step: object) => ({ ts, text: JSON.stringify(step) });
 
 describe('reduceActivityLines', () => {
+  it('preserves builtin metadata through completion and reconnect lifecycle replay', () => {
+    const running = { kind: 'tool', id: 'email-1', tool: 'nanoclaw.send_email', status: 'running',
+      detail: 'alice@example.test', description: 'Subject: Exact\n<literal> subject' };
+    const result = reduceActivityLines([
+      line('10', running),
+      line('20', { kind: 'tool', id: 'email-1', tool: 'nanoclaw.send_email', status: 'completed' }),
+    ]);
+    expect(JSON.parse(result[0].text)).toMatchObject({ ...running, status: 'completed' });
+    const replayed = reduceActivityLines([...result, ...result]);
+    expect(replayed).toHaveLength(1);
+    expect(JSON.parse(replayed[0].text)).toMatchObject({ ...running, status: 'completed' });
+    expect(activityHint(result)).toBe('Emailed alice@example.test');
+  });
+
   it('merges lifecycle updates by kind and id in first-seen order', () => {
     const result = reduceActivityLines([
       line('10', { kind: 'tool', id: 'call-1', tool: 'bash', status: 'pending' }),

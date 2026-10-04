@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   activityChapters,
+  BUILTIN_TOOL_PRESENTATIONS,
   chapterEntryHeadline,
   displayStep,
   headlineSummary,
   parseStep,
   stepHeadline,
+  stepBody,
   stepSummary,
   todoItems,
   traceStatusClass,
@@ -26,6 +29,70 @@ const tool = (id: string, name: string, status: TraceStep['status'] = 'completed
 });
 
 describe('activity presentation', () => {
+  it('tailors every registered builtin and captures it in the runner without importing runner modules', () => {
+    const registry = new URL('../../../container/agent-runner/src/mcp-tools/registry.ts', import.meta.url);
+    const sources = [...readFileSync(registry, 'utf8').matchAll(/import '\.\/([^']+)\.js';/g)];
+    const names = sources
+      .flatMap(([, module]) =>
+        [...readFileSync(new URL(`${module}.ts`, registry), 'utf8').matchAll(/tool:\s*\{\s*name:\s*'([^']+)'/g)].map(
+          ([, name]) => name,
+        ),
+      )
+      .sort();
+    expect(names).toHaveLength(20);
+    expect([...BUILTIN_TOOL_PRESENTATIONS.keys()].sort()).toEqual(names);
+    const captures = readFileSync(new URL('../providers/tool-activity.ts', registry), 'utf8');
+    expect([...captures.matchAll(/^\s*\['([^']+)', \[/gm)].map(([, name]) => name).sort()).toEqual(names);
+  });
+
+  it.each([...BUILTIN_TOOL_PRESENTATIONS])('presents %s honestly in every lifecycle phase', (name, verbs) => {
+    const [present, past, infinitive, noun, joiner] = verbs;
+    for (const prefix of ['nanoclaw.', 'mcp__nanoclaw__', 'nanoclaw_', 'nanoclaw__']) {
+      const step = { ...tool(name, prefix + name), detail: 'target\n<literal>' };
+      const suffix = joiner ? ` ${joiner}` : '';
+      expect(stepHeadline(step)).toEqual({ action: past + suffix, subject: 'target <literal>', codeSubject: true });
+      expect(stepHeadline({ ...step, status: 'running' }).action).toBe(present + suffix);
+      expect(stepHeadline({ ...step, status: 'pending' }).action).toBe(`Queued ${noun.toLowerCase()}${suffix}`);
+      expect(stepHeadline({ ...step, status: 'error' }).action).toBe(`Failed to ${infinitive}${suffix}`);
+      expect(stepHeadline({ ...step, status: 'unknown' }).action).toBe(`${noun} outcome unknown:`);
+      expect(stepHeadline({ ...step, status: 'interrupted' }).action).toBe(`${noun} interrupted (outcome unknown):`);
+      expect(stepHeadline({ ...step, status: undefined }).action).toBe(`${noun} outcome unknown:`);
+      expect(stepHeadline({ ...step, detail: undefined }).action).toBe(past);
+    }
+  });
+
+  it('shows the email recipient in the heading and the exact subject in expansion', () => {
+    const step = {
+      ...tool('email', 'mcp__nanoclaw__send_email'),
+      detail: 'alice@example.test',
+      description: 'Subject: Report <literal>\nSecond line',
+    };
+    expect(stepHeadline(step)).toEqual({ action: 'Emailed', subject: 'alice@example.test', codeSubject: true });
+    expect(stepBody(step)).toBe('alice@example.test\n\nSubject: Report <literal>\nSecond line');
+    expect(stepBody({ ...step, status: 'error', error: 'Not permitted' })).toContain('\n\nNot permitted');
+    expect(parseStep(JSON.stringify(step))).toEqual(step);
+    expect(stepSummary(tool('email', 'other.send_email'))).toBe('Used other.send_email');
+  });
+
+  it('preserves repeated builtin grouping without leaving a dangling target joiner', () => {
+    const entries = [
+      line(0, { ...tool('first', 'nanoclaw.send_message'), detail: 'alice' }),
+      line(1, { ...tool('second', 'nanoclaw.send_message'), detail: 'bob' }),
+      line(2, { ...tool('third', 'nanoclaw.send_email'), detail: 'alice@example.test' }),
+      line(3, { ...tool('fourth', 'nanoclaw.send_email'), detail: 'alice@example.test' }),
+    ];
+    const chapters = activityChapters(entries);
+    expect(chapters.map((chapter) => chapter.title)).toEqual([
+      'Sent message · 2 times',
+      'Emailed alice@example.test · 2 times',
+    ]);
+    expect(chapters[0].entries.map((entry) => headlineSummary(chapterEntryHeadline(entry.step)))).toEqual([
+      'alice',
+      'bob',
+    ]);
+    expect(chapters.flatMap((chapter) => chapter.entries.map((entry) => entry.line))).toEqual(entries);
+  });
+
   it('keeps steering injection markers visible as distinct steps between tool chapters', () => {
     const marker = {
       kind: 'notification' as const,
