@@ -73,20 +73,13 @@ describe('explicit host trace placement', () => {
     });
     expect(view.timeline).toEqual([
       { kind: 'message', messageId: 'ask' },
-      { kind: 'message', messageId: 'early', trace: { turnId: 'turn', ordinals: [0], ownsTurn: false } },
-      {
-        kind: 'turn',
-        turnId: 'turn',
-        afterId: 'early',
-        status: false,
-        trace: { turnId: 'turn', ordinals: [1], ownsTurn: false },
-      },
+      { kind: 'message', messageId: 'early' },
       { kind: 'message', messageId: 'steer' },
       {
         kind: 'message',
         messageId: 'final',
         statsTurnId: 'turn',
-        trace: { turnId: 'turn', ordinals: [2, 3], ownsTurn: true },
+        trace: { turnId: 'turn', ordinals: [0, 1, 2, 3], ownsTurn: true },
       },
     ]);
     validate(view);
@@ -100,8 +93,8 @@ describe('explicit host trace placement', () => {
       outputIds: ['early', 'final'],
       activity: [activity(0, 150)],
     });
-    expect(view.timeline[1]).toMatchObject({ messageId: 'early', trace: { ordinals: [0] } });
-    expect(view.timeline[2]).toMatchObject({ messageId: 'final', trace: { ordinals: [], ownsTurn: true } });
+    expect(view.timeline[1]).toEqual({ kind: 'message', messageId: 'early' });
+    expect(view.timeline[2]).toMatchObject({ messageId: 'final', trace: { ordinals: [0], ownsTurn: true } });
     validate(view);
     const invalid = structuredClone(view);
     Reflect.deleteProperty(invalid.turns[0].activity[0], 'timelinePosition');
@@ -116,25 +109,25 @@ describe('explicit host trace placement', () => {
     ).toThrow('invalid_frame');
   });
 
-  it('keeps live status separate from the latest trace owner until new tail activity arrives', () => {
+  it('keeps the whole live trace in one synthetic bubble across intermediate outputs', () => {
     const messages = [message('ask', 'in', 100), message('early', 'out', 200)];
     const current = { ...turn, outputIds: ['early'], activity: [activity(0, 150)] };
     const early = present(messages, current);
-    expect(early.timeline[1]).toMatchObject({ kind: 'message', trace: { ownsTurn: true } });
+    expect(early.timeline[1]).toEqual({ kind: 'message', messageId: 'early' });
     expect(early.timeline[2]).toMatchObject({
       kind: 'turn',
       afterId: 'early',
       status: true,
-      trace: { ordinals: [], ownsTurn: false },
+      trace: { ordinals: [0], ownsTurn: true },
     });
     validate(early);
     const tail = present(messages, { ...current, activity: [...current.activity, activity(1, 250)] });
-    expect(tail.timeline[1]).toMatchObject({ kind: 'message', trace: { ownsTurn: false } });
-    expect(tail.timeline[2]).toMatchObject({ kind: 'turn', trace: { ordinals: [1], ownsTurn: true } });
+    expect(tail.timeline[1]).toEqual({ kind: 'message', messageId: 'early' });
+    expect(tail.timeline[2]).toMatchObject({ kind: 'turn', trace: { ordinals: [0, 1], ownsTurn: true } });
     validate(tail);
   });
 
-  it('uses the actual question output position and attaches its trace without inventing a message', () => {
+  it('keeps questions in conversation order without splitting or hosting the turn trace', () => {
     const view = present([message('ask', 'in', 100)], {
       ...turn,
       outputIds: ['question-output'],
@@ -163,9 +156,68 @@ describe('explicit host trace placement', () => {
     expect(view.timeline[1]).toEqual({
       kind: 'question',
       questionId: 'question',
+    });
+    expect(view.timeline[2]).toEqual({
+      kind: 'turn',
+      turnId: 'turn',
+      afterId: 'question-output',
+      status: true,
       trace: { turnId: 'turn', ordinals: [0], ownsTurn: true },
     });
     expect(view.messages.map((item) => item.id)).toEqual(['ask']);
+    validate(view);
+  });
+
+  it.each(['silent', 'stopped', 'failed', 'interrupted', 'unknown'] as const)(
+    'uses a synthetic bubble for %s turns with no final response, even after intermediate output',
+    (outcome) => {
+      const view = present(
+        [
+          message('ask', 'in', 100),
+          { ...message('update', 'out', 200), deliveryOrigin: 'send_message' },
+          { ...message('queued', 'in', 500), inputState: { messageId: 'queued', status: 'queued' } },
+        ],
+        {
+          ...turn,
+          phase: 'settled',
+          outcome,
+          outputIds: ['update'],
+          activity: [activity(0, 150)],
+        },
+      );
+      expect(view.timeline).toEqual([
+        { kind: 'message', messageId: 'ask' },
+        { kind: 'message', messageId: 'update' },
+        {
+          kind: 'turn',
+          turnId: 'turn',
+          afterId: 'update',
+          status: true,
+          trace: { turnId: 'turn', ordinals: [0], ownsTurn: true },
+        },
+        { kind: 'message', messageId: 'queued' },
+      ]);
+      validate(view);
+    },
+  );
+
+  it('moves one live trace after all applied steering without changing its owner or activity membership', () => {
+    const view = present(
+      [
+        message('ask', 'in', 100),
+        { ...message('steer-1', 'in', 200), inputState: { messageId: 'steer-1', status: 'applied' } },
+        { ...message('steer-2', 'in', 400), inputState: { messageId: 'steer-2', status: 'applied' } },
+      ],
+      { ...turn, inputIds: ['ask', 'steer-1', 'steer-2'], activity: [activity(0, 150), activity(1, 300)] },
+    );
+    expect(view.timeline.at(-1)).toEqual({
+      kind: 'turn',
+      turnId: 'turn',
+      afterId: 'steer-2',
+      status: true,
+      trace: { turnId: 'turn', ordinals: [0, 1], ownsTurn: true },
+    });
+    expect(view.timeline.filter((row) => row.trace)).toHaveLength(1);
     validate(view);
   });
 

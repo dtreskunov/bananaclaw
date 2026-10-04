@@ -152,14 +152,31 @@ steps** disclosure opens every group collapsed and does not enable following.
 Only one activity trace can be expanded across the transcript. Its global
 state stores only the owning row and whether live activity is being followed;
 the selected group and step are local to the mounted trace.
-The active or final trace uses its turn as the owner, so expansion survives
-movement between a live row and a response. A move resets group and step
-selection. On completion, the trace stays expanded with every group collapsed,
+Each logical turn has one complete activity trace. Steering, questions, and
+intermediate assistant outputs never split it. While running, a synthetic
+bubble below the turn's latest conversation content carries the trace and
+Stop control. On settlement, the trace attaches to the final response; if
+there is no final response, it stays on the synthetic bubble. Intermediate
+`send_message`/`send_file` output is not a final response.
+The trace uses its turn as the owner, so expansion survives movement between
+the live bubble and a response. Moving the live bubble preserves local group
+and step selection; moving onto a response resets them.
+On completion, the trace stays expanded with every group collapsed,
 and the transcript scrolls the response's top into view instead of following
 its bottom. Reconnect snapshots clear transient trace state. Completion
 scrolling applies only to observed updates, not initial history loads or
 reconnect snapshots; outputless turns retain their trace without inventing a
 response to scroll to.
+Questions contribute display-only **Asked a question `<question>`** markers
+at their recorded output positions. Every settled turn ends with one
+display-only **Done** marker, including stopped or failed turns: it means the
+turn ended, not that the requested work succeeded. Outcome notes retain that
+distinction. These markers count in the visible step total but never enter
+the runner journal, stored activity, or usage accounting.
+Questions use their stored output-to-turn associations, and question cards never
+own separate traces. Missing output or turn references are explicit projection
+errors; reads never infer ownership or synthesize historical turns. Legacy imports
+must establish canonical associations before their data is served.
 Headers show the group heading and outcome notices. Recorded file targets and
 arguments shared by every entry can appear in the heading; a differing last
 argument is not presented as the whole group's target. Child labels omit the parent's repeated verb.
@@ -359,7 +376,8 @@ returns to its position in the current transcript.
 When the provider confirms injection, the activity trace records a
 **Steering message injected** step immediately after that input's recorded
 consumption position. It remains in the saved trace after completion.
-The step previews the steering text; expanding it shows the multiline text,
+The stored notification is displayed as **Considered `<steering text>`**.
+Expanding it shows the multiline text,
 subject to the normal 2,000-character activity-detail cap.
 Submitting, accepting, or queuing steering alone does not create this step.
 
@@ -448,9 +466,10 @@ Subsequent envelopes update that view atomically. A final response is not render
 until the host commits the matching turn's `settled` barrier. Platform typing
 notifications are unrelated and cannot complete a browser turn.
 
-Each logical turn has a stable timeline summary, keyed by turn ID. Steering,
-queued input, multiple output messages, reconnects and settlement do not transfer
-or erase its trace. Expansion state stays with that row. Silent, warning,
+Each logical turn has one complete trace, owned by its turn ID. Steering,
+questions and intermediate outputs move the synthetic bubble beneath the latest
+associated content without splitting the trace. Settlement attaches it to the
+final response, if present. Expansion state stays with the turn. Silent, warning,
 stopped, failed and interrupted turns remain visible even without a response.
 Usage retains its accounting IDs and is displayed once per record, not once per
 response; metadata explicitly distinguishes provisional, partial, final and
@@ -463,12 +482,14 @@ that poll. Local composer drafts, uploads and command request IDs are separate
 from the server store; HTTP acceptance does not prove a command took effect.
 
 The host publishes an explicit `timeline` of message references, question
-references, and typed turn trace/status rows. Trace placement uses the activity's
-recorded logical-clock position relative to consumed inputs and emitted outputs.
-The browser only resolves those references; it does not infer activity segments
+references, and typed turn trace/status rows. The host selects the final response
+or the synthetic bubble beneath the latest associated conversation content as
+the sole trace host. Recorded logical-clock positions order the turn's activities.
+The browser resolves those references and adds display-only question and Done
+markers; it does not infer activity segments
 from timestamps or invent messages, message IDs, or insertion positions for
 trace/status rows. Chapters remain presentation-only groups within a trace.
-Every activity has a required recorded position. Historical activity is normalized
+Every recorded activity has a required position. Historical activity is normalized
 once, offline, using saved output associations and ordinals. These assigned
 positions encode canonical presentation order, not recovered execution timing.
 There are no runtime missing-position or saved-association placement fallbacks.

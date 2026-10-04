@@ -17678,6 +17678,42 @@ function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
 
+// ../../shared/timeline.ts
+function parseTimelinePosition(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
+}
+function timelineSortKey(timestamp, timelinePosition) {
+  const position2 = parseTimelinePosition(timelinePosition);
+  if (position2 !== void 0) return position2;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
+  const milliseconds = Date.parse(normalized);
+  return Number.isFinite(milliseconds) ? milliseconds * 1e3 : 0;
+}
+
+// ../../shared/conversation-activity.ts
+function marker(id2, text2, timestamp, detail) {
+  const step = { kind: "notification", id: id2, text: text2, ...detail ? { detail } : {} };
+  const position2 = timelineSortKey(timestamp);
+  return { ts: position2 ? String(Math.floor(position2 / 1e3)) : "", text: JSON.stringify(step) };
+}
+function conversationActivity(turn2, questions) {
+  const entries = turn2.activity.map((line) => ({
+    line,
+    position: line.timelinePosition
+  }));
+  for (const question2 of questions) {
+    if (question2.turnId !== turn2.id && (question2.turnId || !question2.messageId || !turn2.outputIds.includes(question2.messageId)))
+      continue;
+    entries.push({
+      line: marker(`ui:question:${question2.questionId}`, "Asked a question", question2.createdAt, question2.question),
+      position: timelineSortKey(question2.createdAt, question2.timelinePosition)
+    });
+  }
+  const lines = entries.sort((a4, b5) => a4.position - b5.position).map(({ line }) => line);
+  if (turn2.phase === "settled") lines.push(marker(`ui:done:${turn2.id}`, "Done", turn2.endedAt ?? ""));
+  return lines;
+}
+
 // ../../shared/conversation-protocol.ts
 var CONVERSATION_PROTOCOL_VERSION = 2;
 var ConversationProtocolError = class extends Error {
@@ -18695,7 +18731,8 @@ function conversationPresentation(view) {
     const turn2 = turns.get(trace2.turnId);
     if (!turn2) throw new ConversationProtocolError("invalid_frame");
     const ordinals = new Set(trace2.ordinals);
-    return turn2.activity.filter((line) => ordinals.has(line.ordinal));
+    const activity = turn2.activity.filter((line) => ordinals.has(line.ordinal));
+    return trace2.ownsTurn ? conversationActivity({ ...turn2, activity }, view.questions) : activity;
   };
   const transcript = view.timeline.map((row) => {
     const turn2 = row.trace ? turns.get(row.trace.turnId) : void 0;
@@ -18714,14 +18751,7 @@ function conversationPresentation(view) {
     if (row.kind === "question") {
       const question2 = questions.get(row.questionId);
       if (!question2) throw new ConversationProtocolError("invalid_frame");
-      return {
-        kind: "question",
-        question: row.trace ? { ...question2, activity: traceLines(row.trace) } : question2,
-        ...row.trace ? {
-          traceOwner: row.trace.ownsTurn ? `turn:${row.trace.turnId}` : `question:${row.questionId}`,
-          traceLive: row.trace.ownsTurn && turn2?.phase !== "settled"
-        } : {}
-      };
+      return { kind: "question", question: question2 };
     }
     if (!turn2 || turn2.id !== row.turnId) throw new ConversationProtocolError("invalid_frame");
     return {
@@ -21380,11 +21410,6 @@ function usePendingComposer(inputRef, autosize) {
   };
 }
 
-// ../../shared/timeline.ts
-function parseTimelinePosition(value) {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
-}
-
 // src/queued-followups.ts
 function isQueuedFollowup(message2) {
   const state = message2.inputState;
@@ -21549,8 +21574,8 @@ function stepHeadline(step) {
       return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
     case "notification":
       return {
-        action: step.text || "Notification",
-        ...step.detail ? { subject: singleLine(step.detail) } : {}
+        action: step.text === "Steering message injected" ? "Considered" : step.text || "Notification",
+        ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {}
       };
     default:
       return { action: "" };
@@ -23392,7 +23417,7 @@ function messageKey(message2) {
   return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
 }
 function groupKey(group) {
-  if (group.kind === "turn") return `turn:${group.row.turn.id}:after:${group.row.afterId ?? "start"}`;
+  if (group.kind === "turn") return `turn:${group.row.turn.id}`;
   if (group.kind === "question") return `question:${group.row.question.questionId}`;
   if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
@@ -23927,8 +23952,6 @@ function MessageLog() {
           QuestionCardItem,
           {
             question: g8.row.question,
-            traceOwner: g8.row.traceOwner,
-            traceLive: g8.row.traceLive,
             busy: respondingQuestionIds.value.has(g8.row.question.questionId)
           },
           key
@@ -23994,10 +24017,8 @@ function PendingTray() {
     /* @__PURE__ */ u4("button", { type: "button", title: "Remove", onClick: () => removePending(i5), children: "\xD7" })
   ] }, i5)) });
 }
-function QuestionCardItem({ question: q5, busy, traceOwner, traceLive = false }) {
+function QuestionCardItem({ question: q5, busy }) {
   const [answer, setAnswer] = h2("");
-  const traceId = traceOwner ?? `question:${q5.questionId}`;
-  const traceView = activityTraceView(traceId, traceLive);
   const answerRef = A2("");
   const textareaRef = A2(null);
   const gid = groupId.value;
@@ -24014,7 +24035,6 @@ function QuestionCardItem({ question: q5, busy, traceOwner, traceLive = false })
   const sendBusyRef = A2(false);
   const canType = q5.responseMode === "text" || q5.responseMode === "choice_or_text";
   const answered = q5.status === "answered";
-  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const submitAnswer = async (value = answerRef.current) => {
     const trimmed = value.trim();
     if (!trimmed || busy || sendBusyRef.current || !pendingRef.current) return false;
@@ -24127,26 +24147,8 @@ function QuestionCardItem({ question: q5, busy, traceOwner, traceLive = false })
         }
       )
     ] }),
-    showTechnicalStatus ? /* @__PURE__ */ u4(
-      ActivityTracePanel,
-      {
-        lines: q5.activity ?? [],
-        expanded: traceView.expanded,
-        ownerId: traceId,
-        live: traceLive,
-        following: traceView.following
-      }
-    ) : null,
     /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }),
-      /* @__PURE__ */ u4(
-        ActivityTraceToggle,
-        {
-          count: showTechnicalStatus ? q5.activity?.length ?? 0 : 0,
-          expanded: traceView.expanded,
-          onToggle: () => toggleActivityTrace(traceId)
-        }
-      ),
       !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null
     ] })
   ] });

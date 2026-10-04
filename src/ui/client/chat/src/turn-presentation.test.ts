@@ -130,7 +130,7 @@ describe('authoritative turn presentation', () => {
     expect(completedResponse.value).toBe('reply');
   });
 
-  it('moves turn ownership from an early response to new tail activity without changing intent', () => {
+  it('keeps turn ownership on one live bubble across intermediate responses and tail activity', () => {
     const traceId = 'turn:turn-1';
     toggleActivityTrace(traceId, true);
     const reply = {
@@ -148,9 +148,11 @@ describe('authoritative turn presentation', () => {
       turns: [{ ...testTurn, outputIds: [reply.id] }],
     };
     update(early);
-    expect(chatMessages.value.find((message) => message.id === reply.id)).toMatchObject({
-      turnTraceOwner: true,
-      turnTraceLive: true,
+    expect(chatMessages.value.find((message) => message.id === reply.id)?.activity).toBeUndefined();
+    expect(chatTranscript.value.find((row) => row.kind === 'turn')).toMatchObject({
+      traceOwner: traceId,
+      afterId: reply.id,
+      activity: testTurn.activity,
     });
     expect(activityTraceView(traceId, true).following).toBe(true);
 
@@ -161,7 +163,7 @@ describe('authoritative turn presentation', () => {
       timelinePosition: 300,
     };
     update({ ...early, turns: [{ ...testTurn, outputIds: [reply.id], activity: [...testTurn.activity, tail] }] });
-    expect(chatMessages.value.find((message) => message.id === reply.id)?.turnTraceOwner).toBe(false);
+    expect(chatMessages.value.find((message) => message.id === reply.id)?.turnTraceOwner).toBeUndefined();
     expect(
       chatTranscript.value.find(
         (row) => row.kind === 'turn' && row.activity.some((line) => line.ordinal === tail.ordinal),

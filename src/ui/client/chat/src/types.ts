@@ -210,8 +210,6 @@ export type TranscriptRow =
   | {
       kind: 'question';
       question: PendingQuestionDto;
-      traceOwner?: string;
-      traceLive?: boolean;
     }
   | {
       kind: 'turn';

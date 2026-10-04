@@ -203,11 +203,8 @@ export function projectConversation(
   const turnIds = new Set(turns.map((turn) => turn.id));
   const scopedQuestions: ConversationQuestion[] = visibleQuestions.map((q) => {
     const anchor = questionAnchors.get(q.message_out_id);
-    const activity = !anchor?.turn_id
-      ? (outDb
-          ?.prepare('SELECT ts, text FROM turn_activity WHERE message_out_id = ? ORDER BY ordinal')
-          .all(q.message_out_id) as Array<{ ts: string; text: string }> | undefined)
-      : undefined;
+    if (!anchor?.turn_id || !byId.has(anchor.turn_id))
+      throw new Error('Missing conversation question turn association');
     return {
       questionId: q.question_id,
       title: q.title,
@@ -225,8 +222,7 @@ export function projectConversation(
       ...(anchor?.content && outboundTimelinePosition(anchor.content) !== undefined
         ? { timelinePosition: outboundTimelinePosition(anchor.content) }
         : {}),
-      ...(activity?.length ? { activity } : {}),
-      ...(anchor?.turn_id && turnIds.has(anchor.turn_id) ? { turnId: anchor.turn_id } : {}),
+      ...(turnIds.has(anchor.turn_id) ? { turnId: anchor.turn_id } : {}),
     };
   });
   const live = signals.active.turn;

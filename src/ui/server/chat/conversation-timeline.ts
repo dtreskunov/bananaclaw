@@ -3,7 +3,7 @@ import { timelineSortKey } from '../../shared/timeline.js';
 
 type ContentRow = Extract<ConversationTimelineRow, { kind: 'message' | 'question' }>;
 
-/** Host-owned presentation order. Activity placement always uses recorded order, never step timestamps. */
+/** Host-owned conversation order with one trace host per logical turn. */
 export function conversationTimeline(view: Omit<Conversation, 'timeline'>): ConversationTimelineRow[] {
   const messages = view.messages.filter((message) => message.inputState?.status !== 'cancelled');
   const ordered: Array<{ row: ContentRow; id: string; position: number | undefined; key: number }> = [
@@ -41,76 +41,49 @@ export function conversationTimeline(view: Omit<Conversation, 'timeline'>): Conv
   };
   for (const turn of view.turns) {
     const settled = turn.phase === 'settled';
-    const inputs = ordered.filter((entry) => turn.inputIds.includes(entry.id));
-    const outputs = ordered.filter((entry) => turn.outputIds.includes(entry.id));
-    const replies = outputs.filter((entry) => entry.row.kind === 'message');
-    const finalReply = settled ? replies.at(-1) : undefined;
-    if (finalReply?.row.kind === 'message') finalReply.row.statsTurnId = turn.id;
-    const firstInput = inputs[0];
-    const boundaries = ordered.filter(
-      (entry) =>
-        turn.outputIds.includes(entry.id) ||
-        (entry !== firstInput &&
-          turn.inputIds.includes(entry.id) &&
-          messages.find((message) => message.id === entry.id)?.inputState?.status !== 'steering'),
-    );
-    const buckets = new Map<number, number[]>();
-    const attached = new Map<ContentRow, number[]>();
-    for (const line of turn.activity) {
-      const index = boundaries.filter(
-        (entry) => entry.position !== undefined && entry.position <= line.timelinePosition,
-      ).length;
-      const next = boundaries[index];
-      const anchor = next && turn.outputIds.includes(next.id) ? next : !next ? finalReply : undefined;
-      if (anchor) {
-        const list = attached.get(anchor.row) ?? [];
-        list.push(line.ordinal);
-        attached.set(anchor.row, list);
-      } else {
-        const list = buckets.get(index) ?? [];
-        list.push(line.ordinal);
-        buckets.set(index, list);
+    const trace: ConversationTrace = {
+      turnId: turn.id,
+      ordinals: turn.activity.map((line) => line.ordinal),
+      ownsTurn: true,
+    };
+    const content = ordered.filter((entry) => {
+      if (turn.outputIds.includes(entry.id)) return true;
+      if (entry.row.kind === 'question') {
+        const { questionId } = entry.row;
+        return view.questions.some((question) => question.questionId === questionId && question.turnId === turn.id);
       }
-    }
-    const traces: ConversationTrace[] = [];
-    for (const [row, ordinals] of attached) {
-      const trace = { turnId: turn.id, ordinals, ownsTurn: false };
-      row.trace = trace;
-      traces.push(trace);
-    }
-    if (finalReply && !attached.has(finalReply.row) && finalReply.row.kind === 'message') {
-      finalReply.row.trace = { turnId: turn.id, ordinals: [], ownsTurn: true };
-    }
-    const hasStatus =
-      !settled ||
-      turn.activity.length > 0 ||
-      turn.usage.length > 0 ||
-      !!turn.metadata.model ||
-      turn.metadata.durationMs !== null ||
-      (!!turn.startedAt && !!turn.endedAt) ||
-      ['stopped', 'failed', 'warning', 'interrupted', 'silent'].includes(turn.outcome);
-    const statusIndex = finalReply || !hasStatus ? null : boundaries.length;
-    if (statusIndex !== null && !buckets.has(statusIndex)) buckets.set(statusIndex, []);
-    for (const [index, ordinals] of buckets) {
-      const anchor = index ? boundaries[index - 1] : (firstInput ?? ordered.at(-1));
-      const trace = { turnId: turn.id, ordinals, ownsTurn: false };
-      traces.push(trace);
+      return (
+        turn.inputIds.includes(entry.id) &&
+        messages.find((message) => message.id === entry.id)?.inputState?.status !== 'steering'
+      );
+    });
+    const finalReply = settled
+      ? content
+          .filter((entry) => {
+            if (entry.row.kind !== 'message' || !turn.outputIds.includes(entry.id)) return false;
+            const message = messages.find((message) => message.id === entry.id);
+            return (
+              message?.direction === 'out' &&
+              !message.systemGenerated &&
+              message.deliveryOrigin !== 'send_message' &&
+              message.deliveryOrigin !== 'send_file'
+            );
+          })
+          .at(-1)
+      : undefined;
+    if (finalReply?.row.kind === 'message') {
+      finalReply.row.trace = trace;
+      finalReply.row.statsTurnId = turn.id;
+    } else {
+      const anchor = content.at(-1);
       appendAfter(anchor?.row ?? null, {
         kind: 'turn',
         turnId: turn.id,
         afterId: anchor?.id ?? null,
         trace,
-        status: index === statusIndex,
+        status: true,
       });
     }
-    const owner =
-      finalReply && finalReply.row.kind === 'message'
-        ? finalReply.row.trace
-        : (traces
-            .filter((trace) => trace.ordinals.length)
-            .sort((a, b) => Math.max(...a.ordinals) - Math.max(...b.ordinals))
-            .at(-1) ?? traces.at(-1));
-    if (owner) owner.ownsTurn = true;
   }
   return [...(inserts.get(null) ?? []), ...rows.flatMap((row) => [row, ...(inserts.get(row) ?? [])])];
 }

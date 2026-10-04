@@ -1,5 +1,6 @@
 import { batch, signal } from '@preact/signals';
 import type { Conversation, ConversationTrace } from '../../../shared/conversation';
+import { conversationActivity } from '../../../shared/conversation-activity';
 import {
   ConversationProtocolError,
   parseConversationFrame,
@@ -46,7 +47,8 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     const turn = turns.get(trace.turnId);
     if (!turn) throw new ConversationProtocolError('invalid_frame');
     const ordinals = new Set(trace.ordinals);
-    return turn.activity.filter((line) => ordinals.has(line.ordinal));
+    const activity = turn.activity.filter((line) => ordinals.has(line.ordinal));
+    return trace.ownsTurn ? conversationActivity({ ...turn, activity }, view.questions) : activity;
   };
   const transcript = view.timeline.map((row): TranscriptRow => {
     const turn = row.trace ? turns.get(row.trace.turnId) : undefined;
@@ -65,16 +67,7 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     if (row.kind === 'question') {
       const question = questions.get(row.questionId);
       if (!question) throw new ConversationProtocolError('invalid_frame');
-      return {
-        kind: 'question',
-        question: row.trace ? { ...question, activity: traceLines(row.trace) } : question,
-        ...(row.trace
-          ? {
-              traceOwner: row.trace.ownsTurn ? `turn:${row.trace.turnId}` : `question:${row.questionId}`,
-              traceLive: row.trace.ownsTurn && turn?.phase !== 'settled',
-            }
-          : {}),
-      };
+      return { kind: 'question', question };
     }
     if (!turn || turn.id !== row.turnId) throw new ConversationProtocolError('invalid_frame');
     return {

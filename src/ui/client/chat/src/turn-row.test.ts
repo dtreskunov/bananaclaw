@@ -74,8 +74,8 @@ describe('turn row placement', () => {
     const view = testSnapshot({ messages, turns: [imported('a', 'first'), imported('b', 'later')] }).conversation;
     expect(conversationMessages(view).map((m) => [m.id, m.activity?.length, m.statsTurn?.id])).toEqual([
       ['ask', undefined, undefined],
-      ['first', 1, 'a'],
-      ['later', 1, 'b'],
+      ['first', 2, 'a'],
+      ['later', 2, 'b'],
     ]);
   });
 
@@ -86,7 +86,7 @@ describe('turn row placement', () => {
     const view = testSnapshot({ messages, turns: [turn] }).conversation;
     expect(conversationMessages(view).map((m) => [m.id, m.activity?.length])).toEqual([
       ['ask', undefined],
-      ['reply', 1],
+      ['reply', 2],
     ]);
   });
 });
@@ -117,21 +117,21 @@ describe('turn activity placement', () => {
       row.kind === 'message'
         ? {
             id: row.message.id,
-            lines: row.message.activity?.map((line) => line.text),
+            lines: row.message.activity?.map((line) => (line.text.includes('"text":"Done"') ? 'Done' : line.text)),
             status: false,
             stats: row.message.statsTurn?.id,
           }
         : row.kind === 'turn'
           ? {
               id: `trace:${row.turn.id}:after:${row.afterId}`,
-              lines: row.activity.map((line) => line.text),
+              lines: row.activity.map((line) => (line.text.includes('"text":"Done"') ? 'Done' : line.text)),
               status: row.status,
               stats: undefined,
             }
           : { id: row.question.questionId, status: false },
     );
 
-  it('splits activity at a steering message: a system bubble before it, the reply after it', () => {
+  it('keeps activity across steering in the final response with a display-only Done marker', () => {
     const messages = [message('ask', 'in', -1), message('steer', 'in', 3000, 'applied'), message('reply', 'out', 9000)];
     const turn = settled({
       id: 's',
@@ -141,9 +141,8 @@ describe('turn activity placement', () => {
     });
     expect(rows(testSnapshot({ messages, turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
-      { id: 'trace:s:after:ask', lines: ['step 0'], status: false, stats: undefined },
       { id: 'steer', lines: undefined, status: false, stats: undefined },
-      { id: 'reply', lines: ['step 1'], status: false, stats: 's' },
+      { id: 'reply', lines: ['step 0', 'step 1', 'Done'], status: false, stats: 's' },
     ]);
   });
 
@@ -154,7 +153,6 @@ describe('turn activity placement', () => {
       rows(testSnapshot({ messages: applied, turns: [running] }).conversation).map((r) => [r.id, r.status]),
     ).toEqual([
       ['ask', false],
-      ['trace:r:after:ask', false],
       ['steer', false],
       ['trace:r:after:steer', true],
     ]);
@@ -168,7 +166,7 @@ describe('turn activity placement', () => {
     ]);
   });
 
-  it('puts work before a mid-turn message inside it, and later live work in a status bubble', () => {
+  it('keeps work across mid-turn messages in the same live synthetic bubble', () => {
     const running = {
       ...testTurn,
       id: 'm',
@@ -179,8 +177,8 @@ describe('turn activity placement', () => {
     const messages = [message('ask', 'in', -1), message('update', 'out', 3000)];
     expect(rows(testSnapshot({ messages, turns: [running] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
-      { id: 'update', lines: ['step 0'], status: false, stats: undefined },
-      { id: 'trace:m:after:update', lines: ['step 1'], status: true, stats: undefined },
+      { id: 'update', lines: undefined, status: false, stats: undefined },
+      { id: 'trace:m:after:update', lines: ['step 0', 'step 1'], status: true, stats: undefined },
     ]);
   });
 
@@ -188,16 +186,17 @@ describe('turn activity placement', () => {
     const turn = settled({ id: 'q', outcome: 'silent', inputIds: ['ask'], activity: [step(0, 1000)] });
     expect(rows(testSnapshot({ messages: [message('ask', 'in', -1)], turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
-      { id: 'trace:q:after:ask', lines: ['step 0'], status: true, stats: undefined },
+      { id: 'trace:q:after:ask', lines: ['step 0', 'Done'], status: true, stats: undefined },
     ]);
   });
 
-  it('drops a settled turn with a reply and no activity to a stats line on that reply', () => {
+  it('retains a display-only Done trace and stats on a reply without recorded activities', () => {
     const turn = settled({ id: 'p', inputIds: ['ask'], outputIds: ['reply'], activity: [] });
     const messages = [message('ask', 'in', -1), message('reply', 'out', 2000)];
     expect(rows(testSnapshot({ messages, turns: [turn] }).conversation).map((r) => [r.id, r.stats])).toEqual([
       ['ask', undefined],
       ['reply', 'p'],
     ]);
+    expect(conversationMessages(testSnapshot({ messages, turns: [turn] }).conversation)[1].activity).toHaveLength(1);
   });
 });

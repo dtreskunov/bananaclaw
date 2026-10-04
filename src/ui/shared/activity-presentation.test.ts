@@ -42,13 +42,18 @@ describe('activity presentation', () => {
     const chapters = activityChapters(values);
     expect(chapters.map((chapter) => chapter.entries.length)).toEqual([1, 1, 1, 1]);
     expect(chapters.slice(1, 3).map((chapter) => chapter.title)).toEqual([
-      'Steering message injected Use the revised approach. Keep <literal text> intact.',
-      'Steering message injected Use the revised approach. Keep <literal text> intact.',
+      'Considered Use the revised approach. Keep <literal text> intact.',
+      'Considered Use the revised approach. Keep <literal text> intact.',
     ]);
     expect(displayStep(values[1], true).detail).toBe(marker.detail);
     expect(stepSummary(displayStep(values[1], true))).toBe(
-      'Steering message injected Use the revised approach. Keep <literal text> intact.',
+      'Considered Use the revised approach. Keep <literal text> intact.',
     );
+    expect(stepHeadline(marker)).toEqual({
+      action: 'Considered',
+      subject: 'Use the revised approach. Keep <literal text> intact.',
+      codeSubject: true,
+    });
     expect(chapters.flatMap((chapter) => chapter.entries.map((entry) => entry.line))).toEqual(values);
   });
 

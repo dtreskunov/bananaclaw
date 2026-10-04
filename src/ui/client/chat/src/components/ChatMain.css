@@ -348,7 +348,7 @@
 .chat-main .typing .typing-meta { flex: none; white-space: nowrap; font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
 /* Expanded historical traces need room even when their summary is short. */
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
-/* Turn activity with no agent message to carry it (before a steer, live, or no reply). */
+/* Synthetic turn bubble while live or when there is no final response. */
 .chat-main .typing.turn-system { align-self: flex-start; background: transparent; border-radius: var(--radius-lg); padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block); gap: 2px; }
 .chat-main .typing.turn-system.turn-status { width: fit-content; }
 .chat-main .typing.turn-system.turn-live { width: 100%; max-width: 100%; min-width: 0; }

@@ -875,7 +875,7 @@ function messageKey(message: ChatMessage): string {
 }
 
 function groupKey(group: MsgGroup): string {
-  if (group.kind === 'turn') return `turn:${group.row.turn.id}:after:${group.row.afterId ?? 'start'}`;
+  if (group.kind === 'turn') return `turn:${group.row.turn.id}`;
   if (group.kind === 'question') return `question:${group.row.question.questionId}`;
   if (group.kind === 'thoughts') return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === 'events') return `events:${messageKey(group.events[0]!)}`;
@@ -1141,7 +1141,7 @@ function ReplyTurnStats({
 }
 
 /**
- * A system bubble for turn activity that no agent message carries (before a steer, live, or no reply).
+ * A synthetic bubble carrying the whole turn trace while live or when there is no final response.
  * The status bubble also carries the live headline, timer, usage and Stop control, or settled stats
  * for a turn without a reply.
  */
@@ -1480,7 +1480,6 @@ function MessageLog() {
                         status={g.row.status} ownerId={g.row.traceOwner} />
                     : g.kind === 'question'
                       ? <QuestionCardItem key={key} question={g.row.question}
-                          traceOwner={g.row.traceOwner} traceLive={g.row.traceLive}
                           busy={respondingQuestionIds.value.has(g.row.question.questionId)} />
                     : g.kind === 'thoughts'
                     ? <ThoughtGroup
@@ -1553,12 +1552,10 @@ function PendingTray() {
   );
 }
 
-function QuestionCardItem({ question: q, busy, traceOwner, traceLive = false }: {
-  question: PendingQuestionDto; busy: boolean; traceOwner?: string; traceLive?: boolean;
+function QuestionCardItem({ question: q, busy }: {
+  question: PendingQuestionDto; busy: boolean;
 }) {
   const [answer, setAnswer] = useState('');
-  const traceId = traceOwner ?? `question:${q.questionId}`;
-  const traceView = activityTraceView(traceId, traceLive);
   const answerRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const gid = groupId.value;
@@ -1575,7 +1572,6 @@ function QuestionCardItem({ question: q, busy, traceOwner, traceLive = false }: 
   const sendBusyRef = useRef(false);
   const canType = q.responseMode === 'text' || q.responseMode === 'choice_or_text';
   const answered = q.status === 'answered';
-  const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
 
   const submitAnswer = async (value = answerRef.current): Promise<boolean> => {
     const trimmed = value.trim();
@@ -1674,14 +1670,8 @@ function QuestionCardItem({ question: q, busy, traceOwner, traceLive = false }: 
           )}
         </>
       )}
-      {showTechnicalStatus
-        ? <ActivityTracePanel lines={q.activity ?? []} expanded={traceView.expanded} ownerId={traceId}
-            live={traceLive} following={traceView.following} />
-        : null}
       <div class="meta question-card-meta">
         <RelativeTime ts={answered && q.answeredAt ? q.answeredAt : q.createdAt} />
-        <ActivityTraceToggle count={showTechnicalStatus ? q.activity?.length ?? 0 : 0} expanded={traceView.expanded}
-          onToggle={() => toggleActivityTrace(traceId)} />
         {!answered ? <AgentActionLabel label="question" title="Sent with ask_user_question" /> : null}
       </div>
     </div>

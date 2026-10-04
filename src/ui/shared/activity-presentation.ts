@@ -237,8 +237,8 @@ export function stepHeadline(step: TraceStep): StepHeadline {
         : { action: step.description || 'Started subtask' };
     case 'notification':
       return {
-        action: step.text || 'Notification',
-        ...(step.detail ? { subject: singleLine(step.detail) } : {}),
+        action: step.text === 'Steering message injected' ? 'Considered' : step.text || 'Notification',
+        ...(step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {}),
       };
     default:
       return { action: '' };

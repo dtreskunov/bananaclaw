@@ -115,11 +115,11 @@ describe('authoritative conversation projection', () => {
     expect(result.turns[0].activity[1].text).toBe('Imported activity');
   });
 
-  it('scopes questions by platform as well as thread and preserves unassociated historical traces', () => {
+  describe('questions', () => {
     const question: Parameters<typeof projectConversation>[5][number] = {
       question_id: 'q',
       session_id: 's',
-      message_out_id: 'legacy-question',
+      message_out_id: 'question-output',
       in_reply_to: null,
       channel_type: 'web',
       platform_id: 'group:g',
@@ -134,29 +134,84 @@ describe('authoritative conversation projection', () => {
       answered_by: null,
       answered_at: null,
       cancelled_at: null,
-      created_at: 'now',
+      created_at: '2026-09-29T00:00:01Z',
     };
-    db.prepare(
-      'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
-    ).run('legacy-question', 0, '1', 'legacy', null);
-    const readQuestions = (status: typeof question.status) =>
-      projectConversation(
-        db,
-        context,
-        't',
-        'g',
-        [],
-        [
-          { ...question, status },
-          { ...question, question_id: 'private', platform_id: 'private' },
-        ],
-        signals,
+    beforeEach(() => {
+      db.prepare('INSERT INTO messages_out (id, kind, timestamp, content, turn_id) VALUES (?, ?, ?, ?, ?)').run(
+        question.message_out_id,
+        'system_action',
+        question.created_at,
+        '{}',
+        turn.id,
       );
-    expect(readQuestions('pending').questions).toHaveLength(1);
-    expect(readQuestions('answered').questions[0]).toMatchObject({
-      status: 'answered',
-      activity: [{ ts: '1', text: 'legacy' }],
     });
+
+    it('uses canonical turn ownership and scopes questions by channel, platform and thread', () => {
+      db.prepare(
+        'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
+      ).run(question.message_out_id, 3, '1', 'question work', turn.id);
+      const readQuestions = (status: typeof question.status) =>
+        projectConversation(
+          db,
+          context,
+          't',
+          'g',
+          [],
+          [
+            { ...question, status },
+            { ...question, question_id: 'private', platform_id: 'private', message_out_id: 'missing-private-output' },
+            {
+              ...question,
+              question_id: 'off-thread',
+              thread_id: 'private-thread',
+              message_out_id: 'missing-thread-output',
+            },
+            {
+              ...question,
+              question_id: 'off-channel',
+              channel_type: 'telegram',
+              message_out_id: 'missing-channel-output',
+            },
+          ],
+          signals,
+        );
+      expect(readQuestions('pending').questions).toHaveLength(1);
+      const view = readQuestions('answered');
+      expect(view.questions[0]).toMatchObject({ status: 'answered', turnId: turn.id });
+      expect(view.questions[0]).not.toHaveProperty('activity');
+      expect(view.turns).toHaveLength(1);
+      expect(view.turns[0].activity.filter((line) => line.text === 'question work')).toHaveLength(1);
+      expect(view.timeline.filter((row) => row.trace)).toHaveLength(1);
+      expect(view.timeline.find((row) => row.kind === 'turn')).toMatchObject({
+        afterId: question.message_out_id,
+        trace: { turnId: turn.id, ownsTurn: true, ordinals: [1, 3] },
+      });
+      putTurn(db, { ...turn, origin_platform_id: 'private' });
+      const privateOrigin = readQuestions('answered');
+      expect(privateOrigin.questions[0]).not.toHaveProperty('turnId');
+      expect(privateOrigin.turns).toHaveLength(0);
+    });
+
+    it.each(['missing output', 'missing output turn', 'missing turn record'])(
+      'rejects a %s instead of normalizing history',
+      (missing) => {
+        if (missing === 'missing output') {
+          db.prepare('DELETE FROM messages_out WHERE id = ?').run(question.message_out_id);
+        } else {
+          db.pragma('foreign_keys = OFF');
+          db.prepare('UPDATE messages_out SET turn_id = ? WHERE id = ?').run(
+            missing === 'missing output turn' ? null : 'missing-turn',
+            question.message_out_id,
+          );
+        }
+        db.prepare(
+          'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
+        ).run(question.message_out_id, 3, '1', 'old activity', missing === 'missing output' ? turn.id : null);
+        expect(() => projectConversation(db, context, 't', 'g', [], [question], signals)).toThrow(
+          'Missing conversation question turn association',
+        );
+      },
+    );
   });
   it('stages the response until the matching durable settlement and keeps live trace on reconnect', () => {
     const before = read([output, { ...output, id: 'update', deliveryOrigin: 'send_message' }]);
