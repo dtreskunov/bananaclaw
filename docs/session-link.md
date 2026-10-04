@@ -107,9 +107,10 @@ reply address. The context is routing metadata, not a credential.
 
 **No runtime upgrades or mixed versions.** Version 5 requires canonical activity
 positions in both projections and every activity signal/durable payload.
-Normalize version 4 stores with the explicit offline cutover in
-[ui.md](ui.md#offline-canonical-activity-order-cutover); both peers reject
-unmigrated storage. For older turn-format changes see
+Both peers reject incompatible storage. The completed cutover's converter is
+archived in git, not needed at runtime; see
+[ui.md](ui.md#activity-order-storage) for older-installation recovery and rollback.
+For older turn-format changes see
 [downgrade-to-v3.md](downgrade-to-v3.md).
 
 User cancellation uses a host-to-runner live `turn.stop` control carrying the

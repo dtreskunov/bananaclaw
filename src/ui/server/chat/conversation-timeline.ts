@@ -1,10 +1,12 @@
 import type { Conversation, ConversationTimelineRow, ConversationTrace } from '../../shared/conversation.js';
 import { timelineSortKey } from '../../shared/timeline.js';
 
+type ContentRow = Extract<ConversationTimelineRow, { kind: 'message' | 'question' }>;
+
 /** Host-owned presentation order. Activity placement always uses recorded order, never step timestamps. */
 export function conversationTimeline(view: Omit<Conversation, 'timeline'>): ConversationTimelineRow[] {
   const messages = view.messages.filter((message) => message.inputState?.status !== 'cancelled');
-  const ordered: Array<{ row: ConversationTimelineRow; id: string; position: number | undefined; key: number }> = [
+  const ordered: Array<{ row: ContentRow; id: string; position: number | undefined; key: number }> = [
     ...messages.map((message) => ({
       row: { kind: 'message' as const, messageId: message.id },
       id: message.id,
@@ -53,7 +55,7 @@ export function conversationTimeline(view: Omit<Conversation, 'timeline'>): Conv
           messages.find((message) => message.id === entry.id)?.inputState?.status !== 'steering'),
     );
     const buckets = new Map<number, number[]>();
-    const attached = new Map<ConversationTimelineRow, number[]>();
+    const attached = new Map<ContentRow, number[]>();
     for (const line of turn.activity) {
       const index = boundaries.filter(
         (entry) => entry.position !== undefined && entry.position <= line.timelinePosition,
@@ -73,7 +75,7 @@ export function conversationTimeline(view: Omit<Conversation, 'timeline'>): Conv
     const traces: ConversationTrace[] = [];
     for (const [row, ordinals] of attached) {
       const trace = { turnId: turn.id, ordinals, ownsTurn: false };
-      if (row.kind !== 'turn') row.trace = trace;
+      row.trace = trace;
       traces.push(trace);
     }
     if (finalReply && !attached.has(finalReply.row) && finalReply.row.kind === 'message') {

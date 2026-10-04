@@ -24,7 +24,7 @@ describe('durable turn schema', () => {
     opened.push(db);
     db.exec(`CREATE TABLE turn_activity (message_out_id TEXT, ordinal INTEGER, ts TEXT, text TEXT, turn_id TEXT);
       INSERT INTO turn_activity VALUES ('out', 0, 'same-time', 'work', 'turn')`);
-    expect(() => assertActivityOrderSchema(db)).toThrow('migration required');
+    expect(() => assertActivityOrderSchema(db)).toThrow('Unsupported activity-order schema');
     expect(db.prepare('PRAGMA table_info(turn_activity)').all()).toHaveLength(5);
   });
   it('keeps host and runner SQL contracts identical without cross-runtime imports', () => {

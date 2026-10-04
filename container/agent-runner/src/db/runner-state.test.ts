@@ -27,7 +27,7 @@ describe('runner state journal', () => {
         message_out_id TEXT, ordinal INTEGER, ts TEXT, text TEXT, turn_id TEXT,
         PRIMARY KEY (message_out_id, ordinal));
         INSERT INTO turn_activity VALUES ('legacy', 0, 'same-time', 'work', NULL)`);
-      expect(() => ensureRunnerStateSchema(db)).toThrow('migration required');
+      expect(() => ensureRunnerStateSchema(db)).toThrow('Unsupported activity-order schema');
       expect(db.prepare('PRAGMA table_info(turn_activity)').all()).toHaveLength(5);
     } finally { db.close(); }
   });

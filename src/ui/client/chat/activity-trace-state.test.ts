@@ -69,6 +69,19 @@ describe('activity trace intent state', () => {
     expect(activityTraceOwner(prior)).toBe('message:reply');
   });
 
+  it('requires an explicit turn ID instead of inferring ownership from accounting', () => {
+    const reply: ChatMessage = {
+      id: 'reply',
+      direction: 'out',
+      text: 'Done',
+      ts: '',
+      statsTurn: testTurn,
+      turnTraceOwner: true,
+      files: null,
+    };
+    expect(() => activityTraceOwner(reply)).toThrow('missing its authoritative turn ID');
+  });
+
   it('clears transient state', () => {
     toggleActivityTrace('turn:turn-1', true);
     resetActivityTraceView();

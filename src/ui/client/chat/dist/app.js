@@ -17941,14 +17941,14 @@ function clearPendingStop() {
   requestController?.abort();
   requestController = null;
 }
-function boundRequest(turnId2) {
+function boundRequest(turnId) {
   requestTimer = setTimeout(() => {
     requestTimer = null;
     requestController?.abort();
     requestController = null;
-    if (activeTurn.value?.id !== turnId2) return;
+    if (activeTurn.value?.id !== turnId) return;
     stopRequest.value = {
-      turnId: turnId2,
+      turnId,
       busy: false,
       error: "Stop request timed out. Reconnect to check the authoritative turn state."
     };
@@ -17979,18 +17979,18 @@ function resetTurnState() {
     stopRequest.value = null;
   });
 }
-async function stopActiveTurn(turnId2) {
+async function stopActiveTurn(turnId) {
   const gid = groupId.value;
   const tid = threadId.value;
-  if (!gid || !tid || !canSend.value || !turnConnected.value || activeTurn.value?.id !== turnId2 || stopRequest.value?.busy)
+  if (!gid || !tid || !canSend.value || !turnConnected.value || activeTurn.value?.id !== turnId || stopRequest.value?.busy)
     return;
   const generation2 = refs.chatGeneration;
-  const isCurrent = () => generation2 === refs.chatGeneration && groupId.value === gid && threadId.value === tid && activeTurn.value?.id === turnId2;
+  const isCurrent = () => generation2 === refs.chatGeneration && groupId.value === gid && threadId.value === tid && activeTurn.value?.id === turnId;
   clearPendingStop();
-  stopRequest.value = { turnId: turnId2, busy: true, error: "" };
+  stopRequest.value = { turnId, busy: true, error: "" };
   const controller = new AbortController();
   requestController = controller;
-  boundRequest(turnId2);
+  boundRequest(turnId);
   let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/stop`;
   if (channelType.value !== "web" && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
@@ -18000,7 +18000,7 @@ async function stopActiveTurn(turnId2) {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ turnId: turnId2 }),
+      body: JSON.stringify({ turnId }),
       signal: controller.signal
     });
     if (!isCurrent()) return;
@@ -18020,7 +18020,7 @@ async function stopActiveTurn(turnId2) {
     clearPendingStop();
     console.error("Stop request failed", error);
     stopRequest.value = {
-      turnId: turnId2,
+      turnId,
       busy: false,
       error: error instanceof Error ? error.message : "Stop request failed. Try again."
     };
@@ -18641,12 +18641,11 @@ function urlBase64ToUint8Array(base64String) {
 
 // src/activity-trace-state.ts
 var intent = y3(null);
-function turnId(message2) {
-  return message2.turnId ?? message2.statsTurn?.id ?? null;
-}
 function activityTraceOwner(message2) {
-  const turn2 = message2.turnTraceOwner ? turnId(message2) : null;
-  if (turn2) return `turn:${turn2}`;
+  if (message2.turnTraceOwner) {
+    if (!message2.turnId) throw new Error("Activity trace owner is missing its authoritative turn ID");
+    return `turn:${message2.turnId}`;
+  }
   if (!message2.id) throw new Error("Activity trace message is missing its authoritative ID");
   return `message:${message2.id}`;
 }

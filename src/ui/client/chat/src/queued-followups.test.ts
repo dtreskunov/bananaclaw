@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { testSnapshot } from './conversation-test-fixtures';
-import { isQueuedFollowup, splitPendingInputs, splitQueuedFollowups, timelineLayoutKey } from './queued-followups';
+import { isQueuedFollowup, splitPendingInputs, splitQueuedFollowups } from './queued-followups';
 import type { ChatMessage } from './types';
 
 const sent = '2026-09-26T00:00:00Z';
@@ -40,7 +40,6 @@ describe('queued follow-up timeline', () => {
     expect(ids(splitPendingInputs(input).transcript)).toEqual(['initial', 'progress']);
     expect(ids(splitPendingInputs(input).queued)).toEqual(['steer', 'later']);
     const applied = { ...steering, inputState: { ...steering.inputState, status: 'applied' as const } };
-    expect(timelineLayoutKey([steering])).not.toBe(timelineLayoutKey([applied]));
     expect(ids(splitPendingInputs([input[0], applied, input[2], input[3]]).transcript)).toEqual([
       'initial',
       'steer',
@@ -49,21 +48,18 @@ describe('queued follow-up timeline', () => {
   });
   it('waits for a valid durable position when processing acknowledgement arrives first', () => {
     const queued = followup('followup');
-    const initialKey = timelineLayoutKey([queued]);
     const processing = {
       ...queued,
       canEditPending: false,
       inputState: { ...queued.inputState!, status: 'processing' as const },
     };
     expect(layout([processing]).queued).toEqual([processing]);
-    expect(timelineLayoutKey([processing])).toBe(initialKey);
     for (const timelinePosition of [0, -1, NaN, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
       expect(isQueuedFollowup({ ...processing, timelinePosition })).toBe(true);
     }
     const positioned = { ...processing, timelinePosition: base + 2 };
     expect(layout([positioned]).queued).toEqual([]);
     expect(layout([positioned]).transcript).toEqual([positioned]);
-    expect(timelineLayoutKey([positioned])).not.toBe(initialKey);
     expect(
       isQueuedFollowup({
         ...processing,
@@ -85,14 +81,12 @@ describe('queued follow-up timeline', () => {
   it('promotes at consumption after the prior answer and before its own response with identical sent timestamps', () => {
     const queued = followup('next');
     const messages = [message('initial', 'in', base + 1), queued, message('prior-answer', 'out', base + 2)];
-    const oldLayout = timelineLayoutKey(messages);
     const consumed = {
       ...queued,
       timelinePosition: base + 3,
       inputState: { ...queued.inputState!, status: 'processing' as const },
     };
     const live = [messages[0], consumed, messages[2]];
-    expect(timelineLayoutKey(live)).not.toBe(oldLayout);
     live.push(message('own-answer', 'out', base + 4));
     expect(ids(layout(live).transcript)).toEqual(['initial', 'prior-answer', 'next', 'own-answer']);
     expect(layout(live).queued).toEqual([]);

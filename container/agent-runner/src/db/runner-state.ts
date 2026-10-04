@@ -22,7 +22,9 @@ function applyRunnerStateSchema(db: Database): void {
   db.exec(TURN_ACTIVITY_SCHEMA);
   const columns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{ name: string; notnull: number }>;
   if (!columns.some((column) => column.name === 'timeline_position' && column.notnull === 1)) {
-    throw new Error('Activity order migration required before starting the runner.');
+    throw new Error(
+      'Unsupported activity-order schema: turn_activity.timeline_position must be NOT NULL. See docs/ui.md#activity-order-storage.',
+    );
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages_in (
@@ -146,7 +148,6 @@ function applyRunnerStateSchema(db: Database): void {
       provider_turn_ref TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
-    ${TURN_ACTIVITY_SCHEMA}
     CREATE TABLE IF NOT EXISTS turn_usage (
       id TEXT PRIMARY KEY,
       message_out_id TEXT,

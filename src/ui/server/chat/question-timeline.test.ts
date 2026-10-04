@@ -1,29 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ChatMessage, PendingQuestionDto } from './types';
-import { testSnapshot } from './conversation-test-fixtures';
-import type { ConversationTimelineRow } from '../../../shared/conversation';
+import type { ConversationMessage, ConversationQuestion } from '../../shared/conversation.js';
+import { conversationTimeline } from './conversation-timeline.js';
 
-function mergeQuestionTimeline(messages: ChatMessage[], questions: PendingQuestionDto[], threadId: string) {
-  return testSnapshot({
+function questionTimeline(messages: ConversationMessage[], questions: ConversationQuestion[], threadId: string) {
+  return conversationTimeline({
     threadId,
-    messages: messages.map(({ ts, files: _files, ...message }) => ({
-      ...message,
-      id: message.id!,
-      timestamp: ts,
-    })),
+    messages,
+    turns: [],
     questions,
-  }).conversation.timeline;
-}
-function rowId(row: ConversationTimelineRow): string {
-  return row.kind === 'message' ? row.messageId : row.kind === 'question' ? row.questionId : row.turnId;
-}
-
-function message(id: string, ts: string): ChatMessage {
-  return { id, direction: 'out', text: id, files: null, ts };
+    connection: { connected: true, activeTurnId: null },
+    capabilities: { canSend: true, stop: false, steer: false, editInput: false, cancelInput: false },
+  });
 }
 
-function question(overrides: Partial<PendingQuestionDto> = {}): PendingQuestionDto {
+function message(id: string, timestamp: string): ConversationMessage {
+  return { id, direction: 'out', text: id, timestamp };
+}
+
+function question(overrides: Partial<ConversationQuestion> = {}): ConversationQuestion {
   return {
     questionId: 'question-1',
     title: 'Release note',
@@ -43,28 +38,35 @@ function question(overrides: Partial<PendingQuestionDto> = {}): PendingQuestionD
 
 describe('host question presentation order', () => {
   it('places a SQLite-timestamped question between surrounding ISO messages', () => {
-    const result = mergeQuestionTimeline(
+    const result = questionTimeline(
       [message('before', '2026-07-15T05:33:48.707Z'), message('after', '2026-07-15T05:35:43.000Z')],
       [question()],
       'thread-1',
     );
 
-    expect(result.map(rowId)).toEqual(['before', 'question-1', 'after']);
+    expect(result).toEqual([
+      { kind: 'message', messageId: 'before' },
+      { kind: 'question', questionId: 'question-1' },
+      { kind: 'message', messageId: 'after' },
+    ]);
   });
 
   it('excludes questions belonging to another thread', () => {
-    expect(mergeQuestionTimeline([], [question({ threadId: 'thread-2' })], 'thread-1')).toEqual([]);
+    expect(questionTimeline([], [question({ threadId: 'thread-2' })], 'thread-1')).toEqual([]);
   });
 
   it('places a question after a message with the same timestamp', () => {
-    const result = mergeQuestionTimeline([message('message-1', '2026-07-15T05:34:20Z')], [question()], 'thread-1');
-    expect(result.map(rowId)).toEqual(['message-1', 'question-1']);
+    const result = questionTimeline([message('message-1', '2026-07-15T05:34:20Z')], [question()], 'thread-1');
+    expect(result).toEqual([
+      { kind: 'message', messageId: 'message-1' },
+      { kind: 'question', questionId: 'question-1' },
+    ]);
   });
 
   it('keeps questions after precise input positions in their millisecond without losing normal ordering', () => {
     const timestamp = '2026-07-15T05:34:20.000Z';
     const position = Date.parse(timestamp) * 1000;
-    const result = mergeQuestionTimeline(
+    const result = questionTimeline(
       [
         { ...message('later-in-bucket', timestamp), timelinePosition: position + 9 },
         { ...message('triggering-input', timestamp), direction: 'in', timelinePosition: position + 1 },
@@ -73,12 +75,16 @@ describe('host question presentation order', () => {
       [question({ createdAt: timestamp })],
       'thread-1',
     );
-    expect(result.map(rowId)).toEqual(['triggering-input', 'later-in-bucket', 'question-1', 'later-output']);
-    expect(result[0]).toEqual({ kind: 'message', messageId: 'triggering-input' });
+    expect(result).toEqual([
+      { kind: 'message', messageId: 'triggering-input' },
+      { kind: 'message', messageId: 'later-in-bucket' },
+      { kind: 'question', questionId: 'question-1' },
+      { kind: 'message', messageId: 'later-output' },
+    ]);
   });
 
   it('places an answered question at its answer time', () => {
-    const result = mergeQuestionTimeline(
+    const result = questionTimeline(
       [message('before', '2026-07-15T05:52:30.000Z'), message('after', '2026-07-15T05:53:20.000Z')],
       [
         question({
@@ -92,12 +98,15 @@ describe('host question presentation order', () => {
       'thread-1',
     );
 
-    expect(result.map(rowId)).toEqual(['before', 'question-1', 'after']);
-    expect(result[1]).toEqual({ kind: 'question', questionId: 'question-1' });
+    expect(result).toEqual([
+      { kind: 'message', messageId: 'before' },
+      { kind: 'question', questionId: 'question-1' },
+      { kind: 'message', messageId: 'after' },
+    ]);
   });
 
   it('keeps a pending question at its ask time', () => {
-    const result = mergeQuestionTimeline(
+    const result = questionTimeline(
       [],
       [
         question({
@@ -107,6 +116,6 @@ describe('host question presentation order', () => {
       'thread-1',
     );
 
-    expect(result[0]).toEqual({ kind: 'question', questionId: 'question-1' });
+    expect(result).toEqual([{ kind: 'question', questionId: 'question-1' }]);
   });
 });

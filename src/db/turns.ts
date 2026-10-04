@@ -74,7 +74,7 @@ export function assertActivityOrderSchema(db: Database.Database): void {
   const columns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{ name: string; notnull: number }>;
   if (!columns.some((column) => column.name === 'timeline_position' && column.notnull === 1)) {
     throw new Error(
-      'Activity order migration required: run scripts/migrate-activity-order.ts offline before starting.',
+      'Unsupported activity-order schema: turn_activity.timeline_position must be NOT NULL. See docs/ui.md#activity-order-storage.',
     );
   }
 }

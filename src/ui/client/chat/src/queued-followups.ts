@@ -31,17 +31,3 @@ export function splitPendingInputs(messages: ChatMessage[]): { transcript: ChatM
   }
   return { transcript, queued };
 }
-
-/** Positions/status changes can move an existing row without changing its count. */
-export function timelineLayoutKey(messages: ChatMessage[]): string {
-  return JSON.stringify(
-    messages.map((message) => [
-      message.id,
-      message.direction,
-      message.timelinePosition,
-      isQueuedFollowup(message),
-      message.inputState?.status === 'steering',
-      message.statsTurn?.id,
-    ]),
-  );
-}

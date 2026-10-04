@@ -479,14 +479,29 @@ and assets together, and reload open tabs. Verify that a reconnect starts with a
 `snapshot` and subsequent changes are revisioned `update` envelopes. Do not mix
 protocol versions; see [downgrade-to-v3.md](downgrade-to-v3.md) for rollback.
 
-#### Offline canonical activity-order cutover
+#### Activity-order storage
 
-**Detect / why:** run `pnpm exec tsx scripts/migrate-activity-order.ts --check`.
-Exit code 1 means existing host/runner pairs need conversion. The runtime requires
+The one-time offline cutover is complete. Its converter and regression tests were
+retired from the working tree and remain archived in commit `36cb79d4`.
+Normal operation, fresh sessions, and restarts do not need migration scripts.
+
+**Detect / why:** the host and runner reject incompatible activity storage with
+an `Unsupported activity-order schema` error. The runtime requires
 `turn_activity.timeline_position` to be positive and `NOT NULL`; it never upgrades
 existing storage or accepts older activity frames. Queued inputs that have not
 been consumed still use their arrival chronology; that is current behavior, not
 activity-format compatibility.
+
+**Older installations only:** restore the archived converter before following
+the offline procedure below:
+
+```sh
+git restore --source=36cb79d4 -- scripts/activity-order-migration.ts scripts/migrate-activity-order.ts
+pnpm exec tsx scripts/migrate-activity-order.ts --check
+```
+
+Exit code 1 means existing host/runner pairs need conversion. Do not bypass the
+schema checks or run old writers against already-converted databases.
 
 **Prepare:** let active turns finish and runner journals drain using the previous
 host. Stop this installation's host and all its runners, then take a consistent
@@ -527,7 +542,8 @@ backups and previous host/client/runner software, then restart. Do not run old
 writers against the strict schema. A failed individual conversion rolls back that
 pair; global rollback must restore all converted pairs from the same offline backup.
 Builds replace served static assets even before a host restart, so keep builds and
-activation inside the maintenance window.
+activation inside the maintenance window. After successful conversion, retire
+the restored converter files again; retain the backups and git history.
 
 ### Live voice input
 
