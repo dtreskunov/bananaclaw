@@ -139,7 +139,7 @@ describe('activity chapters', () => {
   it('counts distinct recorded file paths instead of claiming every edit touched a different file', () => {
     const same = { ...tool('first', 'write'), detail: 'example.ts' };
     const repeated = { ...tool('second', 'edit'), detail: 'example.ts' };
-    expect(activityChapters([line(0, same), line(1, repeated)])[0].title).toBe('Edited 1 file');
+    expect(activityChapters([line(0, same), line(1, repeated)])[0].title).toBe('Edited example.ts * 2 steps');
     expect(
       activityChapters([
         line(0, same),
@@ -148,6 +148,23 @@ describe('activity chapters', () => {
       ])[0].title,
     ).toBe('Edited 2 files');
     expect(activityChapters([line(0, same), line(1, tool('patch', 'patch'))])[0].title).toBe('Edited files · 2 steps');
+  });
+
+  it('names one repeatedly edited file and keeps execution-phase wording', () => {
+    const edits = Array.from({ length: 4 }, (_, index) =>
+      line(index, { ...tool(`edit-${index}`, index % 2 ? 'write' : 'edit'), detail: '/workspace/agent/file.txt' }),
+    );
+    expect(activityChapters(edits)[0].title).toBe('Edited /workspace/agent/file.txt * 4 steps');
+    expect(
+      activityChapters(
+        edits.map((entry, index) =>
+          index === edits.length - 1
+            ? line(index, { ...tool(`edit-${index}`, 'edit', 'running'), detail: '/workspace/agent/file.txt' })
+            : entry,
+        ),
+        true,
+      )[0].title,
+    ).toBe('Editing /workspace/agent/file.txt * 4 steps');
   });
 
   it('removes repeated verbs from child labels and collapsed previews without losing the primary argument', () => {

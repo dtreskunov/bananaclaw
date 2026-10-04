@@ -17,6 +17,7 @@ export function attachScrollNavigation(
   viewport: ScrollViewport,
   onDirection: (direction: ScrollDirection | null) => void,
   onUserInput?: () => void,
+  onUserScroll?: (direction: ScrollDirection) => void,
 ): ScrollNavigation {
   let direction: ScrollDirection | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -51,12 +52,11 @@ export function attachScrollNavigation(
 
   function arm(): void {
     const now = Date.now();
-    const active = inputUntil !== null && now <= inputUntil;
     onUserInput?.();
     inputUntil = now + SCROLL_NAVIGATION_IDLE_MS;
     // Passive input may arrive after the compositor moves but before scroll.
-    // Keep the last observed position so an active reversal is not swallowed.
-    if (!active) previous = snapshot();
+    // Observe that movement before a streaming update can reset the position.
+    onScroll();
   }
 
   function available(next: ScrollDirection, position: ReturnType<typeof snapshot>): boolean {
@@ -74,6 +74,7 @@ export function attachScrollNavigation(
     if (resized || delta === 0 || (!pointers.size && (inputUntil === null || Date.now() > inputUntil))) return;
     inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
     const next = delta < 0 ? 'up' : 'down';
+    onUserScroll?.(next);
     if (!available(next, position)) {
       hide();
       return;

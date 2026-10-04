@@ -22,7 +22,7 @@ import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCan
 import { sendChat } from '../actions';
 import type { ChatMessage, Thread } from '../types';
 import { applyConversationFrame, completedResponse, resetConversation } from '../conversation-state';
-import { testSnapshot } from '../conversation-test-fixtures';
+import { testSnapshot, testTurn } from '../conversation-test-fixtures';
 import { appearance } from '../appearance-state';
 import { DEFAULT_APPEARANCE } from '../appearance';
 
@@ -480,6 +480,51 @@ describe('main composer pending edits', () => {
     hooks.cursor = 0;
     expect(forkButtons[1].type(forkButtons[1].props)).toBeNull();
   });
+
+  it.each([false, true])(
+    'places Stop between the bouncing dots and label with technical information %s',
+    (technical) => {
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
+      applyConversationFrame(
+        testSnapshot({
+          turns: [testTurn],
+          connection: { connected: true, activeTurnId: testTurn.id },
+        }),
+        'thread',
+      );
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const messageNode = findComponent(log.type(log.props), 'Message');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const turnRow = findComponent(messageNode.type(messageNode.props), 'ConversationTurnRow');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const row = turnRow.type(turnRow.props);
+      expect(row.props.class).toContain('turn-live');
+      const summary = row.props.children[0];
+      const controls = summary.props.children.filter(Boolean);
+      expect(controls.map((node: any) => node.props.class)).toEqual([
+        'typing-dots',
+        'msg-inline-actions turn-stop-inline',
+        technical ? 'hint trace-preview' : 'hint',
+      ]);
+      expect(controls[0].props.children).toHaveLength(3);
+      expect(controls[0].props['aria-hidden']).toBe('true');
+      expect(findComponent(controls[1], 'ActiveTurnStopButton')).toBeTruthy();
+      expect(controls[2].type).toBe(technical ? 'button' : 'span');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const settled = turnRow.type({ ...turnRow.props, turn: { ...testTurn, phase: 'settled', outcome: 'silent' } });
+      expect(settled?.props.class ?? '').not.toContain('turn-live');
+    },
+  );
 
   it.each(['reaching the top', 'new user scrolling', 'the Down button'])(
     'protects Up jumps from bottom-follow and resumes normal following after %s',

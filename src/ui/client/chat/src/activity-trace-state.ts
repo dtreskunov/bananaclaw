@@ -6,9 +6,15 @@ export interface ActivityTraceView {
   expanded: boolean;
   selectedEntry: string | null;
   openChapter: string | null;
+  followLatest: boolean;
 }
 
-export const DEFAULT_TRACE_VIEW: ActivityTraceView = { expanded: false, selectedEntry: null, openChapter: null };
+export const DEFAULT_TRACE_VIEW: ActivityTraceView = {
+  expanded: false,
+  selectedEntry: null,
+  openChapter: null,
+  followLatest: false,
+};
 const views = signal(new Map<string, ActivityTraceView>());
 
 export function activityTraceId(message: ChatMessage): string {
@@ -30,11 +36,17 @@ export function resetActivityTraceViews(): void {
 }
 
 export function toggleActivityTrace(view: ActivityTraceView, lines: TraceLine[], latest = false): ActivityTraceView {
-  if (view.expanded) return { ...view, expanded: false };
+  if (view.expanded) return { ...view, expanded: false, followLatest: false };
+  const opened = { ...DEFAULT_TRACE_VIEW, expanded: true, followLatest: latest };
+  return latest ? latestActivityTraceView(opened, lines) : opened;
+}
+
+export function latestActivityTraceView(view: ActivityTraceView, lines: TraceLine[]): ActivityTraceView {
+  const chapter = activityChapters(lines, true).at(-1);
   return {
-    expanded: true,
-    selectedEntry: latest && lines.length ? activityLineId(lines[lines.length - 1], lines.length - 1) : null,
-    openChapter: latest ? (activityChapters(lines, true).at(-1)?.id ?? null) : null,
+    ...view,
+    selectedEntry: chapter?.entries.at(-1)?.id ?? null,
+    openChapter: chapter && chapter.entries.length > 1 ? chapter.id : null,
   };
 }
 
@@ -43,6 +55,19 @@ export function transferActivityTraceViews(previous: ChatMessage[], next: ChatMe
   if (!current.size) return;
   const retained = new Set(next.map(activityTraceId));
   const migrated = new Map(current);
+  const followingTurns = new Set(
+    previous.flatMap((message) => {
+      const view = current.get(activityTraceId(message));
+      return message.direction === 'turn' &&
+        message.turnStatus &&
+        message.turn &&
+        message.turn.phase !== 'settled' &&
+        view?.expanded &&
+        view.followLatest
+        ? [message.turn.id]
+        : [];
+    }),
+  );
   for (const message of previous) {
     const id = activityTraceId(message);
     if (retained.has(id)) continue;
@@ -58,16 +83,43 @@ export function transferActivityTraceViews(previous: ChatMessage[], next: ChatMe
       if (reply) {
         const chapters = activityChapters(reply.activity ?? []);
         const openChapter = chapters.find((chapter) => chapter.entries.some((entry) => entry.id === view.openChapter));
-        migrated.set(activityTraceId(reply), {
+        const transferred = {
           ...view,
+          followLatest: false,
           openChapter: openChapter?.id ?? null,
           selectedEntry: chapters.some((chapter) => chapter.entries.some((entry) => entry.id === view.selectedEntry))
             ? view.selectedEntry
             : null,
-        });
+        };
+        migrated.set(
+          activityTraceId(reply),
+          view.followLatest
+            ? { ...latestActivityTraceView(transferred, reply.activity ?? []), followLatest: false }
+            : transferred,
+        );
       }
     }
     migrated.delete(id);
+  }
+  for (const message of next) {
+    if (message.direction !== 'turn' || !message.turn || !followingTurns.has(message.turn.id)) continue;
+    const id = activityTraceId(message);
+    const view = migrated.get(id);
+    if (message.turnStatus) {
+      migrated.set(
+        id,
+        latestActivityTraceView(
+          {
+            ...(view ?? DEFAULT_TRACE_VIEW),
+            expanded: true,
+            followLatest: message.turn.phase !== 'settled',
+          },
+          message.activity ?? [],
+        ),
+      );
+    } else if (view?.followLatest) {
+      migrated.set(id, { ...view, followLatest: false });
+    }
   }
   views.value = migrated;
 }

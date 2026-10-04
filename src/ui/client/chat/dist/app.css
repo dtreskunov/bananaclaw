@@ -2741,9 +2741,10 @@ nav.tab-bar-strip.group-strip {
 .chat-main .typing.turn-system .typing-summary {
   flex-direction: row;
   align-items: center;
+  gap: 6px;
 }
 .chat-main .typing.turn-system .typing-summary .turn-stop-inline {
-  margin-left: 6px;
+  margin-left: 0;
 }
 .chat-main .typing .meta {
   width: 100%;
@@ -2761,10 +2762,9 @@ nav.tab-bar-strip.group-strip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 100%;
-  min-width: 0;
+  flex: none;
 }
-.chat-main .typing .typing-dots > span:not(.hint) {
+.chat-main .typing .typing-dots > span {
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -2831,6 +2831,15 @@ nav.tab-bar-strip.group-strip {
 .chat-main .typing.turn-system.turn-status {
   width: fit-content;
 }
+.chat-main .typing.turn-system.turn-live {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.chat-main .typing.turn-system.turn-live .typing-summary,
+.chat-main .typing.turn-system.turn-live .msg-activity {
+  width: 100%;
+}
 .chat-main .typing.turn-system .msg-activity {
   margin-top: 0;
 }
@@ -2886,6 +2895,7 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .msg-activity .activity-trace {
   --trace-child-indent: 20px;
+  --trace-row-height: 28px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2924,11 +2934,11 @@ nav.tab-bar-strip.group-strip {
   pointer-events: none;
 }
 .chat-main .activity-trace > .trace-row:first-child::before {
-  top: 16px;
+  top: calc(var(--trace-row-height) / 2);
 }
 .chat-main .activity-trace > .trace-row:last-child::before,
 .chat-main .activity-trace > .trace-chapter:last-child .trace-children > .trace-row:last-child::before {
-  bottom: calc(100% - 16px);
+  bottom: calc(100% - var(--trace-row-height) / 2);
 }
 .chat-main .activity-trace .trace-row-toggle,
 .chat-main .activity-trace .trace-chapter-toggle {
@@ -2948,7 +2958,7 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.85;
 }
 .chat-main .activity-trace .trace-row-toggle {
-  min-height: 32px;
+  height: var(--trace-row-height);
 }
 .chat-main .activity-trace .trace-marker {
   position: relative;
@@ -2972,7 +2982,7 @@ nav.tab-bar-strip.group-strip {
   content: "";
   position: absolute;
   left: calc(4px - var(--trace-child-indent));
-  top: 16px;
+  top: calc(var(--trace-row-height) / 2);
   width: calc(var(--trace-child-indent) - 2px);
   border-top: 1px solid var(--border-strong);
   pointer-events: none;
@@ -3020,18 +3030,18 @@ nav.tab-bar-strip.group-strip {
   position: absolute;
   left: 4px;
   top: var(--chapter-rail-start, 0px);
-  height: calc(var(--chapter-rail-end, 44px) - var(--chapter-rail-start, 0px));
+  height: calc(var(--chapter-rail-end, var(--trace-row-height)) - var(--chapter-rail-start, 0px));
   border-left: 1px solid var(--border-strong);
   pointer-events: none;
 }
 .chat-main .activity-trace > .trace-chapter:first-child {
-  --chapter-rail-start: 22px;
+  --chapter-rail-start: calc(var(--trace-row-height) / 2);
 }
 .chat-main .activity-trace > .trace-chapter:last-child:not(.open) {
-  --chapter-rail-end: 22px;
+  --chapter-rail-end: calc(var(--trace-row-height) / 2);
 }
 .chat-main .activity-trace .trace-chapter-toggle {
-  height: 44px;
+  height: var(--trace-row-height);
 }
 .chat-main .activity-trace .trace-chapter-label {
   flex: 1;

@@ -132,7 +132,7 @@ describe('theme CSS contract', () => {
     expect(error).toContain('--provenance-rail-color: var(--error-soft, var(--danger))');
   });
 
-  it('keeps turn-status bubbles content-sized and timing metadata on one line', () => {
+  it('keeps live status bubbles transparent and full-width with fixed controls and one-line timing metadata', () => {
     const css = read('./components/ChatMain.css');
     const message = css.match(/\.chat-main \.msg \{([^}]+)\}/)?.[1];
     expect(message).toContain(
@@ -141,11 +141,20 @@ describe('theme CSS contract', () => {
     const turnStatus = css.match(/\.chat-main \.typing\.turn-system\.turn-status \{([^}]+)\}/)?.[1];
     expect(turnStatus).toContain('width: fit-content');
     expect(turnStatus).not.toContain('max-width: 100%');
+    const live = css.match(/\.chat-main \.typing\.turn-system\.turn-live \{([^}]+)\}/)?.[1];
+    expect(live).toContain('width: 100%');
+    expect(live).toContain('max-width: 100%');
+    expect(live).toContain('min-width: 0');
+    expect(css).toMatch(
+      /\.turn-live \.typing-summary,\s*\.chat-main \.typing\.turn-system\.turn-live \.msg-activity \{ width: 100%; \}/,
+    );
     const summary = css.match(/\.chat-main \.typing\.turn-system \.typing-summary \{([^}]+)\}/)?.[1];
     expect(summary).toContain('flex-direction: row');
     expect(summary).toContain('align-items: center');
     const stop = css.match(/\.chat-main \.typing\.turn-system \.typing-summary \.turn-stop-inline \{([^}]+)\}/)?.[1];
-    expect(stop).toContain('margin-left: 6px');
+    expect(stop).toContain('margin-left: 0');
+    const dots = css.match(/\.chat-main \.typing \.typing-dots \{([^}]+)\}/)?.[1];
+    expect(dots).toContain('flex: none');
     const turn = css.match(/\.chat-main \.typing\.turn-system \{([^}]+)\}/)?.[1];
     expect(turn).toContain('background: transparent');
     expect(turn).toContain(
@@ -189,6 +198,17 @@ describe('theme CSS contract', () => {
     expect(css).toContain('.trace-status-interrupted');
     expect(css).toContain('.trace-status-unknown');
     expect(css).toContain('ul.trace-todos');
+  });
+
+  it('uses one compact row rhythm for standalone steps, chapter headers and child connectors', () => {
+    const css = read('./components/ChatMain.css');
+    const trace = css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1];
+    expect(trace).toContain('--trace-row-height: 28px');
+    const row = css.match(/\.chat-main \.activity-trace \.trace-row-toggle \{([^}]+)\}/)?.[1];
+    const chapter = [...css.matchAll(/\.chat-main \.activity-trace \.trace-chapter-toggle \{([^}]+)\}/g)].at(-1)?.[1];
+    expect(row).toContain('height: var(--trace-row-height)');
+    expect(chapter).toContain('height: var(--trace-row-height)');
+    expect(css).toContain('top: calc(var(--trace-row-height) / 2)');
   });
 
   it('shares table transparency fades with the scrollable activity viewport', () => {

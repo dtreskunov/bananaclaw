@@ -78,6 +78,27 @@ afterEach(() => {
 });
 
 describe('directional scroll navigation', () => {
+  it('reports actual user movement at boundaries, but not automatic scrolling or layout changes', () => {
+    const viewport = new TestViewport();
+    const moved = vi.fn();
+    const navigation = attachScrollNavigation(viewport, () => {}, undefined, moved);
+    cleanup.push(() => navigation.dispose());
+    viewport.move(500);
+    expect(moved).not.toHaveBeenCalled();
+    viewport.dispatchEvent(new TestWheelEvent(-100));
+    viewport.move(0);
+    expect(moved).toHaveBeenLastCalledWith('up');
+    navigation.reset();
+    viewport.move(400);
+    expect(moved).toHaveBeenCalledTimes(1);
+    viewport.dispatchEvent(new TestWheelEvent());
+    viewport.scrollHeight = 2500;
+    viewport.move(500);
+    expect(moved).toHaveBeenCalledTimes(1);
+    viewport.move(2000);
+    expect(moved).toHaveBeenLastCalledWith('down');
+    expect(moved).toHaveBeenCalledTimes(2);
+  });
   it('starts hidden and does not reveal arrows for automatic scrolling', () => {
     const log = mount();
     log.viewport.move(300);
@@ -97,6 +118,18 @@ describe('directional scroll navigation', () => {
     log.viewport.move(300);
     expect(log.direction()).toBe('up');
     expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('detects a first wheel movement even when the compositor reaches the top before passive input', () => {
+    const viewport = new TestViewport();
+    const moved = vi.fn();
+    const navigation = attachScrollNavigation(viewport, () => {}, undefined, moved);
+    cleanup.push(() => navigation.dispose());
+    viewport.scrollTop = 0;
+    viewport.dispatchEvent(new TestWheelEvent(-400));
+    expect(moved).toHaveBeenCalledExactlyOnceWith('up');
+    viewport.dispatchEvent(new Event('scroll'));
+    expect(moved).toHaveBeenCalledExactlyOnceWith('up');
   });
 
   it.each([

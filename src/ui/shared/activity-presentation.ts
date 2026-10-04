@@ -261,7 +261,7 @@ export function chapterEntryHeadline(step: TraceStep): StepHeadline {
     : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
 }
 
-function recordedFileCount(entries: TraceEntry[]): number | null {
+function recordedFilePaths(entries: TraceEntry[]): Set<string> | null {
   const paths = new Set<string>();
   for (const { step } of entries) {
     const targets =
@@ -277,7 +277,7 @@ function recordedFileCount(entries: TraceEntry[]): number | null {
     if (!targets || targets.some((path) => !path.trim())) return null;
     targets.forEach((path) => paths.add(path.trim()));
   }
-  return paths.size;
+  return paths;
 }
 
 function chapterTitle(category: string, entries: TraceEntry[]): string {
@@ -291,13 +291,20 @@ function chapterTitle(category: string, entries: TraceEntry[]): string {
     return uncertain ? label : `${executing ? 'Running' : 'Ran'} ${label}`;
   }
   if (category === 'read' || category === 'change') {
-    const files = recordedFileCount(entries);
+    const files = recordedFilePaths(entries);
     const verb = category === 'read' ? (executing ? 'Reading' : 'Read') : executing ? 'Editing' : 'Edited';
     if (uncertain) {
       const label = category === 'read' ? 'File reads' : 'File changes';
-      return files === null ? `${label} · ${count} steps` : `${label} · ${files} file${files === 1 ? '' : 's'}`;
+      return files === null
+        ? `${label} · ${count} steps`
+        : `${label} · ${files.size} file${files.size === 1 ? '' : 's'}`;
     }
-    return files === null ? `${verb} files · ${count} steps` : `${verb} ${files} file${files === 1 ? '' : 's'}`;
+    if (category === 'change' && count > 1 && files?.size === 1) {
+      return `${verb} ${files.values().next().value} * ${count} steps`;
+    }
+    return files === null
+      ? `${verb} files · ${count} steps`
+      : `${verb} ${files.size} file${files.size === 1 ? '' : 's'}`;
   }
   if (category === 'search')
     return uncertain ? `${count} searches` : `${executing ? 'Searching' : 'Searched'} · ${count} searches`;

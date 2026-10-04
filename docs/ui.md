@@ -124,11 +124,12 @@ no rail. Live turn-system status is intentionally transparent and rail-free.
 Runner-authored notices use the same background as agent replies, but retain
 the neutral or semantic rail and omit a redundant status label from the
 metadata row.
-Turn-system bubbles remain content-sized so live controls stay beside the
-status instead of at the far edge of the conversation column. Their timing and
-model metadata stay on one line while flexible usage details truncate. The
-live Stop control shares the progress-summary row rather than creating a
-separate metadata row.
+Live in-progress turn-system bubbles use the full transcript width and remain
+transparent in every theme and color mode, whether their activity is collapsed
+or expanded. Settled turn-system bubbles remain content-sized. Timing and model
+metadata stay on one line while flexible usage details truncate. The live
+progress-summary row places Stop between the bouncing dots and label text;
+the controls keep their size while long labels truncate.
 Activity trace previews and expanded rows use the same small type scale as
 status metadata so operational detail remains secondary to message content.
 Activity uses expandable **chapters** of consecutive related steps, without
@@ -137,8 +138,14 @@ continuous rail; child steps are indented with smaller hollow dots and branches.
 Singleton steps stay directly on the rail. Only one chapter can be expanded at
 a time. Opening via **N steps** leaves every group and step collapsed until
 the user expands one, and scrolls to the latest visible group/step header.
-Opening via the live activity summary expands the latest step and its group.
-These reveal operations scroll only the trace viewport.
+Opening via the live activity summary expands the latest step's group and
+details, and follows subsequent steps the same way, switching groups when
+necessary. Only one group and one step's details are open within a trace.
+Reveal operations scroll only the trace viewport: short details are shown
+fully, while oversized details align at their beginning so the header remains
+visible. Selecting a group/step manually or scrolling up to inspect older
+activity pauses following; collapse the trace and reopen via the live summary
+to resume. The **N steps** disclosure does not enable detail following.
 On turn completion, an open trace (including its selected group and step)
 stays open when its activity moves into the response. The transcript scrolls
 the response's top into view instead of following its bottom. This applies
@@ -152,9 +159,12 @@ steps retain a compact duration beside the label.
 
 Chapter wording follows its latest step: **Editing files / Edited files**
 and **Running 2 commands / Ran 2 commands**, with counts in the heading instead
-of a separate badge. File headings count distinct recorded paths when all
+of a separate badge. Consecutive changes to one recorded path name that file
+and retain the operation count, such as **Edited /workspace/agent/file.txt *
+4 steps**. Otherwise file headings count distinct recorded paths when all
 targets are known; incomplete legacy/patch records retain an explicit step
-count rather than inventing a file count. Earlier failures remain counted even
+count rather than inventing a file count. Standalone steps, chapter headers,
+and child rows share a compact 28 px rhythm. Earlier failures remain counted even
 after later successes. Queued, running, completed and failed states use
 theme-aware colors, interrupted states use warning colors, and unknown outcomes
 are muted. Accessible labels and expanded metadata convey status without

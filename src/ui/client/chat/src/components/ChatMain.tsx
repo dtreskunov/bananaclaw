@@ -38,7 +38,7 @@ import {
 } from '../../../../shared/activity-presentation';
 import { completedResponse, conversationState } from '../conversation-state';
 import {
-  activityTraceId, activityTraceView, DEFAULT_TRACE_VIEW, toggleActivityTrace, updateActivityTraceView, type ActivityTraceView,
+  activityTraceId, activityTraceView, DEFAULT_TRACE_VIEW, latestActivityTraceView, toggleActivityTrace, updateActivityTraceView, type ActivityTraceView,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
 import { turnRowView, type TurnRowView } from '../turn-row';
@@ -218,38 +218,57 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
 export function ActivityTraceList({ lines, live = false, now = null, openLatest = false, traceId }: { lines: ActivityLine[]; live?: boolean; now?: number | null; openLatest?: boolean; traceId?: string }) {
   const listRef = useRef<HTMLUListElement | null>(null);
   const follow = useRef(true);
+  const navigation = useRef<ScrollNavigation | null>(null);
+  const [localView, setLocalView] = useState<ActivityTraceView>(() =>
+    toggleActivityTrace(DEFAULT_TRACE_VIEW, lines, openLatest));
+  const currentView = traceId ? activityTraceView(traceId) : localView;
+  const resolveView = (view: ActivityTraceView) => live && view.followLatest ? latestActivityTraceView(view, lines) : view;
+  const traceView = resolveView(currentView);
+  const setView = (update: (view: ActivityTraceView) => ActivityTraceView) => {
+    if (traceId) updateActivityTraceView(traceId, view => update(resolveView(view)));
+    else setLocalView(view => update(resolveView(view)));
+  };
+  const updateView = useRef(setView);
+  updateView.current = setView;
   useEffect(() => {
-    if (listRef.current) return attachScrollEdges(listRef.current);
-  }, []);
+    if (!listRef.current) return;
+    const disposeEdges = attachScrollEdges(listRef.current);
+    const scroll = attachScrollNavigation(listRef.current, () => {}, undefined, direction => {
+      if (direction !== 'up') return;
+      follow.current = false;
+      updateView.current(view => ({ ...view, followLatest: false }));
+    });
+    navigation.current = scroll;
+    return () => {
+      disposeEdges();
+      scroll.dispose();
+      navigation.current = null;
+    };
+  }, [traceId]);
   const revealed = useRef(false);
   useLayoutEffect(() => {
     if (!listRef.current || !lines.length) return;
-    if (!revealed.current || (live && follow.current)) revealLatestActivity(listRef.current);
+    if (!revealed.current || (live && follow.current)) {
+      navigation.current?.reset();
+      revealLatestActivity(listRef.current, live && traceView.followLatest);
+    }
     revealed.current = true;
-  }, [lines, live]);
-  const [localView, setLocalView] = useState<ActivityTraceView>(() =>
-    toggleActivityTrace(DEFAULT_TRACE_VIEW, lines, openLatest));
-  const traceView = traceId ? activityTraceView(traceId) : localView;
-  const setView = (update: (view: ActivityTraceView) => ActivityTraceView) => {
-    if (traceId) updateActivityTraceView(traceId, update);
-    else setLocalView(update);
-  };
+  }, [lines, live, traceView.followLatest]);
   const sel = traceView.selectedEntry;
-  const toggle = (id: string) => setView(view => ({ ...view, selectedEntry: view.selectedEntry === id ? null : id }));
+  const toggle = (id: string) => {
+    follow.current = false;
+    setView(view => ({ ...view, followLatest: false, selectedEntry: view.selectedEntry === id ? null : id }));
+  };
   const chapters = activityChapters(lines, live);
   const openChapter = traceView.openChapter;
-  const toggleChapter = (id: string) => setView(view => ({
-    ...view, openChapter: view.openChapter === id ? null : id, selectedEntry: null,
-  }));
+  const toggleChapter = (id: string) => {
+    follow.current = false;
+    setView(view => ({
+      ...view, followLatest: false, openChapter: view.openChapter === id ? null : id, selectedEntry: null,
+    }));
+  };
   return (
-    <ul class="activity-trace scroll-edge-fade" tabIndex={0} aria-label="Activity steps" ref={listRef} onScroll={() => {
-      const element = listRef.current;
-      if (element) {
-        const rows = element.querySelectorAll<HTMLButtonElement>('.trace-row-toggle, .trace-chapter-toggle');
-        const latest = rows[rows.length - 1];
-        follow.current = !!latest && latest.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom < 40;
-      }
-    }}>
+    <ul class="activity-trace scroll-edge-fade" tabIndex={0} aria-label="Activity steps" ref={listRef}>
       {chapters.map(chapter => {
         if (chapter.entries.length === 1) {
           const { line, id } = chapter.entries[0];
@@ -1150,25 +1169,23 @@ function ConversationTurnRow({ turn, lines, status, traceId }: { turn: Conversat
   };
   return (
     <div
-      class={`typing turn-system${status ? ' turn-status' : ''}${traceExpanded ? ' expanded' : ''}${provenanceTone}`}
+      class={`typing turn-system${status ? ' turn-status' : ''}${live ? ' turn-live' : ''}${traceExpanded ? ' expanded' : ''}${provenanceTone}`}
       data-turn-id={status ? turn.id : undefined}
       aria-live={live ? 'polite' : 'off'}
     >
       <div class="typing-summary">
-        <div class="typing-dots">
-          {live ? <><span></span><span></span><span></span></> : null}
-          {showTechnicalStatus && liveHeadline
-            ? <button
-                type="button"
-                class="hint trace-preview"
-                aria-expanded={traceExpanded}
-                aria-label={traceExpanded ? 'Hide activity' : 'Show latest activity'}
-                title={traceExpanded ? 'Hide activity' : 'Show latest activity'}
-                onClick={toggleFromPreview}
-              ><StepHeadlineContent headline={liveHeadline} /></button>
-            : live && view.status ? <span class="hint">{view.status}</span> : null}
-        </div>
+        {live ? <div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div> : null}
         {showStop ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton /></span> : null}
+        {showTechnicalStatus && liveHeadline
+          ? <button
+              type="button"
+              class="hint trace-preview"
+              aria-expanded={traceExpanded}
+              aria-label={traceExpanded ? 'Hide activity' : 'Show latest activity'}
+              title={traceExpanded ? 'Hide activity' : 'Show latest activity'}
+              onClick={toggleFromPreview}
+            ><StepHeadlineContent headline={liveHeadline} /></button>
+          : live && view.status ? <span class="hint">{view.status}</span> : null}
       </div>
       {status && stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
       {status && view.note ? <div class="turn-stop-note">{view.note}</div> : null}

@@ -332,13 +332,13 @@
 .chat-main .typing { align-self: flex-start; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px; background: var(--wash); border-radius: var(--radius-lg); max-width: 78%; }
 .chat-main .typing-usage { color: var(--muted); font-size: var(--font-2xs); }
 .chat-main .typing .typing-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; min-width: 0; }
-.chat-main .typing.turn-system .typing-summary { flex-direction: row; align-items: center; }
-.chat-main .typing.turn-system .typing-summary .turn-stop-inline { margin-left: 6px; }
+.chat-main .typing.turn-system .typing-summary { flex-direction: row; align-items: center; gap: 6px; }
+.chat-main .typing.turn-system .typing-summary .turn-stop-inline { margin-left: 0; }
 .chat-main .typing .meta { width: 100%; }
 .chat-main .typing .turn-stop-error { color: var(--danger, #b42318); font-size: var(--font-xs); max-width: 44ch; }
 .chat-main .typing .turn-stop-note { color: var(--muted); font-size: var(--font-xs); }
-.chat-main .typing .typing-dots { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
-.chat-main .typing .typing-dots > span:not(.hint) { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); opacity: 0.5; animation: typing-bounce 1.2s infinite ease-in-out; }
+.chat-main .typing .typing-dots { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.chat-main .typing .typing-dots > span { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); opacity: 0.5; animation: typing-bounce 1.2s infinite ease-in-out; }
 .chat-main .typing .typing-dots > span:nth-child(2) { animation-delay: 0.15s; }
 .chat-main .typing .typing-dots > span:nth-child(3) { animation-delay: 0.3s; }
 .chat-main .typing .hint { flex: 1; font-size: var(--font-xs); color: var(--muted); font-style: italic; margin-left: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -346,13 +346,14 @@
 .chat-main .typing .trace-preview:hover { color: var(--fg); opacity: 1; }
 .chat-main .typing .trace-preview:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; border-radius: 2px; }
 .chat-main .typing .typing-meta { flex: none; white-space: nowrap; font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
-/* The bubble is inline-flex and normally shrinks to the dots' width; when the
-   trace is expanded, widen it so command hints don't truncate to a sliver
-  (especially on narrow mobile viewports). Capped by the 78% max-width. */
+/* Expanded historical traces need room even when their summary is short. */
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
 /* Turn activity with no agent message to carry it (before a steer, live, or no reply). */
 .chat-main .typing.turn-system { align-self: flex-start; background: transparent; border-radius: var(--radius-lg); padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block); gap: 2px; }
 .chat-main .typing.turn-system.turn-status { width: fit-content; }
+.chat-main .typing.turn-system.turn-live { width: 100%; max-width: 100%; min-width: 0; }
+.chat-main .typing.turn-system.turn-live .typing-summary,
+.chat-main .typing.turn-system.turn-live .msg-activity { width: 100%; }
 .chat-main .typing.turn-system .msg-activity { margin-top: 0; }
 .chat-main .msg .meta .turn-outcome-note { color: var(--surface-fg, inherit); opacity: 0.8; font-weight: 600; }
 .chat-main .activity-trace li .ts { margin-right: 6px; opacity: 0.6; font-variant-numeric: tabular-nums; }
@@ -364,23 +365,23 @@
 .chat-main .meta .trace-toggle .chevron { display: inline-block; font-size: 1.3em; line-height: 1; transition: transform 0.15s ease; }
 .chat-main .meta .trace-toggle .chevron.open { transform: rotate(90deg); }
 .chat-main .meta .trace-count { white-space: nowrap; }
-.chat-main .msg-activity .activity-trace { --trace-child-indent: 20px; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; width: 100%; max-height: 30vh; overflow: auto; font-size: var(--font-2xs); scrollbar-width: thin; }
+.chat-main .msg-activity .activity-trace { --trace-child-indent: 20px; --trace-row-height: 28px; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; width: 100%; max-height: 30vh; overflow: auto; font-size: var(--font-2xs); scrollbar-width: thin; }
 .chat-main .msg.markdown .msg-activity .activity-trace { padding-left: 0; }
 .chat-main .msg-activity .activity-trace li { flex: none; min-width: 0; }
 .chat-main .activity-trace:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; border-radius: var(--radius-sm); }
 
 .chat-main .activity-trace .trace-row { position: relative; display: flow-root; }
 .chat-main .activity-trace .trace-row::before { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; border-left: 1px solid var(--border-strong); pointer-events: none; }
-.chat-main .activity-trace > .trace-row:first-child::before { top: 16px; }
+.chat-main .activity-trace > .trace-row:first-child::before { top: calc(var(--trace-row-height) / 2); }
 .chat-main .activity-trace > .trace-row:last-child::before,
-.chat-main .activity-trace > .trace-chapter:last-child .trace-children > .trace-row:last-child::before { bottom: calc(100% - 16px); }
+.chat-main .activity-trace > .trace-chapter:last-child .trace-children > .trace-row:last-child::before { bottom: calc(100% - var(--trace-row-height) / 2); }
 .chat-main .activity-trace .trace-row-toggle,
 .chat-main .activity-trace .trace-chapter-toggle { display: flex; align-items: center; gap: 6px; width: max-content; min-width: 100%; padding: 0; border: none; background: none; text-align: left; cursor: pointer; font-size: inherit; color: var(--trace-status-color, var(--muted)); font-family: var(--font-mono, monospace); opacity: 0.85; }
-.chat-main .activity-trace .trace-row-toggle { min-height: 32px; }
+.chat-main .activity-trace .trace-row-toggle { height: var(--trace-row-height); }
 .chat-main .activity-trace .trace-marker { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 9px; height: 9px; }
 .chat-main .activity-trace .trace-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--trace-status-color, var(--muted)); }
 .chat-main .activity-trace .trace-child::before { left: calc(4px - var(--trace-child-indent)); }
-.chat-main .activity-trace .trace-child::after { content: ''; position: absolute; left: calc(4px - var(--trace-child-indent)); top: 16px; width: calc(var(--trace-child-indent) - 2px); border-top: 1px solid var(--border-strong); pointer-events: none; }
+.chat-main .activity-trace .trace-child::after { content: ''; position: absolute; left: calc(4px - var(--trace-child-indent)); top: calc(var(--trace-row-height) / 2); width: calc(var(--trace-child-indent) - 2px); border-top: 1px solid var(--border-strong); pointer-events: none; }
 .chat-main .activity-trace .trace-child .trace-dot { width: 5px; height: 5px; border: 1px solid var(--trace-status-color, var(--muted)); background: var(--surface); }
 .chat-main .activity-trace .trace-status-queued { --trace-status-color: var(--activity-status-queued); }
 .chat-main .activity-trace .trace-status-running { --trace-status-color: var(--activity-status-running); }
@@ -394,10 +395,10 @@
 .chat-main .activity-trace .trace-row-toggle:focus-visible,
 .chat-main .activity-trace .trace-chapter-toggle:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; border-radius: var(--radius-sm); }
 .chat-main .activity-trace .trace-chapter { position: relative; }
-.chat-main .activity-trace .trace-chapter::before { content: ''; position: absolute; left: 4px; top: var(--chapter-rail-start, 0px); height: calc(var(--chapter-rail-end, 44px) - var(--chapter-rail-start, 0px)); border-left: 1px solid var(--border-strong); pointer-events: none; }
-.chat-main .activity-trace > .trace-chapter:first-child { --chapter-rail-start: 22px; }
-.chat-main .activity-trace > .trace-chapter:last-child:not(.open) { --chapter-rail-end: 22px; }
-.chat-main .activity-trace .trace-chapter-toggle { height: 44px; }
+.chat-main .activity-trace .trace-chapter::before { content: ''; position: absolute; left: 4px; top: var(--chapter-rail-start, 0px); height: calc(var(--chapter-rail-end, var(--trace-row-height)) - var(--chapter-rail-start, 0px)); border-left: 1px solid var(--border-strong); pointer-events: none; }
+.chat-main .activity-trace > .trace-chapter:first-child { --chapter-rail-start: calc(var(--trace-row-height) / 2); }
+.chat-main .activity-trace > .trace-chapter:last-child:not(.open) { --chapter-rail-end: calc(var(--trace-row-height) / 2); }
+.chat-main .activity-trace .trace-chapter-toggle { height: var(--trace-row-height); }
 .chat-main .activity-trace .trace-chapter-label { flex: 1; min-width: 0; }
 .chat-main .activity-trace .trace-chapter-heading { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
 .chat-main .activity-trace .trace-chapter-title { display: block; white-space: nowrap; }

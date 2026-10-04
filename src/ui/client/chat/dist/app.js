@@ -18783,14 +18783,14 @@ function chapterEntryHeadline(step) {
   const headline = stepHeadline(step);
   return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
 }
-function recordedFileCount(entries) {
+function recordedFilePaths(entries) {
   const paths = /* @__PURE__ */ new Set();
   for (const { step } of entries) {
     const targets = step.kind === "patch" ? step.files : step.kind === "file" ? step.path ? [step.path] : void 0 : ["read", "write", "edit"].includes(toolKind(step)) && step.detail ? [step.detail] : void 0;
     if (!targets || targets.some((path) => !path.trim())) return null;
     targets.forEach((path) => paths.add(path.trim()));
   }
-  return paths.size;
+  return paths;
 }
 function chapterTitle(category, entries) {
   const latest = entries[entries.length - 1].step;
@@ -18803,13 +18803,16 @@ function chapterTitle(category, entries) {
     return uncertain ? label2 : `${executing ? "Running" : "Ran"} ${label2}`;
   }
   if (category === "read" || category === "change") {
-    const files = recordedFileCount(entries);
+    const files = recordedFilePaths(entries);
     const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
     if (uncertain) {
       const label2 = category === "read" ? "File reads" : "File changes";
-      return files === null ? `${label2} \xB7 ${count} steps` : `${label2} \xB7 ${files} file${files === 1 ? "" : "s"}`;
+      return files === null ? `${label2} \xB7 ${count} steps` : `${label2} \xB7 ${files.size} file${files.size === 1 ? "" : "s"}`;
     }
-    return files === null ? `${verb} files \xB7 ${count} steps` : `${verb} ${files} file${files === 1 ? "" : "s"}`;
+    if (category === "change" && count > 1 && files?.size === 1) {
+      return `${verb} ${files.values().next().value} * ${count} steps`;
+    }
+    return files === null ? `${verb} files \xB7 ${count} steps` : `${verb} ${files.size} file${files.size === 1 ? "" : "s"}`;
   }
   if (category === "search")
     return uncertain ? `${count} searches` : `${executing ? "Searching" : "Searched"} \xB7 ${count} searches`;
@@ -18872,7 +18875,12 @@ function activityChapters(lines, live = false) {
 }
 
 // src/activity-trace-state.ts
-var DEFAULT_TRACE_VIEW = { expanded: false, selectedEntry: null, openChapter: null };
+var DEFAULT_TRACE_VIEW = {
+  expanded: false,
+  selectedEntry: null,
+  openChapter: null,
+  followLatest: false
+};
 var views = y3(/* @__PURE__ */ new Map());
 function activityTraceId(message2) {
   return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
@@ -18889,11 +18897,16 @@ function resetActivityTraceViews() {
   views.value = /* @__PURE__ */ new Map();
 }
 function toggleActivityTrace(view, lines, latest = false) {
-  if (view.expanded) return { ...view, expanded: false };
+  if (view.expanded) return { ...view, expanded: false, followLatest: false };
+  const opened = { ...DEFAULT_TRACE_VIEW, expanded: true, followLatest: latest };
+  return latest ? latestActivityTraceView(opened, lines) : opened;
+}
+function latestActivityTraceView(view, lines) {
+  const chapter = activityChapters(lines, true).at(-1);
   return {
-    expanded: true,
-    selectedEntry: latest && lines.length ? activityLineId(lines[lines.length - 1], lines.length - 1) : null,
-    openChapter: latest ? activityChapters(lines, true).at(-1)?.id ?? null : null
+    ...view,
+    selectedEntry: chapter?.entries.at(-1)?.id ?? null,
+    openChapter: chapter && chapter.entries.length > 1 ? chapter.id : null
   };
 }
 function transferActivityTraceViews(previous, next) {
@@ -18901,6 +18914,12 @@ function transferActivityTraceViews(previous, next) {
   if (!current.size) return;
   const retained = new Set(next.map(activityTraceId));
   const migrated = new Map(current);
+  const followingTurns = new Set(
+    previous.flatMap((message2) => {
+      const view = current.get(activityTraceId(message2));
+      return message2.direction === "turn" && message2.turnStatus && message2.turn && message2.turn.phase !== "settled" && view?.expanded && view.followLatest ? [message2.turn.id] : [];
+    })
+  );
   for (const message2 of previous) {
     const id2 = activityTraceId(message2);
     if (retained.has(id2)) continue;
@@ -18913,14 +18932,39 @@ function transferActivityTraceViews(previous, next) {
       if (reply) {
         const chapters = activityChapters(reply.activity ?? []);
         const openChapter = chapters.find((chapter) => chapter.entries.some((entry) => entry.id === view.openChapter));
-        migrated.set(activityTraceId(reply), {
+        const transferred = {
           ...view,
+          followLatest: false,
           openChapter: openChapter?.id ?? null,
           selectedEntry: chapters.some((chapter) => chapter.entries.some((entry) => entry.id === view.selectedEntry)) ? view.selectedEntry : null
-        });
+        };
+        migrated.set(
+          activityTraceId(reply),
+          view.followLatest ? { ...latestActivityTraceView(transferred, reply.activity ?? []), followLatest: false } : transferred
+        );
       }
     }
     migrated.delete(id2);
+  }
+  for (const message2 of next) {
+    if (message2.direction !== "turn" || !message2.turn || !followingTurns.has(message2.turn.id)) continue;
+    const id2 = activityTraceId(message2);
+    const view = migrated.get(id2);
+    if (message2.turnStatus) {
+      migrated.set(
+        id2,
+        latestActivityTraceView(
+          {
+            ...view ?? DEFAULT_TRACE_VIEW,
+            expanded: true,
+            followLatest: message2.turn.phase !== "settled"
+          },
+          message2.activity ?? []
+        )
+      );
+    } else if (view?.followLatest) {
+      migrated.set(id2, { ...view, followLatest: false });
+    }
   }
   views.value = migrated;
 }
@@ -22219,7 +22263,7 @@ function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onBottom }
 
 // src/scroll-navigation.ts
 var SCROLL_NAVIGATION_IDLE_MS = 1e3;
-function attachScrollNavigation(viewport, onDirection, onUserInput) {
+function attachScrollNavigation(viewport, onDirection, onUserInput, onUserScroll) {
   let direction = null;
   let timer2 = null;
   let inputUntil = null;
@@ -22249,10 +22293,9 @@ function attachScrollNavigation(viewport, onDirection, onUserInput) {
   }
   function arm() {
     const now = Date.now();
-    const active = inputUntil !== null && now <= inputUntil;
     onUserInput?.();
     inputUntil = now + SCROLL_NAVIGATION_IDLE_MS;
-    if (!active) previous = snapshot();
+    onScroll();
   }
   function available(next, position) {
     return position.maximum > 1 && (next === "up" ? position.top > 1 : position.top < position.maximum - 1);
@@ -22266,6 +22309,7 @@ function attachScrollNavigation(viewport, onDirection, onUserInput) {
     if (resized || delta === 0 || !pointers.size && (inputUntil === null || Date.now() > inputUntil)) return;
     inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
     const next = delta < 0 ? "up" : "down";
+    onUserScroll?.(next);
     if (!available(next, position)) {
       hide();
       return;
@@ -22622,11 +22666,31 @@ function attachScrollEdges(element, axes = {}) {
 function latestActivityScrollTop(scrollTop, entryBottom, viewportTop, viewportHeight) {
   return Math.max(0, scrollTop + entryBottom - viewportTop - viewportHeight + 12);
 }
-function revealLatestActivity(viewport) {
+function activityDetailsScrollTop(scrollTop, entryTop, entryBottom, viewportTop, viewportHeight) {
+  const top = viewportTop + 12;
+  const bottom = viewportTop + viewportHeight - 12;
+  if (entryBottom - entryTop > viewportHeight - 24 || entryTop < top) {
+    return Math.max(0, scrollTop + entryTop - top);
+  }
+  return Math.max(0, scrollTop + Math.max(0, entryBottom - bottom));
+}
+function revealLatestActivity(viewport, details = false) {
   const rows = viewport.querySelectorAll(".trace-row-toggle, .trace-chapter-toggle");
   const target = rows[rows.length - 1];
   if (!target) return;
   const bounds = viewport.getBoundingClientRect();
+  const row = details && target.getAttribute("aria-expanded") === "true" ? target.closest(".trace-row") : null;
+  if (row) {
+    const entry2 = row.getBoundingClientRect();
+    viewport.scrollTop = activityDetailsScrollTop(
+      viewport.scrollTop,
+      entry2.top,
+      entry2.bottom,
+      bounds.top + viewport.clientTop,
+      viewport.clientHeight
+    );
+    return;
+  }
   const entry = target.getBoundingClientRect();
   viewport.scrollTop = latestActivityScrollTop(
     viewport.scrollTop,
@@ -22774,38 +22838,59 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
 function ActivityTraceList({ lines, live = false, now = null, openLatest = false, traceId }) {
   const listRef = A2(null);
   const follow = A2(true);
+  const navigation = A2(null);
+  const [localView, setLocalView] = h2(() => toggleActivityTrace(DEFAULT_TRACE_VIEW, lines, openLatest));
+  const currentView = traceId ? activityTraceView(traceId) : localView;
+  const resolveView = (view) => live && view.followLatest ? latestActivityTraceView(view, lines) : view;
+  const traceView = resolveView(currentView);
+  const setView = (update) => {
+    if (traceId) updateActivityTraceView(traceId, (view) => update(resolveView(view)));
+    else setLocalView((view) => update(resolveView(view)));
+  };
+  const updateView = A2(setView);
+  updateView.current = setView;
   y2(() => {
-    if (listRef.current) return attachScrollEdges(listRef.current);
-  }, []);
+    if (!listRef.current) return;
+    const disposeEdges = attachScrollEdges(listRef.current);
+    const scroll = attachScrollNavigation(listRef.current, () => {
+    }, void 0, (direction) => {
+      if (direction !== "up") return;
+      follow.current = false;
+      updateView.current((view) => ({ ...view, followLatest: false }));
+    });
+    navigation.current = scroll;
+    return () => {
+      disposeEdges();
+      scroll.dispose();
+      navigation.current = null;
+    };
+  }, [traceId]);
   const revealed = A2(false);
   _2(() => {
     if (!listRef.current || !lines.length) return;
-    if (!revealed.current || live && follow.current) revealLatestActivity(listRef.current);
+    if (!revealed.current || live && follow.current) {
+      navigation.current?.reset();
+      revealLatestActivity(listRef.current, live && traceView.followLatest);
+    }
     revealed.current = true;
-  }, [lines, live]);
-  const [localView, setLocalView] = h2(() => toggleActivityTrace(DEFAULT_TRACE_VIEW, lines, openLatest));
-  const traceView = traceId ? activityTraceView(traceId) : localView;
-  const setView = (update) => {
-    if (traceId) updateActivityTraceView(traceId, update);
-    else setLocalView(update);
-  };
+  }, [lines, live, traceView.followLatest]);
   const sel = traceView.selectedEntry;
-  const toggle = (id2) => setView((view) => ({ ...view, selectedEntry: view.selectedEntry === id2 ? null : id2 }));
+  const toggle = (id2) => {
+    follow.current = false;
+    setView((view) => ({ ...view, followLatest: false, selectedEntry: view.selectedEntry === id2 ? null : id2 }));
+  };
   const chapters = activityChapters(lines, live);
   const openChapter = traceView.openChapter;
-  const toggleChapter = (id2) => setView((view) => ({
-    ...view,
-    openChapter: view.openChapter === id2 ? null : id2,
-    selectedEntry: null
-  }));
-  return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, onScroll: () => {
-    const element = listRef.current;
-    if (element) {
-      const rows = element.querySelectorAll(".trace-row-toggle, .trace-chapter-toggle");
-      const latest = rows[rows.length - 1];
-      follow.current = !!latest && latest.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom < 40;
-    }
-  }, children: chapters.map((chapter) => {
+  const toggleChapter = (id2) => {
+    follow.current = false;
+    setView((view) => ({
+      ...view,
+      followLatest: false,
+      openChapter: view.openChapter === id2 ? null : id2,
+      selectedEntry: null
+    }));
+  };
+  return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, children: chapters.map((chapter) => {
     if (chapter.entries.length === 1) {
       const { line, id: id2 } = chapter.entries[0];
       return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, onToggle: () => toggle(id2) }, chapter.id);
@@ -23615,31 +23700,29 @@ function ConversationTurnRow({ turn: turn2, lines, status, traceId }) {
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: `typing turn-system${status ? " turn-status" : ""}${traceExpanded ? " expanded" : ""}${provenanceTone}`,
+      class: `typing turn-system${status ? " turn-status" : ""}${live ? " turn-live" : ""}${traceExpanded ? " expanded" : ""}${provenanceTone}`,
       "data-turn-id": status ? turn2.id : void 0,
       "aria-live": live ? "polite" : "off",
       children: [
         /* @__PURE__ */ u4("div", { class: "typing-summary", children: [
-          /* @__PURE__ */ u4("div", { class: "typing-dots", children: [
-            live ? /* @__PURE__ */ u4(k, { children: [
-              /* @__PURE__ */ u4("span", {}),
-              /* @__PURE__ */ u4("span", {}),
-              /* @__PURE__ */ u4("span", {})
-            ] }) : null,
-            showTechnicalStatus && liveHeadline ? /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "button",
-                class: "hint trace-preview",
-                "aria-expanded": traceExpanded,
-                "aria-label": traceExpanded ? "Hide activity" : "Show latest activity",
-                title: traceExpanded ? "Hide activity" : "Show latest activity",
-                onClick: toggleFromPreview,
-                children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
-              }
-            ) : live && view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
-          ] }),
-          showStop ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null
+          live ? /* @__PURE__ */ u4("div", { class: "typing-dots", "aria-hidden": "true", children: [
+            /* @__PURE__ */ u4("span", {}),
+            /* @__PURE__ */ u4("span", {}),
+            /* @__PURE__ */ u4("span", {})
+          ] }) : null,
+          showStop ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null,
+          showTechnicalStatus && liveHeadline ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "hint trace-preview",
+              "aria-expanded": traceExpanded,
+              "aria-label": traceExpanded ? "Hide activity" : "Show latest activity",
+              title: traceExpanded ? "Hide activity" : "Show latest activity",
+              onClick: toggleFromPreview,
+              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
+            }
+          ) : live && view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
         ] }),
         status && stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
         status && view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,

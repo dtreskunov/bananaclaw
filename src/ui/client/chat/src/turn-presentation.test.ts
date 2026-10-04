@@ -65,6 +65,42 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('authoritative turn presentation', () => {
+  it('follows new live steps through protocol updates without changing the count-only disclosure', () => {
+    const steps = [0, 1].map((ordinal) => ({
+      ordinal,
+      ts: String(1000 + ordinal),
+      text: JSON.stringify({ kind: 'tool', id: `step-${ordinal}`, tool: 'bash', status: 'running' }),
+    }));
+    updateActivityTraceView('turn:turn-1', (view) => toggleActivityTrace(view, testTurn.activity, true));
+    update({ ...initial, turns: [{ ...testTurn, activity: steps }] });
+    expect(activityTraceView('turn:turn-1')).toMatchObject({
+      followLatest: true,
+      openChapter: 'activity-0',
+      selectedEntry: 'activity-1',
+    });
+    updateActivityTraceView('turn:turn-1', (view) => toggleActivityTrace(toggleActivityTrace(view, steps), steps));
+    update({
+      ...initial,
+      turns: [
+        {
+          ...testTurn,
+          activity: [
+            ...steps,
+            {
+              ordinal: 2,
+              ts: '1002',
+              text: JSON.stringify({ kind: 'tool', id: 'step-2', tool: 'read', status: 'running' }),
+            },
+          ],
+        },
+      ],
+    });
+    expect(activityTraceView('turn:turn-1')).toMatchObject({
+      followLatest: false,
+      openChapter: null,
+      selectedEntry: null,
+    });
+  });
   it('moves an expanded live trace to the reply and requests its top on completion', () => {
     updateActivityTraceView('turn:turn-1', (view) => toggleActivityTrace(view, testTurn.activity));
     const settled: Conversation = {
