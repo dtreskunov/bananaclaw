@@ -128,7 +128,7 @@ export interface ThreadCtx {
   canSend: boolean;
 }
 
-export type Direction = 'in' | 'out' | 'internal' | 'event' | 'question' | 'turn';
+export type Direction = 'in' | 'out' | 'internal' | 'event';
 
 export interface ChatMessageFile {
   filename: string;
@@ -173,9 +173,6 @@ export type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface ChatMessage {
   turnId?: string;
-  turn?: import('../../../shared/conversation').ConversationTurn;
-  /** Turn rows only: this row carries the turn's live status, or its settled stats when it has no reply. */
-  turnStatus?: boolean;
   /** Replies only: the settled turn whose accounting renders in this bubble's meta line. */
   statsTurn?: import('../../../shared/conversation').ConversationTurn;
   timelinePosition?: number;
@@ -206,9 +203,24 @@ export interface ChatMessage {
   /** Emoji reactions the agent added to this message (already resolved to
    *  unicode), in emit order. Rendered as chips under the bubble. */
   reactions?: MessageReaction[];
-  /** Durable interactive question rendered at its chronological position. */
-  question?: PendingQuestionDto;
 }
+
+export type TranscriptRow =
+  | { kind: 'message'; message: ChatMessage }
+  | {
+      kind: 'question';
+      question: PendingQuestionDto;
+      traceOwner?: string;
+      traceLive?: boolean;
+    }
+  | {
+      kind: 'turn';
+      turn: import('../../../shared/conversation').ConversationTurn;
+      afterId: string | null;
+      activity: ActivityLine[];
+      status: boolean;
+      traceOwner: string;
+    };
 
 /** One emoji reaction attached to a message. */
 export interface MessageReaction {

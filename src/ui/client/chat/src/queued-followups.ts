@@ -41,10 +41,6 @@ export function timelineLayoutKey(messages: ChatMessage[]): string {
       message.timelinePosition,
       isQueuedFollowup(message),
       message.inputState?.status === 'steering',
-      message.turn?.phase,
-      message.turn?.activity,
-      message.turn?.metadata,
-      message.turnStatus,
       message.statsTurn?.id,
     ]),
   );

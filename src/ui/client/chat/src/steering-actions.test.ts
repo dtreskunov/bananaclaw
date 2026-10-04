@@ -4,7 +4,7 @@ import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
 import { applyConversationFrame, conversationState } from './conversation-state';
 import { diffConversation } from '../../../shared/conversation-protocol';
-import { testSnapshot, testTurn } from './conversation-test-fixtures';
+import { presentedConversation, testSnapshot, testTurn } from './conversation-test-fixtures';
 import {
   activeTurn,
   canSend,
@@ -175,11 +175,11 @@ describe('authoritative input dispositions', () => {
     applyConversationFrame(
       {
         kind: 'update',
-        protocolVersion: 1,
+        protocolVersion: 2,
         streamId: before.streamId,
         baseRevision: 0,
         revision: 1,
-        changes: diffConversation(before.conversation, next),
+        changes: diffConversation(before.conversation, presentedConversation(next)),
       },
       'thread',
     );
@@ -188,11 +188,11 @@ describe('authoritative input dispositions', () => {
     applyConversationFrame(
       {
         kind: 'update',
-        protocolVersion: 1,
+        protocolVersion: 2,
         streamId: before.streamId,
         baseRevision: 1,
         revision: 2,
-        changes: diffConversation(next, after),
+        changes: diffConversation(presentedConversation(next), presentedConversation(after)),
       },
       'thread',
     );

@@ -7,6 +7,7 @@ import type { CallUsage, TurnUsage } from './providers/types.js';
 import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import type { Database } from 'bun:sqlite';
+import { allocateTimelinePosition } from './db/timeline.js';
 
 export interface TurnExecution extends TurnContext {
   routing: RoutingContext;
@@ -132,11 +133,11 @@ function finishTurnActivity(db: Database, turnId: string, outcome: TurnOutcome, 
   for (const step of steps.values()) {
     if (!['running', 'pending'].includes(String(step.status))) continue;
     const status = ['stopped', 'interrupted', 'failed'].includes(outcome) ? 'interrupted' : 'unknown';
-    db.prepare(`INSERT INTO turn_activity (turn_id, message_out_id, ordinal, ts, text)
-      SELECT ?, NULL, COALESCE(MAX(ordinal), -1) + 1, ?, ? FROM turn_activity WHERE turn_id = ?`)
+    db.prepare(`INSERT INTO turn_activity (turn_id, message_out_id, ordinal, ts, text, timeline_position)
+      SELECT ?, NULL, COALESCE(MAX(ordinal), -1) + 1, ?, ?, ? FROM turn_activity WHERE turn_id = ?`)
       .run(turnId, String(Date.parse(endedAt)), JSON.stringify({
         ...step, status, error: 'Turn ended without a confirmed tool result; external side effects may have occurred.',
-      }), turnId);
+      }), allocateTimelinePosition(db), turnId);
   }
 }
 

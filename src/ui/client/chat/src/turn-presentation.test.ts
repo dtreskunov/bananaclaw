@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat } from './actions';
-import { completedResponse, conversationState } from './conversation-state';
+import { chatTranscript, completedResponse, conversationPresentation, conversationState } from './conversation-state';
 import { activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace } from './activity-trace-state';
 import { diffConversation } from '../../../shared/conversation-protocol';
 import type { Conversation } from '../../../shared/conversation';
-import { testSnapshot, testTurn } from './conversation-test-fixtures';
+import { presentedConversation, testSnapshot, testTurn } from './conversation-test-fixtures';
 import {
   activeTurn,
   chatMessages,
@@ -25,10 +25,11 @@ const initial: Conversation = testSnapshot({
   capabilities: { canSend: true, stop: true, steer: true, editInput: true, cancelInput: true },
 }).conversation;
 function update(next: Conversation): void {
+  next = presentedConversation(next);
   const state = conversationState.value!;
   receive({
     kind: 'update',
-    protocolVersion: 1,
+    protocolVersion: 2,
     streamId: state.streamId,
     baseRevision: state.revision,
     revision: state.revision + 1,
@@ -65,10 +66,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('authoritative turn presentation', () => {
+  it('resolves the supplied layout without parsing timestamps or fabricating messages', () => {
+    const view = testSnapshot({
+      messages: [{ id: 'input', direction: 'in', text: 'ask', timestamp: 'invalid', timelinePosition: 50 }],
+      turns: [{ ...testTurn, inputIds: ['input'], startedAt: 'invalid' }],
+    }).conversation;
+    const parse = vi.spyOn(Date, 'parse').mockImplementation(() => {
+      throw new Error('Timestamp inference is forbidden');
+    });
+    const projection = conversationPresentation(view);
+    expect(projection.messages.map((message) => message.id)).toEqual(['input']);
+    expect(projection.transcript.map((row) => row.kind)).toEqual(['message', 'turn']);
+    expect(projection.transcript[1]).not.toHaveProperty('id');
+    parse.mockRestore();
+  });
   it('follows new live steps through protocol updates without changing the count-only disclosure', () => {
     const steps = [0, 1].map((ordinal) => ({
       ordinal,
       ts: String(1000 + ordinal),
+      timelinePosition: 100 + ordinal,
       text: JSON.stringify({ kind: 'tool', id: `step-${ordinal}`, tool: 'bash', status: 'running' }),
     }));
     const traceId = 'turn:turn-1';
@@ -86,6 +102,7 @@ describe('authoritative turn presentation', () => {
             {
               ordinal: 2,
               ts: '1002',
+              timelinePosition: 102,
               text: JSON.stringify({ kind: 'tool', id: 'step-2', tool: 'read', status: 'running' }),
             },
           ],
@@ -119,9 +136,11 @@ describe('authoritative turn presentation', () => {
     const reply = {
       id: 'early-reply',
       direction: 'out' as const,
+      deliveryOrigin: 'send_message' as const,
       turnId: testTurn.id,
       text: 'Still working',
       timestamp: '2026-09-29T00:00:02Z',
+      timelinePosition: 200,
     };
     const early = {
       ...initial,
@@ -139,14 +158,15 @@ describe('authoritative turn presentation', () => {
       ordinal: 1,
       ts: String(Date.parse('2026-09-29T00:00:03Z')),
       text: JSON.stringify({ kind: 'tool', id: 'tail', tool: 'bash', status: 'running' }),
+      timelinePosition: 300,
     };
     update({ ...early, turns: [{ ...testTurn, outputIds: [reply.id], activity: [...testTurn.activity, tail] }] });
-    expect(chatMessages.value.find((message) => message.id === reply.id)?.turnTraceOwner).toBeUndefined();
+    expect(chatMessages.value.find((message) => message.id === reply.id)?.turnTraceOwner).toBe(false);
     expect(
-      chatMessages.value.find(
-        (message) => message.direction === 'turn' && message.activity?.some((line) => line.ordinal === tail.ordinal),
+      chatTranscript.value.find(
+        (row) => row.kind === 'turn' && row.activity.some((line) => line.ordinal === tail.ordinal),
       ),
-    ).toMatchObject({ turnTraceOwner: true, turnTraceLive: true });
+    ).toMatchObject({ traceOwner: traceId });
     expect(activityTraceView(traceId, true).following).toBe(true);
   });
 
@@ -179,11 +199,15 @@ describe('authoritative turn presentation', () => {
     };
     update({ ...initial, turns: [imported], connection: { connected: false, activeTurnId: null } });
     expect(chatReady.value).toBe(true);
-    expect(chatMessages.value[0].turn?.usage).toEqual([{ id: 'original-bill', value: { input_tokens: 17 } }]);
+    expect(chatTranscript.value[0]).toMatchObject({
+      kind: 'turn',
+      turn: { usage: [{ id: 'original-bill', value: { input_tokens: 17 } }] },
+    });
   });
   it('renders the initial live trace from the snapshot without waiting for another signal', () => {
     expect(chatReady.value).toBe(true);
-    expect(chatMessages.value[0]).toMatchObject({ id: 'turn:turn-1', turn: { activity: testTurn.activity } });
+    expect(chatMessages.value).toEqual([]);
+    expect(chatTranscript.value[0]).toMatchObject({ kind: 'turn', turn: { activity: testTurn.activity } });
     expect(activeTurn.value?.id).toBe(testTurn.id);
   });
   it.each(['silent', 'warning', 'stopped', 'interrupted', 'failed'] as const)(
@@ -205,9 +229,10 @@ describe('authoritative turn presentation', () => {
         ],
         connection: { connected: true, activeTurnId: null },
       });
-      expect(chatMessages.value).toHaveLength(1);
-      expect(chatMessages.value[0]).toMatchObject({
-        id: 'turn:turn-1',
+      expect(chatMessages.value).toHaveLength(0);
+      expect(chatTranscript.value).toHaveLength(1);
+      expect(chatTranscript.value[0]).toMatchObject({
+        kind: 'turn',
         turn: { phase: 'settled', outcome, activity: testTurn.activity, usage: [] },
       });
       expect(activeTurn.value).toBeNull();
@@ -244,23 +269,25 @@ describe('authoritative turn presentation', () => {
       connection: { connected: true, activeTurnId: null },
     };
     update(settled);
-    expect(chatMessages.value.some((m) => m.direction === 'turn')).toBe(false);
+    expect(chatTranscript.value.some((row) => row.kind === 'turn')).toBe(false);
     expect(chatMessages.value.find((m) => m.statsTurn)?.statsTurn?.usage).toEqual([{ id: 'usage-1', value }]);
     receive(testSnapshot(settled, 'reconnect'));
-    expect(conversationState.value?.conversation).toEqual(settled);
+    expect(conversationState.value?.conversation).toEqual(presentedConversation(settled));
   });
   it('does not invent a completion after time passes or the runner disconnects', async () => {
     await vi.advanceTimersByTimeAsync(60_000);
     update({ ...initial, connection: { connected: false, activeTurnId: testTurn.id } });
-    expect(chatMessages.value[0].turn?.phase).toBe('running');
-    expect(chatMessages.value[0].turn?.activity).toEqual(testTurn.activity);
+    expect(chatTranscript.value[0]).toMatchObject({
+      kind: 'turn',
+      turn: { phase: 'running', activity: testTurn.activity },
+    });
   });
   it('rejects gaps without partially replacing state or local drafts', () => {
     pending.value = [{ name: 'draft.txt', size: 1 }];
     const before = chatMessages.value;
     receive({
       kind: 'update',
-      protocolVersion: 1,
+      protocolVersion: 2,
       streamId: 'test-stream',
       baseRevision: 4,
       revision: 5,

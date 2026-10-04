@@ -11,6 +11,7 @@
  */
 import { getOutboundDb } from './connection.js';
 import { getTurnContext } from '../current-batch.js';
+import { allocateTimelinePosition } from './timeline.js';
 
 const MAX_STATE_CHARS = 1024 * 1024;
 
@@ -19,9 +20,9 @@ function continuationKey(providerName: string): string {
 }
 
 function getValue(key: string): string | undefined {
-  const row = getOutboundDb()
-    .prepare('SELECT value FROM session_state WHERE key = ?')
-    .get(key) as { value: string } | undefined;
+  const row = getOutboundDb().prepare('SELECT value FROM session_state WHERE key = ?').get(key) as
+    | { value: string }
+    | undefined;
   return row?.value;
 }
 
@@ -129,6 +130,7 @@ import {
 export interface ActivityLine {
   ts: string;
   text: string;
+  timelinePosition: number;
 }
 
 // Generous per-line hard cap on the primary detail. We store the *whole*
@@ -163,19 +165,27 @@ export function appendActivity(step: ActivityStep): void {
   const s = truncateActivityStep(step);
   const text = JSON.stringify(s);
   if (text === _lastActivity) return;
-  _lastActivity = text;
   const ts = String(Date.now());
-  _activityBuffer.push({ ts, text });
   const turnId = getTurnContext()?.turnId ?? null;
   let ordinal: number | undefined;
-  if (turnId) {
-    const db = getOutboundDb();
-    const row = db.prepare(`INSERT INTO turn_activity (turn_id, message_out_id, ordinal, ts, text)
-      SELECT ?, NULL, COALESCE(MAX(ordinal), -1) + 1, ?, ? FROM turn_activity WHERE turn_id = ?
-      RETURNING ordinal`).get(turnId, ts, text, turnId) as { ordinal: number };
-    ordinal = row.ordinal;
-  }
-  emitActivitySignal(s, ts, turnId, ordinal);
+  const db = getOutboundDb();
+  const timelinePosition = db.transaction(() => {
+    const position = allocateTimelinePosition(db);
+    if (turnId) {
+      const row = db
+        .prepare(
+          `INSERT INTO turn_activity (turn_id, message_out_id, ordinal, ts, text, timeline_position)
+        SELECT ?, NULL, COALESCE(MAX(ordinal), -1) + 1, ?, ?, ? FROM turn_activity WHERE turn_id = ?
+        RETURNING ordinal`,
+        )
+        .get(turnId, ts, text, position, turnId) as { ordinal: number };
+      ordinal = row.ordinal;
+    }
+    return position;
+  })();
+  _lastActivity = text;
+  _activityBuffer.push({ ts, text, timelinePosition });
+  emitActivitySignal(s, timelinePosition, ts, turnId, ordinal);
 }
 
 /** Cap user/model/provider text fields before they leave the container. */

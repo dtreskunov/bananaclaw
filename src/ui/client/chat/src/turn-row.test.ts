@@ -4,7 +4,9 @@ import { testSnapshot, testTurn } from './conversation-test-fixtures';
 import { turnRowView } from './turn-row';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
-const { conversationMessages } = await import('./conversation-state');
+const { conversationPresentation } = await import('./conversation-state');
+const conversationMessages = (view: ReturnType<typeof testSnapshot>['conversation']) =>
+  conversationPresentation(view).messages;
 
 const start = Date.parse('2026-09-29T00:00:00Z');
 const usage = { id: 'u', value: { cost_usd: 0.1, duration_ms: 4000, model: 'm', input_tokens: 10, output_tokens: 1 } };
@@ -108,14 +110,26 @@ describe('turn activity placement', () => {
     ordinal,
     ts: String(start + offsetMs),
     text: `step ${ordinal}`,
+    timelinePosition: us + offsetMs * 1000,
   });
   const rows = (view: ReturnType<typeof testSnapshot>['conversation']) =>
-    conversationMessages(view).map((m) => ({
-      id: m.id,
-      lines: m.activity?.map((line) => line.text),
-      status: m.turnStatus ?? false,
-      stats: m.statsTurn?.id,
-    }));
+    conversationPresentation(view).transcript.map((row) =>
+      row.kind === 'message'
+        ? {
+            id: row.message.id,
+            lines: row.message.activity?.map((line) => line.text),
+            status: false,
+            stats: row.message.statsTurn?.id,
+          }
+        : row.kind === 'turn'
+          ? {
+              id: `trace:${row.turn.id}:after:${row.afterId}`,
+              lines: row.activity.map((line) => line.text),
+              status: row.status,
+              stats: undefined,
+            }
+          : { id: row.question.questionId, status: false },
+    );
 
   it('splits activity at a steering message: a system bubble before it, the reply after it', () => {
     const messages = [message('ask', 'in', -1), message('steer', 'in', 3000, 'applied'), message('reply', 'out', 9000)];
@@ -127,7 +141,7 @@ describe('turn activity placement', () => {
     });
     expect(rows(testSnapshot({ messages, turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
-      { id: 'turn:s', lines: ['step 0'], status: false, stats: undefined },
+      { id: 'trace:s:after:ask', lines: ['step 0'], status: false, stats: undefined },
       { id: 'steer', lines: undefined, status: false, stats: undefined },
       { id: 'reply', lines: ['step 1'], status: false, stats: 's' },
     ]);
@@ -140,16 +154,16 @@ describe('turn activity placement', () => {
       rows(testSnapshot({ messages: applied, turns: [running] }).conversation).map((r) => [r.id, r.status]),
     ).toEqual([
       ['ask', false],
-      ['turn:r', false],
+      ['trace:r:after:ask', false],
       ['steer', false],
-      ['turn:r:1', true],
+      ['trace:r:after:steer', true],
     ]);
     const waiting = [message('ask', 'in', -1), message('steer', 'in', 3000, 'steering')];
     expect(
       rows(testSnapshot({ messages: waiting, turns: [running] }).conversation).map((r) => [r.id, r.status]),
     ).toEqual([
       ['ask', false],
-      ['turn:r', true],
+      ['trace:r:after:ask', true],
       ['steer', false],
     ]);
   });
@@ -166,7 +180,7 @@ describe('turn activity placement', () => {
     expect(rows(testSnapshot({ messages, turns: [running] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
       { id: 'update', lines: ['step 0'], status: false, stats: undefined },
-      { id: 'turn:m:1', lines: ['step 1'], status: true, stats: undefined },
+      { id: 'trace:m:after:update', lines: ['step 1'], status: true, stats: undefined },
     ]);
   });
 
@@ -174,7 +188,7 @@ describe('turn activity placement', () => {
     const turn = settled({ id: 'q', outcome: 'silent', inputIds: ['ask'], activity: [step(0, 1000)] });
     expect(rows(testSnapshot({ messages: [message('ask', 'in', -1)], turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
-      { id: 'turn:q', lines: ['step 0'], status: true, stats: undefined },
+      { id: 'trace:q:after:ask', lines: ['step 0'], status: true, stats: undefined },
     ]);
   });
 

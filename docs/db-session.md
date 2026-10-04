@@ -242,6 +242,12 @@ Associations are explicit:
   unique index on `(turn_id, ordinal) WHERE message_out_id IS NULL` identifies
   unanchored activity. Legacy ordinals are not renumbered, even when multiple
   output anchors share a turn. Timestamps never determine association/order.
+  Required positive `timeline_position` records first emission on the runner's existing
+  logical clock, shared with input consumption and output writes. Lifecycle
+  reduction retains a step's first position; final output reanchoring never
+  changes it. The offline activity-order migration assigns historical positions
+  from saved output associations and ordinal order, never activity timestamps.
+  Runtime code rejects missing positions instead of accepting old payloads.
 - Historical usage/activity rows that point at an existing output but no turn
   remain stored and unattributed; nothing is attributed by time proximity.
   Rows reachable from neither a turn nor an output are not kept.

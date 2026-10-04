@@ -23,7 +23,7 @@ describe('completion response scrolling', () => {
   it('does not scroll for partial replies, disconnects or outputless settlement', () => {
     expect(completedResponseId(previous, [{ ...reply, statsTurn: undefined }])).toBeNull();
     expect(completedResponseId(previous, [{ ...reply, statsTurn: testTurn }])).toBeNull();
-    expect(completedResponseId(previous, [{ ...reply, direction: 'turn' }])).toBeNull();
+    expect(completedResponseId(previous, [])).toBeNull();
   });
 
   it('targets the newest response when multiple turns settle in one update', () => {

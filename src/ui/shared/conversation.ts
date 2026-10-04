@@ -64,7 +64,27 @@ export interface ConversationQuestion {
   threadId: string | null;
   agentGroupId: string;
   createdAt: string;
+  messageId?: string;
+  timelinePosition?: number;
 }
+
+export interface ConversationActivity {
+  ordinal: number;
+  ts: string;
+  text: string;
+  timelinePosition: number;
+}
+
+export interface ConversationTrace {
+  turnId: string;
+  ordinals: number[];
+  ownsTurn: boolean;
+}
+
+export type ConversationTimelineRow =
+  | { kind: 'message'; messageId: string; trace?: ConversationTrace; statsTurnId?: string }
+  | { kind: 'question'; questionId: string; trace?: ConversationTrace }
+  | { kind: 'turn'; turnId: string; afterId: string | null; trace: ConversationTrace; status: boolean };
 
 export interface ConversationTurn {
   id: string;
@@ -74,7 +94,7 @@ export interface ConversationTurn {
   endedAt: string | null;
   inputIds: string[];
   outputIds: string[];
-  activity: { ordinal: number; ts: string; text: string }[];
+  activity: ConversationActivity[];
   /** Accounting records remain keyed by their original usage IDs, never by response count. */
   usage: { id: string; value: Partial<ConversationUsage> }[];
   metadata: {
@@ -98,6 +118,7 @@ export interface Conversation {
   messages: ConversationMessage[];
   turns: ConversationTurn[];
   questions: ConversationQuestion[];
+  timeline: ConversationTimelineRow[];
   connection: { connected: boolean; activeTurnId: string | null };
   capabilities: ConversationCapabilities;
 }

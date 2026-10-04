@@ -17679,7 +17679,7 @@ function publicWebMessageId(clientMessageId) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 1;
+var CONVERSATION_PROTOCOL_VERSION = 2;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -17694,6 +17694,7 @@ var id = (v5) => typeof v5 === "string" && v5.length > 0;
 var bool = (v5) => typeof v5 === "boolean";
 var number = (v5) => typeof v5 === "number" && Number.isFinite(v5) && v5 >= 0;
 var integer = (v5) => number(v5) && Number.isSafeInteger(v5);
+var position = (v5) => integer(v5) && Number(v5) > 0;
 var optional = (check) => (v5) => v5 === void 0 || check(v5);
 var nullable = (check) => (v5) => v5 === null || check(v5);
 var array = (check) => (v5) => Array.isArray(v5) && v5.every(check);
@@ -17782,7 +17783,7 @@ var turn = shape({
   endedAt: nullable(text),
   inputIds: strings,
   outputIds: strings,
-  activity: array(shape({ ordinal: integer, ts: text, text })),
+  activity: array(shape({ ordinal: integer, ts: text, text, timelinePosition: position })),
   usage: array(shape({ id, value: reportedUsage })),
   metadata: shape({
     status: oneOf("provisional", "partial", "final", "unavailable"),
@@ -17805,8 +17806,12 @@ var question = shape({
   turnId: optional(id),
   threadId: nullable(text),
   agentGroupId: id,
-  createdAt: text
+  createdAt: text,
+  messageId: optional(id),
+  timelinePosition: optional(integer)
 });
+var tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
+var timelineRow = (v5) => shape({ kind: oneOf("message"), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v5) || shape({ kind: oneOf("question"), questionId: id, trace: optional(tracePlacement) })(v5) || shape({ kind: oneOf("turn"), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v5);
 var connection = shape({ connected: bool, activeTurnId: nullable(id) });
 var capabilities = shape({ canSend: bool, stop: bool, steer: bool, editInput: bool, cancelInput: bool });
 var conversation = shape({
@@ -17814,6 +17819,7 @@ var conversation = shape({
   messages: array(message),
   turns: array(turn),
   questions: array(question),
+  timeline: array(timelineRow),
   connection,
   capabilities
 });
@@ -17828,7 +17834,8 @@ function parseConversationFrame(value) {
     turns: changes(turn),
     questions: changes(question),
     connection,
-    capabilities
+    capabilities,
+    timeline: array(timelineRow)
   })(value.changes))
     return value;
   throw new ConversationProtocolError("invalid_frame");
@@ -17848,19 +17855,64 @@ function applyEntities(prior, delta) {
     throw new ConversationProtocolError("invalid_frame");
   return delta.order.map((id2) => values.get(id2));
 }
+function validateTimeline(view) {
+  const messages = new Set(
+    view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map((message2) => message2.id)
+  );
+  const questions = new Set(view.questions.map((question2) => question2.questionId));
+  const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
+  const seenRows = /* @__PURE__ */ new Set();
+  const seenActivity = /* @__PURE__ */ new Set();
+  const owners = /* @__PURE__ */ new Set();
+  const statsHosts = /* @__PURE__ */ new Set();
+  for (const row of view.timeline) {
+    const key = row.kind === "message" ? `message:${row.messageId}` : row.kind === "question" ? `question:${row.questionId}` : `turn:${row.turnId}:after:${row.afterId}`;
+    if (seenRows.has(key)) throw new ConversationProtocolError("invalid_frame");
+    seenRows.add(key);
+    if (row.kind === "message") {
+      if (!messages.delete(row.messageId)) throw new ConversationProtocolError("invalid_frame");
+      if (row.statsTurnId && turns.get(row.statsTurnId)?.phase !== "settled")
+        throw new ConversationProtocolError("invalid_frame");
+      if (row.statsTurnId) {
+        if (statsHosts.has(row.statsTurnId)) throw new ConversationProtocolError("invalid_frame");
+        statsHosts.add(row.statsTurnId);
+      }
+    } else if (row.kind === "question") {
+      if (!questions.delete(row.questionId)) throw new ConversationProtocolError("invalid_frame");
+    } else if (!turns.has(row.turnId) || row.trace.turnId !== row.turnId) {
+      throw new ConversationProtocolError("invalid_frame");
+    }
+    if (!row.trace) continue;
+    const turn2 = turns.get(row.trace.turnId);
+    if (!turn2) throw new ConversationProtocolError("invalid_frame");
+    if (row.trace.ownsTurn) {
+      if (owners.has(turn2.id)) throw new ConversationProtocolError("invalid_frame");
+      owners.add(turn2.id);
+    }
+    const ordinals = new Set(turn2.activity.map((line) => line.ordinal));
+    for (const ordinal of row.trace.ordinals) {
+      const activityKey = `${turn2.id}:${ordinal}`;
+      if (!ordinals.has(ordinal) || seenActivity.has(activityKey)) throw new ConversationProtocolError("invalid_frame");
+      seenActivity.add(activityKey);
+    }
+  }
+  if (messages.size || questions.size || view.turns.some((turn2) => turn2.activity.some((line) => !seenActivity.has(`${turn2.id}:${line.ordinal}`))))
+    throw new ConversationProtocolError("invalid_frame");
+}
 function reduceConversation(state, frame) {
   if (frame.kind === "snapshot") {
     if (state?.streamId === frame.streamId && frame.revision <= state.revision) return state;
     unique(frame.conversation.messages);
     unique(frame.conversation.turns);
     unique(frame.conversation.questions);
+    validateTimeline(frame.conversation);
     return frame;
   }
   if (!state || state.streamId !== frame.streamId) throw new ConversationProtocolError("unknown_stream");
   if (frame.revision <= state.revision) return state;
   if (frame.baseRevision !== state.revision) throw new ConversationProtocolError("revision_gap");
   const changes2 = frame.changes;
-  return {
+  const next = {
     kind: "snapshot",
     protocolVersion: CONVERSATION_PROTOCOL_VERSION,
     streamId: state.streamId,
@@ -17870,51 +17922,13 @@ function reduceConversation(state, frame) {
       messages: applyEntities(state.conversation.messages, changes2.messages),
       turns: applyEntities(state.conversation.turns, changes2.turns),
       questions: applyEntities(state.conversation.questions, changes2.questions),
+      timeline: changes2.timeline,
       connection: changes2.connection,
       capabilities: changes2.capabilities
     }
   };
-}
-
-// ../../shared/timeline.ts
-function parseTimelinePosition(value) {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
-}
-function timelineSortKey(timestamp, timelinePosition) {
-  const position = parseTimelinePosition(timelinePosition);
-  if (position !== void 0) return position;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
-  const milliseconds = Date.parse(normalized);
-  return Number.isFinite(milliseconds) ? milliseconds * 1e3 : 0;
-}
-
-// src/turn-row.ts
-var OUTCOME_NOTES = {
-  stopped: "Stopped",
-  failed: "Failed",
-  warning: "Ended with a warning",
-  interrupted: "Interrupted; outcome unknown",
-  silent: "No reply"
-};
-function turnRowView(turn2, now) {
-  const settled = turn2.phase === "settled";
-  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
-  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
-  const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
-  const model = turn2.metadata.model;
-  const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : turn2.phase === "settling" ? "Finalizing turn\u2026" : null;
-  const hasTiming = elapsedMs !== null || !!model;
-  return {
-    hidden: settled && !turn2.activity.length && !turn2.usage.length && !hasTiming && !note,
-    status: !settled && turn2.phase === "running" ? "Working\u2026" : null,
-    note,
-    elapsedMs,
-    model,
-    showTiming: !settled || !turn2.usage.length,
-    showTokensUnavailable: settled && !turn2.usage.length && hasTiming,
-    // While running, the live line owns elapsed time and model; checkpointed values would be stale.
-    usage: settled ? turn2.usage : turn2.usage.map(({ id: id2, value }) => ({ id: id2, value: { ...value, duration_ms: void 0, model: void 0 } }))
-  };
+  validateTimeline(next.conversation);
+  return next;
 }
 
 // src/stop-turn.ts
@@ -18628,11 +18642,13 @@ function urlBase64ToUint8Array(base64String) {
 // src/activity-trace-state.ts
 var intent = y3(null);
 function turnId(message2) {
-  return message2.turn?.id ?? message2.turnId ?? message2.statsTurn?.id ?? null;
+  return message2.turnId ?? message2.statsTurn?.id ?? null;
 }
 function activityTraceOwner(message2) {
   const turn2 = message2.turnTraceOwner ? turnId(message2) : null;
-  return turn2 ? `turn:${turn2}` : `message:${message2.id ?? `${message2.direction}:${message2.ts}:${message2.text}`}`;
+  if (turn2) return `turn:${turn2}`;
+  if (!message2.id) throw new Error("Activity trace message is missing its authoritative ID");
+  return `message:${message2.id}`;
 }
 function activityTraceView(ownerId, live = false) {
   const current = intent.value;
@@ -18664,86 +18680,64 @@ function responseScrollTop(scrollTop, responseTop, viewportTop) {
 // src/conversation-state.ts
 var conversationState = y3(null);
 var completedResponse = y3(null);
+var chatTranscript = y3([]);
 function resetConversation() {
   conversationState.value = null;
   completedResponse.value = null;
   resetActivityTraceView();
+  chatTranscript.value = [];
 }
-function activityKey(ts) {
-  const ms = Number(ts);
-  return Number.isFinite(ms) ? ms * 1e3 : null;
-}
-function conversationMessages(view) {
-  const key = (m6) => timelineSortKey(m6.timestamp, m6.timelinePosition);
-  const statsHosts = /* @__PURE__ */ new Map();
-  for (const turn2 of view.turns) {
-    if (turn2.phase !== "settled") continue;
-    const replies = view.messages.filter((m6) => turn2.outputIds.includes(m6.id) && m6.direction === "out");
-    const last = replies.sort((a4, b5) => key(a4) - key(b5)).at(-1);
-    if (last) statsHosts.set(last.id, turn2);
-  }
-  const messages = view.messages.filter((m6) => m6.inputState?.status !== "cancelled").map(({ timestamp, ...m6 }) => {
-    const statsTurn = statsHosts.get(m6.id);
-    return { ...m6, files: m6.files ?? null, ts: timestamp, ...statsTurn ? { statsTurn } : {} };
-  });
-  const byId = new Map(messages.map((m6) => [m6.id, m6]));
-  const hostOf = new Map([...statsHosts].map(([id2, turn2]) => [turn2.id, id2]));
-  for (const turn2 of view.turns) {
-    const anchor = view.messages.find((m6) => turn2.outputIds.includes(m6.id) || turn2.inputIds.includes(m6.id));
-    const inputs = view.messages.filter((m6) => turn2.inputIds.includes(m6.id));
-    const outputs = view.messages.filter((m6) => turn2.outputIds.includes(m6.id));
-    const firstInput = inputs.length ? Math.min(...inputs.map(key)) : null;
-    const firstOutput = outputs.length ? Math.min(...outputs.map(key)) : null;
-    const ts = turn2.startedAt ?? anchor?.timestamp ?? view.questions.find((q5) => q5.turnId === turn2.id)?.createdAt ?? turn2.endedAt ?? "";
-    const start = !turn2.startedAt && firstOutput !== null ? Math.max(firstOutput - 1, firstInput !== null ? firstInput + 1 : 0) : firstInput !== null ? Math.max(timelineSortKey(ts), firstInput + 1) : null;
-    const boundaries = turn2.startedAt ? [...inputs, ...outputs].filter((m6) => m6.inputState?.status !== "steering" && m6.inputState?.status !== "cancelled").filter((m6) => firstInput === null || key(m6) > firstInput).sort((a4, b5) => key(a4) - key(b5)) : [];
-    const segmentOf = (ts2) => {
-      const at = activityKey(ts2);
-      return at === null ? 0 : boundaries.filter((boundary) => key(boundary) <= at).length;
+function conversationPresentation(view) {
+  const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
+  const questions = new Map(view.questions.map((question2) => [question2.questionId, question2]));
+  const messages = view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map(({ timestamp, ...message2 }) => ({ ...message2, files: message2.files ?? null, ts: timestamp }));
+  const byId = new Map(messages.map((message2) => [message2.id, message2]));
+  const traceLines = (trace2) => {
+    const turn2 = turns.get(trace2.turnId);
+    if (!turn2) throw new ConversationProtocolError("invalid_frame");
+    const ordinals = new Set(trace2.ordinals);
+    return turn2.activity.filter((line) => ordinals.has(line.ordinal));
+  };
+  const transcript = view.timeline.map((row) => {
+    const turn2 = row.trace ? turns.get(row.trace.turnId) : void 0;
+    if (row.kind === "message") {
+      const message2 = byId.get(row.messageId);
+      if (!message2) throw new ConversationProtocolError("invalid_frame");
+      if (row.statsTurnId) message2.statsTurn = turns.get(row.statsTurnId);
+      if (row.trace) {
+        message2.turnId = row.trace.turnId;
+        message2.activity = traceLines(row.trace);
+        message2.turnTraceOwner = row.trace.ownsTurn;
+        message2.turnTraceLive = row.trace.ownsTurn && turn2?.phase !== "settled";
+      }
+      return { kind: "message", message: message2 };
+    }
+    if (row.kind === "question") {
+      const question2 = questions.get(row.questionId);
+      if (!question2) throw new ConversationProtocolError("invalid_frame");
+      return {
+        kind: "question",
+        question: row.trace ? { ...question2, activity: traceLines(row.trace) } : question2,
+        ...row.trace ? {
+          traceOwner: row.trace.ownsTurn ? `turn:${row.trace.turnId}` : `question:${row.questionId}`,
+          traceLive: row.trace.ownsTurn && turn2?.phase !== "settled"
+        } : {}
+      };
+    }
+    if (!turn2 || turn2.id !== row.turnId) throw new ConversationProtocolError("invalid_frame");
+    return {
+      kind: "turn",
+      turn: turn2,
+      afterId: row.afterId,
+      activity: traceLines(row.trace),
+      status: row.status,
+      traceOwner: row.trace.ownsTurn ? `turn:${turn2.id}` : `turn:${turn2.id}:after:${row.afterId ?? "start"}`
     };
-    const segments = /* @__PURE__ */ new Map();
-    for (const line of turn2.activity) {
-      const index = segmentOf(line.ts);
-      segments.set(index, [...segments.get(index) ?? [], line]);
-    }
-    const settled = turn2.phase === "settled";
-    const host = hostOf.get(turn2.id);
-    const bubbles = /* @__PURE__ */ new Map();
-    for (const [index, lines] of segments) {
-      const next = boundaries[index];
-      const target = next?.direction === "out" ? next.id : !next && settled ? host : void 0;
-      const message2 = target ? byId.get(target) : void 0;
-      if (message2) {
-        message2.activity = [...message2.activity ?? [], ...lines];
-      } else bubbles.set(index, lines);
-    }
-    const statusSegment = !settled ? boundaries.length : host || turnRowView(turn2, 0).hidden ? null : Math.max(0, ...bubbles.keys());
-    if (statusSegment !== null && !bubbles.has(statusSegment)) bubbles.set(statusSegment, []);
-    for (const [index, lines] of bubbles) {
-      const position = index === 0 ? start : key(boundaries[index - 1]) + 1;
-      messages.push({
-        id: index === 0 ? `turn:${turn2.id}` : `turn:${turn2.id}:${index}`,
-        direction: "turn",
-        turn: turn2,
-        activity: lines,
-        ...index === statusSegment ? { turnStatus: true } : {},
-        text: turn2.outcome,
-        files: null,
-        ts,
-        ...position !== null ? { timelinePosition: position } : {}
-      });
-    }
-    const traced = messages.filter((message2) => {
-      const messageTurn = message2.turn?.id ?? message2.turnId ?? message2.statsTurn?.id;
-      return messageTurn === turn2.id && !!message2.activity?.length;
-    }).sort((a4, b5) => timelineSortKey(a4.ts, a4.timelinePosition) - timelineSortKey(b5.ts, b5.timelinePosition));
-    const owner = settled && host ? byId.get(host) : traced.at(-1);
-    if (owner) {
-      owner.turnTraceOwner = true;
-      if (!settled) owner.turnTraceLive = true;
-    }
-  }
-  return messages.sort((a4, b5) => timelineSortKey(a4.ts, a4.timelinePosition) - timelineSortKey(b5.ts, b5.timelinePosition));
+  });
+  return {
+    messages: transcript.flatMap((row) => row.kind === "message" ? [row.message] : []),
+    transcript
+  };
 }
 function applyConversationFrame(raw, expectedThreadId) {
   const frame = parseConversationFrame(raw);
@@ -18754,7 +18748,7 @@ function applyConversationFrame(raw, expectedThreadId) {
   const view = next.conversation;
   const current = view.turns.find((turn2) => turn2.id === view.connection.activeTurnId);
   const caps = view.capabilities;
-  const messages = conversationMessages(view);
+  const { messages, transcript } = conversationPresentation(view);
   n2(() => {
     conversationState.value = next;
     for (const message2 of view.messages) {
@@ -18762,6 +18756,7 @@ function applyConversationFrame(raw, expectedThreadId) {
     }
     if (frame.kind === "snapshot") resetActivityTraceView();
     chatMessages.value = messages;
+    chatTranscript.value = transcript;
     if (frame.kind === "update") {
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
@@ -21386,26 +21381,9 @@ function usePendingComposer(inputRef, autosize) {
   };
 }
 
-// src/question-timeline.ts
-function mergeQuestionTimeline(messages, questions, currentThreadId) {
-  const questionMessages = questions.filter((question2) => !question2.threadId || question2.threadId === currentThreadId).map(
-    (question2) => ({
-      id: question2.questionId,
-      direction: "question",
-      text: question2.question,
-      files: null,
-      ts: question2.status === "answered" && question2.answeredAt ? question2.answeredAt : question2.createdAt,
-      question: question2
-    })
-  );
-  return [...messages, ...questionMessages].sort((left, right) => {
-    const leftKey = timelineSortKey(left.ts, left.timelinePosition);
-    const rightKey = timelineSortKey(right.ts, right.timelinePosition);
-    const byMillisecond = Math.floor(leftKey / 1e3) - Math.floor(rightKey / 1e3);
-    if (byMillisecond !== 0) return byMillisecond;
-    const byQuestion = Number(left.direction === "question") - Number(right.direction === "question");
-    return byQuestion || leftKey - rightKey;
-  });
+// ../../shared/timeline.ts
+function parseTimelinePosition(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
 }
 
 // src/queued-followups.ts
@@ -21428,22 +21406,6 @@ function splitPendingInputs(messages) {
     (waiting ? queued : transcript).push(message2);
   }
   return { transcript, queued };
-}
-function timelineLayoutKey(messages) {
-  return JSON.stringify(
-    messages.map((message2) => [
-      message2.id,
-      message2.direction,
-      message2.timelinePosition,
-      isQueuedFollowup(message2),
-      message2.inputState?.status === "steering",
-      message2.turn?.phase,
-      message2.turn?.activity,
-      message2.turn?.metadata,
-      message2.turnStatus,
-      message2.statsTurn?.id
-    ])
-  );
 }
 
 // ../../shared/activity-presentation.ts
@@ -21695,6 +21657,35 @@ function activityChapters(lines, live = false) {
   });
 }
 
+// src/turn-row.ts
+var OUTCOME_NOTES = {
+  stopped: "Stopped",
+  failed: "Failed",
+  warning: "Ended with a warning",
+  interrupted: "Interrupted; outcome unknown",
+  silent: "No reply"
+};
+function turnRowView(turn2, now) {
+  const settled = turn2.phase === "settled";
+  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
+  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
+  const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
+  const model = turn2.metadata.model;
+  const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : turn2.phase === "settling" ? "Finalizing turn\u2026" : null;
+  const hasTiming = elapsedMs !== null || !!model;
+  return {
+    hidden: settled && !turn2.activity.length && !turn2.usage.length && !hasTiming && !note,
+    status: !settled && turn2.phase === "running" ? "Working\u2026" : null,
+    note,
+    elapsedMs,
+    model,
+    showTiming: !settled || !turn2.usage.length,
+    showTokensUnavailable: settled && !turn2.usage.length && hasTiming,
+    // While running, the live line owns elapsed time and model; checkpointed values would be stale.
+    usage: settled ? turn2.usage : turn2.usage.map(({ id: id2, value }) => ({ id: id2, value: { ...value, duration_ms: void 0, model: void 0 } }))
+  };
+}
+
 // src/input-state.ts
 function inputStatePresentation(state) {
   if (!state) return null;
@@ -21750,7 +21741,7 @@ function isFutureWorkMessage(body) {
 // src/edit-message.ts
 function findEditBranchAnchorId(messages, targetMessageId) {
   let previousId = null;
-  const { transcript } = splitQueuedFollowups(mergeQuestionTimeline(messages, [], null));
+  const { transcript } = splitQueuedFollowups(messages);
   for (const message2 of transcript) {
     if (message2.id === targetMessageId) return previousId;
     if ((message2.direction === "in" || message2.direction === "out") && message2.id) {
@@ -22237,20 +22228,20 @@ function attachScrollNavigation(viewport, onDirection, onUserInput, onUserScroll
     inputUntil = now + SCROLL_NAVIGATION_IDLE_MS;
     onScroll();
   }
-  function available(next, position) {
-    return position.maximum > 1 && (next === "up" ? position.top > 1 : position.top < position.maximum - 1);
+  function available(next, position2) {
+    return position2.maximum > 1 && (next === "up" ? position2.top > 1 : position2.top < position2.maximum - 1);
   }
   function onScroll() {
-    const position = snapshot();
-    const delta = position.top - previous.top;
-    const resized = position.height !== previous.height || position.viewportHeight !== previous.viewportHeight;
-    previous = position;
-    if (direction && !available(direction, position)) hide();
+    const position2 = snapshot();
+    const delta = position2.top - previous.top;
+    const resized = position2.height !== previous.height || position2.viewportHeight !== previous.viewportHeight;
+    previous = position2;
+    if (direction && !available(direction, position2)) hide();
     if (resized || delta === 0 || !pointers.size && (inputUntil === null || Date.now() > inputUntil)) return;
     inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
     const next = delta < 0 ? "up" : "down";
     onUserScroll?.(next);
-    if (!available(next, position)) {
+    if (!available(next, position2)) {
       hide();
       return;
     }
@@ -23159,7 +23150,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const traceOwner = activityTraceOwner(m6);
   const traceView = activityTraceView(traceOwner, !!m6.turnTraceLive);
   const toggleTrace = () => toggleActivityTrace(traceOwner);
-  if (m6.direction === "turn" && m6.turn) return /* @__PURE__ */ u4(ConversationTurnRow, { turn: m6.turn, lines: m6.activity ?? [], status: !!m6.turnStatus, ownerId: traceOwner });
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -23182,15 +23172,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             recur
           ] })
         ]
-      }
-    );
-  }
-  if (m6.direction === "question" && m6.question) {
-    return /* @__PURE__ */ u4(
-      QuestionCardItem,
-      {
-        question: m6.question,
-        busy: respondingQuestionIds.value.has(m6.question.questionId)
       }
     );
   }
@@ -23406,11 +23387,14 @@ function messageKey(message2) {
   return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
 }
 function groupKey(group) {
+  if (group.kind === "turn") return `turn:${group.row.turn.id}:after:${group.row.afterId ?? "start"}`;
+  if (group.kind === "question") return `question:${group.row.question.questionId}`;
   if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
   return `single:${messageKey(group.m)}`;
 }
 function groupContains(group, messageId) {
+  if (group.kind === "turn" || group.kind === "question") return false;
   if (group.kind === "thoughts") {
     return group.answer.id === messageId || group.thoughts.some((t4) => t4.id === messageId);
   }
@@ -23427,7 +23411,16 @@ function groupMessages(list) {
     else out.push({ kind: "events", events });
     events = [];
   };
-  for (const m6 of list) {
+  for (const row of list) {
+    if (row.kind !== "message") {
+      flushEvents();
+      for (const message2 of pendingMsgs) out.push({ kind: "single", m: message2 });
+      pendingMsgs = [];
+      if (row.kind === "turn") out.push({ kind: "turn", row });
+      else out.push({ kind: "question", row });
+      continue;
+    }
+    const m6 = row.message;
     if (m6.direction === "event") {
       for (const t4 of pendingMsgs) out.push({ kind: "single", m: t4 });
       pendingMsgs = [];
@@ -23620,7 +23613,7 @@ function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
   const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
   const settled = turn2.phase === "settled";
   const live = status && !settled;
-  const traceView = activityTraceView(ownerId, live);
+  const traceView = activityTraceView(ownerId, !settled);
   const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : null;
   const [now, setNow] = h2(() => Date.now());
   y2(() => {
@@ -23704,9 +23697,11 @@ function MessageLog() {
   const [newMessageBelow, setNewMessageBelow] = h2(false);
   const [, setDensityReflowTick] = h2(0);
   const highlight = highlightMessageId.value;
-  const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
-  const { transcript, queued } = splitPendingInputs(timeline);
-  const layoutKey = timelineLayoutKey(timeline);
+  const timeline = chatTranscript.value;
+  const { queued } = splitPendingInputs(chatMessages.value);
+  const queuedIds = new Set(queued.map((message2) => message2.id));
+  const transcript = timeline.filter((row) => row.kind !== "message" || !queuedIds.has(row.message.id));
+  const layoutKey = JSON.stringify(timeline);
   const msgCount = timeline.length;
   const activeTurnId = activeTurn.value?.id;
   const scrollTick = scrollToBottomTick.value;
@@ -23893,7 +23888,7 @@ function MessageLog() {
   const groups2 = groupMessages(list);
   const thread = activeThread();
   const forkOrigin = thread?.forkedFrom;
-  const inheritedUntil = forkOrigin && list.some((msg) => msg.id === forkOrigin.messageId) ? forkOrigin.messageId : null;
+  const inheritedUntil = forkOrigin && list.some((row) => row.kind === "message" && row.message.id === forkOrigin.messageId) ? forkOrigin.messageId : null;
   const branchesAt = /* @__PURE__ */ new Map();
   for (const child of thread?.forkChildren ?? []) {
     const at = branchesAt.get(child.messageId) ?? [];
@@ -23902,7 +23897,9 @@ function MessageLog() {
   }
   let latestConversationalMessage;
   for (let index = list.length - 1; index >= 0; index--) {
-    const message2 = list[index];
+    const row = list[index];
+    if (row.kind !== "message") continue;
+    const message2 = row.message;
     if (message2.direction !== "internal" && message2.direction !== "event") {
       latestConversationalMessage = message2;
       break;
@@ -23912,7 +23909,25 @@ function MessageLog() {
     /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
       chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
         const key = `${threadId.value}:${groupKey(g8)}`;
-        const body = g8.kind === "thoughts" ? /* @__PURE__ */ u4(
+        const body = g8.kind === "turn" ? /* @__PURE__ */ u4(
+          ConversationTurnRow,
+          {
+            turn: g8.row.turn,
+            lines: g8.row.activity,
+            status: g8.row.status,
+            ownerId: g8.row.traceOwner
+          },
+          key
+        ) : g8.kind === "question" ? /* @__PURE__ */ u4(
+          QuestionCardItem,
+          {
+            question: g8.row.question,
+            traceOwner: g8.row.traceOwner,
+            traceLive: g8.row.traceLive,
+            busy: respondingQuestionIds.value.has(g8.row.question.questionId)
+          },
+          key
+        ) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
           ThoughtGroup,
           {
             thoughts: g8.thoughts,
@@ -23974,10 +23989,10 @@ function PendingTray() {
     /* @__PURE__ */ u4("button", { type: "button", title: "Remove", onClick: () => removePending(i5), children: "\xD7" })
   ] }, i5)) });
 }
-function QuestionCardItem({ question: q5, busy }) {
+function QuestionCardItem({ question: q5, busy, traceOwner, traceLive = false }) {
   const [answer, setAnswer] = h2("");
-  const traceId = `question:${q5.questionId}`;
-  const traceExpanded = activityTraceView(traceId).expanded;
+  const traceId = traceOwner ?? `question:${q5.questionId}`;
+  const traceView = activityTraceView(traceId, traceLive);
   const answerRef = A2("");
   const textareaRef = A2(null);
   const gid = groupId.value;
@@ -24107,14 +24122,23 @@ function QuestionCardItem({ question: q5, busy }) {
         }
       )
     ] }),
-    showTechnicalStatus ? /* @__PURE__ */ u4(ActivityTracePanel, { lines: q5.activity ?? [], expanded: traceExpanded, ownerId: traceId }) : null,
+    showTechnicalStatus ? /* @__PURE__ */ u4(
+      ActivityTracePanel,
+      {
+        lines: q5.activity ?? [],
+        expanded: traceView.expanded,
+        ownerId: traceId,
+        live: traceLive,
+        following: traceView.following
+      }
+    ) : null,
     /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }),
       /* @__PURE__ */ u4(
         ActivityTraceToggle,
         {
           count: showTechnicalStatus ? q5.activity?.length ?? 0 : 0,
-          expanded: traceExpanded,
+          expanded: traceView.expanded,
           onToggle: () => toggleActivityTrace(traceId)
         }
       ),

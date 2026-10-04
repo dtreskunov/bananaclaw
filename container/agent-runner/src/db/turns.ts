@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS turn_activity (
   ts TEXT NOT NULL,
   text TEXT NOT NULL,
   turn_id TEXT REFERENCES turns(id),
+  timeline_position INTEGER NOT NULL CHECK (timeline_position > 0 AND timeline_position <= 9007199254740991),
   PRIMARY KEY (message_out_id, ordinal),
   CHECK (message_out_id IS NOT NULL OR turn_id IS NOT NULL)
 );
@@ -162,7 +163,6 @@ export function linkTurnRecord(db: Database, turnId: string, target: TurnAssocia
     } | null;
     if (!row) throw new Error('Unknown turn association target');
     if (row.turn_id !== null && row.turn_id !== turnId) throw new Error('Record already belongs to another turn');
-    if (row.turn_id === null)
-      db.query(`UPDATE ${target.table} SET turn_id = ? WHERE ${where}`).run(turnId, ...values);
+    if (row.turn_id === null) db.query(`UPDATE ${target.table} SET turn_id = ? WHERE ${where}`).run(turnId, ...values);
   })();
 }

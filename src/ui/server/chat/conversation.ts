@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3';
 import { reduceActivityLines } from '../../../activity.js';
 import type { Question } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
+import { outboundTimelinePosition } from '../../../input-timeline.js';
+import { conversationTimeline } from './conversation-timeline.js';
 import { getTurnInputs, type TurnRow } from '../../../db/turns.js';
 import { readTurnMetadata } from '../../../session-link-durable.js';
 import { getSessionTurnSignals } from '../../../session-link.js';
@@ -56,7 +58,7 @@ function displayActivity(lines: ConversationTurn['activity']): ConversationTurn[
   }
   return [...groups.values()].flatMap((group) => {
     const reduced = reduceActivityLines(group);
-    return reduced.length ? reduced.map((line) => ({ ...line, ordinal: group[0].ordinal })) : group;
+    return reduced.length ? reduced.map((line) => ({ ...group[0], ...line })) : group;
   });
 }
 
@@ -104,8 +106,8 @@ export function projectConversation(
   const questionAnchors = new Map(
     visibleQuestions.map((q) => [
       q.message_out_id,
-      outDb?.prepare('SELECT turn_id FROM messages_out WHERE id = ?').get(q.message_out_id) as
-        | { turn_id: string | null }
+      outDb?.prepare('SELECT turn_id, content FROM messages_out WHERE id = ?').get(q.message_out_id) as
+        | { turn_id: string | null; content: string }
         | undefined,
     ]),
   );
@@ -135,17 +137,35 @@ export function projectConversation(
     ];
     if (!owned && !(unknown(turn) && outputs.length)) continue;
     const activity = outDb!
-      .prepare('SELECT message_out_id, ordinal, ts, text FROM turn_activity WHERE turn_id = ? ORDER BY ordinal')
-      .all(turn.id) as Array<{ message_out_id: string | null; ordinal: number; ts: string; text: string }>;
+      .prepare(
+        'SELECT message_out_id, ordinal, ts, text, timeline_position FROM turn_activity WHERE turn_id = ? ORDER BY ordinal',
+      )
+      .all(turn.id) as Array<{
+      message_out_id: string | null;
+      ordinal: number;
+      ts: string;
+      text: string;
+      timeline_position: number;
+    }>;
     const trace = new Map<number, ConversationTurn['activity'][number]>();
     for (const line of activity) {
       if (owned || (line.message_out_id !== null && visibleOutputIds.has(line.message_out_id)))
-        trace.set(line.ordinal, { ordinal: line.ordinal, ts: line.ts, text: line.text });
+        trace.set(line.ordinal, {
+          ordinal: line.ordinal,
+          ts: line.ts,
+          text: line.text,
+          timelinePosition: line.timeline_position,
+        });
     }
     if (owned && turn.phase !== 'settled') {
       for (const line of signals.activity) {
         if (line.turnId === turn.id && !trace.has(line.ordinal))
-          trace.set(line.ordinal, { ordinal: line.ordinal, ts: line.ts, text: line.text });
+          trace.set(line.ordinal, {
+            ordinal: line.ordinal,
+            ts: line.ts,
+            text: line.text,
+            timelinePosition: line.timelinePosition,
+          });
       }
     }
     const usage = (
@@ -201,6 +221,10 @@ export function projectConversation(
       threadId: q.thread_id,
       agentGroupId: groupId,
       createdAt: q.created_at,
+      messageId: q.message_out_id,
+      ...(anchor?.content && outboundTimelinePosition(anchor.content) !== undefined
+        ? { timelinePosition: outboundTimelinePosition(anchor.content) }
+        : {}),
       ...(activity?.length ? { activity } : {}),
       ...(anchor?.turn_id && turnIds.has(anchor.turn_id) ? { turnId: anchor.turn_id } : {}),
     };
@@ -215,7 +239,7 @@ export function projectConversation(
       : null;
   const connected = signals.active.connected;
   const actionable = context.canSend && connected && !!active;
-  return {
+  const view = {
     threadId,
     messages,
     turns,
@@ -229,6 +253,7 @@ export function projectConversation(
       cancelInput: actionable && active?.supportsInputCancellation === true,
     },
   };
+  return { ...view, timeline: conversationTimeline(view) };
 }
 
 export function readConversation(

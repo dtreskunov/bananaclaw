@@ -26,10 +26,11 @@ invalidate but cannot publish new state. Projection failures are explicit,
 not successful empty histories. Unknown imported origins expose only sidecars
 anchored to visible messages; off-route sends never expose the source trace.
 
-The browser protocol is separately versioned (`protocolVersion: 1`). A
+The browser protocol is separately versioned (`protocolVersion: 2`). A
 subscription starts with `{kind:"snapshot", streamId, revision, conversation}`.
 Each atomic `update` names `baseRevision` and the next `revision`, with entity
-upserts, removals, complete ordering, connection state and action capabilities.
+upserts, removals, an explicit typed presentation timeline, connection state
+and action capabilities.
 Revisions count changed browser projections, never runner journal sequences.
 The pure shared reducer validates frames before applying them, ignores duplicate
 revisions and requests a new snapshot for gaps or unknown streams. Reconnect
@@ -56,7 +57,7 @@ sees a replacement socket after the host unlinks and rebinds it during restart.
 
 ## Protocol
 
-Version 4 is newline-delimited JSON. Every frame contains `v: 4` and a closed
+Version 5 is newline-delimited JSON. Every frame contains `v: 5` and a closed
 `type`. Live frames are capped at 16 KiB; durable frames are bounded by the
 configured output cap plus envelope overhead. Each session is limited to 256
 frames and 24 MiB per second,
@@ -87,8 +88,8 @@ numbers must be finite and non-negative. Live state is best-effort: the runner
 keeps its current snapshot in memory and replays it after reconnect, but the
 socket does not acknowledge or journal these signals.
 
-Activity carries `turnId`, its original emit-time `ts` and a turn-local
-`ordinal`; usage carries `turnId` and emit-time `ts`. Reconnect replays these
+Activity carries `turnId`, its original emit-time `ts`, a turn-local
+`ordinal`, and a required positive `timelinePosition`; usage carries `turnId` and emit-time `ts`. Reconnect replays these
 unchanged, rather than inventing a new time or a successor's identity.
 
 The runner creates a durable logical turn before invoking the provider.
@@ -104,10 +105,12 @@ using async-local storage across awaits. This works in both in-process tools
 and external stdio sidecars; late completion cannot read a successor's ID or
 reply address. The context is routing metadata, not a credential.
 
-**No upgrade path from v3.** Runner and host DB openers create the v4 turn
-schema and turn-aware journal triggers; they never migrate an older store. The
-only way back to v3 is the snapshot restore in
-[downgrade-to-v3.md](downgrade-to-v3.md); mixed protocol versions are unsupported.
+**No runtime upgrades or mixed versions.** Version 5 requires canonical activity
+positions in both projections and every activity signal/durable payload.
+Normalize version 4 stores with the explicit offline cutover in
+[ui.md](ui.md#offline-canonical-activity-order-cutover); both peers reject
+unmigrated storage. For older turn-format changes see
+[downgrade-to-v3.md](downgrade-to-v3.md).
 
 User cancellation uses a host-to-runner live `turn.stop` control carrying the
 exact turn ID. Both peers compare it with the active turn; stale controls never
@@ -244,7 +247,10 @@ awaiting cold startup is not automatically a follow-up.
 
 On first consumption, an input receives an immutable `timelinePosition`.
 Outbound content receives a position from the same runner-local logical clock
-when written. Positions are positive safe integers in epoch-microsecond units,
+when written. Activity emission allocates from that clock in the same transaction
+as its journaled row; the position travels in live signals and durable
+`activity.persist` payloads and is retained through settlement/reanchoring.
+Positions are positive safe integers in epoch-microsecond units,
 allocated as `max(now * 1000, previous + 1)` in SQLite transactions. This
 distinguishes same-millisecond events and remains monotonic across clock
 adjustments and restarts. Positions travel as JSON numbers, serialized with
@@ -332,8 +338,8 @@ a container that survived a host restart. The runner reconnects with bounded
 exponential backoff. Container exit closes the listener; graceful host shutdown
 closes all listeners. A host restart recreates each socket path and an adopted
 runner replays its current live snapshot. Containers carry a
-`nanoclaw-session-link=v4` label; startup stops rather than adopts a live
-container with a missing or incompatible link version. Version 4 containers
+`nanoclaw-session-link=v5` label; startup stops rather than adopts a live
+container with a missing or incompatible link version. Version 5 containers
 mount only their writable projection directory (`runner-state/`, containing
 `runner-state.db` and its rollback journal), a read-only inbox, a writable
 outbox, and provider-specific state directories.

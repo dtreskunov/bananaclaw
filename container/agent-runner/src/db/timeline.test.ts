@@ -10,6 +10,9 @@ import { writeMessageOut, writeMessageOutWithConnections } from './messages-out.
 import { ensureRunnerStateSchema } from './runner-state.js';
 import { allocateTimelinePosition } from './timeline.js';
 import { readInputState, startInputProcessing, writeInputState } from '../steering.js';
+import { appendActivity, clearActivity } from './session-state.js';
+import { beginTurn, settleTurn } from '../turn-execution.js';
+import { setTurnContext } from '../current-batch.js';
 
 let now: ReturnType<typeof spyOn<typeof Date, 'now'>>;
 const epoch = 1_800_000_000_000;
@@ -41,6 +44,35 @@ function clock(): number {
 }
 
 describe('durable consumption timeline', () => {
+  it('orders activity, outputs and applied steering despite equal/backwards timestamps, preserving order at settlement', async () => {
+    const first = input('first', 2);
+    const steer = input('steer', 4);
+    startInputProcessing([first]);
+    const turn = beginTurn({ channelType: 'web', platformId: 'chat', threadId: null, inReplyTo: first.id }, [first.id]);
+    clearActivity();
+    appendActivity({ kind: 'notification', id: 'first-step', text: 'before output' });
+    const progress = output('progress');
+    writeInputState({ messageId: steer.id, status: 'applied', turnId: turn.turnId });
+    now.mockReturnValue(epoch - 60_000);
+    appendActivity({ kind: 'notification', id: 'second-step', text: 'after steering' });
+    const final = output('final');
+    const activity = getOutboundDb().prepare('SELECT timeline_position, ts FROM turn_activity ORDER BY ordinal')
+      .all() as Array<{ timeline_position: number; ts: string }>;
+    expect(activity[0].timeline_position).toBeLessThan(progress);
+    expect(progress).toBeLessThan(readInputState(steer.id)!.timelinePosition!);
+    expect(readInputState(steer.id)!.timelinePosition!).toBeLessThan(activity[1].timeline_position);
+    expect(activity[1].timeline_position).toBeLessThan(final);
+    expect(Number(activity[1].ts)).toBeLessThan(Number(activity[0].ts));
+    await settleTurn(turn, 'replied');
+    expect(getOutboundDb().prepare('SELECT timeline_position, ts FROM turn_activity ORDER BY ordinal').all()).toEqual(activity);
+    const events = getOutboundDb().prepare("SELECT payload FROM pending_runner_events WHERE event_type = 'activity.persist'")
+      .all() as Array<{ payload: string }>;
+    expect(events.map((event) => JSON.parse(event.payload).timeline_position)).toEqual([
+      activity[0].timeline_position, activity[1].timeline_position,
+      activity[0].timeline_position, activity[1].timeline_position,
+    ]);
+    setTurnContext(null);
+  });
   it('shares a strictly increasing clock across inputs and outputs despite frozen/backwards time', () => {
     const a = input('A', 2);
     const b = input('B', 4);

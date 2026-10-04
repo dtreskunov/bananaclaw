@@ -450,10 +450,15 @@ describe('main composer pending edits', () => {
   it('does not offer branching from the latest response', () => {
     threads.value = [thread];
     activeTurn.value = null;
-    chatMessages.value = [
-      { id: 'older-response', text: 'Older', files: null, ts: '1', direction: 'out' },
-      { id: 'latest-response', text: 'Latest', files: null, ts: '2', direction: 'out' },
-    ];
+    applyConversationFrame(
+      testSnapshot({
+        messages: [
+          { id: 'older-response', text: 'Older', timestamp: '1', timelinePosition: 100, direction: 'out' },
+          { id: 'latest-response', text: 'Latest', timestamp: '2', timelinePosition: 200, direction: 'out' },
+        ],
+      }),
+      'thread',
+    );
 
     hooks.cursor = 0;
     const chat = ChatMain();
@@ -500,10 +505,7 @@ describe('main composer pending edits', () => {
       const log = findComponent(ChatMain(), 'MessageLog');
       hooks.slots = [];
       hooks.cursor = 0;
-      const messageNode = findComponent(log.type(log.props), 'Message');
-      hooks.slots = [];
-      hooks.cursor = 0;
-      const turnRow = findComponent(messageNode.type(messageNode.props), 'ConversationTurnRow');
+      const turnRow = findComponent(log.type(log.props), 'ConversationTurnRow');
       hooks.slots = [];
       hooks.cursor = 0;
       const row = turnRow.type(turnRow.props);

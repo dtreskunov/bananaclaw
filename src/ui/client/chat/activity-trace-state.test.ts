@@ -43,17 +43,6 @@ describe('activity trace intent state', () => {
   });
 
   it('uses one turn owner across live and final rows', () => {
-    const live: ChatMessage = {
-      id: 'turn:turn-1',
-      direction: 'turn',
-      text: '',
-      ts: '',
-      turn: testTurn,
-      turnStatus: true,
-      turnTraceOwner: true,
-      activity: [],
-      files: null,
-    };
     const reply: ChatMessage = {
       id: 'reply',
       direction: 'out',
@@ -64,7 +53,6 @@ describe('activity trace intent state', () => {
       activity: [],
       files: null,
     };
-    expect(activityTraceOwner(live)).toBe('turn:turn-1');
     expect(activityTraceOwner(reply)).toBe('turn:turn-1');
   });
 

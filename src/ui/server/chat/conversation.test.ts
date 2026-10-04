@@ -43,7 +43,7 @@ const signals = {
       supportsInputCancellation: true,
     },
   },
-  activity: [{ turnId: 'turn', ordinal: 1, ts: '1', text: 'work' }],
+  activity: [{ turnId: 'turn', ordinal: 1, ts: '1', text: 'work', timelinePosition: 100 }],
   usage: null,
 };
 const read = (history: ConversationMessage[] = []) => projectConversation(db, context, 't', 'g', history, [], signals);
@@ -55,6 +55,24 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('authoritative conversation projection', () => {
+  it('keeps the first recorded position through tool lifecycle reduction and final output anchoring', () => {
+    const step = (status: string) =>
+      JSON.stringify({ kind: 'tool', id: 'tool', tool: 'Read', status, detail: 'file.txt' });
+    db.prepare('INSERT INTO turn_activity (turn_id, ordinal, ts, text, timeline_position) VALUES (?, ?, ?, ?, ?)').run(
+      turn.id,
+      0,
+      '1000',
+      step('running'),
+      100,
+    );
+    db.prepare(
+      'INSERT INTO turn_activity (turn_id, message_out_id, ordinal, ts, text, timeline_position) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(turn.id, 'out', 1, '999', step('completed'), 300);
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied' });
+    const view = read([{ ...output, timelinePosition: 200 }]);
+    expect(view.turns[0].activity[0]).toMatchObject({ ordinal: 0, timelinePosition: 100, ts: '1000' });
+    expect(view.timeline[0]).toMatchObject({ kind: 'message', messageId: 'out', trace: { ordinals: [0] } });
+  });
   it('reduces tool state by identity while preserving emit order and unrecognized history', () => {
     const result = projectConversation(db, context, 't', 'g', [], [], {
       ...signals,
@@ -62,6 +80,7 @@ describe('authoritative conversation projection', () => {
         {
           turnId: 'turn',
           ordinal: 0,
+          timelinePosition: 100,
           ts: '1000',
           text: JSON.stringify({
             kind: 'tool',
@@ -71,10 +90,11 @@ describe('authoritative conversation projection', () => {
             detail: 'file.txt',
           }),
         },
-        { turnId: 'turn', ordinal: 1, ts: '1001', text: 'Imported activity' },
+        { turnId: 'turn', ordinal: 1, ts: '1001', text: 'Imported activity', timelinePosition: 200 },
         {
           turnId: 'turn',
           ordinal: 2,
+          timelinePosition: 300,
           ts: '2000',
           text: JSON.stringify({
             kind: 'tool',
@@ -116,7 +136,9 @@ describe('authoritative conversation projection', () => {
       cancelled_at: null,
       created_at: 'now',
     };
-    db.prepare('INSERT INTO turn_activity VALUES (?, ?, ?, ?, ?)').run('legacy-question', 0, '1', 'legacy', null);
+    db.prepare(
+      'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
+    ).run('legacy-question', 0, '1', 'legacy', null);
     const readQuestions = (status: typeof question.status) =>
       projectConversation(
         db,
@@ -139,9 +161,11 @@ describe('authoritative conversation projection', () => {
   it('stages the response until the matching durable settlement and keeps live trace on reconnect', () => {
     const before = read([output, { ...output, id: 'update', deliveryOrigin: 'send_message' }]);
     expect(before.messages.map((m) => m.id)).toEqual(['update']);
-    expect(before.turns[0].activity).toEqual([{ ordinal: 1, ts: '1', text: 'work' }]);
+    expect(before.turns[0].activity).toEqual([{ ordinal: 1, ts: '1', text: 'work', timelinePosition: 100 }]);
     expect(before.capabilities).toEqual({ canSend: true, stop: true, steer: true, editInput: true, cancelInput: true });
-    db.prepare('INSERT INTO turn_activity VALUES (?, ?, ?, ?, ?)').run('out', 1, '1', 'durable', 'turn');
+    db.prepare(
+      'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
+    ).run('out', 1, '1', 'durable', 'turn');
     putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
     const after = read([output]);
     expect(after.messages).toEqual([output]);
@@ -201,9 +225,15 @@ describe('authoritative conversation projection', () => {
       origin_platform_id: null,
       origin_thread_id: null,
     });
-    db.prepare('INSERT INTO turn_activity VALUES (?, ?, ?, ?, ?)').run('out', 0, '1', 'visible', 'turn');
-    db.prepare('INSERT INTO turn_activity VALUES (?, ?, ?, ?, ?)').run('private-out', 1, '2', 'private', 'turn');
-    db.prepare('INSERT INTO turn_activity VALUES (?, ?, ?, ?, ?)').run(null, 2, '3', 'unanchored', 'turn');
+    db.prepare(
+      'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
+    ).run('out', 0, '1', 'visible', 'turn');
+    db.prepare(
+      'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 200)',
+    ).run('private-out', 1, '2', 'private', 'turn');
+    db.prepare(
+      'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 300)',
+    ).run(null, 2, '3', 'unanchored', 'turn');
     expect(read([output]).turns[0].activity.map((a) => a.text)).toEqual(['visible']);
     expect(read([]).turns).toEqual([]);
   });

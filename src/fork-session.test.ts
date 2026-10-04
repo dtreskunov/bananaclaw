@@ -216,9 +216,9 @@ describe('forkThread', () => {
       INSERT INTO turn_usage (id, message_out_id, turn_id, cost_usd) VALUES ('second', 'a2', 'turn-parent', 2);
       INSERT INTO turn_usage (id, turn_id, cost_usd) VALUES ('turn-only', 'turn-parent', 3);
       INSERT INTO turn_usage (id, cost_usd) VALUES ('unattributed', 4);
-      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text) VALUES ('a1', 'turn-parent', 0, 'now', 'first');
-      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text) VALUES ('a2', 'turn-parent', 0, 'now', 'second');
-      INSERT INTO turn_activity (turn_id, ordinal, ts, text) VALUES ('turn-parent', 2, 'now', 'turn-only');
+      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text, timeline_position) VALUES ('a1', 'turn-parent', 0, 'now', 'first', 1);
+      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text, timeline_position) VALUES ('a2', 'turn-parent', 1, 'now', 'second', 2);
+      INSERT INTO turn_activity (turn_id, ordinal, ts, text, timeline_position) VALUES ('turn-parent', 2, 'now', 'turn-only', 3);
       INSERT INTO turns (id, phase, outcome, provenance) VALUES ('unrelated', 'running', 'pending', 'native');
     `);
     db.close();

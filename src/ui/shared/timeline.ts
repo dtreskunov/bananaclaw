@@ -2,7 +2,7 @@ export function parseTimelinePosition(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
-/** New records use durable consumption/emission order; legacy records keep chronology. */
+/** Consumed/emitted records use durable order; unconsumed inputs and host events use arrival chronology. */
 export function timelineSortKey(timestamp: string, timelinePosition?: number): number {
   const position = parseTimelinePosition(timelinePosition);
   if (position !== undefined) return position;

@@ -40,6 +40,33 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 describe('applyDurableRunnerEvent', () => {
+  it('preserves explicit activity order through replay and output reanchoring', () => {
+    const apply = (sequence: number, type: string, payload: Record<string, unknown>) =>
+      applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+        sequence, eventId: `activity-order-${sequence}`, event: { type, payload },
+      });
+    apply(1, 'turn.upsert', {
+      id: 'logical-turn', origin_channel_type: 'web', origin_platform_id: 'chat',
+      origin_thread_id: null, origin_source_session_id: null, started_at: 'now',
+      ended_at: null, phase: 'running', outcome: 'pending', provenance: 'native',
+      imported_from_session_id: null, imported_from_turn_id: null,
+    });
+    apply(2, 'message.upsert', { ...messagePayload({ text: 'hello' }), turn_id: 'logical-turn' });
+    const activity = { turn_id: 'logical-turn', message_out_id: null, ordinal: 0,
+      ts: '123', text: 'work', timeline_position: 500 };
+    apply(3, 'activity.persist', activity);
+    apply(3, 'activity.persist', activity);
+    apply(4, 'activity.persist', { ...activity, message_out_id: 'out-1' });
+    expect(() => apply(5, 'activity.persist', { ...activity, timeline_position: -1 })).toThrow('invalid activity.persist');
+    expect(() => apply(5, 'activity.persist', { ...activity, timeline_position: 501 })).toThrow('immutable activity position');
+    const { timeline_position: _position, ...legacy } = activity;
+    expect(() => apply(5, 'activity.persist', legacy)).toThrow('invalid activity.persist');
+    const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+    try {
+      expect(db.prepare('SELECT message_out_id, timeline_position FROM turn_activity').all())
+        .toEqual([{ message_out_id: 'out-1', timeline_position: 500 }]);
+    } finally { db.close(); }
+  });
   it('projects turn identity before associations and rejects missing or reassigned identities', () => {
     const turn = {
       id: 'logical-turn', origin_channel_type: 'web', origin_platform_id: 'chat',
@@ -56,8 +83,8 @@ describe('applyDurableRunnerEvent', () => {
     apply(1, 'turn.upsert', turn);
     apply(2, 'turn-input.upsert', { turn_id: turn.id, message_in_id: 'in-1', association: 'consumed' });
     apply(3, 'message.upsert', { ...messagePayload({ text: 'hello' }), turn_id: turn.id });
-    apply(4, 'activity.persist', { turn_id: turn.id, message_out_id: null, ordinal: 0, ts: '123', text: 'work' });
-    apply(4, 'activity.persist', { turn_id: turn.id, message_out_id: null, ordinal: 0, ts: '123', text: 'work' });
+    apply(4, 'activity.persist', { turn_id: turn.id, message_out_id: null, ordinal: 0, ts: '123', text: 'work', timeline_position: 1 });
+    apply(4, 'activity.persist', { turn_id: turn.id, message_out_id: null, ordinal: 0, ts: '123', text: 'work', timeline_position: 1 });
     expect(() => apply(5, 'turn.upsert', { ...turn, started_at: 'different' })).toThrow('immutable turn identity');
     const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
     try {
@@ -297,6 +324,7 @@ describe('applyDurableRunnerEvent', () => {
       ordinal: 0,
       ts: '1',
       text: '{"kind":"notification","id":"n1","text":"ok"}',
+      timeline_position: 100,
     });
     apply('usage.persist', {
       turn_id: null,

@@ -104,7 +104,7 @@ async function connect(turnId: string) {
   socket.resume();
   socket.write(
     JSON.stringify({
-      v: 4,
+      v: 5,
       type: 'turn.state',
       turn: {
         id: turnId,
@@ -146,7 +146,7 @@ async function replay(frame: DurableRunnerFrame): Promise<void> {
       }
     };
     connection.on('data', receive);
-    connection.write(JSON.stringify({ v: 4, type: 'durable', ...frame }) + '\n');
+    connection.write(JSON.stringify({ v: 5, type: 'durable', ...frame }) + '\n');
   });
 }
 function browser(thread = 'thread') {
@@ -266,6 +266,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
       ordinal: 0,
       ts: now,
       text: 'original activity',
+      timeline_position: 100,
     });
     apply('turn.upsert', turn('previous', { phase: 'settling' }));
     apply('message.upsert', output('final', 'previous', 1));
@@ -292,7 +293,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
     apply('turn.upsert', turn('successor'));
     socket!.write(
       JSON.stringify({
-        v: 4,
+        v: 5,
         type: 'turn.state',
         turn: {
           id: 'successor',
@@ -380,6 +381,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
       ordinal: 0,
       ts: now,
       text: 'private trace',
+      timeline_position: 100,
     });
     apply('message.upsert', output('cross-route-send', 'private-turn', 1));
     settle('private-turn', { origin_thread_id: 'private', outcome: 'replied' });

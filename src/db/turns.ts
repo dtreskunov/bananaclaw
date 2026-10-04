@@ -64,10 +64,20 @@ CREATE TABLE IF NOT EXISTS turn_activity (
   ts TEXT NOT NULL,
   text TEXT NOT NULL,
   turn_id TEXT REFERENCES turns(id),
+  timeline_position INTEGER NOT NULL CHECK (timeline_position > 0 AND timeline_position <= 9007199254740991),
   PRIMARY KEY (message_out_id, ordinal),
   CHECK (message_out_id IS NOT NULL OR turn_id IS NOT NULL)
 );
 `;
+
+export function assertActivityOrderSchema(db: Database.Database): void {
+  const columns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{ name: string; notnull: number }>;
+  if (!columns.some((column) => column.name === 'timeline_position' && column.notnull === 1)) {
+    throw new Error(
+      'Activity order migration required: run scripts/migrate-activity-order.ts offline before starting.',
+    );
+  }
+}
 
 export const TURN_INDEX_SCHEMA = `
 CREATE INDEX IF NOT EXISTS idx_messages_out_turn ON messages_out(turn_id);

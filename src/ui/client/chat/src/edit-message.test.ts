@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { findEditBranchAnchorId } from './edit-message';
 import type { ChatMessage } from './types';
+import { testSnapshot } from './conversation-test-fixtures';
 
 function message(id: string, direction: ChatMessage['direction']): ChatMessage {
   return { id, direction, text: id, files: null, ts: '2026-01-01T00:00:00.000Z' };
@@ -17,7 +18,17 @@ describe('findEditBranchAnchorId', () => {
       { ...message('responseA', 'out'), timelinePosition: base + 3 },
       { ...message('responseB', 'out'), timelinePosition: base + 5 },
     ];
-    expect(findEditBranchAnchorId(messages, 'inputB')).toBe('responseA');
+    const view = testSnapshot({
+      messages: messages.map(({ ts, files: _files, ...message }) => ({
+        ...message,
+        id: message.id!,
+        timestamp: ts,
+      })),
+    }).conversation;
+    const ordered = view.timeline.flatMap((row) =>
+      row.kind === 'message' ? [messages.find((message) => message.id === row.messageId)!] : [],
+    );
+    expect(findEditBranchAnchorId(ordered, 'inputB')).toBe('responseA');
   });
   it('never uses a queued or awaiting-position shelf input as a branch anchor', () => {
     const messages = [

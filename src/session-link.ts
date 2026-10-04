@@ -32,8 +32,8 @@ import { getSession } from './db/sessions.js';
 import { indexMessage, deleteMessageFromIndex } from './search-index.js';
 import { INPUT_EDIT_PREFIX, INPUT_CANCEL_PREFIX, type EditedInput } from './pending-input-edit.js';
 
-const PROTOCOL_VERSION = 4;
-export const SESSION_LINK_VERSION = 'v4';
+const PROTOCOL_VERSION = 5;
+export const SESSION_LINK_VERSION = 'v5';
 const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_FRAME_BYTES = Math.ceil((CONTAINER_MAX_OUTPUT_SIZE * 4) / 3) + 2 * 1024 * 1024;
 const MAX_FRAME_BYTES_PER_SECOND = 24 * 1024 * 1024;
@@ -72,7 +72,7 @@ interface SessionSignalState {
   frameBytesThisWindow: number;
   connectionWindowStartedAt: number;
   connectionsThisWindow: number;
-  activity: Array<ActivityLine & { turnId: string | null; ordinal: number }>;
+  activity: Array<ActivityLine & { turnId: string | null; ordinal: number; timelinePosition: number }>;
   usageTurnId: string | null;
   usage: UsageSnapshot | null;
   usageUpdatedAt: number;
@@ -451,7 +451,8 @@ function applyActivity(frame: Record<string, unknown>, { state }: FrameContext):
   const turnId = frame.turnId as string | null;
   const ordinal = frame.ordinal as number;
   state.activity = state.activity.filter((line) => line.turnId !== turnId || line.ordinal !== ordinal);
-  state.activity.push({ ts: frame.ts as string, text: JSON.stringify(step), turnId, ordinal });
+  state.activity.push({ ts: frame.ts as string, text: JSON.stringify(step), turnId, ordinal,
+    timelinePosition: frame.timelinePosition as number });
   if (state.activity.length > MAX_ACTIVITY_LINES) state.activity.splice(0, state.activity.length - MAX_ACTIVITY_LINES);
   return 'activity';
 }
@@ -497,6 +498,7 @@ const FRAME_SPECS = new Map<string, FrameSpec>([
         required('turnId', isTurnIdOrNull),
         required('ts', isTimestamp),
         required('ordinal', isCount),
+        required('timelinePosition', (value) => Number.isSafeInteger(value) && Number(value) > 0),
       ],
       live(applyActivity),
     ),
@@ -790,7 +792,7 @@ export function getSessionSignalUsage(sessionId: string, sinceMs?: number): Usag
 /** Identity-preserving live input for the later authoritative conversation projector. */
 export function getSessionTurnSignals(sessionId: string): {
   active: ReturnType<typeof getSessionActiveTurn>;
-  activity: Array<ActivityLine & { turnId: string | null; ordinal: number }>;
+  activity: Array<ActivityLine & { turnId: string | null; ordinal: number; timelinePosition: number }>;
   usage: { turnId: string | null; ts: number; value: UsageSnapshot } | null;
 } {
   const state = states.get(sessionId);

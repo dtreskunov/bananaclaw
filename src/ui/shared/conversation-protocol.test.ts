@@ -13,12 +13,13 @@ const empty: Conversation = {
   messages: [],
   turns: [],
   questions: [],
+  timeline: [],
   connection: { connected: false, activeTurnId: null },
   capabilities: { canSend: true, stop: false, steer: false, editInput: false, cancelInput: false },
 };
 const snapshot: ConversationSnapshot = {
   kind: 'snapshot',
-  protocolVersion: 1,
+  protocolVersion: 2,
   streamId: 's',
   revision: 0,
   conversation: empty,
@@ -29,10 +30,14 @@ const next: Conversation = {
     { id: 'one', direction: 'in', text: 'input', timestamp: 'now', inputState: { messageId: 'one', status: 'queued' } },
     { id: 'two', direction: 'out', text: 'output', timestamp: 'later' },
   ],
+  timeline: [
+    { kind: 'message', messageId: 'one' },
+    { kind: 'message', messageId: 'two' },
+  ],
 };
 const update: ConversationUpdate = {
   kind: 'update',
-  protocolVersion: 1,
+  protocolVersion: 2,
   streamId: 's',
   baseRevision: 0,
   revision: 1,
@@ -66,7 +71,11 @@ describe('conversation protocol', () => {
   });
   it('atomically applies removals, replacements and order changes', () => {
     const before = reduceConversation(snapshot, update);
-    const after = { ...next, messages: [{ ...next.messages[1], text: 'edited' }] };
+    const after: Conversation = {
+      ...next,
+      messages: [{ ...next.messages[1], text: 'edited' }],
+      timeline: [{ kind: 'message', messageId: 'two' }],
+    };
     expect(
       reduceConversation(before, {
         ...update,
@@ -80,7 +89,7 @@ describe('conversation protocol', () => {
   it.each([
     null,
     { kind: 'history' },
-    { ...snapshot, protocolVersion: 2 },
+    { ...snapshot, protocolVersion: 1 },
     { ...snapshot, revision: -1 },
     { ...snapshot, conversation: { ...empty, messages: [{ ...next.messages[0], text: null }] } },
     { ...snapshot, conversation: { ...empty, turns: [{ id: 'malformed' }] } },
@@ -96,5 +105,27 @@ describe('conversation protocol', () => {
       }),
     ).toThrow('invalid_frame');
     expect(snapshot.conversation).toEqual(empty);
+  });
+  it('rejects missing, duplicated or unknown presentation rows atomically', () => {
+    for (const timeline of [
+      [],
+      [{ kind: 'message' as const, messageId: 'missing' }],
+      [
+        { kind: 'message' as const, messageId: 'one' },
+        { kind: 'message' as const, messageId: 'one' },
+      ],
+      [
+        { kind: 'message' as const, messageId: 'one' },
+        { kind: 'message' as const, messageId: 'two', statsTurnId: 'missing' },
+      ],
+    ]) {
+      expect(() =>
+        reduceConversation(snapshot, {
+          ...update,
+          changes: { ...update.changes, timeline },
+        }),
+      ).toThrow('invalid_frame');
+      expect(snapshot.conversation).toEqual(empty);
+    }
   });
 });

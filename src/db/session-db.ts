@@ -11,12 +11,14 @@ import { invalidateSessionDatabase } from '../conversation-events.js';
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
 import { CONTAINER_MAX_OUTPUT_SIZE } from '../config.js';
 import { assertUserUuid } from './uuid.js';
+import { assertActivityOrderSchema } from './turns.js';
 
 /** Apply the inbound or outbound schema to a DB file. Idempotent. */
 export function ensureSchema(dbPath: string, schema: 'inbound' | 'outbound'): void {
   const db = new Database(dbPath);
   db.pragma('journal_mode = DELETE');
   db.exec(schema === 'inbound' ? INBOUND_SCHEMA : OUTBOUND_SCHEMA);
+  if (schema === 'outbound') assertActivityOrderSchema(db);
   if (schema === 'inbound') {
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS validate_message_in_size_insert

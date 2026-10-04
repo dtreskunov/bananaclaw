@@ -27,8 +27,8 @@ export function writeTurnActivity(
   if (lines.length === 0) return;
   const db = getOutboundDb();
   const stmt = db.prepare(
-    `INSERT OR REPLACE INTO turn_activity (message_out_id, ordinal, ts, text, turn_id)
-     VALUES ($message_out_id, $ordinal, $ts, $text, $turn_id)`,
+    `INSERT OR REPLACE INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position)
+     VALUES ($message_out_id, $ordinal, $ts, $text, $turn_id, $timeline_position)`,
   );
   const tx = db.transaction((rows: ActivityLine[]) => {
     for (let i = 0; i < rows.length; i++) {
@@ -38,6 +38,7 @@ export function writeTurnActivity(
         $ordinal: startOrdinal + i,
         $ts: rows[i].ts,
         $text: rows[i].text,
+        $timeline_position: rows[i].timelinePosition,
       });
     }
   });

@@ -25,7 +25,7 @@ async function listen(socketPath: string, lines: string[], acknowledge = false):
         if (acknowledge) {
           const frame = JSON.parse(lines.at(-1)!) as { type?: string; eventId?: string };
           if (frame.type === 'durable' && frame.eventId) {
-            socket.write(`${JSON.stringify({ v: 4, type: 'ack', eventId: frame.eventId })}\n`);
+            socket.write(`${JSON.stringify({ v: 5, type: 'ack', eventId: frame.eventId })}\n`);
           }
         }
         buffer = buffer.slice(newline + 1);
@@ -90,13 +90,13 @@ describe('SessionSignalClient', () => {
           buffer = buffer.slice(newline + 1);
           if (frame.type === 'host.ack') {
             acknowledgements.push(frame);
-            socket.write(`${JSON.stringify({ v: 4, type: 'host.ready' })}\n`);
+            socket.write(`${JSON.stringify({ v: 5, type: 'host.ready' })}\n`);
           }
         }
       });
       socket.write(
         `${JSON.stringify({
-          v: 4,
+          v: 5,
           type: 'host.event',
           eventId: 'host-1',
           sequence: 1,
@@ -135,7 +135,7 @@ describe('SessionSignalClient', () => {
     const client = new SessionSignalClient(socketPath);
     await client.start();
 
-    expect(acknowledgements).toEqual([{ v: 4, type: 'host.ack', eventId: 'host-1' }]);
+    expect(acknowledgements).toEqual([{ v: 5, type: 'host.ack', eventId: 'host-1' }]);
     expect(getOutboundDb().prepare('SELECT id, content FROM messages_in').get()).toEqual({
       id: 'in-1',
       content: '{"text":"hello"}',
@@ -154,7 +154,7 @@ describe('SessionSignalClient', () => {
     await waitFor(() => firstLines.length >= 4);
 
     client.clearActivity();
-    client.appendActivity({ kind: 'tool', id: 'read-1', tool: 'read', status: 'running', detail: 'src/index.ts' });
+    client.appendActivity({ kind: 'tool', id: 'read-1', tool: 'read', status: 'running', detail: 'src/index.ts' }, 100);
     client.updateUsage({
       cost_usd: 0.1,
       input_tokens: 100,
@@ -200,7 +200,7 @@ describe('SessionSignalClient', () => {
     try {
       void client.start();
       await waitFor(() => sockets.length > 0);
-      sockets[0].write('{"v":4,"type":"turn.stop","turnId":"active"}\n');
+      sockets[0].write('{"v":5,"type":"turn.stop","turnId":"active"}\n');
       await waitFor(() => ids.length > 0);
       expect(ids).toEqual(['active']);
       writeMessageOut({ id: 'stopped', kind: 'chat', content: '{"text":"Stopped by user."}' });
@@ -227,7 +227,7 @@ describe('SessionSignalClient', () => {
     );
     const durable = lines.map((line) => JSON.parse(line)).find((frame) => frame.type === 'durable');
     expect(durable).toMatchObject({
-      v: 4,
+      v: 5,
       sequence: 1,
       event: {
         type: 'message.upsert',
@@ -263,7 +263,7 @@ describe('SessionSignalClient', () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(durableFrames()).toHaveLength(1);
 
-    sockets[0].write(`${JSON.stringify({ v: 4, type: 'ack', eventId: durableFrames()[0].eventId })}\n`);
+    sockets[0].write(`${JSON.stringify({ v: 5, type: 'ack', eventId: durableFrames()[0].eventId })}\n`);
     await waitFor(() => durableFrames().length === 2);
     expect(durableFrames().map((frame) => frame.sequence)).toEqual([1, 2]);
     client.stop();
@@ -318,7 +318,7 @@ describe('SessionSignalClient', () => {
           durableFrames++;
           socket.write(
             `${JSON.stringify({
-              v: 4,
+              v: 5,
               type: 'nack',
               eventId: frame.eventId,
               fatal: true,
@@ -363,7 +363,7 @@ describe('SessionSignalClient', () => {
       kind: 'patch',
       id: 'oversized',
       files: Array.from({ length: 100 }, (_, index) => `${index}-${'x'.repeat(200)}`),
-    });
+    }, 100);
     client.updateUsage({
       cost_usd: 0.1,
       input_tokens: 100,

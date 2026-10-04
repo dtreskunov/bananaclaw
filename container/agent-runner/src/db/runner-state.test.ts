@@ -15,10 +15,22 @@ import { writeTurnCheckpoint } from './turn-checkpoints.js';
 import { writeTurnUsage } from './turn-usage.js';
 import { ensureRunnerStateSchema } from './runner-state.js';
 import { beginTurn } from '../turn-execution.js';
+import { Database } from 'bun:sqlite';
 
 afterEach(() => closeSessionDb());
 
 describe('runner state journal', () => {
+  it('rejects unmigrated activity storage without changing it', () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(`CREATE TABLE turn_activity (
+        message_out_id TEXT, ordinal INTEGER, ts TEXT, text TEXT, turn_id TEXT,
+        PRIMARY KEY (message_out_id, ordinal));
+        INSERT INTO turn_activity VALUES ('legacy', 0, 'same-time', 'work', NULL)`);
+      expect(() => ensureRunnerStateSchema(db)).toThrow('migration required');
+      expect(db.prepare('PRAGMA table_info(turn_activity)').all()).toHaveLength(5);
+    } finally { db.close(); }
+  });
   it('journals a durable turn identity, and reopening the schema is a no-op', () => {
     initTestSessionDb();
     const db = getOutboundDb();
@@ -43,7 +55,7 @@ describe('runner state journal', () => {
     setContainerToolInFlight('Bash', 1000);
     clearContainerToolInFlight();
     writeTurnCheckpoint('out-1', 'native', 'continuation-1', 'turn-1');
-    writeTurnActivity('out-1', [{ ts: '1', text: '{"kind":"notification","id":"n1","text":"ok"}' }]);
+    writeTurnActivity('out-1', [{ ts: '1', text: '{"kind":"notification","id":"n1","text":"ok"}', timelinePosition: 1 }]);
     writeTurnUsage('usage-1', 'out-1', {
       cost_usd: 0.1,
       input_tokens: 10,

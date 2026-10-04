@@ -14,10 +14,10 @@ describe('runner durable turns', () => {
     db.exec('PRAGMA foreign_keys = ON');
     ensureRunnerStateSchema(db);
     db.exec(`INSERT INTO turns (id, phase, outcome, provenance) VALUES ('silent', 'settled', 'silent', 'native');
-      INSERT INTO turn_activity (turn_id, ordinal, ts, text) VALUES ('silent', 0, 'now', 'activity');
+      INSERT INTO turn_activity (turn_id, ordinal, ts, text, timeline_position) VALUES ('silent', 0, 'now', 'activity', 1);
       INSERT INTO turn_usage (id, turn_id, cost_usd) VALUES ('usage', 'silent', 0.2);`);
     expect(() =>
-      db.exec("INSERT INTO turn_activity (turn_id, ordinal, ts, text) VALUES ('silent', 0, 'now', 'duplicate')"),
+      db.exec("INSERT INTO turn_activity (turn_id, ordinal, ts, text, timeline_position) VALUES ('silent', 0, 'now', 'duplicate', 2)"),
     ).toThrow();
     expect(() => db.exec("INSERT INTO turn_activity (ordinal, ts, text) VALUES (1, 'now', 'unassociated')")).toThrow();
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

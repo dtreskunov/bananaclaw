@@ -451,7 +451,19 @@ existing ten-second polling. Web conversation questions are never overwritten by
 that poll. Local composer drafts, uploads and command request IDs are separate
 from the server store; HTTP acceptance does not prove a command took effect.
 
-The browser validates `protocolVersion`, `streamId`, revisions and entity shapes.
+The host publishes an explicit `timeline` of message references, question
+references, and typed turn trace/status rows. Trace placement uses the activity's
+recorded logical-clock position relative to consumed inputs and emitted outputs.
+The browser only resolves those references; it does not infer activity segments
+from timestamps or invent messages, message IDs, or insertion positions for
+trace/status rows. Chapters remain presentation-only groups within a trace.
+Every activity has a required recorded position. Historical activity is normalized
+once, offline, using saved output associations and ordinals. These assigned
+positions encode canonical presentation order, not recovered execution timing.
+There are no runtime missing-position or saved-association placement fallbacks.
+
+The browser protocol is version 2 and validates `protocolVersion`, `streamId`,
+revisions, entity shapes, timeline references, and unique activity placement.
 Gaps or unknown streams show a synchronization error and reconnect for a fresh
 snapshot; incompatible protocols explicitly ask for a page reload. Progress is
 coalesced on the host with a bounded dirty flag. Slow consumers are closed rather
@@ -466,7 +478,56 @@ the checked-in bundle with `pnpm --dir src/ui/client/chat run build`, deploy hos
 and assets together, and reload open tabs. Verify that a reconnect starts with a
 `snapshot` and subsequent changes are revisioned `update` envelopes. Do not mix
 protocol versions; see [downgrade-to-v3.md](downgrade-to-v3.md) for rollback.
-No deployment occurs during a build.
+
+#### Offline canonical activity-order cutover
+
+**Detect / why:** run `pnpm exec tsx scripts/migrate-activity-order.ts --check`.
+Exit code 1 means existing host/runner pairs need conversion. The runtime requires
+`turn_activity.timeline_position` to be positive and `NOT NULL`; it never upgrades
+existing storage or accepts older activity frames. Queued inputs that have not
+been consumed still use their arrival chronology; that is current behavior, not
+activity-format compatibility.
+
+**Prepare:** let active turns finish and runner journals drain using the previous
+host. Stop this installation's host and all its runners, then take a consistent
+backup of every session's inbound, outbound and runner-state databases (including
+any SQLite sidecars), plus the matching software and central database. Do not stop
+other installations. The converter refuses unfinished turns, pending runner events,
+divergent projections, and missing/mismatched backups. It preflights all sessions
+before writing and commits each attached host/runner pair atomically.
+
+**Fix:** with writers stopped, run:
+
+```sh
+pnpm exec tsx scripts/migrate-activity-order.ts --offline --backup-dir /absolute/path/to/backed-up/v2-sessions
+pnpm exec tsx scripts/migrate-activity-order.ts --check
+pnpm run build
+pnpm --dir src/ui/client/chat run build
+```
+
+The converter preserves IDs, activity ordinals/text/display timestamps, provider
+continuations, accounting and journal cursors. It rekeys message/input timeline
+metadata consistently in both projections, makes room for activity immediately
+before its saved output (or after its turn inputs when outputless), and reseeds
+the runner clock without decreasing its previous floor. Already-recorded activity
+order is preserved. Numeric historical message times are normalized once for
+ordering; stored display timestamps remain unchanged. Activity timestamps never
+determine placement. Old activity journal triggers are rewritten offline; no
+conversion events are added to the drained journal. Repeat conversion is a no-op.
+
+**Verify:** require zero pairs needing conversion, SQLite integrity/foreign-key
+checks, and matching activity positions on both sides before starting the matched
+host and runners. Verify session-link version 5, browser protocol version 2,
+served bundle hashes, reconnect snapshots, applied steering, mid-turn output and
+completion behavior. Reload open browser tabs. Runner source is bind-mounted, so
+source-only changes do not require an image rebuild.
+
+**Rollback:** stop all writers again; restore the complete matching database
+backups and previous host/client/runner software, then restart. Do not run old
+writers against the strict schema. A failed individual conversion rolls back that
+pair; global rollback must restore all converted pairs from the same offline backup.
+Builds replace served static assets even before a host restart, so keep builds and
+activation inside the maintenance window.
 
 ### Live voice input
 

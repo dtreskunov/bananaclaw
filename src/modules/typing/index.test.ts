@@ -161,17 +161,18 @@ describe('startTypingRefresh — instance forwarding', () => {
     });
     socket.write(
       `${JSON.stringify({
-        v: 4,
+        v: 5,
         type: 'activity',
         turnId: null,
         ts: String(Date.now()),
         ordinal: 0,
+        timelinePosition: 100,
         step: { kind: 'tool', id: 'lookup', tool: 'budget', status: 'completed' },
       })}\n`,
     );
     socket.write(
       `${JSON.stringify({
-        v: 4,
+        v: 5,
         type: 'usage',
         turnId: null,
         ts: String(Date.now()),
@@ -247,7 +248,7 @@ describe('startTypingRefresh — transient heartbeat stalls', () => {
       socket.once('connect', resolve);
       socket.once('error', reject);
     });
-    socket.write(`${JSON.stringify({ v: 4, type: 'heartbeat' })}\n`);
+    socket.write(`${JSON.stringify({ v: 5, type: 'heartbeat' })}\n`);
     await vi.advanceTimersByTimeAsync(100);
     await vi.advanceTimersByTimeAsync(4_000);
 

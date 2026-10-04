@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeQuestionTimeline } from './question-timeline';
+import { testSnapshot } from './conversation-test-fixtures';
 import { isQueuedFollowup, splitPendingInputs, splitQueuedFollowups, timelineLayoutKey } from './queued-followups';
 import type { ChatMessage } from './types';
 
@@ -12,7 +12,17 @@ function followup(id: string): ChatMessage {
   return { ...message(id, 'in'), inputState: { messageId: id, status: 'queued', queuedForNextTurn: true } };
 }
 function layout(messages: ChatMessage[]) {
-  return splitQueuedFollowups(mergeQuestionTimeline(messages, [], 'thread'));
+  const view = testSnapshot({
+    messages: messages.map(({ ts, files: _files, ...message }) => ({
+      ...message,
+      id: message.id!,
+      timestamp: ts,
+    })),
+  }).conversation;
+  const ordered = view.timeline.flatMap((row) =>
+    row.kind === 'message' ? [messages.find((message) => message.id === row.messageId)!] : [],
+  );
+  return splitQueuedFollowups(ordered);
 }
 function ids(messages: ChatMessage[]) {
   return messages.map((entry) => entry.id);

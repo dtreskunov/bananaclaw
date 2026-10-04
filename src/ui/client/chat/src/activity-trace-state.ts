@@ -10,12 +10,14 @@ export interface ActivityTraceIntent {
 const intent = signal<ActivityTraceIntent | null>(null);
 
 function turnId(message: ChatMessage): string | null {
-  return message.turn?.id ?? message.turnId ?? message.statsTurn?.id ?? null;
+  return message.turnId ?? message.statsTurn?.id ?? null;
 }
 
 export function activityTraceOwner(message: ChatMessage): string {
   const turn = message.turnTraceOwner ? turnId(message) : null;
-  return turn ? `turn:${turn}` : `message:${message.id ?? `${message.direction}:${message.ts}:${message.text}`}`;
+  if (turn) return `turn:${turn}`;
+  if (!message.id) throw new Error('Activity trace message is missing its authoritative ID');
+  return `message:${message.id}`;
 }
 
 export function activityTraceView(ownerId: string, live = false): { expanded: boolean; following: boolean } {

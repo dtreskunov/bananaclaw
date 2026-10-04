@@ -186,7 +186,7 @@ describe('readSessionUsageProgress', () => {
       context_window: 1_048_576,
     };
     const before = Date.now();
-    await sendSignal({ v: 4, type: 'usage', usage, turnId: null, ts: String(Date.now()) });
+    await sendSignal({ v: 5, type: 'usage', usage, turnId: null, ts: String(Date.now()) });
     expect(readSessionUsageProgress(AG, SESS)).toEqual(usage);
     expect(readSessionUsageProgress(AG, SESS, before)).toEqual(usage);
     expect(readSessionUsageProgress(AG, SESS, Date.now() + 1)).toBeNull();

@@ -1,6 +1,6 @@
 import type { Conversation, ConversationMessage, ConversationQuestion, ConversationTurn } from './conversation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 1;
+export const CONVERSATION_PROTOCOL_VERSION = 2;
 export interface EntityChanges<T> {
   upserts: T[];
   removeIds: string[];
@@ -12,17 +12,18 @@ export interface ConversationChanges {
   questions: EntityChanges<ConversationQuestion>;
   connection: Conversation['connection'];
   capabilities: Conversation['capabilities'];
+  timeline: Conversation['timeline'];
 }
 export interface ConversationSnapshot {
   kind: 'snapshot';
-  protocolVersion: 1;
+  protocolVersion: 2;
   streamId: string;
   revision: number;
   conversation: Conversation;
 }
 export interface ConversationUpdate {
   kind: 'update';
-  protocolVersion: 1;
+  protocolVersion: 2;
   streamId: string;
   baseRevision: number;
   revision: number;
@@ -47,6 +48,7 @@ const id: Check = (v) => typeof v === 'string' && v.length > 0;
 const bool: Check = (v) => typeof v === 'boolean';
 const number: Check = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const integer: Check = (v) => number(v) && Number.isSafeInteger(v);
+const position: Check = (v) => integer(v) && Number(v) > 0;
 const optional =
   (check: Check): Check =>
   (v) =>
@@ -150,7 +152,7 @@ const turn = shape({
   endedAt: nullable(text),
   inputIds: strings,
   outputIds: strings,
-  activity: array(shape({ ordinal: integer, ts: text, text })),
+  activity: array(shape({ ordinal: integer, ts: text, text, timelinePosition: position })),
   usage: array(shape({ id, value: reportedUsage })),
   metadata: shape({
     status: oneOf('provisional', 'partial', 'final', 'unavailable'),
@@ -174,7 +176,14 @@ const question = shape({
   threadId: nullable(text),
   agentGroupId: id,
   createdAt: text,
+  messageId: optional(id),
+  timelinePosition: optional(integer),
 });
+const tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
+const timelineRow: Check = (v) =>
+  shape({ kind: oneOf('message'), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v) ||
+  shape({ kind: oneOf('question'), questionId: id, trace: optional(tracePlacement) })(v) ||
+  shape({ kind: oneOf('turn'), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v);
 const connection = shape({ connected: bool, activeTurnId: nullable(id) });
 const capabilities = shape({ canSend: bool, stop: bool, steer: bool, editInput: bool, cancelInput: bool });
 const conversation = shape({
@@ -182,6 +191,7 @@ const conversation = shape({
   messages: array(message),
   turns: array(turn),
   questions: array(question),
+  timeline: array(timelineRow),
   connection,
   capabilities,
 });
@@ -203,6 +213,7 @@ export function parseConversationFrame(value: unknown): ConversationFrame {
       questions: changes(question),
       connection,
       capabilities,
+      timeline: array(timelineRow),
     })(value.changes)
   )
     return value as unknown as ConversationUpdate;
@@ -229,6 +240,60 @@ function applyEntities<T extends { id: string } | { questionId: string }>(prior:
   return delta.order.map((id) => values.get(id)!);
 }
 
+function validateTimeline(view: Conversation): void {
+  const messages = new Set(
+    view.messages.filter((message) => message.inputState?.status !== 'cancelled').map((message) => message.id),
+  );
+  const questions = new Set(view.questions.map((question) => question.questionId));
+  const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
+  const seenRows = new Set<string>();
+  const seenActivity = new Set<string>();
+  const owners = new Set<string>();
+  const statsHosts = new Set<string>();
+  for (const row of view.timeline) {
+    const key =
+      row.kind === 'message'
+        ? `message:${row.messageId}`
+        : row.kind === 'question'
+          ? `question:${row.questionId}`
+          : `turn:${row.turnId}:after:${row.afterId}`;
+    if (seenRows.has(key)) throw new ConversationProtocolError('invalid_frame');
+    seenRows.add(key);
+    if (row.kind === 'message') {
+      if (!messages.delete(row.messageId)) throw new ConversationProtocolError('invalid_frame');
+      if (row.statsTurnId && turns.get(row.statsTurnId)?.phase !== 'settled')
+        throw new ConversationProtocolError('invalid_frame');
+      if (row.statsTurnId) {
+        if (statsHosts.has(row.statsTurnId)) throw new ConversationProtocolError('invalid_frame');
+        statsHosts.add(row.statsTurnId);
+      }
+    } else if (row.kind === 'question') {
+      if (!questions.delete(row.questionId)) throw new ConversationProtocolError('invalid_frame');
+    } else if (!turns.has(row.turnId) || row.trace.turnId !== row.turnId) {
+      throw new ConversationProtocolError('invalid_frame');
+    }
+    if (!row.trace) continue;
+    const turn = turns.get(row.trace.turnId);
+    if (!turn) throw new ConversationProtocolError('invalid_frame');
+    if (row.trace.ownsTurn) {
+      if (owners.has(turn.id)) throw new ConversationProtocolError('invalid_frame');
+      owners.add(turn.id);
+    }
+    const ordinals = new Set(turn.activity.map((line) => line.ordinal));
+    for (const ordinal of row.trace.ordinals) {
+      const activityKey = `${turn.id}:${ordinal}`;
+      if (!ordinals.has(ordinal) || seenActivity.has(activityKey)) throw new ConversationProtocolError('invalid_frame');
+      seenActivity.add(activityKey);
+    }
+  }
+  if (
+    messages.size ||
+    questions.size ||
+    view.turns.some((turn) => turn.activity.some((line) => !seenActivity.has(`${turn.id}:${line.ordinal}`)))
+  )
+    throw new ConversationProtocolError('invalid_frame');
+}
+
 /** Atomic and pure. Duplicates are idempotent; gaps and unknown streams require a snapshot. */
 export function reduceConversation(state: ConversationSnapshot | null, frame: ConversationFrame): ConversationSnapshot {
   if (frame.kind === 'snapshot') {
@@ -236,13 +301,14 @@ export function reduceConversation(state: ConversationSnapshot | null, frame: Co
     unique(frame.conversation.messages);
     unique(frame.conversation.turns);
     unique(frame.conversation.questions);
+    validateTimeline(frame.conversation);
     return frame;
   }
   if (!state || state.streamId !== frame.streamId) throw new ConversationProtocolError('unknown_stream');
   if (frame.revision <= state.revision) return state;
   if (frame.baseRevision !== state.revision) throw new ConversationProtocolError('revision_gap');
   const changes = frame.changes;
-  return {
+  const next: ConversationSnapshot = {
     kind: 'snapshot',
     protocolVersion: CONVERSATION_PROTOCOL_VERSION,
     streamId: state.streamId,
@@ -252,10 +318,13 @@ export function reduceConversation(state: ConversationSnapshot | null, frame: Co
       messages: applyEntities(state.conversation.messages, changes.messages),
       turns: applyEntities(state.conversation.turns, changes.turns),
       questions: applyEntities(state.conversation.questions, changes.questions),
+      timeline: changes.timeline,
       connection: changes.connection,
       capabilities: changes.capabilities,
     },
   };
+  validateTimeline(next.conversation);
+  return next;
 }
 
 function diffEntities<T extends { id: string } | { questionId: string }>(before: T[], after: T[]): EntityChanges<T> {
@@ -276,5 +345,6 @@ export function diffConversation(before: Conversation, after: Conversation): Con
     questions: diffEntities(before.questions, after.questions),
     connection: after.connection,
     capabilities: after.capabilities,
+    timeline: after.timeline,
   };
 }

@@ -28,15 +28,14 @@ import { ActiveTurnStopButton } from './ActiveTurnStopButton';
 import { PendingMessageActions } from './PendingMessageActions';
 import { canEditMessageInBranch, composerSendInFlight, currentPendingEditor } from '../pending-edit';
 import { usePendingComposer } from '../pending-composer';
-import { mergeQuestionTimeline } from '../question-timeline';
-import { splitPendingInputs, timelineLayoutKey } from '../queued-followups';
+import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import {
   activityChapters, chapterEntryHeadline, displayStep, isTitleStep, isTodoStep, parseStep, stepHeadline,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
 } from '../../../../shared/activity-presentation';
-import { completedResponse, conversationState } from '../conversation-state';
+import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
 import {
   activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace,
 } from '../activity-trace-state';
@@ -62,7 +61,7 @@ import { attachScrollEdges } from '../scroll-edges';
 import { revealLatestActivity } from '../activity-trace-scroll';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
-import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TurnUsage } from '../types';
+import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TranscriptRow, TurnUsage } from '../types';
 
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
 const revealedMobileMessageActionsId = signal<string | null>(null);
@@ -612,7 +611,6 @@ function Message(
   const traceOwner = activityTraceOwner(m);
   const traceView = activityTraceView(traceOwner, !!m.turnTraceLive);
   const toggleTrace = () => toggleActivityTrace(traceOwner);
-  if (m.direction === 'turn' && m.turn) return <ConversationTurnRow turn={m.turn} lines={m.activity ?? []} status={!!m.turnStatus} ownerId={traceOwner} />;
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
@@ -631,14 +629,6 @@ function Message(
         <span class="event-text">{ev?.summary || m.text}</span>
         <span class="event-meta"><RelativeTime ts={m.ts} />{recur}</span>
       </button>
-    );
-  }
-  if (m.direction === 'question' && m.question) {
-    return (
-      <QuestionCardItem
-        question={m.question}
-        busy={respondingQuestionIds.value.has(m.question.questionId)}
-      />
     );
   }
   if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
@@ -874,19 +864,24 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
 interface ThoughtsGroup { kind: 'thoughts'; thoughts: ChatMessage[]; answer: ChatMessage }
 interface SingleGroup { kind: 'single'; m: ChatMessage }
 interface EventsGroup { kind: 'events'; events: ChatMessage[] }
-type MsgGroup = ThoughtsGroup | SingleGroup | EventsGroup;
+type MsgGroup = ThoughtsGroup | SingleGroup | EventsGroup
+  | { kind: 'turn'; row: Extract<TranscriptRow, { kind: 'turn' }> }
+  | { kind: 'question'; row: Extract<TranscriptRow, { kind: 'question' }> };
 
 function messageKey(message: ChatMessage): string {
   return message.id || `${message.direction}:${message.ts}:${message.text}`;
 }
 
 function groupKey(group: MsgGroup): string {
+  if (group.kind === 'turn') return `turn:${group.row.turn.id}:after:${group.row.afterId ?? 'start'}`;
+  if (group.kind === 'question') return `question:${group.row.question.questionId}`;
   if (group.kind === 'thoughts') return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === 'events') return `events:${messageKey(group.events[0]!)}`;
   return `single:${messageKey(group.m)}`;
 }
 
 function groupContains(group: MsgGroup, messageId: string): boolean {
+  if (group.kind === 'turn' || group.kind === 'question') return false;
   if (group.kind === 'thoughts') {
     return group.answer.id === messageId || group.thoughts.some((t) => t.id === messageId);
   }
@@ -894,7 +889,7 @@ function groupContains(group: MsgGroup, messageId: string): boolean {
   return group.m.id === messageId;
 }
 
-function groupMessages(list: ChatMessage[]): MsgGroup[] {
+function groupMessages(list: TranscriptRow[]): MsgGroup[] {
   const out: MsgGroup[] = [];
   let pendingMsgs: ChatMessage[] = [];
   let events: ChatMessage[] = [];
@@ -907,7 +902,16 @@ function groupMessages(list: ChatMessage[]): MsgGroup[] {
     else out.push({ kind: 'events', events });
     events = [];
   };
-  for (const m of list) {
+  for (const row of list) {
+    if (row.kind !== 'message') {
+      flushEvents();
+      for (const message of pendingMsgs) out.push({ kind: 'single', m: message });
+      pendingMsgs = [];
+      if (row.kind === 'turn') out.push({ kind: 'turn', row });
+      else out.push({ kind: 'question', row });
+      continue;
+    }
+    const m = row.message;
     if (m.direction === 'event') {
       // Keep timeline order: flush any buffered internal thoughts first.
       for (const t of pendingMsgs) out.push({ kind: 'single', m: t });
@@ -1143,7 +1147,7 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
   const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
   const settled = turn.phase === 'settled';
   const live = status && !settled;
-  const traceView = activityTraceView(ownerId, live);
+  const traceView = activityTraceView(ownerId, !settled);
   const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : null;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1224,9 +1228,11 @@ function MessageLog() {
   const [newMessageBelow, setNewMessageBelow] = useState(false);
   const [, setDensityReflowTick] = useState(0);
   const highlight = highlightMessageId.value;
-  const timeline = mergeQuestionTimeline(chatMessages.value, pendingQuestions.value, threadId.value);
-  const { transcript, queued } = splitPendingInputs(timeline);
-  const layoutKey = timelineLayoutKey(timeline);
+  const timeline = chatTranscript.value;
+  const { queued } = splitPendingInputs(chatMessages.value);
+  const queuedIds = new Set(queued.map((message) => message.id));
+  const transcript = timeline.filter((row) => row.kind !== 'message' || !queuedIds.has(row.message.id));
+  const layoutKey = JSON.stringify(timeline);
   const msgCount = timeline.length;
   const activeTurnId = activeTurn.value?.id;
   const scrollTick = scrollToBottomTick.value;
@@ -1436,7 +1442,7 @@ function MessageLog() {
   // view. Messages up to it were inherited; the divider closes that region.
   const thread = activeThread();
   const forkOrigin = thread?.forkedFrom;
-  const inheritedUntil = forkOrigin && list.some((msg) => msg.id === forkOrigin.messageId)
+  const inheritedUntil = forkOrigin && list.some((row) => row.kind === 'message' && row.message.id === forkOrigin.messageId)
     ? forkOrigin.messageId
     : null;
   // Branches taken out of this thread, keyed by the message each was cut at.
@@ -1448,7 +1454,9 @@ function MessageLog() {
   }
   let latestConversationalMessage: ChatMessage | undefined;
   for (let index = list.length - 1; index >= 0; index--) {
-    const message = list[index]!;
+    const row = list[index]!;
+    if (row.kind !== 'message') continue;
+    const message = row.message;
     if (message.direction !== 'internal' && message.direction !== 'event') {
       latestConversationalMessage = message;
       break;
@@ -1465,7 +1473,14 @@ function MessageLog() {
               ? <div class="empty">No messages yet.</div>
               : groups.map((g) => {
                   const key = `${threadId.value}:${groupKey(g)}`;
-                  const body = g.kind === 'thoughts'
+                  const body = g.kind === 'turn'
+                    ? <ConversationTurnRow key={key} turn={g.row.turn} lines={g.row.activity}
+                        status={g.row.status} ownerId={g.row.traceOwner} />
+                    : g.kind === 'question'
+                      ? <QuestionCardItem key={key} question={g.row.question}
+                          traceOwner={g.row.traceOwner} traceLive={g.row.traceLive}
+                          busy={respondingQuestionIds.value.has(g.row.question.questionId)} />
+                    : g.kind === 'thoughts'
                     ? <ThoughtGroup
                         key={key}
                         thoughts={g.thoughts}
@@ -1536,10 +1551,12 @@ function PendingTray() {
   );
 }
 
-function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto; busy: boolean }) {
+function QuestionCardItem({ question: q, busy, traceOwner, traceLive = false }: {
+  question: PendingQuestionDto; busy: boolean; traceOwner?: string; traceLive?: boolean;
+}) {
   const [answer, setAnswer] = useState('');
-  const traceId = `question:${q.questionId}`;
-  const traceExpanded = activityTraceView(traceId).expanded;
+  const traceId = traceOwner ?? `question:${q.questionId}`;
+  const traceView = activityTraceView(traceId, traceLive);
   const answerRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const gid = groupId.value;
@@ -1656,11 +1673,12 @@ function QuestionCardItem({ question: q, busy }: { question: PendingQuestionDto;
         </>
       )}
       {showTechnicalStatus
-        ? <ActivityTracePanel lines={q.activity ?? []} expanded={traceExpanded} ownerId={traceId} />
+        ? <ActivityTracePanel lines={q.activity ?? []} expanded={traceView.expanded} ownerId={traceId}
+            live={traceLive} following={traceView.following} />
         : null}
       <div class="meta question-card-meta">
         <RelativeTime ts={answered && q.answeredAt ? q.answeredAt : q.createdAt} />
-        <ActivityTraceToggle count={showTechnicalStatus ? q.activity?.length ?? 0 : 0} expanded={traceExpanded}
+        <ActivityTraceToggle count={showTechnicalStatus ? q.activity?.length ?? 0 : 0} expanded={traceView.expanded}
           onToggle={() => toggleActivityTrace(traceId)} />
         {!answered ? <AgentActionLabel label="question" title="Sent with ask_user_question" /> : null}
       </div>

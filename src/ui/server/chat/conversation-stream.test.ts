@@ -8,6 +8,7 @@ const view: Conversation = {
   messages: [],
   turns: [],
   questions: [],
+  timeline: [],
   connection: { connected: false, activeTurnId: null },
   capabilities: { canSend: true, stop: false, steer: false, editInput: false, cancelInput: false },
 };

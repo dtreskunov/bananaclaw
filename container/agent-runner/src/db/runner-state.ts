@@ -14,7 +14,16 @@ const enqueue = (eventType: string, payload: string): string => `
 `;
 
 export function ensureRunnerStateSchema(db: Database): void {
+  db.transaction(() => applyRunnerStateSchema(db))();
+}
+
+function applyRunnerStateSchema(db: Database): void {
   db.exec(TURN_SCHEMA);
+  db.exec(TURN_ACTIVITY_SCHEMA);
+  const columns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{ name: string; notnull: number }>;
+  if (!columns.some((column) => column.name === 'timeline_position' && column.notnull === 1)) {
+    throw new Error('Activity order migration required before starting the runner.');
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages_in (
       id TEXT PRIMARY KEY,
@@ -118,6 +127,8 @@ export function ensureRunnerStateSchema(db: Database): void {
       UNION ALL
       SELECT CASE WHEN json_valid(value) THEN json_extract(value, '$.timelinePosition') END AS position
       FROM session_state WHERE key LIKE 'input:%'
+      UNION ALL
+      SELECT timeline_position FROM turn_activity
     )
     WHERE typeof(position) = 'integer' AND position BETWEEN 1 AND 9007199254740991
     ON CONFLICT(id) DO UPDATE SET position = MAX(timeline_clock.position, excluded.position);
@@ -295,7 +306,8 @@ export function ensureRunnerStateSchema(db: Database): void {
         'activity.persist',
         `json_object(
         'message_out_id', NEW.message_out_id, 'ordinal', NEW.ordinal,
-        'ts', NEW.ts, 'text', NEW.text, 'turn_id', NEW.turn_id
+        'ts', NEW.ts, 'text', NEW.text, 'turn_id', NEW.turn_id,
+        'timeline_position', NEW.timeline_position
       )`,
       )}
     END;
@@ -305,7 +317,8 @@ export function ensureRunnerStateSchema(db: Database): void {
         'activity.persist',
         `json_object(
         'message_out_id', NEW.message_out_id, 'ordinal', NEW.ordinal,
-        'ts', NEW.ts, 'text', NEW.text, 'turn_id', NEW.turn_id
+        'ts', NEW.ts, 'text', NEW.text, 'turn_id', NEW.turn_id,
+        'timeline_position', NEW.timeline_position
       )`,
       )}
     END;
@@ -379,21 +392,27 @@ export function ensureRunnerStateSchema(db: Database): void {
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS journal_turn_${operation.toLowerCase()}
       AFTER ${operation} ON turns BEGIN
-        ${enqueue('turn.upsert', `json_object(
+        ${enqueue(
+          'turn.upsert',
+          `json_object(
           'id', NEW.id, 'origin_channel_type', NEW.origin_channel_type,
           'origin_platform_id', NEW.origin_platform_id, 'origin_thread_id', NEW.origin_thread_id,
           'origin_source_session_id', NEW.origin_source_session_id,
           'started_at', NEW.started_at, 'ended_at', NEW.ended_at, 'phase', NEW.phase,
           'outcome', NEW.outcome, 'provenance', NEW.provenance,
           'imported_from_session_id', NEW.imported_from_session_id,
-          'imported_from_turn_id', NEW.imported_from_turn_id)`)}
+          'imported_from_turn_id', NEW.imported_from_turn_id)`,
+        )}
       END;
     `);
   }
   db.exec(`
     CREATE TRIGGER IF NOT EXISTS journal_turn_input_insert AFTER INSERT ON turn_inputs BEGIN
-      ${enqueue('turn-input.upsert', `json_object('turn_id', NEW.turn_id,
-        'message_in_id', NEW.message_in_id, 'association', NEW.association)`)}
+      ${enqueue(
+        'turn-input.upsert',
+        `json_object('turn_id', NEW.turn_id,
+        'message_in_id', NEW.message_in_id, 'association', NEW.association)`,
+      )}
     END;
   `);
 }

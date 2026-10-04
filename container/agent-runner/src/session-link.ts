@@ -6,7 +6,7 @@ import { acknowledgeRunnerEvent, listPendingRunnerEvents } from './db/runner-sta
 import type { ActivityStep, TurnUsage } from './providers/types.js';
 
 const DEFAULT_SOCKET_PATH = '/run/nanoclaw/runner.sock';
-const PROTOCOL_VERSION = 4;
+const PROTOCOL_VERSION = 5;
 const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
 const MAX_DURABLE_FRAME_BYTES = Math.ceil((MAX_OUTPUT_BYTES * 4) / 3) + 2 * 1024 * 1024;
@@ -16,14 +16,22 @@ const INITIAL_RECONNECT_MS = 100;
 const MAX_RECONNECT_MS = 5_000;
 
 type SignalFrame =
-  | { v: 4; type: 'turn.state'; turn: ActiveTurn | null }
-  | { v: 4; type: 'heartbeat' }
-  | { v: 4; type: 'activity.clear' }
-  | { v: 4; type: 'activity'; step: ActivityStep; turnId: string | null; ts: string; ordinal: number }
-  | { v: 4; type: 'usage.clear' }
-  | { v: 4; type: 'usage'; usage: TurnUsage; turnId: string | null; ts: string }
-  | { v: 4; type: 'turn.resume' }
-  | { v: 4; type: 'turn.end' };
+  | { v: 5; type: 'turn.state'; turn: ActiveTurn | null }
+  | { v: 5; type: 'heartbeat' }
+  | { v: 5; type: 'activity.clear' }
+  | {
+      v: 5;
+      type: 'activity';
+      step: ActivityStep;
+      turnId: string | null;
+      ts: string;
+      ordinal: number;
+      timelinePosition: number;
+    }
+  | { v: 5; type: 'usage.clear' }
+  | { v: 5; type: 'usage'; usage: TurnUsage; turnId: string | null; ts: string }
+  | { v: 5; type: 'turn.resume' }
+  | { v: 5; type: 'turn.end' };
 
 export interface ActiveTurn {
   id: string;
@@ -39,9 +47,12 @@ export interface ActiveTurn {
 export function isAddressableTurn(turn: ActiveTurn): boolean {
   const routePart = (value: string): boolean =>
     value.length >= 1 && value.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(value);
-  return /^[A-Za-z0-9_-]{1,128}$/.test(turn.id) &&
-    routePart(turn.channelType) && routePart(turn.platformId) &&
-    (turn.threadId === null || routePart(turn.threadId));
+  return (
+    /^[A-Za-z0-9_-]{1,128}$/.test(turn.id) &&
+    routePart(turn.channelType) &&
+    routePart(turn.platformId) &&
+    (turn.threadId === null || routePart(turn.threadId))
+  );
 }
 
 const stopListeners = new Set<(turnId: string) => void>();
@@ -55,7 +66,7 @@ export function requestTurnStop(turnId: string): void {
 }
 
 interface DurableFrame {
-  v: 4;
+  v: 5;
   type: 'durable';
   eventId: string;
   sequence: number;
@@ -91,11 +102,7 @@ export function getHostEventGeneration(): number {
   return hostEventGeneration;
 }
 
-export function waitForHostEvent(
-  sinceGeneration: number,
-  timeoutMs?: number,
-  signal?: AbortSignal,
-): Promise<void> {
+export function waitForHostEvent(sinceGeneration: number, timeoutMs?: number, signal?: AbortSignal): Promise<void> {
   if (hostEventGeneration !== sinceGeneration || signal?.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -173,8 +180,14 @@ export class SessionSignalClient {
     this.send({ v: PROTOCOL_VERSION, type: 'activity.clear' });
   }
 
-  appendActivity(step: ActivityStep, ts = String(Date.now()), turnId = this.turn?.id ?? null, ordinal = this.activityOrdinal++): void {
-    const frame = { v: PROTOCOL_VERSION, type: 'activity', step, ts, turnId, ordinal } as const;
+  appendActivity(
+    step: ActivityStep,
+    timelinePosition: number,
+    ts = String(Date.now()),
+    turnId = this.turn?.id ?? null,
+    ordinal = this.activityOrdinal++,
+  ): void {
+    const frame = { v: PROTOCOL_VERSION, type: 'activity', step, ts, turnId, ordinal, timelinePosition } as const;
     if (!this.encode(frame)) return;
     this.activity.push(frame);
     if (this.activity.length > MAX_ACTIVITY_LINES) {
@@ -250,9 +263,13 @@ export class SessionSignalClient {
             socket.destroy();
             return;
           }
-          if (frame.type === 'turn.stop' && typeof frame.turnId === 'string' &&
-              frame.turnId.length > 0 && frame.turnId.length <= 128 &&
-              Object.keys(frame).every((key) => ['v', 'type', 'turnId'].includes(key))) {
+          if (
+            frame.type === 'turn.stop' &&
+            typeof frame.turnId === 'string' &&
+            frame.turnId.length > 0 &&
+            frame.turnId.length <= 128 &&
+            Object.keys(frame).every((key) => ['v', 'type', 'turnId'].includes(key))
+          ) {
             requestTurnStop(frame.turnId);
           } else if (frame.type === 'host.ready' && Object.keys(frame).every((key) => ['v', 'type'].includes(key))) {
             this.resolveReady?.();
@@ -267,7 +284,10 @@ export class SessionSignalClient {
             Object.keys(frame).every((key) => ['v', 'type', 'eventId', 'sequence', 'event'].includes(key))
           ) {
             const event = frame.event as Record<string, unknown>;
-            if (!Object.keys(event).every((key) => ['type', 'payload'].includes(key)) || typeof event.type !== 'string') {
+            if (
+              !Object.keys(event).every((key) => ['type', 'payload'].includes(key)) ||
+              typeof event.type !== 'string'
+            ) {
               socket.destroy();
               return;
             }
@@ -344,11 +364,7 @@ export class SessionSignalClient {
     this.send({ v: PROTOCOL_VERSION, type: 'heartbeat' });
     this.send({ v: PROTOCOL_VERSION, type: 'activity.clear' });
     for (const frame of this.activity) this.send(frame);
-    this.send(
-      this.usage
-        ? this.usage
-        : { v: PROTOCOL_VERSION, type: 'usage.clear' },
-    );
+    this.send(this.usage ? this.usage : { v: PROTOCOL_VERSION, type: 'usage.clear' });
     this.send({ v: PROTOCOL_VERSION, type: this.turnEnded ? 'turn.end' : 'turn.resume' });
     this.send({ v: PROTOCOL_VERSION, type: 'turn.state', turn: this.turn });
   }
@@ -447,8 +463,14 @@ export function clearActivitySignal(): void {
   client.clearActivity();
 }
 
-export function emitActivitySignal(step: ActivityStep, ts?: string, turnId?: string | null, ordinal?: number): void {
-  client.appendActivity(step, ts, turnId, ordinal);
+export function emitActivitySignal(
+  step: ActivityStep,
+  timelinePosition: number,
+  ts?: string,
+  turnId?: string | null,
+  ordinal?: number,
+): void {
+  client.appendActivity(step, timelinePosition, ts, turnId, ordinal);
 }
 
 export function clearUsageSignal(): void {
