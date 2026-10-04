@@ -1,4 +1,19 @@
 import type { ConversationTurn } from '../../../shared/conversation';
+import type { ActiveTurn } from './types';
+
+export function activeTurnNotices(
+  turn: ActiveTurn | null,
+  connected: boolean,
+  stop: { turnId: string; error: string } | null,
+): Array<{ text: string; error: boolean }> {
+  if (!turn) return [];
+  const error = stop?.turnId === turn.id ? stop.error : '';
+  const notices: Array<{ text: string; error: boolean }> = [];
+  if (error) notices.push({ text: error, error: true });
+  if (turn.status === 'stopping') notices.push({ text: 'Stopping…', error: false });
+  if (!connected && !error) notices.push({ text: 'Runner disconnected.', error: false });
+  return notices;
+}
 
 /** Only outcomes that change how the reply should be read get a label; a normal reply speaks for itself. */
 const OUTCOME_NOTES: Partial<Record<ConversationTurn['outcome'], string>> = {

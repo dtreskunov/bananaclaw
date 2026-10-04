@@ -21790,6 +21790,15 @@ function activityChapters(lines, live = false) {
 }
 
 // src/turn-row.ts
+function activeTurnNotices(turn2, connected, stop) {
+  if (!turn2) return [];
+  const error = stop?.turnId === turn2.id ? stop.error : "";
+  const notices = [];
+  if (error) notices.push({ text: error, error: true });
+  if (turn2.status === "stopping") notices.push({ text: "Stopping\u2026", error: false });
+  if (!connected && !error) notices.push({ text: "Runner disconnected.", error: false });
+  return notices;
+}
 var OUTCOME_NOTES = {
   stopped: "Stopped",
   failed: "Failed",
@@ -23787,9 +23796,7 @@ function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
             }
           ) : live && view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
         ] }),
-        status && stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-error", role: "alert", children: stop.error }) : null,
-        status && view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,
-        live && !turnConnected.value && !stop?.error ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: "Runner disconnected. The outcome is not yet confirmed." }) : null,
+        status && settled && view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,
         showTechnicalStatus ? /* @__PURE__ */ u4(
           ActivityTracePanel,
           {
@@ -23808,6 +23815,19 @@ function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
       ]
     }
   );
+}
+function ActiveTurnNotices() {
+  const notices = activeTurnNotices(activeTurn.value, turnConnected.value, stopRequest.value);
+  if (!notices.length) return null;
+  return /* @__PURE__ */ u4("div", { class: "turn-notices", children: notices.map((notice) => /* @__PURE__ */ u4(
+    "div",
+    {
+      class: notice.error ? "turn-stop-error" : "turn-stop-note",
+      role: notice.error ? "alert" : "status",
+      children: notice.text
+    },
+    notice.text
+  )) });
 }
 function MessageLog() {
   const ref = A2(null);
@@ -24078,7 +24098,8 @@ function MessageLog() {
         ] });
       }),
       !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(Message, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
-      /* @__PURE__ */ u4(TaskIndicator, {})
+      /* @__PURE__ */ u4(TaskIndicator, {}),
+      !chatLoading.value && /* @__PURE__ */ u4(ActiveTurnNotices, {})
     ] }),
     /* @__PURE__ */ u4(
       ScrollNavigationButtons,

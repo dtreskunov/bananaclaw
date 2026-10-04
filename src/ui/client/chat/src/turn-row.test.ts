@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage, ConversationTurn } from '../../../shared/conversation';
 import { testSnapshot, testTurn } from './conversation-test-fixtures';
-import { turnRowView } from './turn-row';
+import { activeTurnNotices, turnRowView } from './turn-row';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 const { conversationPresentation } = await import('./conversation-state');
@@ -17,6 +17,26 @@ const settled = (partial: Partial<ConversationTurn> = {}): ConversationTurn => (
   endedAt: '2026-09-29T00:00:05Z',
   metadata: { status: 'final', durationMs: 5000, model: 'm' },
   ...partial,
+});
+
+describe('active turn notices', () => {
+  const turn = { id: 'active', status: 'running' as const };
+  it('shows the concise disconnect notice only while an active runner is disconnected', () => {
+    expect(activeTurnNotices(turn, false, null)).toEqual([{ text: 'Runner disconnected.', error: false }]);
+    expect(activeTurnNotices(turn, true, null)).toEqual([]);
+    expect(activeTurnNotices(null, false, null)).toEqual([]);
+  });
+  it('keeps stopping and errors separate from historical outcomes', () => {
+    expect(activeTurnNotices({ ...turn, status: 'stopping' }, true, null)).toEqual([
+      { text: 'Stopping…', error: false },
+    ]);
+    expect(activeTurnNotices(turn, false, { turnId: turn.id, error: 'Stop failed.' })).toEqual([
+      { text: 'Stop failed.', error: true },
+    ]);
+    expect(activeTurnNotices(turn, false, { turnId: 'previous', error: 'Old error.' })).toEqual([
+      { text: 'Runner disconnected.', error: false },
+    ]);
+  });
 });
 
 describe('turn row presentation', () => {

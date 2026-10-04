@@ -40,7 +40,7 @@ import {
   activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
-import { turnRowView, type TurnRowView } from '../turn-row';
+import { activeTurnNotices, turnRowView, type TurnRowView } from '../turn-row';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -1186,9 +1186,7 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
             ><StepHeadlineContent headline={liveHeadline} /></button>
           : live && view.status ? <span class="hint">{view.status}</span> : null}
       </div>
-      {status && stop?.error ? <div class="turn-stop-error" role="alert">{stop.error}</div> : null}
-      {status && view.note ? <div class="turn-stop-note">{view.note}</div> : null}
-      {live && !turnConnected.value && !stop?.error ? <div class="turn-stop-note">Runner disconnected. The outcome is not yet confirmed.</div> : null}
+      {status && settled && view.note ? <div class="turn-stop-note">{view.note}</div> : null}
       {showTechnicalStatus
         ? <ActivityTracePanel
             lines={lines}
@@ -1203,6 +1201,18 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
         <ActivityTraceToggle count={lines.length} expanded={traceView.expanded} onToggle={toggleFromCount} />
         {status ? <TurnStats turn={turn} view={view} /> : null}
       </div> : null}
+    </div>
+  );
+}
+
+function ActiveTurnNotices() {
+  const notices = activeTurnNotices(activeTurn.value, turnConnected.value, stopRequest.value);
+  if (!notices.length) return null;
+  return (
+    <div class="turn-notices">
+      {notices.map((notice) => <div key={notice.text}
+        class={notice.error ? 'turn-stop-error' : 'turn-stop-note'}
+        role={notice.error ? 'alert' : 'status'}>{notice.text}</div>)}
     </div>
   );
 }
@@ -1500,6 +1510,7 @@ function MessageLog() {
                 })}
         {!chatLoading.value && queued.map((message) => <Message key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
         <TaskIndicator />
+        {!chatLoading.value && <ActiveTurnNotices />}
       </div>
       <ScrollNavigationButtons
         direction={scrollDirection}

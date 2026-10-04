@@ -2749,12 +2749,18 @@ nav.tab-bar-strip.group-strip {
 .chat-main .typing .meta {
   width: 100%;
 }
-.chat-main .typing .turn-stop-error {
+.chat-main .typing .turn-stop-error,
+.chat-main .turn-notices .turn-stop-error {
   color: var(--danger, #b42318);
   font-size: var(--font-xs);
   max-width: 44ch;
 }
 .chat-main .typing .turn-stop-note {
+  color: var(--muted);
+  font-size: var(--font-xs);
+}
+.chat-main .turn-notices {
+  padding-inline: var(--message-padding-inline);
   color: var(--muted);
   font-size: var(--font-xs);
 }

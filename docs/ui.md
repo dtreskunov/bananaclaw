@@ -160,6 +160,10 @@ there is no final response, it stays on the synthetic bubble. Intermediate
 `send_message`/`send_file` output is not a final response.
 The durable settling phase keeps the existing live presentation without a
 transient "Finalizing turn" notice; completion remains gated on settlement.
+Transient runner-disconnection, stopping and Stop-error notices appear at the
+bottom of the transcript, after queued inputs, independently of the trace's
+anchor. The disconnect text is **Runner disconnected.** Notices clear when the
+active state changes; settled outcome notes remain with their original turn.
 The trace uses its turn as the owner, so expansion survives movement between
 the live bubble and a response. Moving the live bubble preserves local group
 and step selection; moving onto a response resets them.
