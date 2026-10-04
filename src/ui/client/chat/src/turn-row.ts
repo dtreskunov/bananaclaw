@@ -34,13 +34,7 @@ export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
       ? Math.max(0, now - startedAt)
       : null;
   const model = turn.metadata.model;
-  const note = settled
-    ? (OUTCOME_NOTES[turn.outcome] ?? null)
-    : turn.phase === 'stopping'
-      ? 'Stopping…'
-      : turn.phase === 'settling'
-        ? 'Finalizing turn…'
-        : null;
+  const note = settled ? (OUTCOME_NOTES[turn.outcome] ?? null) : turn.phase === 'stopping' ? 'Stopping…' : null;
   const hasTiming = elapsedMs !== null || !!model;
   return {
     hidden: settled && !turn.activity.length && !turn.usage.length && !hasTiming && !note,

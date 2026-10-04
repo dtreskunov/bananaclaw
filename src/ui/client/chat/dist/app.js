@@ -21526,17 +21526,68 @@ var BUILTIN_TOOL_PRESENTATIONS = /* @__PURE__ */ new Map([
   ["send_card", ["Sending card", "Sent card", "send card", "Card send"]],
   ["schedule_task", ["Scheduling task", "Scheduled task", "schedule task", "Task scheduling", "for"]],
   ["list_tasks", ["Listing tasks", "Listed tasks", "list tasks", "Task listing", "with status"]],
-  ["update_task", ["Requesting task update", "Requested task update", "request task update", "Task update request", "for"]],
-  ["cancel_task", ["Requesting task cancellation", "Requested task cancellation", "request task cancellation", "Task cancellation request", "for"]],
+  [
+    "update_task",
+    ["Requesting task update", "Requested task update", "request task update", "Task update request", "for"]
+  ],
+  [
+    "cancel_task",
+    [
+      "Requesting task cancellation",
+      "Requested task cancellation",
+      "request task cancellation",
+      "Task cancellation request",
+      "for"
+    ]
+  ],
   ["pause_task", ["Requesting task pause", "Requested task pause", "request task pause", "Task pause request", "for"]],
-  ["resume_task", ["Requesting task resume", "Requested task resume", "request task resume", "Task resume request", "for"]],
-  ["create_agent", ["Requesting agent creation", "Requested agent creation", "request agent creation", "Agent creation request", "for"]],
-  ["add_agent_destination", ["Requesting agent link", "Requested agent link", "request agent link", "Agent link request", "for"]],
-  ["install_packages", ["Requesting package installation", "Requested package installation", "request package installation", "Package installation request", "for"]],
-  ["add_mcp_server", ["Requesting MCP server setup", "Requested MCP server setup", "request MCP server setup", "MCP server setup request", "for"]],
+  [
+    "resume_task",
+    ["Requesting task resume", "Requested task resume", "request task resume", "Task resume request", "for"]
+  ],
+  [
+    "create_agent",
+    [
+      "Requesting agent creation",
+      "Requested agent creation",
+      "request agent creation",
+      "Agent creation request",
+      "for"
+    ]
+  ],
+  [
+    "add_agent_destination",
+    ["Requesting agent link", "Requested agent link", "request agent link", "Agent link request", "for"]
+  ],
+  [
+    "install_packages",
+    [
+      "Requesting package installation",
+      "Requested package installation",
+      "request package installation",
+      "Package installation request",
+      "for"
+    ]
+  ],
+  [
+    "add_mcp_server",
+    [
+      "Requesting MCP server setup",
+      "Requested MCP server setup",
+      "request MCP server setup",
+      "MCP server setup request",
+      "for"
+    ]
+  ],
   ["set_thread_title", ["Setting title", "Set title", "set title", "Title change", "to"]],
-  ["request_login_link", ["Requesting login link", "Requested login link", "request login link", "Login link request", "for"]],
-  ["mint_file_link", ["Requesting download link", "Requested download link", "request download link", "Download link request", "for"]]
+  [
+    "request_login_link",
+    ["Requesting login link", "Requested login link", "request login link", "Login link request", "for"]
+  ],
+  [
+    "mint_file_link",
+    ["Requesting download link", "Requested download link", "request download link", "Download link request", "for"]
+  ]
 ]);
 function builtinHeadline(step) {
   const name = cleanToolName(step.tool || "");
@@ -21752,7 +21803,7 @@ function turnRowView(turn2, now) {
   const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
   const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
   const model = turn2.metadata.model;
-  const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : turn2.phase === "settling" ? "Finalizing turn\u2026" : null;
+  const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : null;
   const hasTiming = elapsedMs !== null || !!model;
   return {
     hidden: settled && !turn2.activity.length && !turn2.usage.length && !hasTiming && !note,

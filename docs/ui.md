@@ -158,6 +158,8 @@ bubble below the turn's latest conversation content carries the trace and
 Stop control. On settlement, the trace attaches to the final response; if
 there is no final response, it stays on the synthetic bubble. Intermediate
 `send_message`/`send_file` output is not a final response.
+The durable settling phase keeps the existing live presentation without a
+transient "Finalizing turn" notice; completion remains gated on settlement.
 The trace uses its turn as the owner, so expansion survives movement between
 the live bubble and a response. Moving the live bubble preserves local group
 and step selection; moving onto a response resets them.

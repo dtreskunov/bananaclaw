@@ -35,6 +35,19 @@ describe('turn row presentation', () => {
     expect(turnRowView(settled(), 0)).toMatchObject({ showTiming: true, showTokensUnavailable: true });
   });
 
+  it('keeps settling live without flashing a finalization notice or settled accounting', () => {
+    const turn: ConversationTurn = { ...testTurn, phase: 'settling', usage: [usage] };
+    expect(turnRowView(turn, start + 7000)).toMatchObject({
+      hidden: false,
+      status: null,
+      note: null,
+      elapsedMs: 7000,
+      showTiming: true,
+      showTokensUnavailable: false,
+    });
+    expect(turnRowView(turn, start).usage[0].value).toMatchObject({ duration_ms: undefined, model: undefined });
+  });
+
   it('labels only outcomes that change how the reply reads', () => {
     for (const outcome of ['replied', 'unknown', 'pending'] as const)
       expect(turnRowView(settled({ outcome }), 0).note).toBeNull();
