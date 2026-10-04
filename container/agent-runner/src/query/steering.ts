@@ -11,7 +11,7 @@ import {
   markProcessing,
   type MessageInRow,
 } from '../db/messages-in.js';
-import { extractFileAttachments, formatMessages, type RoutingContext } from '../formatter.js';
+import { extractFileAttachments, extractMessageText, formatMessages, type RoutingContext } from '../formatter.js';
 import type { AgentProvider, AgentQuery } from '../providers/types.js';
 import { signalTurnState } from '../session-link.js';
 import { steeringDisposition, writeInputState } from '../steering.js';
@@ -97,9 +97,9 @@ export class SteeringSession {
 
   /**
    * Record that the provider applied an accepted input to the current turn.
-   * Returns the formatted guidance to append to the turn's prompt record.
+   * Returns the prompt record and message text for the activity trace.
    */
-  apply(id: string, execution: TurnExecution, stopped: boolean): string {
+  apply(id: string, execution: TurnExecution, stopped: boolean): { prompt: string; text: string } {
     const message = this.inputs.get(id);
     if (!message) throw new Error(`Provider applied unaccepted steering input: ${id}`);
     getOutboundDb().transaction(() => {
@@ -109,7 +109,7 @@ export class SteeringSession {
       else markProcessing([id]);
     })();
     this.inputs.delete(id);
-    return formatMessages([message]);
+    return { prompt: formatMessages([message]), text: extractMessageText(message) };
   }
 
   /** The turn finished: accepted-but-unapplied inputs go back to the queue. */

@@ -351,6 +351,12 @@ still show the original send time. Older messages retain chronological ordering.
 An initial idle message is not a follow-up merely because it briefly has queued
 status. Waiting-to-steer input also appears at the bottom; applied steering
 returns to its position in the current transcript.
+When the provider confirms injection, the activity trace records a
+**Steering message injected** step immediately after that input's recorded
+consumption position. It remains in the saved trace after completion.
+The step previews the steering text; expanding it shows the multiline text,
+subject to the normal 2,000-character activity-detail cap.
+Submitting, accepting, or queuing steering alone does not create this step.
 
 Promoting an input preserves its attachments and pending editor: unsaved drafts,
 in-flight saves, retry identities, and composer conflicts survive movement within

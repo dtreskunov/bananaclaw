@@ -3,6 +3,14 @@ import { describe, expect, it } from 'bun:test';
 import { truncateActivityStep } from './session-state.js';
 
 describe('truncateActivityStep', () => {
+  it('preserves multiline notification details and caps them at the normal activity limit', () => {
+    const notification = { kind: 'notification' as const, id: 'steering:one', text: 'Steering message injected' };
+    const detail = 'Keep <literal text>.\nUse the second approach.';
+    expect(truncateActivityStep({ ...notification, detail })).toEqual({ ...notification, detail });
+    const long = truncateActivityStep({ ...notification, detail: 'x'.repeat(3000) });
+    expect(long).toMatchObject({ ...notification, detail: 'x'.repeat(1999) + '…' });
+  });
+
   it('caps internal trace text', () => {
     const step = truncateActivityStep({ kind: 'internal', id: 'i1', text: 'x'.repeat(3000) });
     expect(step.kind).toBe('internal');

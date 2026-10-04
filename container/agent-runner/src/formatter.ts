@@ -125,6 +125,14 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
  *
  * Strips routing fields — the agent never sees platform_id, channel_type, thread_id.
  */
+export function extractMessageText(message: MessageInRow): string {
+  const text: unknown = parseContent(message.content).text;
+  if (text !== undefined && typeof text !== 'string') {
+    throw new Error(`Invalid message text for ${message.id}`);
+  }
+  return text ?? '';
+}
+
 export function formatMessages(messages: MessageInRow[]): string {
   const header = `<context timezone="${escapeXml(TIMEZONE)}" />\n`;
   if (messages.length === 0) return header;

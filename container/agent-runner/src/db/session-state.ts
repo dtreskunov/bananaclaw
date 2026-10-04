@@ -191,7 +191,7 @@ export function appendActivity(step: ActivityStep): void {
 /** Cap user/model/provider text fields before they leave the container. */
 export function truncateActivityStep(step: ActivityStep): ActivityStep {
   let s = step;
-  if (s.kind === 'tool' && typeof s.detail === 'string' && s.detail.length > ACTIVITY_MAX_CHARS) {
+  if ('detail' in s && typeof s.detail === 'string' && s.detail.length > ACTIVITY_MAX_CHARS) {
     s = { ...s, detail: s.detail.slice(0, ACTIVITY_MAX_CHARS - 1) + '…' };
   }
   if ('text' in s && typeof s.text === 'string') {

@@ -24,15 +24,17 @@ const routing = { channelType: 'web', platformId: 'room', threadId: 'thread', in
 function insert(
   id: string,
   content: Record<string, unknown> = {},
-  options: { channel?: string; platform?: string; thread?: string | null; kind?: string; trigger?: number } = {},
+  options: {
+    channel?: string; platform?: string; thread?: string | null; kind?: string; trigger?: number; senderIdentity?: string;
+  } = {},
 ): MessageInRow {
   getInboundDb().prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, channel_type, platform_id, thread_id, trigger, content)
-     VALUES (?, ?, ?, datetime('now'), 'pending', ?, ?, ?, ?, ?)`,
+    `INSERT INTO messages_in (id, seq, kind, timestamp, status, channel_type, platform_id, thread_id, trigger, content, sender_identity)
+     VALUES (?, ?, ?, datetime('now'), 'pending', ?, ?, ?, ?, ?, ?)`,
   ).run(
     id, sequence += 2, options.kind ?? 'chat', options.channel ?? 'web', options.platform ?? 'room',
     options.thread === undefined ? 'thread' : options.thread, options.trigger ?? 1,
-    JSON.stringify({ text: id, ...content }),
+    JSON.stringify({ text: id, ...content }), options.senderIdentity ?? null,
   );
   link.emitHostEventForTesting();
   return getInboundDb().prepare('SELECT * FROM messages_in WHERE id = ?').get(id) as MessageInRow;
@@ -43,6 +45,20 @@ async function until(predicate: () => boolean): Promise<void> {
     await Bun.sleep(4);
   }
   throw new Error('Timed out waiting for steering state');
+}
+
+function steeringActivity() {
+  return getOutboundDb().prepare(`
+    SELECT turn_id, message_out_id, ordinal, timeline_position,
+      json_extract(text, '$.id') AS id, json_extract(text, '$.detail') AS detail
+    FROM turn_activity
+    WHERE json_extract(text, '$.kind') = 'notification'
+      AND json_extract(text, '$.text') = 'Steering message injected'
+    ORDER BY timeline_position
+  `).all() as Array<{
+    turn_id: string; message_out_id: string | null; ordinal: number;
+    timeline_position: number; id: string; detail: string;
+  }>;
 }
 
 describe('steering selection', () => {
@@ -171,13 +187,18 @@ it('applies steering to the existing batch without claiming queued or other-conv
     expect(turn.supportsSteering).toBe(true);
     insert('queued', { inputHandling: { mode: 'queue', turnId: turn.id } });
     insert('other', { inputHandling: { mode: 'steer', turnId: turn.id } }, { thread: 'other' });
-    insert('guidance', { inputHandling: { mode: 'steer', turnId: turn.id } });
+    const guidanceText = '  Use the revised approach.\nKeep <literal markup> and "quoted text" intact.\n\n';
+    insert('guidance', { text: guidanceText, inputHandling: { mode: 'steer', turnId: turn.id } });
     await until(() => h.steering.length === 1);
-    expect(h.steering[0].prompt).toContain('guidance');
+    expect(h.steering[0].prompt).toContain('Use the revised approach.');
     expect(readInputState('guidance')?.status).toBe('steering');
     expect(getPendingMessages().map((m) => m.id)).toContain('guidance');
+    expect(steeringActivity()).toEqual([]);
     h.emit({ type: 'steering_applied', id: 'guidance' });
     await until(() => readInputState('guidance')?.status === 'applied');
+    expect(steeringActivity()).toHaveLength(1);
+    expect(steeringActivity()[0]).toMatchObject({ turn_id: turn.id, detail: guidanceText });
+    expect(steeringActivity()[0].timeline_position).toBeGreaterThan(readInputState('guidance')!.timelinePosition!);
     expect(h.active?.id).toBe(turn.id);
     expect(getPendingMessages().map((m) => m.id)).toEqual(['queued', 'other']);
     expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('guidance'))
@@ -186,9 +207,90 @@ it('applies steering to the existing batch without claiming queued or other-conv
     await until(() => h.prompts.length > 1);
     expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('guidance'))
       .toEqual({ status: 'completed' });
-    expect(h.prompts[1].prompt).not.toContain('guidance');
-    const out = getOutboundDb().prepare('SELECT platform_id, thread_id FROM messages_out ORDER BY seq LIMIT 1').get();
+    expect(h.prompts[1].prompt).not.toContain('Use the revised approach.');
+    const out = getOutboundDb().prepare('SELECT platform_id, thread_id FROM messages_out WHERE id = ?')
+      .get(steeringActivity()[0].message_out_id);
     expect(out).toEqual({ platform_id: 'room', thread_id: 'thread' });
+    expect(steeringActivity()).toHaveLength(1);
+    expect(steeringActivity()[0].detail).toBe(guidanceText);
+  } finally { await h.stop(loop); }
+});
+
+it('records and broadcasts a distinct activity for each injected steering message in consumption order', async () => {
+  insert('initial');
+  const h = harness();
+  const activity = spyOn(link, 'emitActivitySignal');
+  const now = spyOn(Date, 'now').mockReturnValue(Date.now());
+  const loop = h.start();
+  try {
+    await until(() => h.active !== null);
+    const turnId = h.active!.id;
+    for (const [index, id] of ['first-guidance', 'second-guidance'].entries()) {
+      insert(id, { inputHandling: { mode: 'steer', turnId } });
+      await until(() => h.steering.length === index + 1);
+      expect(steeringActivity()).toHaveLength(index);
+      h.emit({ type: 'steering_applied', id });
+      await until(() => readInputState(id)?.status === 'applied');
+      expect(steeringActivity()).toHaveLength(index + 1);
+    }
+    const markers = steeringActivity();
+    expect(markers.map((marker) => marker.turn_id)).toEqual([turnId, turnId]);
+    expect(new Set(markers.map((marker) => marker.id)).size).toBe(2);
+    expect(markers[0].ordinal).toBeLessThan(markers[1].ordinal);
+    expect(readInputState('first-guidance')!.timelinePosition!).toBeLessThan(markers[0].timeline_position);
+    expect(markers[0].timeline_position).toBeLessThan(readInputState('second-guidance')!.timelinePosition!);
+    expect(readInputState('second-guidance')!.timelinePosition!).toBeLessThan(markers[1].timeline_position);
+    const live = activity.mock.calls.filter(([step]) =>
+      step.kind === 'notification' && step.text === 'Steering message injected');
+    expect(live.map(([step]) => step.id)).toEqual(markers.map((marker) => marker.id));
+    expect(live.map(([, position]) => position)).toEqual(markers.map((marker) => marker.timeline_position));
+    expect(live.map(([step]) => 'detail' in step ? step.detail : undefined))
+      .toEqual(['first-guidance', 'second-guidance']);
+    h.emit({ type: 'progress', step: { kind: 'tool', id: 'after-injection', tool: 'bash', status: 'completed' } });
+    const subsequentWork = () => getOutboundDb().prepare(
+      "SELECT ordinal, timeline_position FROM turn_activity WHERE json_extract(text, '$.id') = 'after-injection'",
+    ).get() as { ordinal: number; timeline_position: number } | null;
+    await until(() => subsequentWork() !== null);
+    expect(subsequentWork()!.ordinal).toBeGreaterThan(markers[1].ordinal);
+    expect(subsequentWork()!.timeline_position).toBeGreaterThan(markers[1].timeline_position);
+  } finally {
+    now.mockRestore();
+    activity.mockRestore();
+    await h.stop(loop);
+  }
+});
+
+it('records the revised text when buffered steering is edited before injection', async () => {
+  insert('initial');
+  const h = harness();
+  h.provider.supportsInputEditing = true;
+  const query = h.provider.query.bind(h.provider);
+  const replacements: SteeringInput[] = [];
+  h.provider.query = (input) => ({
+    ...query(input),
+    replaceSteering(replacement) { replacements.push(replacement); return true; },
+  });
+  const loop = h.start();
+  try {
+    await until(() => h.active !== null);
+    insert('guidance', { text: 'Original guidance', inputHandling: { mode: 'steer', turnId: h.active!.id } },
+      { senderIdentity: 'web:owner' });
+    await until(() => h.steering.length === 1);
+    const requestId = randomUUID();
+    const revised = 'Revised guidance.\nKeep the next line intact.';
+    insert(`edit-${requestId}`, {
+      action: 'edit_input', requestId, messageId: 'guidance',
+      expectedText: 'Original guidance', replacementText: revised,
+    }, { kind: 'system', senderIdentity: 'web:owner' });
+    await until(() => readInputEditReceipt(requestId) !== undefined);
+    expect(readInputEditReceipt(requestId)).toMatchObject({ status: 'accepted' });
+    expect(replacements).toHaveLength(1);
+    expect(replacements[0].prompt).toContain(revised);
+    expect(steeringActivity()).toEqual([]);
+    h.emit({ type: 'steering_applied', id: 'guidance' });
+    await until(() => readInputState('guidance')?.status === 'applied');
+    expect(steeringActivity()).toHaveLength(1);
+    expect(steeringActivity()[0].detail).toBe(revised);
   } finally { await h.stop(loop); }
 });
 
@@ -203,6 +305,7 @@ it('does not steer a provider that lacks the capability', async () => {
     expect(h.steering).toEqual([]);
     expect(h.active?.supportsSteering).toBeUndefined();
     expect(readInputState('guidance')?.reason).toBe('unsupported');
+    expect(steeringActivity()).toEqual([]);
   } finally { await h.stop(loop); }
 });
 
@@ -288,6 +391,8 @@ it('automatically steers external messages without redirecting cross-conversatio
     expect(h.steering[0].id).toBe('external-guidance');
     h.emit({ type: 'steering_applied', id: 'external-guidance' });
     await until(() => readInputState('external-guidance')?.status === 'applied');
+    expect(steeringActivity()).toHaveLength(1);
+    expect(steeringActivity()[0].turn_id).toBe(turnId);
     expect(h.active).toMatchObject({ id: turnId, channelType: 'telegram', threadId: 'thread' });
     expect(getPendingMessages().map((m) => m.id)).toEqual(['other-channel', 'other-thread']);
   } finally { await h.stop(loop); }
@@ -324,12 +429,14 @@ it('preserves unapplied steering across Stop, as a distinct follow-up', async ()
     const turnId = h.active!.id;
     insert('guidance', { inputHandling: { mode: 'steer', turnId } });
     await until(() => h.steering.length === 1);
+    expect(steeringActivity()).toEqual([]);
     link.requestTurnStop(turnId);
     await until(() => h.prompts.length > 1);
     expect(h.prompts[1].prompt).toContain('guidance');
     expect(h.prompts[1].prompt).not.toContain('initial');
     expect(h.active?.id).not.toBe(turnId);
     expect(readInputState('guidance')).toMatchObject({ status: 'processing', reason: 'turn_finished' });
+    expect(steeringActivity()).toEqual([]);
   } finally { await h.stop(loop); }
 });
 
@@ -393,6 +500,7 @@ it('recovers already-persisted steering without appending the same guidance agai
     expect(readInputState('already-applied')?.status).toBe('applied');
     expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('already-applied'))
       .toEqual({ status: 'completed' });
+    expect(steeringActivity()).toEqual([]);
   } finally { await h.stop(loop); }
 });
 

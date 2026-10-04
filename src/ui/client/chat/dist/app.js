@@ -21548,7 +21548,10 @@ function stepHeadline(step) {
     case "subtask":
       return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
     case "notification":
-      return { action: step.text || "Notification" };
+      return {
+        action: step.text || "Notification",
+        ...step.detail ? { subject: singleLine(step.detail) } : {}
+      };
     default:
       return { action: "" };
   }
@@ -22688,6 +22691,7 @@ function StepHeadlineContent({ headline }) {
 }
 function stepBody(s5) {
   if (s5.kind === "tool") return [s5.detail, s5.error].filter(Boolean).join("\n\n") || null;
+  if (s5.kind === "notification") return s5.detail || null;
   if (s5.kind === "internal") return s5.text || null;
   if (s5.kind === "patch") return s5.files?.join("\n") || null;
   if (s5.kind === "retry") return s5.error || null;

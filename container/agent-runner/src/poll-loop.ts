@@ -1092,7 +1092,13 @@ export async function processQuery(
   const handleForkEvent = (event: ProviderEvent): void => {
     switch (event.type) {
       case 'steering_applied': {
-        const guidance = steering.apply(event.id, execution.current, userStopped);
+        const { prompt: guidance, text } = steering.apply(event.id, execution.current, userStopped);
+        appendActivity({
+          kind: 'notification',
+          id: `steering:${randomUUID()}`,
+          text: 'Steering message injected',
+          detail: text,
+        });
         turnBatchQueue[0]?.ids.push(event.id);
         consumedIds.add(event.id);
         archivePrompts[0] = `${archivePrompts[0] ?? initialPrompt}\n\n${guidance}`;

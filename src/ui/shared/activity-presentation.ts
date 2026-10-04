@@ -235,7 +235,10 @@ export function stepHeadline(step: TraceStep): StepHeadline {
         ? { action: 'Started subtask with', subject: step.agent, codeSubject: true }
         : { action: step.description || 'Started subtask' };
     case 'notification':
-      return { action: step.text || 'Notification' };
+      return {
+        action: step.text || 'Notification',
+        ...(step.detail ? { subject: singleLine(step.detail) } : {}),
+      };
     default:
       return { action: '' };
   }

@@ -130,6 +130,7 @@ function StepHeadlineContent({ headline }: { headline: StepHeadline }) {
 
 function stepBody(s: TraceStep): string | null {
   if (s.kind === 'tool') return [s.detail, s.error].filter(Boolean).join('\n\n') || null;
+  if (s.kind === 'notification') return s.detail || null;
   if (s.kind === 'internal') return s.text || null;
   if (s.kind === 'patch') return s.files?.join('\n') || null;
   if (s.kind === 'retry') return s.error || null;

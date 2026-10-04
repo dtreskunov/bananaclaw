@@ -438,6 +438,13 @@ current turn at a safe model/tool-step boundary. Web chat asks whether to steer
 same conversation. Other providers retain queued follow-ups. A
 `steering_applied` event associates the persisted guidance with the existing
 turn's completion batch; acceptance alone never completes the message.
+That acknowledgement also appends a normal **Steering message injected**
+activity notification, with a distinct step ID and a durable position after the
+input's consumption position. Its `detail` carries the steering message text,
+not the prompt's routing/context wrappers, with the normal 2,000-character cap.
+Existing notification rendering and persistence
+handle it; queued/unapplied inputs and startup receipt recovery do not invent
+injection events.
 See [session-link.md](session-link.md#steering-native-provider) for durability,
 recovery, exclusions, and rollout requirements.
 

@@ -24,6 +24,32 @@ const tool = (id: string, name: string, status: TraceStep['status'] = 'completed
 });
 
 describe('activity presentation', () => {
+  it('keeps steering injection markers visible as distinct steps between tool chapters', () => {
+    const marker = {
+      kind: 'notification' as const,
+      id: 'steering:first',
+      text: 'Steering message injected',
+      detail: 'Use the revised approach.\nKeep <literal text> intact.',
+    };
+    const values = [
+      line(0, tool('before', 'bash')),
+      line(1, marker),
+      line(2, { ...marker, id: 'steering:second' }),
+      line(3, tool('after', 'bash')),
+    ];
+    const chapters = activityChapters(values);
+    expect(chapters.map((chapter) => chapter.entries.length)).toEqual([1, 1, 1, 1]);
+    expect(chapters.slice(1, 3).map((chapter) => chapter.title)).toEqual([
+      'Steering message injected · 1 steps',
+      'Steering message injected · 1 steps',
+    ]);
+    expect(displayStep(values[1], true).detail).toBe(marker.detail);
+    expect(stepSummary(displayStep(values[1], true))).toBe(
+      'Steering message injected Use the revised approach. Keep <literal text> intact.',
+    );
+    expect(chapters.flatMap((chapter) => chapter.entries.map((entry) => entry.line))).toEqual(values);
+  });
+
   it.each([
     ['pending', 'Queued'],
     ['running', 'Running'],
