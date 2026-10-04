@@ -635,6 +635,10 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
           return;
         }
         if (!applyFrame(sessionId, entry, parsed)) {
+          log.warn('Rejected session link frame', {
+            sessionId,
+            type: typeof parsed.type === 'string' ? parsed.type.slice(0, 128) : 'invalid',
+          });
           connection.destroy();
           return;
         }

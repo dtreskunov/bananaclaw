@@ -83,7 +83,12 @@ Supported live runner signals:
 - `turn.state`, carrying the immutable active turn ID, `running`/`stopping`
   status and originating channel/platform/thread, or `null` after settlement
 
-Activity is capped at 128 current steps and text fields are bounded. Usage
+Activity is capped at 128 current steps and text fields are bounded.
+Notification activities may include an optional `detail` string of at most
+2,000 characters, including steering text; whitespace and literal markup are
+preserved. Both initial delivery and reconnect replay accept this field.
+Invalid frame schemas are logged before the socket closes, without logging
+the activity text. Usage
 numbers must be finite and non-negative. Live state is best-effort: the runner
 keeps its current snapshot in memory and replays it after reconnect, but the
 socket does not acknowledge or journal these signals.

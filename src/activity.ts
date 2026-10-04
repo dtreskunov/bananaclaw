@@ -9,7 +9,7 @@ export type ActivityStep =
   | { kind: 'retry'; id: string; attempt: number; error?: string }
   | { kind: 'compaction'; id: string; auto?: boolean }
   | { kind: 'subtask'; id: string; agent?: string; description?: string }
-  | { kind: 'notification'; id: string; text: string };
+  | { kind: 'notification'; id: string; text: string; detail?: string };
 
 export interface ReducedActivityLine extends ActivityLine {
   step: ActivityStep;

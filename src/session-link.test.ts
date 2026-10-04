@@ -389,6 +389,49 @@ describe('session signal link', () => {
     socket.destroy();
   });
 
+  it('preserves steering text on reconnect without blocking the durable reply', async () => {
+    const step = {
+      kind: 'notification',
+      id: 'steering-1',
+      text: 'Steering message injected',
+      detail: ' \nActually, sleep 5 more seconds. Append "<b>cool</b>".\n ',
+    };
+    const reply = {
+      v: 5, type: 'durable', eventId: 'reply-after-steering', sequence: 1,
+      event: { type: 'message.upsert', payload: {
+        id: 'reply-1', seq: 1, in_reply_to: null, timestamp: '2026-10-04T18:49:00.000Z',
+        deliver_after: null, recurrence: null, kind: 'chat', platform_id: 'room',
+        channel_type: 'web', thread_id: 'thread-1', turn_id: null,
+        content_base64: Buffer.from('{"text":"Elapsed: 5002 ms - cool"}').toString('base64'),
+      } },
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const socket = await connect();
+      let received = '';
+      socket.on('data', (chunk) => { received += String(chunk); });
+      try {
+        socket.write(`${JSON.stringify({ v: 5, type: 'activity.clear' })}\n`);
+        socket.write(`${JSON.stringify({
+          v: 5, type: 'activity', turnId: ACTIVE_TURN.id, ts: '1791139732667',
+          ordinal: 0, timelinePosition: 1791139732667000, step,
+        })}\n`);
+        socket.write(`${JSON.stringify({ v: 5, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
+        socket.write(`${JSON.stringify(reply)}\n`);
+        await waitFor(() => received.endsWith('\n') && parsedFrames(received).some(
+          (frame) => frame.type === 'ack' && frame.eventId === reply.eventId,
+        ));
+        expect(getSessionActiveTurn(SESSION_ID).connected).toBe(true);
+        expect(JSON.parse(getSessionSignalActivity(SESSION_ID)[0].text)).toEqual(step);
+        const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+        try {
+          expect(db.prepare('SELECT content FROM messages_out').pluck().all())
+            .toEqual(['{"text":"Elapsed: 5002 ms - cool"}']);
+        } finally { db.close(); }
+      } finally { socket.destroy(); }
+      await waitFor(() => !getSessionActiveTurn(SESSION_ID).connected);
+    }
+  });
+
   it('rejects malformed frames without applying them', async () => {
     const socket = await connect();
     socket.write(
