@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
+import { ComposerInput } from './ComposerInput';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { PendingMessageActions } from './PendingMessageActions';
 import {
@@ -16,6 +17,7 @@ import {
   canSend,
   chatReady,
   chatReloadRequired,
+  isMobile,
   pendingQuestions,
   pinnedContext,
   voiceInput,
@@ -83,6 +85,7 @@ let input: any;
 let tree: any;
 function find(node: any, type: string, label?: string): any {
   if (!node) return undefined;
+  if (node.type === ComposerInput) return find(ComposerInput(node.props), type, label);
   if (node.type === type && (!label || node.props['aria-label'] === label || node.props.children === label))
     return node;
   for (const child of [node.props?.children].flat(Infinity)) {
@@ -95,6 +98,7 @@ function find(node: any, type: string, label?: string): any {
 function findComponent(node: any, name: string): any {
   if (!node) return undefined;
   if (typeof node.type === 'function' && node.type.name === name) return node;
+  if (node.type === ComposerInput) return findComponent(ComposerInput(node.props), name);
   for (const child of [node.props?.children].flat(Infinity)) {
     if (child && typeof child === 'object') {
       const result = findComponent(child, name);
@@ -163,6 +167,7 @@ beforeEach(() => {
   chatMessages.value = [message];
   canSend.value = true;
   chatReady.value = true;
+  isMobile.value = false;
   pendingQuestions.value = [];
   pinnedContext.value = ['keep/context.txt'];
   pending.value = [{ name: 'unsent.txt', size: 1 }];
@@ -244,6 +249,12 @@ describe('main composer pending edits', () => {
     expect(input.value).toBe(draft);
     expect(pending.value).toBe(files);
   });
+  it('retains the normal composer height cap and inner scrolling for long message drafts', () => {
+    input.scrollHeight = 500;
+    type('Long ordinary message');
+    expect(input.style.height).toBe('200px');
+    expect(input.style.overflowY).toBe('auto');
+  });
 
   const dockQuestion: PendingQuestionDto = {
     questionId: 'q',
@@ -265,7 +276,10 @@ describe('main composer pending edits', () => {
       hooks.cursor = 0;
       tree = QuestionPrompt({ question });
       const textarea = find(tree, 'textarea');
-      if (textarea) textarea.ref.current = input;
+      if (textarea) {
+        textarea.ref.current = input;
+        input.value = textarea.props.value;
+      }
       hooks.effects.splice(0).forEach((effect) => effect());
       return tree;
     };
@@ -273,6 +287,105 @@ describe('main composer pending edits', () => {
       resetMount('');
       vi.mocked(respondQuestion).mockReset().mockResolvedValue(true);
       vi.mocked(skipQuestion).mockReset().mockResolvedValue(true);
+    });
+    it('shares the ordinary composer input while omitting its attachment controls', () => {
+      const ordinary = findComponent(tree, 'ComposerInput');
+      mount();
+      const answer = findComponent(tree, 'ComposerInput');
+      expect(answer.type).toBe(ordinary.type);
+      expect(answer.type).toBe(ComposerInput);
+      expect(findComponent(tree, 'ComposerPlusMenu')).toBeUndefined();
+      expect(find(tree, 'input')).toBeUndefined();
+      expect(pending.value[0].name).toBe('unsent.txt');
+      expect(pinnedContext.value).toEqual(['keep/context.txt']);
+    });
+    it.each([
+      { name: 'desktop Enter', mobile: false, shiftKey: false, isComposing: false, submits: true },
+      { name: 'Shift+Enter', mobile: false, shiftKey: true, isComposing: false, submits: false },
+      { name: 'mobile Enter', mobile: true, shiftKey: false, isComposing: false, submits: false },
+      { name: 'IME Enter', mobile: false, shiftKey: false, isComposing: true, submits: false },
+    ])('shares $name handling with ordinary composition', ({ mobile, shiftKey, isComposing, submits }) => {
+      const ordinary = find(tree, 'textarea').props.onKeyDown;
+      mount();
+      const answer = find(tree, 'textarea').props.onKeyDown;
+      expect(answer).toBe(ordinary);
+      isMobile.value = mobile;
+      const requestSubmit = vi.fn();
+      const preventDefault = vi.fn();
+      for (const onKeyDown of [ordinary, answer]) {
+        onKeyDown({
+          key: 'Enter',
+          shiftKey,
+          isComposing,
+          preventDefault,
+          currentTarget: { form: { requestSubmit } },
+        });
+      }
+      expect(requestSubmit).toHaveBeenCalledTimes(submits ? 2 : 0);
+      expect(preventDefault).toHaveBeenCalledTimes(submits ? 2 : 0);
+    });
+    it('grows an answer beyond the ordinary cap so only the outer dock scrolls', () => {
+      mount();
+      input.value = 'An answer with several lines';
+      find(tree, 'textarea').props.onInput({ currentTarget: input });
+      mount();
+      const files = pending.value;
+      input.scrollHeight = 96;
+      appearance.value = {
+        ...appearance.value,
+        preferences: { ...DEFAULT_APPEARANCE, density: 'comfortable' },
+      };
+      mount();
+      expect(input.style.height).toBe('96px');
+      expect(input.style.overflowY).toBe('hidden');
+      expect(input.value).toBe('An answer with several lines');
+      expect(pending.value).toBe(files);
+      input.scrollHeight = 300;
+      find(tree, 'textarea').props.onInput({ currentTarget: input });
+      mount();
+      expect(input.style.height).toBe('300px');
+      expect(input.style.overflowY).toBe('hidden');
+      const shared = findComponent(tree, 'ComposerInput');
+      expect(ComposerInput(shared.props).props.class).toContain('multi-line');
+      input.value = '';
+      find(tree, 'textarea').props.onInput({ currentTarget: input });
+      mount();
+      expect(input.style.height).toBe('');
+      expect(input.style.overflowY).toBe('hidden');
+    });
+    it('observes answer width changes using the shared composer sizing logic', () => {
+      let resize!: () => void;
+      const observe = vi.fn();
+      const disconnect = vi.fn();
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(callback: () => void) {
+            resize = callback;
+          }
+          observe = observe;
+          disconnect = disconnect;
+        },
+      );
+      try {
+        hooks.capturePassive = true;
+        mount();
+        const dispose = hooks.passiveEffects.shift()?.();
+        expect(observe).toHaveBeenCalledWith(input);
+        input.value = 'Wrapped answer';
+        find(tree, 'textarea').props.onInput({ currentTarget: input });
+        input.scrollHeight = 116;
+        resize();
+        expect(input.style.height).toBe('116px');
+        expect(input.style.overflowY).toBe('hidden');
+        dispose?.();
+        expect(disconnect).toHaveBeenCalledOnce();
+      } finally {
+        hooks.capturePassive = false;
+        hooks.passiveEffects = [];
+        vi.unstubAllGlobals();
+        vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+      }
     });
     it('skips once, blocks an answer race and waits for the actual response event', async () => {
       mount();

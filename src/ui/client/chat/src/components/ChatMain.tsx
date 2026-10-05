@@ -23,7 +23,7 @@ import {
 import { requestConfirm } from './PromptModal';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia } from '../recorder';
 import { voice, voiceBrowserReason } from '../voice-audio';
-import { VoiceButton } from './VoiceButton';
+import { ComposerInput, useComposerTextarea } from './ComposerInput';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
 import { PendingMessageActions } from './PendingMessageActions';
 import { canEditMessageInBranch, composerSendInFlight, currentPendingEditor } from '../pending-edit';
@@ -1581,48 +1581,8 @@ export function Composer() {
   const voiceLocked = activeVoice && (voiceState.phase !== 'error' || voiceState.sending);
   const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || 'Live voice input is not configured.' : '');
   const sendBusyRef = useRef(false);
-  const [multiLine, setMultiLine] = useState(false);
-  const density = appearance.value.preferences.density;
-  const autosize = (): void => {
-    const el = inputRef.current;
-    if (!el) return;
-    // When empty, size to min-height. Chrome's scrollHeight reflects the
-    // placeholder when value is empty, which makes a long/wrapping
-    // placeholder (e.g. the wsDown 'Reconnecting…') puff the box to two
-    // lines and leaves it stuck there once the placeholder shortens.
-    if (!el.value) {
-      el.style.height = '';
-      el.style.overflowY = 'hidden';
-      setMultiLine(false);
-      return;
-    }
-    el.style.height = 'auto';
-    const h = Math.min(el.scrollHeight, 200);
-    el.style.height = h + 'px';
-    // overflow:auto with subpixel borders triggers a phantom scrollbar even
-    // below the cap; only show it when actually capped.
-    el.style.overflowY = h >= 200 ? 'auto' : 'hidden';
-    // Threshold tracks the single-line scrollHeight (~30px on desktop
-    // with padding:5px + 1.4 line-height). Two lines push it past ~50.
-    setMultiLine(h > 44);
-  };
+  const { autosize, multiLine } = useComposerTextarea(inputRef);
   const edit = usePendingComposer(inputRef, autosize);
-  useLayoutEffect(autosize, [density]);
-  // Mount + width-change observer. The empty-value early return inside
-  // autosize() means we don't need to re-run on focus or on wsDown
-  // placeholder changes. Font changes are handled by the density layout effect.
-  useEffect(() => {
-    autosize();
-    const el = inputRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    // Width changes (pane toggle, drawer, viewport resize) rewrap text
-    // and change scrollHeight; re-run autosize so the box tracks content.
-    // No-op when empty (early return), idempotent when stable, so this
-    // doesn't ping-pong on the height changes autosize itself causes.
-    const ro = new ResizeObserver(autosize);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
   const onSubmit = (ev: JSX.TargetedEvent<HTMLFormElement>): void => {
     ev.preventDefault();
     if (hasQuestion) return;
@@ -1666,15 +1626,6 @@ export function Composer() {
       composerSendInFlight.value = false;
     }
   };
-  const onKey = (ev: JSX.TargetedKeyboardEvent<HTMLTextAreaElement>): void => {
-    // On mobile, Enter inserts a newline (matches platform keyboard
-    // convention — Send is the dedicated button). On desktop, Enter sends
-    // and Shift+Enter inserts a newline.
-    if (ev.key === 'Enter' && !ev.shiftKey && !isMobile.value) {
-      ev.preventDefault();
-      ev.currentTarget.form?.requestSubmit();
-    }
-  };
   const onAttachClick = (): void => fileRef.current?.click();
   const addFiles = (files: File[]): void => {
     if (currentPendingEditor()) return;
@@ -1686,7 +1637,7 @@ export function Composer() {
     ev.currentTarget.value = '';
     addFiles(files);
   };
-  const onPaste = (ev: ClipboardEvent): void => {
+  const onPaste = (ev: JSX.TargetedClipboardEvent<HTMLTextAreaElement>): void => {
     const items = ev.clipboardData && ev.clipboardData.files;
     if (!items || items.length === 0) return;
     ev.preventDefault();
@@ -1765,23 +1716,22 @@ export function Composer() {
           <span class="recording-stop-label">Stop</span>
         </button>
       )}
-        <div class={'composer-input-wrap' + (multiLine ? ' multi-line' : '') + (activeVoice && voiceState.phase === 'listening' ? ' voice-listening' : '')} style={attachRecording ? 'display:none' : ''}>
-          {/* Dictation updates only its insertion span; editing is locked
-              until finalization so typed text cannot race provider revisions. */}
-          <textarea
-            id="chat-input"
-            rows={1}
-            placeholder={edit.editing ? 'Edit pending message\u2026' : chatReloadRequired.value ? 'Reload to continue\u2026' : wsDown ? 'Reconnecting\u2026' : `Message ${groupName}\u2026`}
-            ref={inputRef}
-            aria-label={edit.editing ? 'Pending message text' : 'Message'}
-            onInput={(event) => { edit.input(event.currentTarget.value); autosize(); }}
-            onKeyDown={onKey}
-            onPaste={onPaste as unknown as JSX.ClipboardEventHandler<HTMLTextAreaElement>}
-            autocomplete="off"
-            disabled={!edit.editing && hasQuestion}
-            readOnly={voiceLocked || !!edit.state?.busy || !!edit.state?.unresolved}
-          ></textarea>
-          <ComposerPlusMenu
+        <ComposerInput
+          inputRef={inputRef}
+          multiLine={multiLine}
+          listening={activeVoice && voiceState.phase === 'listening'}
+          hidden={attachRecording}
+          textarea={{
+            id: 'chat-input',
+            placeholder: edit.editing ? 'Edit pending message\u2026' : chatReloadRequired.value ? 'Reload to continue\u2026' : wsDown ? 'Reconnecting\u2026' : `Message ${groupName}\u2026`,
+            'aria-label': edit.editing ? 'Pending message text' : 'Message',
+            onInput: (event) => { edit.input(event.currentTarget.value); autosize(); },
+            onPaste,
+            autocomplete: 'off',
+            disabled: !edit.editing && hasQuestion,
+            readOnly: voiceLocked || !!edit.state?.busy || !!edit.state?.unresolved,
+          }}
+          controls={<ComposerPlusMenu
             disabled={edit.editing || composerDisabled || voiceState.sending || !['idle', 'error'].includes(voiceState.phase)}
             title={composerDisabled ? 'Disconnected' : 'Add\u2026'}
             showRecordAudio={hasGetUserMedia()}
@@ -1789,21 +1739,21 @@ export function Composer() {
             onUploadFile={onAttachClick}
             onQuickCapture={() => setQuickCapture(true)}
             onRecordAudio={() => { startAudioAttachRecording().catch(console.error); }}
-          />
-          <VoiceButton target={target} controller={voice} onStart={startVoice} id="chat-mic"
-            configured={voiceInput.value.ready} unavailable={unavailable}
-            disabled={edit.editing || composerDisabled || isRecording.value} />
-          <button
-            type="submit"
-            id="chat-send"
-            class="accent-icon-btn"
-            aria-label={edit.editing ? edit.state?.busy ? 'Saving…' : edit.state?.retry ? 'Retry save' : 'Save edit' : 'Send'}
-            aria-busy={edit.state?.busy}
-            title={edit.editing ? 'Save edit' : activeVoice && voiceState.phase === 'listening' ? 'Finalize and send' : 'Send'}
-            disabled={edit.editing ? edit.disabled : composerDisabled || (activeVoice && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase)))}
-            onMouseDown={(e) => e.preventDefault()}
-          >{edit.editing ? '\u2713' : '\u2191'}</button>
-        </div>
+          />}
+          voice={{
+            target, controller: voice, onStart: startVoice, id: 'chat-mic',
+            configured: voiceInput.value.ready, unavailable,
+            disabled: edit.editing || composerDisabled || isRecording.value,
+          }}
+          send={{
+            id: 'chat-send',
+            label: edit.editing ? edit.state?.busy ? 'Saving…' : edit.state?.retry ? 'Retry save' : 'Save edit' : 'Send',
+            busy: edit.state?.busy,
+            title: edit.editing ? 'Save edit' : activeVoice && voiceState.phase === 'listening' ? 'Finalize and send' : 'Send',
+            disabled: edit.editing ? edit.disabled : composerDisabled || (activeVoice && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase))),
+            icon: edit.editing ? '\u2713' : '\u2191',
+          }}
+        />
       {edit.editing && edit.error && <p class="pending-input-error" role="alert">{edit.error}</p>}
       {edit.editing && (edit.state?.busy || edit.state?.unresolved) && <p class="composer-edit-notice" role="status">
         This save may still apply. Exit edit only closes the editor; retry checks the same request.

@@ -21316,6 +21316,201 @@ function ThreadsRail() {
   );
 }
 
+// src/appearance.ts
+var THEMES = [
+  { id: "default", name: "Default", description: "The original look" },
+  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
+];
+var APPEARANCE_MODES = [
+  { id: "system", name: "System" },
+  { id: "light", name: "Light" },
+  { id: "dark", name: "Dark" }
+];
+var TEXT_DENSITIES = [
+  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
+  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
+];
+var APPEARANCE_KEY = "nanoclaw:appearance";
+var DEFAULT_APPEARANCE = {
+  version: 3,
+  theme: "default",
+  mode: "system",
+  density: "compact",
+  showTechnicalStatus: false
+};
+var InvalidAppearanceError = class extends Error {
+};
+function parseAppearance(raw) {
+  if (raw === null) return { ...DEFAULT_APPEARANCE };
+  const value = JSON.parse(raw);
+  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
+  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
+    throw new InvalidAppearanceError("Invalid appearance preferences");
+  }
+  return {
+    version: 3,
+    theme: value.theme,
+    mode: value.mode,
+    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
+    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
+  };
+}
+function isThemeId(value) {
+  return THEMES.some((theme) => theme.id === value);
+}
+function isAppearanceMode(value) {
+  return APPEARANCE_MODES.some((mode) => mode.id === value);
+}
+function isTextDensity(value) {
+  return TEXT_DENSITIES.some((density) => density.id === value);
+}
+function isStorageError(cause) {
+  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
+}
+function resolveMode(mode, systemDark) {
+  return mode === "system" ? systemDark ? "dark" : "light" : mode;
+}
+function createAppearanceController(win, doc) {
+  const media = win.matchMedia("(prefers-color-scheme: dark)");
+  const listeners = /* @__PURE__ */ new Set();
+  const densityListeners = /* @__PURE__ */ new Set();
+  let preferences = { ...DEFAULT_APPEARANCE };
+  let error = null;
+  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
+  function report(message2, cause) {
+    console.warn(message2, cause);
+    error = message2;
+  }
+  function read(raw, persistMigration = false) {
+    try {
+      preferences = parseAppearance(raw);
+    } catch (cause) {
+      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
+      preferences = { ...DEFAULT_APPEARANCE };
+      report("Saved appearance was invalid and has been reset to the defaults.", cause);
+      try {
+        win.localStorage.removeItem(APPEARANCE_KEY);
+      } catch (storageError) {
+        if (!isStorageError(storageError)) throw storageError;
+        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
+      }
+      return;
+    }
+    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report(
+          "Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.",
+          cause
+        );
+      }
+    }
+  }
+  try {
+    read(win.localStorage.getItem(APPEARANCE_KEY), true);
+  } catch (cause) {
+    if (!isStorageError(cause)) throw cause;
+    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
+  }
+  function getSnapshot() {
+    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
+  }
+  function updateBrowserColor() {
+    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
+    const next = color || brandedBrowserColor;
+    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
+  }
+  function apply2() {
+    const snapshot = getSnapshot();
+    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
+    doc.documentElement.dataset.theme = preferences.theme;
+    doc.documentElement.dataset.mode = snapshot.resolvedMode;
+    doc.documentElement.dataset.density = preferences.density;
+    updateBrowserColor();
+    for (const restore of restoreDensity) restore();
+    for (const listener of listeners) listener(snapshot);
+  }
+  function onStorage(event) {
+    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
+    try {
+      if (event.storageArea !== win.localStorage) return;
+    } catch (cause) {
+      if (!isStorageError(cause)) throw cause;
+      report("Appearance could not be synchronized with another tab.", cause);
+      apply2();
+      return;
+    }
+    error = null;
+    read(event.key === null ? null : event.newValue);
+    apply2();
+  }
+  function onSystemChange() {
+    if (preferences.mode === "system") apply2();
+  }
+  apply2();
+  media.addEventListener("change", onSystemChange);
+  win.addEventListener("storage", onStorage);
+  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
+  return {
+    getSnapshot,
+    setPreferences(next) {
+      preferences = parseAppearance(JSON.stringify(next));
+      error = null;
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
+      }
+      apply2();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    beforeDensityChange(listener) {
+      densityListeners.add(listener);
+      return () => {
+        densityListeners.delete(listener);
+      };
+    },
+    dispose() {
+      listeners.clear();
+      densityListeners.clear();
+      media.removeEventListener("change", onSystemChange);
+      win.removeEventListener("storage", onStorage);
+      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
+    }
+  };
+}
+function getAppearanceController() {
+  return window.nanoclawAppearance ??= createAppearanceController(window, document);
+}
+
+// src/appearance-state.ts
+var appearance = y3({
+  preferences: { ...DEFAULT_APPEARANCE },
+  resolvedMode: "light",
+  error: null
+});
+function initAppearance(onError) {
+  const controller = getAppearanceController();
+  const update = (snapshot) => {
+    const previousError = appearance.value.error;
+    appearance.value = snapshot;
+    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
+  };
+  update(controller.getSnapshot());
+  return controller.subscribe(update);
+}
+function setAppearance(preferences) {
+  getAppearanceController().setPreferences(preferences);
+}
+
 // src/components/VoiceButton.tsx
 function VoiceButton({ target, controller, onStart, configured, unavailable, disabled, id: id2, className = "" }) {
   const state = controller.state.value;
@@ -21349,6 +21544,81 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
           String(seconds % 60).padStart(2, "0")
         ] })
       ] }) : connecting || finalizing ? /* @__PURE__ */ u4("span", { class: "voice-spinner", "aria-hidden": "true" }) : "\u{1F399}\uFE0F"
+    }
+  );
+}
+
+// src/components/ComposerInput.tsx
+function useComposerTextarea(inputRef, value, maxHeight = 200) {
+  const [multiLine, setMultiLine] = h2(false);
+  const density = appearance.value.preferences.density;
+  const autosize = () => {
+    const input = inputRef.current;
+    if (!input) return;
+    if (!input.value) {
+      input.style.height = "";
+      input.style.overflowY = "hidden";
+      setMultiLine(false);
+      return;
+    }
+    input.style.height = "auto";
+    const height = maxHeight === null ? input.scrollHeight : Math.min(input.scrollHeight, maxHeight);
+    input.style.height = `${height}px`;
+    input.style.overflowY = maxHeight !== null && height >= maxHeight ? "auto" : "hidden";
+    setMultiLine(height > 44);
+  };
+  _2(autosize, [density, value, maxHeight]);
+  y2(() => {
+    autosize();
+    const input = inputRef.current;
+    if (!input || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(autosize);
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [inputRef, maxHeight]);
+  return { autosize, multiLine };
+}
+function onComposerKeyDown(event) {
+  if (event.key === "Enter" && !event.shiftKey && !isMobile.value && !event.isComposing) {
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+}
+function ComposerInput({
+  inputRef,
+  textarea,
+  voice: voice2,
+  send,
+  multiLine,
+  listening,
+  className = "",
+  hidden = false,
+  controls
+}) {
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: `composer-input-wrap${className ? ` ${className}` : ""}${multiLine ? " multi-line" : ""}${listening ? " voice-listening" : ""}`,
+      style: hidden ? "display:none" : "",
+      children: [
+        /* @__PURE__ */ u4("textarea", { ...textarea, ref: inputRef, rows: 1, onKeyDown: onComposerKeyDown }),
+        controls,
+        /* @__PURE__ */ u4(VoiceButton, { ...voice2 }),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "submit",
+            id: send.id,
+            class: `accent-icon-btn${send.className ? ` ${send.className}` : ""}`,
+            "aria-label": send.label,
+            "aria-busy": send.busy,
+            title: send.title,
+            disabled: send.disabled,
+            onMouseDown: (event) => event.preventDefault(),
+            children: send.icon ?? "\u2191"
+          }
+        )
+      ]
     }
   );
 }
@@ -22243,13 +22513,7 @@ function QuestionPrompt({ question: q5 }) {
   const voiceLocked = active && (voiceState.phase !== "error" || voiceState.sending);
   const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
   const canType = q5.responseMode !== "choice";
-  const autosize = () => {
-    const input = textareaRef.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
-  };
-  _2(autosize, [answer]);
+  const { autosize, multiLine } = useComposerTextarea(textareaRef, answer, null);
   const submit = async (value = answerRef.current.trim()) => {
     if (!value.trim() || submitting.current || !current.current || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg)
       return false;
@@ -22356,58 +22620,40 @@ function QuestionPrompt({ question: q5 }) {
               else void submit();
             },
             children: /* @__PURE__ */ u4(
-              "div",
+              ComposerInput,
               {
-                class: `composer-input-wrap question-response-input-wrap${active && voiceState.phase === "listening" ? " voice-listening" : ""}`,
-                children: [
-                  /* @__PURE__ */ u4(
-                    "textarea",
-                    {
-                      class: "question-card-input",
-                      rows: 1,
-                      value: answer,
-                      ref: textareaRef,
-                      disabled,
-                      readOnly: voiceLocked,
-                      "aria-label": "Your answer",
-                      placeholder: "Type your answer\u2026",
-                      onInput: (event) => {
-                        answerRef.current = event.currentTarget.value;
-                        setAnswer(answerRef.current);
-                      },
-                      onKeyDown: (event) => {
-                        if (event.key === "Enter" && !event.shiftKey && !isMobile.value && !event.isComposing) {
-                          event.preventDefault();
-                          event.currentTarget.form?.requestSubmit();
-                        }
-                      }
-                    }
-                  ),
-                  /* @__PURE__ */ u4(
-                    VoiceButton,
-                    {
-                      target,
-                      controller: voice,
-                      onStart: startVoice,
-                      className: "question-response-mic",
-                      configured: voiceInput.value.ready,
-                      unavailable,
-                      disabled: disabled || isRecording.value
-                    }
-                  ),
-                  /* @__PURE__ */ u4(
-                    "button",
-                    {
-                      type: "submit",
-                      class: "accent-icon-btn question-response-send",
-                      "aria-label": "Send answer",
-                      title: active && voiceState.phase === "listening" ? "Finalize and send answer" : "Send answer",
-                      disabled: disabled || active && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)) || !answer.trim() && !active,
-                      onMouseDown: (event) => event.preventDefault(),
-                      children: "\u2191"
-                    }
-                  )
-                ]
+                inputRef: textareaRef,
+                multiLine,
+                listening: active && voiceState.phase === "listening",
+                className: "question-response-input-wrap",
+                textarea: {
+                  class: "question-card-input",
+                  value: answer,
+                  disabled,
+                  readOnly: voiceLocked,
+                  "aria-label": "Your answer",
+                  placeholder: "Type your answer\u2026",
+                  onInput: (event) => {
+                    answerRef.current = event.currentTarget.value;
+                    setAnswer(answerRef.current);
+                    autosize();
+                  }
+                },
+                voice: {
+                  target,
+                  controller: voice,
+                  onStart: startVoice,
+                  className: "question-response-mic",
+                  configured: voiceInput.value.ready,
+                  unavailable,
+                  disabled: disabled || isRecording.value
+                },
+                send: {
+                  className: "question-response-send",
+                  label: "Send answer",
+                  title: active && voiceState.phase === "listening" ? "Finalize and send answer" : "Send answer",
+                  disabled: disabled || active && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)) || !answer.trim() && !active
+                }
               }
             )
           }
@@ -22772,201 +23018,6 @@ function attachScrollNavigation(viewport, onDirection, onUserInput, onUserScroll
       viewport.ownerDocument.removeEventListener("pointercancel", onPointerEnd);
     }
   };
-}
-
-// src/appearance.ts
-var THEMES = [
-  { id: "default", name: "Default", description: "The original look" },
-  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
-];
-var APPEARANCE_MODES = [
-  { id: "system", name: "System" },
-  { id: "light", name: "Light" },
-  { id: "dark", name: "Dark" }
-];
-var TEXT_DENSITIES = [
-  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
-  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
-];
-var APPEARANCE_KEY = "nanoclaw:appearance";
-var DEFAULT_APPEARANCE = {
-  version: 3,
-  theme: "default",
-  mode: "system",
-  density: "compact",
-  showTechnicalStatus: false
-};
-var InvalidAppearanceError = class extends Error {
-};
-function parseAppearance(raw) {
-  if (raw === null) return { ...DEFAULT_APPEARANCE };
-  const value = JSON.parse(raw);
-  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
-  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
-    throw new InvalidAppearanceError("Invalid appearance preferences");
-  }
-  return {
-    version: 3,
-    theme: value.theme,
-    mode: value.mode,
-    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
-    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
-  };
-}
-function isThemeId(value) {
-  return THEMES.some((theme) => theme.id === value);
-}
-function isAppearanceMode(value) {
-  return APPEARANCE_MODES.some((mode) => mode.id === value);
-}
-function isTextDensity(value) {
-  return TEXT_DENSITIES.some((density) => density.id === value);
-}
-function isStorageError(cause) {
-  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
-}
-function resolveMode(mode, systemDark) {
-  return mode === "system" ? systemDark ? "dark" : "light" : mode;
-}
-function createAppearanceController(win, doc) {
-  const media = win.matchMedia("(prefers-color-scheme: dark)");
-  const listeners = /* @__PURE__ */ new Set();
-  const densityListeners = /* @__PURE__ */ new Set();
-  let preferences = { ...DEFAULT_APPEARANCE };
-  let error = null;
-  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
-  function report(message2, cause) {
-    console.warn(message2, cause);
-    error = message2;
-  }
-  function read(raw, persistMigration = false) {
-    try {
-      preferences = parseAppearance(raw);
-    } catch (cause) {
-      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
-      preferences = { ...DEFAULT_APPEARANCE };
-      report("Saved appearance was invalid and has been reset to the defaults.", cause);
-      try {
-        win.localStorage.removeItem(APPEARANCE_KEY);
-      } catch (storageError) {
-        if (!isStorageError(storageError)) throw storageError;
-        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
-      }
-      return;
-    }
-    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report(
-          "Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.",
-          cause
-        );
-      }
-    }
-  }
-  try {
-    read(win.localStorage.getItem(APPEARANCE_KEY), true);
-  } catch (cause) {
-    if (!isStorageError(cause)) throw cause;
-    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
-  }
-  function getSnapshot() {
-    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
-  }
-  function updateBrowserColor() {
-    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
-    const next = color || brandedBrowserColor;
-    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
-  }
-  function apply2() {
-    const snapshot = getSnapshot();
-    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
-    doc.documentElement.dataset.theme = preferences.theme;
-    doc.documentElement.dataset.mode = snapshot.resolvedMode;
-    doc.documentElement.dataset.density = preferences.density;
-    updateBrowserColor();
-    for (const restore of restoreDensity) restore();
-    for (const listener of listeners) listener(snapshot);
-  }
-  function onStorage(event) {
-    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
-    try {
-      if (event.storageArea !== win.localStorage) return;
-    } catch (cause) {
-      if (!isStorageError(cause)) throw cause;
-      report("Appearance could not be synchronized with another tab.", cause);
-      apply2();
-      return;
-    }
-    error = null;
-    read(event.key === null ? null : event.newValue);
-    apply2();
-  }
-  function onSystemChange() {
-    if (preferences.mode === "system") apply2();
-  }
-  apply2();
-  media.addEventListener("change", onSystemChange);
-  win.addEventListener("storage", onStorage);
-  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
-  return {
-    getSnapshot,
-    setPreferences(next) {
-      preferences = parseAppearance(JSON.stringify(next));
-      error = null;
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
-      }
-      apply2();
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    beforeDensityChange(listener) {
-      densityListeners.add(listener);
-      return () => {
-        densityListeners.delete(listener);
-      };
-    },
-    dispose() {
-      listeners.clear();
-      densityListeners.clear();
-      media.removeEventListener("change", onSystemChange);
-      win.removeEventListener("storage", onStorage);
-      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
-    }
-  };
-}
-function getAppearanceController() {
-  return window.nanoclawAppearance ??= createAppearanceController(window, document);
-}
-
-// src/appearance-state.ts
-var appearance = y3({
-  preferences: { ...DEFAULT_APPEARANCE },
-  resolvedMode: "light",
-  error: null
-});
-function initAppearance(onError) {
-  const controller = getAppearanceController();
-  const update = (snapshot) => {
-    const previousError = appearance.value.error;
-    appearance.value = snapshot;
-    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
-  };
-  update(controller.getSnapshot());
-  return controller.subscribe(update);
-}
-function setAppearance(preferences) {
-  getAppearanceController().setPreferences(preferences);
 }
 
 // src/density-reflow.ts
@@ -24475,33 +24526,8 @@ function Composer() {
   const voiceLocked = activeVoice && (voiceState.phase !== "error" || voiceState.sending);
   const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
   const sendBusyRef = A2(false);
-  const [multiLine, setMultiLine] = h2(false);
-  const density = appearance.value.preferences.density;
-  const autosize = () => {
-    const el = inputRef.current;
-    if (!el) return;
-    if (!el.value) {
-      el.style.height = "";
-      el.style.overflowY = "hidden";
-      setMultiLine(false);
-      return;
-    }
-    el.style.height = "auto";
-    const h5 = Math.min(el.scrollHeight, 200);
-    el.style.height = h5 + "px";
-    el.style.overflowY = h5 >= 200 ? "auto" : "hidden";
-    setMultiLine(h5 > 44);
-  };
+  const { autosize, multiLine } = useComposerTextarea(inputRef);
   const edit = usePendingComposer(inputRef, autosize);
-  _2(autosize, [density]);
-  y2(() => {
-    autosize();
-    const el = inputRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(autosize);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
   const onSubmit = (ev) => {
     ev.preventDefault();
     if (hasQuestion) return;
@@ -24538,12 +24564,6 @@ function Composer() {
     } finally {
       sendBusyRef.current = false;
       composerSendInFlight.value = false;
-    }
-  };
-  const onKey = (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey && !isMobile.value) {
-      ev.preventDefault();
-      ev.currentTarget.form?.requestSubmit();
     }
   };
   const onAttachClick = () => fileRef.current?.click();
@@ -24644,43 +24664,41 @@ function Composer() {
               ]
             }
           ),
-          /* @__PURE__ */ u4("div", { class: "composer-input-wrap" + (multiLine ? " multi-line" : "") + (activeVoice && voiceState.phase === "listening" ? " voice-listening" : ""), style: attachRecording ? "display:none" : "", children: [
-            /* @__PURE__ */ u4(
-              "textarea",
-              {
+          /* @__PURE__ */ u4(
+            ComposerInput,
+            {
+              inputRef,
+              multiLine,
+              listening: activeVoice && voiceState.phase === "listening",
+              hidden: attachRecording,
+              textarea: {
                 id: "chat-input",
-                rows: 1,
                 placeholder: edit.editing ? "Edit pending message\u2026" : chatReloadRequired.value ? "Reload to continue\u2026" : wsDown ? "Reconnecting\u2026" : `Message ${groupName}\u2026`,
-                ref: inputRef,
                 "aria-label": edit.editing ? "Pending message text" : "Message",
                 onInput: (event) => {
                   edit.input(event.currentTarget.value);
                   autosize();
                 },
-                onKeyDown: onKey,
                 onPaste,
                 autocomplete: "off",
                 disabled: !edit.editing && hasQuestion,
                 readOnly: voiceLocked || !!edit.state?.busy || !!edit.state?.unresolved
-              }
-            ),
-            /* @__PURE__ */ u4(
-              ComposerPlusMenu,
-              {
-                disabled: edit.editing || composerDisabled || voiceState.sending || !["idle", "error"].includes(voiceState.phase),
-                title: composerDisabled ? "Disconnected" : "Add\u2026",
-                showRecordAudio: hasGetUserMedia(),
-                showQuickCapture: hasGetUserMedia(),
-                onUploadFile: onAttachClick,
-                onQuickCapture: () => setQuickCapture(true),
-                onRecordAudio: () => {
-                  startAudioAttachRecording().catch(console.error);
+              },
+              controls: /* @__PURE__ */ u4(
+                ComposerPlusMenu,
+                {
+                  disabled: edit.editing || composerDisabled || voiceState.sending || !["idle", "error"].includes(voiceState.phase),
+                  title: composerDisabled ? "Disconnected" : "Add\u2026",
+                  showRecordAudio: hasGetUserMedia(),
+                  showQuickCapture: hasGetUserMedia(),
+                  onUploadFile: onAttachClick,
+                  onQuickCapture: () => setQuickCapture(true),
+                  onRecordAudio: () => {
+                    startAudioAttachRecording().catch(console.error);
+                  }
                 }
-              }
-            ),
-            /* @__PURE__ */ u4(
-              VoiceButton,
-              {
+              ),
+              voice: {
                 target,
                 controller: voice,
                 onStart: startVoice,
@@ -24688,23 +24706,17 @@ function Composer() {
                 configured: voiceInput.value.ready,
                 unavailable,
                 disabled: edit.editing || composerDisabled || isRecording.value
-              }
-            ),
-            /* @__PURE__ */ u4(
-              "button",
-              {
-                type: "submit",
+              },
+              send: {
                 id: "chat-send",
-                class: "accent-icon-btn",
-                "aria-label": edit.editing ? edit.state?.busy ? "Saving\u2026" : edit.state?.retry ? "Retry save" : "Save edit" : "Send",
-                "aria-busy": edit.state?.busy,
+                label: edit.editing ? edit.state?.busy ? "Saving\u2026" : edit.state?.retry ? "Retry save" : "Save edit" : "Send",
+                busy: edit.state?.busy,
                 title: edit.editing ? "Save edit" : activeVoice && voiceState.phase === "listening" ? "Finalize and send" : "Send",
                 disabled: edit.editing ? edit.disabled : composerDisabled || activeVoice && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)),
-                onMouseDown: (e4) => e4.preventDefault(),
-                children: edit.editing ? "\u2713" : "\u2191"
+                icon: edit.editing ? "\u2713" : "\u2191"
               }
-            )
-          ] }),
+            }
+          ),
           edit.editing && edit.error && /* @__PURE__ */ u4("p", { class: "pending-input-error", role: "alert", children: edit.error }),
           edit.editing && (edit.state?.busy || edit.state?.unresolved) && /* @__PURE__ */ u4("p", { class: "composer-edit-notice", role: "status", children: "This save may still apply. Exit edit only closes the editor; retry checks the same request." })
         ]

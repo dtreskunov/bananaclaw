@@ -487,6 +487,12 @@ The host orders both normally and never relocates the question. Asked events
 never render transcript cards. Outstanding questions replace the ordinary
 composer in a bounded, scrollable input dock below the transcript, with choice,
 text and dictation controls, plus an explicit **Skip** button. Multiple questions keep their recorded order.
+Freeform answers use the same textarea, dictation and send controls as ordinary
+composition, including density/width-aware autosizing. Question textareas grow
+to fit the entire answer; only the outer question dock scrolls. The ordinary
+message composer keeps its 200px height cap and inner scrolling. Desktop
+Enter submits; Shift+Enter and mobile Enter insert a newline. Enter during IME
+composition does not submit either editor.
 The ordinary composer stays mounted but hidden, preserving its draft, attachments,
 pinned context and pending-message editor; none of these are submitted as an answer.
 Question submission failures retain typed text and show an error. HTTP acceptance

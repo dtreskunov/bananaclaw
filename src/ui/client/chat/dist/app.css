@@ -3876,8 +3876,10 @@ nav.tab-bar-strip.group-strip {
 .chat-main .question-card-input {
   min-width: 0;
   flex: 1;
+  max-height: none;
+  overflow-y: hidden;
   background: var(--bg);
-  padding: 5px 70px 5px 10px;
+  padding-left: 10px;
 }
 .chat-main .question-card-meta {
   margin-top: -2px;

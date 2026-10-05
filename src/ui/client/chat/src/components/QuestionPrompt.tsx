@@ -1,11 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { respondQuestion, skipQuestion } from '../actions';
 import { isRecording } from '../recorder';
 import {
   channelType,
   chatReady,
   groupId,
-  isMobile,
   messagingGroupId,
   respondingQuestionIds,
   threadId,
@@ -13,7 +12,7 @@ import {
 } from '../state';
 import type { PendingQuestionDto } from '../types';
 import { voice, voiceBrowserReason } from '../voice-audio';
-import { VoiceButton } from './VoiceButton';
+import { ComposerInput, useComposerTextarea } from './ComposerInput';
 
 export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }) {
   const [answer, setAnswer] = useState('');
@@ -42,13 +41,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
     voiceBrowserReason() ||
     (!voiceInput.value.ready ? voiceInput.value.reason || 'Live voice input is not configured.' : '');
   const canType = q.responseMode !== 'choice';
-  const autosize = () => {
-    const input = textareaRef.current;
-    if (!input) return;
-    input.style.height = 'auto';
-    input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
-  };
-  useLayoutEffect(autosize, [answer]);
+  const { autosize, multiLine } = useComposerTextarea(textareaRef, answer, null);
 
   const submit = async (value = answerRef.current.trim()): Promise<boolean> => {
     if (
@@ -177,53 +170,41 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
             else void submit();
           }}
         >
-          <div
-            class={`composer-input-wrap question-response-input-wrap${active && voiceState.phase === 'listening' ? ' voice-listening' : ''}`}
-          >
-            <textarea
-              class="question-card-input"
-              rows={1}
-              value={answer}
-              ref={textareaRef}
-              disabled={disabled}
-              readOnly={voiceLocked}
-              aria-label="Your answer"
-              placeholder="Type your answer…"
-              onInput={(event) => {
+          <ComposerInput
+            inputRef={textareaRef}
+            multiLine={multiLine}
+            listening={active && voiceState.phase === 'listening'}
+            className="question-response-input-wrap"
+            textarea={{
+              class: 'question-card-input',
+              value: answer,
+              disabled,
+              readOnly: voiceLocked,
+              'aria-label': 'Your answer',
+              placeholder: 'Type your answer…',
+              onInput: (event) => {
                 answerRef.current = event.currentTarget.value;
                 setAnswer(answerRef.current);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey && !isMobile.value && !event.isComposing) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-            />
-            <VoiceButton
-              target={target}
-              controller={voice}
-              onStart={startVoice}
-              className="question-response-mic"
-              configured={voiceInput.value.ready}
-              unavailable={unavailable}
-              disabled={disabled || isRecording.value}
-            />
-            <button
-              type="submit"
-              class="accent-icon-btn question-response-send"
-              aria-label="Send answer"
-              title={active && voiceState.phase === 'listening' ? 'Finalize and send answer' : 'Send answer'}
-              disabled={
+                autosize();
+              },
+            }}
+            voice={{
+              target, controller: voice, onStart: startVoice,
+              className: 'question-response-mic',
+              configured: voiceInput.value.ready,
+              unavailable,
+              disabled: disabled || isRecording.value,
+            }}
+            send={{
+              className: 'question-response-send',
+              label: 'Send answer',
+              title: active && voiceState.phase === 'listening' ? 'Finalize and send answer' : 'Send answer',
+              disabled:
                 disabled ||
                 (active && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase))) ||
-                (!answer.trim() && !active)
-              }
-              onMouseDown={(event) => event.preventDefault()}
-            >
-              {'\u2191'}
-            </button>
-          </div>
+                (!answer.trim() && !active),
+            }}
+          />
         </form>
       )}
       {(busy || waiting || disconnected) && (
