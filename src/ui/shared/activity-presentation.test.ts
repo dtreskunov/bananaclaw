@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   activityChapters,
+  activityStepCount,
   BUILTIN_TOOL_PRESENTATIONS,
   chapterEntryHeadline,
   displayStep,
   headlineSummary,
+  isSyntheticTraceStep,
   parseStep,
   stepHeadline,
   stepBody,
@@ -29,8 +31,64 @@ const tool = (id: string, name: string, status: TraceStep['status'] = 'completed
 });
 
 describe('activity presentation', () => {
+  it('counts recorded steps without counting synthetic lifecycle markers or changing the trace', () => {
+    const markers: TraceStep[] = [
+      { kind: 'notification', id: 'ui:thinking:turn', text: 'Thinking…', status: 'running' },
+      { kind: 'notification', id: 'ui:done:turn', text: 'Done', status: 'completed' },
+      { kind: 'notification', id: 'ui:current:turn', text: 'Running', status: 'running' },
+      { kind: 'notification', id: 'ui:current:turn', text: 'Stopping…', status: 'running' },
+      { kind: 'notification', id: 'ui:current:turn', text: 'Stop failed', status: 'error' },
+      { kind: 'notification', id: 'ui:current:turn', text: 'Runner disconnected', status: 'interrupted' },
+    ];
+    const synthetic = markers.map((step, index) => line(index, step));
+    const recorded = [
+      line(0, tool('ui:current:tool', 'bash')),
+      line(1, { kind: 'compaction', id: 'compact', status: 'completed' }),
+      line(2, { kind: 'notification', id: 'steering:input', text: 'Steering message injected' }),
+      { ts: '1000', text: 'Legacy recorded activity' },
+    ];
+    const all = [...recorded, ...synthetic];
+    const before = JSON.stringify(all);
+    expect(activityStepCount([])).toBe(0);
+    expect(activityStepCount(synthetic)).toBe(0);
+    expect(activityStepCount(all)).toBe(4);
+    expect(isSyntheticTraceStep(parseStep(recorded[0].text))).toBe(false);
+    expect(isSyntheticTraceStep({ kind: 'notification', id: 'agent:thinking', text: 'Thinking…' })).toBe(false);
+    expect(JSON.stringify(all)).toBe(before);
+  });
+
+  it('uses tool lifecycle presentation for explicit notification states but leaves legacy notices neutral', () => {
+    const thinking: TraceStep = { kind: 'notification', id: 'ui:current:turn', text: 'Thinking…', status: 'running' };
+    const done: TraceStep = { kind: 'notification', id: 'ui:done:turn', text: 'Done', status: 'completed' };
+    const failure: TraceStep = { kind: 'notification', id: 'ui:current:turn', text: 'Stop failed', status: 'error' };
+    expect(traceStatusClass(displayStep(line(0, thinking), true))).toBe('trace-status-running');
+    expect(traceStatusClass(displayStep(line(1, done), false))).toBe('trace-status-completed');
+    expect(traceStatusClass(displayStep(line(2, failure), true))).toBe('trace-status-failed');
+    expect(displayStep(line(0, thinking), false).status).toBe('unknown');
+    expect(traceStatusClass({ kind: 'notification', text: 'Legacy notice' })).toBe('trace-status-neutral');
+  });
+
+  it('keeps both concurrent calls blue and only turns completed calls green', () => {
+    for (const secondStatus of ['running', 'completed'] as const) {
+      const chapters = activityChapters(
+        [line(0, tool('first', 'bash', 'running')), line(1, tool('second', 'read', secondStatus))],
+        true,
+      );
+      expect(chapters.flatMap((chapter) => chapter.entries.map((entry) => traceStatusClass(entry.step)))).toEqual([
+        'trace-status-running',
+        `trace-status-${secondStatus}`,
+      ]);
+    }
+  });
+
   it('presents compaction as its own lifecycle activity and keeps legacy events compatible', () => {
-    const step: TraceStep = { kind: 'compaction', id: 'compact-1', auto: true, status: 'running', detail: 'Context window exceeded' };
+    const step: TraceStep = {
+      kind: 'compaction',
+      id: 'compact-1',
+      auto: true,
+      status: 'running',
+      detail: 'Context window exceeded',
+    };
     expect(stepSummary(step)).toBe('Compacting context');
     expect(traceStatusClass(step)).toBe('trace-status-running');
     expect(stepSummary({ ...step, status: 'completed' })).toBe('Compacted context automatically');

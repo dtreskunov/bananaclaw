@@ -172,9 +172,9 @@ there is no final response, it stays on the synthetic bubble. Intermediate
 `send_message`/`send_file` output is not a final response.
 The durable settling phase keeps the existing live presentation without a
 transient "Finalizing turn" notice; completion remains gated on settlement.
-Transient runner-disconnection, stopping and Stop-error notices appear at the
-bottom of the transcript, after queued inputs, independently of the trace's
-anchor. The disconnect text is **Runner disconnected.** Notices clear when the
+Transient runner-disconnection, stopping and Stop-error notices appear in the
+live turn's regular footer and trailing trace marker, not separate transcript
+rows. The disconnect text is **Runner disconnected**. Notices clear when the
 active state changes; settled outcome notes remain with their original turn.
 Notice layout changes keep bottom-following viewers pinned; readers scrolled
 up into history retain their position.
@@ -193,11 +193,15 @@ back into history. Cancelling a steering/queue choice preserves the draft,
 highlight and scroll position. A rejected send retains the draft and attachments.
 Question activity comes only from the recorded `nanoclaw.ask_user_question`
 tool call; question cards do not synthesize a second action in the trace.
+Live turns show at most one display-only **Thinking…** marker, only as the current
+trailing state while no activity is active. It disappears when work resumes or
+the turn settles; there is no permanent initial Thinking entry.
 Every settled turn ends with one
 display-only **Done** marker, including stopped or failed turns: it means the
 turn ended, not that the requested work succeeded. Outcome notes retain that
-distinction. This marker counts in the visible step total but never enters
-the runner journal, stored activity, or usage accounting.
+distinction. Display-only markers remain part of the expanded trace but do not
+count as activity steps or enter the runner journal, stored activity, or usage
+accounting. The step-count disclosure is hidden when there are no recorded steps.
 Questions use their stored output-to-turn associations, and question cards never
 own separate traces. Missing output or turn references are explicit projection
 errors; reads never infer ownership or synthesize historical turns. Legacy imports
@@ -343,11 +347,63 @@ reveal actions on hover or focus. User-message timestamps stay anchored to the
 left while actions occupy the right side of the row.
 
 **Appearance → Transcript details → Show technical information** controls technical
-details on all bubbles: activity trace, cost, duration, model, and context use.
+details on all bubbles: activity trace, cost, model, and context use. Technical
+information occupies a separate line at the top of live, reply and display-card
+bubbles, and is absent when the toggle is off. The regular information line
+remains at the bottom and always includes available elapsed time and notable
+outcomes. Live rows order the bouncing dots, Stop, stopwatch, and current
+activity text. Only pending or running activities drive that text; when none
+remain, it returns to **Thinking…**, including before recorded activity arrives.
+An activity finishing does not mask another activity that is still running.
+Completed, failed and interrupted entries stay in the trace, not in the live
+status text.
+While live, the trace includes a transient, display-only current-status marker
+when needed so its last visible entry matches the footer. This includes
+**Thinking…** after completed activity, stopping, disconnection and Stop errors.
+The marker is replaced or removed when activity resumes; it is not retained as
+historical thinking between activities and never enters the durable journal.
+Thinking uses the same blue running presentation as tool calls; Done uses their
+green completion presentation. Stop errors use a red failed marker, without
+changing the durable activity or the still-running turn's outcome. Concurrent
+tool calls retain their individual lifecycle colors: a completed call is green
+even while another call remains blue. Execution concurrency depends on the
+provider, model and tools; adjacent calls alone are not proof of overlap.
+Stopping/disconnect notices and Stop errors occupy the same footer text slot,
+not separate transcript rows. Errors retain their alert role and retry control.
+Current activity remains visible with technical information hidden. The
+stopwatch uses minutes and seconds, freezes on settlement, and is not repeated
+in the technical summary. Usage details still retain recorded accounting duration.
+Technical information and the expanded trace form one shared, compact block at
+the top of live, reply and display-card bubbles, before their content. This keeps
+header-to-trace spacing consistent without accumulating card-content gaps or
+mobile footer touch-target spacing. Synthetic status markers never inflate its
+step count; a live status preview can still reveal the current marker when the
+zero-step disclosure is hidden.
 It is off by default, including for preferences migrated from older versions.
 Live bubbles retain essential progress feedback and Stop controls. Notable
 completed outcomes such as failures, warnings, interruptions, and silent turns
 remain visible even when technical details are hidden.
+
+An isolated production-component fixture covers initial Thinking, running and
+completed tools, two simultaneously running calls and one parallel call already
+completed, long activity text, stopping/disconnected/settling states,
+immediately visible simulated Stop failures and real simulated retry handling, final
+replies without recorded steps,
+replies, outputless turns, failures and display cards:
+
+```bash
+pnpm --dir src/ui/client/chat run build:turn-status-fixture
+```
+
+Open the content-hashed `/ui/chat/dist/turn-status-fixture-<hash>.html` URL printed
+by the build command on this host; the document hash includes both script and
+stylesheet references, so CSS-only changes also invalidate cached fixture pages.
+Its technical-info toggle is page-local and does not save preferences.
+Stop is simulated through
+the real UI action; every other fetch is explicitly blocked. The fixture can
+advance the same turn into a reply to verify trace ownership and frozen elapsed
+time across settlement. Generated fixture assets are ignored and rebuilt from
+`src/ui/client/chat/fixtures/`.
 
 Your own pending native web-chat messages instead offer **Edit**
 while the connected runner advertises input editing. This changes text in place,
@@ -652,8 +708,8 @@ The host publishes an explicit `timeline` of message references, question
 references, and typed turn trace/status rows. The host selects the final response
 or the synthetic bubble beneath the latest associated conversation content as
 the sole trace host. Recorded logical-clock positions order the turn's activities.
-The browser resolves those references and adds only the display-only Done
-marker; it does not infer activity segments
+The browser resolves those references and adds display-only Done and live
+current-status markers (including current-only Thinking…); it does not infer activity segments
 from timestamps or invent messages, message IDs, or insertion positions for
 trace/status rows. Chapters remain presentation-only groups within a trace.
 Every recorded activity has a required position. Historical activity is normalized

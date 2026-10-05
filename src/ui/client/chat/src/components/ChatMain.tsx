@@ -32,7 +32,7 @@ import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import {
-  activityChapters, chapterEntryHeadline, displayStep, headlineSummary, isTitleStep, isTodoStep, parseStep, stepHeadline, stepBody,
+  activityChapters, activityStepCount, chapterEntryHeadline, displayStep, headlineSummary, isTitleStep, isTodoStep, stepHeadline, stepBody,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
 } from '../../../../shared/activity-presentation';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
@@ -40,7 +40,7 @@ import {
   activityTraceOwner, activityTraceView, followActivityTrace, pauseActivityTrace, toggleActivityTrace,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
-import { activeTurnNotices, turnRowView, type TurnRowView } from '../turn-row';
+import { activeTurnNotices, liveTurnActivity, turnRowView, type TurnRowView } from '../turn-row';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -150,7 +150,7 @@ function formatDuration(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
-function formatRecordingDuration(ms: number): string {
+function formatElapsedDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
@@ -285,14 +285,7 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
   );
 }
 
-function latestActivityHeadline(lines: ActivityLine[]): StepHeadline | null {
-  if (!lines.length) return null;
-  const line = lines[lines.length - 1];
-  const headline = stepHeadline(parseStep(line.text));
-  return headline.action || headline.subject ? headline : { action: line.text };
-}
-
-/** The "› N steps" disclosure; lives in the bubble's meta row. */
+/** The "› N steps" disclosure counts recorded activity, not presentation markers. */
 function ActivityTraceToggle({ count, expanded, onToggle }: { count: number; expanded: boolean; onToggle: () => void }) {
   if (!count) return null;
   return (
@@ -310,7 +303,7 @@ function ActivityTraceToggle({ count, expanded, onToggle }: { count: number; exp
   );
 }
 
-/** Expanded step list, shared by live and completed traces; opens above the meta row. */
+/** Expanded step list, shared by live and completed traces. */
 function ActivityTracePanel({
   lines,
   expanded,
@@ -400,8 +393,8 @@ function UsageMeta({ u, live = false, partial = false, provisional = false }: {
   const short = live
     ? [estimatedCost, `${input} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
     : partial
-      ? [u.cost_usd !== undefined ? cost : '', dur, model, reported].filter(Boolean).join(' \u00b7 ')
-      : [provisional ? estimatedCost : cost, dur, model, ctx].filter(Boolean).join(' \u00b7 ');
+      ? [u.cost_usd !== undefined ? cost : '', model, reported].filter(Boolean).join(' \u00b7 ')
+      : [provisional ? estimatedCost : cost, model, ctx].filter(Boolean).join(' \u00b7 ');
   const contextDetail = contextTokens
     ? `${fmtTok(contextTokens)}${u.context_window
       ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})`
@@ -599,8 +592,6 @@ function Message(
   const mdRef = useRef<HTMLDivElement | null>(null);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const traceOwner = activityTraceOwner(m);
-  const traceView = activityTraceView(traceOwner, !!m.turnTraceLive);
-  const toggleTrace = () => toggleActivityTrace(traceOwner);
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
@@ -694,6 +685,14 @@ function Message(
       data-msg-id={m.id}
       ref={ref}
     >
+      {showTechnicalStatus
+        ? <TurnTechnicalDetails
+            turn={m.direction === 'out' ? m.statsTurn : undefined}
+            lines={activity}
+            ownerId={traceOwner}
+            live={m.turnTraceLive}
+          />
+        : null}
       {m.direction === 'internal' ? <div class="internal-label">internal</div> : null}
       {m.direction === 'in' && m.author && m.author.userId !== currentUserId.value
         ? <div class="message-author">{m.author.displayName}</div>
@@ -761,10 +760,6 @@ function Message(
           </div>
         )
         : null}
-      {activity.length && showTechnicalStatus
-        ? <ActivityTracePanel lines={activity} expanded={traceView.expanded} live={m.turnTraceLive}
-            ownerId={traceOwner} following={traceView.following} />
-        : null}
       {m.reactions && m.reactions.length
         ? (
           <div class="reactions">
@@ -774,9 +769,8 @@ function Message(
           </div>
         )
         : null}
-      {m.ts || m.inputState || activity.length ? <div class="meta">
+      {m.ts || m.inputState || activity.length ? <div class="meta turn-info">
         {m.ts && <RelativeTime ts={m.ts} />}
-        <ActivityTraceToggle count={showTechnicalStatus ? activity.length : 0} expanded={traceView.expanded} onToggle={toggleTrace} />
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
         <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} />
         {showsMidTurnLabel(m.deliveryOrigin,
@@ -786,10 +780,9 @@ function Message(
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
         {m.direction === 'out' && m.statsTurn
-          ? <ReplyTurnStats
+          ? <ReplyTurnInfo
               turn={m.statsTurn}
               showOutcomeNote={!systemNotice}
-              showTechnicalDetails={showTechnicalStatus}
             />
           : null}
         <span class="msg-inline-actions">
@@ -804,11 +797,14 @@ function Message(
 
 function DisplayCardMessage({ message, card }: { message: ChatMessage; card: DisplayCard }) {
   const traceOwner = activityTraceOwner(message);
-  const traceView = activityTraceView(traceOwner, !!message.turnTraceLive);
   const activity = message.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return (
     <div class="msg out display-card agent-action" data-msg-id={message.id}>
+      {showTechnicalStatus
+        ? <TurnTechnicalDetails turn={message.statsTurn} lines={activity}
+            ownerId={traceOwner} live={message.turnTraceLive} />
+        : null}
       {card.title ? <div class="display-card-title">{card.title}</div> : null}
       {card.description ? <div class="display-card-description">{card.description}</div> : null}
       {card.children.length > 0 ? (
@@ -829,8 +825,6 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      {showTechnicalStatus ? <ActivityTracePanel lines={activity} expanded={traceView.expanded}
-        live={message.turnTraceLive} ownerId={traceOwner} following={traceView.following} /> : null}
       {message.reactions?.length ? (
         <div class="reactions">
           {message.reactions.map((reaction, index) => (
@@ -838,13 +832,11 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      {message.ts || activity.length ? <div class="meta">
+      {message.ts || activity.length ? <div class="meta turn-info">
         {message.ts ? <RelativeTime ts={message.ts} /> : null}
-        <ActivityTraceToggle count={showTechnicalStatus ? activity.length : 0} expanded={traceView.expanded}
-          onToggle={() => toggleActivityTrace(traceOwner)} />
         <AgentActionLabel label="card" title="Sent with send_card" />
         {message.statsTurn
-          ? <ReplyTurnStats turn={message.statsTurn} showTechnicalDetails={showTechnicalStatus} />
+          ? <ReplyTurnInfo turn={message.statsTurn} />
           : null}
       </div> : null}
     </div>
@@ -1094,14 +1086,11 @@ function TaskIndicator() {
   );
 }
 
-/** Elapsed/model line, usage and token availability for a turn; shared by status rows and replies. */
+/** Model, usage and token availability; elapsed time belongs to the regular info line. */
 function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }) {
-  const metadata = [view.elapsedMs !== null ? fmtDur(view.elapsedMs) : '', view.model ? shortModel(view.model) : '']
-    .filter(Boolean)
-    .join(' \u00b7 ');
   return (
     <>
-      {view.showTiming && metadata ? <span class="typing-meta">{metadata}</span> : null}
+      {view.showModel && view.model ? <span class="typing-meta">{shortModel(view.model)}</span> : null}
       {view.usage.map((record) => <UsageMeta key={record.id} u={record.value}
         provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
       {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} live provisional /> : null}
@@ -1110,21 +1099,64 @@ function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }
   );
 }
 
-/** A settled turn's outcome note and accounting, in the meta line of its last reply. */
-function ReplyTurnStats({
+function TurnTechnicalInfo({
+  turn, count, expanded, onToggle,
+}: {
+  turn?: ConversationTurn; count: number; expanded: boolean; onToggle: () => void;
+}) {
+  if (!turn && !count) return null;
+  return (
+    <div class="meta turn-tech-info" role="group" aria-label="Technical information">
+      <ActivityTraceToggle count={count} expanded={expanded} onToggle={onToggle} />
+      {turn ? <TurnStats turn={turn} view={turnRowView(turn, Date.now())} /> : null}
+    </div>
+  );
+}
+
+function TurnTechnicalDetails({
+  turn, lines, ownerId, live = false, now = null,
+}: {
+  turn?: ConversationTurn;
+  lines: ActivityLine[];
+  ownerId: string;
+  live?: boolean;
+  now?: number | null;
+}) {
+  const traceView = activityTraceView(ownerId, live);
+  if (!turn && !lines.length) return null;
+  return (
+    <div class="turn-technical-details">
+      <TurnTechnicalInfo turn={turn} count={activityStepCount(lines)}
+        expanded={traceView.expanded} onToggle={() => toggleActivityTrace(ownerId)} />
+      <ActivityTracePanel lines={lines} expanded={traceView.expanded} live={live} now={now}
+        ownerId={ownerId} following={traceView.following} />
+    </div>
+  );
+}
+
+function TurnElapsed({ elapsedMs, live = false }: { elapsedMs: number | null; live?: boolean }) {
+  if (elapsedMs === null) return null;
+  return (
+    <span class="turn-elapsed" role={live ? 'timer' : undefined} aria-live={live ? 'off' : undefined}
+      aria-label="Elapsed response time">
+      {formatElapsedDuration(elapsedMs)}
+    </span>
+  );
+}
+
+/** A settled turn's elapsed time and outcome note, always visible in its reply footer. */
+function ReplyTurnInfo({
   turn,
   showOutcomeNote = true,
-  showTechnicalDetails = true,
 }: {
   turn: ConversationTurn;
   showOutcomeNote?: boolean;
-  showTechnicalDetails?: boolean;
 }) {
   const view = turnRowView(turn, Date.now());
   return (
     <>
+      <TurnElapsed elapsedMs={view.elapsedMs} />
       {showOutcomeNote && view.note ? <span class="turn-outcome-note">{view.note}</span> : null}
-      {showTechnicalDetails ? <TurnStats turn={turn} view={view} /> : null}
     </>
   );
 }
@@ -1150,7 +1182,9 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
   const view = turnRowView(turn, now);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const showStop = status && activeTurn.value?.id === turn.id;
-  const liveHeadline = latestActivityHeadline(lines);
+  const currentActivity = live ? liveTurnActivity(turn, lines, turnConnected.value, stop) : null;
+  const displayLines = currentActivity?.lines ?? lines;
+  const liveHeadline = currentActivity?.headline ?? null;
   const provenanceTone = stop?.error || (settled && turn.outcome === 'failed')
     ? ' provenance-error'
     : (settled && ['warning', 'stopped', 'interrupted'].includes(turn.outcome)) ||
@@ -1158,12 +1192,9 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
       ? ' provenance-warning'
       : '';
   if (!lines.length && !status) return null;
-  if (settled && !showTechnicalStatus && !view.note && !stop?.error) return null;
+  if (!status && !showTechnicalStatus) return null;
   const toggleFromPreview = () => {
     toggleActivityTrace(ownerId, true);
-  };
-  const toggleFromCount = () => {
-    toggleActivityTrace(ownerId);
   };
   return (
     <div
@@ -1171,10 +1202,24 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
       data-turn-id={status ? turn.id : undefined}
       aria-live={live ? 'polite' : 'off'}
     >
-      <div class="typing-summary">
+      {showTechnicalStatus
+        ? <TurnTechnicalDetails
+            turn={status ? turn : undefined}
+            lines={displayLines}
+            live={!settled}
+            now={endedAt ?? now}
+            ownerId={ownerId}
+          />
+        : null}
+      <div class="typing-summary turn-info">
         {live ? <div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div> : null}
         {showStop ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton /></span> : null}
-        {showTechnicalStatus && liveHeadline
+        {status ? <TurnElapsed elapsedMs={view.elapsedMs} live={live} /> : null}
+        {liveHeadline && currentActivity?.notice
+          ? <span class={`hint${currentActivity.error ? ' turn-stop-error' : ''}`}
+              role={currentActivity.error ? 'alert' : 'status'} title={headlineSummary(liveHeadline)}
+            ><StepHeadlineContent headline={liveHeadline} /></span>
+          : liveHeadline && showTechnicalStatus
           ? <button
               type="button"
               class="hint trace-preview"
@@ -1183,35 +1228,9 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
               title={traceView.expanded ? 'Hide activity' : 'Show latest activity'}
               onClick={toggleFromPreview}
             ><StepHeadlineContent headline={liveHeadline} /></button>
-          : live && view.status ? <span class="hint">{view.status}</span> : null}
+          : liveHeadline ? <span class="hint"><StepHeadlineContent headline={liveHeadline} /></span>
+          : status && settled ? <span class="hint">{view.note ?? 'Done'}</span> : null}
       </div>
-      {status && settled && view.note ? <div class="turn-stop-note">{view.note}</div> : null}
-      {showTechnicalStatus
-        ? <ActivityTracePanel
-            lines={lines}
-            expanded={traceView.expanded}
-            live={!settled}
-            now={endedAt ?? now}
-            ownerId={ownerId}
-            following={traceView.following}
-          />
-        : null}
-      {showTechnicalStatus && (status || lines.length) ? <div class="meta">
-        <ActivityTraceToggle count={lines.length} expanded={traceView.expanded} onToggle={toggleFromCount} />
-        {status ? <TurnStats turn={turn} view={view} /> : null}
-      </div> : null}
-    </div>
-  );
-}
-
-function ActiveTurnNotices() {
-  const notices = activeTurnNotices(activeTurn.value, turnConnected.value, stopRequest.value);
-  if (!notices.length) return null;
-  return (
-    <div class="turn-notices">
-      {notices.map((notice) => <div key={notice.text}
-        class={notice.error ? 'turn-stop-error' : 'turn-stop-note'}
-        role={notice.error ? 'alert' : 'status'}>{notice.text}</div>)}
     </div>
   );
 }
@@ -1511,7 +1530,6 @@ function MessageLog() {
                 })}
         {!chatLoading.value && queued.map((message) => <Message key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
         <TaskIndicator />
-        {!chatLoading.value && <ActiveTurnNotices />}
       </div>
       <ScrollNavigationButtons
         direction={scrollDirection}
@@ -1712,7 +1730,7 @@ export function Composer() {
           title="Tap to stop recording"
         >
           <span class="recording-dot"></span>
-          <span class="recording-time">{formatRecordingDuration(recordingDuration.value)}</span>
+          <span class="recording-time">{formatElapsedDuration(recordingDuration.value)}</span>
           <span class="recording-stop-label">Stop</span>
         </button>
       )}

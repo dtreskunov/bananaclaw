@@ -61,7 +61,7 @@ describe('whole-turn activity presentation', () => {
     expect(JSON.stringify(shuffled)).toBe(before);
   });
 
-  it('represents every builtin call once and adds only turn completion', () => {
+  it('represents every builtin call once followed by a completed Done marker', () => {
     const activity = [...BUILTIN_TOOL_PRESENTATIONS.keys()].map((tool, ordinal) => ({
       ordinal,
       ts: String(ordinal),
@@ -73,7 +73,7 @@ describe('whole-turn activity presentation', () => {
       activity.map((line) => `call-${line.ordinal}`),
     );
     expect(steps.filter((step) => step.kind !== 'tool')).toEqual([
-      { kind: 'notification', id: 'ui:done:turn', text: 'Done' },
+      { kind: 'notification', id: 'ui:done:turn', text: 'Done', status: 'completed' },
     ]);
   });
 
@@ -92,6 +92,7 @@ describe('whole-turn activity presentation', () => {
         kind: 'notification',
         id: 'ui:done:turn',
         text: 'Done',
+        status: 'completed',
       });
       expect(lines.at(-1)!.ts).toBe(String(Date.parse(settled.endedAt)));
       expect(conversationActivity(settled)).toEqual(lines);
@@ -100,10 +101,23 @@ describe('whole-turn activity presentation', () => {
     },
   );
 
-  it('retains Done for an outputless turn without recorded activities or timestamps', () => {
+  it('retains only Done for an outputless settled turn without recorded activities or timestamps', () => {
     const lines = conversationActivity({ ...turn, phase: 'settled', outcome: 'silent', activity: [] });
     expect(lines).toHaveLength(1);
     expect(lines[0].ts).toBe('');
     expect(stepHeadline(parseStep(lines[0].text))).toEqual({ action: 'Done' });
   });
+
+  it.each(['running', 'stopping', 'settling', 'settled'] as const)(
+    'does not retain historical Thinking while %s or change the journal',
+    (phase) => {
+      const startedAt = '2026-10-05T20:07:00Z';
+      const value = { ...turn, phase, startedAt };
+      const before = JSON.stringify(value);
+      const lines = conversationActivity(value);
+      expect(lines[0]).toEqual(turn.activity[0]);
+      expect(lines.filter((line) => parseStep(line.text).text === 'Thinking…')).toHaveLength(0);
+      expect(JSON.stringify(value)).toBe(before);
+    },
+  );
 });

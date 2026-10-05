@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage, ConversationTurn } from '../../../shared/conversation';
 import { testSnapshot, testTurn } from './conversation-test-fixtures';
-import { activeTurnNotices, turnRowView } from './turn-row';
+import { activeTurnNotices, currentActivityHeadline, liveTurnActivity, turnRowView } from './turn-row';
+import {
+  activityChapters,
+  headlineSummary,
+  parseStep,
+  stepHeadline,
+  traceStatusClass,
+  type TraceLine,
+  type TraceStep,
+} from '../../../shared/activity-presentation';
+import { conversationActivity } from '../../../shared/conversation-activity';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 const { conversationPresentation } = await import('./conversation-state');
@@ -19,10 +29,164 @@ const settled = (partial: Partial<ConversationTurn> = {}): ConversationTurn => (
   ...partial,
 });
 
+describe('current activity headline', () => {
+  const line = (step: TraceStep): TraceLine => ({ ts: '1000', text: JSON.stringify(step) });
+  const tool: TraceStep = { kind: 'tool', id: 'call', tool: 'bash', detail: 'pnpm test' };
+
+  it.each(['completed', 'error', 'interrupted', 'unknown', undefined] as const)(
+    'returns to Thinking after a tool becomes %s without changing its trace record',
+    (status) => {
+      const lines = [line({ ...tool, status })];
+      const before = JSON.stringify(lines);
+      expect(currentActivityHeadline(lines)).toEqual({ action: 'Thinking…' });
+      expect(JSON.stringify(lines)).toBe(before);
+    },
+  );
+
+  it('keeps running and pending activities current', () => {
+    expect(currentActivityHeadline([line({ ...tool, status: 'running' })])).toEqual({
+      action: 'Running',
+      subject: 'pnpm test',
+      codeSubject: true,
+    });
+    expect(currentActivityHeadline([line({ ...tool, status: 'pending' })])).toEqual({
+      action: 'Queued',
+      subject: 'pnpm test',
+      codeSubject: true,
+    });
+  });
+
+  it('keeps an earlier parallel activity current when a later activity has completed', () => {
+    expect(
+      currentActivityHeadline([
+        line({ ...tool, status: 'running' }),
+        line({ kind: 'tool', id: 'other', tool: 'read', detail: 'file.ts', status: 'completed' }),
+        line({ kind: 'notification', id: 'steering', text: 'Steering message injected' }),
+      ]),
+    ).toEqual({ action: 'Running', subject: 'pnpm test', codeSubject: true });
+  });
+
+  it.each(['completed', 'error', 'interrupted', 'unknown'] as const)(
+    'does not revive a stale running entry when the same activity is now %s',
+    (status) => {
+      expect(currentActivityHeadline([line({ ...tool, status: 'running' }), line({ ...tool, status })])).toEqual({
+        action: 'Thinking…',
+      });
+    },
+  );
+
+  it('returns to Thinking after compaction finishes', () => {
+    const compaction: TraceStep = { kind: 'compaction', id: 'compact', auto: true, status: 'running' };
+    expect(currentActivityHeadline([line(compaction)])).toEqual({ action: 'Compacting context' });
+    expect(currentActivityHeadline([line({ ...compaction, status: 'completed' })])).toEqual({ action: 'Thinking…' });
+  });
+
+  it('does not keep instantaneous notifications, retries or legacy text current indefinitely', () => {
+    expect(currentActivityHeadline([])).toEqual({ action: 'Thinking…' });
+    expect(
+      currentActivityHeadline([
+        line({ kind: 'notification', id: 'thinking', text: 'Thinking' }),
+        line({ kind: 'retry', id: 'retry', attempt: 2 }),
+        { ts: '1000', text: 'Earlier work' },
+      ]),
+    ).toEqual({ action: 'Thinking…' });
+  });
+
+  it('never treats a synthetic running Thinking marker as actual active work', () => {
+    expect(
+      currentActivityHeadline([
+        line({ ...tool, id: 'ui:current:tool', status: 'running' }),
+        line({ kind: 'notification', id: 'ui:current:turn', text: 'Thinking…', status: 'running' }),
+      ]),
+    ).toEqual({ action: 'Running', subject: 'pnpm test', codeSubject: true });
+  });
+});
+
+describe('live status and trailing trace entry', () => {
+  const line = (step: TraceStep): TraceLine => ({ ts: '1000', text: JSON.stringify(step) });
+  const initial = conversationActivity({ ...testTurn, activity: [], startedAt: null });
+  const finished = line({ kind: 'tool', id: 'call', tool: 'bash', status: 'completed', detail: 'pnpm test' });
+  const running = line({ kind: 'tool', id: 'next', tool: 'read', status: 'running', detail: 'file.ts' });
+
+  it('projects one blue initial Thinking… marker without changing source activity', () => {
+    const result = liveTurnActivity(testTurn, initial, true, null)!;
+    expect(initial).toEqual([]);
+    expect(result.lines).toHaveLength(1);
+    expect(traceStatusClass(parseStep(result.lines[0].text))).toBe('trace-status-running');
+    expect(result.headline).toEqual({ action: 'Thinking…' });
+  });
+
+  it('adds only a transient trailing Thinking… marker after completion and removes it on resumed activity', () => {
+    const lines = [...initial, finished];
+    const before = JSON.stringify(lines);
+    const result = liveTurnActivity(testTurn, lines, true, null)!;
+    expect(result.lines.slice(0, -1)).toEqual(lines);
+    expect(parseStep(result.lines.at(-1)!.text)).toEqual({
+      kind: 'notification',
+      id: `ui:current:${testTurn.id}`,
+      text: 'Thinking…',
+      status: 'running',
+    });
+    expect(result.lines.at(-1)!.ts).toBe('');
+    expect(result.headline).toEqual(stepHeadline(parseStep(result.lines.at(-1)!.text)));
+    expect(liveTurnActivity(testTurn, lines, true, null)).toEqual(result);
+    expect(result.lines.filter((entry) => parseStep(entry.text).text === 'Thinking…')).toHaveLength(1);
+    const resumed = [...lines, running];
+    expect(liveTurnActivity(testTurn, resumed, true, null)!.lines).toBe(resumed);
+    expect(JSON.stringify(lines)).toBe(before);
+  });
+
+  it('matches the last visible entry even when parallel or grouped activity hides the current caption', () => {
+    for (const lines of [
+      [...initial, running, finished],
+      [...initial, running, line({ kind: 'tool', id: 'other', tool: 'read', status: 'running', detail: 'other.ts' })],
+    ]) {
+      const result = liveTurnActivity(testTurn, lines, true, null)!;
+      expect(result.lines.slice(0, -1)).toEqual(lines);
+      expect(activityChapters(result.lines, true).at(-1)!.title).toBe(headlineSummary(result.headline));
+      expect(parseStep(result.lines.at(-1)!.text).id).toBe(`ui:current:${testTurn.id}`);
+    }
+  });
+
+  it.each([
+    { phase: 'stopping' as const, connected: true, error: '', text: 'Stopping…' },
+    { phase: 'running' as const, connected: false, error: '', text: 'Runner disconnected' },
+    { phase: 'running' as const, connected: true, error: 'Stop failed.', text: 'Stop failed.' },
+    { phase: 'stopping' as const, connected: true, error: 'Stop failed.', text: 'Stop failed. · Stopping…' },
+  ])('puts $text in both the status slot and the trailing trace marker', ({ phase, connected, error, text }) => {
+    const lines = [...initial, running];
+    const result = liveTurnActivity(
+      { ...testTurn, phase },
+      lines,
+      connected,
+      error ? { turnId: testTurn.id, error } : null,
+    )!;
+    expect(result.headline).toEqual({ action: text });
+    expect(result).toMatchObject({ notice: true, error: !!error });
+    expect(activityChapters(result.lines, true).at(-1)!.title).toBe(text);
+    expect(result.lines.slice(0, -1)).toEqual(lines);
+    expect(traceStatusClass(parseStep(result.lines.at(-1)!.text))).toBe(
+      error ? 'trace-status-failed' : connected ? 'trace-status-running' : 'trace-status-interrupted',
+    );
+  });
+
+  it('ignores stale Stop errors and never adds a current-state marker after settlement', () => {
+    expect(liveTurnActivity(testTurn, initial, true, { turnId: 'other', error: 'Old error.' })!.headline).toEqual({
+      action: 'Thinking…',
+    });
+    expect(
+      liveTurnActivity({ ...testTurn, phase: 'settled' }, initial, false, {
+        turnId: testTurn.id,
+        error: 'Stop failed.',
+      }),
+    ).toBeNull();
+  });
+});
+
 describe('active turn notices', () => {
   const turn = { id: 'active', status: 'running' as const };
   it('shows the concise disconnect notice only while an active runner is disconnected', () => {
-    expect(activeTurnNotices(turn, false, null)).toEqual([{ text: 'Runner disconnected.', error: false }]);
+    expect(activeTurnNotices(turn, false, null)).toEqual([{ text: 'Runner disconnected', error: false }]);
     expect(activeTurnNotices(turn, true, null)).toEqual([]);
     expect(activeTurnNotices(null, false, null)).toEqual([]);
   });
@@ -34,7 +198,7 @@ describe('active turn notices', () => {
       { text: 'Stop failed.', error: true },
     ]);
     expect(activeTurnNotices(turn, false, { turnId: 'previous', error: 'Old error.' })).toEqual([
-      { text: 'Runner disconnected.', error: false },
+      { text: 'Runner disconnected', error: false },
     ]);
   });
 });
@@ -42,17 +206,17 @@ describe('active turn notices', () => {
 describe('turn row presentation', () => {
   it('ticks elapsed time live while running and strips stale checkpoint timing from usage', () => {
     const turn = { ...testTurn, usage: [usage] };
-    expect(turnRowView(turn, start + 7000)).toMatchObject({ elapsedMs: 7000, status: 'Working…', note: null });
+    expect(turnRowView(turn, start + 7000)).toMatchObject({ elapsedMs: 7000, status: 'Thinking…', note: null });
     expect(turnRowView(turn, start + 9000).elapsedMs).toBe(9000);
     expect(turnRowView(turn, start).usage[0].value).toMatchObject({ duration_ms: undefined, model: undefined });
-    expect(turnRowView(turn, start).showTiming).toBe(true);
+    expect(turnRowView(turn, start).showModel).toBe(true);
   });
 
-  it('shows settled timing once, through the usage summary when there is one', () => {
+  it('keeps settled elapsed time separate from model and usage metadata', () => {
     const view = turnRowView(settled({ usage: [usage] }), start + 60_000);
-    expect(view).toMatchObject({ elapsedMs: 5000, showTiming: false, showTokensUnavailable: false, status: null });
+    expect(view).toMatchObject({ elapsedMs: 5000, showModel: false, showTokensUnavailable: false, status: null });
     expect(view.usage).toEqual([usage]);
-    expect(turnRowView(settled(), 0)).toMatchObject({ showTiming: true, showTokensUnavailable: true });
+    expect(turnRowView(settled(), 0)).toMatchObject({ showModel: true, showTokensUnavailable: true });
   });
 
   it('keeps settling live without flashing a finalization notice or settled accounting', () => {
@@ -62,7 +226,7 @@ describe('turn row presentation', () => {
       status: null,
       note: null,
       elapsedMs: 7000,
-      showTiming: true,
+      showModel: true,
       showTokensUnavailable: false,
     });
     expect(turnRowView(turn, start).usage[0].value).toMatchObject({ duration_ms: undefined, model: undefined });
@@ -150,14 +314,14 @@ describe('turn activity placement', () => {
       row.kind === 'message'
         ? {
             id: row.message.id,
-            lines: row.message.activity?.map((line) => (line.text.includes('"text":"Done"') ? 'Done' : line.text)),
+            lines: row.message.activity?.map((line) => parseStep(line.text).text ?? line.text),
             status: false,
             stats: row.message.statsTurn?.id,
           }
         : row.kind === 'turn'
           ? {
               id: `trace:${row.turn.id}:after:${row.afterId}`,
-              lines: row.activity.map((line) => (line.text.includes('"text":"Done"') ? 'Done' : line.text)),
+              lines: row.activity.map((line) => parseStep(line.text).text ?? line.text),
               status: row.status,
               stats: undefined,
             }

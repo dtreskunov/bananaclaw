@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
 import { ComposerInput } from './ComposerInput';
@@ -6,6 +6,7 @@ import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { PendingMessageActions } from './PendingMessageActions';
 import {
   activeTurn,
+  stopRequest,
   turnConnected,
   groupId,
   threadId,
@@ -52,11 +53,11 @@ vi.mock('preact/hooks', () => ({
   },
   useState: (initial: unknown) => {
     const index = hooks.cursor++;
-    hooks.slots[index] ??= { value: initial };
+    hooks.slots[index] ??= { value: typeof initial === 'function' ? initial() : initial };
     return [
       hooks.slots[index].value,
       (value: unknown) => {
-        hooks.slots[index].value = value;
+        hooks.slots[index].value = typeof value === 'function' ? value(hooks.slots[index].value) : value;
       },
     ];
   },
@@ -105,6 +106,10 @@ function findComponent(node: any, name: string): any {
       if (result) return result;
     }
   }
+}
+function renderTechnicalDetails(node: unknown) {
+  const details = findComponent(node, 'TurnTechnicalDetails');
+  return details?.type(details.props);
 }
 function render() {
   hooks.cursor = 0;
@@ -820,7 +825,7 @@ describe('main composer pending edits', () => {
   });
 
   it.each([false, true])(
-    'places Stop between the bouncing dots and label with technical information %s',
+    'shows initial Thinking with a bottom stopwatch and optional top technical line (%s)',
     (technical) => {
       appearance.value = {
         ...appearance.peek(),
@@ -828,7 +833,275 @@ describe('main composer pending edits', () => {
       };
       applyConversationFrame(
         testSnapshot({
-          turns: [testTurn],
+          turns: [{ ...testTurn, activity: [], startedAt: new Date(Date.now() - 7000).toISOString() }],
+          connection: { connected: true, activeTurnId: testTurn.id },
+        }),
+        'thread',
+      );
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const turnRow = findComponent(log.type(log.props), 'ConversationTurnRow');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const row = turnRow.type(turnRow.props);
+      const [header, footer] = row.props.children;
+      expect(!!header).toBe(technical);
+      if (technical) {
+        expect(header.type.name).toBe('TurnTechnicalDetails');
+        const details = renderTechnicalDetails(row);
+        const info = findComponent(details, 'TurnTechnicalInfo');
+        expect(info.props.count).toBe(0);
+        const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
+        expect(toggle.type(toggle.props)).toBeNull();
+        expect(findComponent(details, 'TurnElapsed')).toBeUndefined();
+      }
+      const headline = footer.props.children.filter(Boolean).at(-1).props.children;
+      expect(headline.type(headline.props).props.children).toContain('Thinking…');
+    },
+  );
+
+  it.each([false, true])('returns to Thinking after activity finishes with technical information %s', (technical) => {
+    appearance.value = {
+      ...appearance.peek(),
+      preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+    };
+    for (const phase of ['running', 'stopping', 'settling'] as const) {
+      resetConversation();
+      const activity = [
+        {
+          ordinal: 0,
+          timelinePosition: 100,
+          ts: '1000',
+          text: JSON.stringify({
+            kind: 'tool',
+            id: 'completed-call',
+            tool: 'bash',
+            status: 'completed',
+            detail: 'pnpm test',
+          }),
+        },
+      ];
+      applyConversationFrame(
+        testSnapshot({
+          turns: [{ ...testTurn, phase, activity }],
+          connection: { connected: true, activeTurnId: testTurn.id },
+        }),
+        'thread',
+      );
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const turnRow = findComponent(log.type(log.props), 'ConversationTurnRow');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const row = turnRow.type(turnRow.props);
+      const headline = row.props.children.at(-1).props.children.filter(Boolean).at(-1).props.children;
+      const expected = phase === 'stopping' ? 'Stopping…' : 'Thinking…';
+      expect(headline.type(headline.props).props.children).toContain(expected);
+      if (technical) {
+        const details = renderTechnicalDetails(row);
+        expect(findComponent(details, 'TurnTechnicalInfo').props.count).toBe(1);
+        const panel = findComponent(details, 'ActivityTracePanel');
+        expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(expected);
+        expect(panel.props.lines).toHaveLength(2);
+      }
+      expect(turnRow.props.turn.activity).toEqual(activity);
+      expect(turnRow.props.lines).toHaveLength(1);
+    }
+  });
+
+  it.each([false, true])('keeps stopping, disconnect and Stop errors inside the regular footer (%s)', (technical) => {
+    appearance.value = {
+      ...appearance.peek(),
+      preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+    };
+    for (const notice of [
+      { phase: 'stopping' as const, connected: true, error: '', text: 'Stopping…' },
+      { phase: 'running' as const, connected: false, error: '', text: 'Runner disconnected' },
+      { phase: 'running' as const, connected: true, error: 'Stop failed.', text: 'Stop failed.' },
+    ]) {
+      resetConversation();
+      applyConversationFrame(
+        testSnapshot({
+          turns: [{ ...testTurn, phase: notice.phase, activity: [] }],
+          connection: { connected: notice.connected, activeTurnId: testTurn.id },
+        }),
+        'thread',
+      );
+      stopRequest.value = notice.error ? { turnId: testTurn.id, busy: false, error: notice.error } : null;
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const turnRow = findComponent(log.type(log.props), 'ConversationTurnRow');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const row = turnRow.type(turnRow.props);
+      const caption = row.props.children.at(-1).props.children.filter(Boolean).at(-1);
+      expect(caption.type).toBe('span');
+      expect(caption.props.role).toBe(notice.error ? 'alert' : 'status');
+      expect(caption.props.children.type(caption.props.children.props).props.children).toContain(notice.text);
+      if (technical) {
+        const details = renderTechnicalDetails(row);
+        const info = findComponent(details, 'TurnTechnicalInfo');
+        expect(info.props.count).toBe(0);
+        const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
+        expect(toggle.type(toggle.props)).toBeNull();
+        const panel = findComponent(details, 'ActivityTracePanel');
+        expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(notice.text);
+      }
+    }
+  });
+
+  it.each([false, true].flatMap((technical) => [false, true].map((recorded) => ({ technical, recorded }))))(
+    'keeps settled elapsed time in the footer and a shared technical block at the top ($technical, recorded steps $recorded)',
+    ({ technical, recorded }) => {
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
+      applyConversationFrame(
+        testSnapshot({
+          messages: [
+            {
+              id: 'settled-reply',
+              direction: 'out',
+              text: 'Reply',
+              timestamp: '2026-09-29T00:00:02Z',
+              timelinePosition: 200,
+              turnId: testTurn.id,
+            },
+          ],
+          turns: [
+            {
+              ...testTurn,
+              phase: 'settled',
+              outcome: 'replied',
+              outputIds: ['settled-reply'],
+              activity: recorded ? testTurn.activity : [],
+              metadata: { status: 'final', model: 'fixture-model', durationMs: 6500 },
+            },
+          ],
+          connection: { connected: true, activeTurnId: null },
+        }),
+        'thread',
+      );
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const messageNode = findComponent(log.type(log.props), 'Message');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const row = messageNode.type(messageNode.props);
+      const [header] = row.props.children;
+      expect(!!header).toBe(technical);
+      if (technical) {
+        expect(header.type.name).toBe('TurnTechnicalDetails');
+        const details = renderTechnicalDetails(row);
+        expect(details.props.class).toBe('turn-technical-details');
+        const [info, panel] = details.props.children;
+        expect(info.type.name).toBe('TurnTechnicalInfo');
+        expect(panel.type.name).toBe('ActivityTracePanel');
+        expect(info.props.count).toBe(recorded ? 1 : 0);
+        const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
+        expect(!!toggle.type(toggle.props)).toBe(recorded);
+        expect(findComponent(details, 'TurnElapsed')).toBeUndefined();
+      }
+      const footer = row.props.children.at(-1);
+      expect(footer.props.class).toBe('meta turn-info');
+      const info = findComponent(footer, 'ReplyTurnInfo');
+      const elapsed = findComponent(info.type(info.props), 'TurnElapsed');
+      expect(elapsed.props.elapsedMs).toBe(6500);
+      const stopwatch = elapsed.type(elapsed.props);
+      expect(stopwatch.props.children).toBe('0:06');
+      expect(stopwatch.props.role).toBeUndefined();
+    },
+  );
+
+  it.each([false, true].flatMap((technical) => [false, true].map((recorded) => ({ technical, recorded }))))(
+    'groups settled card technical information and trace before content ($technical, recorded steps $recorded)',
+    ({ technical, recorded }) => {
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
+      applyConversationFrame(
+        testSnapshot({
+          messages: [
+            {
+              id: 'settled-card',
+              direction: 'out',
+              text: '',
+              timestamp: '2026-09-29T00:00:02Z',
+              timelinePosition: 200,
+              turnId: testTurn.id,
+              deliveryOrigin: 'response',
+              card: { title: 'Card title', description: 'Card content', children: [], actions: [] },
+            },
+          ],
+          turns: [
+            {
+              ...testTurn,
+              phase: 'settled',
+              outcome: 'replied',
+              outputIds: ['settled-card'],
+              activity: recorded ? testTurn.activity : [],
+              metadata: { status: 'final', model: 'fixture-model', durationMs: 6500 },
+            },
+          ],
+          connection: { connected: true, activeTurnId: null },
+        }),
+        'thread',
+      );
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const messageNode = findComponent(log.type(log.props), 'Message');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const cardNode = messageNode.type(messageNode.props);
+      const row = cardNode.type(cardNode.props);
+      const [technicalBlock, title] = row.props.children;
+      expect(!!technicalBlock).toBe(technical);
+      if (technical) {
+        expect(technicalBlock.type.name).toBe('TurnTechnicalDetails');
+        const details = renderTechnicalDetails(row);
+        expect(details.props.class).toBe('turn-technical-details');
+        const [header, trace] = details.props.children;
+        expect(header.type.name).toBe('TurnTechnicalInfo');
+        expect(trace.type.name).toBe('ActivityTracePanel');
+        expect(header.props.count).toBe(recorded ? 1 : 0);
+        const toggle = findComponent(header.type(header.props), 'ActivityTraceToggle');
+        expect(!!toggle.type(toggle.props)).toBe(recorded);
+        expect(JSON.parse(trace.props.lines.at(-1).text)).toMatchObject({ text: 'Done', status: 'completed' });
+      }
+      expect(title.props.class).toBe('display-card-title');
+      expect(findComponent(row.props.children.at(-1), 'ReplyTurnInfo')).toBeTruthy();
+    },
+  );
+
+  it.each([false, true])(
+    'keeps dots, Stop, stopwatch and current activity in the footer with technical information %s',
+    (technical) => {
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+      onTestFinished(() => clock.mockRestore());
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
+      applyConversationFrame(
+        testSnapshot({
+          turns: [{ ...testTurn, startedAt: new Date(Date.now() - 7000).toISOString() }],
           connection: { connected: true, activeTurnId: testTurn.id },
         }),
         'thread',
@@ -843,21 +1116,30 @@ describe('main composer pending edits', () => {
       hooks.cursor = 0;
       const row = turnRow.type(turnRow.props);
       expect(row.props.class).toContain('turn-live');
-      const summary = row.props.children[0];
+      const summary = row.props.children.at(-1);
       const controls = summary.props.children.filter(Boolean);
-      expect(controls.map((node: any) => node.props.class)).toEqual([
+      expect(controls.map((node: { props: { class?: string } }) => node.props.class)).toEqual([
         'typing-dots',
         'msg-inline-actions turn-stop-inline',
+        undefined,
         technical ? 'hint trace-preview' : 'hint',
       ]);
       expect(controls[0].props.children).toHaveLength(3);
       expect(controls[0].props['aria-hidden']).toBe('true');
       expect(findComponent(controls[1], 'ActiveTurnStopButton')).toBeTruthy();
-      expect(controls[2].type).toBe(technical ? 'button' : 'span');
+      expect(controls[2].type.name).toBe('TurnElapsed');
+      expect(controls[2].props.elapsedMs).toBeGreaterThanOrEqual(7000);
+      const stopwatch = controls[2].type(controls[2].props);
+      expect(stopwatch.props.children).toBe('0:07');
+      expect(stopwatch.props['aria-live']).toBe('off');
+      expect(controls[3].type).toBe(technical ? 'button' : 'span');
+      expect(findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo') !== undefined).toBe(technical);
       hooks.slots = [];
       hooks.cursor = 0;
       const settled = turnRow.type({ ...turnRow.props, turn: { ...testTurn, phase: 'settled', outcome: 'silent' } });
       expect(settled?.props.class ?? '').not.toContain('turn-live');
+      const footer = settled.props.children.at(-1);
+      expect(footer.props.children.filter(Boolean).at(-1).props.children).toBe('No reply');
     },
   );
 

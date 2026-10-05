@@ -2548,7 +2548,7 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
   white-space: nowrap;
 }
-.chat-main .meta > span:not(.ts):not(.msg-inline-actions):not(.usage-wrap) {
+.chat-main .meta > span:not(.ts):not(.msg-inline-actions):not(.usage-wrap):not(.delivery-origin) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2562,6 +2562,10 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .msg .delivery-origin {
   font-style: italic;
+}
+.chat-main .msg .meta > .delivery-origin {
+  flex: none;
+  overflow: visible;
 }
 .chat-main .message-actions {
   display: flex;
@@ -2676,6 +2680,41 @@ nav.tab-bar-strip.group-strip {
   text-align: right;
   overflow-wrap: anywhere;
 }
+.chat-main .turn-tech-info {
+  position: relative;
+}
+.chat-main .turn-technical-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.chat-main .msg:not(.display-card) > .turn-technical-details {
+  margin-bottom: var(--text-block-gap);
+}
+.chat-main .turn-technical-details > .meta.turn-tech-info {
+  margin: 0;
+  min-height: 0;
+}
+.chat-main .turn-technical-details > .msg-activity {
+  margin-top: 0;
+}
+.chat-main .turn-tech-info .usage-wrap {
+  position: static;
+}
+.chat-main .turn-tech-info .usage-popover {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+.chat-main .turn-elapsed {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--font-2xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .chat-main .msg.markdown {
   white-space: normal;
 }
@@ -2785,21 +2824,6 @@ nav.tab-bar-strip.group-strip {
 .chat-main .typing .meta {
   width: 100%;
 }
-.chat-main .typing .turn-stop-error,
-.chat-main .turn-notices .turn-stop-error {
-  color: var(--danger, #b42318);
-  font-size: var(--font-xs);
-  max-width: 44ch;
-}
-.chat-main .typing .turn-stop-note {
-  color: var(--muted);
-  font-size: var(--font-xs);
-}
-.chat-main .turn-notices {
-  padding-inline: var(--message-padding-inline);
-  color: var(--muted);
-  font-size: var(--font-xs);
-}
 .chat-main .typing .typing-dots {
   display: inline-flex;
   align-items: center;
@@ -2824,12 +2848,15 @@ nav.tab-bar-strip.group-strip {
   flex: 1;
   font-size: var(--font-xs);
   color: var(--muted);
-  font-style: italic;
+  font-style: normal;
   margin-left: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+.chat-main .typing .hint.turn-stop-error {
+  color: var(--danger, #b42318);
 }
 .chat-main .typing .trace-preview {
   padding: 0;
@@ -2837,7 +2864,6 @@ nav.tab-bar-strip.group-strip {
   background: none;
   color: var(--muted);
   font-family: var(--font-ui);
-  font-size: var(--font-2xs);
   font-style: normal;
   text-align: left;
   cursor: pointer;

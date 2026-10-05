@@ -1,0 +1,40 @@
+#fixture-root {
+  height: 100dvh;
+}
+.turn-status-fixture {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.turn-status-fixture-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--font-sm);
+}
+.turn-status-fixture-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.turn-status-fixture-controls select,
+.turn-status-fixture-controls button {
+  min-height: 32px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.turn-status-fixture-controls p {
+  width: 100%;
+  margin: 0;
+  color: var(--muted);
+}

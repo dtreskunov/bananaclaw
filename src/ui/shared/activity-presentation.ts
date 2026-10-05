@@ -101,6 +101,14 @@ export function parseStep(text: string): TraceStep {
   }
 }
 
+export function isSyntheticTraceStep(step: TraceStep): boolean {
+  return step.kind === 'notification' && /^ui:(current|done|thinking):/.test(step.id ?? '');
+}
+
+export function activityStepCount(lines: readonly TraceLine[]): number {
+  return lines.reduce((count, line) => count + (isSyntheticTraceStep(parseStep(line.text)) ? 0 : 1), 0);
+}
+
 export function cleanToolName(tool: string): string {
   if (tool.toLowerCase().startsWith('nanoclaw_'))
     return `nanoclaw.${tool.slice('nanoclaw_'.length).replace(/^_/, '')}`.toLowerCase();
@@ -452,8 +460,8 @@ function chapterHeadline(category: string, entries: TraceEntry[]): StepHeadline 
 
 export function traceStatus(step: TraceStep): TraceStatus {
   if (step.kind === 'retry') return 'queued';
-  if (step.kind !== 'tool' && step.kind !== 'compaction') return 'neutral';
-  if (step.kind === 'compaction' && !step.status) return 'neutral';
+  if (step.kind !== 'tool' && step.kind !== 'compaction' && step.kind !== 'notification') return 'neutral';
+  if ((step.kind === 'compaction' || step.kind === 'notification') && !step.status) return 'neutral';
   return step.status === 'pending' ? 'queued' : step.status === 'error' ? 'failed' : step.status || 'unknown';
 }
 
@@ -469,7 +477,8 @@ export function activityLineId(line: TraceLine, index: number): string {
 
 export function displayStep(line: TraceLine, live: boolean): TraceStep {
   const step = parseStep(line.text);
-  return (step.kind === 'tool' || (step.kind === 'compaction' && step.status !== undefined)) &&
+  return (step.kind === 'tool' ||
+    ((step.kind === 'compaction' || step.kind === 'notification') && step.status !== undefined)) &&
     (!step.status || (!live && (step.status === 'pending' || step.status === 'running')))
     ? { ...step, status: 'unknown' }
     : step;

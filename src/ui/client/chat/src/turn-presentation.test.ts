@@ -74,7 +74,7 @@ describe('authoritative turn presentation', () => {
   it('resolves the supplied layout without parsing timestamps or fabricating messages', () => {
     const view = testSnapshot({
       messages: [{ id: 'input', direction: 'in', text: 'ask', timestamp: 'invalid', timelinePosition: 50 }],
-      turns: [{ ...testTurn, inputIds: ['input'], startedAt: 'invalid' }],
+      turns: [{ ...testTurn, inputIds: ['input'], startedAt: null }],
     }).conversation;
     const parse = vi.spyOn(Date, 'parse').mockImplementation(() => {
       throw new Error('Timestamp inference is forbidden');
@@ -157,7 +157,7 @@ describe('authoritative turn presentation', () => {
     expect(chatTranscript.value.find((row) => row.kind === 'turn')).toMatchObject({
       traceOwner: traceId,
       afterId: reply.id,
-      activity: testTurn.activity,
+      activity: [...testTurn.activity],
     });
     expect(activityTraceView(traceId, true).following).toBe(true);
 

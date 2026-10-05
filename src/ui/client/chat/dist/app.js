@@ -17692,12 +17692,21 @@ function timelineSortKey(timestamp, timelinePosition) {
 }
 
 // ../../shared/conversation-activity.ts
+var THINKING_TEXT = "Thinking\u2026";
+function completionMarker(turnId, timestamp) {
+  const step = {
+    kind: "notification",
+    id: `ui:done:${turnId}`,
+    text: "Done",
+    status: "completed"
+  };
+  const position2 = timestamp ? timelineSortKey(timestamp) : 0;
+  return { ts: position2 ? String(Math.floor(position2 / 1e3)) : "", text: JSON.stringify(step) };
+}
 function conversationActivity(turn2) {
   const lines = [...turn2.activity].sort((a4, b5) => a4.timelinePosition - b5.timelinePosition);
   if (turn2.phase === "settled") {
-    const step = { kind: "notification", id: `ui:done:${turn2.id}`, text: "Done" };
-    const position2 = timelineSortKey(turn2.endedAt ?? "");
-    lines.push({ ts: position2 ? String(Math.floor(position2 / 1e3)) : "", text: JSON.stringify(step) });
+    lines.push(completionMarker(turn2.id, turn2.endedAt));
   }
   return lines;
 }
@@ -21830,6 +21839,12 @@ function parseStep(text2) {
     return {};
   }
 }
+function isSyntheticTraceStep(step) {
+  return step.kind === "notification" && /^ui:(current|done|thinking):/.test(step.id ?? "");
+}
+function activityStepCount(lines) {
+  return lines.reduce((count, line) => count + (isSyntheticTraceStep(parseStep(line.text)) ? 0 : 1), 0);
+}
 function cleanToolName(tool) {
   if (tool.toLowerCase().startsWith("nanoclaw_"))
     return `nanoclaw.${tool.slice("nanoclaw_".length).replace(/^_/, "")}`.toLowerCase();
@@ -22105,8 +22120,8 @@ function chapterHeadline(category, entries) {
 }
 function traceStatus(step) {
   if (step.kind === "retry") return "queued";
-  if (step.kind !== "tool" && step.kind !== "compaction") return "neutral";
-  if (step.kind === "compaction" && !step.status) return "neutral";
+  if (step.kind !== "tool" && step.kind !== "compaction" && step.kind !== "notification") return "neutral";
+  if ((step.kind === "compaction" || step.kind === "notification") && !step.status) return "neutral";
   return step.status === "pending" ? "queued" : step.status === "error" ? "failed" : step.status || "unknown";
 }
 function traceStatusClass(step) {
@@ -22119,7 +22134,7 @@ function activityLineId(line, index) {
 }
 function displayStep(line, live) {
   const step = parseStep(line.text);
-  return (step.kind === "tool" || step.kind === "compaction" && step.status !== void 0) && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
+  return (step.kind === "tool" || (step.kind === "compaction" || step.kind === "notification") && step.status !== void 0) && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
 }
 function chapterCategory(step, index) {
   if (step.kind === "file" || step.kind === "tool" && toolKind(step) === "read") return "read";
@@ -22157,13 +22172,52 @@ function activityChapters(lines, live = false) {
 }
 
 // src/turn-row.ts
+function currentActivityHeadline(lines) {
+  const seen = /* @__PURE__ */ new Set();
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const step = parseStep(lines[index].text);
+    if (isSyntheticTraceStep(step)) continue;
+    if (step.id) {
+      const id2 = `${step.kind}:${step.id}`;
+      if (seen.has(id2)) continue;
+      seen.add(id2);
+    }
+    if (step.status !== "running" && step.status !== "pending") continue;
+    const headline = stepHeadline(step);
+    if (headline.action || headline.subject) return headline;
+  }
+  return { action: THINKING_TEXT };
+}
+function liveTurnActivity(turn2, lines, connected, stop) {
+  if (turn2.phase === "settled") return null;
+  const notices = activeTurnNotices({
+    id: turn2.id,
+    status: turn2.phase === "stopping" ? "stopping" : "running"
+  }, connected, stop);
+  const current = notices.length ? { action: notices.map((notice) => notice.text).join(" \xB7 ") } : currentActivityHeadline(lines);
+  const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
+  const last = activityChapters(lines, true).at(-1);
+  if (last?.title === headlineSummary(current)) return { lines, headline: current, ...presentation };
+  const marker = {
+    kind: "notification",
+    id: `ui:current:${turn2.id}`,
+    text: current.action,
+    status: presentation.error ? "error" : !connected ? "interrupted" : "running",
+    ...current.subject ? { detail: current.subject } : {}
+  };
+  return {
+    ...presentation,
+    lines: [...lines, { ts: "", text: JSON.stringify(marker) }],
+    headline: stepHeadline(marker)
+  };
+}
 function activeTurnNotices(turn2, connected, stop) {
   if (!turn2) return [];
   const error = stop?.turnId === turn2.id ? stop.error : "";
   const notices = [];
   if (error) notices.push({ text: error, error: true });
   if (turn2.status === "stopping") notices.push({ text: "Stopping\u2026", error: false });
-  if (!connected && !error) notices.push({ text: "Runner disconnected.", error: false });
+  if (!connected && !error) notices.push({ text: "Runner disconnected", error: false });
   return notices;
 }
 var OUTCOME_NOTES = {
@@ -22183,11 +22237,11 @@ function turnRowView(turn2, now) {
   const hasTiming = elapsedMs !== null || !!model;
   return {
     hidden: settled && !turn2.activity.length && !turn2.usage.length && !hasTiming && !note,
-    status: !settled && turn2.phase === "running" ? "Working\u2026" : null,
+    status: !settled && turn2.phase === "running" ? THINKING_TEXT : null,
     note,
     elapsedMs,
     model,
-    showTiming: !settled || !turn2.usage.length,
+    showModel: !settled || !turn2.usage.length,
     showTokensUnavailable: settled && !turn2.usage.length && hasTiming,
     // While running, the live line owns elapsed time and model; checkpointed values would be stale.
     usage: settled ? turn2.usage : turn2.usage.map(({ id: id2, value }) => ({ id: id2, value: { ...value, duration_ms: void 0, model: void 0 } }))
@@ -23225,7 +23279,7 @@ function formatDuration(ms) {
   if (ms < 1e4) return `${(ms / 1e3).toFixed(1)}s`;
   return `${Math.round(ms / 1e3)}s`;
 }
-function formatRecordingDuration(ms) {
+function formatElapsedDuration(ms) {
   const seconds = Math.floor(ms / 1e3);
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
@@ -23354,12 +23408,6 @@ function ActivityTraceList({ lines, live = false, now = null, following = false,
     ] }, chapter.id);
   }) });
 }
-function latestActivityHeadline(lines) {
-  if (!lines.length) return null;
-  const line = lines[lines.length - 1];
-  const headline = stepHeadline(parseStep(line.text));
-  return headline.action || headline.subject ? headline : { action: line.text };
-}
 function ActivityTraceToggle({ count, expanded, onToggle }) {
   if (!count) return null;
   return /* @__PURE__ */ u4(
@@ -23447,7 +23495,7 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false }
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
   const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
   const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
-  const short = live ? [estimatedCost, `${input} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [u5.cost_usd !== void 0 ? cost : "", dur, model, reported].filter(Boolean).join(" \xB7 ") : [provisional ? estimatedCost : cost, dur, model, ctx2].filter(Boolean).join(" \xB7 ");
+  const short = live ? [estimatedCost, `${input} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [u5.cost_usd !== void 0 ? cost : "", model, reported].filter(Boolean).join(" \xB7 ") : [provisional ? estimatedCost : cost, model, ctx2].filter(Boolean).join(" \xB7 ");
   const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
@@ -23662,8 +23710,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const mdRef = A2(null);
   const [continueState, setContinueState] = h2("idle");
   const traceOwner = activityTraceOwner(m6);
-  const traceView = activityTraceView(traceOwner, !!m6.turnTraceLive);
-  const toggleTrace = () => toggleActivityTrace(traceOwner);
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -23753,6 +23799,15 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
       "data-msg-id": m6.id,
       ref,
       children: [
+        showTechnicalStatus ? /* @__PURE__ */ u4(
+          TurnTechnicalDetails,
+          {
+            turn: m6.direction === "out" ? m6.statsTurn : void 0,
+            lines: activity,
+            ownerId: traceOwner,
+            live: m6.turnTraceLive
+          }
+        ) : null,
         m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
         m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
         md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, children: m6.text || "" }),
@@ -23807,20 +23862,9 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             children: continueState === "sent" ? "Sent" : continueState === "sending" ? action.sendingLabel : action.label
           }
         ) }) : null,
-        activity.length && showTechnicalStatus ? /* @__PURE__ */ u4(
-          ActivityTracePanel,
-          {
-            lines: activity,
-            expanded: traceView.expanded,
-            live: m6.turnTraceLive,
-            ownerId: traceOwner,
-            following: traceView.following
-          }
-        ) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
-        m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+        m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
           m6.ts && /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-          /* @__PURE__ */ u4(ActivityTraceToggle, { count: showTechnicalStatus ? activity.length : 0, expanded: traceView.expanded, onToggle: toggleTrace }),
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
           showsMidTurnLabel(
@@ -23828,11 +23872,10 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
           ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
           m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(
-            ReplyTurnStats,
+            ReplyTurnInfo,
             {
               turn: m6.statsTurn,
-              showOutcomeNote: !systemNotice,
-              showTechnicalDetails: showTechnicalStatus
+              showOutcomeNote: !systemNotice
             }
           ) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
@@ -23847,10 +23890,18 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
 }
 function DisplayCardMessage({ message: message2, card }) {
   const traceOwner = activityTraceOwner(message2);
-  const traceView = activityTraceView(traceOwner, !!message2.turnTraceLive);
   const activity = message2.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message2.id, children: [
+    showTechnicalStatus ? /* @__PURE__ */ u4(
+      TurnTechnicalDetails,
+      {
+        turn: message2.statsTurn,
+        lines: activity,
+        ownerId: traceOwner,
+        live: message2.turnTraceLive
+      }
+    ) : null,
     card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
     card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
     card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
@@ -23871,29 +23922,11 @@ function DisplayCardMessage({ message: message2, card }) {
       },
       `${action.label}:${action.url}`
     )) }) : null,
-    showTechnicalStatus ? /* @__PURE__ */ u4(
-      ActivityTracePanel,
-      {
-        lines: activity,
-        expanded: traceView.expanded,
-        live: message2.turnTraceLive,
-        ownerId: traceOwner,
-        following: traceView.following
-      }
-    ) : null,
     message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
-    message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta", children: [
+    message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
       message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
-      /* @__PURE__ */ u4(
-        ActivityTraceToggle,
-        {
-          count: showTechnicalStatus ? activity.length : 0,
-          expanded: traceView.expanded,
-          onToggle: () => toggleActivityTrace(traceOwner)
-        }
-      ),
       /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }),
-      message2.statsTurn ? /* @__PURE__ */ u4(ReplyTurnStats, { turn: message2.statsTurn, showTechnicalDetails: showTechnicalStatus }) : null
+      message2.statsTurn ? /* @__PURE__ */ u4(ReplyTurnInfo, { turn: message2.statsTurn }) : null
     ] }) : null
   ] });
 }
@@ -24097,9 +24130,8 @@ function TaskIndicator() {
   }) });
 }
 function TurnStats({ turn: turn2, view }) {
-  const metadata = [view.elapsedMs !== null ? fmtDur(view.elapsedMs) : "", view.model ? shortModel(view.model) : ""].filter(Boolean).join(" \xB7 ");
   return /* @__PURE__ */ u4(k, { children: [
-    view.showTiming && metadata ? /* @__PURE__ */ u4("span", { class: "typing-meta", children: metadata }) : null,
+    view.showModel && view.model ? /* @__PURE__ */ u4("span", { class: "typing-meta", children: shortModel(view.model) }) : null,
     view.usage.map((record) => /* @__PURE__ */ u4(
       UsageMeta,
       {
@@ -24113,15 +24145,71 @@ function TurnStats({ turn: turn2, view }) {
     view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null
   ] });
 }
-function ReplyTurnStats({
+function TurnTechnicalInfo({
   turn: turn2,
-  showOutcomeNote = true,
-  showTechnicalDetails = true
+  count,
+  expanded,
+  onToggle
+}) {
+  if (!turn2 && !count) return null;
+  return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
+    /* @__PURE__ */ u4(ActivityTraceToggle, { count, expanded, onToggle }),
+    turn2 ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view: turnRowView(turn2, Date.now()) }) : null
+  ] });
+}
+function TurnTechnicalDetails({
+  turn: turn2,
+  lines,
+  ownerId,
+  live = false,
+  now = null
+}) {
+  const traceView = activityTraceView(ownerId, live);
+  if (!turn2 && !lines.length) return null;
+  return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
+    /* @__PURE__ */ u4(
+      TurnTechnicalInfo,
+      {
+        turn: turn2,
+        count: activityStepCount(lines),
+        expanded: traceView.expanded,
+        onToggle: () => toggleActivityTrace(ownerId)
+      }
+    ),
+    /* @__PURE__ */ u4(
+      ActivityTracePanel,
+      {
+        lines,
+        expanded: traceView.expanded,
+        live,
+        now,
+        ownerId,
+        following: traceView.following
+      }
+    )
+  ] });
+}
+function TurnElapsed({ elapsedMs, live = false }) {
+  if (elapsedMs === null) return null;
+  return /* @__PURE__ */ u4(
+    "span",
+    {
+      class: "turn-elapsed",
+      role: live ? "timer" : void 0,
+      "aria-live": live ? "off" : void 0,
+      "aria-label": "Elapsed response time",
+      children: formatElapsedDuration(elapsedMs)
+    }
+  );
+}
+function ReplyTurnInfo({
+  turn: turn2,
+  showOutcomeNote = true
 }) {
   const view = turnRowView(turn2, Date.now());
   return /* @__PURE__ */ u4(k, { children: [
-    showOutcomeNote && view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null,
-    showTechnicalDetails ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
+    /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs }),
+    showOutcomeNote && view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null
   ] });
 }
 function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
@@ -24140,15 +24228,14 @@ function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
   const view = turnRowView(turn2, now);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const showStop = status && activeTurn.value?.id === turn2.id;
-  const liveHeadline = latestActivityHeadline(lines);
+  const currentActivity = live ? liveTurnActivity(turn2, lines, turnConnected.value, stop) : null;
+  const displayLines = currentActivity?.lines ?? lines;
+  const liveHeadline = currentActivity?.headline ?? null;
   const provenanceTone = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
   if (!lines.length && !status) return null;
-  if (settled && !showTechnicalStatus && !view.note && !stop?.error) return null;
+  if (!status && !showTechnicalStatus) return null;
   const toggleFromPreview = () => {
     toggleActivityTrace(ownerId, true);
-  };
-  const toggleFromCount = () => {
-    toggleActivityTrace(ownerId);
   };
   return /* @__PURE__ */ u4(
     "div",
@@ -24157,14 +24244,33 @@ function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
       "data-turn-id": status ? turn2.id : void 0,
       "aria-live": live ? "polite" : "off",
       children: [
-        /* @__PURE__ */ u4("div", { class: "typing-summary", children: [
+        showTechnicalStatus ? /* @__PURE__ */ u4(
+          TurnTechnicalDetails,
+          {
+            turn: status ? turn2 : void 0,
+            lines: displayLines,
+            live: !settled,
+            now: endedAt ?? now,
+            ownerId
+          }
+        ) : null,
+        /* @__PURE__ */ u4("div", { class: "typing-summary turn-info", children: [
           live ? /* @__PURE__ */ u4("div", { class: "typing-dots", "aria-hidden": "true", children: [
             /* @__PURE__ */ u4("span", {}),
             /* @__PURE__ */ u4("span", {}),
             /* @__PURE__ */ u4("span", {})
           ] }) : null,
           showStop ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null,
-          showTechnicalStatus && liveHeadline ? /* @__PURE__ */ u4(
+          status ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs, live }) : null,
+          liveHeadline && currentActivity?.notice ? /* @__PURE__ */ u4(
+            "span",
+            {
+              class: `hint${currentActivity.error ? " turn-stop-error" : ""}`,
+              role: currentActivity.error ? "alert" : "status",
+              title: headlineSummary(liveHeadline),
+              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
+            }
+          ) : liveHeadline && showTechnicalStatus ? /* @__PURE__ */ u4(
             "button",
             {
               type: "button",
@@ -24175,40 +24281,11 @@ function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
               onClick: toggleFromPreview,
               children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
             }
-          ) : live && view.status ? /* @__PURE__ */ u4("span", { class: "hint", children: view.status }) : null
-        ] }),
-        status && settled && view.note ? /* @__PURE__ */ u4("div", { class: "turn-stop-note", children: view.note }) : null,
-        showTechnicalStatus ? /* @__PURE__ */ u4(
-          ActivityTracePanel,
-          {
-            lines,
-            expanded: traceView.expanded,
-            live: !settled,
-            now: endedAt ?? now,
-            ownerId,
-            following: traceView.following
-          }
-        ) : null,
-        showTechnicalStatus && (status || lines.length) ? /* @__PURE__ */ u4("div", { class: "meta", children: [
-          /* @__PURE__ */ u4(ActivityTraceToggle, { count: lines.length, expanded: traceView.expanded, onToggle: toggleFromCount }),
-          status ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
-        ] }) : null
+          ) : liveHeadline ? /* @__PURE__ */ u4("span", { class: "hint", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline }) }) : status && settled ? /* @__PURE__ */ u4("span", { class: "hint", children: view.note ?? "Done" }) : null
+        ] })
       ]
     }
   );
-}
-function ActiveTurnNotices() {
-  const notices = activeTurnNotices(activeTurn.value, turnConnected.value, stopRequest.value);
-  if (!notices.length) return null;
-  return /* @__PURE__ */ u4("div", { class: "turn-notices", children: notices.map((notice) => /* @__PURE__ */ u4(
-    "div",
-    {
-      class: notice.error ? "turn-stop-error" : "turn-stop-note",
-      role: notice.error ? "alert" : "status",
-      children: notice.text
-    },
-    notice.text
-  )) });
 }
 function MessageLog() {
   const ref = A2(null);
@@ -24475,8 +24552,7 @@ function MessageLog() {
         ] });
       }),
       !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(Message, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
-      /* @__PURE__ */ u4(TaskIndicator, {}),
-      !chatLoading.value && /* @__PURE__ */ u4(ActiveTurnNotices, {})
+      /* @__PURE__ */ u4(TaskIndicator, {})
     ] }),
     /* @__PURE__ */ u4(
       ScrollNavigationButtons,
@@ -24666,7 +24742,7 @@ function Composer() {
               title: "Tap to stop recording",
               children: [
                 /* @__PURE__ */ u4("span", { class: "recording-dot" }),
-                /* @__PURE__ */ u4("span", { class: "recording-time", children: formatRecordingDuration(recordingDuration.value) }),
+                /* @__PURE__ */ u4("span", { class: "recording-time", children: formatElapsedDuration(recordingDuration.value) }),
                 /* @__PURE__ */ u4("span", { class: "recording-stop-label", children: "Stop" })
               ]
             }
@@ -26661,7 +26737,7 @@ function AppearanceSettings() {
         ),
         /* @__PURE__ */ u4("span", { children: [
           /* @__PURE__ */ u4("strong", { children: "Show technical information" }),
-          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, cost, duration, model, and context use." })
+          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, cost, model, and context use. Elapsed time is always shown." })
         ] })
       ] })
     ] }),
