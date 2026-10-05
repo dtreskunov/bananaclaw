@@ -127,7 +127,10 @@ metadata row.
 Live in-progress turn-system bubbles use the full transcript width and remain
 transparent in every theme and color mode, whether their activity is collapsed
 or expanded. Settled turn-system bubbles remain content-sized. Timing and model
-metadata stay on one line while flexible usage details truncate. The live
+All bubble status-line entries stay on one line, including outcome, provenance
+and token-availability labels. Flexible text and usage details truncate when
+space is limited; timestamps and trace controls retain their size, and usage
+popovers still wrap their full details. The live
 progress-summary row places Stop between the bouncing dots and label text;
 the controls keep their size while long labels truncate.
 Activity trace previews and expanded rows use the same small type scale as
@@ -146,12 +149,19 @@ details, and follows subsequent steps the same way, switching groups when
 necessary. Only one group and one step's details are open within a trace.
 Reveal operations scroll only the trace viewport: short details are shown
 fully, while oversized details align at their beginning so the header remains
-visible. Selecting a group or step manually pauses following; scrolling does
-not. Collapse the trace and reopen it via the live summary to resume. The **N
+visible. Expanding the latest step's details enables following, whether the
+step is grouped or standalone. Selecting earlier steps, browsing chapters or
+closing the latest details pauses following; scrolling does not.
+Collapse the trace and reopen it via the live summary to resume. The **N
 steps** disclosure opens every group collapsed and does not enable following.
 Only one activity trace can be expanded across the transcript. Its global
 state stores only the owning row and whether live activity is being followed;
 the selected group and step are local to the mounted trace.
+Follow intent survives settlement within the current conversation: when the
+next live turn starts, its trace opens in follow mode and the previous trace
+collapses, even if the new turn has not recorded its first activity yet.
+Manual browsing or collapsing disables this carry-over. Reconnect snapshots
+and conversation navigation still reset transient trace state.
 Each logical turn has one complete activity trace. Steering, questions, and
 intermediate assistant outputs never split it. While running, a synthetic
 bubble below the turn's latest conversation content carries the trace and

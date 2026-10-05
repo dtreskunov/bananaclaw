@@ -18697,6 +18697,13 @@ function toggleActivityTrace(ownerId, follow = false) {
 function pauseActivityTrace(ownerId) {
   if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: "open" };
 }
+function followActivityTrace(ownerId) {
+  if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: "follow" };
+}
+function inheritActivityTrace(ownerId) {
+  const current = intent.peek();
+  if (current?.mode === "follow" && current.ownerId !== ownerId) intent.value = { ownerId, mode: "follow" };
+}
 function resetActivityTraceView() {
   intent.value = null;
 }
@@ -18784,6 +18791,8 @@ function applyConversationFrame(raw, expectedThreadId) {
       if (message2.inputState?.status === "cancelled") confirmCancelledInput(message2.id);
     }
     if (frame.kind === "snapshot") resetActivityTraceView();
+    else if (current && current.phase !== "settled" && current.id !== previous?.conversation.connection.activeTurnId)
+      inheritActivityTrace(`turn:${current.id}`);
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === "update") {
@@ -22916,23 +22925,19 @@ function ActivityTraceList({ lines, live = false, now = null, following = false,
     revealed.current = true;
   }, [lines, live, following]);
   const chapters = activityChapters(lines, live);
-  const latestChapter = following ? chapters.at(-1) : null;
-  const sel = following ? latestChapter?.entries.at(-1)?.id ?? null : target?.kind === "entry" ? target.id : null;
+  const latestChapter = chapters.at(-1);
+  const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
+  const sel = following ? latestEntryId : target?.kind === "entry" ? target.id : null;
   const openChapter = following ? latestChapter && latestChapter.entries.length > 1 ? latestChapter.id : null : target?.kind === "chapter" ? target.id : target?.kind === "entry" ? chapters.find((chapter) => chapter.entries.some((entry) => entry.id === target.id))?.id ?? null : null;
   const toggle = (id2) => {
-    onBrowse?.();
-    setTarget((current) => {
-      if (current?.kind !== "entry" || current.id !== id2) return { kind: "entry", id: id2 };
-      const chapter = chapters.find((candidate) => candidate.entries.some((entry) => entry.id === id2));
-      return chapter && chapter.entries.length > 1 ? { kind: "chapter", id: chapter.id } : null;
-    });
+    const opening = sel !== id2;
+    const chapter = chapters.find((candidate) => candidate.entries.some((entry) => entry.id === id2));
+    onBrowse?.(opening && id2 === latestEntryId);
+    setTarget(opening ? { kind: "entry", id: id2 } : chapter && chapter.entries.length > 1 ? { kind: "chapter", id: chapter.id } : null);
   };
   const toggleChapter = (id2) => {
-    onBrowse?.();
-    setTarget((current) => {
-      const selectedChapter = current?.kind === "chapter" ? current.id : current?.kind === "entry" ? chapters.find((chapter) => chapter.entries.some((entry) => entry.id === current.id))?.id : null;
-      return selectedChapter === id2 ? null : { kind: "chapter", id: id2 };
-    });
+    onBrowse?.(false);
+    setTarget(openChapter === id2 ? null : { kind: "chapter", id: id2 });
   };
   return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, children: chapters.map((chapter) => {
     if (chapter.entries.length === 1) {
@@ -23021,7 +23026,7 @@ function ActivityTracePanel({
       live,
       now,
       following,
-      onBrowse: () => pauseActivityTrace(ownerId)
+      onBrowse: (follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)
     },
     `${ownerId}:${live}`
   ) });

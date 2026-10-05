@@ -2516,6 +2516,12 @@ nav.tab-bar-strip.group-strip {
   align-items: center;
   flex-wrap: nowrap;
   min-width: 0;
+  white-space: nowrap;
+}
+.chat-main .meta > span:not(.ts):not(.msg-inline-actions):not(.usage-wrap) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chat-main .meta > .ts {
   flex: none;
@@ -2817,7 +2823,7 @@ nav.tab-bar-strip.group-strip {
   border-radius: 2px;
 }
 .chat-main .typing .typing-meta {
-  flex: none;
+  flex: 0 1 auto;
   white-space: nowrap;
   font-size: var(--font-2xs);
   color: var(--muted);
@@ -2869,6 +2875,7 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .meta .trace-toggle {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 3px;
   padding: 1px 4px;
@@ -2878,6 +2885,7 @@ nav.tab-bar-strip.group-strip {
   cursor: pointer;
   border-radius: var(--radius-pill);
   font: inherit;
+  white-space: nowrap;
 }
 .chat-main .meta .trace-toggle:hover {
   background: var(--wash);

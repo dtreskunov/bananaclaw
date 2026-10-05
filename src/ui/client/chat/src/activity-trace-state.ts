@@ -33,6 +33,15 @@ export function pauseActivityTrace(ownerId: string): void {
   if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: 'open' };
 }
 
+export function followActivityTrace(ownerId: string): void {
+  if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: 'follow' };
+}
+
+export function inheritActivityTrace(ownerId: string): void {
+  const current = intent.peek();
+  if (current?.mode === 'follow' && current.ownerId !== ownerId) intent.value = { ownerId, mode: 'follow' };
+}
+
 export function resetActivityTraceView(): void {
   intent.value = null;
 }

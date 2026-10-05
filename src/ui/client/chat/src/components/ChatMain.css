@@ -252,7 +252,8 @@
 .chat-main .msg .inline-media video { max-height: 320px; background: #000; }
 .chat-main .msg .inline-media-name { font-size: var(--font-2xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* No group opacity here — it would cap the branch chip's contrast too. */
-.chat-main .msg .meta, .chat-main .typing .meta { font-size: var(--font-2xs); color: var(--message-meta, var(--muted)); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; min-width: 0; }
+.chat-main .msg .meta, .chat-main .typing .meta { font-size: var(--font-2xs); color: var(--message-meta, var(--muted)); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; min-width: 0; white-space: nowrap; }
+.chat-main .meta > span:not(.ts):not(.msg-inline-actions):not(.usage-wrap) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chat-main .meta > .ts { flex: none; white-space: nowrap; }
 .chat-main .msg.in .meta > .ts { margin-right: auto; }
 .chat-main .msg .delivery-origin { font-style: italic; }
@@ -347,7 +348,7 @@
 .chat-main .typing .trace-preview { padding: 0; border: none; background: none; color: var(--muted); font-family: var(--font-ui); font-size: var(--font-2xs); font-style: normal; text-align: left; cursor: pointer; opacity: 0.85; }
 .chat-main .typing .trace-preview:hover { color: var(--fg); opacity: 1; }
 .chat-main .typing .trace-preview:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; border-radius: 2px; }
-.chat-main .typing .typing-meta { flex: none; white-space: nowrap; font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
+.chat-main .typing .typing-meta { flex: 0 1 auto; white-space: nowrap; font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
 /* Expanded historical traces need room even when their summary is short. */
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
 /* Synthetic turn bubble while live or when there is no final response. */
@@ -361,7 +362,7 @@
 .chat-main .activity-trace li .ts { margin-right: 6px; opacity: 0.6; font-variant-numeric: tabular-nums; }
 /* Shared live and persisted activity chapters. */
 .chat-main .msg-activity { margin-top: var(--text-block-gap); display: flex; flex-direction: column; align-items: flex-start; gap: var(--text-block-gap); max-width: 100%; }
-.chat-main .meta .trace-toggle { display: inline-flex; align-items: center; gap: 3px; padding: 1px 4px; border: none; background: none; color: inherit; cursor: pointer; border-radius: var(--radius-pill); font: inherit; }
+.chat-main .meta .trace-toggle { display: inline-flex; flex: none; align-items: center; gap: 3px; padding: 1px 4px; border: none; background: none; color: inherit; cursor: pointer; border-radius: var(--radius-pill); font: inherit; white-space: nowrap; }
 .chat-main .meta .trace-toggle:hover { background: var(--wash); color: var(--fg); }
 .chat-main .meta .trace-toggle:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 .chat-main .meta .trace-toggle .chevron { display: inline-block; font-size: 1.3em; line-height: 1; transition: transform 0.15s ease; }

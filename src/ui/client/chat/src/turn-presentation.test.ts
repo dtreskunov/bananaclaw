@@ -191,6 +191,50 @@ describe('authoritative turn presentation', () => {
     expect(activityTraceView('turn:turn-1', true)).toEqual({ expanded: false, following: false });
   });
 
+  it.each([false, true])('inherits follow into a new turn with separate settlement = %s', (separate) => {
+    toggleActivityTrace('turn:turn-1', true);
+    const settled: Conversation = {
+      ...initial,
+      turns: [{ ...testTurn, phase: 'settled', outcome: 'silent' }],
+      connection: { connected: true, activeTurnId: null },
+    };
+    if (separate) {
+      update(settled);
+      expect(activityTraceView('turn:turn-1')).toEqual({ expanded: true, following: false });
+    }
+    const next = { ...testTurn, id: 'turn-2', activity: [], startedAt: '2026-09-29T00:00:02Z' };
+    update({ ...settled, turns: [...settled.turns, next], connection: { connected: true, activeTurnId: next.id } });
+    expect(activityTraceView('turn:turn-1', true)).toEqual({ expanded: false, following: false });
+    expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: true, following: true });
+    update({
+      ...settled,
+      turns: [...settled.turns, { ...next, activity: [{ ...testTurn.activity[0], timelinePosition: 300 }] }],
+      connection: { connected: true, activeTurnId: next.id },
+    });
+    expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: true, following: true });
+  });
+
+  it('does not move historical follow intent on updates to the same live turn', () => {
+    toggleActivityTrace('turn:history', true);
+    update({ ...initial, turns: [{ ...testTurn, metadata: { ...testTurn.metadata, model: 'updated' } }] });
+    expect(activityTraceView('turn:history', true)).toEqual({ expanded: true, following: true });
+    expect(activityTraceView('turn:turn-1', true).expanded).toBe(false);
+  });
+
+  it.each([false, true])('does not inherit a manually browsed or collapsed trace; collapsed = %s', (collapsed) => {
+    toggleActivityTrace('turn:turn-1', true);
+    if (collapsed) toggleActivityTrace('turn:turn-1');
+    else pauseActivityTrace('turn:turn-1');
+    const next = { ...testTurn, id: 'turn-2', startedAt: '2026-09-29T00:00:02Z' };
+    update({
+      ...initial,
+      turns: [{ ...testTurn, phase: 'settled', outcome: 'silent' }, next],
+      connection: { connected: true, activeTurnId: next.id },
+    });
+    expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: false, following: false });
+    expect(activityTraceView('turn:turn-1', true).expanded).toBe(!collapsed);
+  });
+
   it('retains a migrated partial accounting record without synthesizing the absent counters', () => {
     const imported = {
       ...testTurn,

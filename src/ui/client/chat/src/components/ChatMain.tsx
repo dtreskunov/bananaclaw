@@ -37,7 +37,7 @@ import {
 } from '../../../../shared/activity-presentation';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
 import {
-  activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace,
+  activityTraceOwner, activityTraceView, followActivityTrace, pauseActivityTrace, toggleActivityTrace,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
 import { activeTurnNotices, turnRowView, type TurnRowView } from '../turn-row';
@@ -208,7 +208,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
 
 type ActivityTraceTarget = { kind: 'chapter' | 'entry'; id: string } | null;
 
-export function ActivityTraceList({ lines, live = false, now = null, following = false, onBrowse }: { lines: ActivityLine[]; live?: boolean; now?: number | null; following?: boolean; onBrowse?: () => void }) {
+export function ActivityTraceList({ lines, live = false, now = null, following = false, onBrowse }: { lines: ActivityLine[]; live?: boolean; now?: number | null; following?: boolean; onBrowse?: (follow: boolean) => void }) {
   const listRef = useRef<HTMLUListElement | null>(null);
   const [target, setTarget] = useState<ActivityTraceTarget>(null);
   useEffect(() => {
@@ -221,9 +221,10 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
     revealed.current = true;
   }, [lines, live, following]);
   const chapters = activityChapters(lines, live);
-  const latestChapter = following ? chapters.at(-1) : null;
+  const latestChapter = chapters.at(-1);
+  const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
   const sel = following
-    ? latestChapter?.entries.at(-1)?.id ?? null
+    ? latestEntryId
     : target?.kind === 'entry'
       ? target.id
       : null;
@@ -237,24 +238,18 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
         ? chapters.find(chapter => chapter.entries.some(entry => entry.id === target.id))?.id ?? null
         : null;
   const toggle = (id: string) => {
-    onBrowse?.();
-    setTarget(current => {
-      if (current?.kind !== 'entry' || current.id !== id) return { kind: 'entry', id };
-      const chapter = chapters.find(candidate => candidate.entries.some(entry => entry.id === id));
-      return chapter && chapter.entries.length > 1 ? { kind: 'chapter', id: chapter.id } : null;
-    });
+    const opening = sel !== id;
+    const chapter = chapters.find(candidate => candidate.entries.some(entry => entry.id === id));
+    onBrowse?.(opening && id === latestEntryId);
+    setTarget(opening
+      ? { kind: 'entry', id }
+      : chapter && chapter.entries.length > 1
+        ? { kind: 'chapter', id: chapter.id }
+        : null);
   };
   const toggleChapter = (id: string) => {
-    onBrowse?.();
-    setTarget(current => {
-      const selectedChapter =
-        current?.kind === 'chapter'
-          ? current.id
-          : current?.kind === 'entry'
-            ? chapters.find(chapter => chapter.entries.some(entry => entry.id === current.id))?.id
-            : null;
-      return selectedChapter === id ? null : { kind: 'chapter', id };
-    });
+    onBrowse?.(false);
+    setTarget(openChapter === id ? null : { kind: 'chapter', id });
   };
   return (
     <ul class="activity-trace scroll-edge-fade" tabIndex={0} aria-label="Activity steps" ref={listRef}>
@@ -332,7 +327,7 @@ function ActivityTracePanel({
   return (
     <div class="msg-activity expanded">
       <ActivityTraceList key={`${ownerId}:${live}`} lines={lines} live={live} now={now}
-        following={following} onBrowse={() => pauseActivityTrace(ownerId)} />
+        following={following} onBrowse={(follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)} />
     </div>
   );
 }
