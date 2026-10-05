@@ -43,9 +43,6 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     .filter((message) => message.inputState?.status !== 'cancelled')
     .map(({ timestamp, ...message }) => ({ ...message, files: message.files ?? null, ts: timestamp }));
   const byId = new Map(messages.map((message) => [message.id, message]));
-  const answeredQuestions = new Set(
-    messages.filter((message) => message.questionId).map((message) => message.questionId),
-  );
   const traceLines = (trace: ConversationTrace) => {
     const turn = turns.get(trace.turnId);
     if (!turn) throw new ConversationProtocolError('invalid_frame');
@@ -68,14 +65,12 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
       if (message.questionId) {
         const question = questions.get(message.questionId);
         if (!question || message.direction !== 'in') throw new ConversationProtocolError('invalid_frame');
-        return [{ kind: 'question', question, answer: message }];
+        return [{ kind: 'question-answer', question, answer: message }];
       }
       return [{ kind: 'message', message }];
     }
     if (row.kind === 'question') {
-      const question = questions.get(row.questionId);
-      if (!question) throw new ConversationProtocolError('invalid_frame');
-      return answeredQuestions.has(question.questionId) ? [] : [{ kind: 'question', question }];
+      return [];
     }
     if (!turn || turn.id !== row.turnId) throw new ConversationProtocolError('invalid_frame');
     return [

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Composer, ChatMain } from './ChatMain';
+import { Composer, ChatMain, InputDock } from './ChatMain';
+import { QuestionPrompt } from './QuestionPrompt';
 import { PendingMessageActions } from './PendingMessageActions';
 import {
   activeTurn,
@@ -15,16 +16,18 @@ import {
   chatReady,
   pendingQuestions,
   pinnedContext,
+  voiceInput,
 } from '../state';
 import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, openPendingEditor } from '../pending-edit';
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
-import { sendChat } from '../actions';
-import type { ChatMessage, Thread } from '../types';
+import { respondQuestion, sendChat } from '../actions';
+import type { ChatMessage, PendingQuestionDto, Thread } from '../types';
 import { applyConversationFrame, completedResponse, resetConversation } from '../conversation-state';
 import { testSnapshot, testTurn } from '../conversation-test-fixtures';
 import { appearance } from '../appearance-state';
 import { DEFAULT_APPEARANCE } from '../appearance';
+import { voice } from '../voice-audio';
 
 // Exercise the real Composer's refs, layout transitions, handlers and rendered
 // controls without adding a browser-DOM dependency to the repository.
@@ -68,6 +71,7 @@ vi.mock('../actions', () => ({
   sendChat: vi.fn(),
   addPendingFiles: vi.fn(),
   removePending: vi.fn(),
+  respondQuestion: vi.fn(),
 }));
 
 const thread: Thread = { threadId: 'thread', title: 'Chat', lastActivityAt: '', channelType: 'web' };
@@ -172,6 +176,27 @@ beforeEach(() => {
 });
 
 describe('main composer pending edits', () => {
+  it('suspends composition for a dock prompt without replacing its draft, attachments or context', () => {
+    const draft = input.value;
+    const files = pending.value;
+    const pins = pinnedContext.value;
+    pendingQuestions.value = [dockQuestion];
+    render();
+    expect(find(tree, 'form').props.style).toBe('display:none');
+    find(tree, 'form').props.onSubmit({ preventDefault() {} });
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(input.value).toBe(draft);
+    expect(pending.value).toBe(files);
+    expect(pinnedContext.value).toBe(pins);
+    const dock = InputDock();
+    expect(find(dock, 'div').props.children[0].props.hidden).toBe(true);
+    expect(findComponent(dock, 'QuestionPrompt').props.question).toBe(dockQuestion);
+    pendingQuestions.value = [];
+    render();
+    expect(find(tree, 'form').props.style).toBe('');
+    expect(input.value).toBe(draft);
+    expect(pending.value).toBe(files);
+  });
   it('autosizes an existing draft on a density change without replacing it', () => {
     const draft = input.value;
     const files = pending.value;
@@ -185,6 +210,107 @@ describe('main composer pending edits', () => {
     expect(input.style.height).toBe('76px');
     expect(input.value).toBe(draft);
     expect(pending.value).toBe(files);
+  });
+
+  const dockQuestion: PendingQuestionDto = {
+    questionId: 'q',
+    title: 'Choice',
+    question: 'Choose?',
+    responseMode: 'choice_or_text',
+    options: [{ label: 'First', selectedLabel: 'Chosen first', value: 'first' }],
+    status: 'pending',
+    answerValue: null,
+    answerType: null,
+    answeredAt: null,
+    threadId: 'thread',
+    agentGroupId: 'group',
+    createdAt: '2026-10-05T17:00:00Z',
+  };
+
+  describe('question dock controls', () => {
+    const mount = (question = dockQuestion) => {
+      hooks.cursor = 0;
+      tree = QuestionPrompt({ question });
+      const textarea = find(tree, 'textarea');
+      if (textarea) textarea.ref.current = input;
+      hooks.effects.splice(0).forEach((effect) => effect());
+      return tree;
+    };
+    beforeEach(() => {
+      resetMount('');
+      vi.mocked(respondQuestion).mockReset().mockResolvedValue(true);
+    });
+    it('sends a choice once and waits for the authoritative answer event before restoring composition', async () => {
+      mount();
+      const click = find(tree, 'button', 'First').props.onClick;
+      click();
+      click();
+      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledOnce());
+      mount();
+      expect(respondQuestion).toHaveBeenCalledWith('q', 'first');
+      expect(find(tree, 'button', 'First').props.disabled).toBe(true);
+      expect(find(tree, 'section').props['aria-busy']).toBe(true);
+      expect(find(tree, 'div', 'Waiting for answer confirmation…')).toBeDefined();
+    });
+    it('keeps a failed text answer for retry, without using the ordinary send path', async () => {
+      vi.mocked(respondQuestion).mockResolvedValueOnce(false);
+      mount();
+      find(tree, 'textarea').props.onInput({ currentTarget: { value: '  My answer  ' } });
+      mount();
+      find(tree, 'form').props.onSubmit({ preventDefault() {} });
+      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledWith('q', 'My answer'));
+      mount();
+      expect(find(tree, 'textarea').props.value).toBe('  My answer  ');
+      expect(find(tree, 'p').props.role).toBe('alert');
+      expect(find(tree, 'button', 'Send answer').props.disabled).toBe(false);
+      expect(sendChat).not.toHaveBeenCalled();
+      find(tree, 'form').props.onSubmit({ preventDefault() {} });
+      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledTimes(2));
+    });
+    it('locks a metadata-only answered prompt and disables sends while disconnected', () => {
+      mount({ ...dockQuestion, status: 'answered' });
+      expect(find(tree, 'button', 'First').props.disabled).toBe(true);
+      expect(find(tree, 'div', 'Waiting for answer confirmation…')).toBeDefined();
+      resetMount('');
+      chatReady.value = false;
+      mount();
+      expect(find(tree, 'button', 'Send answer').props.disabled).toBe(true);
+      expect(find(tree, 'div', 'Reconnecting…')).toBeDefined();
+    });
+    it.each(['choice', 'text', 'choice_or_text'] as const)(
+      'renders %s input using the existing voice control',
+      (responseMode) => {
+        mount({ ...dockQuestion, responseMode, options: responseMode === 'text' ? [] : dockQuestion.options });
+        expect(!!find(tree, 'textarea')).toBe(responseMode !== 'choice');
+        expect(!!findComponent(tree, 'VoiceButton')).toBe(responseMode !== 'choice');
+        expect(!!find(tree, 'button', 'First')).toBe(responseMode !== 'text');
+      },
+    );
+    it('routes dictation into the question answer, not the preserved composer draft', async () => {
+      vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn() } });
+      vi.stubGlobal('AudioContext', vi.fn());
+      vi.stubGlobal('AudioWorkletNode', vi.fn());
+      const config = voiceInput.value;
+      voiceInput.value = { ...config, ready: true };
+      const start = vi.spyOn(voice, 'start').mockImplementation(() => {});
+      try {
+        mount();
+        findComponent(tree, 'VoiceButton').props.onStart();
+        const target = start.mock.calls[0][0];
+        expect(target.key).toBe('group:thread:question:q');
+        target.setText('Dictated answer');
+        mount();
+        expect(find(tree, 'textarea').props.value).toBe('Dictated answer');
+        expect(await target.send()).toBe(true);
+        expect(respondQuestion).toHaveBeenCalledWith('q', 'Dictated answer');
+        expect(sendChat).not.toHaveBeenCalled();
+      } finally {
+        start.mockRestore();
+        voiceInput.value = config;
+        vi.unstubAllGlobals();
+        vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+      }
+    });
   });
 
   it('uses the existing textarea and a checkmark, preserving the ordinary draft and attachments on save', async () => {

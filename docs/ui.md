@@ -117,7 +117,7 @@ and faint even-row stripe. A short fade marks each edge that has additional
 horizontally scrolled content. Tables scroll horizontally by default;
 exceptional fixed-layout tables can opt out with `data-table-scroll="off"`.
 Non-standard transcript entries share a subtle inset provenance rail without
-changing their geometry. Tool, file, card and question output uses an accent
+changing their geometry. Tool, file and card output uses an accent
 rail; runner notices and internal traces use a neutral rail; warning and failed
 message state use semantic warning and error rails. Normal agent replies have
 no rail. Live turn-system status is intentionally transparent and rail-free.
@@ -308,7 +308,7 @@ its existing 90% bubbles and 12 px composer gutters.
 The normal composer placeholder uses the selected agent group's display name,
 such as **Message Denis's Lab…**, and follows group switches and renames. While
 group metadata is unavailable it uses **Message the agent…**. Editing, pending
-question and reconnecting prompts retain their specific wording.
+question-dock and reconnecting prompts retain their specific wording.
 
 #### Access and file browsing
 
@@ -475,7 +475,7 @@ bound to the actual active response, even when the newest bubble is your input.
 Steering accepted but not yet applied is preserved as a follow-up after Stop.
 When the next queued response starts, Stop targets that new turn instead.
 
-Question cards are not cancelled by Stop. They remain actionable, and submitting
+Questions are not cancelled by Stop. They remain actionable in the input dock, and submitting
 an answer is ordinary new input (or a queued follow-up). You can stop the
 resulting turn after answering. If the agent has finished asking a question and
 is only waiting for your answer, there may be no active turn to stop.
@@ -483,13 +483,22 @@ is only waiting for your answer, there may be no active turn to stop.
 Questions and answers are separate durable events: the original question output
 keeps its identity, timestamp, recorded position and asking-turn association;
 the answer input has its own identity, timestamp and consumed-input position.
-The host orders both normally and never relocates the question. Once the answer
-event is available, the UI hides the original question card and displays a
-read-only answer bubble at the input event's position, retaining question context.
-Metadata saying "answered" alone does not hide the original card or fabricate an
-answer event. The asking turn's trace stays on its final response (or its own
-synthetic bubble), independently of card visibility. Cancelled cards stay visible
-at the question output.
+The host orders both normally and never relocates the question. Asked events
+never render transcript cards. Outstanding questions replace the ordinary
+composer in a bounded, scrollable input dock below the transcript, with choice,
+text and dictation controls. Multiple questions keep their recorded order.
+The ordinary composer stays mounted but hidden, preserving its draft, attachments,
+pinned context and pending-message editor; none of these are submitted as an answer.
+Question submission failures retain typed text and show an error. HTTP acceptance
+or metadata saying "answered" locks the prompt while waiting for its actual answer
+event; neither fabricates an answer bubble nor restores the ordinary composer.
+Once the answer event is available, the prompt disappears and the transcript
+displays a read-only answer bubble at the input event's position, retaining question
+context. The composer returns without automatically taking focus. Cancelled
+questions leave the dock without creating a transcript card. The asking turn's
+trace stays on its final response (or its own synthetic bubble), independently
+of prompt visibility. Reconnects restore the dock from authoritative question
+and answer records; read-only views retain their existing answer permissions.
 
 The icon is disabled and grayed out while stopping, without adding transient
 status text or changing the bubble's layout. A **Stopping response** tooltip
@@ -649,7 +658,7 @@ The existing Send button finalizes active dictation before submitting once.
 There is no separate voice panel. Existing text and attachments are retained.
 Pressing the connecting indicator cancels startup without changing the draft.
 
-Voice works with every agent model and with question-card text answers. It is
+Voice works with every agent model and with question-dock text answers. It is
 separate from attaching an audio file for a model to hear. Browser speech
 recognition and the old web `/voice/transcribe` upload endpoint are replaced by
 streaming STT. Received audio files use the separate attachment behavior below.

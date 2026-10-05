@@ -3,6 +3,7 @@ import { clearChat, openChat } from './actions';
 import { chatTranscript, completedResponse, conversationPresentation, conversationState } from './conversation-state';
 import { activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace } from './activity-trace-state';
 import { diffConversation } from '../../../shared/conversation-protocol';
+import { dockQuestions } from './question-dock';
 import type { Conversation } from '../../../shared/conversation';
 import { presentedConversation, testSnapshot, testTurn } from './conversation-test-fixtures';
 import {
@@ -185,7 +186,7 @@ describe('authoritative turn presentation', () => {
     expect(completedResponse.value).toBeNull();
   });
 
-  it.each([false, true])('hides only the asked card when an answer event arrives; final response = %s', (final) => {
+  it.each([false, true])('keeps the dock lifecycle separate from turn traces; final response = %s', (final) => {
     const question: Conversation['questions'][number] = {
       questionId: 'q',
       messageId: 'q-output',
@@ -243,9 +244,9 @@ describe('authoritative turn presentation', () => {
       ],
     };
     update(metadataOnly);
-    expect(chatTranscript.value.filter((row) => row.kind === 'question')).toEqual([
-      { kind: 'question', question: metadataOnly.questions[0] },
-    ]);
+    expect(dockQuestions(metadataOnly.questions, metadataOnly.messages, 'group', 'thread')).toEqual(
+      metadataOnly.questions,
+    );
     const answer: Conversation['messages'][number] = {
       id: 'question-response:q',
       direction: 'in',
@@ -261,15 +262,16 @@ describe('authoritative turn presentation', () => {
       connection: { connected: true, activeTurnId: 'answer-turn' },
     });
     update(answered);
-    const cardRows = chatTranscript.value.filter((row) => row.kind === 'question');
+    const cardRows = chatTranscript.value.filter((row) => row.kind === 'question-answer');
     const { timestamp: answerTimestamp, ...answerFields } = answer;
     expect(cardRows).toEqual([
       {
-        kind: 'question',
+        kind: 'question-answer',
         question: metadataOnly.questions[0],
         answer: { ...answerFields, ts: answerTimestamp, files: null },
       },
     ]);
+    expect(dockQuestions(answered.questions, answered.messages, 'group', 'thread')).toEqual([]);
     expect(conversationState.value?.conversation.timeline.slice(0, asking.timeline.length)).toEqual(asking.timeline);
     const originalTrace = chatTranscript.value.find((row) =>
       row.kind === 'turn' ? row.turn.id === testTurn.id : row.kind === 'message' && row.message.turnId === testTurn.id,
@@ -281,12 +283,12 @@ describe('authoritative turn presentation', () => {
       afterId: answer.id,
     });
     receive(testSnapshot(answered, 'reconnected'));
-    expect(chatTranscript.value.filter((row) => row.kind === 'question')).toEqual(cardRows);
+    expect(chatTranscript.value.filter((row) => row.kind === 'question-answer')).toEqual(cardRows);
     expect(completedResponse.value).toBeNull();
   });
 
   it.each([false, true])(
-    'keeps the question card without synthesizing question activity; recorded call = %s',
+    'keeps the question in the dock without synthesizing question activity; recorded call = %s',
     (recorded) => {
       const question: Conversation['questions'][number] = {
         questionId: 'question',
@@ -339,7 +341,7 @@ describe('authoritative turn presentation', () => {
         ],
       }).conversation;
       const projection = conversationPresentation(view);
-      expect(projection.transcript.filter((row) => row.kind === 'question')).toEqual([{ kind: 'question', question }]);
+      expect(dockQuestions(view.questions, view.messages, 'group', 'thread')).toEqual([question]);
       const steps = projection.messages[0].activity!.map((line) => JSON.parse(line.text));
       expect(steps.map((step) => step.id)).toEqual(recorded ? ['question-call', 'ui:done:turn-1'] : ['ui:done:turn-1']);
       expect(projection.messages[0].turnTraceOwner).toBe(true);

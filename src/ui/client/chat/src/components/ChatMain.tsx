@@ -7,7 +7,7 @@ import { useRef, useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import {
   chatMessages, chatStatus, chatLoading, chatReady, threadId, channelType, canSend, pending,
   threads, groups, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
-  pendingQuestions, respondingQuestionIds,
+  pendingQuestions,
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
   pendingWebSends,
@@ -17,7 +17,7 @@ import {
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
 import {
   sendChat, addPendingFiles, removePending,
-  navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval, respondQuestion,
+  navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval,
   openChat, openTaskPanel, reconnectChatNow, forkThreadAt, editMessageInBranch,
 } from '../actions';
 import { requestConfirm } from './PromptModal';
@@ -47,6 +47,9 @@ import { findEditBranchAnchorId } from '../edit-message';
 import { BRANCH_ACTION_EXPLANATION, editBranchActionExplanation } from '../transcript-action-copy';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
+import { QuestionPrompt } from './QuestionPrompt';
+import { QuestionAnswerBubble } from './QuestionAnswerBubble';
+import { dockQuestions } from '../question-dock';
 import { RelativeTime } from './RelativeTime';
 import { MobileDialog } from './MobileDialog';
 import { ZoomableImage } from './ZoomableImage';
@@ -61,7 +64,7 @@ import { attachScrollEdges } from '../scroll-edges';
 import { revealLatestActivity } from '../activity-trace-scroll';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
-import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingQuestionDto, Thread, TranscriptRow, TurnUsage } from '../types';
+import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, Thread, TranscriptRow, TurnUsage } from '../types';
 
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
 const revealedMobileMessageActionsId = signal<string | null>(null);
@@ -853,7 +856,7 @@ interface SingleGroup { kind: 'single'; m: ChatMessage }
 interface EventsGroup { kind: 'events'; events: ChatMessage[] }
 type MsgGroup = ThoughtsGroup | SingleGroup | EventsGroup
   | { kind: 'turn'; row: Extract<TranscriptRow, { kind: 'turn' }> }
-  | { kind: 'question'; row: Extract<TranscriptRow, { kind: 'question' }> };
+  | { kind: 'question-answer'; row: Extract<TranscriptRow, { kind: 'question-answer' }> };
 
 function messageKey(message: ChatMessage): string {
   return message.id || `${message.direction}:${message.ts}:${message.text}`;
@@ -861,15 +864,15 @@ function messageKey(message: ChatMessage): string {
 
 function groupKey(group: MsgGroup): string {
   if (group.kind === 'turn') return `turn:${group.row.turn.id}`;
-  if (group.kind === 'question') return group.row.answer
-    ? `question-answer:${group.row.answer.id}` : `question:${group.row.question.questionId}`;
+  if (group.kind === 'question-answer') return `question-answer:${group.row.answer.id}`;
   if (group.kind === 'thoughts') return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === 'events') return `events:${messageKey(group.events[0]!)}`;
   return `single:${messageKey(group.m)}`;
 }
 
 function groupContains(group: MsgGroup, messageId: string): boolean {
-  if (group.kind === 'turn' || group.kind === 'question') return false;
+  if (group.kind === 'turn') return false;
+  if (group.kind === 'question-answer') return group.row.answer.id === messageId;
   if (group.kind === 'thoughts') {
     return group.answer.id === messageId || group.thoughts.some((t) => t.id === messageId);
   }
@@ -896,7 +899,7 @@ function groupMessages(list: TranscriptRow[]): MsgGroup[] {
       for (const message of pendingMsgs) out.push({ kind: 'single', m: message });
       pendingMsgs = [];
       if (row.kind === 'turn') out.push({ kind: 'turn', row });
-      else out.push({ kind: 'question', row });
+      else out.push({ kind: 'question-answer', row });
       continue;
     }
     const m = row.message;
@@ -1477,9 +1480,8 @@ function MessageLog() {
                   const body = g.kind === 'turn'
                     ? <ConversationTurnRow key={key} turn={g.row.turn} lines={g.row.activity}
                         status={g.row.status} ownerId={g.row.traceOwner} />
-                    : g.kind === 'question'
-                      ? <QuestionCardItem key={key} question={g.row.question} answer={g.row.answer}
-                          busy={respondingQuestionIds.value.has(g.row.question.questionId)} />
+                    : g.kind === 'question-answer'
+                      ? <QuestionAnswerBubble key={key} question={g.row.question} answer={g.row.answer} />
                     : g.kind === 'thoughts'
                     ? <ThoughtGroup
                         key={key}
@@ -1552,131 +1554,8 @@ function PendingTray() {
   );
 }
 
-function QuestionCardItem({ question: q, answer: answerMessage, busy }: {
-  question: PendingQuestionDto; answer?: ChatMessage; busy: boolean;
-}) {
-  const [answer, setAnswer] = useState('');
-  const answerRef = useRef('');
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const gid = groupId.value;
-  const tid = threadId.value;
-  const target = `${gid}:${tid}:question:${q.questionId}`;
-  const channel = channelType.value;
-  const mg = messagingGroupId.value;
-  const voiceState = voice.state.value;
-  const active = voiceState.target === target;
-  const voiceLocked = active && voiceState.phase !== 'error';
-  const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || 'Live voice input is not configured.' : '');
-  const pendingRef = useRef(!answerMessage && q.status === 'pending');
-  pendingRef.current = !answerMessage && q.status === 'pending';
-  const sendBusyRef = useRef(false);
-  const canType = q.responseMode === 'text' || q.responseMode === 'choice_or_text';
-  const answered = !!answerMessage;
-  const unavailableToAnswer = busy || q.status !== 'pending';
-
-  const submitAnswer = async (value = answerRef.current): Promise<boolean> => {
-    const trimmed = value.trim();
-    if (!trimmed || busy || sendBusyRef.current || !pendingRef.current) return false;
-    sendBusyRef.current = true;
-    try {
-      return await respondQuestion(q.questionId, trimmed);
-    } finally { sendBusyRef.current = false; }
-  };
-
-  const startVoice = (): void => {
-    if (!gid || !tid || unavailable || busy || isRecording.value) return;
-    voice.start({
-      key: target, groupId: gid, threadId: tid,
-      channelType: channel, messagingGroupId: mg,
-      getText: () => answerRef.current,
-      setText: (text) => { answerRef.current = text; setAnswer(text); },
-      isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && pendingRef.current,
-      send: () => submitAnswer(),
-    }, textareaRef.current?.selectionStart ?? answerRef.current.length);
-  };
-
-  useEffect(() => {
-    if ((answered || q.status !== 'pending') && voice.state.value.target === target) voice.detach();
-    return () => {
-      if (voice.state.value.target === target) voice.detach();
-    };
-  }, [q.status, answered, target, channel, mg]);
-
-  return (
-    <div class={`msg ${answered ? 'in question-card-answered' : 'out agent-action'} question-card`} data-msg-id={answerMessage?.id ?? q.questionId}>
-      <div class="question-card-heading">{q.title}</div>
-      <div class="question-card-title">{q.question}</div>
-      {answered ? (
-        <div class="question-card-answer">
-          {q.options.find((option) => option.value === answerMessage?.text)?.selectedLabel ?? answerMessage?.text}
-        </div>
-      ) : q.status === 'cancelled' ? (
-        <div class="question-card-answer">Cancelled</div>
-      ) : (
-        <>
-          {q.options.length > 0 && (
-            <div class="question-card-actions">
-              {q.options.map((o) => (
-                <button
-                  type="button"
-                  class="question-card-btn"
-                  disabled={unavailableToAnswer}
-                  onClick={() => {
-                    if (voice.state.value.target === target) voice.detach();
-                    respondQuestion(q.questionId, o.value).catch(console.error);
-                  }}
-                  key={o.value}
-                >{o.label}</button>
-              ))}
-            </div>
-          )}
-          {canType && (
-            <form
-              class="question-card-text-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (active) voice.send();
-                else submitAnswer().catch(console.error);
-              }}
-            >
-              <div class={`composer-input-wrap question-response-input-wrap${active && voiceState.phase === 'listening' ? ' voice-listening' : ''}`}>
-                <textarea
-                  class="question-card-input"
-                  rows={1}
-                  value={answer}
-                  ref={textareaRef}
-                  disabled={unavailableToAnswer}
-                  readOnly={voiceLocked || (active && voiceState.sending)}
-                  aria-label="Your answer"
-                  placeholder="Type your answer…"
-                  onInput={(event) => {
-                    answerRef.current = event.currentTarget.value;
-                    setAnswer(event.currentTarget.value);
-                  }}
-                />
-                <VoiceButton target={target} controller={voice} onStart={startVoice}
-                  className="question-response-mic" configured={voiceInput.value.ready}
-                  unavailable={unavailable} disabled={unavailableToAnswer || isRecording.value} />
-                <button
-                  type="submit"
-                  class="accent-icon-btn question-response-send"
-                  aria-label="Send answer"
-                  title={active && voiceState.phase === 'listening' ? 'Finalize and send answer' : 'Send answer'}
-                  disabled={unavailableToAnswer || (active && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase))) || (!answer.trim() && !active)}
-                  onMouseDown={(event) => event.preventDefault()}
-                >{'\u2191'}</button>
-              </div>
-              {active && voiceState.error && <p class="voice-error" role="alert">{voiceState.error} Nothing is sent automatically.</p>}
-            </form>
-          )}
-        </>
-      )}
-      <div class="meta question-card-meta">
-        <RelativeTime ts={answerMessage?.ts ?? q.createdAt} />
-        {!answered ? <AgentActionLabel label="question" title="Sent with ask_user_question" /> : null}
-      </div>
-    </div>
-  );
+function currentDockQuestions() {
+  return dockQuestions(pendingQuestions.value, conversationState.value?.conversation.messages ?? [], groupId.value, threadId.value);
 }
 
 export function Composer() {
@@ -1689,10 +1568,7 @@ export function Composer() {
   // synchronized socket handshake so the accepted inbound echo cannot race
   // ahead of the active subscription. Non-web sends do not require a socket.
   const wsDown = isWeb && !chatReady.value;
-  // Disable composer while a question card is awaiting user response.
-  const hasQuestion = pendingQuestions.value.some(
-    (q) => q.status === 'pending' && (!q.threadId || q.threadId === threadId.value),
-  );
+  const hasQuestion = currentDockQuestions().length > 0;
   const composerDisabled = wsDown || hasQuestion;
   const gid = groupId.value;
   const groupName = groups.value.find((group) => group.id === gid)?.name || 'the agent';
@@ -1749,6 +1625,7 @@ export function Composer() {
   }, []);
   const onSubmit = (ev: JSX.TargetedEvent<HTMLFormElement>): void => {
     ev.preventDefault();
+    if (hasQuestion) return;
     if (edit.editing) {
       void edit.save();
       return;
@@ -1761,7 +1638,7 @@ export function Composer() {
     if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid
       || channelType.value !== channel || messagingGroupId.value !== mg
       || (isWeb && !chatReady.value)
-      || pendingQuestions.value.some((q) => q.status === 'pending' && (!q.threadId || q.threadId === tid))) return false;
+      || currentDockQuestions().length) return false;
     const text = (inputRef.current?.value || '').trim();
     const files = pending.value.slice();
     if (!text && files.length === 0) return false;
@@ -1867,7 +1744,7 @@ export function Composer() {
     <form
       id="chat-form"
       onSubmit={onSubmit}
-      style={showComposer || edit.editing ? '' : 'display:none'}
+      style={!hasQuestion && (showComposer || edit.editing) ? '' : 'display:none'}
       class={composerDisabled ? 'ws-down' : ''}
     >
       {edit.editing && <div class="composer-edit-header">
@@ -1894,7 +1771,7 @@ export function Composer() {
           <textarea
             id="chat-input"
             rows={1}
-            placeholder={edit.editing ? 'Edit pending message\u2026' : hasQuestion ? 'Answer the question above to continue\u2026' : wsDown ? 'Reconnecting\u2026' : `Message ${groupName}\u2026`}
+            placeholder={edit.editing ? 'Edit pending message\u2026' : wsDown ? 'Reconnecting\u2026' : `Message ${groupName}\u2026`}
             ref={inputRef}
             aria-label={edit.editing ? 'Pending message text' : 'Message'}
             onInput={(event) => { edit.input(event.currentTarget.value); autosize(); }}
@@ -1906,7 +1783,7 @@ export function Composer() {
           ></textarea>
           <ComposerPlusMenu
             disabled={edit.editing || composerDisabled || voiceState.sending || !['idle', 'error'].includes(voiceState.phase)}
-            title={composerDisabled ? (hasQuestion ? 'Answer the question above' : 'Disconnected') : 'Add\u2026'}
+            title={composerDisabled ? 'Disconnected' : 'Add\u2026'}
             showRecordAudio={hasGetUserMedia()}
             showQuickCapture={hasGetUserMedia()}
             onUploadFile={onAttachClick}
@@ -1933,7 +1810,7 @@ export function Composer() {
       </p>}
     </form>
     {activeVoice && voiceState.error && <p class="voice-error" role="alert">{voiceState.error} Nothing is sent automatically.</p>}
-    {quickCapture ? (
+    {quickCapture && !hasQuestion ? (
       <QuickCapture
         onCapture={(file) => { setQuickCapture(false); addFiles([file]); }}
         onClose={() => setQuickCapture(false)}
@@ -1999,11 +1876,25 @@ export function ChatMain() {
       {reconnectPending
         ? <button class="status reconnect-status" id="chat-status" type="button" onClick={reconnectChatNow}>{chatStatus.value}</button>
         : <div class="status" id="chat-status" hidden={chatStatus.value === 'connected'}>{chatStatus.value}</div>}
-      <ContextChip />
-      <PendingTray />
       <ReadonlyBanner />
-      <Subnotice />
-      <Composer />
+      <InputDock />
     </section>
   );
+}
+
+export function InputDock() {
+  const questions = currentDockQuestions();
+  return <div class="input-dock">
+    <div class="message-composer" hidden={questions.length > 0}>
+      <ContextChip />
+      <PendingTray />
+      <Subnotice />
+      <Composer />
+    </div>
+    {questions.length > 0 && <div class="question-dock">
+      {questions.map((question) => <QuestionPrompt
+        key={`${groupId.value}:${threadId.value}:${channelType.value}:${messagingGroupId.value}:${question.questionId}`}
+        question={question} />)}
+    </div>}
+  </div>;
 }

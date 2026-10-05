@@ -18727,9 +18727,6 @@ function conversationPresentation(view) {
   const questions = new Map(view.questions.map((question2) => [question2.questionId, question2]));
   const messages = view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map(({ timestamp, ...message2 }) => ({ ...message2, files: message2.files ?? null, ts: timestamp }));
   const byId = new Map(messages.map((message2) => [message2.id, message2]));
-  const answeredQuestions = new Set(
-    messages.filter((message2) => message2.questionId).map((message2) => message2.questionId)
-  );
   const traceLines = (trace2) => {
     const turn2 = turns.get(trace2.turnId);
     if (!turn2) throw new ConversationProtocolError("invalid_frame");
@@ -18752,14 +18749,12 @@ function conversationPresentation(view) {
       if (message2.questionId) {
         const question2 = questions.get(message2.questionId);
         if (!question2 || message2.direction !== "in") throw new ConversationProtocolError("invalid_frame");
-        return [{ kind: "question", question: question2, answer: message2 }];
+        return [{ kind: "question-answer", question: question2, answer: message2 }];
       }
       return [{ kind: "message", message: message2 }];
     }
     if (row.kind === "question") {
-      const question2 = questions.get(row.questionId);
-      if (!question2) throw new ConversationProtocolError("invalid_frame");
-      return answeredQuestions.has(question2.questionId) ? [] : [{ kind: "question", question: question2 }];
+      return [];
     }
     if (!turn2 || turn2.id !== row.turnId) throw new ConversationProtocolError("invalid_frame");
     return [
@@ -22140,6 +22135,204 @@ function QuickCapture({ onCapture, onClose }) {
   );
 }
 
+// src/components/QuestionPrompt.tsx
+function QuestionPrompt({ question: q5 }) {
+  const [answer, setAnswer] = h2("");
+  const [accepted, setAccepted] = h2(false);
+  const [error, setError] = h2("");
+  const answerRef = A2("");
+  const textareaRef = A2(null);
+  const submitting = A2(false);
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const channel = channelType.value;
+  const mg = messagingGroupId.value;
+  const target = `${gid}:${tid}:question:${q5.questionId}`;
+  const voiceState = voice.state.value;
+  const active = voiceState.target === target;
+  const busy = respondingQuestionIds.value.has(q5.questionId);
+  const waiting = accepted || q5.status === "answered";
+  const disconnected = (!channel || channel === "web") && !chatReady.value;
+  const disabled = busy || waiting || disconnected;
+  const current = A2(false);
+  current.current = q5.status === "pending" && !disabled;
+  const voiceLocked = active && (voiceState.phase !== "error" || voiceState.sending);
+  const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
+  const canType = q5.responseMode !== "choice";
+  const autosize = () => {
+    const input = textareaRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
+  };
+  _2(autosize, [answer]);
+  const submit = async (value = answerRef.current.trim()) => {
+    if (!value.trim() || submitting.current || !current.current || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg)
+      return false;
+    submitting.current = true;
+    setError("");
+    try {
+      const sent = await respondQuestion(q5.questionId, value);
+      if (sent) setAccepted(true);
+      else setError("Could not submit your answer. Please retry.");
+      return sent;
+    } finally {
+      submitting.current = false;
+    }
+  };
+  const startVoice = () => {
+    if (!gid || !tid || unavailable || !current.current || isRecording.value) return;
+    voice.start(
+      {
+        key: target,
+        groupId: gid,
+        threadId: tid,
+        channelType: channel,
+        messagingGroupId: mg,
+        getText: () => answerRef.current,
+        setText: (text2) => {
+          answerRef.current = text2;
+          setAnswer(text2);
+        },
+        isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && current.current,
+        send: submit
+      },
+      textareaRef.current?.selectionStart ?? answerRef.current.length
+    );
+  };
+  y2(() => {
+    if ((waiting || q5.status !== "pending") && voice.state.value.target === target) voice.detach();
+  }, [waiting, q5.status, target]);
+  y2(
+    () => () => {
+      if (voice.state.value.target === target) voice.detach();
+    },
+    [target, channel, mg]
+  );
+  return /* @__PURE__ */ u4(
+    "section",
+    {
+      class: "question-prompt",
+      "data-question-id": q5.questionId,
+      "aria-label": q5.title || "Question",
+      "aria-busy": busy || waiting,
+      children: [
+        /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
+        /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.question }),
+        !!q5.options.length && /* @__PURE__ */ u4("div", { class: "question-card-actions", children: q5.options.map((option) => /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "question-card-btn",
+            disabled,
+            onClick: () => {
+              if (voice.state.value.target === target) voice.detach();
+              void submit(option.value);
+            },
+            children: option.label
+          },
+          option.value
+        )) }),
+        canType && /* @__PURE__ */ u4(
+          "form",
+          {
+            class: "question-card-text-form",
+            onSubmit: (event) => {
+              event.preventDefault();
+              if (disabled) return;
+              if (active) voice.send();
+              else void submit();
+            },
+            children: /* @__PURE__ */ u4(
+              "div",
+              {
+                class: `composer-input-wrap question-response-input-wrap${active && voiceState.phase === "listening" ? " voice-listening" : ""}`,
+                children: [
+                  /* @__PURE__ */ u4(
+                    "textarea",
+                    {
+                      class: "question-card-input",
+                      rows: 1,
+                      value: answer,
+                      ref: textareaRef,
+                      disabled,
+                      readOnly: voiceLocked,
+                      "aria-label": "Your answer",
+                      placeholder: "Type your answer\u2026",
+                      onInput: (event) => {
+                        answerRef.current = event.currentTarget.value;
+                        setAnswer(answerRef.current);
+                      },
+                      onKeyDown: (event) => {
+                        if (event.key === "Enter" && !event.shiftKey && !isMobile.value && !event.isComposing) {
+                          event.preventDefault();
+                          event.currentTarget.form?.requestSubmit();
+                        }
+                      }
+                    }
+                  ),
+                  /* @__PURE__ */ u4(
+                    VoiceButton,
+                    {
+                      target,
+                      controller: voice,
+                      onStart: startVoice,
+                      className: "question-response-mic",
+                      configured: voiceInput.value.ready,
+                      unavailable,
+                      disabled: disabled || isRecording.value
+                    }
+                  ),
+                  /* @__PURE__ */ u4(
+                    "button",
+                    {
+                      type: "submit",
+                      class: "accent-icon-btn question-response-send",
+                      "aria-label": "Send answer",
+                      title: active && voiceState.phase === "listening" ? "Finalize and send answer" : "Send answer",
+                      disabled: disabled || active && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)) || !answer.trim() && !active,
+                      onMouseDown: (event) => event.preventDefault(),
+                      children: "\u2191"
+                    }
+                  )
+                ]
+              }
+            )
+          }
+        ),
+        (busy || waiting || disconnected) && /* @__PURE__ */ u4("div", { class: "question-prompt-status", role: "status", children: disconnected ? "Reconnecting\u2026" : busy ? "Submitting answer\u2026" : "Waiting for answer confirmation\u2026" }),
+        error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: error }),
+        active && voiceState.error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: [
+          voiceState.error,
+          " Nothing is sent automatically."
+        ] })
+      ]
+    }
+  );
+}
+
+// src/components/QuestionAnswerBubble.tsx
+function QuestionAnswerBubble({ question: question2, answer }) {
+  return /* @__PURE__ */ u4("div", { class: "msg in question-card question-card-answered", "data-msg-id": answer.id, children: [
+    /* @__PURE__ */ u4("div", { class: "question-card-heading", children: question2.title }),
+    /* @__PURE__ */ u4("div", { class: "question-card-title", children: question2.question }),
+    /* @__PURE__ */ u4("div", { class: "question-card-answer", children: question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text }),
+    /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answer.ts }) })
+  ] });
+}
+
+// src/question-dock.ts
+function dockQuestions(questions, messages, groupId2, threadId2) {
+  const answered = new Set(
+    messages.filter((message2) => message2.direction === "in" && message2.inputState?.status !== "cancelled").map((message2) => message2.questionId)
+  );
+  return questions.filter(
+    (question2) => question2.agentGroupId === groupId2 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.questionId)
+  ).sort(
+    (a4, b5) => timelineSortKey(a4.createdAt, a4.timelinePosition) - timelineSortKey(b5.createdAt, b5.timelinePosition)
+  );
+}
+
 // src/components/ZoomableImage.tsx
 var MIN_SCALE = 1;
 var MAX_SCALE = 5;
@@ -23539,13 +23732,14 @@ function messageKey(message2) {
 }
 function groupKey(group) {
   if (group.kind === "turn") return `turn:${group.row.turn.id}`;
-  if (group.kind === "question") return group.row.answer ? `question-answer:${group.row.answer.id}` : `question:${group.row.question.questionId}`;
+  if (group.kind === "question-answer") return `question-answer:${group.row.answer.id}`;
   if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
   return `single:${messageKey(group.m)}`;
 }
 function groupContains(group, messageId) {
-  if (group.kind === "turn" || group.kind === "question") return false;
+  if (group.kind === "turn") return false;
+  if (group.kind === "question-answer") return group.row.answer.id === messageId;
   if (group.kind === "thoughts") {
     return group.answer.id === messageId || group.thoughts.some((t4) => t4.id === messageId);
   }
@@ -23568,7 +23762,7 @@ function groupMessages(list) {
       for (const message2 of pendingMsgs) out.push({ kind: "single", m: message2 });
       pendingMsgs = [];
       if (row.kind === "turn") out.push({ kind: "turn", row });
-      else out.push({ kind: "question", row });
+      else out.push({ kind: "question-answer", row });
       continue;
     }
     const m6 = row.message;
@@ -24083,15 +24277,7 @@ function MessageLog() {
             ownerId: g8.row.traceOwner
           },
           key
-        ) : g8.kind === "question" ? /* @__PURE__ */ u4(
-          QuestionCardItem,
-          {
-            question: g8.row.question,
-            answer: g8.row.answer,
-            busy: respondingQuestionIds.value.has(g8.row.question.questionId)
-          },
-          key
-        ) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
+        ) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswerBubble, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
           ThoughtGroup,
           {
             thoughts: g8.thoughts,
@@ -24154,142 +24340,8 @@ function PendingTray() {
     /* @__PURE__ */ u4("button", { type: "button", title: "Remove", onClick: () => removePending(i5), children: "\xD7" })
   ] }, i5)) });
 }
-function QuestionCardItem({ question: q5, answer: answerMessage, busy }) {
-  const [answer, setAnswer] = h2("");
-  const answerRef = A2("");
-  const textareaRef = A2(null);
-  const gid = groupId.value;
-  const tid = threadId.value;
-  const target = `${gid}:${tid}:question:${q5.questionId}`;
-  const channel = channelType.value;
-  const mg = messagingGroupId.value;
-  const voiceState = voice.state.value;
-  const active = voiceState.target === target;
-  const voiceLocked = active && voiceState.phase !== "error";
-  const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
-  const pendingRef = A2(!answerMessage && q5.status === "pending");
-  pendingRef.current = !answerMessage && q5.status === "pending";
-  const sendBusyRef = A2(false);
-  const canType = q5.responseMode === "text" || q5.responseMode === "choice_or_text";
-  const answered = !!answerMessage;
-  const unavailableToAnswer = busy || q5.status !== "pending";
-  const submitAnswer = async (value = answerRef.current) => {
-    const trimmed = value.trim();
-    if (!trimmed || busy || sendBusyRef.current || !pendingRef.current) return false;
-    sendBusyRef.current = true;
-    try {
-      return await respondQuestion(q5.questionId, trimmed);
-    } finally {
-      sendBusyRef.current = false;
-    }
-  };
-  const startVoice = () => {
-    if (!gid || !tid || unavailable || busy || isRecording.value) return;
-    voice.start({
-      key: target,
-      groupId: gid,
-      threadId: tid,
-      channelType: channel,
-      messagingGroupId: mg,
-      getText: () => answerRef.current,
-      setText: (text2) => {
-        answerRef.current = text2;
-        setAnswer(text2);
-      },
-      isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && pendingRef.current,
-      send: () => submitAnswer()
-    }, textareaRef.current?.selectionStart ?? answerRef.current.length);
-  };
-  y2(() => {
-    if ((answered || q5.status !== "pending") && voice.state.value.target === target) voice.detach();
-    return () => {
-      if (voice.state.value.target === target) voice.detach();
-    };
-  }, [q5.status, answered, target, channel, mg]);
-  return /* @__PURE__ */ u4("div", { class: `msg ${answered ? "in question-card-answered" : "out agent-action"} question-card`, "data-msg-id": answerMessage?.id ?? q5.questionId, children: [
-    /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
-    /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.question }),
-    answered ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: q5.options.find((option) => option.value === answerMessage?.text)?.selectedLabel ?? answerMessage?.text }) : q5.status === "cancelled" ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: "Cancelled" }) : /* @__PURE__ */ u4(k, { children: [
-      q5.options.length > 0 && /* @__PURE__ */ u4("div", { class: "question-card-actions", children: q5.options.map((o4) => /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "question-card-btn",
-          disabled: unavailableToAnswer,
-          onClick: () => {
-            if (voice.state.value.target === target) voice.detach();
-            respondQuestion(q5.questionId, o4.value).catch(console.error);
-          },
-          children: o4.label
-        },
-        o4.value
-      )) }),
-      canType && /* @__PURE__ */ u4(
-        "form",
-        {
-          class: "question-card-text-form",
-          onSubmit: (event) => {
-            event.preventDefault();
-            if (active) voice.send();
-            else submitAnswer().catch(console.error);
-          },
-          children: [
-            /* @__PURE__ */ u4("div", { class: `composer-input-wrap question-response-input-wrap${active && voiceState.phase === "listening" ? " voice-listening" : ""}`, children: [
-              /* @__PURE__ */ u4(
-                "textarea",
-                {
-                  class: "question-card-input",
-                  rows: 1,
-                  value: answer,
-                  ref: textareaRef,
-                  disabled: unavailableToAnswer,
-                  readOnly: voiceLocked || active && voiceState.sending,
-                  "aria-label": "Your answer",
-                  placeholder: "Type your answer\u2026",
-                  onInput: (event) => {
-                    answerRef.current = event.currentTarget.value;
-                    setAnswer(event.currentTarget.value);
-                  }
-                }
-              ),
-              /* @__PURE__ */ u4(
-                VoiceButton,
-                {
-                  target,
-                  controller: voice,
-                  onStart: startVoice,
-                  className: "question-response-mic",
-                  configured: voiceInput.value.ready,
-                  unavailable,
-                  disabled: unavailableToAnswer || isRecording.value
-                }
-              ),
-              /* @__PURE__ */ u4(
-                "button",
-                {
-                  type: "submit",
-                  class: "accent-icon-btn question-response-send",
-                  "aria-label": "Send answer",
-                  title: active && voiceState.phase === "listening" ? "Finalize and send answer" : "Send answer",
-                  disabled: unavailableToAnswer || active && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)) || !answer.trim() && !active,
-                  onMouseDown: (event) => event.preventDefault(),
-                  children: "\u2191"
-                }
-              )
-            ] }),
-            active && voiceState.error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: [
-              voiceState.error,
-              " Nothing is sent automatically."
-            ] })
-          ]
-        }
-      )
-    ] }),
-    /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
-      /* @__PURE__ */ u4(RelativeTime, { ts: answerMessage?.ts ?? q5.createdAt }),
-      !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null
-    ] })
-  ] });
+function currentDockQuestions() {
+  return dockQuestions(pendingQuestions.value, conversationState.value?.conversation.messages ?? [], groupId.value, threadId.value);
 }
 function Composer() {
   const inputRef = A2(null);
@@ -24298,9 +24350,7 @@ function Composer() {
   const isWeb = !channelType.value || channelType.value === "web";
   const showComposer = canSend.value;
   const wsDown = isWeb && !chatReady.value;
-  const hasQuestion = pendingQuestions.value.some(
-    (q5) => q5.status === "pending" && (!q5.threadId || q5.threadId === threadId.value)
-  );
+  const hasQuestion = currentDockQuestions().length > 0;
   const composerDisabled = wsDown || hasQuestion;
   const gid = groupId.value;
   const groupName = groups.value.find((group) => group.id === gid)?.name || "the agent";
@@ -24342,6 +24392,7 @@ function Composer() {
   }, []);
   const onSubmit = (ev) => {
     ev.preventDefault();
+    if (hasQuestion) return;
     if (edit.editing) {
       void edit.save();
       return;
@@ -24351,7 +24402,7 @@ function Composer() {
     else doSubmit().catch(console.error);
   };
   const doSubmit = async () => {
-    if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg || isWeb && !chatReady.value || pendingQuestions.value.some((q5) => q5.status === "pending" && (!q5.threadId || q5.threadId === tid))) return false;
+    if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg || isWeb && !chatReady.value || currentDockQuestions().length) return false;
     const text2 = (inputRef.current?.value || "").trim();
     const files = pending.value.slice();
     if (!text2 && files.length === 0) return false;
@@ -24458,7 +24509,7 @@ function Composer() {
       {
         id: "chat-form",
         onSubmit,
-        style: showComposer || edit.editing ? "" : "display:none",
+        style: !hasQuestion && (showComposer || edit.editing) ? "" : "display:none",
         class: composerDisabled ? "ws-down" : "",
         children: [
           edit.editing && /* @__PURE__ */ u4("div", { class: "composer-edit-header", children: [
@@ -24487,7 +24538,7 @@ function Composer() {
               {
                 id: "chat-input",
                 rows: 1,
-                placeholder: edit.editing ? "Edit pending message\u2026" : hasQuestion ? "Answer the question above to continue\u2026" : wsDown ? "Reconnecting\u2026" : `Message ${groupName}\u2026`,
+                placeholder: edit.editing ? "Edit pending message\u2026" : wsDown ? "Reconnecting\u2026" : `Message ${groupName}\u2026`,
                 ref: inputRef,
                 "aria-label": edit.editing ? "Pending message text" : "Message",
                 onInput: (event) => {
@@ -24505,7 +24556,7 @@ function Composer() {
               ComposerPlusMenu,
               {
                 disabled: edit.editing || composerDisabled || voiceState.sending || !["idle", "error"].includes(voiceState.phase),
-                title: composerDisabled ? hasQuestion ? "Answer the question above" : "Disconnected" : "Add\u2026",
+                title: composerDisabled ? "Disconnected" : "Add\u2026",
                 showRecordAudio: hasGetUserMedia(),
                 showQuickCapture: hasGetUserMedia(),
                 onUploadFile: onAttachClick,
@@ -24551,7 +24602,7 @@ function Composer() {
       voiceState.error,
       " Nothing is sent automatically."
     ] }),
-    quickCapture ? /* @__PURE__ */ u4(
+    quickCapture && !hasQuestion ? /* @__PURE__ */ u4(
       QuickCapture,
       {
         onCapture: (file) => {
@@ -24635,11 +24686,26 @@ function ChatMain() {
     /* @__PURE__ */ u4(MessageLog, {}),
     /* @__PURE__ */ u4(ImageViewer, {}),
     reconnectPending ? /* @__PURE__ */ u4("button", { class: "status reconnect-status", id: "chat-status", type: "button", onClick: reconnectChatNow, children: chatStatus.value }) : /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatStatus.value === "connected", children: chatStatus.value }),
-    /* @__PURE__ */ u4(ContextChip, {}),
-    /* @__PURE__ */ u4(PendingTray, {}),
     /* @__PURE__ */ u4(ReadonlyBanner, {}),
-    /* @__PURE__ */ u4(Subnotice, {}),
-    /* @__PURE__ */ u4(Composer, {})
+    /* @__PURE__ */ u4(InputDock, {})
+  ] });
+}
+function InputDock() {
+  const questions = currentDockQuestions();
+  return /* @__PURE__ */ u4("div", { class: "input-dock", children: [
+    /* @__PURE__ */ u4("div", { class: "message-composer", hidden: questions.length > 0, children: [
+      /* @__PURE__ */ u4(ContextChip, {}),
+      /* @__PURE__ */ u4(PendingTray, {}),
+      /* @__PURE__ */ u4(Subnotice, {}),
+      /* @__PURE__ */ u4(Composer, {})
+    ] }),
+    questions.length > 0 && /* @__PURE__ */ u4("div", { class: "question-dock", children: questions.map((question2) => /* @__PURE__ */ u4(
+      QuestionPrompt,
+      {
+        question: question2
+      },
+      `${groupId.value}:${threadId.value}:${channelType.value}:${messagingGroupId.value}:${question2.questionId}`
+    )) })
   ] });
 }
 

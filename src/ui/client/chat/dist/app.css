@@ -2126,7 +2126,7 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main {
   display: grid;
-  grid-template-rows: 1fr auto auto auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   min-width: 0;
   min-height: 0;
   position: relative;
@@ -2147,6 +2147,21 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
   min-height: 0;
   position: relative;
+}
+.chat-main > .approvals-banner {
+  grid-row: 1;
+}
+.chat-main > .log-viewport {
+  grid-row: 2;
+}
+.chat-main > .status {
+  grid-row: 3;
+}
+.chat-main > .readonly-banner {
+  grid-row: 4;
+}
+.chat-main > .input-dock {
+  grid-row: 5;
 }
 .chat-main .log {
   width: 100%;
@@ -3732,15 +3747,51 @@ nav.tab-bar-strip.group-strip {
     justify-content: flex-end;
   }
 }
+.chat-main .input-dock {
+  min-width: 0;
+  min-height: 0;
+}
+.chat-main .message-composer[hidden] {
+  display: none;
+}
+.chat-main .question-dock {
+  padding: 12px var(--chat-gutter);
+  border-top: 1px solid var(--border);
+  max-height: min(45dvh, 380px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.chat-main .question-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.chat-main .question-prompt .question-card-title {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-main .question-prompt .question-card-btn {
+  height: auto;
+  min-height: 32px;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.chat-main .question-prompt + .question-prompt {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.chat-main .question-prompt-status {
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
 .chat-main .question-card {
-  border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 8px;
   white-space: normal;
-}
-.chat-main .question-card-answered {
-  border-color: transparent;
 }
 .chat-main .question-card-heading {
   font-size: var(--font-xs);
@@ -3754,8 +3805,6 @@ nav.tab-bar-strip.group-strip {
   color: var(--fg);
 }
 .chat-main .question-card-answer {
-  border-left: 3px solid var(--accent, #6366f1);
-  padding: 6px 10px;
   color: var(--fg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -3763,10 +3812,6 @@ nav.tab-bar-strip.group-strip {
 .chat-main .question-card-answered .question-card-title {
   border-left: 3px solid var(--accent, #6366f1);
   padding: 6px 10px;
-}
-.chat-main .question-card-answered .question-card-answer {
-  border-left: 0;
-  padding: 0;
 }
 .chat-main .question-card-actions {
   display: flex;

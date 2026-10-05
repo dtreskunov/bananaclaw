@@ -209,9 +209,9 @@ export interface ChatMessage {
 export type TranscriptRow =
   | { kind: 'message'; message: ChatMessage }
   | {
-      kind: 'question';
+      kind: 'question-answer';
       question: PendingQuestionDto;
-      answer?: ChatMessage;
+      answer: ChatMessage;
     }
   | {
       kind: 'turn';
@@ -358,6 +358,7 @@ export interface PendingQuestionDto {
   threadId: string | null;
   agentGroupId: string;
   createdAt: string;
+  timelinePosition?: number;
 }
 
 export interface RouterApi {
