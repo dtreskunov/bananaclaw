@@ -1047,7 +1047,6 @@ describe('chat turn snapshots and events', () => {
         channel_type: 'web',
         platform_id: 'group:agent',
         thread_id: 'thread-1',
-        title: 'Choose',
         question_text: 'Continue?',
         response_mode: 'text',
         options: [],

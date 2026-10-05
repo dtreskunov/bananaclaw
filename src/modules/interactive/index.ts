@@ -76,7 +76,6 @@ async function routeQuestionResponse(question: Question): Promise<void> {
     content: JSON.stringify({
       type: 'question_response',
       questionId: question.question_id,
-      title: question.title,
       question: question.question_text,
       responseType: skipped ? 'skipped' : question.answer_type,
       ...(!skipped ? { value: question.answer_value } : {}),

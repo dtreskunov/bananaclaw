@@ -444,11 +444,10 @@ async function deliverMessage(
   // exist and we skip persistence — the card still delivers to the user,
   // but the response path has nowhere to land and will log unclaimed.
   if (content.type === 'ask_question' && content.questionId && hasTable(getDb(), 'questions')) {
-    const title = content.title as string | undefined;
     const questionText = content.question as string | undefined;
     const responseMode = content.responseMode as 'choice' | 'text' | 'choice_or_text' | undefined;
     const rawOptions = content.options as unknown;
-    if (!title || !questionText || !responseMode || !Array.isArray(rawOptions)) {
+    if (!questionText || !responseMode || !Array.isArray(rawOptions)) {
       log.error('ask_question missing required fields — not persisting', {
         questionId: content.questionId,
       });
@@ -461,7 +460,6 @@ async function deliverMessage(
         platform_id: msg.platform_id,
         channel_type: msg.channel_type,
         thread_id: msg.thread_id,
-        title,
         question_text: questionText,
         response_mode: responseMode,
         options: normalizeOptions(rawOptions as never),

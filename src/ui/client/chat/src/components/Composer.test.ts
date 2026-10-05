@@ -258,7 +258,6 @@ describe('main composer pending edits', () => {
 
   const dockQuestion: PendingQuestionDto = {
     questionId: 'q',
-    title: 'Choice',
     question: 'Choose?',
     responseMode: 'choice_or_text',
     options: [{ label: 'First', selectedLabel: 'Chosen first', value: 'first' }],
@@ -287,6 +286,14 @@ describe('main composer pending edits', () => {
       resetMount('');
       vi.mocked(respondQuestion).mockReset().mockResolvedValue(true);
       vi.mocked(skipQuestion).mockReset().mockResolvedValue(true);
+    });
+    it('shows the question beside Skip without a separate title', () => {
+      mount();
+      const prompt = find(tree, 'section');
+      expect(prompt.props['aria-label']).toBe(dockQuestion.question);
+      const header = prompt.props.children[0];
+      expect(header.props.children[0].props.children).toBe(dockQuestion.question);
+      expect(header.props.children[1].props['aria-label']).toBe('Skip question and notify agent');
     });
     it('shares the ordinary composer input while omitting its attachment controls', () => {
       const ordinary = findComponent(tree, 'ComposerInput');
@@ -433,7 +440,9 @@ describe('main composer pending edits', () => {
           files: null,
         },
       });
-      expect(bubble.props.children[2].props.children).toBe('Question skipped');
+      expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toBe(
+        '<blockquote>\n<p>Choose?</p>\n</blockquote>\n<p>Question skipped</p>\n',
+      );
       expect(bubble.props['data-msg-id']).toBe('question-response:q');
     });
     it('sends a choice once and waits for the authoritative answer event before restoring composition', async () => {

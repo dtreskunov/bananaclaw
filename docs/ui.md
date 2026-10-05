@@ -486,7 +486,8 @@ the answer input has its own identity, timestamp and consumed-input position.
 The host orders both normally and never relocates the question. Asked events
 never render transcript cards. Outstanding questions replace the ordinary
 composer in a bounded, scrollable input dock below the transcript, with choice,
-text and dictation controls, plus an explicit **Skip** button. Multiple questions keep their recorded order.
+text and dictation controls, plus an explicit **Skip** button beside the question
+text, without a separate title. Multiple questions keep their recorded order.
 Freeform answers use the same textarea, dictation and send controls as ordinary
 composition, including density/width-aware autosizing. Question textareas grow
 to fit the entire answer; only the outer question dock scrolls. The ordinary
@@ -499,8 +500,11 @@ Question submission failures retain typed text and show an error. HTTP acceptanc
 or metadata saying "answered" locks the prompt while waiting for its actual answer
 event; neither fabricates an answer bubble nor restores the ordinary composer.
 Once the answer event is available, the prompt disappears and the transcript
-displays a read-only answer bubble at the input event's position, retaining question
-context. The composer returns without automatically taking focus. Cancelled
+displays a read-only answer bubble at the input event's position. The question text
+is prepended as a Markdown blockquote followed by the response, rendered together
+using the ordinary message Markdown renderer and styling, without a separate
+title or custom card layout. Choice responses retain their selected labels.
+The composer returns without automatically taking focus. Cancelled
 questions leave the dock without creating a transcript card. The asking turn's
 trace stays on its final response (or its own synthetic bubble), independently
 of prompt visibility. Reconnects restore the dock from authoritative question
@@ -517,7 +521,8 @@ Skip failures retain the prompt and typed answer with a retryable error, includi
 a **Retry skip** control if the terminal outcome was saved before journaling failed.
 Answers and skips share one idempotent response ID and a first-response-wins update,
 so retries and competing tabs never produce both outcomes. Approvals cannot be skipped.
-Browser protocol version 3 includes the skipped response type; older clients must reload.
+Browser protocol version 4 includes skipped responses and title-free questions;
+older clients must reload.
 
 The icon is disabled and grayed out while stopping, without adding transient
 status text or changing the bubble's layout. A **Stopping response** tooltip
@@ -576,7 +581,7 @@ before proceeding. Restore the backup if verification fails. No legacy question
 conversion ships in the host.
 Rebuild the host and chat assets, restart the host, and recycle any existing
 agent containers so the runner's formatter recognizes skipped responses.
-Reload stale browsers for conversation protocol version 3.
+Reload stale browsers for the current conversation protocol version.
 
 Verify that `questions` admits `answer_type = 'skipped'` with a NULL value,
 the existing pending question still appears in the dock with **Skip**, and
@@ -584,6 +589,36 @@ normal answers are unchanged. Do not skip a real question merely to validate
 deployment. Before reopening the service, rollback is a restore of the printed
 backup with the host stopped plus the matching previous code/assets. Never
 restore that backup over newer accepted messages.
+
+#### Removing stored question titles
+
+Question titles have been removed from the MCP tool, delivery payload, central
+schema and browser protocol. Fresh databases create the title-free schema
+directly; there is no startup migration. Approval and display-card titles remain
+unchanged. Existing `questions.title` columns must be dropped offline before
+starting this host.
+
+Stop this installation's host and verify that nothing is writing the central DB.
+Use the temporary offline script, which defaults to read-only inspection:
+
+```bash
+pnpm exec tsx scripts/migrate-question-titles.ts data/v2.db
+pnpm exec tsx scripts/migrate-question-titles.ts data/v2.db --apply --host-stopped
+```
+
+Applying creates a restricted-permission backup using SQLite's backup API, drops
+the title column inside a transaction and verifies every remaining question
+value, rowid, index, trigger, constraint and applied-migration record. Integrity
+and foreign-key checks must pass. Unexpected schemas or failed verification
+abort the upgrade. An already title-free database needs no change. Original
+session journals are immutable history; old title fields there are ignored and
+are not projected into current question records.
+
+Rebuild host and chat assets, restart this host and recycle its existing agent
+containers to refresh their MCP tool schemas. Reload browsers for protocol
+version 4. Before accepting new input, rollback is a restore of the printed
+backup with the host stopped and the matching previous code/assets. Never
+restore the backup over newer accepted messages.
 
 ### Authoritative conversation synchronization
 
@@ -692,7 +727,7 @@ conversion events are added to the drained journal. Repeat conversion is a no-op
 
 **Verify:** require zero pairs needing conversion, SQLite integrity/foreign-key
 checks, and matching activity positions on both sides before starting the matched
-host and runners. Verify session-link version 5, browser protocol version 3,
+host and runners. Verify session-link version 5, browser protocol version 4,
 served bundle hashes, reconnect snapshots, applied steering, mid-turn output and
 completion behavior. Reload open browser tabs. Runner source is bind-mounted, so
 source-only changes do not require an image rebuild.

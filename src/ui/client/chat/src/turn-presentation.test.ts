@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat } from './actions';
 import { chatTranscript, completedResponse, conversationPresentation, conversationState } from './conversation-state';
 import { activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace } from './activity-trace-state';
-import { diffConversation } from '../../../shared/conversation-protocol';
+import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared/conversation-protocol';
 import { dockQuestions } from './question-dock';
 import type { Conversation } from '../../../shared/conversation';
 import { presentedConversation, testSnapshot, testTurn } from './conversation-test-fixtures';
@@ -33,7 +33,7 @@ function update(next: Conversation): void {
   const state = conversationState.value!;
   receive({
     kind: 'update',
-    protocolVersion: 3,
+    protocolVersion: CONVERSATION_PROTOCOL_VERSION,
     streamId: state.streamId,
     baseRevision: state.revision,
     revision: state.revision + 1,
@@ -201,7 +201,6 @@ describe('authoritative turn presentation', () => {
       messageId: 'q-output',
       turnId: testTurn.id,
       timelinePosition: 100,
-      title: 'Choice',
       question: 'Choose?',
       responseMode: 'text',
       options: [],
@@ -305,7 +304,6 @@ describe('authoritative turn presentation', () => {
         messageId: 'question-output',
         turnId: testTurn.id,
         timelinePosition: 200,
-        title: 'Choice',
         question: 'Which option?',
         responseMode: 'text',
         options: [],
@@ -506,7 +504,7 @@ describe('authoritative turn presentation', () => {
     const before = chatMessages.value;
     receive({
       kind: 'update',
-      protocolVersion: 3,
+      protocolVersion: CONVERSATION_PROTOCOL_VERSION,
       streamId: 'test-stream',
       baseRevision: 4,
       revision: 5,

@@ -22,7 +22,7 @@ import { log } from '../log.js';
 import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
-import { normalizeOptions, type NormalizedOption } from './ask-question.js';
+import { formatQuestionResponse, normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
 import { normalizeDisplayCardPayload } from './display-card.js';
 
@@ -323,7 +323,10 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         try {
           const tid = event.threadId;
           await adapter.editMessage(tid, event.messageId, {
-            markdown: `${title}\n\n${selectedLabel}${byLine}`,
+            markdown:
+              render?.question != null
+                ? formatQuestionResponse(render.question, `${selectedLabel}${byLine}`)
+                : `${title}\n\n${selectedLabel}${byLine}`,
           });
         } catch (err) {
           log.warn('Failed to update card after action', { err });
@@ -425,10 +428,10 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // Ask question card — render as Card with buttons
       if (content.type === 'ask_question' && content.questionId && content.options) {
         const questionId = content.questionId as string;
-        const title = content.title as string;
+        const title = content.title as string | undefined;
         const question = content.question as string;
-        if (!title) {
-          log.error('ask_question missing required title — skipping delivery', { questionId });
+        if (!question) {
+          log.error('ask_question missing required question — skipping delivery', { questionId });
           return;
         }
         const options: NormalizedOption[] = normalizeOptions(content.options as never);
@@ -450,7 +453,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         });
         const result = await adapter.postMessage(tid, {
           card,
-          fallbackText: `${title}\n\n${question}\nOptions: ${options.map((o) => o.label).join(', ')}`,
+          fallbackText: `${title ? `${title}\n\n` : ''}${question}\nOptions: ${options.map((o) => o.label).join(', ')}`,
         });
         return result?.id;
       }
@@ -657,7 +660,10 @@ async function handleForwardedEvent(
       // Discord custom_id mirrors the new index-based encoding (see Button
       // construction). Decode back to the real option value for downstream.
       const selectedOption = resolveSelectedOption(render, tail, tail);
-      const cardTitle = render?.title ?? ((originalEmbeds[0]?.title as string) || '❓ Question');
+      const cardTitle =
+        render?.question != null
+          ? undefined
+          : (render?.title ?? ((originalEmbeds[0]?.title as string) || '❓ Question'));
       const matchedOpt = render?.options.find((o) => o.value === selectedOption);
       const selectedLabel = matchedOpt?.selectedLabel ?? selectedOption ?? customId;
       try {
@@ -670,7 +676,10 @@ async function handleForwardedEvent(
               embeds: [
                 {
                   title: cardTitle,
-                  description: `${originalDescription}\n\n${selectedLabel}`,
+                  description:
+                    render?.question != null
+                      ? formatQuestionResponse(render.question, selectedLabel)
+                      : `${originalDescription}\n\n${selectedLabel}`,
                 },
               ],
               components: [], // remove buttons

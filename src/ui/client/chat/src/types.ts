@@ -347,7 +347,6 @@ export interface PendingApprovalDto {
 
 export interface PendingQuestionDto {
   questionId: string;
-  title: string;
   question: string;
   responseMode: 'choice' | 'text' | 'choice_or_text';
   options: { label: string; selectedLabel: string; value: string }[];

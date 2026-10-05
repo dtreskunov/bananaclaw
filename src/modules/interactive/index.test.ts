@@ -81,7 +81,6 @@ function seedQuestion(responseMode: 'choice' | 'text' | 'choice_or_text'): void 
     platform_id: 'user-1',
     channel_type: 'web',
     thread_id: 'thread-1',
-    title: 'Environment',
     question_text: 'Which environment?',
     response_mode: responseMode,
     options: [{ label: 'Production', selectedLabel: 'Production', value: 'prod' }],
@@ -145,7 +144,6 @@ describe('handleInteractiveResponse', () => {
       expect(JSON.parse(message.content)).toEqual({
         type: 'question_response',
         questionId: QUESTION_ID,
-        title: 'Environment',
         question: 'Which environment?',
         responseType: 'skipped',
         userId: 'skipper',

@@ -359,7 +359,7 @@ Agent calls `add_reaction` tool with message ID and emoji. Agent-runner writes m
 { "text": "LGTM" }
 
 // Interactive card
-{ "operation": "ask_question", "title": "Deploy", "question": "Approve deployment?", "options": ["Yes", "No", "Defer"] }
+{ "type": "ask_question", "questionId": "q-1", "question": "Approve deployment?", "responseMode": "choice", "options": ["Yes", "No", "Defer"] }
 
 // Edit existing message
 { "operation": "edit", "messageId": "3", "text": "Updated: LGTM with minor comments" }

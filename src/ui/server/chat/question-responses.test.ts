@@ -57,7 +57,6 @@ beforeEach(() => {
     platform_id: 'group:agent',
     channel_type: 'web',
     thread_id: 'thread',
-    title: 'Choose',
     question_text: 'Which option?',
     response_mode: 'choice',
     options: [{ label: 'Yes', selectedLabel: 'Selected yes', value: 'yes' }],

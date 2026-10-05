@@ -220,7 +220,6 @@ export interface Question {
   platform_id: string | null;
   channel_type: string | null;
   thread_id: string | null;
-  title: string;
   question_text: string;
   response_mode: 'choice' | 'text' | 'choice_or_text';
   options: import('./channels/ask-question.js').NormalizedOption[];

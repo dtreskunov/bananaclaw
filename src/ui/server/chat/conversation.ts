@@ -210,7 +210,6 @@ export function projectConversation(
     const timelinePosition = outboundTimelinePosition(anchor.content);
     return {
       questionId: q.question_id,
-      title: q.title,
       question: q.question_text,
       responseMode: q.response_mode,
       options: JSON.parse(q.options_json),

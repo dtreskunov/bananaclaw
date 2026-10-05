@@ -130,7 +130,6 @@ CREATE TABLE questions (
   platform_id     TEXT,
   channel_type    TEXT,
   thread_id       TEXT,
-  title           TEXT NOT NULL,
   question_text   TEXT NOT NULL,
   response_mode   TEXT NOT NULL CHECK(response_mode IN ('choice', 'text', 'choice_or_text')),
   options_json    TEXT NOT NULL,

@@ -40,8 +40,15 @@ export function normalizeOptions(raws: RawOption[]): NormalizedOption[] {
 export interface AskQuestionPayload {
   type: 'ask_question';
   questionId: string;
-  title: string;
   question: string;
   responseMode: 'choice' | 'text' | 'choice_or_text';
   options: NormalizedOption[];
+}
+
+export function formatQuestionResponse(question: string, response: string): string {
+  const quote = question
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join('\n');
+  return `${quote}\n\n${response}`;
 }

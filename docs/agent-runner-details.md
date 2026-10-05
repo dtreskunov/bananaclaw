@@ -734,28 +734,34 @@ Implementation: write a `messages_out` row with `kind: 'chat-sdk'` and the card 
 
 #### ask_user_question
 
-Send an interactive question and wait for the user's response. This is a **blocking tool call** — the tool doesn't return until the user responds.
+Queue a durable interactive question. The tool returns immediately; an answer
+or explicit skip arrives as an `interactive_response` input in a later turn.
 
 ```typescript
 {
   name: 'ask_user_question',
   params: {
-    title: string,         // short card title, e.g. "Confirm deletion"
     question: string,
-    options: (string | { label: string; selectedLabel?: string; value?: string })[],
-    timeout?: number,      // seconds (default: 300)
+    responseMode: 'choice' | 'text' | 'choice_or_text',
+    options?: (string | { label: string; selectedLabel?: string; value?: string })[],
+    placeholder?: string,
+    multiline?: boolean,
   }
 }
 ```
 
 Implementation:
 1. Generate a `questionId`
-2. Write a `messages_out` row with `operation: 'ask_question'`, the question, options, and questionId
-3. Poll `messages_in` for a row with matching `questionId` in content
-4. When found, return the `selectedOption` as the tool result
-5. If timeout expires, return a timeout error as the tool result
+2. Write a `messages_out` row with `kind: 'chat-sdk'` and a `type: 'ask_question'`
+   payload containing the question, response mode, normalized options and ID
+3. Return `status: 'awaiting_user'` immediately
+4. The host persists the question and journals the eventual response using the
+   deterministic input ID `question-response:<questionId>`, then wakes the runner
 
-The agent's execution is paused at this tool call. The provider's query keeps running (Claude holds the tool call open). The agent-runner polls for the response in a separate loop.
+Choice modes require options. A second question is rejected while a previous one
+is awaiting its response, including after Stop. No title or timeout is accepted
+as part of the question contract. Approval and display-card titles are separate
+and unchanged.
 
 #### edit_message
 

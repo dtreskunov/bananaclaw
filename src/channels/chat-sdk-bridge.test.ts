@@ -236,6 +236,33 @@ describe('createChatSdkBridge.setup — webhook route and state namespace', () =
   });
 });
 
+describe('createChatSdkBridge.deliver — questions', () => {
+  it.each([undefined, 'Approval required'])('delivers a question with optional approval title %s', async (title) => {
+    const { calls, postMessage } = makePostCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+    });
+    const id = await bridge.deliver('telegram:42', null, {
+      kind: 'chat-sdk',
+      content: {
+        type: 'ask_question',
+        questionId: 'q',
+        question: 'Which day?',
+        responseMode: 'choice',
+        options: ['Monday'],
+        ...(title ? { title } : {}),
+      },
+    });
+    expect(id).toBe('msg-stub');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].message).toMatchObject({
+      card: { title },
+      fallbackText: `${title ? `${title}\n\n` : ''}Which day?\nOptions: Monday`,
+    });
+  });
+});
+
 describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
   // The send_card MCP tool writes outbound rows with `{ type: 'card', card, fallbackText }`.
   // Before this branch existed the bridge silently dropped them: cards have no

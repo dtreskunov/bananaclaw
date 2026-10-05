@@ -109,11 +109,11 @@ export function createQuestion(question: Question): boolean {
     .prepare(
       `INSERT OR IGNORE INTO questions
          (question_id, session_id, message_out_id, in_reply_to, platform_id, channel_type, thread_id,
-          title, question_text, response_mode, options_json, status, answer_value, answer_type,
+          question_text, response_mode, options_json, status, answer_value, answer_type,
           answered_by, answered_at, cancelled_at, created_at)
        VALUES
          (@question_id, @session_id, @message_out_id, @in_reply_to, @platform_id, @channel_type, @thread_id,
-          @title, @question_text, @response_mode, @options_json, @status, @answer_value, @answer_type,
+          @question_text, @response_mode, @options_json, @status, @answer_value, @answer_type,
           @answered_by, @answered_at, @cancelled_at, @created_at)`,
     )
     .run({
@@ -209,16 +209,18 @@ export function getPendingApprovalsByAction(action: string): PendingApproval[] {
   return getDb().prepare('SELECT * FROM pending_approvals WHERE action = ?').all(action) as PendingApproval[];
 }
 
+type AskQuestionRender = {
+  options: import('../channels/ask-question.js').NormalizedOption[];
+} & ({ question: string; title?: never } | { title: string; question?: never });
+
 /**
- * Resolve ask_question render metadata (title + normalized options) for any
+ * Resolve ask_question render metadata (question or approval title + options) for any
  * card, regardless of whether it was persisted as a question (generic
  * ask_user_question) or a pending_approval (self-mod / OneCLI credential).
  */
-export function getAskQuestionRender(
-  id: string,
-): { title: string; options: import('../channels/ask-question.js').NormalizedOption[] } | undefined {
+export function getAskQuestionRender(id: string): AskQuestionRender | undefined {
   const q = getQuestion(id);
-  if (q) return { title: q.title, options: q.options };
+  if (q) return { question: q.question_text, options: q.options };
   const a = getDb().prepare('SELECT title, options_json FROM pending_approvals WHERE approval_id = ?').get(id) as
     | { title: string; options_json: string }
     | undefined;

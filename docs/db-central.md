@@ -196,6 +196,8 @@ The `ask_user_question` MCP tool creates a durable question here. Fresh database
 create this schema directly, including the `skipped` response type. The legacy
 `pending_questions` conversion is no longer registered or shipped.
 Existing installations require the [offline upgrade](ui.md#upgrading-question-skips).
+Question titles are not part of the persisted schema; older installations also
+need the [offline title removal](ui.md#removing-stored-question-titles).
 The original question remains stored after resolution. Answers and
 skips arrive in the session input journal as `interactive_response` events
 linked by `questionId`; they never relocate the original question output.
@@ -209,7 +211,6 @@ CREATE TABLE questions (
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
-  title          TEXT NOT NULL,
   question_text  TEXT NOT NULL,
   response_mode  TEXT NOT NULL CHECK(response_mode IN ('choice', 'text', 'choice_or_text')),
   options_json   TEXT NOT NULL,

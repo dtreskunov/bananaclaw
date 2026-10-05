@@ -1,6 +1,6 @@
 import type { Conversation, ConversationMessage, ConversationQuestion, ConversationTurn } from './conversation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 3;
+export const CONVERSATION_PROTOCOL_VERSION = 4;
 export interface EntityChanges<T> {
   upserts: T[];
   removeIds: string[];
@@ -165,7 +165,6 @@ const turn = shape({
 });
 const question = shape({
   questionId: id,
-  title: text,
   question: text,
   responseMode: oneOf('choice', 'text', 'choice_or_text'),
   options: array(shape({ label: text, selectedLabel: text, value: text })),

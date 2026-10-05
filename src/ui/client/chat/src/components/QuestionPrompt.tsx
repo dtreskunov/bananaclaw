@@ -125,11 +125,11 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
     <section
       class="question-prompt"
       data-question-id={q.questionId}
-      aria-label={q.title || 'Question'}
+      aria-label={q.question || 'Question'}
       aria-busy={busy || waiting}
     >
       <div class="question-prompt-header">
-        <div class="question-card-heading">{q.title}</div>
+        <div class="question-prompt-text">{q.question}</div>
         <button
           type="button"
           class="question-skip-btn"
@@ -141,7 +141,6 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
           {q.answerType === 'skipped' && !accepted ? 'Retry skip' : 'Skip'}
         </button>
       </div>
-      <div class="question-card-title">{q.question}</div>
       {!!q.options.length && (
         <div class="question-card-actions">
           {q.options.map((option) => (

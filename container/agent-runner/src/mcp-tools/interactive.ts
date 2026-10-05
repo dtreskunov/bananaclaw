@@ -71,7 +71,6 @@ export const askUserQuestion: McpToolDefinition = {
     inputSchema: {
       type: 'object' as const,
       properties: {
-        title: { type: 'string', description: 'Short card title shown above the question' },
         question: { type: 'string', description: 'The question to ask' },
         responseMode: {
           type: 'string',
@@ -99,16 +98,15 @@ export const askUserQuestion: McpToolDefinition = {
         placeholder: { type: 'string', description: 'Placeholder for text input' },
         multiline: { type: 'boolean', description: 'Whether text input should allow multiple lines' },
       },
-      required: ['title', 'question', 'responseMode'],
+      required: ['question', 'responseMode'],
     },
   },
   async handler(args) {
-    const title = args.title as string;
     const question = args.question as string;
     const responseMode = args.responseMode as 'choice' | 'text' | 'choice_or_text';
     const rawOptions = (args.options as unknown[] | undefined) ?? [];
-    if (!title || !question || !['choice', 'text', 'choice_or_text'].includes(responseMode)) {
-      return err('title, question, and responseMode are required');
+    if (!question || !['choice', 'text', 'choice_or_text'].includes(responseMode)) {
+      return err('question and responseMode are required');
     }
     if (responseMode !== 'text' && rawOptions.length === 0) {
       return err('options are required for choice questions');
@@ -141,7 +139,6 @@ export const askUserQuestion: McpToolDefinition = {
       content: JSON.stringify({
         type: 'ask_question',
         questionId,
-        title,
         question,
         responseMode,
         options,

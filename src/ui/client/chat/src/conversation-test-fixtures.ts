@@ -1,5 +1,5 @@
 import type { Conversation, ConversationTurn } from '../../../shared/conversation';
-import type { ConversationSnapshot } from '../../../shared/conversation-protocol';
+import { CONVERSATION_PROTOCOL_VERSION, type ConversationSnapshot } from '../../../shared/conversation-protocol';
 import { conversationTimeline } from '../../../server/chat/conversation-timeline';
 
 export function presentedConversation(view: Omit<Conversation, 'timeline'>): Conversation {
@@ -22,7 +22,7 @@ export const testTurn: ConversationTurn = {
 export function testSnapshot(partial: Partial<Conversation> = {}, streamId = 'test-stream'): ConversationSnapshot {
   return {
     kind: 'snapshot',
-    protocolVersion: 3,
+    protocolVersion: CONVERSATION_PROTOCOL_VERSION,
     streamId,
     revision: 0,
     conversation: presentedConversation({

@@ -17703,7 +17703,7 @@ function conversationActivity(turn2) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 3;
+var CONVERSATION_PROTOCOL_VERSION = 4;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -17820,7 +17820,6 @@ var turn = shape({
 });
 var question = shape({
   questionId: id,
-  title: text,
   question: text,
   responseMode: oneOf("choice", "text", "choice_or_text"),
   options: array(shape({ label: text, selectedLabel: text, value: text })),
@@ -22576,11 +22575,11 @@ function QuestionPrompt({ question: q5 }) {
     {
       class: "question-prompt",
       "data-question-id": q5.questionId,
-      "aria-label": q5.title || "Question",
+      "aria-label": q5.question || "Question",
       "aria-busy": busy || waiting,
       children: [
         /* @__PURE__ */ u4("div", { class: "question-prompt-header", children: [
-          /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
+          /* @__PURE__ */ u4("div", { class: "question-prompt-text", children: q5.question }),
           /* @__PURE__ */ u4(
             "button",
             {
@@ -22594,7 +22593,6 @@ function QuestionPrompt({ question: q5 }) {
             }
           )
         ] }),
-        /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.question }),
         !!q5.options.length && /* @__PURE__ */ u4("div", { class: "question-card-actions", children: q5.options.map((option) => /* @__PURE__ */ u4(
           "button",
           {
@@ -22669,13 +22667,22 @@ function QuestionPrompt({ question: q5 }) {
   );
 }
 
+// ../../../channels/ask-question.ts
+function formatQuestionResponse(question2, response) {
+  const quote = question2.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
+  return `${quote}
+
+${response}`;
+}
+
 // src/components/QuestionAnswerBubble.tsx
 function QuestionAnswerBubble({ question: question2, answer }) {
-  return /* @__PURE__ */ u4("div", { class: "msg in question-card question-card-answered", "data-msg-id": answer.id, children: [
-    /* @__PURE__ */ u4("div", { class: "question-card-heading", children: question2.title }),
-    /* @__PURE__ */ u4("div", { class: "question-card-title", children: question2.question }),
-    /* @__PURE__ */ u4("div", { class: "question-card-answer", children: answer.questionResponseType === "skipped" ? "Question skipped" : question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text }),
-    /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answer.ts }) })
+  const response = answer.questionResponseType === "skipped" ? "Question skipped" : question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text;
+  const text2 = formatQuestionResponse(question2.question, response);
+  const md = renderMarkdown(text2, groupId.value);
+  return /* @__PURE__ */ u4("div", { class: `msg in${md != null ? " markdown" : ""}`, "data-msg-id": answer.id, children: [
+    md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 }),
+    /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answer.ts }) })
   ] });
 }
 

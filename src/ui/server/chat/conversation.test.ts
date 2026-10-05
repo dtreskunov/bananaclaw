@@ -2,7 +2,11 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OUTBOUND_SCHEMA } from '../../../db/schema.js';
 import { linkTurnInput, putTurn, type TurnRow } from '../../../db/turns.js';
-import { parseConversationFrame, reduceConversation } from '../../shared/conversation-protocol.js';
+import {
+  CONVERSATION_PROTOCOL_VERSION,
+  parseConversationFrame,
+  reduceConversation,
+} from '../../shared/conversation-protocol.js';
 import type { ConversationMessage } from '../../shared/conversation.js';
 import { projectConversation } from './conversation.js';
 
@@ -125,7 +129,6 @@ describe('authoritative conversation projection', () => {
       channel_type: 'web',
       platform_id: 'group:g',
       thread_id: 't',
-      title: 'Question',
       question_text: 'Choose?',
       response_mode: 'text',
       options_json: '[]',
@@ -178,6 +181,7 @@ describe('authoritative conversation projection', () => {
         );
       const pending = readQuestions('pending');
       expect(pending.questions).toHaveLength(1);
+      expect(pending.questions[0]).not.toHaveProperty('title');
       expect(pending.timeline.find((row) => row.kind === 'turn')).toMatchObject({
         afterId: question.message_out_id,
       });
@@ -253,7 +257,7 @@ describe('authoritative conversation projection', () => {
             null,
             parseConversationFrame({
               kind: 'snapshot',
-              protocolVersion: 3,
+              protocolVersion: CONVERSATION_PROTOCOL_VERSION,
               streamId: 'test',
               revision: 0,
               conversation: consumed,

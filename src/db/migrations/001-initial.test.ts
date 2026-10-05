@@ -9,8 +9,8 @@ beforeEach(() => {
     INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 'created');
     INSERT INTO sessions (id, agent_group_id, created_at) VALUES ('s', 'g', 'created');
     INSERT INTO questions
-      (question_id, session_id, message_out_id, title, question_text, response_mode, options_json, created_at)
-      VALUES ('q', 's', 'out', 'Title', 'Choose?', 'choice', '[]', 'created');
+      (question_id, session_id, message_out_id, question_text, response_mode, options_json, created_at)
+      VALUES ('q', 's', 'out', 'Choose?', 'choice', '[]', 'created');
   `);
 });
 afterEach(() => closeDb());
@@ -20,6 +20,9 @@ describe('current question schema bootstrap', () => {
     const db = getDb();
     expect(hasTable(db, 'questions')).toBe(true);
     expect(hasTable(db, 'pending_questions')).toBe(false);
+    expect(db.pragma('table_info(questions)')).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'title' })]),
+    );
     expect(migrations.some((migration) => migration.name === 'durable-questions')).toBe(false);
     expect(answerQuestion('q', { type: 'skipped', value: null, userId: 'actor', answeredAt: 'skipped' })).toBe(true);
     expect(getQuestion('q')).toMatchObject({

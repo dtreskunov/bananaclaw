@@ -5,7 +5,6 @@ import type { ConversationMessage } from '../../../shared/conversation';
 
 const question: PendingQuestionDto = {
   questionId: 'q',
-  title: 'Choice',
   question: 'Choose?',
   responseMode: 'text',
   options: [],

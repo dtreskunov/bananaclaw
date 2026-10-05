@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Conversation, ConversationMessage, ConversationTurn } from '../../shared/conversation.js';
-import { parseConversationFrame, reduceConversation } from '../../shared/conversation-protocol.js';
+import {
+  CONVERSATION_PROTOCOL_VERSION,
+  parseConversationFrame,
+  reduceConversation,
+} from '../../shared/conversation-protocol.js';
 import { conversationTimeline } from './conversation-timeline.js';
 
 const turn: ConversationTurn = {
@@ -46,7 +50,7 @@ function validate(view: Conversation): void {
       null,
       parseConversationFrame({
         kind: 'snapshot',
-        protocolVersion: 3,
+        protocolVersion: CONVERSATION_PROTOCOL_VERSION,
         streamId: 'test',
         revision: 0,
         conversation: view,
@@ -101,7 +105,7 @@ describe('explicit host trace placement', () => {
     expect(() =>
       parseConversationFrame({
         kind: 'snapshot',
-        protocolVersion: 3,
+        protocolVersion: CONVERSATION_PROTOCOL_VERSION,
         streamId: 'test',
         revision: 0,
         conversation: invalid,
@@ -139,7 +143,6 @@ describe('explicit host trace placement', () => {
         messageId: 'question-output',
         timelinePosition: 200,
         turnId: turn.id,
-        title: '',
         question: 'Choose?',
         responseMode: 'text',
         options: [],
@@ -250,7 +253,7 @@ describe('explicit host trace placement', () => {
           null,
           parseConversationFrame({
             kind: 'snapshot',
-            protocolVersion: 3,
+            protocolVersion: CONVERSATION_PROTOCOL_VERSION,
             streamId: 'test',
             revision: 0,
             conversation: { ...view, timeline },

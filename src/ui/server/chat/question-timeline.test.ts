@@ -21,7 +21,6 @@ function message(id: string, timestamp: string): ConversationMessage {
 function question(overrides: Partial<ConversationQuestion> = {}): ConversationQuestion {
   return {
     questionId: 'question-1',
-    title: 'Release note',
     question: 'What should it say?',
     responseMode: 'text',
     options: [],

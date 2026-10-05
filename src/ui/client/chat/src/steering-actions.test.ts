@@ -3,7 +3,7 @@ import { clearChat, respondQuestion, sendChat, skipQuestion } from './actions';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
 import { applyConversationFrame, conversationState } from './conversation-state';
-import { diffConversation } from '../../../shared/conversation-protocol';
+import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared/conversation-protocol';
 import { presentedConversation, testSnapshot, testTurn } from './conversation-test-fixtures';
 import {
   activeTurn,
@@ -226,7 +226,7 @@ describe('authoritative input dispositions', () => {
     applyConversationFrame(
       {
         kind: 'update',
-        protocolVersion: 3,
+        protocolVersion: CONVERSATION_PROTOCOL_VERSION,
         streamId: before.streamId,
         baseRevision: 0,
         revision: 1,
@@ -239,7 +239,7 @@ describe('authoritative input dispositions', () => {
     applyConversationFrame(
       {
         kind: 'update',
-        protocolVersion: 3,
+        protocolVersion: CONVERSATION_PROTOCOL_VERSION,
         streamId: before.streamId,
         baseRevision: 1,
         revision: 2,

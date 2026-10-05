@@ -31,7 +31,9 @@ import {
   createQuestion,
   getQuestion,
   answerQuestion,
+  createPendingApproval,
 } from './index.js';
+import { getAskQuestionRender } from './sessions.js';
 
 function now() {
   return new Date().toISOString();
@@ -402,7 +404,6 @@ describe('durable questions', () => {
       platform_id: 'chan-1',
       channel_type: 'discord',
       thread_id: null,
-      title: 'Test',
       question_text: 'Choose one',
       response_mode: 'choice',
       options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
@@ -417,8 +418,23 @@ describe('durable questions', () => {
     const result = getQuestion('q-1');
     expect(result).toBeDefined();
     expect(result!.session_id).toBe('sess-1');
-    expect(result!.title).toBe('Test');
+    expect(result!.question_text).toBe('Choose one');
+    expect(result).not.toHaveProperty('title');
     expect(result!.options[0].value).toBe('yes');
+    expect(getAskQuestionRender('q-1')).toEqual({ question: 'Choose one', options: result!.options });
+  });
+
+  it('retains separate approval titles in channel render metadata', () => {
+    createPendingApproval({
+      approval_id: 'approval',
+      request_id: 'request',
+      action: 'install_packages',
+      payload: '{}',
+      created_at: now(),
+      title: 'Approval required',
+      options_json: '[]',
+    });
+    expect(getAskQuestionRender('approval')).toEqual({ title: 'Approval required', options: [] });
   });
 
   it('retains the answer', () => {
@@ -430,7 +446,6 @@ describe('durable questions', () => {
       platform_id: null,
       channel_type: null,
       thread_id: null,
-      title: 'Test',
       question_text: 'What should happen?',
       response_mode: 'choice_or_text',
       options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
