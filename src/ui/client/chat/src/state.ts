@@ -74,6 +74,7 @@ export const chatMessages: Signal<ChatMessage[]> = signal<ChatMessage[]>([]);
 export const chatStatus: Signal<string> = signal('');
 export const chatLoading: Signal<boolean> = signal(false);
 export const chatReady: Signal<boolean> = signal(false);
+export const chatReloadRequired: Signal<boolean> = signal(false);
 export const activeTurn = signal<ActiveTurn | null>(null);
 export const turnConnected = signal(false);
 export const stopRequest = signal<{ turnId: string; busy: boolean; error: string } | null>(null);

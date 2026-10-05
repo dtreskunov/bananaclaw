@@ -14,6 +14,7 @@ import {
   chatStatus,
   chatLoading,
   chatReady,
+  chatReloadRequired,
   activeTurn,
   turnConnected,
   pendingWebSends,
@@ -62,6 +63,7 @@ import { applyTurnState, resetTurnState } from './stop-turn';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { parentPath } from './utils';
 import { showToast } from './components/Toast';
+import { showClientReloadPrompt } from './notify';
 import { requestChoice } from './components/PromptModal';
 import type {
   Thread,
@@ -477,6 +479,7 @@ export async function runSync(
         console.error('Conversation snapshot rejected', error);
         chatStatus.value = error instanceof Error ? error.message : 'Invalid chat snapshot. Reload this page.';
         chatReady.value = false;
+        handleProtocolMismatch(error);
         return false;
       }
     }
@@ -705,6 +708,14 @@ interface ChatSocketContext {
 
 const WS_CONNECT_TIMEOUT_MS = 10000;
 
+function handleProtocolMismatch(error: unknown): boolean {
+  if (!(error instanceof ConversationProtocolError) || error.code !== 'protocol_mismatch') return false;
+  chatReloadRequired.value = true;
+  applyTurnState(activeTurn.value, false);
+  showClientReloadPrompt('Chat protocol changed');
+  return true;
+}
+
 function connectChatWs(ctx: ChatSocketContext): void {
   const { gid, tid, mg, generation } = ctx;
   if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
@@ -791,10 +802,9 @@ function connectChatWs(ctx: ChatSocketContext): void {
       chatReady.value = false;
       applyTurnState(activeTurn.value, false);
       chatStatus.value = error instanceof Error ? error.message : 'Invalid chat data. Reload this page.';
-      if (error instanceof ConversationProtocolError && error.code === 'protocol_mismatch') {
+      if (handleProtocolMismatch(error)) {
         ws.onclose = null;
         if (refs.wsPingTimer) clearInterval(refs.wsPingTimer);
-        showToast('Chat protocol changed. Reload this page.', 'err');
       } else {
         showToast('Chat synchronization lost. Reconnecting for a fresh snapshot.', 'err');
       }

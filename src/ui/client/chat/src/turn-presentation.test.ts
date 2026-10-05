@@ -10,12 +10,15 @@ import {
   activeTurn,
   chatMessages,
   chatReady,
+  chatReloadRequired,
   chatStatus,
   groupId,
   highlightMessageId,
   pending,
   threadId,
+  toastMessage,
 } from './state';
+import { dismissToast } from './components/Toast';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 vi.mock('./hash', () => ({ writeHash: vi.fn() }));
@@ -63,6 +66,7 @@ afterEach(() => {
   clearChat();
   groupId.value = null;
   pending.value = [];
+  while (toastMessage.value) dismissToast();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -516,6 +520,28 @@ describe('authoritative turn presentation', () => {
   it('provides an actionable reload error for an unsupported protocol', () => {
     receive({ kind: 'snapshot', protocolVersion: 99 });
     expect(chatReady.value).toBe(false);
+    expect(chatReloadRequired.value).toBe(true);
+    expect(chatStatus.value).toContain('Reload');
+    expect(toastMessage.value).toMatchObject({ text: 'Chat protocol changed', kind: 'ok', actionLabel: 'Reload' });
+    expect(toastMessage.value?.action).toBeTypeOf('function');
+  });
+  it('requires the same reload for incompatible non-Web snapshots', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          approvals: [],
+          conversation: { kind: 'snapshot', protocolVersion: 99 },
+        }),
+        { status: 200 },
+      ),
+    );
+    await openChat('group', 'external-thread', {
+      channelType: 'slack',
+      messagingGroupId: 'slack-group',
+      canSend: false,
+    });
+    expect(chatReady.value).toBe(false);
+    expect(chatReloadRequired.value).toBe(true);
     expect(chatStatus.value).toContain('Reload');
   });
 });

@@ -89,4 +89,29 @@ describe('shared toast policy', () => {
     expect(node?.type).toBe('div');
     expect(node?.props.class).toBe('toast toast-err toast-sticky');
   });
+
+  it.each(['ok', 'err'] as const)('renders a persistent Reload action without Dismiss (%s)', (kind) => {
+    const action = vi.fn();
+    showStickyToast('Chat protocol changed', action, kind, 'Reload');
+    vi.advanceTimersByTime(60_000);
+    const node = Toast()!;
+    expect(node.type).toBe('div');
+    expect(node.props.class).toContain('toast-sticky toast-action');
+    const button = node.props.children[1].props.children;
+    expect(button.type).toBe('button');
+    expect(button.props.children).toBe('Reload');
+    button.props.onClick();
+    expect(action).toHaveBeenCalledOnce();
+  });
+
+  it('keeps required Reload prompts visible but updates a failed attempt in place', () => {
+    const action = vi.fn();
+    showStickyToast('Chat protocol changed', action, 'ok', 'Reload');
+    showToast('Copied');
+    expect(toastMessage.value?.text).toBe('Chat protocol changed');
+    showStickyToast('Could not load the client. Retry Reload.', action, 'err', 'Reload');
+    expect(toastMessage.value?.text).toBe('Could not load the client. Retry Reload.');
+    dismissToast();
+    expect(toastMessage.value?.text).toBe('Copied');
+  });
 });

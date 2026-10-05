@@ -318,6 +318,7 @@ export interface ToastMessage {
   kind?: 'ok' | 'err';
   // When set, the toast is sticky (no auto-hide) and invokes this action.
   action?: () => void;
+  actionLabel?: string;
 }
 
 export interface PendingFile {

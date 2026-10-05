@@ -822,11 +822,18 @@ does not preserve the retired settings.
 
 ### Feedback notifications
 
-Error toasts across the UI remain visible until explicitly dismissed. Their text
+Ordinary error toasts across the UI remain visible until explicitly dismissed. Their text
 can be selected and copied, long messages wrap and scroll, and each has a
 keyboard-accessible **Dismiss** button. Later notifications queue behind an
 unread error rather than replacing it. Success messages still auto-dismiss;
-action prompts (such as a new-version reload) remain clickable and persistent.
+action prompts remain persistent. New-version and incompatible-protocol notices
+share a **Reload** action instead of **Dismiss**. Reload checks for a newer
+service worker and waits for it to activate before reloading, so a cached client
+does not simply reload itself. Failed updates show a retryable Reload error.
+Protocol mismatches pause chat rather than implying that the user must reply on
+another channel; the read-only banner appears only after capabilities have been
+confirmed, and read-only Web threads do not direct users back to Web.
+Later notifications also queue behind a required Reload prompt.
 
 If a catalog skill fails to install, the error includes Git's diagnostic when
 available. `Repository not found` during a catalog add or refresh means the

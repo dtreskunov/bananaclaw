@@ -13,6 +13,7 @@ import {
   chatLoading,
   chatMessages,
   chatReady,
+  chatReloadRequired,
   chatStatus,
   pendingQuestions,
   pendingWebSends,
@@ -30,6 +31,7 @@ export const conversationState = signal<ConversationSnapshot | null>(null);
 export const completedResponse = signal<string | null>(null);
 export const chatTranscript = signal<TranscriptRow[]>([]);
 export function resetConversation(): void {
+  chatReloadRequired.value = false;
   conversationState.value = null;
   completedResponse.value = null;
   resetActivityTraceView();
@@ -135,6 +137,7 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
     );
     chatLoading.value = false;
     chatReady.value = true;
+    chatReloadRequired.value = false;
     chatStatus.value = 'connected';
   });
   // A snapshot (including reconnect) is not evidence of a newly completed turn.

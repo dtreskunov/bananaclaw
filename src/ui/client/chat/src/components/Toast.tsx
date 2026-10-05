@@ -18,8 +18,11 @@ function displayToast(message: ToastMessage, ms: number): void {
 }
 
 function enqueueToast(message: ToastMessage, ms = 1800): void {
-  // A later success, error, or reload prompt must not erase an unread error.
-  if (toastMessage.value?.kind === 'err') {
+  const current = toastMessage.value;
+  // Required actions can update their own failure; unrelated feedback must queue.
+  if (message.action && message.action === current?.action && message.actionLabel === current.actionLabel) {
+    displayToast(message, ms);
+  } else if (current?.kind === 'err' || current?.actionLabel) {
     pending.push({ message, ms });
   } else {
     displayToast(message, ms);
@@ -36,8 +39,9 @@ export function showStickyToast(
   text: string,
   onClick: () => void,
   kind: 'ok' | 'err' = 'ok',
+  actionLabel?: string,
 ): void {
-  enqueueToast({ id: nextId++, text, kind, action: onClick });
+  enqueueToast({ id: nextId++, text, kind, action: onClick, actionLabel });
 }
 
 export function dismissToast(): void {
@@ -50,6 +54,20 @@ export function dismissToast(): void {
 export function Toast() {
   const t = toastMessage.value;
   if (!t) return null;
+  if (t.action && t.actionLabel) {
+    return (
+      <div
+        class={'toast toast-' + t.kind + ' toast-sticky toast-action' + (t.kind === 'ok' ? ' accent-icon-btn' : '')}
+        role={t.kind === 'err' ? 'alert' : 'status'}
+        key={t.id}
+      >
+        <span class="toast-text">{t.text}</span>
+        <div class="toast-controls">
+          <button type="button" onClick={t.action}>{t.actionLabel}</button>
+        </div>
+      </div>
+    );
+  }
   if (t.kind === 'err') {
     return (
       <div class="toast toast-err toast-sticky" key={t.id}>

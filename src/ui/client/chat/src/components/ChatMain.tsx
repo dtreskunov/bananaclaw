@@ -5,7 +5,7 @@ import { signal } from '@preact/signals';
 import type { JSX } from 'preact';
 import { useRef, useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import {
-  chatMessages, chatStatus, chatLoading, chatReady, threadId, channelType, canSend, pending,
+  chatMessages, chatStatus, chatLoading, chatReady, chatReloadRequired, threadId, channelType, canSend, pending,
   threads, groups, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
   pendingQuestions,
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
@@ -1771,7 +1771,7 @@ export function Composer() {
           <textarea
             id="chat-input"
             rows={1}
-            placeholder={edit.editing ? 'Edit pending message\u2026' : wsDown ? 'Reconnecting\u2026' : `Message ${groupName}\u2026`}
+            placeholder={edit.editing ? 'Edit pending message\u2026' : chatReloadRequired.value ? 'Reload to continue\u2026' : wsDown ? 'Reconnecting\u2026' : `Message ${groupName}\u2026`}
             ref={inputRef}
             aria-label={edit.editing ? 'Pending message text' : 'Message'}
             onInput={(event) => { edit.input(event.currentTarget.value); autosize(); }}
@@ -1822,7 +1822,10 @@ export function Composer() {
 
 function ReadonlyBanner() {
   const showComposer = canSend.value;
-  if (showComposer) return <div class="readonly-banner" hidden></div>;
+  if (showComposer || chatReloadRequired.value || !conversationState.value) return <div class="readonly-banner" hidden></div>;
+  if (!channelType.value || channelType.value === 'web') {
+    return <div class="readonly-banner">Read-only view — sending is unavailable for this thread.</div>;
+  }
   const meta = channelMeta(channelType.value);
   return <div class="readonly-banner">Read-only view — reply on {meta.label} to continue this thread.</div>;
 }
@@ -1875,7 +1878,7 @@ export function ChatMain() {
       <ImageViewer />
       {reconnectPending
         ? <button class="status reconnect-status" id="chat-status" type="button" onClick={reconnectChatNow}>{chatStatus.value}</button>
-        : <div class="status" id="chat-status" hidden={chatStatus.value === 'connected'}>{chatStatus.value}</div>}
+        : <div class="status" id="chat-status" hidden={chatReloadRequired.value || chatStatus.value === 'connected'}>{chatStatus.value}</div>}
       <ReadonlyBanner />
       <InputDock />
     </section>

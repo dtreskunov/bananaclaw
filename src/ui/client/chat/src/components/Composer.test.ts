@@ -15,6 +15,7 @@ import {
   pending,
   canSend,
   chatReady,
+  chatReloadRequired,
   pendingQuestions,
   pinnedContext,
   voiceInput,
@@ -178,6 +179,36 @@ beforeEach(() => {
 });
 
 describe('main composer pending edits', () => {
+  it('does not infer read-only permissions before a snapshot or while a client reload is required', () => {
+    canSend.value = false;
+    const banner = () => findComponent(ChatMain(), 'ReadonlyBanner').type();
+    expect(banner().props.hidden).toBe(true);
+    applyConversationFrame(
+      testSnapshot({
+        capabilities: { canSend: false, stop: false, steer: false, editInput: false, cancelInput: false },
+      }),
+      'thread',
+    );
+    expect(banner().props.children).toBe('Read-only view — sending is unavailable for this thread.');
+    chatReloadRequired.value = true;
+    const chat = ChatMain();
+    expect(findComponent(chat, 'ReadonlyBanner').type().props.hidden).toBe(true);
+    expect(findComponent(chat, 'InputDock')).toBeDefined();
+    expect(find(chat, 'div').props.id).toBe('chat-status');
+    expect(find(chat, 'div').props.hidden).toBe(true);
+    chatReloadRequired.value = false;
+    channelType.value = 'slack';
+    expect(banner().props.children).toEqual(['Read-only view — reply on ', 'Slack', ' to continue this thread.']);
+  });
+
+  it('offers reload rather than reconnecting in a retained composer draft', () => {
+    chatReady.value = false;
+    chatReloadRequired.value = true;
+    render();
+    expect(find(tree, 'textarea').props.placeholder).toBe('Reload to continue\u2026');
+    expect(input.value).toBe('Unsent composer draft');
+    expect(pending.value[0].name).toBe('unsent.txt');
+  });
   it('suspends composition for a dock prompt without replacing its draft, attachments or context', () => {
     const draft = input.value;
     const files = pending.value;

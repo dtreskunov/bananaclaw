@@ -61,6 +61,23 @@
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
+.toast-action {
+  display: flex;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 32px));
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--message-input-font-size);
+  line-height: 1.4;
+  text-align: left;
+  cursor: default;
+}
+.toast-action .toast-controls button {
+  padding-inline: 12px;
+  background: transparent;
+  color: inherit;
+}
 @keyframes toast-in {
   from { opacity: 0; transform: translate(-50%, -8px); }
   to   { opacity: 1; transform: translate(-50%, 0); }

@@ -17,6 +17,7 @@ import { shouldAutoSubscribe, type NotificationPermissionState } from './notific
 let registration: ServiceWorkerRegistration | null = null;
 let updatePromptShown = false;
 let updateReloadStarted = false;
+let updateReloadPending = false;
 
 function reloadForUpdate(): void {
   if (updateReloadStarted) return;
@@ -86,31 +87,81 @@ function watchForUpdates(reg: ServiceWorkerRegistration): void {
       // Only prompt when there's an existing controller — otherwise this
       // is the very first install and there's nothing to "update from".
       if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-        promptForUpdate(worker);
+        showClientReloadPrompt('New version available');
       }
     });
   };
 
   // A worker may already be waiting from a prior tab.
   if (reg.waiting && navigator.serviceWorker.controller) {
-    promptForUpdate(reg.waiting);
+    showClientReloadPrompt('New version available');
   }
   reg.addEventListener('updatefound', () => {
     if (reg.installing) onNewWorker(reg.installing);
   });
 }
 
-function promptForUpdate(worker: ServiceWorker): void {
+function requestClientReload(): void {
+  void reloadChatClient();
+}
+
+export function showClientReloadPrompt(text: string): void {
   if (updatePromptShown) return;
   updatePromptShown = true;
-  showStickyToast('Reload to use new version', () => {
-    const reloadWhenActivated = (): void => {
-      if (worker.state === 'activated') reloadForUpdate();
+  showStickyToast(text, requestClientReload, 'ok', 'Reload');
+}
+
+function activateUpdatedWorker(worker: ServiceWorker): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let skipRequested = false;
+    const finish = (error?: unknown): void => {
+      clearTimeout(timer);
+      worker.removeEventListener('statechange', onStateChange);
+      if (error) reject(error);
+      else resolve();
     };
-    worker.addEventListener('statechange', reloadWhenActivated);
-    worker.postMessage({ type: 'SKIP_WAITING' });
-    reloadWhenActivated();
+    const onStateChange = (): void => {
+      if (worker.state === 'activated') finish();
+      else if (worker.state === 'redundant') finish(new Error('The updated chat client could not be activated.'));
+      else if (worker.state === 'installed' && !skipRequested) {
+        skipRequested = true;
+        try {
+          worker.postMessage({ type: 'SKIP_WAITING' });
+        } catch (error) {
+          finish(new Error('Could not activate the updated chat client.', { cause: error }));
+        }
+      }
+    };
+    const timer = setTimeout(() => finish(new Error('Timed out loading the updated chat client.')), 30_000);
+    worker.addEventListener('statechange', onStateChange);
+    onStateChange();
   });
+}
+
+async function reloadChatClient(): Promise<void> {
+  if (updateReloadPending || updateReloadStarted) return;
+  updateReloadPending = true;
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = registration ?? (await navigator.serviceWorker.getRegistration('/ui/chat/'));
+      if (reg) {
+        await reg.update();
+        const worker = reg.installing ?? reg.waiting;
+        if (worker) await activateUpdatedWorker(worker);
+      }
+    }
+    reloadForUpdate();
+  } catch (error) {
+    console.error('Chat client update failed', error);
+    showStickyToast(
+      'Could not load the current chat client. Check your connection and try Reload again.',
+      requestClientReload,
+      'err',
+      'Reload',
+    );
+  } finally {
+    updateReloadPending = false;
+  }
 }
 
 export async function toggleMute(): Promise<void> {

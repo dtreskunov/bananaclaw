@@ -15554,6 +15554,7 @@ var chatMessages = y3([]);
 var chatStatus = y3("");
 var chatLoading = y3(false);
 var chatReady = y3(false);
+var chatReloadRequired = y3(false);
 var activeTurn = y3(null);
 var turnConnected = y3(false);
 var stopRequest = y3(null);
@@ -18389,7 +18390,10 @@ function displayToast(message2, ms) {
   }, ms);
 }
 function enqueueToast(message2, ms = 1800) {
-  if (toastMessage.value?.kind === "err") {
+  const current = toastMessage.value;
+  if (message2.action && message2.action === current?.action && message2.actionLabel === current.actionLabel) {
+    displayToast(message2, ms);
+  } else if (current?.kind === "err" || current?.actionLabel) {
     pending2.push({ message: message2, ms });
   } else {
     displayToast(message2, ms);
@@ -18398,8 +18402,8 @@ function enqueueToast(message2, ms = 1800) {
 function showToast(text2, kind = "ok", ms = 1800) {
   enqueueToast({ id: nextId++, text: text2, kind }, ms);
 }
-function showStickyToast(text2, onClick, kind = "ok") {
-  enqueueToast({ id: nextId++, text: text2, kind, action: onClick });
+function showStickyToast(text2, onClick, kind = "ok", actionLabel) {
+  enqueueToast({ id: nextId++, text: text2, kind, action: onClick, actionLabel });
 }
 function dismissToast() {
   if (hideTimer) {
@@ -18413,6 +18417,20 @@ function dismissToast() {
 function Toast() {
   const t4 = toastMessage.value;
   if (!t4) return null;
+  if (t4.action && t4.actionLabel) {
+    return /* @__PURE__ */ u4(
+      "div",
+      {
+        class: "toast toast-" + t4.kind + " toast-sticky toast-action" + (t4.kind === "ok" ? " accent-icon-btn" : ""),
+        role: t4.kind === "err" ? "alert" : "status",
+        children: [
+          /* @__PURE__ */ u4("span", { class: "toast-text", children: t4.text }),
+          /* @__PURE__ */ u4("div", { class: "toast-controls", children: /* @__PURE__ */ u4("button", { type: "button", onClick: t4.action, children: t4.actionLabel }) })
+        ]
+      },
+      t4.id
+    );
+  }
   if (t4.kind === "err") {
     return /* @__PURE__ */ u4("div", { class: "toast toast-err toast-sticky", children: [
       /* @__PURE__ */ u4("span", { class: "toast-text", role: "alert", children: t4.text }),
@@ -18489,6 +18507,7 @@ function notificationStatus(muted, permission) {
 var registration = null;
 var updatePromptShown = false;
 var updateReloadStarted = false;
+var updateReloadPending = false;
 function reloadForUpdate() {
   if (updateReloadStarted) return;
   updateReloadStarted = true;
@@ -18544,28 +18563,75 @@ function watchForUpdates(reg) {
   const onNewWorker = (worker) => {
     worker.addEventListener("statechange", () => {
       if (worker.state === "installed" && navigator.serviceWorker.controller) {
-        promptForUpdate(worker);
+        showClientReloadPrompt("New version available");
       }
     });
   };
   if (reg.waiting && navigator.serviceWorker.controller) {
-    promptForUpdate(reg.waiting);
+    showClientReloadPrompt("New version available");
   }
   reg.addEventListener("updatefound", () => {
     if (reg.installing) onNewWorker(reg.installing);
   });
 }
-function promptForUpdate(worker) {
+function requestClientReload() {
+  void reloadChatClient();
+}
+function showClientReloadPrompt(text2) {
   if (updatePromptShown) return;
   updatePromptShown = true;
-  showStickyToast("Reload to use new version", () => {
-    const reloadWhenActivated = () => {
-      if (worker.state === "activated") reloadForUpdate();
+  showStickyToast(text2, requestClientReload, "ok", "Reload");
+}
+function activateUpdatedWorker(worker) {
+  return new Promise((resolve, reject) => {
+    let skipRequested = false;
+    const finish = (error) => {
+      clearTimeout(timer2);
+      worker.removeEventListener("statechange", onStateChange);
+      if (error) reject(error);
+      else resolve();
     };
-    worker.addEventListener("statechange", reloadWhenActivated);
-    worker.postMessage({ type: "SKIP_WAITING" });
-    reloadWhenActivated();
+    const onStateChange = () => {
+      if (worker.state === "activated") finish();
+      else if (worker.state === "redundant") finish(new Error("The updated chat client could not be activated."));
+      else if (worker.state === "installed" && !skipRequested) {
+        skipRequested = true;
+        try {
+          worker.postMessage({ type: "SKIP_WAITING" });
+        } catch (error) {
+          finish(new Error("Could not activate the updated chat client.", { cause: error }));
+        }
+      }
+    };
+    const timer2 = setTimeout(() => finish(new Error("Timed out loading the updated chat client.")), 3e4);
+    worker.addEventListener("statechange", onStateChange);
+    onStateChange();
   });
+}
+async function reloadChatClient() {
+  if (updateReloadPending || updateReloadStarted) return;
+  updateReloadPending = true;
+  try {
+    if ("serviceWorker" in navigator) {
+      const reg = registration ?? await navigator.serviceWorker.getRegistration("/ui/chat/");
+      if (reg) {
+        await reg.update();
+        const worker = reg.installing ?? reg.waiting;
+        if (worker) await activateUpdatedWorker(worker);
+      }
+    }
+    reloadForUpdate();
+  } catch (error) {
+    console.error("Chat client update failed", error);
+    showStickyToast(
+      "Could not load the current chat client. Check your connection and try Reload again.",
+      requestClientReload,
+      "err",
+      "Reload"
+    );
+  } finally {
+    updateReloadPending = false;
+  }
 }
 async function toggleMute() {
   if (!notifMutedSig.value) {
@@ -18718,6 +18784,7 @@ var conversationState = y3(null);
 var completedResponse = y3(null);
 var chatTranscript = y3([]);
 function resetConversation() {
+  chatReloadRequired.value = false;
   conversationState.value = null;
   completedResponse.value = null;
   resetActivityTraceView();
@@ -18817,6 +18884,7 @@ function applyConversationFrame(raw, expectedThreadId) {
     );
     chatLoading.value = false;
     chatReady.value = true;
+    chatReloadRequired.value = false;
     chatStatus.value = "connected";
   });
   if (frame.kind !== "update" || !previous) return;
@@ -19414,6 +19482,7 @@ async function runSync(options = {}) {
         console.error("Conversation snapshot rejected", error);
         chatStatus.value = error instanceof Error ? error.message : "Invalid chat snapshot. Reload this page.";
         chatReady.value = false;
+        handleProtocolMismatch(error);
         return false;
       }
     }
@@ -19595,6 +19664,13 @@ async function openChat(gid, resumeTid, opts) {
   refs.newChatInFlight = false;
 }
 var WS_CONNECT_TIMEOUT_MS = 1e4;
+function handleProtocolMismatch(error) {
+  if (!(error instanceof ConversationProtocolError) || error.code !== "protocol_mismatch") return false;
+  chatReloadRequired.value = true;
+  applyTurnState(activeTurn.value, false);
+  showClientReloadPrompt("Chat protocol changed");
+  return true;
+}
 function connectChatWs(ctx2) {
   const { gid, tid, mg, generation: generation2 } = ctx2;
   if (generation2 !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
@@ -19676,10 +19752,9 @@ function connectChatWs(ctx2) {
       chatReady.value = false;
       applyTurnState(activeTurn.value, false);
       chatStatus.value = error instanceof Error ? error.message : "Invalid chat data. Reload this page.";
-      if (error instanceof ConversationProtocolError && error.code === "protocol_mismatch") {
+      if (handleProtocolMismatch(error)) {
         ws.onclose = null;
         if (refs.wsPingTimer) clearInterval(refs.wsPingTimer);
-        showToast("Chat protocol changed. Reload this page.", "err");
       } else {
         showToast("Chat synchronization lost. Reconnecting for a fresh snapshot.", "err");
       }
@@ -24575,7 +24650,7 @@ function Composer() {
               {
                 id: "chat-input",
                 rows: 1,
-                placeholder: edit.editing ? "Edit pending message\u2026" : wsDown ? "Reconnecting\u2026" : `Message ${groupName}\u2026`,
+                placeholder: edit.editing ? "Edit pending message\u2026" : chatReloadRequired.value ? "Reload to continue\u2026" : wsDown ? "Reconnecting\u2026" : `Message ${groupName}\u2026`,
                 ref: inputRef,
                 "aria-label": edit.editing ? "Pending message text" : "Message",
                 onInput: (event) => {
@@ -24653,7 +24728,10 @@ function Composer() {
 }
 function ReadonlyBanner() {
   const showComposer = canSend.value;
-  if (showComposer) return /* @__PURE__ */ u4("div", { class: "readonly-banner", hidden: true });
+  if (showComposer || chatReloadRequired.value || !conversationState.value) return /* @__PURE__ */ u4("div", { class: "readonly-banner", hidden: true });
+  if (!channelType.value || channelType.value === "web") {
+    return /* @__PURE__ */ u4("div", { class: "readonly-banner", children: "Read-only view \u2014 sending is unavailable for this thread." });
+  }
   const meta = channelMeta(channelType.value);
   return /* @__PURE__ */ u4("div", { class: "readonly-banner", children: [
     "Read-only view \u2014 reply on ",
@@ -24722,7 +24800,7 @@ function ChatMain() {
     /* @__PURE__ */ u4(ApprovalsBanner, {}),
     /* @__PURE__ */ u4(MessageLog, {}),
     /* @__PURE__ */ u4(ImageViewer, {}),
-    reconnectPending ? /* @__PURE__ */ u4("button", { class: "status reconnect-status", id: "chat-status", type: "button", onClick: reconnectChatNow, children: chatStatus.value }) : /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatStatus.value === "connected", children: chatStatus.value }),
+    reconnectPending ? /* @__PURE__ */ u4("button", { class: "status reconnect-status", id: "chat-status", type: "button", onClick: reconnectChatNow, children: chatStatus.value }) : /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatReloadRequired.value || chatStatus.value === "connected", children: chatStatus.value }),
     /* @__PURE__ */ u4(ReadonlyBanner, {}),
     /* @__PURE__ */ u4(InputDock, {})
   ] });
