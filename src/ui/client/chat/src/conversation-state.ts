@@ -48,7 +48,7 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     if (!turn) throw new ConversationProtocolError('invalid_frame');
     const ordinals = new Set(trace.ordinals);
     const activity = turn.activity.filter((line) => ordinals.has(line.ordinal));
-    return trace.ownsTurn ? conversationActivity({ ...turn, activity }, view.questions) : activity;
+    return trace.ownsTurn ? conversationActivity({ ...turn, activity }) : activity;
   };
   const transcript = view.timeline.map((row): TranscriptRow => {
     const turn = row.trace ? turns.get(row.trace.turnId) : undefined;

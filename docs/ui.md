@@ -189,11 +189,12 @@ Submitting a message scrolls to the transcript bottom and clears any previous
 search-result highlight so the authoritative input echo cannot pull the viewer
 back into history. Cancelling a steering/queue choice preserves the draft,
 highlight and scroll position. A rejected send retains the draft and attachments.
-Questions contribute display-only **Asked a question `<question>`** markers
-at their recorded output positions. Every settled turn ends with one
+Question activity comes only from the recorded `nanoclaw.ask_user_question`
+tool call; question cards do not synthesize a second action in the trace.
+Every settled turn ends with one
 display-only **Done** marker, including stopped or failed turns: it means the
 turn ended, not that the requested work succeeded. Outcome notes retain that
-distinction. These markers count in the visible step total but never enter
+distinction. This marker counts in the visible step total but never enters
 the runner journal, stored activity, or usage accounting.
 Questions use their stored output-to-turn associations, and question cards never
 own separate traces. Missing output or turn references are explicit projection
@@ -231,8 +232,8 @@ email call reads **Emailed `recipient`**; expansion includes its subject and
 attachment paths. Messages name their destination, files name their paths,
 reactions name their emoji, task actions name their task ID or scheduled time,
 and title changes name the title. Cards name the card and question calls name
-the question; the separate UI-only **Asked a question** marker records emission,
-not receipt of an answer. Agent, package, MCP-server and link actions say
+the question. A completed question call reads **Requested an answer to `<question>`**,
+not receipt of an answer; the answer arrives in a later turn. Agent, package, MCP-server and link actions say
 **Requested …** where completion only confirms submission to the host or an
 approval flow. **Emailed** confirms the email tool accepted the request, not
 delivery to the recipient.
@@ -532,8 +533,8 @@ The host publishes an explicit `timeline` of message references, question
 references, and typed turn trace/status rows. The host selects the final response
 or the synthetic bubble beneath the latest associated conversation content as
 the sole trace host. Recorded logical-clock positions order the turn's activities.
-The browser resolves those references and adds display-only question and Done
-markers; it does not infer activity segments
+The browser resolves those references and adds only the display-only Done
+marker; it does not infer activity segments
 from timestamps or invent messages, message IDs, or insertion positions for
 trace/status rows. Chapters remain presentation-only groups within a trace.
 Every recorded activity has a required position. Historical activity is normalized

@@ -185,6 +185,67 @@ describe('authoritative turn presentation', () => {
     expect(completedResponse.value).toBeNull();
   });
 
+  it.each([false, true])(
+    'keeps the question card without synthesizing question activity; recorded call = %s',
+    (recorded) => {
+      const question: Conversation['questions'][number] = {
+        questionId: 'question',
+        messageId: 'question-output',
+        turnId: testTurn.id,
+        timelinePosition: 200,
+        title: 'Choice',
+        question: 'Which option?',
+        responseMode: 'text',
+        options: [],
+        status: 'pending',
+        answerValue: null,
+        answerType: null,
+        answeredAt: null,
+        threadId: 'thread',
+        agentGroupId: 'group',
+        createdAt: '2026-09-29T00:00:01Z',
+      };
+      const activity = recorded
+        ? [
+            {
+              ordinal: 0,
+              ts: '1000',
+              timelinePosition: 100,
+              text: JSON.stringify({
+                kind: 'tool',
+                id: 'question-call',
+                tool: 'nanoclaw.ask_user_question',
+                status: 'completed',
+                detail: question.question,
+              }),
+            },
+          ]
+        : [];
+      const view = testSnapshot({
+        questions: [question],
+        turns: [
+          { ...testTurn, phase: 'settled', outcome: 'replied', activity, outputIds: ['question-output', 'reply'] },
+        ],
+        messages: [
+          {
+            id: 'reply',
+            direction: 'out',
+            turnId: testTurn.id,
+            text: 'Waiting for your answer',
+            timestamp: '2026-09-29T00:00:02Z',
+            timelinePosition: 300,
+            deliveryOrigin: 'response',
+          },
+        ],
+      }).conversation;
+      const projection = conversationPresentation(view);
+      expect(projection.transcript.filter((row) => row.kind === 'question')).toEqual([{ kind: 'question', question }]);
+      const steps = projection.messages[0].activity!.map((line) => JSON.parse(line.text));
+      expect(steps.map((step) => step.id)).toEqual(recorded ? ['question-call', 'ui:done:turn-1'] : ['ui:done:turn-1']);
+      expect(projection.messages[0].turnTraceOwner).toBe(true);
+    },
+  );
+
   it('clears transient trace state on a reconnect snapshot', () => {
     toggleActivityTrace('turn:turn-1', true);
     receive(testSnapshot(initial, 'reconnect'));

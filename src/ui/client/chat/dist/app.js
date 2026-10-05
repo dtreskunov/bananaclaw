@@ -17691,26 +17691,13 @@ function timelineSortKey(timestamp, timelinePosition) {
 }
 
 // ../../shared/conversation-activity.ts
-function marker(id2, text2, timestamp, detail) {
-  const step = { kind: "notification", id: id2, text: text2, ...detail ? { detail } : {} };
-  const position2 = timelineSortKey(timestamp);
-  return { ts: position2 ? String(Math.floor(position2 / 1e3)) : "", text: JSON.stringify(step) };
-}
-function conversationActivity(turn2, questions) {
-  const entries = turn2.activity.map((line) => ({
-    line,
-    position: line.timelinePosition
-  }));
-  for (const question2 of questions) {
-    if (question2.turnId !== turn2.id && (question2.turnId || !question2.messageId || !turn2.outputIds.includes(question2.messageId)))
-      continue;
-    entries.push({
-      line: marker(`ui:question:${question2.questionId}`, "Asked a question", question2.createdAt, question2.question),
-      position: timelineSortKey(question2.createdAt, question2.timelinePosition)
-    });
+function conversationActivity(turn2) {
+  const lines = [...turn2.activity].sort((a4, b5) => a4.timelinePosition - b5.timelinePosition);
+  if (turn2.phase === "settled") {
+    const step = { kind: "notification", id: `ui:done:${turn2.id}`, text: "Done" };
+    const position2 = timelineSortKey(turn2.endedAt ?? "");
+    lines.push({ ts: position2 ? String(Math.floor(position2 / 1e3)) : "", text: JSON.stringify(step) });
   }
-  const lines = entries.sort((a4, b5) => a4.position - b5.position).map(({ line }) => line);
-  if (turn2.phase === "settled") lines.push(marker(`ui:done:${turn2.id}`, "Done", turn2.endedAt ?? ""));
   return lines;
 }
 
@@ -18739,7 +18726,7 @@ function conversationPresentation(view) {
     if (!turn2) throw new ConversationProtocolError("invalid_frame");
     const ordinals = new Set(trace2.ordinals);
     const activity = turn2.activity.filter((line) => ordinals.has(line.ordinal));
-    return trace2.ownsTurn ? conversationActivity({ ...turn2, activity }, view.questions) : activity;
+    return trace2.ownsTurn ? conversationActivity({ ...turn2, activity }) : activity;
   };
   const transcript = view.timeline.map((row) => {
     const turn2 = row.trace ? turns.get(row.trace.turnId) : void 0;
