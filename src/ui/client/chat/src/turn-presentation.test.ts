@@ -30,7 +30,7 @@ function update(next: Conversation): void {
   const state = conversationState.value!;
   receive({
     kind: 'update',
-    protocolVersion: 2,
+    protocolVersion: 3,
     streamId: state.streamId,
     baseRevision: state.revision,
     revision: state.revision + 1,
@@ -186,7 +186,12 @@ describe('authoritative turn presentation', () => {
     expect(completedResponse.value).toBeNull();
   });
 
-  it.each([false, true])('keeps the dock lifecycle separate from turn traces; final response = %s', (final) => {
+  it.each([
+    ['text', false],
+    ['text', true],
+    ['skipped', false],
+    ['skipped', true],
+  ] as const)('keeps the %s dock lifecycle separate from turn traces; final response = %s', (responseType, final) => {
     const question: Conversation['questions'][number] = {
       questionId: 'q',
       messageId: 'q-output',
@@ -237,8 +242,8 @@ describe('authoritative turn presentation', () => {
         {
           ...question,
           status: 'answered',
-          answerValue: 'Stale metadata',
-          answerType: 'text',
+          answerValue: responseType === 'skipped' ? null : 'Stale metadata',
+          answerType: responseType,
           answeredAt: '2026-09-29T00:00:09Z',
         },
       ],
@@ -251,7 +256,8 @@ describe('authoritative turn presentation', () => {
       id: 'question-response:q',
       direction: 'in',
       questionId: 'q',
-      text: 'Yes',
+      text: responseType === 'skipped' ? 'Question skipped' : 'Yes',
+      ...(responseType === 'skipped' ? { questionResponseType: 'skipped' as const } : {}),
       timestamp: '2026-09-29T00:00:03Z',
       timelinePosition: 300,
     };
@@ -496,7 +502,7 @@ describe('authoritative turn presentation', () => {
     const before = chatMessages.value;
     receive({
       kind: 'update',
-      protocolVersion: 2,
+      protocolVersion: 3,
       streamId: 'test-stream',
       baseRevision: 4,
       revision: 5,

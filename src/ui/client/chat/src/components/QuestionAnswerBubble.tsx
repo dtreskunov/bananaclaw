@@ -7,7 +7,9 @@ export function QuestionAnswerBubble({ question, answer }: { question: PendingQu
       <div class="question-card-heading">{question.title}</div>
       <div class="question-card-title">{question.question}</div>
       <div class="question-card-answer">
-        {question.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text}
+        {answer.questionResponseType === 'skipped'
+          ? 'Question skipped'
+          : (question.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text)}
       </div>
       <div class="meta question-card-meta">
         <RelativeTime ts={answer.ts} />

@@ -13,15 +13,15 @@
  */
 
 import { log } from './log.js';
+import type { QuestionResponse } from './ui/shared/question-response.js';
 
-export interface ResponsePayload {
+export type ResponsePayload = QuestionResponse & {
   questionId: string;
-  value: string;
   userId: string | null;
   channelType: string;
   platformId: string;
   threadId: string | null;
-}
+};
 
 export type ResponseHandler = (payload: ResponsePayload) => Promise<boolean>;
 

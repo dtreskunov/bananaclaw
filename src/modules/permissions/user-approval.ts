@@ -317,6 +317,7 @@ export async function requestUserApproval(pendingId: string): Promise<void> {
  * admins are not authorized — user onboarding is a global act.
  */
 async function handleUserApprovalResponse(payload: ResponsePayload): Promise<boolean> {
+  if (payload.responseType === 'skipped') return false;
   const row = getPendingApproval(payload.questionId);
   if (!row) return false;
 

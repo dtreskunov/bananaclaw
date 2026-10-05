@@ -46,7 +46,7 @@ function validate(view: Conversation): void {
       null,
       parseConversationFrame({
         kind: 'snapshot',
-        protocolVersion: 2,
+        protocolVersion: 3,
         streamId: 'test',
         revision: 0,
         conversation: view,
@@ -101,7 +101,7 @@ describe('explicit host trace placement', () => {
     expect(() =>
       parseConversationFrame({
         kind: 'snapshot',
-        protocolVersion: 2,
+        protocolVersion: 3,
         streamId: 'test',
         revision: 0,
         conversation: invalid,
@@ -250,7 +250,7 @@ describe('explicit host trace placement', () => {
           null,
           parseConversationFrame({
             kind: 'snapshot',
-            protocolVersion: 2,
+            protocolVersion: 3,
             streamId: 'test',
             revision: 0,
             conversation: { ...view, timeline },

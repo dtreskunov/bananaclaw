@@ -173,6 +173,7 @@ export type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface ChatMessage {
   questionId?: string;
+  questionResponseType?: 'skipped';
   turnId?: string;
   /** Replies only: the settled turn whose accounting renders in this bubble's meta line. */
   statsTurn?: import('../../../shared/conversation').ConversationTurn;
@@ -352,7 +353,7 @@ export interface PendingQuestionDto {
   options: { label: string; selectedLabel: string; value: string }[];
   status: 'pending' | 'answered' | 'cancelled';
   answerValue: string | null;
-  answerType: 'choice' | 'text' | null;
+  answerType: 'choice' | 'text' | 'skipped' | null;
   answeredAt: string | null;
   activity?: ActivityLine[];
   threadId: string | null;

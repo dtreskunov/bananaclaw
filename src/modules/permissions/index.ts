@@ -235,6 +235,7 @@ setSenderScopeGate(
  * fresh card per ACTION-ITEMS item 5 "no denial persistence").
  */
 async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<boolean> {
+  if (payload.responseType === 'skipped') return false;
   const row = getPendingSenderApproval(payload.questionId);
   if (!row) return false;
 
@@ -315,6 +316,7 @@ setChannelRequestGate(async (mg, event) => {
  *   reject          — set denied_at, delete pending row
  */
 async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<boolean> {
+  if (payload.responseType === 'skipped') return false;
   const row = getPendingChannelApproval(payload.questionId);
   if (!row) return false;
 

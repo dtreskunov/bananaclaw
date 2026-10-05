@@ -49,6 +49,19 @@ describe('question input dock', () => {
       ).map((q) => q.questionId),
     ).toEqual(['q', 'unthreaded']);
   });
+  it('waits for the actual skip event, then removes only the resolved prompt', () => {
+    const skipped: PendingQuestionDto = { ...question, status: 'answered', answerType: 'skipped' };
+    const other = { ...question, questionId: 'other' };
+    expect(dockQuestions([skipped, other], [], 'group', 'thread')).toEqual([skipped, other]);
+    expect(
+      dockQuestions(
+        [skipped, other],
+        [{ ...answer, text: 'Question skipped', questionResponseType: 'skipped' }],
+        'group',
+        'thread',
+      ),
+    ).toEqual([other]);
+  });
   it('orders multiple prompts by recorded position without changing records', () => {
     const questions = [{ ...question, questionId: 'second', timelinePosition: 200 }, question];
     expect(dockQuestions(questions, [], 'group', 'thread').map((q) => q.questionId)).toEqual(['q', 'second']);

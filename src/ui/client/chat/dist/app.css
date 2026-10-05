@@ -3767,6 +3767,35 @@ nav.tab-bar-strip.group-strip {
   gap: 8px;
   min-width: 0;
 }
+.chat-main .question-prompt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.chat-main .question-prompt-header .question-card-heading {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-main .question-skip-btn {
+  flex: none;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.chat-main .question-skip-btn:hover:not(:disabled) {
+  background: var(--wash-strong);
+  color: var(--fg);
+}
+.chat-main .question-skip-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .chat-main .question-prompt .question-card-title {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

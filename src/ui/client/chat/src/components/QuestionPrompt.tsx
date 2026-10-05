@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { respondQuestion } from '../actions';
+import { respondQuestion, skipQuestion } from '../actions';
 import { isRecording } from '../recorder';
 import {
   channelType,
@@ -17,7 +17,7 @@ import { VoiceButton } from './VoiceButton';
 
 export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }) {
   const [answer, setAnswer] = useState('');
-  const [accepted, setAccepted] = useState(false);
+  const [accepted, setAccepted] = useState<'answer' | 'skipped' | null>(null);
   const [error, setError] = useState('');
   const answerRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -30,9 +30,11 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
   const voiceState = voice.state.value;
   const active = voiceState.target === target;
   const busy = respondingQuestionIds.value.has(q.questionId);
-  const waiting = accepted || q.status === 'answered';
+  const waiting = !!accepted || q.status === 'answered';
+  const skipped = accepted === 'skipped' || q.answerType === 'skipped';
   const disconnected = (!channel || channel === 'web') && !chatReady.value;
   const disabled = busy || waiting || disconnected;
+  const skipDisabled = busy || !!accepted || disconnected || q.status === 'cancelled' || (waiting && !skipped);
   const current = useRef(false);
   current.current = q.status === 'pending' && !disabled;
   const voiceLocked = active && (voiceState.phase !== 'error' || voiceState.sending);
@@ -63,9 +65,30 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
     setError('');
     try {
       const sent = await respondQuestion(q.questionId, value);
-      if (sent) setAccepted(true);
+      if (sent) setAccepted('answer');
       else setError('Could not submit your answer. Please retry.');
       return sent;
+    } finally {
+      submitting.current = false;
+    }
+  };
+  const skip = async () => {
+    if (
+      submitting.current ||
+      skipDisabled ||
+      groupId.value !== gid ||
+      threadId.value !== tid ||
+      channelType.value !== channel ||
+      messagingGroupId.value !== mg
+    )
+      return;
+    submitting.current = true;
+    setError('');
+    if (voice.state.value.target === target) voice.detach();
+    try {
+      const sent = await skipQuestion(q.questionId);
+      if (sent) setAccepted('skipped');
+      else setError('Could not skip this question. Please retry.');
     } finally {
       submitting.current = false;
     }
@@ -112,7 +135,19 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
       aria-label={q.title || 'Question'}
       aria-busy={busy || waiting}
     >
-      <div class="question-card-heading">{q.title}</div>
+      <div class="question-prompt-header">
+        <div class="question-card-heading">{q.title}</div>
+        <button
+          type="button"
+          class="question-skip-btn"
+          aria-label="Skip question and notify agent"
+          title="Skip this question and tell the agent"
+          disabled={skipDisabled}
+          onClick={() => void skip()}
+        >
+          {q.answerType === 'skipped' && !accepted ? 'Retry skip' : 'Skip'}
+        </button>
+      </div>
       <div class="question-card-title">{q.question}</div>
       {!!q.options.length && (
         <div class="question-card-actions">
@@ -193,7 +228,13 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
       )}
       {(busy || waiting || disconnected) && (
         <div class="question-prompt-status" role="status">
-          {disconnected ? 'Reconnecting…' : busy ? 'Submitting answer…' : 'Waiting for answer confirmation…'}
+          {disconnected
+            ? 'Reconnecting…'
+            : busy
+              ? 'Submitting response…'
+              : skipped
+                ? 'Waiting for skip confirmation…'
+                : 'Waiting for answer confirmation…'}
         </div>
       )}
       {error && (

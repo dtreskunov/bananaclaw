@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
+import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { PendingMessageActions } from './PendingMessageActions';
 import {
   activeTurn,
@@ -21,7 +22,7 @@ import {
 import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, openPendingEditor } from '../pending-edit';
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
-import { respondQuestion, sendChat } from '../actions';
+import { respondQuestion, sendChat, skipQuestion } from '../actions';
 import type { ChatMessage, PendingQuestionDto, Thread } from '../types';
 import { applyConversationFrame, completedResponse, resetConversation } from '../conversation-state';
 import { testSnapshot, testTurn } from '../conversation-test-fixtures';
@@ -72,6 +73,7 @@ vi.mock('../actions', () => ({
   addPendingFiles: vi.fn(),
   removePending: vi.fn(),
   respondQuestion: vi.fn(),
+  skipQuestion: vi.fn(),
 }));
 
 const thread: Thread = { threadId: 'thread', title: 'Chat', lastActivityAt: '', channelType: 'web' };
@@ -239,6 +241,56 @@ describe('main composer pending edits', () => {
     beforeEach(() => {
       resetMount('');
       vi.mocked(respondQuestion).mockReset().mockResolvedValue(true);
+      vi.mocked(skipQuestion).mockReset().mockResolvedValue(true);
+    });
+    it('skips once, blocks an answer race and waits for the actual response event', async () => {
+      mount();
+      const click = find(tree, 'button', 'Skip question and notify agent').props.onClick;
+      click();
+      click();
+      find(tree, 'button', 'First').props.onClick();
+      await vi.waitFor(() => expect(skipQuestion).toHaveBeenCalledOnce());
+      mount();
+      expect(skipQuestion).toHaveBeenCalledWith('q');
+      expect(respondQuestion).not.toHaveBeenCalled();
+      expect(sendChat).not.toHaveBeenCalled();
+      expect(find(tree, 'button', 'First').props.disabled).toBe(true);
+      expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
+      expect(find(tree, 'div', 'Waiting for skip confirmation…')).toBeDefined();
+    });
+    it('retains typed text and offers a retry when skipping fails after the outcome is saved', async () => {
+      vi.mocked(skipQuestion).mockResolvedValueOnce(false);
+      mount();
+      find(tree, 'textarea').props.onInput({ currentTarget: { value: 'Unsaved answer' } });
+      mount();
+      find(tree, 'button', 'Skip question and notify agent').props.onClick();
+      await vi.waitFor(() => expect(skipQuestion).toHaveBeenCalledOnce());
+      mount({ ...dockQuestion, status: 'answered', answerType: 'skipped' });
+      expect(find(tree, 'textarea').props.value).toBe('Unsaved answer');
+      expect(find(tree, 'p').props.role).toBe('alert');
+      const retry = find(tree, 'button', 'Skip question and notify agent');
+      expect(retry.props.children).toBe('Retry skip');
+      expect(retry.props.disabled).toBe(false);
+      retry.props.onClick();
+      await vi.waitFor(() => expect(skipQuestion).toHaveBeenCalledTimes(2));
+    });
+    it('renders the skip event without interpreting it as a selected option', () => {
+      const bubble = QuestionAnswerBubble({
+        question: {
+          ...dockQuestion,
+          options: [{ label: 'Fake', selectedLabel: 'Not a skip', value: 'Question skipped' }],
+        },
+        answer: {
+          id: 'question-response:q',
+          direction: 'in',
+          questionResponseType: 'skipped',
+          text: 'Question skipped',
+          ts: 'later',
+          files: null,
+        },
+      });
+      expect(bubble.props.children[2].props.children).toBe('Question skipped');
+      expect(bubble.props['data-msg-id']).toBe('question-response:q');
     });
     it('sends a choice once and waits for the authoritative answer event before restoring composition', async () => {
       mount();
@@ -249,6 +301,7 @@ describe('main composer pending edits', () => {
       mount();
       expect(respondQuestion).toHaveBeenCalledWith('q', 'first');
       expect(find(tree, 'button', 'First').props.disabled).toBe(true);
+      expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
       expect(find(tree, 'section').props['aria-busy']).toBe(true);
       expect(find(tree, 'div', 'Waiting for answer confirmation…')).toBeDefined();
     });
@@ -275,6 +328,7 @@ describe('main composer pending edits', () => {
       chatReady.value = false;
       mount();
       expect(find(tree, 'button', 'Send answer').props.disabled).toBe(true);
+      expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
       expect(find(tree, 'div', 'Reconnecting…')).toBeDefined();
     });
     it.each(['choice', 'text', 'choice_or_text'] as const)(

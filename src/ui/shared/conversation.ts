@@ -22,6 +22,7 @@ export interface ConversationMessage {
   timestamp: string;
   text: string;
   questionId?: string;
+  questionResponseType?: 'skipped';
   turnId?: string;
   timelinePosition?: number;
   inputState?: InputState;
@@ -58,7 +59,7 @@ export interface ConversationQuestion {
   options: { label: string; selectedLabel: string; value: string }[];
   status: 'pending' | 'answered' | 'cancelled';
   answerValue: string | null;
-  answerType: 'choice' | 'text' | null;
+  answerType: 'choice' | 'text' | 'skipped' | null;
   answeredAt: string | null;
   activity?: { ts: string; text: string }[];
   turnId?: string;

@@ -121,7 +121,7 @@ CREATE TABLE sessions (
 CREATE INDEX idx_sessions_agent_group ON sessions(agent_group_id);
 CREATE INDEX idx_sessions_lookup ON sessions(messaging_group_id, thread_id);
 
--- Durable interactive questions and their answers
+-- Durable interactive questions and their responses
 CREATE TABLE questions (
   question_id     TEXT PRIMARY KEY,
   session_id      TEXT NOT NULL REFERENCES sessions(id),
@@ -136,11 +136,12 @@ CREATE TABLE questions (
   options_json    TEXT NOT NULL,
   status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'answered', 'cancelled')),
   answer_value    TEXT,
-  answer_type     TEXT CHECK(answer_type IS NULL OR answer_type IN ('choice', 'text')),
+  answer_type     TEXT CHECK(answer_type IS NULL OR answer_type IN ('choice', 'text', 'skipped')),
   answered_by     TEXT,
   answered_at     TEXT,
   cancelled_at    TEXT,
-  created_at      TEXT NOT NULL
+  created_at      TEXT NOT NULL,
+  CHECK(answer_type != 'skipped' OR answer_value IS NULL)
 );
 CREATE INDEX idx_questions_session_status ON questions(session_id, status);
 

@@ -480,13 +480,13 @@ an answer is ordinary new input (or a queued follow-up). You can stop the
 resulting turn after answering. If the agent has finished asking a question and
 is only waiting for your answer, there may be no active turn to stop.
 
-Questions and answers are separate durable events: the original question output
+Questions and responses are separate durable events: the original question output
 keeps its identity, timestamp, recorded position and asking-turn association;
 the answer input has its own identity, timestamp and consumed-input position.
 The host orders both normally and never relocates the question. Asked events
 never render transcript cards. Outstanding questions replace the ordinary
 composer in a bounded, scrollable input dock below the transcript, with choice,
-text and dictation controls. Multiple questions keep their recorded order.
+text and dictation controls, plus an explicit **Skip** button. Multiple questions keep their recorded order.
 The ordinary composer stays mounted but hidden, preserving its draft, attachments,
 pinned context and pending-message editor; none of these are submitted as an answer.
 Question submission failures retain typed text and show an error. HTTP acceptance
@@ -498,7 +498,20 @@ context. The composer returns without automatically taking focus. Cancelled
 questions leave the dock without creating a transcript card. The asking turn's
 trace stays on its final response (or its own synthetic bubble), independently
 of prompt visibility. Reconnects restore the dock from authoritative question
-and answer records; read-only views retain their existing answer permissions.
+and response records; read-only views retain their existing answer permissions.
+
+Skipping uses the existing response endpoint with a typed `responseType: "skipped"`
+response and no answer value. It resolves the question with `answer_type = 'skipped'`,
+records who responded and when, and journals a wake-eligible interactive input.
+The agent is explicitly told that no answer, choice, consent or approval was
+provided; it can continue where possible or explain what is blocked. The transcript
+shows **Question skipped** at the input event's position. HTTP acceptance or
+metadata alone does not restore the composer; the actual response event does.
+Skip failures retain the prompt and typed answer with a retryable error, including
+a **Retry skip** control if the terminal outcome was saved before journaling failed.
+Answers and skips share one idempotent response ID and a first-response-wins update,
+so retries and competing tabs never produce both outcomes. Approvals cannot be skipped.
+Browser protocol version 3 includes the skipped response type; older clients must reload.
 
 The icon is disabled and grayed out while stopping, without adding transient
 status text or changing the bubble's layout. A **Stopping response** tooltip
@@ -526,6 +539,29 @@ unfinished model call; if no usage was reported, the footer says **Tokens
 unavailable** instead of showing zero. Native model-call usage is captured before
 waiting for tools to finish. This metadata is persisted for reloads, but cannot
 be reconstructed for older stopped responses that never recorded it.
+
+#### Upgrading question skips
+
+Fresh installations support `skipped` directly. Existing databases whose
+`questions.answer_type` CHECK constraint allows only `choice` and `text` need
+an offline upgrade; the host does not run this migration at startup.
+
+Stop this installation's host and verify no process is writing its central DB.
+Run `pnpm exec tsx scripts/migrate-question-skips.ts data/v2.db --host-stopped`.
+This temporary script creates a restricted-permission SQLite backup beside the
+database, preserves all question records, rowids, indexes and triggers, extends
+the response constraint transactionally, and verifies data and database integrity.
+Unexpected schemas are rejected. Re-running it on an upgraded database is a no-op.
+Rebuild the host and chat assets, restart the host, and recycle any existing
+agent containers so the runner's formatter recognizes skipped responses.
+Reload stale browsers for conversation protocol version 3.
+
+Verify that `questions` admits `answer_type = 'skipped'` with a NULL value,
+the existing pending question still appears in the dock with **Skip**, and
+normal answers are unchanged. Do not skip a real question merely to validate
+deployment. Before reopening the service, rollback is a restore of the printed
+backup with the host stopped plus the matching previous code/assets. Never
+restore that backup over newer accepted messages.
 
 ### Authoritative conversation synchronization
 
@@ -634,7 +670,7 @@ conversion events are added to the drained journal. Repeat conversion is a no-op
 
 **Verify:** require zero pairs needing conversion, SQLite integrity/foreign-key
 checks, and matching activity positions on both sides before starting the matched
-host and runners. Verify session-link version 5, browser protocol version 2,
+host and runners. Verify session-link version 5, browser protocol version 3,
 served bundle hashes, reconnect snapshots, applied steering, mid-turn output and
 completion behavior. Reload open browser tabs. Runner source is bind-mounted, so
 source-only changes do not require an image rebuild.

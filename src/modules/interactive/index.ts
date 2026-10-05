@@ -12,6 +12,7 @@
 import { getDb, hasTable } from '../../db/connection.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { answerQuestion, getQuestion, getSession } from '../../db/sessions.js';
+import type { Question } from '../../types.js';
 import { wakeContainer } from '../../container-runner.js';
 import { registerResponseHandler, type ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
@@ -26,15 +27,13 @@ export async function handleInteractiveResponse(payload: ResponsePayload): Promi
   if (question.status === 'cancelled') return true;
 
   if (question.status === 'pending') {
-    const matchingOption = question.options.find((option) => option.value === payload.value);
-    if (question.response_mode === 'choice' && !matchingOption) {
-      log.warn('Question response is not one of the allowed choices', { questionId: payload.questionId });
-      return true;
-    }
-    if (!payload.value.trim()) return true;
+    const response =
+      payload.responseType === 'skipped'
+        ? { type: 'skipped' as const, value: null }
+        : answerValue(question, payload.value);
+    if (!response) return true;
     answerQuestion(payload.questionId, {
-      value: payload.value,
-      type: matchingOption ? 'choice' : 'text',
+      ...response,
       userId: payload.userId,
       answeredAt: new Date().toISOString(),
     });
@@ -42,36 +41,52 @@ export async function handleInteractiveResponse(payload: ResponsePayload): Promi
 
   // Re-read after the conditional update. This is the canonical winner when
   // two responses race, and lets a retry finish writing the inbound event.
-  const answered = getQuestion(payload.questionId);
-  if (!answered || answered.status !== 'answered' || !answered.answer_value || !answered.answer_type) return true;
+  const resolved = getQuestion(payload.questionId);
+  if (resolved?.status === 'answered') await routeQuestionResponse(resolved);
+  return true;
+}
 
-  const session = getSession(answered.session_id);
+function answerValue(question: Question, value: string): { type: 'choice' | 'text'; value: string } | null {
+  const matchingOption = question.options.find((option) => option.value === value);
+  if (question.response_mode === 'choice' && !matchingOption) {
+    log.warn('Question response is not one of the allowed choices', { questionId: question.question_id });
+    return null;
+  }
+  if (!value.trim()) return null;
+  return { type: matchingOption ? 'choice' : 'text', value };
+}
+
+async function routeQuestionResponse(question: Question): Promise<void> {
+  const skipped = question.answer_type === 'skipped';
+  const timestamp = question.answered_at;
+  if (!timestamp || (!skipped && (!question.answer_value || !question.answer_type)))
+    throw new Error(`Incomplete question response: ${question.question_id}`);
+  const session = getSession(question.session_id);
   if (!session) {
-    log.warn('Session not found for question', { questionId: payload.questionId, sessionId: answered.session_id });
-    return true; // claimed — we owned this questionId even though the session is gone
+    throw new Error(`Session not found for question: ${question.question_id}`);
   }
 
   writeSessionMessage(session.agent_group_id, session.id, {
-    id: `question-response:${payload.questionId}`,
+    id: `question-response:${question.question_id}`,
     kind: 'interactive_response',
-    timestamp: answered.answered_at ?? new Date().toISOString(),
-    platformId: answered.platform_id,
-    channelType: answered.channel_type,
-    threadId: answered.thread_id,
+    timestamp,
+    platformId: question.platform_id,
+    channelType: question.channel_type,
+    threadId: question.thread_id,
     content: JSON.stringify({
       type: 'question_response',
-      questionId: payload.questionId,
-      title: answered.title,
-      question: answered.question_text,
-      responseType: answered.answer_type,
-      value: answered.answer_value,
-      userId: answered.answered_by ?? '',
+      questionId: question.question_id,
+      title: question.title,
+      question: question.question_text,
+      responseType: skipped ? 'skipped' : question.answer_type,
+      ...(!skipped ? { value: question.answer_value } : {}),
+      userId: question.answered_by ?? '',
     }),
     idempotent: true,
   });
   log.info('Question response routed', {
-    questionId: payload.questionId,
-    value: answered.answer_value,
+    questionId: question.question_id,
+    responseType: skipped ? 'skipped' : question.answer_type,
     sessionId: session.id,
   });
 
@@ -88,7 +103,6 @@ export async function handleInteractiveResponse(payload: ResponsePayload): Promi
   }
   const woke = await wakeContainer(session);
   if (!woke && messagingGroup) stopTypingRefresh(session.id);
-  return true;
 }
 
 registerResponseHandler(handleInteractiveResponse);

@@ -23,11 +23,12 @@ export const migration028: Migration = {
         options_json    TEXT NOT NULL,
         status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'answered', 'cancelled')),
         answer_value    TEXT,
-        answer_type     TEXT CHECK(answer_type IS NULL OR answer_type IN ('choice', 'text')),
+        answer_type     TEXT CHECK(answer_type IS NULL OR answer_type IN ('choice', 'text', 'skipped')),
         answered_by     TEXT,
         answered_at     TEXT,
         cancelled_at    TEXT,
-        created_at      TEXT NOT NULL
+        created_at      TEXT NOT NULL,
+        CHECK(answer_type != 'skipped' OR answer_value IS NULL)
       );
       INSERT INTO questions
         (question_id, session_id, message_out_id, platform_id, channel_type, thread_id,

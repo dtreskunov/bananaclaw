@@ -23,6 +23,7 @@ import { ONECLI_ACTION, resolveOneCLIApproval } from './onecli-approvals.js';
 import { getApprovalHandler, notifyApprovalResolved } from './primitive.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
+  if (payload.responseType === 'skipped') return false;
   const approval = getPendingApproval(payload.questionId);
   if (!approval) return false;
 

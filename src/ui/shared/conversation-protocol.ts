@@ -1,6 +1,6 @@
 import type { Conversation, ConversationMessage, ConversationQuestion, ConversationTurn } from './conversation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 2;
+export const CONVERSATION_PROTOCOL_VERSION = 3;
 export interface EntityChanges<T> {
   upserts: T[];
   removeIds: string[];
@@ -16,14 +16,14 @@ export interface ConversationChanges {
 }
 export interface ConversationSnapshot {
   kind: 'snapshot';
-  protocolVersion: 2;
+  protocolVersion: typeof CONVERSATION_PROTOCOL_VERSION;
   streamId: string;
   revision: number;
   conversation: Conversation;
 }
 export interface ConversationUpdate {
   kind: 'update';
-  protocolVersion: 2;
+  protocolVersion: typeof CONVERSATION_PROTOCOL_VERSION;
   streamId: string;
   baseRevision: number;
   revision: number;
@@ -95,6 +95,7 @@ const message = shape({
   timestamp: text,
   text,
   questionId: optional(id),
+  questionResponseType: optional(oneOf('skipped')),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -170,7 +171,7 @@ const question = shape({
   options: array(shape({ label: text, selectedLabel: text, value: text })),
   status: oneOf('pending', 'answered', 'cancelled'),
   answerValue: nullable(text),
-  answerType: nullable(oneOf('choice', 'text')),
+  answerType: nullable(oneOf('choice', 'text', 'skipped')),
   answeredAt: nullable(text),
   activity: optional(array(trace)),
   turnId: optional(id),

@@ -135,7 +135,10 @@ export function getQuestion(questionId: string): Question | undefined {
 
 export function answerQuestion(
   questionId: string,
-  answer: { value: string; type: 'choice' | 'text'; userId: string | null; answeredAt: string },
+  answer: ({ value: string; type: 'choice' | 'text' } | { value: null; type: 'skipped' }) & {
+    userId: string | null;
+    answeredAt: string;
+  },
 ): boolean {
   const result = getDb()
     .prepare(

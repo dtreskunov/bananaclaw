@@ -22,7 +22,7 @@ export const testTurn: ConversationTurn = {
 export function testSnapshot(partial: Partial<Conversation> = {}, streamId = 'test-stream'): ConversationSnapshot {
   return {
     kind: 'snapshot',
-    protocolVersion: 2,
+    protocolVersion: 3,
     streamId,
     revision: 0,
     conversation: presentedConversation({

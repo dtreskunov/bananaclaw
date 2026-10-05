@@ -12,8 +12,9 @@ import Router from 'find-my-way';
 
 import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
+import { getMessagingGroupByPlatform } from '../../../db/messaging-groups.js';
 import { getDb } from '../../../db/connection.js';
-import { getSession } from '../../../db/sessions.js';
+import { getQuestion, getSession } from '../../../db/sessions.js';
 import { log } from '../../../log.js';
 import {
   listAccessibleAgentGroups,
@@ -27,6 +28,7 @@ import { deleteSubscriptionByEndpoint, upsertSubscription } from '../../../modul
 import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
 import type { PendingApproval } from '../../../types.js';
+import type { QuestionResponse } from '../../shared/question-response.js';
 import { presentApproval, type ApprovalPackageLists } from './approval-presentation.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
@@ -44,6 +46,7 @@ import {
   listAllThreadsForAgentGroup,
   listAllThreadsForUser,
   readChatHistory,
+  resolveTurnContext,
   viewerHasContent,
 } from './chat.js';
 import type { ThreadSummary } from './chat.js';
@@ -67,7 +70,7 @@ import { handleWriteRequest } from './write.js';
 import { resolveVoiceInputConfig } from './voice-input-config.js';
 
 export { handleChatUpgrade };
-import { readConversation } from './conversation.js';
+import { readConversation, routeMatches } from './conversation.js';
 import { conversationSnapshot } from './conversation-stream.js';
 
 // UI assets live under src/ (not compiled by tsc); resolve from project root,
@@ -670,25 +673,56 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
     }
   }
 
-  let body: { value?: unknown };
+  let body: { value?: unknown; responseType?: unknown };
   try {
-    body = (await readJsonBody(ctx.req)) as { value?: unknown };
+    body = (await readJsonBody(ctx.req)) as { value?: unknown; responseType?: unknown };
   } catch {
     return json(ctx, 400, { error: 'invalid_body' });
   }
-  const value = typeof body?.value === 'string' ? body.value : null;
-  if (!value) return json(ctx, 400, { error: 'value_required' });
+  let response: QuestionResponse;
+  if (body?.responseType === 'skipped') {
+    if (body.value !== undefined) return json(ctx, 400, { error: 'skip_has_no_value' });
+    if (row) return json(ctx, 400, { error: 'approval_cannot_be_skipped' });
+    const question = getQuestion(approvalId);
+    if (!question) return json(ctx, 404, { error: 'not_found' });
+    if (question.status === 'cancelled') return json(ctx, 409, { error: 'question_cancelled' });
+    const session = getSession(question.session_id);
+    const mg =
+      question.channel_type && question.platform_id
+        ? getMessagingGroupByPlatform(question.channel_type, question.platform_id)
+        : undefined;
+    const context =
+      session && mg
+        ? resolveTurnContext(userId, session.agent_group_id, question.thread_id ?? `__dm:${mg.id}`, {
+            channelType: mg.channel_type,
+            messagingGroupId: mg.id,
+          })
+        : null;
+    if (
+      !context ||
+      context.sessionId !== question.session_id ||
+      !routeMatches(context, question.channel_type, question.platform_id, question.thread_id)
+    )
+      return json(ctx, 403, { error: 'forbidden' });
+    response = { responseType: 'skipped' };
+  } else {
+    if (body?.responseType !== undefined && body.responseType !== 'answer')
+      return json(ctx, 400, { error: 'invalid_response_type' });
+    const value = typeof body?.value === 'string' ? body.value : null;
+    if (!value) return json(ctx, 400, { error: 'value_required' });
+    response = { value };
+  }
 
   const claimed = await dispatchResponse({
     questionId: approvalId,
-    value,
+    ...response,
     userId,
     channelType: 'web',
     platformId: userId,
     threadId: null,
   });
   if (!claimed) {
-    log.warn('Web approval/question response unclaimed', { approvalId, userId, value });
+    log.warn('Web approval/question response unclaimed', { approvalId, userId, ...response });
     return json(ctx, 404, { error: 'not_found' });
   }
   json(ctx, 200, { ok: true });

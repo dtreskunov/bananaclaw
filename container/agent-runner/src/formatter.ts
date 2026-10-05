@@ -293,6 +293,8 @@ function formatSystemMessage(msg: MessageInRow): string {
 function formatInteractiveResponse(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const from = originAttr(msg);
+  if (content.responseType === 'skipped')
+    return `<question_response${from} question_id="${escapeXml(content.questionId || '')}" response_type="skipped"><question>${escapeXml(content.question || '')}</question><notice>The user skipped this question without providing an answer. Continue where possible without assuming an answer; explain if the missing information blocks progress. This is not a selected option, consent, or approval.</notice></question_response>`;
   return `<question_response${from} question_id="${escapeXml(content.questionId || '')}" response_type="${escapeXml(content.responseType || 'text')}"><question>${escapeXml(content.question || '')}</question><answer>${escapeXml(content.value || '')}</answer></question_response>`;
 }
 

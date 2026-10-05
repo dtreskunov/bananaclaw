@@ -57,6 +57,7 @@ import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, resetConversation } from './conversation-state';
 import { ConversationProtocolError, type ConversationSnapshot } from '../../../shared/conversation-protocol';
+import type { QuestionResponse } from '../../../shared/question-response';
 import { applyTurnState, resetTurnState } from './stop-turn';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { parentPath } from './utils';
@@ -1506,6 +1507,14 @@ export async function respondApproval(approvalId: string, value: string): Promis
 }
 
 export async function respondQuestion(questionId: string, value: string): Promise<boolean> {
+  return submitQuestionResponse(questionId, { value });
+}
+
+export async function skipQuestion(questionId: string): Promise<boolean> {
+  return submitQuestionResponse(questionId, { responseType: 'skipped' });
+}
+
+async function submitQuestionResponse(questionId: string, response: QuestionResponse): Promise<boolean> {
   if (respondingQuestionIds.value.has(questionId)) return false;
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);
@@ -1514,7 +1523,7 @@ export async function respondQuestion(questionId: string, value: string): Promis
     // Reuse the approval respond endpoint — dispatchResponse routes to both handlers.
     const res = await postJson<{ ok?: boolean; error?: string }>(
       `api/approvals/${encodeURIComponent(questionId)}/respond`,
-      { value },
+      response,
     );
     if (!res.ok) throw new Error(res.data?.error || 'HTTP ' + res.status);
     if (channelType.value !== 'web') await runSync({ forceRefresh: true });

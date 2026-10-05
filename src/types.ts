@@ -226,7 +226,7 @@ export interface Question {
   options: import('./channels/ask-question.js').NormalizedOption[];
   status: 'pending' | 'answered' | 'cancelled';
   answer_value: string | null;
-  answer_type: 'choice' | 'text' | null;
+  answer_type: 'choice' | 'text' | 'skipped' | null;
   answered_by: string | null;
   answered_at: string | null;
   cancelled_at: string | null;

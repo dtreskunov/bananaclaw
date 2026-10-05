@@ -17702,7 +17702,7 @@ function conversationActivity(turn2) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 2;
+var CONVERSATION_PROTOCOL_VERSION = 3;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -17749,6 +17749,7 @@ var message = shape({
   timestamp: text,
   text,
   questionId: optional(id),
+  questionResponseType: optional(oneOf("skipped")),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -17824,7 +17825,7 @@ var question = shape({
   options: array(shape({ label: text, selectedLabel: text, value: text })),
   status: oneOf("pending", "answered", "cancelled"),
   answerValue: nullable(text),
-  answerType: nullable(oneOf("choice", "text")),
+  answerType: nullable(oneOf("choice", "text", "skipped")),
   answeredAt: nullable(text),
   activity: optional(array(trace)),
   turnId: optional(id),
@@ -20256,6 +20257,12 @@ async function respondApproval(approvalId, value) {
   }
 }
 async function respondQuestion(questionId, value) {
+  return submitQuestionResponse(questionId, { value });
+}
+async function skipQuestion(questionId) {
+  return submitQuestionResponse(questionId, { responseType: "skipped" });
+}
+async function submitQuestionResponse(questionId, response) {
   if (respondingQuestionIds.value.has(questionId)) return false;
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);
@@ -20263,7 +20270,7 @@ async function respondQuestion(questionId, value) {
   try {
     const res = await postJson(
       `api/approvals/${encodeURIComponent(questionId)}/respond`,
-      { value }
+      response
     );
     if (!res.ok) throw new Error(res.data?.error || "HTTP " + res.status);
     if (channelType.value !== "web") await runSync({ forceRefresh: true });
@@ -22138,7 +22145,7 @@ function QuickCapture({ onCapture, onClose }) {
 // src/components/QuestionPrompt.tsx
 function QuestionPrompt({ question: q5 }) {
   const [answer, setAnswer] = h2("");
-  const [accepted, setAccepted] = h2(false);
+  const [accepted, setAccepted] = h2(null);
   const [error, setError] = h2("");
   const answerRef = A2("");
   const textareaRef = A2(null);
@@ -22151,9 +22158,11 @@ function QuestionPrompt({ question: q5 }) {
   const voiceState = voice.state.value;
   const active = voiceState.target === target;
   const busy = respondingQuestionIds.value.has(q5.questionId);
-  const waiting = accepted || q5.status === "answered";
+  const waiting = !!accepted || q5.status === "answered";
+  const skipped = accepted === "skipped" || q5.answerType === "skipped";
   const disconnected = (!channel || channel === "web") && !chatReady.value;
   const disabled = busy || waiting || disconnected;
+  const skipDisabled = busy || !!accepted || disconnected || q5.status === "cancelled" || waiting && !skipped;
   const current = A2(false);
   current.current = q5.status === "pending" && !disabled;
   const voiceLocked = active && (voiceState.phase !== "error" || voiceState.sending);
@@ -22173,9 +22182,23 @@ function QuestionPrompt({ question: q5 }) {
     setError("");
     try {
       const sent = await respondQuestion(q5.questionId, value);
-      if (sent) setAccepted(true);
+      if (sent) setAccepted("answer");
       else setError("Could not submit your answer. Please retry.");
       return sent;
+    } finally {
+      submitting.current = false;
+    }
+  };
+  const skip = async () => {
+    if (submitting.current || skipDisabled || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg)
+      return;
+    submitting.current = true;
+    setError("");
+    if (voice.state.value.target === target) voice.detach();
+    try {
+      const sent = await skipQuestion(q5.questionId);
+      if (sent) setAccepted("skipped");
+      else setError("Could not skip this question. Please retry.");
     } finally {
       submitting.current = false;
     }
@@ -22217,7 +22240,21 @@ function QuestionPrompt({ question: q5 }) {
       "aria-label": q5.title || "Question",
       "aria-busy": busy || waiting,
       children: [
-        /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
+        /* @__PURE__ */ u4("div", { class: "question-prompt-header", children: [
+          /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "question-skip-btn",
+              "aria-label": "Skip question and notify agent",
+              title: "Skip this question and tell the agent",
+              disabled: skipDisabled,
+              onClick: () => void skip(),
+              children: q5.answerType === "skipped" && !accepted ? "Retry skip" : "Skip"
+            }
+          )
+        ] }),
         /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.question }),
         !!q5.options.length && /* @__PURE__ */ u4("div", { class: "question-card-actions", children: q5.options.map((option) => /* @__PURE__ */ u4(
           "button",
@@ -22300,7 +22337,7 @@ function QuestionPrompt({ question: q5 }) {
             )
           }
         ),
-        (busy || waiting || disconnected) && /* @__PURE__ */ u4("div", { class: "question-prompt-status", role: "status", children: disconnected ? "Reconnecting\u2026" : busy ? "Submitting answer\u2026" : "Waiting for answer confirmation\u2026" }),
+        (busy || waiting || disconnected) && /* @__PURE__ */ u4("div", { class: "question-prompt-status", role: "status", children: disconnected ? "Reconnecting\u2026" : busy ? "Submitting response\u2026" : skipped ? "Waiting for skip confirmation\u2026" : "Waiting for answer confirmation\u2026" }),
         error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: error }),
         active && voiceState.error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: [
           voiceState.error,
@@ -22316,7 +22353,7 @@ function QuestionAnswerBubble({ question: question2, answer }) {
   return /* @__PURE__ */ u4("div", { class: "msg in question-card question-card-answered", "data-msg-id": answer.id, children: [
     /* @__PURE__ */ u4("div", { class: "question-card-heading", children: question2.title }),
     /* @__PURE__ */ u4("div", { class: "question-card-title", children: question2.question }),
-    /* @__PURE__ */ u4("div", { class: "question-card-answer", children: question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text }),
+    /* @__PURE__ */ u4("div", { class: "question-card-answer", children: answer.questionResponseType === "skipped" ? "Question skipped" : question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text }),
     /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answer.ts }) })
   ] });
 }

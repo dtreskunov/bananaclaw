@@ -208,60 +208,69 @@ async function stop(
 }
 
 describe('native steering submissions', () => {
-  it('reads a question response as a separate routed input with its own timestamp and recorded position', () => {
-    const id = 'question-response:q';
-    const content = JSON.stringify({ type: 'question_response', questionId: 'q', value: 'Yes', responseType: 'text' });
-    writeSessionMessage('agent', 'session-1', {
-      id,
-      kind: 'interactive_response',
-      timestamp: NOW,
-      platformId: 'group:agent',
-      channelType: 'web',
-      threadId: 'thread-1',
-      content,
-    });
-    writeSessionMessage('agent', 'session-1', {
-      id: 'off-route-answer',
-      kind: 'interactive_response',
-      timestamp: NOW,
-      platformId: 'private',
-      channelType: 'web',
-      threadId: 'thread-1',
-      content,
-    });
-    writeSessionMessage('agent', 'session-1', {
-      id: 'not-an-answer',
-      kind: 'chat',
-      timestamp: NOW,
-      platformId: 'group:agent',
-      channelType: 'web',
-      threadId: 'thread-1',
-      content,
-    });
-    const db = openOutboundDbRw('agent', 'session-1');
-    const key = `input:${createHash('sha256').update(id).digest('hex')}`;
-    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
-      key,
-      JSON.stringify({
-        messageId: id,
-        status: 'applied',
-        turnId: 'turn-1',
-        timelinePosition: 300,
-      }),
-      NOW,
-    );
-    db.close();
-    expect(readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE)).toEqual([
-      expect.objectContaining({
-        id,
-        direction: 'in',
+  it.each(['text', 'skipped'] as const)(
+    'reads a %s question response as a separate routed input with its own timestamp and recorded position',
+    (responseType) => {
+      const id = 'question-response:q';
+      const content = JSON.stringify({
+        type: 'question_response',
         questionId: 'q',
-        text: 'Yes',
+        responseType,
+        ...(responseType === 'text' ? { value: 'Yes' } : {}),
+      });
+      writeSessionMessage('agent', 'session-1', {
+        id,
+        kind: 'interactive_response',
         timestamp: NOW,
-        timelinePosition: 300,
-      }),
-    ]);
-  });
+        platformId: 'group:agent',
+        channelType: 'web',
+        threadId: 'thread-1',
+        content,
+      });
+      writeSessionMessage('agent', 'session-1', {
+        id: 'off-route-answer',
+        kind: 'interactive_response',
+        timestamp: NOW,
+        platformId: 'private',
+        channelType: 'web',
+        threadId: 'thread-1',
+        content,
+      });
+      writeSessionMessage('agent', 'session-1', {
+        id: 'not-an-answer',
+        kind: 'chat',
+        timestamp: NOW,
+        platformId: 'group:agent',
+        channelType: 'web',
+        threadId: 'thread-1',
+        content,
+      });
+      const db = openOutboundDbRw('agent', 'session-1');
+      const key = `input:${createHash('sha256').update(id).digest('hex')}`;
+      db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+        key,
+        JSON.stringify({
+          messageId: id,
+          status: 'applied',
+          turnId: 'turn-1',
+          timelinePosition: 300,
+        }),
+        NOW,
+      );
+      db.close();
+      expect(readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE)).toEqual([
+        expect.objectContaining({
+          id,
+          direction: 'in',
+          questionId: 'q',
+          text: responseType === 'skipped' ? 'Question skipped' : 'Yes',
+          ...(responseType === 'skipped' ? { questionResponseType: 'skipped' } : {}),
+          timestamp: NOW,
+          timelinePosition: 300,
+        }),
+      ]);
+    },
+  );
   const handling = { mode: 'steer', turnId: TURN.id };
   const send = (inputHandling: unknown = handling, options: Parameters<typeof stop>[0] = {}) =>
     stop({

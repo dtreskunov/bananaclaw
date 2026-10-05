@@ -92,6 +92,34 @@ describe('context timezone header', () => {
     expect(result).toContain(`<context timezone="${TIMEZONE}"`);
   });
 
+  describe('interactive question responses', () => {
+    it('formats a skip as an explicit non-answer without assuming consent or approval', () => {
+      insertMessage('skip', 'interactive_response', {
+        type: 'question_response', questionId: 'q&1', question: 'Choose <one>?',
+        responseType: 'skipped', userId: 'user',
+      });
+      const prompt = formatMessages(getPendingMessages());
+      expect(prompt).toContain('question_id="q&amp;1" response_type="skipped"');
+      expect(prompt).toContain('<question>Choose &lt;one&gt;?</question>');
+      expect(prompt).toContain('without providing an answer');
+      expect(prompt).toContain('without assuming an answer');
+      expect(prompt).toContain('explain if the missing information blocks progress');
+      expect(prompt).toContain('not a selected option, consent, or approval');
+      expect(prompt).not.toContain('<answer>');
+    });
+
+    it.each(['choice', 'text'])('preserves the existing %s answer format', (responseType) => {
+      insertMessage('answer', 'interactive_response', {
+        type: 'question_response', questionId: 'q', question: 'Choose?',
+        responseType, value: 'A&B',
+      });
+      const prompt = formatMessages(getPendingMessages());
+      expect(prompt).toContain(`response_type="${responseType}"`);
+      expect(prompt).toContain('<answer>A&amp;B</answer>');
+      expect(prompt).not.toContain('<notice>');
+    });
+  });
+
   it('includes the header even when the message list is empty', () => {
     const result = formatMessages([]);
     expect(result).toContain(`<context timezone="${TIMEZONE}"`);

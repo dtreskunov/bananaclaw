@@ -190,23 +190,45 @@ CREATE INDEX idx_sessions_lookup     ON sessions(messaging_group_id, thread_id);
 - **Resolved by:** `resolveSession()` in `src/session-manager.ts`.
 - Creating a session also provisions the session folder and both session DBs via `initSessionFolder()` — see [db-session.md](db-session.md).
 
-### 1.9 `pending_questions`
+### 1.9 `questions`
 
-The `ask_user_question` MCP tool parks an interactive question here, and the container matches incoming `system` messages back to it by `questionId`.
+The `ask_user_question` MCP tool creates a durable question here. Migration 028
+replaced `pending_questions`; the response type also supports `skipped`.
+Existing installations require the [offline upgrade](ui.md#upgrading-question-skips).
+The original question remains stored after resolution. Answers and
+skips arrive in the session input journal as `interactive_response` events
+linked by `questionId`; they never relocate the original question output.
 
 ```sql
-CREATE TABLE pending_questions (
+CREATE TABLE questions (
   question_id    TEXT PRIMARY KEY,
   session_id     TEXT NOT NULL REFERENCES sessions(id),
   message_out_id TEXT NOT NULL,
+  in_reply_to    TEXT,
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
   title          TEXT NOT NULL,
+  question_text  TEXT NOT NULL,
+  response_mode  TEXT NOT NULL CHECK(response_mode IN ('choice', 'text', 'choice_or_text')),
   options_json   TEXT NOT NULL,
-  created_at     TEXT NOT NULL
+  status         TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'answered', 'cancelled')),
+  answer_value   TEXT,
+  answer_type    TEXT CHECK(answer_type IS NULL OR answer_type IN ('choice', 'text', 'skipped')),
+  answered_by    TEXT,
+  answered_at    TEXT,
+  cancelled_at   TEXT,
+  created_at     TEXT NOT NULL,
+  CHECK(answer_type != 'skipped' OR answer_value IS NULL)
 );
+CREATE INDEX idx_questions_session_status ON questions(session_id, status);
 ```
+
+A skip is a resolved response (`status = 'answered'`, `answer_type = 'skipped'`,
+`answer_value = NULL`), not cancellation or a fabricated answer. `answered_by`
+and `answered_at` record the actor and time for either response. The conditional
+pending-to-answered update makes the first response win; journal retries use the
+same `question-response:<questionId>` identity and saved outcome.
 
 ### 1.10 `agent_destinations`
 
@@ -376,6 +398,7 @@ Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMig
 | 009 | `009-drop-pending-credentials.ts` | Drop the defunct `pending_credentials` table |
 | 014 | `014-container-configs.ts` | `container_configs` — per-agent-group container runtime config |
 | 015 | `015-cli-scope.ts` | `ALTER TABLE container_configs ADD COLUMN cli_scope` |
+| 028 | `028-durable-questions.ts` | Replace `pending_questions` with durable `questions` and answer metadata |
 
 Numbers 005 and 006 are intentionally absent — migrations were renumbered during early development.
 

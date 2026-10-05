@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearChat, sendChat } from './actions';
+import { clearChat, respondQuestion, sendChat, skipQuestion } from './actions';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
 import { applyConversationFrame, conversationState } from './conversation-state';
@@ -18,6 +18,7 @@ import {
   pendingWebSends,
   pinnedContext,
   scrollToBottomTick,
+  respondingQuestionIds,
   threadId,
 } from './state';
 import { splitPendingInputs } from './queued-followups';
@@ -140,6 +141,27 @@ describe('native command intent', () => {
     expect(requestChoice).toHaveBeenCalledOnce();
   });
 });
+describe('question response requests', () => {
+  it('uses the existing endpoint for typed skips and ordinary answers without submitting files or context', async () => {
+    channelType.value = 'web';
+    respondingQuestionIds.value = new Set();
+    const files = [{ name: 'draft.txt', size: 1, file: new File(['x'], 'draft.txt') }];
+    pending.value = files;
+    pinnedContext.value = ['keep/context.txt'];
+    expect(await skipQuestion('q:one')).toBe(true);
+    expect(fetch).toHaveBeenLastCalledWith(
+      'api/approvals/q%3Aone/respond',
+      expect.objectContaining({ body: JSON.stringify({ responseType: 'skipped' }) }),
+    );
+    expect(await respondQuestion('q:one', 'Yes')).toBe(true);
+    expect(fetch).toHaveBeenLastCalledWith(
+      'api/approvals/q%3Aone/respond',
+      expect.objectContaining({ body: JSON.stringify({ value: 'Yes' }) }),
+    );
+    expect(pending.value).toBe(files);
+    expect(pinnedContext.value).toEqual(['keep/context.txt']);
+  });
+});
 describe('authoritative input dispositions', () => {
   it.each(['queued', 'steering', 'applied', 'processing'] as const)(
     'keeps Stop bound to the turn with %s input',
@@ -204,7 +226,7 @@ describe('authoritative input dispositions', () => {
     applyConversationFrame(
       {
         kind: 'update',
-        protocolVersion: 2,
+        protocolVersion: 3,
         streamId: before.streamId,
         baseRevision: 0,
         revision: 1,
@@ -217,7 +239,7 @@ describe('authoritative input dispositions', () => {
     applyConversationFrame(
       {
         kind: 'update',
-        protocolVersion: 2,
+        protocolVersion: 3,
         streamId: before.streamId,
         baseRevision: 1,
         revision: 2,

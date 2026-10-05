@@ -29,6 +29,8 @@ import {
   runMigrations,
 } from '../../db/index.js';
 import { handleInteractiveResponse } from './index.js';
+import type { ResponsePayload } from '../../response-registry.js';
+import { getDb } from '../../db/connection.js';
 
 const QUESTION_ID = 'question-1';
 
@@ -104,7 +106,88 @@ function response(value: string) {
   };
 }
 
+function skip(userId = 'skipper'): ResponsePayload {
+  return {
+    questionId: QUESTION_ID,
+    responseType: 'skipped',
+    userId,
+    channelType: 'web',
+    platformId: 'user-1',
+    threadId: 'thread-1',
+  };
+}
+
 describe('handleInteractiveResponse', () => {
+  it.each(['choice', 'text', 'choice_or_text'] as const)(
+    'records and routes a typed skip for a %s question without an answer value',
+    async (mode) => {
+      seedQuestion(mode);
+      expect(await handleInteractiveResponse(skip())).toBe(true);
+      const question = getQuestion(QUESTION_ID)!;
+      expect(question).toMatchObject({
+        status: 'answered',
+        answer_type: 'skipped',
+        answer_value: null,
+        answered_by: 'skipper',
+        cancelled_at: null,
+      });
+      expect(question.answered_at).toBeTruthy();
+      const message = mockWriteSessionMessage.mock.calls[0][2];
+      expect(message).toMatchObject({
+        id: `question-response:${QUESTION_ID}`,
+        kind: 'interactive_response',
+        timestamp: question.answered_at,
+        idempotent: true,
+        platformId: 'user-1',
+        channelType: 'web',
+        threadId: 'thread-1',
+      });
+      expect(JSON.parse(message.content)).toEqual({
+        type: 'question_response',
+        questionId: QUESTION_ID,
+        title: 'Environment',
+        question: 'Which environment?',
+        responseType: 'skipped',
+        userId: 'skipper',
+      });
+      expect(mockWakeContainer).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['answer', 'skip'] as const)('keeps the first %s when an answer and skip race', async (first) => {
+    seedQuestion('text');
+    const requests = first === 'answer' ? [response('First'), skip()] : [skip(), response('Later')];
+    await Promise.all(requests.map(handleInteractiveResponse));
+    expect(getQuestion(QUESTION_ID)).toMatchObject({
+      answer_type: first === 'answer' ? 'text' : 'skipped',
+      answer_value: first === 'answer' ? 'First' : null,
+    });
+    expect(mockWriteSessionMessage.mock.calls[0][2]).toEqual(mockWriteSessionMessage.mock.calls[1][2]);
+  });
+
+  it('retries interrupted journaling using the original skip actor, time and input identity', async () => {
+    seedQuestion('text');
+    mockWriteSessionMessage.mockImplementationOnce(() => {
+      throw new Error('journal unavailable');
+    });
+    await expect(handleInteractiveResponse(skip())).rejects.toThrow('journal unavailable');
+    expect(mockWakeContainer).not.toHaveBeenCalled();
+    const saved = getQuestion(QUESTION_ID);
+    await handleInteractiveResponse(skip('second-user'));
+    expect(getQuestion(QUESTION_ID)).toEqual(saved);
+    expect(mockWriteSessionMessage.mock.calls[1][2]).toEqual(mockWriteSessionMessage.mock.calls[0][2]);
+    expect(mockWakeContainer).toHaveBeenCalledOnce();
+  });
+
+  it('does not route unknown or cancelled questions as skips', async () => {
+    expect(await handleInteractiveResponse(skip())).toBe(false);
+    seedQuestion('text');
+    getDb().prepare("UPDATE questions SET status = 'cancelled' WHERE question_id = ?").run(QUESTION_ID);
+    expect(await handleInteractiveResponse(skip())).toBe(true);
+    expect(mockWriteSessionMessage).not.toHaveBeenCalled();
+    expect(mockWakeContainer).not.toHaveBeenCalled();
+  });
+
   it('rejects a value outside a choice-only question', async () => {
     seedQuestion('choice');
     expect(await handleInteractiveResponse(response('staging'))).toBe(true);

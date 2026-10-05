@@ -19,7 +19,7 @@ const empty: Conversation = {
 };
 const snapshot: ConversationSnapshot = {
   kind: 'snapshot',
-  protocolVersion: 2,
+  protocolVersion: 3,
   streamId: 's',
   revision: 0,
   conversation: empty,
@@ -37,13 +37,16 @@ const next: Conversation = {
 };
 const update: ConversationUpdate = {
   kind: 'update',
-  protocolVersion: 2,
+  protocolVersion: 3,
   streamId: 's',
   baseRevision: 0,
   revision: 1,
   changes: diffConversation(empty, next),
 };
 describe('conversation protocol', () => {
+  it('requires older clients to reload for skipped response support', () => {
+    expect(() => parseConversationFrame({ ...snapshot, protocolVersion: 2 })).toThrow('Chat protocol changed');
+  });
   it.each(['in', 'out'] as const)(
     'rejects %s question references without an authorized question record',
     (direction) => {
