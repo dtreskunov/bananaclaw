@@ -110,6 +110,35 @@ Local media tests also require these binaries on `PATH`.
 
 Both paths end with Bun running the same source file from `/app/src/index.ts`.
 
+## Container resource caps
+
+Host-spawned agent containers and MCP probe containers share per-container
+limits: **1536 MiB RAM** and **2 CPUs** by default. The host reads
+`CONTAINER_MEMORY_LIMIT` and `CONTAINER_CPU_LIMIT` from the process environment
+first, then `.env`. Values are trimmed. Memory accepts positive integer bytes
+or a `k`, `m`, or `g` suffix (case-insensitive); CPUs accept positive integers
+or decimals, such as `0.5`. Invalid values abort the spawn and are logged.
+Set either value to exactly `0` to disable that cap independently.
+
+When a memory cap is enabled, `--memory-swap` equals `--memory`: containers
+cannot consume swap. A runaway install can hit its own container's OOM limit
+rather than exhausting host RAM and thrashing swap. The existing `--memory=2g`
+limit for per-group image builds is separate and unchanged.
+
+**Applying changes:** rebuild the host with `pnpm run build`, restart the host
+service, and recycle existing agent containers when safe. Host restarts adopt
+running containers, so only newly created containers receive the new limits;
+no image rebuild is needed. Verify with `docker inspect <container>`: the
+default `HostConfig.Memory` and `HostConfig.MemorySwap` are both `1610612736`
+bytes, and the CPU quota corresponds to 2 CPUs. On rootless Podman, these
+limits require delegated memory and CPU cgroup controllers.
+
+These are not a fleet-wide cap: multiple containers can still exceed the
+host's total memory. Admission control budgets estimated footprints, not a
+hard aggregate ceiling. An aggregate cgroup limit must be configured
+separately. To roll back the new caps, set both values to `0`, restart the
+host, and recycle affected containers.
+
 ## CI shape
 
 `.github/workflows/ci.yml` installs both Node (with pnpm cache) and Bun, then runs in order:

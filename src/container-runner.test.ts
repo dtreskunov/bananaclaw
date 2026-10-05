@@ -1,14 +1,51 @@
 import fs from 'fs';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   packageDockerfile,
   resolveProviderName,
+  resourceLimitArgs,
   runnerStateStoreMount,
   sessionLinkMount,
   syncSkillSymlinks,
 } from './container-runner.js';
+
+vi.mock('./config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./config.js')>()),
+  CONTAINER_MEMORY_LIMIT: '1536m',
+  CONTAINER_CPU_LIMIT: '2',
+}));
+
+describe('resourceLimitArgs', () => {
+  it('caps memory with no swap and CPU by default', () => {
+    expect(resourceLimitArgs()).toEqual(['--memory=1536m', '--memory-swap=1536m', '--cpus=2']);
+  });
+
+  it('disables each cap independently with exactly "0"', () => {
+    expect(resourceLimitArgs('0', '2')).toEqual(['--cpus=2']);
+    expect(resourceLimitArgs('1536m', '0')).toEqual(['--memory=1536m', '--memory-swap=1536m']);
+    expect(resourceLimitArgs('0', '0')).toEqual([]);
+  });
+
+  it.each(['2048', '512k', '512m', '2g', '512M', '2G'])('accepts memory limit %s and fractional CPUs', (memory) => {
+    expect(resourceLimitArgs(memory, '0.5')).toEqual([`--memory=${memory}`, `--memory-swap=${memory}`, '--cpus=0.5']);
+  });
+
+  it.each(['', ' ', '-1g', '1.5g', '1gb', 'max', '0m', '00', '2g --privileged'])(
+    'rejects invalid memory limit %j',
+    (memory) => {
+      expect(() => resourceLimitArgs(memory, '0')).toThrow(`Invalid CONTAINER_MEMORY_LIMIT: ${memory}`);
+    },
+  );
+
+  it.each(['', ' ', '-1', '1e3', 'Infinity', 'NaN', '.5', '2.', '00', '0.0', '2 --privileged'])(
+    'rejects invalid CPU limit %j',
+    (cpus) => {
+      expect(() => resourceLimitArgs('0', cpus)).toThrow(`Invalid CONTAINER_CPU_LIMIT: ${cpus}`);
+    },
+  );
+});
 
 describe('packageDockerfile', () => {
   const none = { apt: [], npm: [], pip: [] };
@@ -232,5 +269,15 @@ describe('agent-group image build limits (structural)', () => {
   it('caps build memory so package installation cannot starve the host', () => {
     const src = fs.readFileSync(path.join(process.cwd(), 'src', 'container-runner.ts'), 'utf-8');
     expect(src).toContain('${CONTAINER_RUNTIME_BIN} build --memory=2g');
+  });
+});
+
+describe('container runtime limits (structural)', () => {
+  it('applies caps in the shared argument builder for agents and MCP probes', () => {
+    const src = fs.readFileSync(path.join(process.cwd(), 'src', 'container-runner.ts'), 'utf-8');
+    const builder = src.slice(src.indexOf('async function buildContainerArgs('));
+    expect(builder).toMatch(
+      /if \(launchMode !== 'mcp-probe'\) \{\s*args\.push\('--label', `nanoclaw-session-link=\$\{SESSION_LINK_VERSION\}`\);\s*\}\s*args\.push\(\.\.\.resourceLimitArgs\(\)\);/,
+    );
   });
 });

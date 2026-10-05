@@ -10,10 +10,12 @@ import path from 'path';
 import { OneCLI } from '@onecli-sh/sdk';
 
 import {
+  CONTAINER_CPU_LIMIT,
   CONTAINER_IMAGE,
   CONTAINER_IMAGE_BASE,
   CONTAINER_INSTALL_LABEL,
   CONTAINER_MAX_OUTPUT_SIZE,
+  CONTAINER_MEMORY_LIMIT,
   DATA_DIR,
   GROUPS_DIR,
   ONECLI_API_KEY,
@@ -895,6 +897,28 @@ function selectedSkillNames(
     .map((skill) => skill.slug);
 }
 
+export function resourceLimitArgs(
+  memory = CONTAINER_MEMORY_LIMIT,
+  cpus = CONTAINER_CPU_LIMIT,
+): string[] {
+  const args: string[] = [];
+  if (memory !== '0') {
+    if (!/^\d+[kmg]?$/i.test(memory) || parseInt(memory, 10) === 0) {
+      throw new Error(`Invalid CONTAINER_MEMORY_LIMIT: ${memory}`);
+    }
+    // Equal memory and memory-swap caps disable swap, containing runaway
+    // installs in their own cgroup instead of thrashing the host's swap.
+    args.push(`--memory=${memory}`, `--memory-swap=${memory}`);
+  }
+  if (cpus !== '0') {
+    if (!/^\d+(\.\d+)?$/.test(cpus) || !Number.isFinite(Number(cpus)) || Number(cpus) <= 0) {
+      throw new Error(`Invalid CONTAINER_CPU_LIMIT: ${cpus}`);
+    }
+    args.push(`--cpus=${cpus}`);
+  }
+  return args;
+}
+
 export async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -931,6 +955,7 @@ export async function buildContainerArgs(
   if (launchMode !== 'mcp-probe') {
     args.push('--label', `nanoclaw-session-link=${SESSION_LINK_VERSION}`);
   }
+  args.push(...resourceLimitArgs());
 
   // Rootless Podman: UID 0 inside the container maps to the host user
   // (e.g. denis/1000). The Dockerfile sets USER node (UID 1000) which would

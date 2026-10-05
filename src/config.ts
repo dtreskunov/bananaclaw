@@ -12,6 +12,8 @@ const envConfig = readEnvFile([
   'ONECLI_URL',
   'ONECLI_API_KEY',
   'ONECLI_NEW_AGENT_SECRET_IDS',
+  'CONTAINER_MEMORY_LIMIT',
+  'CONTAINER_CPU_LIMIT',
   'TZ',
   'PAGES_BASE_DOMAIN',
 ]);
@@ -41,6 +43,14 @@ export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);
 export const CONTAINER_INSTALL_LABEL = `nanoclaw-install=${INSTALL_SLUG}`;
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760', 10); // 10MB default
+// Per-container caps prevent a runaway agent from exhausting the host.
+// "0" disables the corresponding cap.
+export const CONTAINER_MEMORY_LIMIT = (
+  process.env.CONTAINER_MEMORY_LIMIT ||
+  envConfig.CONTAINER_MEMORY_LIMIT ||
+  '1536m'
+).trim();
+export const CONTAINER_CPU_LIMIT = (process.env.CONTAINER_CPU_LIMIT || envConfig.CONTAINER_CPU_LIMIT || '2').trim();
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
 export const ONECLI_NEW_AGENT_SECRET_IDS = [
