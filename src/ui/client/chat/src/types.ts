@@ -326,7 +326,6 @@ export interface PendingFile {
   size: number;
   // Backed by a real File when picked from the composer; the chat send
   // uses it via FormData.
-  // eslint-disable-next-line @typescript-eslint/ban-types
   file?: File;
 }
 
