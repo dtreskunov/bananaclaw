@@ -599,11 +599,15 @@ unchanged. Existing `questions.title` columns must be dropped offline before
 starting this host.
 
 Stop this installation's host and verify that nothing is writing the central DB.
-Use the temporary offline script, which defaults to read-only inspection:
+The temporary offline script was removed after deployment. Recover it from
+commit `e8f909b0` into a temporary file inside this checkout so its dependencies
+resolve. It defaults to read-only inspection:
 
 ```bash
-pnpm exec tsx scripts/migrate-question-titles.ts data/v2.db
-pnpm exec tsx scripts/migrate-question-titles.ts data/v2.db --apply --host-stopped
+(set -C; git show e8f909b0:scripts/migrate-question-titles.ts > .question-title-upgrade.ts)
+pnpm exec tsx .question-title-upgrade.ts data/v2.db
+pnpm exec tsx .question-title-upgrade.ts data/v2.db --apply --host-stopped
+rm -- .question-title-upgrade.ts
 ```
 
 Applying creates a restricted-permission backup using SQLite's backup API, drops
