@@ -29,6 +29,19 @@ const tool = (id: string, name: string, status: TraceStep['status'] = 'completed
 });
 
 describe('activity presentation', () => {
+  it('presents compaction as its own lifecycle activity and keeps legacy events compatible', () => {
+    const step: TraceStep = { kind: 'compaction', id: 'compact-1', auto: true, status: 'running', detail: 'Context window exceeded' };
+    expect(stepSummary(step)).toBe('Compacting context');
+    expect(traceStatusClass(step)).toBe('trace-status-running');
+    expect(stepSummary({ ...step, status: 'completed' })).toBe('Compacted context automatically');
+    expect(traceStatusClass({ ...step, status: 'completed' })).toBe('trace-status-completed');
+    expect(stepSummary({ ...step, status: 'error' })).toBe('Compaction failed');
+    expect(traceStatusClass({ ...step, status: 'error' })).toBe('trace-status-failed');
+    expect(stepBody({ ...step, error: 'Summary rejected' })).toBe('Context window exceeded\n\nSummary rejected');
+    expect(displayStep(line(0, step), false).status).toBe('unknown');
+    expect(traceStatusClass({ kind: 'compaction', id: 'legacy', auto: true })).toBe('trace-status-neutral');
+  });
+
   it('tailors every registered builtin and captures it in the runner without importing runner modules', () => {
     const registry = new URL('../../../container/agent-runner/src/mcp-tools/registry.ts', import.meta.url);
     const sources = [...readFileSync(registry, 'utf8').matchAll(/import '\.\/([^']+)\.js';/g)];

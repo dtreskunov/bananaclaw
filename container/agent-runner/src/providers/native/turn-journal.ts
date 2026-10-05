@@ -13,6 +13,7 @@ export class NativeTurnJournal {
   private readonly completedActivity: ActivityStep[] = [];
   private text = '';
   private anchor: string;
+  private readonly protectedInputs = new Set<string>();
   checkpoint: string;
 
   constructor(
@@ -21,6 +22,11 @@ export class NativeTurnJournal {
     incoming: ModelMessage,
   ) {
     this.anchor = this.checkpoint = store.append(conversation, [incoming]);
+    this.protectedInputs.add(this.anchor);
+  }
+
+  inputRefs(): ReadonlySet<string> {
+    return this.protectedInputs;
   }
 
   wrap(tools: ToolSet, signal: AbortSignal): ToolSet {
@@ -142,6 +148,7 @@ export class NativeTurnJournal {
     if (ref === null) return false;
     // Future incremental saves may replace only output after the injected input.
     this.anchor = this.checkpoint = ref;
+    this.protectedInputs.add(ref);
     return true;
   }
 }

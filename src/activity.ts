@@ -7,7 +7,7 @@ export type ActivityStep =
   | { kind: 'file'; id: string; path?: string; name?: string; mime?: string }
   | { kind: 'patch'; id: string; files: string[] }
   | { kind: 'retry'; id: string; attempt: number; error?: string }
-  | { kind: 'compaction'; id: string; auto?: boolean }
+  | { kind: 'compaction'; id: string; auto?: boolean; status?: 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; error?: string; durationMs?: number }
   | { kind: 'subtask'; id: string; agent?: string; description?: string }
   | { kind: 'notification'; id: string; text: string; detail?: string };
 
@@ -44,7 +44,8 @@ export function reduceActivityLines(lines: ActivityLine[]): ActivityLine[] {
     const prior = reduced[position];
     let merged = { ...prior.step, ...step } as ActivityStep;
     if (
-      merged.kind === 'tool' &&
+      (merged.kind === 'tool' || merged.kind === 'compaction') &&
+      merged.status !== undefined &&
       ['completed', 'error', 'interrupted', 'unknown'].includes(merged.status)
     ) {
       const startedAt = Number(prior.ts);

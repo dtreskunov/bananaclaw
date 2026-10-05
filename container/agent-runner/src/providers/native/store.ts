@@ -9,6 +9,18 @@ interface StoredMessageRow {
   content_json: string;
 }
 
+export interface NativeContextEntry {
+  ref: string | null;
+  coveredThrough?: string;
+  message: ModelMessage;
+}
+
+interface CompactionRow {
+  through_id: number;
+  summary: string;
+  retained_ids: string;
+}
+
 export class NativeStore {
   private readonly db: Database;
 
@@ -37,6 +49,12 @@ export class NativeStore {
         message_id INTEGER NOT NULL,
         PRIMARY KEY (conversation_id, steering_id)
       );
+      CREATE TABLE IF NOT EXISTS context_compactions (
+        conversation_id TEXT PRIMARY KEY,
+        through_id INTEGER NOT NULL,
+        summary TEXT NOT NULL,
+        retained_ids TEXT NOT NULL
+      );
     `);
   }
 
@@ -56,6 +74,52 @@ export class NativeStore {
       .prepare('SELECT id, content_json FROM messages WHERE conversation_id = ? ORDER BY id')
       .all(conversationId) as StoredMessageRow[];
     return rows.map((row) => JSON.parse(row.content_json) as ModelMessage);
+  }
+
+  contextEntries(conversationId: string): NativeContextEntry[] {
+    const compacted = this.db.prepare('SELECT * FROM context_compactions WHERE conversation_id = ?')
+      .get(conversationId) as CompactionRow | undefined;
+    const rows = this.db.prepare(`
+      SELECT id, content_json FROM messages WHERE conversation_id = ?
+      AND (id > ? OR id IN (SELECT value FROM json_each(?))) ORDER BY id
+    `).all(conversationId, compacted?.through_id ?? 0, compacted?.retained_ids ?? '[]') as StoredMessageRow[];
+    const entries: NativeContextEntry[] = rows.map((row) => ({
+      ref: String(row.id), message: JSON.parse(row.content_json) as ModelMessage,
+    }));
+    if (compacted) entries.unshift({
+      ref: null,
+      coveredThrough: String(compacted.through_id),
+      message: {
+        role: 'assistant',
+        content: `[Compacted conversation and completed work. Preserve completed side effects; continue pending requests without repeating completed actions.]\n${compacted.summary}`,
+      },
+    });
+    return entries;
+  }
+
+  contextMessages(conversationId: string): ModelMessage[] {
+    return this.contextEntries(conversationId).map((entry) => entry.message);
+  }
+
+  saveCompaction(conversationId: string, throughRef: string, retainedRefs: string[], summary: string): void {
+    const through = Number(throughRef);
+    if (!Number.isSafeInteger(through) || through < 1 || !summary.trim()) {
+      throw new Error('Invalid native compaction');
+    }
+    this.db.transaction(() => {
+      const belongs = this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? AND id = ?');
+      if (!belongs.get(conversationId, through)) throw new Error('Compaction boundary is outside the conversation');
+      for (const ref of retainedRefs) {
+        if (!Number.isSafeInteger(Number(ref)) || Number(ref) > through || !belongs.get(conversationId, Number(ref))) {
+          throw new Error('Invalid retained compaction input');
+        }
+      }
+      this.db.prepare(`
+        INSERT INTO context_compactions (conversation_id, through_id, summary, retained_ids)
+        VALUES (?, ?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET
+        through_id=excluded.through_id, summary=excluded.summary, retained_ids=excluded.retained_ids
+      `).run(conversationId, through, summary, JSON.stringify(retainedRefs.map(Number)));
+    })();
   }
 
   append(conversationId: string, messages: ModelMessage[]): string {
@@ -125,6 +189,10 @@ export class NativeStore {
 
   replaceAfter(conversationId: string, anchorRef: string, messages: ModelMessage[]): string {
     return this.db.transaction(() => {
+      this.db.prepare(`
+        DELETE FROM context_compactions WHERE conversation_id = ?
+        AND (through_id > ? OR EXISTS (SELECT 1 FROM json_each(retained_ids) WHERE value > ?))
+      `).run(conversationId, Number(anchorRef), Number(anchorRef));
       this.db.prepare('DELETE FROM applied_steering WHERE conversation_id = ? AND message_id > ?')
         .run(conversationId, Number(anchorRef));
       this.db.prepare('DELETE FROM messages WHERE conversation_id = ? AND id > ?')

@@ -13,6 +13,7 @@ import * as nativeTools from './native/tools.js';
 import * as nativeAttachments from './native/attachments.js';
 import { NativeStore } from './native/store.js';
 import { fingerprintToolInput, type ProviderEvent } from './types.js';
+import { COMPACTION_INSTRUCTIONS } from './native/compaction.js';
 
 let root: string;
 let server: ReturnType<typeof Bun.serve>;
@@ -37,6 +38,9 @@ let scriptedTexts: string[];
 let toolCallText: string;
 let catalogFetch: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 let catalogModels: Record<string, unknown>;
+let contextOverflows: number;
+let overflowAfterTool: boolean;
+let rejectCompaction: boolean;
 
 const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
   (executable) => spawnSync(executable, ['-version'], { stdio: 'ignore' }).status === 0,
@@ -82,6 +86,9 @@ beforeEach(() => {
   slowToolMode = false;
   scriptedTexts = [];
   toolCallText = '';
+  contextOverflows = 0;
+  overflowAfterTool = false;
+  rejectCompaction = false;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -95,6 +102,18 @@ beforeEach(() => {
       requestUrls.push(request.url);
       requestHeaders.push(request.headers);
       requests.push((await request.json()) as Record<string, unknown>);
+      const isCompaction = JSON.stringify(requests.at(-1)).includes(COMPACTION_INSTRUCTIONS);
+      const modelMessages = requests.at(-1)?.messages;
+      const hasCompletedTool = Array.isArray(modelMessages) && modelMessages.some(
+        (message: unknown) => !!message && typeof message === 'object' && 'role' in message && message.role === 'tool',
+      );
+      if (isCompaction && rejectCompaction) {
+        return Response.json({ error: { message: 'Summary service rejected the request', type: 'invalid_request_error' } }, { status: 400 });
+      }
+      if (!isCompaction && contextOverflows > 0 && (!overflowAfterTool || hasCompletedTool)) {
+        contextOverflows--;
+        return Response.json({ type: 'error', error: { message: 'invalid params, context window exceeds limit (2013)', type: 'invalid_request_error' } }, { status: 400 });
+      }
       if (holdModelResponse) {
         return new Response(new ReadableStream({
           start(controller) {
@@ -228,6 +247,95 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  function history(): string {
+    const store = new NativeStore();
+    try {
+      const continuation = store.createConversation();
+      store.append(continuation, [
+        { role: 'user', content: 'Earlier requirements '.repeat(250) },
+        { role: 'assistant', content: 'Earlier work complete' },
+        { role: 'user', content: 'Previous task' },
+        { role: 'assistant', content: 'Previous answer' },
+      ]);
+      return continuation;
+    } finally { store.close(); }
+  }
+
+  it('automatically compacts error 2013, traces its lifecycle, and retries the same request', async () => {
+    const continuation = history();
+    contextOverflows = 1;
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }), continuation);
+    const compaction = events.filter((event) => event.type === 'progress' && event.step.kind === 'compaction');
+    expect(compaction).toHaveLength(2);
+    expect(compaction[0]).toMatchObject({ step: { status: 'running', auto: true } });
+    expect(compaction[1]).toMatchObject({ step: { status: 'completed', id: (compaction[0] as Extract<ProviderEvent, { type: 'progress' }>).step.id } });
+    expect(replyTexts(events)).toEqual([['hello from stub']]);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    const store = new NativeStore();
+    try {
+      expect(JSON.stringify(store.messages(continuation))).toContain('Earlier requirements '.repeat(250));
+      expect(JSON.stringify(store.contextMessages(continuation))).not.toContain('Earlier requirements '.repeat(250));
+      expect(JSON.stringify(requests.at(-1)?.messages)).toContain('follow up');
+    } finally { store.close(); }
+  });
+
+  it('does not rerun a completed tool when the next model step exceeds context', async () => {
+    const continuation = history();
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    contextOverflows = 1;
+    overflowAfterTool = true;
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }), continuation);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(events.filter((event) => event.type === 'progress' && event.step.kind === 'tool' && event.step.tool === 'bash' && event.step.status === 'completed')).toHaveLength(1);
+    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'completed')).toBe(true);
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain('tool_call_id');
+    expect(replyTexts(events)).toEqual([['hello from stub']]);
+  });
+
+  it('bounds overflow recovery to two compactions and surfaces a persistent rejection', async () => {
+    contextOverflows = 3;
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }), history());
+    expect(events.filter((event) => event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'running')).toHaveLength(2);
+    expect(events.some((event) => event.type === 'error' && event.message.includes('2013'))).toBe(true);
+  });
+
+  it('reports a failed compaction distinctly and preserves the uncompressed context', async () => {
+    const continuation = history();
+    contextOverflows = 1;
+    rejectCompaction = true;
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }), continuation);
+    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'error')).toBe(true);
+    expect(events.some((event) => event.type === 'error' && event.message.includes('Summary service rejected'))).toBe(true);
+    const store = new NativeStore();
+    try { expect(JSON.stringify(store.contextMessages(continuation))).toContain('Earlier requirements '.repeat(250)); }
+    finally { store.close(); }
+  });
+
+  it('compacts MiniMax-style error 2013 through the Anthropic Messages adapter', async () => {
+    process.env.NATIVE_PROTOCOL = 'anthropic-messages';
+    contextOverflows = 1;
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }), history());
+    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'completed')).toBe(true);
+    expect(replyTexts(events)).toEqual([['hello from direct minimax']]);
+  });
+
+  it('reports cancelled compaction as interrupted without saving a summary or resuming', async () => {
+    const continuation = history();
+    contextOverflows = 1;
+    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'current request', continuation, cwd: root });
+    query.end();
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'running') query.abort('user');
+    }
+    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'interrupted')).toBe(true);
+    expect(events.some((event) => event.type === 'result')).toBe(false);
+    const store = new NativeStore();
+    try { expect(JSON.stringify(store.contextMessages(continuation))).toContain('Earlier requirements '.repeat(250)); }
+    finally { store.close(); }
+  });
+
   it('removes buffered guidance before consumption without stopping the active reply', async () => {
     holdModelResponse = true;
     const started = new Promise<void>((resolve) => { modelRequestStarted = resolve; });

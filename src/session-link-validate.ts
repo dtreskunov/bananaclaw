@@ -105,7 +105,13 @@ const ACTIVITY_STEP_FIELDS = new Map<string, readonly FieldSpec[]>(
     file: [optional('path', optionalText), optional('name', optionalText), optional('mime', optionalText)],
     patch: [required('files', isFileList)],
     retry: [required('attempt', isNonNegativeInteger), optional('error', optionalText)],
-    compaction: [optional('auto', isBoolean)],
+    compaction: [
+      optional('auto', isBoolean),
+      optional('status', oneOf('running', 'completed', 'error', 'interrupted', 'unknown')),
+      optional('detail', optionalText),
+      optional('error', optionalText),
+      optional('durationMs', isNonNegativeNumber),
+    ],
     subtask: [optional('agent', optionalText), optional('description', optionalText)],
   }).map(([kind, fields]) => [kind, [...STEP_HEAD, ...fields]]),
 );

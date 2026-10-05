@@ -330,6 +330,35 @@ For example, `glob({ pattern: "*.txt", path: "/tmp" })` lists matching files
 under `/tmp`, and `grep({ query: "needle", path: "../shared" })` searches a
 sibling directory.
 
+### Native Provider: Context-overflow compaction
+
+Recognized context rejections, including MiniMax's
+`context window exceeds limit (2013)`, trigger automatic compaction inside the
+native provider. Unrelated authentication, validation, and rate-limit errors
+do not. Recovery retries only the rejected model step, keeps the same turn and
+continuation, and is limited to two compaction attempts per turn. A rejected
+step that already streamed text or tool execution is not automatically retried.
+
+The full native transcript and checkpoint IDs remain unchanged. A persistent
+`context_compactions` projection supplies a model-generated factual summary
+plus recent history on subsequent requests and container resumes. Current input
+and applied steering are retained verbatim; assistant tool calls and their
+results are kept or summarized together. Forks still copy the original
+checkpoint-bounded transcript, never a summary from a later point in time.
+
+Summarization uses the current model with no tools. Transcript fragments omit
+inline media bytes, not the archived originals, and the prompt preserves
+completed actions, results, file paths, constraints, pending work, and unknown
+side effects. Inputs and output summaries are bounded; a compaction has a
+two-minute deadline and a 64-fragment limit. Empty, oversized, non-reducing,
+failed, or cancelled summaries are not saved. Exhausted recovery surfaces an
+explicit provider failure rather than silently dropping history.
+
+Compaction is recorded as its own activity with running/completed/failed/
+interrupted lifecycle states and duration, including failed attempts. Its
+model usage is included in turn accounting. Rebuild/restart the host before
+starting new runners so its activity validator accepts the lifecycle fields.
+
 ### Native Provider: External MCP Tools
 
 The native provider (`providers/native.ts`) runs its built-in tools in-process

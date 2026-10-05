@@ -274,6 +274,7 @@ export function stepBody(step: TraceStep): string | null {
   if (step.kind === 'internal') return step.text || null;
   if (step.kind === 'patch') return step.files?.join('\n') || null;
   if (step.kind === 'retry') return step.error || null;
+  if (step.kind === 'compaction') return [step.detail, step.error].filter(Boolean).join('\n\n') || null;
   if (step.kind === 'file') return step.path || null;
   return null;
 }
@@ -343,6 +344,10 @@ export function stepHeadline(step: TraceStep): StepHeadline {
     case 'retry':
       return { action: 'Retrying', subject: `attempt ${step.attempt ?? 0}` };
     case 'compaction':
+      if (step.status === 'running') return { action: 'Compacting context' };
+      if (step.status === 'error') return { action: 'Compaction failed' };
+      if (step.status === 'interrupted') return { action: 'Compaction interrupted' };
+      if (step.status === 'unknown') return { action: 'Compaction outcome unknown' };
       return { action: step.auto ? 'Compacted context automatically' : 'Compacted context' };
     case 'subtask':
       return step.agent
@@ -447,7 +452,8 @@ function chapterHeadline(category: string, entries: TraceEntry[]): StepHeadline 
 
 export function traceStatus(step: TraceStep): TraceStatus {
   if (step.kind === 'retry') return 'queued';
-  if (step.kind !== 'tool') return 'neutral';
+  if (step.kind !== 'tool' && step.kind !== 'compaction') return 'neutral';
+  if (step.kind === 'compaction' && !step.status) return 'neutral';
   return step.status === 'pending' ? 'queued' : step.status === 'error' ? 'failed' : step.status || 'unknown';
 }
 
@@ -463,7 +469,8 @@ export function activityLineId(line: TraceLine, index: number): string {
 
 export function displayStep(line: TraceLine, live: boolean): TraceStep {
   const step = parseStep(line.text);
-  return step.kind === 'tool' && (!step.status || (!live && (step.status === 'pending' || step.status === 'running')))
+  return (step.kind === 'tool' || (step.kind === 'compaction' && step.status !== undefined)) &&
+    (!step.status || (!live && (step.status === 'pending' || step.status === 'running')))
     ? { ...step, status: 'unknown' }
     : step;
 }

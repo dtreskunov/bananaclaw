@@ -148,6 +148,17 @@ afterAll(() => {
 });
 
 describe('session link frame acceptance', () => {
+  it.each(['running', 'completed', 'error', 'interrupted'])('accepts %s compaction lifecycle updates', async (status) => {
+    expect(await outcome(activity({
+      kind: 'compaction', id: 'compact-1', auto: true, status,
+      detail: 'Context window exceeded', error: 'Summary failure', durationMs: 100,
+    }))).toBe('accepted');
+  });
+
+  it('rejects invalid compaction lifecycle state', async () => {
+    expect(await outcome(activity({ kind: 'compaction', id: 'compact-1', status: 'success' }))).toBe('rejected');
+  });
+
   const accepted: Array<[string, unknown]> = [
     ['heartbeat', { v: 5, type: 'heartbeat' }],
     ['activity.clear', { v: 5, type: 'activity.clear' }],

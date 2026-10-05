@@ -112,6 +112,11 @@ for allowlisted argument metadata alongside their primary `detail`, such as an
 email subject. The runner caps both fields before journaling or live delivery,
 and reconnect preserves them. Deploy the host validator before starting runners
 that emit this field; older hosts reject unknown activity fields.
+Compaction is a distinct `kind: "compaction"` activity. Native automatic
+compaction uses one ID across `running`, `completed`, `error`, or `interrupted`
+updates, with optional `detail`, `error`, and non-negative `durationMs`.
+Legacy compaction events without a status remain supported. Deploy the host
+validator before starting runners that emit the lifecycle fields.
 Notification activities may include an optional `detail` string of at most
 2,000 characters, including steering text; whitespace and literal markup are
 preserved. Both initial delivery and reconnect replay accept this field.

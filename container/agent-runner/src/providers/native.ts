@@ -26,6 +26,7 @@ import { loadNativeInstructions } from './native/instructions.js';
 import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
 import { NativeTurnJournal } from './native/turn-journal.js';
+import { compactNativeContext, COMPACTION_INSTRUCTIONS, isContextOverflow, MAX_COMPACTION_ATTEMPTS } from './native/compaction.js';
 import { createNativeTools } from './native/tools.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
 import {
@@ -105,6 +106,15 @@ function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
     max_output_tokens: model.maxOutputTokens,
     context_tokens: input + cacheRead + cacheWrite + output,
   };
+}
+
+function addUsage(total: TurnUsage, data: CallUsage): void {
+  total.cost_usd += data.cost_usd;
+  total.input_tokens += data.input_tokens;
+  total.output_tokens += data.output_tokens;
+  total.cache_read_tokens += data.cache_read_tokens;
+  total.cache_write_tokens += data.cache_write_tokens;
+  total.reasoning_tokens = (total.reasoning_tokens ?? 0) + (data.reasoning_tokens ?? 0);
 }
 
 function patchTargets(input: Record<string, unknown> | undefined): string | undefined {
@@ -327,7 +337,7 @@ export class NativeProvider implements AgentProvider {
               const todoState = new NativeTodoState();
               const configuredModel = options.model ?? process.env.NATIVE_MODEL;
               if (!configuredModel) throw new Error('native requires a canonical model setting');
-              const prior = portableHistory(store.messages(continuation));
+              const prior = portableHistory(store.contextMessages(continuation));
               journal = new NativeTurnJournal(store, continuation, { role: 'user', content: turn.text });
               abortController.signal.throwIfAborted();
               const resolved = await resolveNativeModel(configuredModel);
@@ -378,9 +388,10 @@ export class NativeProvider implements AgentProvider {
               let wrappingUp = false;
               // Text written alongside tool calls, which is never delivered.
               let undeliveredChars = 0;
+              let compactionAttempts = 0;
               while (true) {
                 abortController.signal.throwIfAborted();
-                const stepNudge = nudge;
+                const stepNudge: string | null = nudge;
                 nudge = null;
                 const result = streamText({
                   model,
@@ -428,28 +439,104 @@ export class NativeProvider implements AgentProvider {
                 // Start the resumed generation before yielding acknowledgements.
                 // New guidance offered in response then targets this running step.
                 for (const id of appliedSteeringIds.splice(0)) yield { type: 'steering_applied', id };
-                for await (const rawPart of result.stream) {
-                  yield* flushCallUsage();
-                  yield { type: 'activity' };
-                  const part = rawPart as unknown as Record<string, unknown>;
-                  // The silence reason is reported with the result, not as activity.
-                  if (part.toolName === NO_REPLY_TOOL) continue;
-                  if (part.type === 'tool-call') {
-                    const toolInputFingerprint = fingerprintToolInput(part.input);
+                let stepProducedOutput = false;
+                try {
+                  for await (const rawPart of result.stream) {
+                    yield* flushCallUsage();
+                    yield { type: 'activity' };
+                    const part = rawPart as unknown as Record<string, unknown>;
+                    if (['tool-call', 'tool-result', 'tool-error', 'text-delta'].includes(String(part.type)))
+                      stepProducedOutput = true;
+                    // The silence reason is reported with the result, not as activity.
+                    if (part.toolName === NO_REPLY_TOOL) continue;
+                    if (part.type === 'tool-call') {
+                      const toolInputFingerprint = fingerprintToolInput(part.input);
+                      yield {
+                        type: 'progress',
+                        step: formatNativeToolStep(part, 'running'),
+                        ...(toolInputFingerprint ? { toolInputFingerprint } : {}),
+                      };
+                    } else if (part.type === 'tool-result') yield { type: 'progress', step: formatNativeToolStep(part, 'completed') };
+                    else if (part.type === 'tool-error') yield { type: 'progress', step: formatNativeToolStep(part, 'error') };
+                    else if (part.type === 'error') throw part.error;
+                    else if (part.type === 'text-delta') journal.appendText(String(part.text ?? ''));
+                    else if (part.type === 'finish-step') {
+                      journal.save();
+                      yield { type: 'assistant_message' };
+                    }
+                  }
+                } catch (error) {
+                  if (!isContextOverflow(error) || stepProducedOutput || compactionAttempts >= MAX_COMPACTION_ATTEMPTS) throw error;
+                  abortController.signal.throwIfAborted();
+                  const compactStartedAt = Date.now();
+                  const compactId = `native-compaction-${continuation}-${++compactionAttempts}-${compactStartedAt}`;
+                  yield {
+                    type: 'progress',
+                    step: {
+                      kind: 'compaction',
+                      id: compactId,
+                      auto: true,
+                      status: 'running',
+                      detail: 'Context window exceeded; summarizing older context',
+                    },
+                  };
+                  try {
+                    await journal.settle();
+                    const compactSignal = AbortSignal.any([abortController.signal, AbortSignal.timeout(120_000)]);
+                    await compactNativeContext({
+                      store,
+                      conversation: continuation,
+                      protectedInputs: journal.inputRefs(),
+                      attempt: compactionAttempts,
+                      contextWindow: resolved.contextWindow,
+                      signal: compactSignal,
+                      summarize: async (prompt) => {
+                        const compacted = streamText({
+                          model,
+                          system: COMPACTION_INSTRUCTIONS,
+                          messages: [{ role: 'user', content: prompt }],
+                          maxOutputTokens: Math.min(2048, Math.max(64, Math.floor((resolved.contextWindow ?? 32_768) / 8))),
+                          maxRetries: 2,
+                          abortSignal: compactSignal,
+                          onLanguageModelCallEnd: ({ usage }) => {
+                            const data = callUsageFor(resolved, usage);
+                            callUsages.push(data);
+                            addUsage(totalUsage, data);
+                          },
+                        });
+                        for await (const part of compacted.stream) if (part.type === 'error') throw part.error;
+                        return compacted.text;
+                      },
+                    });
+                    messages.splice(0, messages.length, ...portableHistory(store.contextMessages(continuation)));
+                    nudge = stepNudge;
+                    yield* flushCallUsage();
                     yield {
                       type: 'progress',
-                      step: formatNativeToolStep(part, 'running'),
-                      ...(toolInputFingerprint ? { toolInputFingerprint } : {}),
+                      step: {
+                        kind: 'compaction',
+                        id: compactId,
+                        auto: true,
+                        status: 'completed',
+                        durationMs: Date.now() - compactStartedAt,
+                      },
                     };
+                  } catch (compactionError) {
+                    yield* flushCallUsage();
+                    yield {
+                      type: 'progress',
+                      step: {
+                        kind: 'compaction',
+                        id: compactId,
+                        auto: true,
+                        status: abortController.signal.aborted ? 'interrupted' : 'error',
+                        error: errorMessage(compactionError),
+                        durationMs: Date.now() - compactStartedAt,
+                      },
+                    };
+                    throw compactionError;
                   }
-                  else if (part.type === 'tool-result') yield { type: 'progress', step: formatNativeToolStep(part, 'completed') };
-                  else if (part.type === 'tool-error') yield { type: 'progress', step: formatNativeToolStep(part, 'error') };
-                  else if (part.type === 'error') throw part.error;
-                  else if (part.type === 'text-delta') journal.appendText(String(part.text ?? ''));
-                  else if (part.type === 'finish-step') {
-                    journal.save();
-                    yield { type: 'assistant_message' };
-                  }
+                  continue;
                 }
 
                 const responseMessages = (await result.responseMessages) as ModelMessage[];
@@ -461,12 +548,7 @@ export class NativeProvider implements AgentProvider {
                 const [usage, steps] = await Promise.all([result.usage, result.steps]);
                 stepsCompleted += steps.length;
                 const segmentUsage = usageFor(resolved, usage, steps.at(-1)?.usage, 0, 0);
-                totalUsage.cost_usd += segmentUsage.cost_usd;
-                totalUsage.input_tokens += segmentUsage.input_tokens;
-                totalUsage.output_tokens += segmentUsage.output_tokens;
-                totalUsage.cache_read_tokens += segmentUsage.cache_read_tokens;
-                totalUsage.cache_write_tokens += segmentUsage.cache_write_tokens;
-                totalUsage.reasoning_tokens = (totalUsage.reasoning_tokens ?? 0) + (segmentUsage.reasoning_tokens ?? 0);
+                addUsage(totalUsage, segmentUsage);
                 totalUsage.context_tokens = segmentUsage.context_tokens;
                 const stepText = (await result.text).trim() || null;
                 finishReason = String(await result.finishReason);
@@ -551,6 +633,7 @@ export class NativeProvider implements AgentProvider {
               };
             } catch (error) {
               active = false;
+              yield* flushCallUsage();
               if (abortController.signal.aborted) {
                 if (journal) {
                   await journal.settle();

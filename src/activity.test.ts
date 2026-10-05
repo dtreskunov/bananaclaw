@@ -5,6 +5,15 @@ import { activityHint, reduceActivityLines } from './activity.js';
 const line = (ts: string, step: object) => ({ ts, text: JSON.stringify(step) });
 
 describe('reduceActivityLines', () => {
+  it('merges compaction lifecycle updates and measures their duration', () => {
+    const [result] = reduceActivityLines([
+      line('1000', { kind: 'compaction', id: 'compact-1', auto: true, status: 'running', detail: 'Context window exceeded' }),
+      line('1250', { kind: 'compaction', id: 'compact-1', auto: true, status: 'completed' }),
+    ]);
+    expect(JSON.parse(result.text)).toMatchObject({ kind: 'compaction', status: 'completed', durationMs: 250, detail: 'Context window exceeded' });
+    expect(activityHint([result])).toBe('Compacted context automatically');
+  });
+
   it('preserves builtin metadata through completion and reconnect lifecycle replay', () => {
     const running = { kind: 'tool', id: 'email-1', tool: 'nanoclaw.send_email', status: 'running',
       detail: 'alice@example.test', description: 'Subject: Exact\n<literal> subject' };
