@@ -4,7 +4,7 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
-- **[BREAKING] Questions can be skipped explicitly.** Skip is a typed response through the existing endpoint, journals a non-answer input, and resumes the agent without assuming a choice or approval. Existing installations need an offline answer-type constraint upgrade and matching browser protocol v3 assets; see [Upgrading question skips](docs/ui.md#upgrading-question-skips). The temporary migration script is included for this upgrade, not registered for host startup.
+- **[BREAKING] Questions can be skipped explicitly.** Skip is a typed response through the existing endpoint, journals a non-answer input, and resumes the agent without assuming a choice or approval. Fresh databases create the current schema directly; existing installations need an offline upgrade and matching browser protocol v3 assets. The temporary script and legacy question converter have been removed from the product; see [Upgrading question skips](docs/ui.md#upgrading-question-skips) for the recoverable offline script and verification steps.
 
 - **[BREAKING] Conversation synchronization (session link v4).** Host/runner link v4 and browser conversation protocol v1 use explicit durable turns and require matching host, runners and chat assets. The one-time v3→v4 migration tooling, its startup guard and the per-message `stopped_stats`/`turn_stats` sidecars have been removed; stats come from turn metadata. There is no upgrade path from v3; rollback is a snapshot restore — see [Downgrading to session-link v3](docs/downgrade-to-v3.md).
 

@@ -67,7 +67,7 @@ and paths live in `src/session-link.ts`.
 | Channel wiring, routing rules  | central                             | Admin plane                                                |
 | Destination ACL                | central (+ projection per session)  | Source of truth centrally; fast local lookup per session   |
 | Session registry (ids, status) | central                             | Host orchestrates lifecycle                                |
-| Approvals & pending questions  | central                             | Survive container restarts, admin-visible                  |
+| Approvals & durable questions  | central                             | Survive container restarts, admin-visible                  |
 | Dropped-message audit          | central                             | Global ops view                                            |
 | Inbound messages, retry state  | session `inbound.db`                | Per-session workload; host is sole writer                  |
 | Outbound messages, agent state | session `outbound.db`               | Host applies acknowledged runner events                    |
@@ -117,7 +117,7 @@ These rules are enforced by convention in `src/session-manager.ts` and `containe
 | `agent_group_members`    | central  | `src/db/agent-group-members.ts`                        | membership checks                              |
 | `user_dms`               | central  | `src/user-dm.ts` (`ensureUserDm`)                      | approval + pairing delivery                    |
 | `sessions`               | central  | `src/db/sessions.ts`, `src/session-manager.ts`         | delivery, sweep, container runner              |
-| `pending_questions`      | central  | `src/db/sessions.ts` (via `ask_user_question`)         | container response matcher                     |
+| `questions`              | central  | `src/db/sessions.ts` (via `ask_user_question`)         | host interactive response handler, chat projection |
 | `agent_destinations`     | central  | `src/db/agent-destinations.ts`, migration 004 backfill | `writeDestinations()`, delivery ACL            |
 | `pending_approvals`      | central  | `src/db/sessions.ts`, `src/onecli-approvals.ts`        | admin-card delivery, sweep                     |
 | `unregistered_senders`   | central  | `src/db/dropped-messages.ts`                           | ops tooling                                    |

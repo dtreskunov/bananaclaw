@@ -547,11 +547,27 @@ Fresh installations support `skipped` directly. Existing databases whose
 an offline upgrade; the host does not run this migration at startup.
 
 Stop this installation's host and verify no process is writing its central DB.
-Run `pnpm exec tsx scripts/migrate-question-skips.ts data/v2.db --host-stopped`.
-This temporary script creates a restricted-permission SQLite backup beside the
+The temporary script was removed after deployment; recover it from commit
+`aee7b194` into a temporary file inside this checkout when upgrading an older
+installation:
+
+```bash
+(set -C; git show aee7b194:scripts/migrate-question-skips.ts > .question-skip-upgrade.ts)
+pnpm exec tsx .question-skip-upgrade.ts data/v2.db --host-stopped
+rm -- .question-skip-upgrade.ts
+```
+
+The offline script creates a restricted-permission SQLite backup beside the
 database, preserves all question records, rowids, indexes and triggers, extends
 the response constraint transactionally, and verifies data and database integrity.
 Unexpected schemas are rejected. Re-running it on an upgraded database is a no-op.
+Installations still using `pending_questions` must first finish the durable-question
+upgrade offline. With the host stopped, back up the central DB using SQLite's
+backup API, recover `src/db/migrations/028-durable-questions.ts` from `aee7b194`,
+and apply its `migration028.up(db)` inside a SQLite transaction. Verify the
+question IDs and count survived, and run the integrity and foreign-key checks
+before proceeding. Restore the backup if verification fails. No legacy question
+conversion ships in the host.
 Rebuild the host and chat assets, restart the host, and recycle any existing
 agent containers so the runner's formatter recognizes skipped responses.
 Reload stale browsers for conversation protocol version 3.

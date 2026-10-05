@@ -192,8 +192,9 @@ CREATE INDEX idx_sessions_lookup     ON sessions(messaging_group_id, thread_id);
 
 ### 1.9 `questions`
 
-The `ask_user_question` MCP tool creates a durable question here. Migration 028
-replaced `pending_questions`; the response type also supports `skipped`.
+The `ask_user_question` MCP tool creates a durable question here. Fresh databases
+create this schema directly, including the `skipped` response type. The legacy
+`pending_questions` conversion is no longer registered or shipped.
 Existing installations require the [offline upgrade](ui.md#upgrading-question-skips).
 The original question remains stored after resolution. Answers and
 skips arrive in the session input journal as `interactive_response` events
@@ -389,7 +390,7 @@ Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMig
 
 | # | File | Introduces |
 |---|------|------------|
-| 001 | `001-initial.ts` | Core tables: `agent_groups`, `messaging_groups`, `messaging_group_agents`, `users`, `user_roles`, `agent_group_members`, `user_dms`, `sessions`, `pending_questions` |
+| 001 | `001-initial.ts` | Core tables: `agent_groups`, `messaging_groups`, `messaging_group_agents`, `users`, `user_roles`, `agent_group_members`, `user_dms`, `sessions`, `questions` |
 | 002 | `002-chat-sdk-state.ts` | `chat_sdk_kv`, `chat_sdk_subscriptions`, `chat_sdk_locks`, `chat_sdk_lists` |
 | 003 | `003-pending-approvals.ts` | `pending_approvals` (session-bound + OneCLI fields) |
 | 004 | `004-agent-destinations.ts` | `agent_destinations` + backfill from existing `messaging_group_agents` wirings |
@@ -398,8 +399,8 @@ Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMig
 | 009 | `009-drop-pending-credentials.ts` | Drop the defunct `pending_credentials` table |
 | 014 | `014-container-configs.ts` | `container_configs` — per-agent-group container runtime config |
 | 015 | `015-cli-scope.ts` | `ALTER TABLE container_configs ADD COLUMN cli_scope` |
-| 028 | `028-durable-questions.ts` | Replace `pending_questions` with durable `questions` and answer metadata |
 
 Numbers 005 and 006 are intentionally absent — migrations were renumbered during early development.
+Migration 028 was retired after offline upgrades; historical applied records remain untouched.
 
 Session DB schemas (`INBOUND_SCHEMA`, `OUTBOUND_SCHEMA`) are **not** versioned here. They describe the complete shape created for every new session; this deployment's existing session DBs are normalized before code begins relying on a newly required table or column. See [db-session.md](db-session.md).

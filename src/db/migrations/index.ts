@@ -25,7 +25,6 @@ import { migration024 } from './024-pending-user-approvals-partial-unique.js';
 import { migration025 } from './025-site-website.js';
 import { migration026 } from './026-user-onboarded.js';
 import { migration027 } from './027-messaging-group-instance.js';
-import { migration028 } from './028-durable-questions.js';
 import { migration029 } from './029-shared-web-chats.js';
 import { migration030 } from './030-shared-web-destinations.js';
 import { migration031 } from './031-ui-private-web-sessions.js';
@@ -86,7 +85,6 @@ export const migrations: Migration[] = [
   migration025,
   migration026,
   migration027,
-  migration028,
   migration029,
   migration030,
   migration031,
