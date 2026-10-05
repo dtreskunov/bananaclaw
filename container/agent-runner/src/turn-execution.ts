@@ -128,7 +128,7 @@ function finishTurnActivity(db: Database, turnId: string, outcome: TurnOutcome, 
     let step: Record<string, unknown>;
     try { step = JSON.parse(row.text); }
     catch (error) { if (error instanceof SyntaxError) continue; throw error; }
-    if (step?.kind === 'tool' && typeof step.id === 'string') steps.set(step.id, step);
+    if (['tool', 'compaction'].includes(String(step?.kind)) && typeof step.id === 'string') steps.set(step.id, step);
   }
   for (const step of steps.values()) {
     if (!['running', 'pending'].includes(String(step.status))) continue;

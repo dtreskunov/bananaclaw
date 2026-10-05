@@ -5,6 +5,29 @@ host/runner communication. Live runner signals are best-effort; durable events
 in both directions are journaled by their owner and acknowledged only after the
 receiver commits them locally.
 
+## Recovery after a runner exits
+
+The host sweep recovers stopped sessions with unsettled turns, outstanding
+processing claims, or a stale running registry entry even when there is no
+pending input. It launches a short-lived, provider-free recovery container.
+Only the runner-state store, session socket capability, and runner source are
+mounted; networking is disabled and no OneCLI credentials or MCP tools are
+initialized. Normal wakes wait for recovery to finish, preventing two writers.
+
+The recovery runner drains its existing durable journal first, preserving any
+recorded failure or successful outcome. It then journals interruption for
+truly abandoned turns and drains again before exiting. The normal socket
+validators, ordered commit acknowledgements, delivery barrier, and conversation
+invalidations apply. The host never opens runner-state SQLite. Recovery does
+not invoke a provider or repeat tool actions, and failures are logged and
+retried by the sweep. A 45-second timeout stops the recovery container; if the
+runtime cannot confirm the stop, the session remains locked rather than risking
+a second writer.
+
+Rebuild and restart the host after installing this change. Existing stopped
+sessions are recovered by the next sweep without sending another user message;
+no image rebuild is needed because fresh runner source is mounted.
+
 ## Capability boundary
 
 ### Browser conversation projection

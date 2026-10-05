@@ -14,6 +14,7 @@ vi.mock('./container-runner.js', () => ({
   killContainer: (...args: unknown[]) =>
     mockKillContainer(args[0] as string, args[1] as string, args[2] as (() => void) | undefined),
   wakeContainer: (...args: unknown[]) => mockWakeContainer(...args),
+  recoverStoppedSession: vi.fn().mockResolvedValue(true),
 }));
 
 const mockStartTypingRefresh = vi.fn();

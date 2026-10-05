@@ -54,7 +54,8 @@ import {
 } from './session-link.js';
 import { onSessionDurableProcessing } from './session-link.js';
 import { MAX_DECLARED_TOOL_TIMEOUT_MS } from './session-link-durable.js';
-import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
+import { isContainerRunning, killContainer, recoverStoppedSession, wakeContainer } from './container-runner.js';
+import { needsStoppedRunnerRecovery } from './session-recovery.js';
 import { publishTaskRun } from './task-events.js';
 import type { Session } from './types.js';
 
@@ -290,6 +291,9 @@ async function sweepSession(session: Session): Promise<void> {
   }
 
   try {
+    if (!isContainerRunning(session.id) && needsStoppedRunnerRecovery(session)) {
+      if (!(await recoverStoppedSession(session))) return;
+    }
     let justCompleted: string[] = [];
     // 1. Sync processing_ack → messages_in status
     if (outDb) {

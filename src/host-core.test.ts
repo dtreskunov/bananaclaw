@@ -35,6 +35,7 @@ import type { InboundEvent } from './channels/adapter.js';
 vi.mock('./container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(undefined),
   isContainerRunning: vi.fn().mockReturnValue(false),
+  recoverStoppedSession: vi.fn().mockResolvedValue(true),
   getActiveContainerCount: vi.fn().mockReturnValue(0),
   killContainer: vi.fn(),
 }));

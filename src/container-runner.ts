@@ -72,7 +72,7 @@ import type { AgentGroup, Session } from './types.js';
 const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 /** Active containers tracked by session ID. */
-const activeContainers = new Map<string, { process: ChildProcess; containerName: string; adopted?: boolean }>();
+const activeContainers = new Map<string, { process: ChildProcess; containerName: string; adopted?: boolean; recovering?: boolean }>();
 
 export interface McpProbeResult {
   ok: boolean;
@@ -92,6 +92,7 @@ export interface McpProbeResult {
  * racy double-replies.
  */
 const wakePromises = new Map<string, Promise<boolean>>();
+const recoveryPromises = new Map<string, Promise<boolean>>();
 
 export function getActiveContainerCount(): number {
   return activeContainers.size;
@@ -114,9 +115,12 @@ export function isContainerRunning(sessionId: string): boolean {
  * can branch on the boolean.
  */
 export function wakeContainer(session: Session): Promise<boolean> {
-  if (activeContainers.has(session.id)) {
-    log.debug('Container already running', { sessionId: session.id });
-    return Promise.resolve(true);
+  const recovery = recoveryPromises.get(session.id);
+  if (recovery) return recovery.then((recovered) => recovered ? wakeContainer(session) : false);
+  const active = activeContainers.get(session.id);
+  if (active) {
+    log.debug(active.recovering ? 'Recovery container still owns session' : 'Container already running', { sessionId: session.id });
+    return Promise.resolve(!active.recovering);
   }
   const existing = wakePromises.get(session.id);
   if (existing) {
@@ -134,6 +138,76 @@ export function wakeContainer(session: Session): Promise<boolean> {
     });
   wakePromises.set(session.id, promise);
   return promise;
+}
+
+export function recoverStoppedSession(session: Session): Promise<boolean> {
+  const existing = recoveryPromises.get(session.id);
+  if (existing) return existing;
+  if (activeContainers.has(session.id) || wakePromises.has(session.id)) return Promise.resolve(false);
+  const recovery = runRecoveryContainer(session)
+    .catch((err: unknown) => {
+      log.warn('Runner journal recovery failed — host-sweep will retry', { sessionId: session.id, err });
+      return false;
+    })
+    .finally(() => recoveryPromises.delete(session.id));
+  recoveryPromises.set(session.id, recovery);
+  return recovery;
+}
+
+async function runRecoveryContainer(session: Session): Promise<boolean> {
+  const agentGroup = getAgentGroup(session.agent_group_id);
+  if (!agentGroup) throw new Error(`Agent group not found: ${session.agent_group_id}`);
+  await startSessionSignalServer(session.id, agentGroup.id);
+  const containerName = `nanoclaw-recovery-${session.id}-${Date.now()}`;
+  const mounts: VolumeMount[] = [
+    runnerStateStoreMount(agentGroup.id, session.id),
+    sessionLinkMount(session.id),
+    {
+      hostPath: path.resolve('container', 'agent-runner', 'src'),
+      containerPath: '/app/src',
+      readonly: true,
+    },
+  ];
+  const config: import('./container-config.js').ContainerConfig = {
+    mcpServers: {}, packages: { apt: [], npm: [], pip: [] },
+    additionalMounts: [], skills: [], disabledSkills: [],
+  };
+  const args = await buildContainerArgs(
+    mounts, containerName, agentGroup, config, 'native', {}, undefined, session.id, 'recovery',
+  );
+  log.info('Recovering stopped runner journal', { sessionId: session.id, containerName });
+  const child = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  const entry = { process: child, containerName, recovering: true };
+  activeContainers.set(session.id, entry);
+  let stderr = '';
+  let stopFailed = false;
+  child.stderr?.on('data', (data: Buffer) => { stderr = (stderr + data.toString()).slice(-64 * 1024); });
+  const timeout = setTimeout(() => {
+    log.warn('Runner recovery timed out — stopping recovery container', { sessionId: session.id, containerName });
+    try { stopContainer(containerName); }
+    catch (err) {
+      stopFailed = true;
+      log.error('Failed to stop recovery container; keeping session locked until runtime recovery', { sessionId: session.id, containerName, err });
+      child.kill('SIGTERM');
+    }
+  }, 45_000);
+  try {
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.once('close', resolve);
+      child.once('error', reject);
+    });
+    if (code !== 0 || stopFailed) throw new Error(`Runner recovery exited ${code}: ${stderr.trim()}`);
+    markContainerStopped(session.id);
+    confirmSessionRunnerExit(session.id);
+    return true;
+  } finally {
+    clearTimeout(timeout);
+    if (!stopFailed) {
+      if (activeContainers.get(session.id) === entry) activeContainers.delete(session.id);
+      markContainerStopped(session.id);
+      await stopSessionSignalServer(session.id, true);
+    }
+  }
 }
 
 // Bound on eviction rounds per spawn attempt, so a pathological state can't
@@ -162,6 +236,10 @@ async function admitThenSpawn(session: Session): Promise<boolean> {
       });
       if (decision.action === 'admit') break;
       if (decision.action === 'evict') {
+        if (activeContainers.get(decision.sessionId)?.recovering) {
+          log.info('Admission deferring spawn while recovery owns a container', { sessionId: session.id });
+          return false;
+        }
         log.info('Admission evicting idle container to free memory', {
           evicting: decision.sessionId,
           forSession: session.id,
@@ -817,7 +895,7 @@ function selectedSkillNames(
     .map((skill) => skill.slug);
 }
 
-async function buildContainerArgs(
+export async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentGroup: AgentGroup,
@@ -826,7 +904,7 @@ async function buildContainerArgs(
   providerContribution: ProviderContainerContribution,
   agentIdentifier: string | undefined,
   sessionId: string,
-  launchMode: 'agent' | 'mcp-probe' = 'agent',
+  launchMode: 'agent' | 'mcp-probe' | 'recovery' = 'agent',
 ): Promise<string[]> {
   // Agent containers use -d: no foreground console is attached to the host,
   // so they survive host restarts and can be adopted. MCP probes use -i so
@@ -846,11 +924,11 @@ async function buildContainerArgs(
     '--label',
     CONTAINER_INSTALL_LABEL,
     '--label',
-    launchMode === 'agent' ? `nanoclaw-session=${sessionId}` : 'nanoclaw-mcp-probe=true',
+    launchMode === 'mcp-probe' ? 'nanoclaw-mcp-probe=true' : `nanoclaw-session=${sessionId}`,
     '--label',
     `nanoclaw-agent-group=${agentGroup.id}`,
   ];
-  if (launchMode === 'agent') {
+  if (launchMode !== 'mcp-probe') {
     args.push('--label', `nanoclaw-session-link=${SESSION_LINK_VERSION}`);
   }
 
@@ -865,6 +943,17 @@ async function buildContainerArgs(
     // Forcing UID 0 bypasses the Dockerfile's USER node, so HOME defaults to
     // /root instead of /home/node where .claude is mounted. Pin it explicitly.
     args.push('-e', 'HOME=/home/node');
+  }
+
+  if (launchMode === 'recovery') {
+    args.push('--network=none', '--label', 'nanoclaw-recovery=true');
+    args.push('-e', `NANOCLAW_MAX_OUTPUT_BYTES=${CONTAINER_MAX_OUTPUT_SIZE}`);
+    for (const mount of mounts) {
+      if (mount.readonly) args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
+      else args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
+    }
+    args.push('--entrypoint', 'bash', CONTAINER_IMAGE, '-c', 'exec bun run /app/src/recover-main.ts');
+    return args;
   }
 
   // Environment — only vars read by code we don't own.

@@ -12,6 +12,7 @@ vi.mock('./config.js', async (importOriginal) => ({
 vi.mock('./container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(true),
   isContainerRunning: vi.fn(() => false),
+  recoverStoppedSession: vi.fn().mockResolvedValue(true),
   killContainer: vi.fn(),
 }));
 vi.mock('./modules/typing/index.js', () => ({

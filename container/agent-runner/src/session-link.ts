@@ -455,6 +455,10 @@ export function startSessionSignalClient(): Promise<void> {
   return client.start();
 }
 
+export function stopSessionSignalClient(): void {
+  client.stop();
+}
+
 export function signalHeartbeat(): void {
   client.heartbeat();
 }

@@ -24,14 +24,15 @@ vi.mock('./config.js', async () => {
 vi.mock('./container-runner.js', () => ({
   isContainerRunning: vi.fn().mockReturnValue(false),
   wakeContainer: vi.fn().mockResolvedValue(true),
+  recoverStoppedSession: vi.fn().mockResolvedValue(true),
   killContainer: vi.fn(),
 }));
 
 import { initTestDb, closeDb, runMigrations, createAgentGroup } from './db/index.js';
 import { createSession } from './db/sessions.js';
-import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
+import { isContainerRunning, killContainer, recoverStoppedSession, wakeContainer } from './container-runner.js';
 import { _requestSessionSweepForTesting, startHostSweep, stopHostSweep } from './host-sweep.js';
-import { initSessionFolder, openOutboundDbRw, writeSessionMessage } from './session-manager.js';
+import { initSessionFolder, openInboundDb, openOutboundDbRw, writeSessionMessage } from './session-manager.js';
 import type { Session } from './types.js';
 
 const TEST_DIR = '/tmp/nanoclaw-test-host-sweep-grace';
@@ -85,6 +86,7 @@ async function runSweepTick(): Promise<void> {
 beforeEach(() => {
   vi.mocked(isContainerRunning).mockReset().mockReturnValue(false);
   vi.mocked(killContainer).mockReset();
+  vi.mocked(recoverStoppedSession).mockReset().mockResolvedValue(true);
   vi.mocked(wakeContainer)
     .mockReset()
     // Simulate a successful spawn: after wake, the container reports running.
@@ -135,6 +137,45 @@ afterEach(() => {
 });
 
 describe('host sweep justWoke grace period', () => {
+  it('recovers an unsettled turn even when its inbound input is already completed', async () => {
+    const inbound = openInboundDb(AG, SESS);
+    const outbound = openOutboundDbRw(AG, SESS);
+    try {
+      inbound.prepare("UPDATE messages_in SET status='completed' WHERE id='m-1'").run();
+      outbound.prepare('DELETE FROM processing_ack').run();
+      outbound.prepare("INSERT INTO turns (id,phase,outcome,provenance) VALUES ('turn-1','running','pending','native')").run();
+    } finally {
+      inbound.close();
+      outbound.close();
+    }
+    await runSweepTick();
+    expect(recoverStoppedSession).toHaveBeenCalledTimes(1);
+    expect(wakeContainer).not.toHaveBeenCalled();
+    expect(killContainer).not.toHaveBeenCalled();
+  });
+
+  it('recovers a saved completed claim before considering an unnecessary retry', async () => {
+    vi.mocked(recoverStoppedSession).mockImplementation(async () => {
+      const db = openOutboundDbRw(AG, SESS);
+      try {
+        db.prepare("UPDATE processing_ack SET status='completed',status_changed=datetime('now') WHERE message_id='m-1'").run();
+      } finally { db.close(); }
+      return true;
+    });
+    await runSweepTick();
+    expect(recoverStoppedSession).toHaveBeenCalledTimes(1);
+    expect(wakeContainer).not.toHaveBeenCalled();
+    expect(killContainer).not.toHaveBeenCalled();
+  });
+
+  it('does not retry stale processing or wake a provider when journal recovery fails', async () => {
+    vi.mocked(recoverStoppedSession).mockResolvedValue(false);
+    await runSweepTick();
+    expect(recoverStoppedSession).toHaveBeenCalledTimes(1);
+    expect(wakeContainer).not.toHaveBeenCalled();
+    expect(killContainer).not.toHaveBeenCalled();
+  });
+
   it('does not kill the container on the tick that woke it, kills on a later tick if the claim is still stale', async () => {
     // Tick 1: due message + no running container → wake. The stale claim is
     // still in outbound.db, but the grace period must skip the SLA check.
