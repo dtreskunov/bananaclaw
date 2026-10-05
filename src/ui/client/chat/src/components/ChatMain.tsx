@@ -861,7 +861,8 @@ function messageKey(message: ChatMessage): string {
 
 function groupKey(group: MsgGroup): string {
   if (group.kind === 'turn') return `turn:${group.row.turn.id}`;
-  if (group.kind === 'question') return `question:${group.row.question.questionId}`;
+  if (group.kind === 'question') return group.row.answer
+    ? `question-answer:${group.row.answer.id}` : `question:${group.row.question.questionId}`;
   if (group.kind === 'thoughts') return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === 'events') return `events:${messageKey(group.events[0]!)}`;
   return `single:${messageKey(group.m)}`;
@@ -1477,7 +1478,7 @@ function MessageLog() {
                     ? <ConversationTurnRow key={key} turn={g.row.turn} lines={g.row.activity}
                         status={g.row.status} ownerId={g.row.traceOwner} />
                     : g.kind === 'question'
-                      ? <QuestionCardItem key={key} question={g.row.question}
+                      ? <QuestionCardItem key={key} question={g.row.question} answer={g.row.answer}
                           busy={respondingQuestionIds.value.has(g.row.question.questionId)} />
                     : g.kind === 'thoughts'
                     ? <ThoughtGroup
@@ -1551,8 +1552,8 @@ function PendingTray() {
   );
 }
 
-function QuestionCardItem({ question: q, busy }: {
-  question: PendingQuestionDto; busy: boolean;
+function QuestionCardItem({ question: q, answer: answerMessage, busy }: {
+  question: PendingQuestionDto; answer?: ChatMessage; busy: boolean;
 }) {
   const [answer, setAnswer] = useState('');
   const answerRef = useRef('');
@@ -1566,11 +1567,12 @@ function QuestionCardItem({ question: q, busy }: {
   const active = voiceState.target === target;
   const voiceLocked = active && voiceState.phase !== 'error';
   const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || 'Live voice input is not configured.' : '');
-  const pendingRef = useRef(q.status === 'pending');
-  pendingRef.current = q.status === 'pending';
+  const pendingRef = useRef(!answerMessage && q.status === 'pending');
+  pendingRef.current = !answerMessage && q.status === 'pending';
   const sendBusyRef = useRef(false);
   const canType = q.responseMode === 'text' || q.responseMode === 'choice_or_text';
-  const answered = q.status === 'answered';
+  const answered = !!answerMessage;
+  const unavailableToAnswer = busy || q.status !== 'pending';
 
   const submitAnswer = async (value = answerRef.current): Promise<boolean> => {
     const trimmed = value.trim();
@@ -1594,19 +1596,19 @@ function QuestionCardItem({ question: q, busy }: {
   };
 
   useEffect(() => {
-    if (q.status !== 'pending' && voice.state.value.target === target) voice.detach();
+    if ((answered || q.status !== 'pending') && voice.state.value.target === target) voice.detach();
     return () => {
       if (voice.state.value.target === target) voice.detach();
     };
-  }, [q.status, target, channel, mg]);
+  }, [q.status, answered, target, channel, mg]);
 
   return (
-    <div class={`msg ${answered ? 'in question-card-answered' : 'out agent-action'} question-card`} data-msg-id={q.questionId}>
+    <div class={`msg ${answered ? 'in question-card-answered' : 'out agent-action'} question-card`} data-msg-id={answerMessage?.id ?? q.questionId}>
       <div class="question-card-heading">{q.title}</div>
       <div class="question-card-title">{q.question}</div>
       {answered ? (
         <div class="question-card-answer">
-          {q.options.find((option) => option.value === q.answerValue)?.selectedLabel ?? q.answerValue}
+          {q.options.find((option) => option.value === answerMessage?.text)?.selectedLabel ?? answerMessage?.text}
         </div>
       ) : q.status === 'cancelled' ? (
         <div class="question-card-answer">Cancelled</div>
@@ -1618,7 +1620,7 @@ function QuestionCardItem({ question: q, busy }: {
                 <button
                   type="button"
                   class="question-card-btn"
-                  disabled={busy}
+                  disabled={unavailableToAnswer}
                   onClick={() => {
                     if (voice.state.value.target === target) voice.detach();
                     respondQuestion(q.questionId, o.value).catch(console.error);
@@ -1643,7 +1645,7 @@ function QuestionCardItem({ question: q, busy }: {
                   rows={1}
                   value={answer}
                   ref={textareaRef}
-                  disabled={busy}
+                  disabled={unavailableToAnswer}
                   readOnly={voiceLocked || (active && voiceState.sending)}
                   aria-label="Your answer"
                   placeholder="Type your answer…"
@@ -1654,13 +1656,13 @@ function QuestionCardItem({ question: q, busy }: {
                 />
                 <VoiceButton target={target} controller={voice} onStart={startVoice}
                   className="question-response-mic" configured={voiceInput.value.ready}
-                  unavailable={unavailable} disabled={busy || isRecording.value} />
+                  unavailable={unavailable} disabled={unavailableToAnswer || isRecording.value} />
                 <button
                   type="submit"
                   class="accent-icon-btn question-response-send"
                   aria-label="Send answer"
                   title={active && voiceState.phase === 'listening' ? 'Finalize and send answer' : 'Send answer'}
-                  disabled={busy || (active && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase))) || (!answer.trim() && !active)}
+                  disabled={unavailableToAnswer || (active && (voiceState.sending || !['listening', 'error'].includes(voiceState.phase))) || (!answer.trim() && !active)}
                   onMouseDown={(event) => event.preventDefault()}
                 >{'\u2191'}</button>
               </div>
@@ -1670,7 +1672,7 @@ function QuestionCardItem({ question: q, busy }: {
         </>
       )}
       <div class="meta question-card-meta">
-        <RelativeTime ts={answered && q.answeredAt ? q.answeredAt : q.createdAt} />
+        <RelativeTime ts={answerMessage?.ts ?? q.createdAt} />
         {!answered ? <AgentActionLabel label="question" title="Sent with ask_user_question" /> : null}
       </div>
     </div>

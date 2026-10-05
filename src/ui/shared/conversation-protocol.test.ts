@@ -44,6 +44,23 @@ const update: ConversationUpdate = {
   changes: diffConversation(empty, next),
 };
 describe('conversation protocol', () => {
+  it.each(['in', 'out'] as const)(
+    'rejects %s question references without an authorized question record',
+    (direction) => {
+      const invalid: Conversation = {
+        ...next,
+        messages: [
+          {
+            ...next.messages[0],
+            direction,
+            questionId: 'unknown',
+          },
+        ],
+        timeline: [{ kind: 'message', messageId: 'one' }],
+      };
+      expect(() => reduceConversation(null, { ...snapshot, conversation: invalid })).toThrow('invalid_frame');
+    },
+  );
   it('produces identical initial and incremental state', () => {
     const incremental = reduceConversation(snapshot, parseConversationFrame(JSON.parse(JSON.stringify(update))));
     expect(incremental.conversation).toEqual(next);

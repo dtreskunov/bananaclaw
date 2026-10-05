@@ -106,13 +106,15 @@ export function projectConversation(
   const questionAnchors = new Map(
     visibleQuestions.map((q) => [
       q.message_out_id,
-      outDb?.prepare('SELECT turn_id, content FROM messages_out WHERE id = ?').get(q.message_out_id) as
-        | { turn_id: string | null; content: string }
+      outDb?.prepare('SELECT turn_id, content, timestamp FROM messages_out WHERE id = ?').get(q.message_out_id) as
+        | { turn_id: string | null; content: string; timestamp: string }
         | undefined,
     ]),
   );
   const messages: ConversationMessage[] = history
     .filter((message) => {
+      if (message.questionId && !visibleQuestions.some((question) => question.question_id === message.questionId))
+        return false;
       const turn = message.turnId ? byId.get(message.turnId) : undefined;
       return !(turn && turn.phase !== 'settled' && message.deliveryOrigin === 'response');
     })
@@ -205,6 +207,7 @@ export function projectConversation(
     const anchor = questionAnchors.get(q.message_out_id);
     if (!anchor?.turn_id || !byId.has(anchor.turn_id))
       throw new Error('Missing conversation question turn association');
+    const timelinePosition = outboundTimelinePosition(anchor.content);
     return {
       questionId: q.question_id,
       title: q.title,
@@ -217,11 +220,9 @@ export function projectConversation(
       answeredAt: q.answered_at,
       threadId: q.thread_id,
       agentGroupId: groupId,
-      createdAt: q.created_at,
+      createdAt: anchor.timestamp,
       messageId: q.message_out_id,
-      ...(anchor?.content && outboundTimelinePosition(anchor.content) !== undefined
-        ? { timelinePosition: outboundTimelinePosition(anchor.content) }
-        : {}),
+      ...(timelinePosition !== undefined ? { timelinePosition } : {}),
       ...(turnIds.has(anchor.turn_id) ? { turnId: anchor.turn_id } : {}),
     };
   });

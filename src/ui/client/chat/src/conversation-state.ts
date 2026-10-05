@@ -43,6 +43,9 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     .filter((message) => message.inputState?.status !== 'cancelled')
     .map(({ timestamp, ...message }) => ({ ...message, files: message.files ?? null, ts: timestamp }));
   const byId = new Map(messages.map((message) => [message.id, message]));
+  const answeredQuestions = new Set(
+    messages.filter((message) => message.questionId).map((message) => message.questionId),
+  );
   const traceLines = (trace: ConversationTrace) => {
     const turn = turns.get(trace.turnId);
     if (!turn) throw new ConversationProtocolError('invalid_frame');
@@ -50,7 +53,7 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     const activity = turn.activity.filter((line) => ordinals.has(line.ordinal));
     return trace.ownsTurn ? conversationActivity({ ...turn, activity }) : activity;
   };
-  const transcript = view.timeline.map((row): TranscriptRow => {
+  const transcript = view.timeline.flatMap((row): TranscriptRow[] => {
     const turn = row.trace ? turns.get(row.trace.turnId) : undefined;
     if (row.kind === 'message') {
       const message = byId.get(row.messageId);
@@ -62,22 +65,29 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
         message.turnTraceOwner = row.trace.ownsTurn;
         message.turnTraceLive = row.trace.ownsTurn && turn?.phase !== 'settled';
       }
-      return { kind: 'message', message };
+      if (message.questionId) {
+        const question = questions.get(message.questionId);
+        if (!question || message.direction !== 'in') throw new ConversationProtocolError('invalid_frame');
+        return [{ kind: 'question', question, answer: message }];
+      }
+      return [{ kind: 'message', message }];
     }
     if (row.kind === 'question') {
       const question = questions.get(row.questionId);
       if (!question) throw new ConversationProtocolError('invalid_frame');
-      return { kind: 'question', question };
+      return answeredQuestions.has(question.questionId) ? [] : [{ kind: 'question', question }];
     }
     if (!turn || turn.id !== row.turnId) throw new ConversationProtocolError('invalid_frame');
-    return {
-      kind: 'turn',
-      turn,
-      afterId: row.afterId,
-      activity: traceLines(row.trace),
-      status: row.status,
-      traceOwner: row.trace.ownsTurn ? `turn:${turn.id}` : `turn:${turn.id}:after:${row.afterId ?? 'start'}`,
-    };
+    return [
+      {
+        kind: 'turn',
+        turn,
+        afterId: row.afterId,
+        activity: traceLines(row.trace),
+        status: row.status,
+        traceOwner: row.trace.ownsTurn ? `turn:${turn.id}` : `turn:${turn.id}:after:${row.afterId ?? 'start'}`,
+      },
+    ];
   });
   return {
     messages: transcript.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),

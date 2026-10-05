@@ -945,6 +945,7 @@ export async function handleChatRequest(
 type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface HistoryMessage {
+  questionId?: string;
   turnId?: string;
   inputState?: InputState;
   canEditPending?: boolean;
@@ -1100,12 +1101,13 @@ export function readChatHistory(
     try {
       const rows = inDb
         .prepare(
-          `SELECT id, timestamp, content, status, sender_user_id FROM messages_in
+          `SELECT id, kind, timestamp, content, status, sender_user_id FROM messages_in
          WHERE channel_type = ? AND thread_id IS ?
            AND platform_id IN (${context.platformIds.map(() => '?').join(',')}) ORDER BY seq`,
         )
         .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
         id: string;
+        kind: string;
         timestamp: string;
         content: string;
         status: string;
@@ -1144,6 +1146,7 @@ export function readChatHistory(
           threadId,
           target.channelType === WEB_CHANNEL_TYPE,
           session.id,
+          r.kind === 'interactive_response',
         );
         if (parsed != null) {
           const id = publicInboundMessageId(r.id, groupId);
@@ -1159,6 +1162,7 @@ export function readChatHistory(
             id,
             timestamp: r.timestamp,
             text,
+            ...(parsed.questionId ? { questionId: parsed.questionId } : {}),
             files: parsed.files,
             author,
             canEditPending:
@@ -1721,8 +1725,10 @@ function parseInboundContent(
   threadId?: string,
   includeAttachmentUrls = false,
   sessionId?: string,
+  includeQuestionResponses = false,
 ): {
   text: string;
+  questionId?: string;
   files?: { filename: string; size: number; url?: string; contentType?: string }[];
   viaWeb?: boolean;
 } | null {
@@ -1730,6 +1736,13 @@ function parseInboundContent(
     const o = JSON.parse(content);
     if (o?.cancelled === true) return null;
     if (typeof o === 'string') return { text: o };
+    if (includeQuestionResponses && o?.type === 'question_response') {
+      if (typeof o.questionId !== 'string' || !o.questionId || typeof o.value !== 'string') {
+        log.warn('Invalid question response in chat history');
+        return null;
+      }
+      return { text: o.value, questionId: o.questionId };
+    }
     if (typeof o?.text === 'string' || Array.isArray(o?.attachments) || Array.isArray(o?.files)) {
       const text = typeof o?.text === 'string' ? o.text : '';
       // `attachments` for native inbound (base64 + name/mimeType); `files`

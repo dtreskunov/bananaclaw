@@ -121,6 +121,8 @@ changing their geometry. Tool, file, card and question output uses an accent
 rail; runner notices and internal traces use a neutral rail; warning and failed
 message state use semantic warning and error rails. Normal agent replies have
 no rail. Live turn-system status is intentionally transparent and rail-free.
+Queued user input keeps its normal bubble styling without a transient left
+rail; its queue status and actions remain in the metadata row.
 Runner-authored notices use the same background as agent replies, but retain
 the neutral or semantic rail and omit a redundant status label from the
 metadata row.
@@ -477,6 +479,17 @@ Question cards are not cancelled by Stop. They remain actionable, and submitting
 an answer is ordinary new input (or a queued follow-up). You can stop the
 resulting turn after answering. If the agent has finished asking a question and
 is only waiting for your answer, there may be no active turn to stop.
+
+Questions and answers are separate durable events: the original question output
+keeps its identity, timestamp, recorded position and asking-turn association;
+the answer input has its own identity, timestamp and consumed-input position.
+The host orders both normally and never relocates the question. Once the answer
+event is available, the UI hides the original question card and displays a
+read-only answer bubble at the input event's position, retaining question context.
+Metadata saying "answered" alone does not hide the original card or fabricate an
+answer event. The asking turn's trace stays on its final response (or its own
+synthetic bubble), independently of card visibility. Cancelled cards stay visible
+at the question output.
 
 The icon is disabled and grayed out while stopping, without adding transient
 status text or changing the bubble's layout. A **Stopping response** tooltip

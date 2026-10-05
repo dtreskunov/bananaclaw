@@ -17748,6 +17748,7 @@ var message = shape({
   direction: oneOf("in", "out", "internal", "event"),
   timestamp: text,
   text,
+  questionId: optional(id),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -17879,6 +17880,11 @@ function applyEntities(prior, delta) {
   return delta.order.map((id2) => values.get(id2));
 }
 function validateTimeline(view) {
+  const questionIds = new Set(view.questions.map((question2) => question2.questionId));
+  if (view.messages.some(
+    (message2) => message2.questionId !== void 0 && (message2.direction !== "in" || !questionIds.has(message2.questionId))
+  ))
+    throw new ConversationProtocolError("invalid_frame");
   const messages = new Set(
     view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map((message2) => message2.id)
   );
@@ -18721,6 +18727,9 @@ function conversationPresentation(view) {
   const questions = new Map(view.questions.map((question2) => [question2.questionId, question2]));
   const messages = view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map(({ timestamp, ...message2 }) => ({ ...message2, files: message2.files ?? null, ts: timestamp }));
   const byId = new Map(messages.map((message2) => [message2.id, message2]));
+  const answeredQuestions = new Set(
+    messages.filter((message2) => message2.questionId).map((message2) => message2.questionId)
+  );
   const traceLines = (trace2) => {
     const turn2 = turns.get(trace2.turnId);
     if (!turn2) throw new ConversationProtocolError("invalid_frame");
@@ -18728,7 +18737,7 @@ function conversationPresentation(view) {
     const activity = turn2.activity.filter((line) => ordinals.has(line.ordinal));
     return trace2.ownsTurn ? conversationActivity({ ...turn2, activity }) : activity;
   };
-  const transcript = view.timeline.map((row) => {
+  const transcript = view.timeline.flatMap((row) => {
     const turn2 = row.trace ? turns.get(row.trace.turnId) : void 0;
     if (row.kind === "message") {
       const message2 = byId.get(row.messageId);
@@ -18740,22 +18749,29 @@ function conversationPresentation(view) {
         message2.turnTraceOwner = row.trace.ownsTurn;
         message2.turnTraceLive = row.trace.ownsTurn && turn2?.phase !== "settled";
       }
-      return { kind: "message", message: message2 };
+      if (message2.questionId) {
+        const question2 = questions.get(message2.questionId);
+        if (!question2 || message2.direction !== "in") throw new ConversationProtocolError("invalid_frame");
+        return [{ kind: "question", question: question2, answer: message2 }];
+      }
+      return [{ kind: "message", message: message2 }];
     }
     if (row.kind === "question") {
       const question2 = questions.get(row.questionId);
       if (!question2) throw new ConversationProtocolError("invalid_frame");
-      return { kind: "question", question: question2 };
+      return answeredQuestions.has(question2.questionId) ? [] : [{ kind: "question", question: question2 }];
     }
     if (!turn2 || turn2.id !== row.turnId) throw new ConversationProtocolError("invalid_frame");
-    return {
-      kind: "turn",
-      turn: turn2,
-      afterId: row.afterId,
-      activity: traceLines(row.trace),
-      status: row.status,
-      traceOwner: row.trace.ownsTurn ? `turn:${turn2.id}` : `turn:${turn2.id}:after:${row.afterId ?? "start"}`
-    };
+    return [
+      {
+        kind: "turn",
+        turn: turn2,
+        afterId: row.afterId,
+        activity: traceLines(row.trace),
+        status: row.status,
+        traceOwner: row.trace.ownsTurn ? `turn:${turn2.id}` : `turn:${turn2.id}:after:${row.afterId ?? "start"}`
+      }
+    ];
   });
   return {
     messages: transcript.flatMap((row) => row.kind === "message" ? [row.message] : []),
@@ -23523,7 +23539,7 @@ function messageKey(message2) {
 }
 function groupKey(group) {
   if (group.kind === "turn") return `turn:${group.row.turn.id}`;
-  if (group.kind === "question") return `question:${group.row.question.questionId}`;
+  if (group.kind === "question") return group.row.answer ? `question-answer:${group.row.answer.id}` : `question:${group.row.question.questionId}`;
   if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
   return `single:${messageKey(group.m)}`;
@@ -24071,6 +24087,7 @@ function MessageLog() {
           QuestionCardItem,
           {
             question: g8.row.question,
+            answer: g8.row.answer,
             busy: respondingQuestionIds.value.has(g8.row.question.questionId)
           },
           key
@@ -24137,7 +24154,7 @@ function PendingTray() {
     /* @__PURE__ */ u4("button", { type: "button", title: "Remove", onClick: () => removePending(i5), children: "\xD7" })
   ] }, i5)) });
 }
-function QuestionCardItem({ question: q5, busy }) {
+function QuestionCardItem({ question: q5, answer: answerMessage, busy }) {
   const [answer, setAnswer] = h2("");
   const answerRef = A2("");
   const textareaRef = A2(null);
@@ -24150,11 +24167,12 @@ function QuestionCardItem({ question: q5, busy }) {
   const active = voiceState.target === target;
   const voiceLocked = active && voiceState.phase !== "error";
   const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
-  const pendingRef = A2(q5.status === "pending");
-  pendingRef.current = q5.status === "pending";
+  const pendingRef = A2(!answerMessage && q5.status === "pending");
+  pendingRef.current = !answerMessage && q5.status === "pending";
   const sendBusyRef = A2(false);
   const canType = q5.responseMode === "text" || q5.responseMode === "choice_or_text";
-  const answered = q5.status === "answered";
+  const answered = !!answerMessage;
+  const unavailableToAnswer = busy || q5.status !== "pending";
   const submitAnswer = async (value = answerRef.current) => {
     const trimmed = value.trim();
     if (!trimmed || busy || sendBusyRef.current || !pendingRef.current) return false;
@@ -24183,21 +24201,21 @@ function QuestionCardItem({ question: q5, busy }) {
     }, textareaRef.current?.selectionStart ?? answerRef.current.length);
   };
   y2(() => {
-    if (q5.status !== "pending" && voice.state.value.target === target) voice.detach();
+    if ((answered || q5.status !== "pending") && voice.state.value.target === target) voice.detach();
     return () => {
       if (voice.state.value.target === target) voice.detach();
     };
-  }, [q5.status, target, channel, mg]);
-  return /* @__PURE__ */ u4("div", { class: `msg ${answered ? "in question-card-answered" : "out agent-action"} question-card`, "data-msg-id": q5.questionId, children: [
+  }, [q5.status, answered, target, channel, mg]);
+  return /* @__PURE__ */ u4("div", { class: `msg ${answered ? "in question-card-answered" : "out agent-action"} question-card`, "data-msg-id": answerMessage?.id ?? q5.questionId, children: [
     /* @__PURE__ */ u4("div", { class: "question-card-heading", children: q5.title }),
     /* @__PURE__ */ u4("div", { class: "question-card-title", children: q5.question }),
-    answered ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: q5.options.find((option) => option.value === q5.answerValue)?.selectedLabel ?? q5.answerValue }) : q5.status === "cancelled" ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: "Cancelled" }) : /* @__PURE__ */ u4(k, { children: [
+    answered ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: q5.options.find((option) => option.value === answerMessage?.text)?.selectedLabel ?? answerMessage?.text }) : q5.status === "cancelled" ? /* @__PURE__ */ u4("div", { class: "question-card-answer", children: "Cancelled" }) : /* @__PURE__ */ u4(k, { children: [
       q5.options.length > 0 && /* @__PURE__ */ u4("div", { class: "question-card-actions", children: q5.options.map((o4) => /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
           class: "question-card-btn",
-          disabled: busy,
+          disabled: unavailableToAnswer,
           onClick: () => {
             if (voice.state.value.target === target) voice.detach();
             respondQuestion(q5.questionId, o4.value).catch(console.error);
@@ -24224,7 +24242,7 @@ function QuestionCardItem({ question: q5, busy }) {
                   rows: 1,
                   value: answer,
                   ref: textareaRef,
-                  disabled: busy,
+                  disabled: unavailableToAnswer,
                   readOnly: voiceLocked || active && voiceState.sending,
                   "aria-label": "Your answer",
                   placeholder: "Type your answer\u2026",
@@ -24243,7 +24261,7 @@ function QuestionCardItem({ question: q5, busy }) {
                   className: "question-response-mic",
                   configured: voiceInput.value.ready,
                   unavailable,
-                  disabled: busy || isRecording.value
+                  disabled: unavailableToAnswer || isRecording.value
                 }
               ),
               /* @__PURE__ */ u4(
@@ -24253,7 +24271,7 @@ function QuestionCardItem({ question: q5, busy }) {
                   class: "accent-icon-btn question-response-send",
                   "aria-label": "Send answer",
                   title: active && voiceState.phase === "listening" ? "Finalize and send answer" : "Send answer",
-                  disabled: busy || active && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)) || !answer.trim() && !active,
+                  disabled: unavailableToAnswer || active && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)) || !answer.trim() && !active,
                   onMouseDown: (event) => event.preventDefault(),
                   children: "\u2191"
                 }
@@ -24268,7 +24286,7 @@ function QuestionCardItem({ question: q5, busy }) {
       )
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta question-card-meta", children: [
-      /* @__PURE__ */ u4(RelativeTime, { ts: answered && q5.answeredAt ? q5.answeredAt : q5.createdAt }),
+      /* @__PURE__ */ u4(RelativeTime, { ts: answerMessage?.ts ?? q5.createdAt }),
       !answered ? /* @__PURE__ */ u4(AgentActionLabel, { label: "question", title: "Sent with ask_user_question" }) : null
     ] })
   ] });

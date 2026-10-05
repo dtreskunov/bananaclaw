@@ -21,6 +21,7 @@ export interface ConversationMessage {
   direction: 'in' | 'out' | 'internal' | 'event';
   timestamp: string;
   text: string;
+  questionId?: string;
   turnId?: string;
   timelinePosition?: number;
   inputState?: InputState;

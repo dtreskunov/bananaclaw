@@ -94,6 +94,7 @@ const message = shape({
   direction: oneOf('in', 'out', 'internal', 'event'),
   timestamp: text,
   text,
+  questionId: optional(id),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -241,6 +242,14 @@ function applyEntities<T extends { id: string } | { questionId: string }>(prior:
 }
 
 function validateTimeline(view: Conversation): void {
+  const questionIds = new Set(view.questions.map((question) => question.questionId));
+  if (
+    view.messages.some(
+      (message) =>
+        message.questionId !== undefined && (message.direction !== 'in' || !questionIds.has(message.questionId)),
+    )
+  )
+    throw new ConversationProtocolError('invalid_frame');
   const messages = new Set(
     view.messages.filter((message) => message.inputState?.status !== 'cancelled').map((message) => message.id),
   );

@@ -19,10 +19,7 @@ export function conversationTimeline(view: Omit<Conversation, 'timeline'>): Conv
         row: { kind: 'question' as const, questionId: question.questionId },
         id: question.messageId ?? question.questionId,
         position: question.timelinePosition,
-        key: timelineSortKey(
-          question.status === 'answered' && question.answeredAt ? question.answeredAt : question.createdAt,
-          question.timelinePosition,
-        ),
+        key: timelineSortKey(question.createdAt, question.timelinePosition),
       })),
   ].sort((a, b) => {
     const bucket = Math.floor(a.key / 1000) - Math.floor(b.key / 1000);

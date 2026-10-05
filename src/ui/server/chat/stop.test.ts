@@ -208,6 +208,60 @@ async function stop(
 }
 
 describe('native steering submissions', () => {
+  it('reads a question response as a separate routed input with its own timestamp and recorded position', () => {
+    const id = 'question-response:q';
+    const content = JSON.stringify({ type: 'question_response', questionId: 'q', value: 'Yes', responseType: 'text' });
+    writeSessionMessage('agent', 'session-1', {
+      id,
+      kind: 'interactive_response',
+      timestamp: NOW,
+      platformId: 'group:agent',
+      channelType: 'web',
+      threadId: 'thread-1',
+      content,
+    });
+    writeSessionMessage('agent', 'session-1', {
+      id: 'off-route-answer',
+      kind: 'interactive_response',
+      timestamp: NOW,
+      platformId: 'private',
+      channelType: 'web',
+      threadId: 'thread-1',
+      content,
+    });
+    writeSessionMessage('agent', 'session-1', {
+      id: 'not-an-answer',
+      kind: 'chat',
+      timestamp: NOW,
+      platformId: 'group:agent',
+      channelType: 'web',
+      threadId: 'thread-1',
+      content,
+    });
+    const db = openOutboundDbRw('agent', 'session-1');
+    const key = `input:${createHash('sha256').update(id).digest('hex')}`;
+    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+      key,
+      JSON.stringify({
+        messageId: id,
+        status: 'applied',
+        turnId: 'turn-1',
+        timelinePosition: 300,
+      }),
+      NOW,
+    );
+    db.close();
+    expect(readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE)).toEqual([
+      expect.objectContaining({
+        id,
+        direction: 'in',
+        questionId: 'q',
+        text: 'Yes',
+        timestamp: NOW,
+        timelinePosition: 300,
+      }),
+    ]);
+  });
   const handling = { mode: 'steer', turnId: TURN.id };
   const send = (inputHandling: unknown = handling, options: Parameters<typeof stop>[0] = {}) =>
     stop({
@@ -960,10 +1014,26 @@ describe('chat turn snapshots and events', () => {
         content: JSON.stringify({ operation: 'reaction', messageId: 'commit-input:agent', emoji: '👍' }),
       });
       await vi.waitFor(() => expect(socketView(frames).messages[0].reactions?.[0].emoji).toBe('👍'));
+      const questionDb = openOutboundDbRw('agent', 'session-1');
+      questionDb
+        .prepare(
+          'INSERT INTO messages_out (id, kind, timestamp, content, turn_id, platform_id, channel_type, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(
+          'question-output',
+          'chat-sdk',
+          NOW,
+          '{"type":"ask_question","questionId":"q"}',
+          'turn-1',
+          'group:agent',
+          'web',
+          'thread-1',
+        );
+      questionDb.close();
       createQuestion({
         question_id: 'q',
         session_id: 'session-1',
-        message_out_id: 'host-output',
+        message_out_id: 'question-output',
         in_reply_to: null,
         channel_type: 'web',
         platform_id: 'group:agent',
@@ -983,6 +1053,23 @@ describe('chat turn snapshots and events', () => {
       await vi.waitFor(() => expect(socketView(frames).questions[0]?.status).toBe('pending'));
       answerQuestion('q', { value: 'yes', type: 'text', userId: null, answeredAt: NOW });
       await vi.waitFor(() => expect(socketView(frames).questions[0]?.answerValue).toBe('yes'));
+      writeSessionMessage('agent', 'session-1', {
+        id: 'question-response:q',
+        kind: 'interactive_response',
+        timestamp: NOW,
+        platformId: 'group:agent',
+        channelType: 'web',
+        threadId: 'thread-1',
+        content: '{"type":"question_response","questionId":"q","value":"yes","responseType":"text"}',
+      });
+      await vi.waitFor(() =>
+        expect(socketView(frames).messages.find((message) => message.questionId === 'q')).toMatchObject({
+          id: 'question-response:q',
+          direction: 'in',
+          timestamp: NOW,
+          text: 'yes',
+        }),
+      );
       const count = frames.length;
       getDb().prepare("DELETE FROM agent_group_members WHERE user_id = 'web:member'").run();
       writeOutboundDirect('agent', 'session-1', {

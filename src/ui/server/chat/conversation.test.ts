@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OUTBOUND_SCHEMA } from '../../../db/schema.js';
-import { putTurn, type TurnRow } from '../../../db/turns.js';
+import { linkTurnInput, putTurn, type TurnRow } from '../../../db/turns.js';
+import { parseConversationFrame, reduceConversation } from '../../shared/conversation-protocol.js';
 import type { ConversationMessage } from '../../shared/conversation.js';
 import { projectConversation } from './conversation.js';
 
@@ -175,7 +176,11 @@ describe('authoritative conversation projection', () => {
           ],
           signals,
         );
-      expect(readQuestions('pending').questions).toHaveLength(1);
+      const pending = readQuestions('pending');
+      expect(pending.questions).toHaveLength(1);
+      expect(pending.timeline.find((row) => row.kind === 'turn')).toMatchObject({
+        afterId: question.message_out_id,
+      });
       const view = readQuestions('answered');
       expect(view.questions[0]).toMatchObject({ status: 'answered', turnId: turn.id });
       expect(view.questions[0]).not.toHaveProperty('activity');
@@ -190,6 +195,140 @@ describe('authoritative conversation projection', () => {
       const privateOrigin = readQuestions('answered');
       expect(privateOrigin.questions[0]).not.toHaveProperty('turnId');
       expect(privateOrigin.turns).toHaveLength(0);
+    });
+
+    it('preserves the asked event and projects the answer as its own input event', () => {
+      const base = Date.parse('2026-09-29T00:00:00Z') * 1000;
+      db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
+        JSON.stringify({ timelinePosition: base + 1_000_000 }),
+        question.message_out_id,
+      );
+      putTurn(db, { ...turn, phase: 'settled', outcome: 'replied' });
+      const reply = { ...output, timelinePosition: base + 2_000_000 };
+      const readQuestion = (current: typeof question, inputs: ConversationMessage[] = []) =>
+        projectConversation(db, context, 't', 'g', [reply, ...inputs], [current], signals);
+      const pending = readQuestion({ ...question, created_at: '2026-09-29T00:00:10Z' });
+      expect(pending.questions[0].timelinePosition).toBe(base + 1_000_000);
+      expect(pending.timeline.map((row) => row.kind)).toEqual(['question', 'message']);
+
+      const answered: typeof question = {
+        ...question,
+        status: 'answered',
+        answer_value: 'Yes',
+        answer_type: 'text',
+        answered_at: '2026-09-29T00:00:03Z',
+      };
+      const queued = readQuestion(answered);
+      expect(queued.questions[0].timelinePosition).toBe(pending.questions[0].timelinePosition);
+      expect(queued.questions[0].createdAt).toBe(pending.questions[0].createdAt);
+      expect(queued.timeline).toEqual(pending.timeline);
+
+      const inputId = `question-response:${question.question_id}`;
+      putTurn(db, { ...turn, id: 'answer-turn' });
+      linkTurnInput(db, { turn_id: 'answer-turn', message_in_id: inputId, association: 'consumed' });
+      const answerInput: ConversationMessage = {
+        id: inputId,
+        direction: 'in',
+        questionId: question.question_id,
+        text: 'Yes',
+        timestamp: '2026-09-29T00:00:00Z',
+        timelinePosition: base + 4_000_000,
+      };
+      const consumed = readQuestion(answered, [answerInput]);
+      expect(consumed.questions[0]).toMatchObject({ timelinePosition: base + 1_000_000, turnId: turn.id });
+      expect(consumed.messages.find((message) => message.id === inputId)).toEqual(answerInput);
+      expect(consumed.turns.find((turn) => turn.id === 'answer-turn')?.inputIds).toEqual([inputId]);
+      expect(consumed.timeline.map((row) => row.kind)).toEqual(['question', 'message', 'message', 'turn']);
+      expect(consumed.timeline.slice(0, 2)).toEqual(pending.timeline);
+      expect(consumed.timeline[3]).toMatchObject({
+        turnId: 'answer-turn',
+        afterId: inputId,
+        trace: { turnId: 'answer-turn', ownsTurn: true },
+      });
+      expect(
+        reduceConversation(
+          null,
+          parseConversationFrame({
+            kind: 'snapshot',
+            protocolVersion: 2,
+            streamId: 'test',
+            revision: 0,
+            conversation: consumed,
+          }),
+        ).conversation,
+      ).toEqual(consumed);
+      expect(readQuestion(answered, [answerInput])).toEqual(consumed);
+    });
+
+    it('keeps a question-only asking turn before the answer and anchors the consuming turn after it', () => {
+      const inputId = `question-response:${question.question_id}`;
+      db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
+        JSON.stringify({ timelinePosition: 200 }),
+        question.message_out_id,
+      );
+      putTurn(db, { ...turn, phase: 'settled', outcome: 'silent' });
+      linkTurnInput(db, { turn_id: turn.id, message_in_id: 'start', association: 'consumed' });
+      putTurn(db, { ...turn, id: 'answer-turn' });
+      linkTurnInput(db, { turn_id: 'answer-turn', message_in_id: inputId, association: 'consumed' });
+      const view = projectConversation(
+        db,
+        context,
+        't',
+        'g',
+        [
+          {
+            id: 'start',
+            direction: 'in',
+            text: 'Ask me',
+            timestamp: 'invalid',
+            timelinePosition: 100,
+          },
+          {
+            id: inputId,
+            direction: 'in',
+            questionId: question.question_id,
+            text: 'Yes',
+            timestamp: 'invalid',
+            timelinePosition: 300,
+          },
+        ],
+        [
+          {
+            ...question,
+            status: 'answered',
+            answer_value: 'Yes',
+            answer_type: 'text',
+            answered_at: '2026-09-29T00:00:03Z',
+          },
+        ],
+        signals,
+      );
+      expect(view.timeline).toMatchObject([
+        { kind: 'message', messageId: 'start' },
+        { kind: 'question', questionId: question.question_id },
+        { kind: 'turn', turnId: turn.id, afterId: question.message_out_id, trace: { turnId: turn.id, ownsTurn: true } },
+        { kind: 'message', messageId: inputId },
+        {
+          kind: 'turn',
+          turnId: 'answer-turn',
+          afterId: inputId,
+          trace: { turnId: 'answer-turn', ownsTurn: true },
+        },
+      ]);
+      expect(view.questions[0].turnId).toBe(turn.id);
+      expect(view.messages).toHaveLength(2);
+    });
+
+    it('does not move asked events when question status changes', () => {
+      db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
+        JSON.stringify({ timelinePosition: 100 }),
+        question.message_out_id,
+      );
+      for (const status of ['pending', 'answered', 'cancelled'] as const) {
+        const view = projectConversation(db, context, 't', 'g', [], [{ ...question, status }], signals);
+        expect(view.questions[0].timelinePosition).toBe(100);
+        expect(view.turns[0].inputIds).toEqual([]);
+      }
     });
 
     it.each(['missing output', 'missing output turn', 'missing turn record'])(

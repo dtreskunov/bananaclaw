@@ -172,6 +172,7 @@ export interface DisplayCard {
 export type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface ChatMessage {
+  questionId?: string;
   turnId?: string;
   /** Replies only: the settled turn whose accounting renders in this bubble's meta line. */
   statsTurn?: import('../../../shared/conversation').ConversationTurn;
@@ -210,6 +211,7 @@ export type TranscriptRow =
   | {
       kind: 'question';
       question: PendingQuestionDto;
+      answer?: ChatMessage;
     }
   | {
       kind: 'turn';

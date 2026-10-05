@@ -185,6 +185,106 @@ describe('authoritative turn presentation', () => {
     expect(completedResponse.value).toBeNull();
   });
 
+  it.each([false, true])('hides only the asked card when an answer event arrives; final response = %s', (final) => {
+    const question: Conversation['questions'][number] = {
+      questionId: 'q',
+      messageId: 'q-output',
+      turnId: testTurn.id,
+      timelinePosition: 100,
+      title: 'Choice',
+      question: 'Choose?',
+      responseMode: 'text',
+      options: [],
+      status: 'pending',
+      answerValue: null,
+      answerType: null,
+      answeredAt: null,
+      threadId: 'thread',
+      agentGroupId: 'group',
+      createdAt: '2026-09-29T00:00:01Z',
+    };
+    const asking: Conversation = presentedConversation({
+      ...initial,
+      questions: [question],
+      messages: final
+        ? [
+            {
+              id: 'reply',
+              direction: 'out',
+              text: 'Waiting',
+              turnId: testTurn.id,
+              deliveryOrigin: 'response',
+              timestamp: '2026-09-29T00:00:02Z',
+              timelinePosition: 200,
+            },
+          ]
+        : [],
+      turns: [
+        {
+          ...testTurn,
+          phase: 'settled',
+          outcome: final ? 'replied' : 'silent',
+          outputIds: final ? ['q-output', 'reply'] : ['q-output'],
+        },
+      ],
+      connection: { connected: true, activeTurnId: null },
+    });
+    receive(testSnapshot(asking, 'asking'));
+    const metadataOnly: Conversation = {
+      ...asking,
+      questions: [
+        {
+          ...question,
+          status: 'answered',
+          answerValue: 'Stale metadata',
+          answerType: 'text',
+          answeredAt: '2026-09-29T00:00:09Z',
+        },
+      ],
+    };
+    update(metadataOnly);
+    expect(chatTranscript.value.filter((row) => row.kind === 'question')).toEqual([
+      { kind: 'question', question: metadataOnly.questions[0] },
+    ]);
+    const answer: Conversation['messages'][number] = {
+      id: 'question-response:q',
+      direction: 'in',
+      questionId: 'q',
+      text: 'Yes',
+      timestamp: '2026-09-29T00:00:03Z',
+      timelinePosition: 300,
+    };
+    const answered: Conversation = presentedConversation({
+      ...metadataOnly,
+      messages: [...asking.messages, answer],
+      turns: [...asking.turns, { ...testTurn, id: 'answer-turn', activity: [], inputIds: [answer.id] }],
+      connection: { connected: true, activeTurnId: 'answer-turn' },
+    });
+    update(answered);
+    const cardRows = chatTranscript.value.filter((row) => row.kind === 'question');
+    const { timestamp: answerTimestamp, ...answerFields } = answer;
+    expect(cardRows).toEqual([
+      {
+        kind: 'question',
+        question: metadataOnly.questions[0],
+        answer: { ...answerFields, ts: answerTimestamp, files: null },
+      },
+    ]);
+    expect(conversationState.value?.conversation.timeline.slice(0, asking.timeline.length)).toEqual(asking.timeline);
+    const originalTrace = chatTranscript.value.find((row) =>
+      row.kind === 'turn' ? row.turn.id === testTurn.id : row.kind === 'message' && row.message.turnId === testTurn.id,
+    );
+    expect(originalTrace).toBeDefined();
+    expect(chatTranscript.value.at(-1)).toMatchObject({
+      kind: 'turn',
+      turn: { id: 'answer-turn' },
+      afterId: answer.id,
+    });
+    receive(testSnapshot(answered, 'reconnected'));
+    expect(chatTranscript.value.filter((row) => row.kind === 'question')).toEqual(cardRows);
+    expect(completedResponse.value).toBeNull();
+  });
+
   it.each([false, true])(
     'keeps the question card without synthesizing question activity; recorded call = %s',
     (recorded) => {
