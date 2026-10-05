@@ -119,6 +119,7 @@ describe('theme CSS contract', () => {
     const rail = railRule?.[1];
     expect(rail).toContain('box-shadow: inset 2px 0 var(--provenance-rail-color, var(--border-strong))');
     expect(railRule?.[0]).not.toContain('.typing.turn-system');
+    expect(railRule?.[0]).not.toContain('.msg.input-queued');
     const action = css.match(/\.chat-main \.msg\.agent-action \{([^}]+)\}/)?.[1];
     expect(action).toContain('--provenance-rail-color: var(--accent-strong-opaque, var(--accent-strong))');
     const neutral = css.match(/\.chat-main :where\(\.msg\.out\.system-notice, \.msg\.internal\) \{([^}]+)\}/)?.[1];
@@ -130,6 +131,15 @@ describe('theme CSS contract', () => {
     expect(warning).toContain('--provenance-rail-color: var(--warning-border, var(--warning))');
     const error = css.match(/\.chat-main :is\(\.msg, \.typing\)\.provenance-error \{([^}]+)\}/)?.[1];
     expect(error).toContain('--provenance-rail-color: var(--error-soft, var(--danger))');
+  });
+
+  it('keeps queued input bubbles free of a transient left rail', () => {
+    const css = read('./components/ChatMain.css');
+    expect(css).not.toContain('.msg.input-queued');
+    const input = css.match(/\.chat-main \.msg\.in \{([^}]+)\}/)?.[1];
+    expect(input).toContain('background: var(--accent)');
+    expect(input).not.toMatch(/border(?:-left|-inline-start)?|box-shadow/);
+    expect(css).toContain('.chat-main .input-state-caption');
   });
 
   it('keeps live status bubbles transparent and full-width with fixed controls and one-line timing metadata', () => {

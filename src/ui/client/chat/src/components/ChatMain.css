@@ -118,7 +118,6 @@
 .chat-main .msg.out.system-notice,
 .chat-main .msg.internal,
 .chat-main .msg.input-applied,
-.chat-main .msg.input-queued,
 .chat-main .msg.input-follow-up,
 .chat-main .msg.input-steering {
   box-shadow: inset 2px 0 var(--provenance-rail-color, var(--border-strong));
@@ -128,7 +127,6 @@
   --provenance-rail-color: var(--border-strong, var(--muted));
 }
 .chat-main :is(.msg, .typing).provenance-warning,
-.chat-main .msg.input-queued,
 .chat-main .msg.input-follow-up { --provenance-rail-color: var(--warning-border, var(--warning)); }
 .chat-main :is(.msg, .typing).provenance-error { --provenance-rail-color: var(--error-soft, var(--danger)); }
 .chat-main .msg.input-applied,
