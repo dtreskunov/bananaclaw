@@ -131,6 +131,60 @@ describe('explicit host trace placement', () => {
     validate(tail);
   });
 
+  it.each(['replied', 'warning', 'stopped', 'failed', 'interrupted'] as const)(
+    'keeps one trace and accounting owner inside the final system notice for a %s turn',
+    (outcome) => {
+      const view = present(
+        [
+          message('ask', 'in', 100),
+          message('reply', 'out', 200),
+          { ...message('notice', 'out', 300), systemGenerated: true, deliveryOrigin: 'response' },
+          { ...message('queued', 'in', 400), inputState: { messageId: 'queued', status: 'queued' } },
+        ],
+        {
+          ...turn,
+          phase: 'settled',
+          outcome,
+          outputIds: ['reply', 'notice'],
+          activity: [activity(0, 150), activity(1, 250)],
+        },
+      );
+      expect(view.timeline).toEqual([
+        { kind: 'message', messageId: 'ask' },
+        { kind: 'message', messageId: 'reply' },
+        {
+          kind: 'message',
+          messageId: 'notice',
+          statsTurnId: turn.id,
+          trace: { turnId: turn.id, ordinals: [0, 1], ownsTurn: true },
+        },
+        { kind: 'message', messageId: 'queued' },
+      ]);
+      validate(view);
+    },
+  );
+
+  it.each(['running', 'stopping', 'settling'] as const)(
+    'keeps the %s trace separate from an intermediate system notice',
+    (phase) => {
+      const view = present([message('ask', 'in', 100), { ...message('notice', 'out', 200), systemGenerated: true }], {
+        ...turn,
+        phase,
+        outputIds: ['notice'],
+        activity: [activity(0, 150)],
+      });
+      expect(view.timeline[1]).toEqual({ kind: 'message', messageId: 'notice' });
+      expect(view.timeline[2]).toEqual({
+        kind: 'turn',
+        turnId: turn.id,
+        afterId: 'notice',
+        status: true,
+        trace: { turnId: turn.id, ordinals: [0], ownsTurn: true },
+      });
+      validate(view);
+    },
+  );
+
   it('keeps questions in conversation order without splitting or hosting the turn trace', () => {
     const view = present([message('ask', 'in', 100)], {
       ...turn,

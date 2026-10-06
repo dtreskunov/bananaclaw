@@ -30,6 +30,7 @@ import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
 import { clearPinnedContext, removePending, respondQuestion, retryChatSend, sendChat, skipQuestion } from '../actions';
 import type { ActivityLine, ChatMessage, PendingQuestionDto, Thread } from '../types';
+import type { ConversationMessage } from '../../../../shared/conversation';
 import { applyConversationFrame, completedResponse, resetConversation } from '../conversation-state';
 import { testSnapshot, testTurn, testWebSubmission } from '../conversation-test-fixtures';
 import { appearance } from '../appearance-state';
@@ -1230,10 +1231,15 @@ describe('main composer pending edits', () => {
     }
   });
 
-  it.each([false, true])(
-    'shows failure handling only in the trace without a Failed label (system notice=%s)',
-    (systemGenerated) => {
-      appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+  it.each(
+    [false, true].flatMap((technical) => [false, true].map((systemGenerated) => ({ technical, systemGenerated }))),
+  )(
+    'keeps failure technical information inside its bubble without a Failed label ($technical, system notice=$systemGenerated)',
+    ({ technical, systemGenerated }) => {
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
       const activity = [
         {
           kind: 'notification',
@@ -1295,14 +1301,11 @@ describe('main composer pending edits', () => {
       expect(find(bubble, 'span', 'Failed')).toBeUndefined();
       expect(find(bubble, 'span', 'Done')).toBeUndefined();
       expect(bubble.props.class.includes('system-notice')).toBe(systemGenerated);
-      let details = renderTechnicalDetails(bubble);
-      if (!details) {
-        resetMount();
-        const status = findComponent(logTree, 'ResponseStatusRow');
-        const row = status.type(status.props);
-        expect(find(row, 'span', 'Failed')).toBeUndefined();
-        expect(find(row, 'span', 'Done')).toBeUndefined();
-        details = renderTechnicalDetails(row);
+      expect(findComponent(logTree, 'ResponseStatusRow')).toBeUndefined();
+      const details = renderTechnicalDetails(bubble);
+      if (!technical) {
+        expect(details).toBeUndefined();
+        return;
       }
       const panel = findComponent(details, 'ActivityTracePanel');
       expect(panel.props.lines).toEqual(activity);
@@ -1310,6 +1313,92 @@ describe('main composer pending edits', () => {
       expect(header.props.count).toBe(3);
     },
   );
+
+  it.each(
+    [false, true].flatMap((technical) =>
+      (
+        [
+          { name: 'text reply', content: {} },
+          { name: 'system warning', content: { systemGenerated: true } },
+          { name: 'suggested-action notice', content: { suggestedAction: 'retry' } },
+          { name: 'file-only reply', content: { text: '', files: [{ filename: 'report.txt', size: 128 }] } },
+          {
+            name: 'audio-only reply',
+            content: {
+              text: '',
+              files: [{ filename: 'reply.wav', size: 128, contentType: 'audio/wav', url: 'blob:fixture-audio' }],
+            },
+          },
+          {
+            name: 'video-only reply',
+            content: {
+              text: '',
+              files: [{ filename: 'reply.mp4', size: 128, contentType: 'video/mp4', url: 'blob:fixture-video' }],
+            },
+          },
+          {
+            name: 'display card',
+            content: { card: { title: 'Card', description: 'Reply', children: [], actions: [] } },
+          },
+        ] satisfies { name: string; content: Partial<ConversationMessage> }[]
+      ).map(({ name, content }) => ({
+        technical,
+        name,
+        content,
+      })),
+    ),
+  )('places $name technical information inside its bubble ($technical)', ({ technical, content }) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical } };
+    applyConversationFrame(
+      testSnapshot({
+        messages: [
+          {
+            id: 'reply',
+            direction: 'out',
+            text: 'Reply',
+            timestamp: '2026-09-29T00:00:07Z',
+            timelinePosition: 200,
+            turnId: testTurn.id,
+            deliveryOrigin: 'response',
+            ...content,
+          },
+        ],
+        turns: [
+          {
+            ...testTurn,
+            phase: 'settled',
+            outcome: 'warning',
+            outputIds: ['reply'],
+            endedAt: '2026-09-29T00:00:07Z',
+            metadata: { status: 'final', model: 'fixture-model', durationMs: 7000 },
+            usage: [{ id: 'usage', value: { cost_usd: 0.01, context_tokens: 35, context_window: 100 } }],
+          },
+        ],
+      }),
+      'thread',
+    );
+    resetMount();
+    hooks.cursor = 0;
+    const log = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    hooks.cursor = 0;
+    const logTree = log.type(log.props);
+    const message = findComponent(logTree, 'Message');
+    resetMount();
+    hooks.cursor = 0;
+    let bubble = message.type(message.props);
+    const card = findComponent(bubble, 'DisplayCardMessage');
+    if (card) bubble = card.type(card.props);
+    expect(findComponent(logTree, 'ResponseStatusRow')).toBeUndefined();
+    const details = findComponent(bubble, 'TurnTechnicalDetails');
+    expect(!!details).toBe(technical);
+    if (details) {
+      expect(bubble.props.children[0]).toBe(details);
+      expect(details.props.turn.id).toBe(testTurn.id);
+      expect(details.props.ownerId).toBe(`turn:${testTurn.id}`);
+      expect(details.props.lines).toHaveLength(2);
+    }
+  });
 
   it.each(
     (['running', 'stopping', 'settling'] as const).flatMap((phase) =>

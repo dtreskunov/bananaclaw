@@ -355,7 +355,11 @@ left while actions occupy the right side of the row.
 **Appearance → Transcript details → Show technical information** controls technical
 details on all bubbles: activity trace, elapsed time, recorded activity count,
 cost, and context use. Technical information occupies a separate line at the top of live, reply and display-card
-bubbles, and is absent when the toggle is off. The regular information line
+bubbles, including system-generated warning/error notices and attachment-only
+replies, and is absent when the toggle is off. A settled turn's final response
+owns its trace and usage inside that bubble, regardless of who generated it.
+Live turns, questions, and turns with only intermediate tool deliveries or no
+final response keep their separate turn row. The regular information line
 remains at the bottom and retains relative timestamps and message provenance.
 The disclosure is labelled **5 traces** (or **1 trace**), counting recorded
 trace entries, not model requests or exclusively tool calls; display-only markers

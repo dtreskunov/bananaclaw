@@ -44,6 +44,10 @@ const scenes = [
   { id: 'disconnected', label: 'Disconnected' },
   { id: 'settling', label: 'Settling' },
   { id: 'reply', label: 'Settled reply' },
+  { id: 'reply-file', label: 'Settled file-only reply' },
+  { id: 'warning-reply', label: 'System warning reply' },
+  { id: 'stopped-reply', label: 'System stop notice' },
+  { id: 'interrupted-reply', label: 'System interruption notice' },
   { id: 'empty-reply', label: 'Settled reply (no recorded steps)' },
   { id: 'outputless', label: 'Settled without reply' },
   { id: 'silent-empty', label: 'No reply (outcome only)' },
@@ -69,6 +73,9 @@ const terminalScenes: Partial<Record<Scene, ConversationTurn['outcome']>> = {
   'warning-empty': 'warning',
   'interrupted-empty': 'interrupted',
   'card-warning': 'warning',
+  'warning-reply': 'warning',
+  'stopped-reply': 'stopped',
+  'interrupted-reply': 'interrupted',
 };
 const nextChapterScene: Partial<Record<Scene, Scene>> = {
   'chapter-running': 'chapter-completed',
@@ -189,7 +196,8 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
   const compactSummary = nextScene.startsWith('technical-summary');
   const elapsedMs = nextScene === 'technical-summary-zero-cost' ? 710_000 : compactSummary ? 15_000 : 12_000;
   const outcomeOnly = nextScene.endsWith('-empty') || nextScene === 'card-warning';
-  const settled = compactSummary || !!terminalOutcome || failed || ['reply', 'empty-reply', 'outputless', 'card'].includes(nextScene);
+  const noticeReply = ['warning-reply', 'stopped-reply', 'interrupted-reply'].includes(nextScene);
+  const settled = compactSummary || !!terminalOutcome || failed || ['reply', 'reply-file', 'empty-reply', 'outputless', 'card'].includes(nextScene);
   const phase = settled
     ? 'settled'
     : nextScene === 'stopping'
@@ -276,7 +284,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
         ...(nextScene === 'parallel-completed' ? { durationMs: 1200 } : {}),
       }),
     });
-  const hasReply = settled && nextScene !== 'outputless' && (!terminalOutcome || nextScene === 'card-warning');
+  const hasReply = settled && nextScene !== 'outputless' && (!terminalOutcome || nextScene === 'card-warning' || noticeReply);
   const turn: ConversationTurn = {
     id: fixtureTurnId,
     phase,
@@ -353,8 +361,11 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
               deliveryOrigin: 'response' as const,
               text: nextScene === 'failed-model-handled'
                 ? 'Your message could not be processed: the provider blocked it with its content filtering policy.'
+                : nextScene === 'reply-file' ? ''
+                : noticeReply ? 'The runner ended this turn with a system notice.'
                 : failed ? 'The fixture response failed.' : 'The **fixture response** is complete.',
-              ...(failed && nextScene !== 'failed-model-handled' ? { systemGenerated: true } : {}),
+              ...((failed && nextScene !== 'failed-model-handled') || noticeReply ? { systemGenerated: true } : {}),
+              ...(nextScene === 'reply-file' ? { files: [{ filename: 'report.txt', size: 128 }] } : {}),
               timestamp: new Date(started + elapsedMs).toISOString(),
               timelinePosition: (started + elapsedMs) * 1000,
               ...(nextScene === 'card' || nextScene === 'card-warning'

@@ -61,7 +61,6 @@ export function conversationTimeline(view: Omit<Conversation, 'timeline'>): Conv
             const message = messages.find((message) => message.id === entry.id);
             return (
               message?.direction === 'out' &&
-              !message.systemGenerated &&
               message.deliveryOrigin !== 'send_message' &&
               message.deliveryOrigin !== 'send_file'
             );
