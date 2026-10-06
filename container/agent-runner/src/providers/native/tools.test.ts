@@ -29,6 +29,18 @@ afterEach(() => {
 });
 
 describe('native coding tools', () => {
+  it('only advertises image viewing for known vision-capable models on both adapters', () => {
+    for (const protocol of ['openai-chat', 'anthropic-messages'] as const) {
+      expect(createNativeTools(root, undefined, undefined, { model: { protocol } })).not.toHaveProperty('view_image');
+      expect(createNativeTools(root, undefined, undefined, {
+        model: { protocol, inputModalities: ['text'] },
+      })).not.toHaveProperty('view_image');
+      expect(createNativeTools(root, undefined, undefined, {
+        model: { protocol, inputModalities: ['text', 'image'] },
+      })).toHaveProperty('view_image');
+    }
+  });
+
   it('advertises the shared Claude/OpenCode tool names', () => {
     expect(Object.keys(createNativeTools(root)).filter((name) => !name.startsWith('mcp__'))).toEqual([
       'read',

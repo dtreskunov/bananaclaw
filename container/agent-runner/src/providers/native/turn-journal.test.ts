@@ -6,6 +6,44 @@ import { INTERRUPTED_TOOL, NativeTurnJournal } from './turn-journal.js';
 const options = (toolCallId: string): ToolExecutionOptions => ({ toolCallId, messages: [] });
 
 describe('incremental native turn journal', () => {
+  it('persists async multimodal conversion once across incremental saves, stops and forks', async () => {
+    const store = new NativeStore(':memory:');
+    try {
+      const conversation = store.createConversation();
+      const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'inspect screenshot' });
+      let conversions = 0;
+      let executions = 0;
+      const output = { path: '/tmp/screenshot.png', data: 'AQID' };
+      const modelOutput = { type: 'content', value: [
+        { type: 'text', text: output.path },
+        { type: 'file', mediaType: 'image/png', data: { type: 'data', data: output.data } },
+      ] } as const;
+      const tools = journal.wrap({
+        view_image: tool({
+          inputSchema: jsonSchema({ type: 'object' }),
+          execute: async () => { executions++; return output; },
+          toModelOutput: async () => {
+            conversions++;
+            await Promise.resolve();
+            return { ...modelOutput, value: [...modelOutput.value] };
+          },
+        }),
+      }, new AbortController().signal);
+      expect(await tools.view_image.execute!({}, options('image'))).toEqual(output);
+      expect(store.messages(conversation).at(-1)).toMatchObject({
+        role: 'tool', content: [{ output: modelOutput }],
+      });
+      expect(await tools.view_image.toModelOutput!({ toolCallId: 'image', input: {}, output })).toEqual(modelOutput);
+      await journal.settle();
+      journal.save(true);
+      const child = store.fork(conversation, journal.checkpoint)!;
+      expect(store.messages(child)).toEqual(store.messages(conversation));
+      expect(JSON.stringify(store.messages(child))).toContain('"type":"file"');
+      expect(conversions).toBe(1);
+      expect(executions).toBe(1);
+    } finally { store.close(); }
+  });
+
   it('retains builtin inputs and MCP error outcomes without changing model result history', async () => {
     const store = new NativeStore(':memory:');
     try {

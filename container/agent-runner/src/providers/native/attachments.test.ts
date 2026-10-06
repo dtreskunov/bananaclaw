@@ -17,6 +17,25 @@ afterEach(() => {
 });
 
 describe('audio routing', () => {
+  it('counts inline tool media and legacy media without counting remote references', () => {
+    expect(inlineHistoryBytes([
+      { role: 'user', content: [
+        { type: 'image', image: 'https://example.test/image.png' },
+        { type: 'file', mediaType: 'image/png', data: 'data:image/png;base64,AQID' },
+      ] },
+      { role: 'tool', content: [{
+        type: 'tool-result', toolCallId: 'image', toolName: 'view_image',
+        output: { type: 'content', value: [
+          { type: 'text', text: 'AQID is not media here' },
+          { type: 'file', mediaType: 'image/png', data: { type: 'data', data: 'AQID' } },
+          { type: 'file', mediaType: 'image/png', data: { type: 'url', url: 'https://example.test/image.png' } },
+          { type: 'image-data', mediaType: 'image/png', data: 'BAUG' },
+          { type: 'file-data', mediaType: 'audio/mpeg', data: 'BwgJ' },
+        ] },
+      }] },
+    ])).toBe(16);
+  });
+
   it('recognizes common aliases without mistaking explicitly typed video for audio', () => {
     for (const mime of [' Audio/X-Wav; codecs=pcm ', 'application/ogg', 'application/octet-stream']) {
       expect(isAudioAttachment({ path: '/voice.opus', filename: 'voice.opus', mime })).toBe(true);

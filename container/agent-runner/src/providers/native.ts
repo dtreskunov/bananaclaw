@@ -1,4 +1,4 @@
-import { isStepCount, streamText, type ModelMessage, type ToolSet } from 'ai';
+import { isStepCount, streamText, wrapLanguageModel, type ModelMessage, type ToolSet } from 'ai';
 
 import { registerProvider } from './provider-registry.js';
 import { loadConfig } from '../config.js';
@@ -28,6 +28,7 @@ import { NativeStore } from './native/store.js';
 import { NativeTurnJournal } from './native/turn-journal.js';
 import { compactNativeContext, COMPACTION_INSTRUCTIONS, isContextOverflow, MAX_COMPACTION_ATTEMPTS } from './native/compaction.js';
 import { createNativeTools } from './native/tools.js';
+import { openAiToolImages } from './native/tool-images.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
 import {
   isPointerReply,
@@ -159,6 +160,8 @@ export function formatNativeToolStep(
     title = status === 'running' ? 'Loading tools' : 'Loaded tools';
   } else if (tool === 'todoread') {
     title = status === 'running' ? 'Reviewing task list' : 'Reviewed task list';
+  } else if (tool === 'view_image') {
+    title = status === 'completed' ? 'Viewed image' : 'Viewing image';
   }
   return {
     kind: 'tool',
@@ -343,19 +346,114 @@ export class NativeProvider implements AgentProvider {
               const configuredModel = options.model ?? process.env.NATIVE_MODEL;
               if (!configuredModel) throw new Error('native requires a canonical model setting');
               const prior = portableHistory(store.contextMessages(continuation));
-              journal = new NativeTurnJournal(store, continuation, { role: 'user', content: turn.text });
+              const turnJournal = new NativeTurnJournal(store, continuation, { role: 'user', content: turn.text });
+              journal = turnJournal;
               abortController.signal.throwIfAborted();
               const resolved = await resolveNativeModel(configuredModel);
+              const conversation = continuation;
               abortController.signal.throwIfAborted();
-              const incoming = await prepareNativeUserMessage(turn.text, turn.files, resolved, {
-                signal: abortController.signal,
-                maxInlineBytes: MAX_INLINE_BYTES - inlineHistoryBytes(prior),
-              });
-              journal.updateInput(incoming);
-              abortController.signal.throwIfAborted();
-              const nativeTools: ToolSet = turn.toolsDisabled
+              const messages: ModelMessage[] = [...prior, { role: 'user', content: turn.text }];
+              let toolMediaPressure = false;
+              const nativeTools = (): ToolSet => turn.toolsDisabled
                 ? {}
-                : { ...createNativeTools(input.cwd, skills, todoState), ...NO_REPLY_TOOLS };
+                : {
+                    ...createNativeTools(input.cwd, skills, todoState, {
+                      model: resolved,
+                      maxInlineBytes: Math.max(0, MAX_INLINE_BYTES - inlineHistoryBytes(messages)),
+                      onMediaPressure: () => { toolMediaPressure = true; },
+                    }),
+                    ...NO_REPLY_TOOLS,
+                  };
+              const configuredMaxOutput =
+                typeof options.modelParams?.max_tokens === 'number'
+                  ? Math.floor(options.modelParams.max_tokens)
+                  : resolved.maxOutputTokens;
+              const adapter = await languageModel(resolved);
+              const model = resolved.protocol === 'openai-chat'
+                ? wrapLanguageModel({ model: adapter, middleware: openAiToolImages })
+                : adapter;
+              let stepsCompleted = 0;
+              let finishReason = '';
+              let reply: string | null = null;
+              let silence: string | null = null;
+              let checkpoint = journal.checkpoint;
+              const appliedSteeringIds: string[] = [];
+              const totalUsage: TurnUsage = usageFor(resolved, {}, {}, 0, 0);
+              // One-off instruction for the next step; never persisted.
+              let nudge: string | null = null;
+              // Past the step limit: one more step, without tools, to report progress.
+              let wrappingUp = false;
+              // Text written alongside tool calls, which is never delivered.
+              let undeliveredChars = 0;
+              let compactionAttempts = 0;
+              async function* recoverContext(reason: 'context' | 'media'): AsyncGenerator<ProviderEvent> {
+                if (compactionAttempts >= MAX_COMPACTION_ATTEMPTS)
+                  throw new Error(`Native ${reason === 'media' ? 'media budget' : 'context'} recovery exhausted; reduce input size or media history`);
+                abortController.signal.throwIfAborted();
+                const compactStartedAt = Date.now();
+                const compactId = `native-compaction-${continuation}-${++compactionAttempts}-${compactStartedAt}`;
+                yield { type: 'progress', step: {
+                  kind: 'compaction', id: compactId, auto: true, status: 'running',
+                  detail: reason === 'media'
+                    ? 'Inline media budget exceeded; summarizing older context'
+                    : 'Context window exceeded; summarizing older context',
+                } };
+                try {
+                  await turnJournal.settle();
+                  const compactSignal = AbortSignal.any([abortController.signal, AbortSignal.timeout(120_000)]);
+                  await compactNativeContext({
+                    store, conversation, protectedInputs: turnJournal.inputRefs(),
+                    attempt: compactionAttempts, contextWindow: resolved.contextWindow, signal: compactSignal,
+                    summarize: async (prompt) => {
+                      const compacted = streamText({
+                        model, system: COMPACTION_INSTRUCTIONS, messages: [{ role: 'user', content: prompt }],
+                        maxOutputTokens: Math.min(2048, Math.max(64, Math.floor((resolved.contextWindow ?? 32_768) / 8))),
+                        maxRetries: 2, abortSignal: compactSignal,
+                        onLanguageModelCallEnd: ({ usage, performance }) => {
+                          const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
+                          modelCallMs += data.duration_api_ms;
+                          callUsages.push(data);
+                          addUsage(totalUsage, data);
+                        },
+                      });
+                      for await (const part of compacted.stream) if (part.type === 'error') throw part.error;
+                      return compacted.text;
+                    },
+                  });
+                  messages.splice(0, messages.length, ...portableHistory(store.contextMessages(conversation)));
+                  yield* flushCallUsage();
+                  yield { type: 'progress', step: {
+                    kind: 'compaction', id: compactId, auto: true, status: 'completed',
+                    durationMs: Date.now() - compactStartedAt,
+                  } };
+                } catch (error) {
+                  yield* flushCallUsage();
+                  yield { type: 'progress', step: {
+                    kind: 'compaction', id: compactId, auto: true,
+                    status: abortController.signal.aborted ? 'interrupted' : 'error',
+                    error: errorMessage(error), durationMs: Date.now() - compactStartedAt,
+                  } };
+                  throw error;
+                }
+              }
+              async function* prepareInput(
+                text: string, files: FileAttachment[] | undefined, extraBytes = 0,
+              ): AsyncGenerator<ProviderEvent, ModelMessage> {
+                while (true) {
+                  let pressure = false;
+                  const historyBytes = inlineHistoryBytes(messages);
+                  const message = await prepareNativeUserMessage(text, files, resolved, {
+                    signal: abortController.signal,
+                    maxInlineBytes: MAX_INLINE_BYTES - historyBytes - extraBytes,
+                    ...(historyBytes > 0 ? { onMediaPressure: () => { pressure = true; } } : {}),
+                  });
+                  if (!pressure) return message;
+                  yield* recoverContext('media');
+                }
+              }
+              const incoming = yield* prepareInput(turn.text, turn.files);
+              journal.updateInput(incoming);
+              messages.splice(0, messages.length, ...portableHistory(store.contextMessages(continuation)));
               const mcpEntries = turn.toolsDisabled ? [] : await mcpManager.entries(abortController.signal);
               // Large external tool sets are loaded on demand via tool_search;
               // the loaded set can grow between steps, so rebuild per step.
@@ -371,31 +469,14 @@ export class NativeProvider implements AgentProvider {
               const mcpTools: ToolSet = deferredMcp
                 ? {}
                 : Object.fromEntries(mcpEntries.map((entry) => [entry.name, entry.tool]));
-              const stepTools = (): ToolSet => ({ ...nativeTools, ...(deferredMcp?.toolSet() ?? mcpTools) });
+              const stepTools = (): ToolSet => ({ ...nativeTools(), ...(deferredMcp?.toolSet() ?? mcpTools) });
               const mcpCatalog = deferredMcp?.instructions() ?? null;
               abortController.signal.throwIfAborted();
-              const configuredMaxOutput =
-                typeof options.modelParams?.max_tokens === 'number'
-                  ? Math.floor(options.modelParams.max_tokens)
-                  : resolved.maxOutputTokens;
-              const model = await languageModel(resolved);
-              const messages: ModelMessage[] = [...prior, incoming];
-              let stepsCompleted = 0;
-              let finishReason = '';
-              let reply: string | null = null;
-              let silence: string | null = null;
-              let checkpoint = journal.checkpoint;
-              const appliedSteeringIds: string[] = [];
-              const totalUsage: TurnUsage = usageFor(resolved, {}, {}, 0, 0);
-              // One-off instruction for the next step; never persisted.
-              let nudge: string | null = null;
-              // Past the step limit: one more step, without tools, to report progress.
-              let wrappingUp = false;
-              // Text written alongside tool calls, which is never delivered.
-              let undeliveredChars = 0;
-              let compactionAttempts = 0;
               while (true) {
                 abortController.signal.throwIfAborted();
+                while (inlineHistoryBytes(messages) > MAX_INLINE_BYTES)
+                  yield* recoverContext('media');
+                toolMediaPressure = false;
                 const stepNudge: string | null = nudge;
                 nudge = null;
                 const result = streamText({
@@ -474,76 +555,8 @@ export class NativeProvider implements AgentProvider {
                   }
                 } catch (error) {
                   if (!isContextOverflow(error) || stepProducedOutput || compactionAttempts >= MAX_COMPACTION_ATTEMPTS) throw error;
-                  abortController.signal.throwIfAborted();
-                  const compactStartedAt = Date.now();
-                  const compactId = `native-compaction-${continuation}-${++compactionAttempts}-${compactStartedAt}`;
-                  yield {
-                    type: 'progress',
-                    step: {
-                      kind: 'compaction',
-                      id: compactId,
-                      auto: true,
-                      status: 'running',
-                      detail: 'Context window exceeded; summarizing older context',
-                    },
-                  };
-                  try {
-                    await journal.settle();
-                    const compactSignal = AbortSignal.any([abortController.signal, AbortSignal.timeout(120_000)]);
-                    await compactNativeContext({
-                      store,
-                      conversation: continuation,
-                      protectedInputs: journal.inputRefs(),
-                      attempt: compactionAttempts,
-                      contextWindow: resolved.contextWindow,
-                      signal: compactSignal,
-                      summarize: async (prompt) => {
-                        const compacted = streamText({
-                          model,
-                          system: COMPACTION_INSTRUCTIONS,
-                          messages: [{ role: 'user', content: prompt }],
-                          maxOutputTokens: Math.min(2048, Math.max(64, Math.floor((resolved.contextWindow ?? 32_768) / 8))),
-                          maxRetries: 2,
-                          abortSignal: compactSignal,
-                          onLanguageModelCallEnd: ({ usage, performance }) => {
-                            const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
-                            modelCallMs += data.duration_api_ms;
-                            callUsages.push(data);
-                            addUsage(totalUsage, data);
-                          },
-                        });
-                        for await (const part of compacted.stream) if (part.type === 'error') throw part.error;
-                        return compacted.text;
-                      },
-                    });
-                    messages.splice(0, messages.length, ...portableHistory(store.contextMessages(continuation)));
-                    nudge = stepNudge;
-                    yield* flushCallUsage();
-                    yield {
-                      type: 'progress',
-                      step: {
-                        kind: 'compaction',
-                        id: compactId,
-                        auto: true,
-                        status: 'completed',
-                        durationMs: Date.now() - compactStartedAt,
-                      },
-                    };
-                  } catch (compactionError) {
-                    yield* flushCallUsage();
-                    yield {
-                      type: 'progress',
-                      step: {
-                        kind: 'compaction',
-                        id: compactId,
-                        auto: true,
-                        status: abortController.signal.aborted ? 'interrupted' : 'error',
-                        error: errorMessage(compactionError),
-                        durationMs: Date.now() - compactStartedAt,
-                      },
-                    };
-                    throw compactionError;
-                  }
+                  yield* recoverContext('context');
+                  nudge = stepNudge;
                   continue;
                 }
 
@@ -573,7 +586,7 @@ export class NativeProvider implements AgentProvider {
                 // Prepare all inputs before acknowledging any: preparation failures
                 // must not consume input for a generation that never starts.
                 const prepared: Array<{ input: SteeringInput; message: ModelMessage }> = [];
-                let inlineBytes = inlineHistoryBytes(messages);
+                let preparedBytes = 0;
                 while (!ended && stepsCompleted < MAX_STEPS && prepared.length < steering.length) {
                   const guidance = steering[prepared.length];
                   // Lock before preparation can yield: an edit must never change
@@ -584,11 +597,8 @@ export class NativeProvider implements AgentProvider {
                     yield { type: 'steering_applied', id: guidance.id };
                     continue;
                   }
-                  const message = await prepareNativeUserMessage(guidance.prompt, guidance.files, resolved, {
-                    signal: abortController.signal,
-                    maxInlineBytes: MAX_INLINE_BYTES - inlineBytes,
-                  });
-                  inlineBytes += inlineHistoryBytes([message]);
+                  const message = yield* prepareInput(guidance.prompt, guidance.files, preparedBytes);
+                  preparedBytes += inlineHistoryBytes([message]);
                   prepared.push({ input: guidance, message });
                 }
                 abortController.signal.throwIfAborted();
@@ -606,6 +616,10 @@ export class NativeProvider implements AgentProvider {
                   step.toolCalls.every((call) => step.content.some((part) =>
                     (part.type === 'tool-result' || part.type === 'tool-error') &&
                     part.toolCallId === call.toolCallId));
+                if (toolMediaPressure) {
+                  yield* recoverContext('media');
+                  nudge = 'Media history was compacted. Retry the failed view_image read if still needed; do not repeat completed actions.';
+                }
                 if (applied) {
                   // Guidance supersedes a drafted answer: the model sees the
                   // draft in history and answers both in its next final message.

@@ -330,6 +330,51 @@ For example, `glob({ pattern: "*.txt", path: "/tmp" })` lists matching files
 under `/tmp`, and `grep({ query: "needle", path: "../shared" })` searches a
 sibling directory.
 
+### Native Provider: Viewing images
+
+Vision-capable native models expose `view_image({ path })` in addition to the
+UTF-8-only `read` tool. It accepts absolute or workspace-relative paths with the
+same container filesystem boundary, including temporary browser screenshots
+and symlinked files. Known text-only models and models with unknown image
+capabilities do not advertise it.
+
+The tool identifies JPEG, PNG, GIF, and WebP by their byte signatures rather
+than trusting filename extensions, rejects empty, truncated or unsupported
+files, and returns tagged multimodal image data through the AI SDK's
+`toModelOutput`. The next request to either the OpenAI-compatible or Anthropic
+Messages adapter therefore contains the actual image pixels. Source path and
+MIME metadata accompany the image; no second model or vision service is used.
+OpenAI Chat cannot embed images in tool responses, so request middleware moves
+those images into adjacent user image blocks after all associated tool results.
+This changes only the wire representation, not the saved conversation or input
+receipts. Anthropic receives image content inside tool results directly.
+Malformed content that passes signature checks can still be rejected by the
+model's image decoder and is surfaced through normal provider error handling.
+
+The existing 16 MiB inline-media budget counts user attachments and tool media,
+including replayed history. Parallel `view_image` calls share the remaining
+per-step budget; limits and filesystem failures are explicit tool errors, not
+text-only substitutes. Media pressure reuses the context-overflow compaction
+recovery path, including its two-attempt per-turn bound, cancellation, usage
+accounting, protected inputs, and activity events. New user attachments and
+steering inputs are prepared again after compaction, before ingestion or
+acknowledgement. A budget-blocked `view_image` finishes its tool exchange first;
+the runner then compacts and continues the model with guidance to retry only the
+failed image read, never replaying the completed SDK step or other tool actions.
+Over-budget tool history is also compacted before the next model request.
+
+Images larger than the entire budget cannot benefit from compaction and keep
+their explicit rejection (or the existing user-attachment reference fallback).
+Protected/recent media can prevent recovery; compaction failure and exhaustion
+are surfaced explicitly without dropping protected inputs. Successful results
+are snapshotted as multimodal content
+in incremental checkpoints and final history, so resume does not require the
+source file. Compaction retains the full original transcript but can omit older
+images from active context; the agent can reopen their source paths on demand.
+Reopening requires the source file to still exist; temporary container files
+disappear on exit, so images needed later should be saved in the workspace.
+No screenshots are automatically attached or re-read.
+
 ### Native Provider: Context-overflow compaction
 
 Recognized context rejections, including MiniMax's

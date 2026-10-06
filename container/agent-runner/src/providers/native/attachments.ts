@@ -7,8 +7,8 @@ import type { NativeModel } from './catalog.js';
 import { prepareAudio } from './audio.js';
 
 export const MAX_INLINE_BYTES = 16 * 1024 * 1024;
-const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-type ModelCapabilities = Pick<NativeModel, 'protocol' | 'inputModalities'>;
+export const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+export type ModelCapabilities = Pick<NativeModel, 'protocol' | 'inputModalities'>;
 
 export function audioRoutingReason(model?: ModelCapabilities): string | null {
   if (!model?.inputModalities) return 'model-audio-capability-unknown';
@@ -17,16 +17,34 @@ export function audioRoutingReason(model?: ModelCapabilities): string | null {
   return null;
 }
 
+function inlineDataBytes(data: unknown): number {
+  if (typeof data === 'string') {
+    if (/^https?:\/\//i.test(data)) return 0;
+    const dataUrl = /^data:[^,]*;base64,/i.exec(data);
+    return Buffer.byteLength(dataUrl ? data.slice(dataUrl[0].length) : data);
+  }
+  if (data instanceof Uint8Array) return 4 * Math.ceil(data.byteLength / 3);
+  if (data instanceof ArrayBuffer) return 4 * Math.ceil(data.byteLength / 3);
+  return 0;
+}
+
 export function inlineHistoryBytes(messages: ModelMessage[]): number {
   let total = 0;
   for (const message of messages) {
-    if (message.role !== 'user' || !Array.isArray(message.content)) continue;
-    for (const part of message.content) {
-      if (part.type === 'file' || part.type === 'image') {
-        const data = part.type === 'file' ? part.data : part.image;
-        if (typeof data === 'string') total += Buffer.byteLength(data);
-        else if (data instanceof Uint8Array) total += 4 * Math.ceil(data.byteLength / 3);
-        else if (data instanceof ArrayBuffer) total += 4 * Math.ceil(data.byteLength / 3);
+    if (message.role === 'user' && Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (part.type === 'file' || part.type === 'image')
+          total += inlineDataBytes(part.type === 'file' ? part.data : part.image);
+      }
+    } else if (message.role === 'tool') {
+      for (const result of message.content) {
+        if (result.type !== 'tool-result' || result.output.type !== 'content') continue;
+        for (const part of result.output.value) {
+          if (part.type === 'file' && part.data.type === 'data')
+            total += inlineDataBytes(part.data.data);
+          else if (part.type === 'image-data' || part.type === 'file-data')
+            total += inlineDataBytes(part.data);
+        }
       }
     }
   }
@@ -56,6 +74,7 @@ export async function prepareNativeUserMessage(
     signal?: AbortSignal;
     maxInlineBytes?: number;
     prepare?: typeof prepareAudio;
+    onMediaPressure?: () => void;
   } = {},
 ): Promise<UserModelMessage> {
   const content: Exclude<UserModelMessage['content'], string> = [];
@@ -69,15 +88,19 @@ export async function prepareNativeUserMessage(
     let bytes: Buffer | undefined;
     let nativeFile: Pick<FileAttachment, 'mime' | 'filename'> = file;
     let conversion = '';
+    let pressure = false;
     if (!reason && audio) {
-      if (remaining < 4) reason = 'inline-payload-limit';
+      if (remaining < 4) { reason = 'inline-payload-limit'; pressure = true; }
       else {
         const prepared = await prepare(file, {
           signal: options.signal,
           maxOutputBytes: Math.floor(remaining / 4) * 3,
         });
         options.signal?.throwIfAborted();
-        if (prepared.kind === 'file-reference') reason = prepared.reason;
+        if (prepared.kind === 'file-reference') {
+          reason = prepared.reason;
+          pressure = reason === 'audio-output-size-limit' && remaining < MAX_INLINE_BYTES;
+        }
         else {
           bytes = prepared.bytes;
           nativeFile = prepared.file;
@@ -86,13 +109,19 @@ export async function prepareNativeUserMessage(
       }
     } else if (!audio && supportsFile(file, model)) {
       const size = fs.statSync(file.path).size;
-      if (4 * Math.ceil(size / 3) > remaining) reason = 'inline-payload-limit';
+      const encodedBytes = 4 * Math.ceil(size / 3);
+      if (encodedBytes > remaining) {
+        reason = 'inline-payload-limit';
+        pressure = encodedBytes <= MAX_INLINE_BYTES;
+      }
       else bytes = fs.readFileSync(file.path);
     }
     if (bytes && 4 * Math.ceil(bytes.length / 3) > remaining) {
+      pressure = 4 * Math.ceil(bytes.length / 3) <= MAX_INLINE_BYTES;
       bytes = undefined;
       reason = 'inline-payload-limit';
     }
+    if (pressure) options.onMediaPressure?.();
     if (bytes) {
       const data = bytes.toString('base64');
       remaining -= data.length;

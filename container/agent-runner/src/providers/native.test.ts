@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { crc32 } from 'node:zlib';
 import { jsonSchema, tool } from 'ai';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
@@ -23,7 +24,7 @@ let requestHeaders: Headers[];
 let toolMode: boolean;
 let anthropicToolMode: boolean;
 let externalMcpToolMode: boolean;
-/** Each OpenAI-compatible model request pops one scripted call; text when empty. */
+/** Each non-summary model request pops one scripted call; text when empty. */
 let scriptedToolCalls: Array<[name: string, args: string]>;
 let skillToolMode: boolean;
 let todoToolMode: boolean;
@@ -48,6 +49,13 @@ const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
 
 function replyTexts(events: ProviderEvent[]): string[][] {
   return events.flatMap((event) => (event.type === 'result' ? [(event.replies ?? []).map((reply) => reply.text)] : []));
+}
+
+function requestImages(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value.flatMap(requestImages);
+  if (!value || typeof value !== 'object') return [];
+  if ('type' in value && (value.type === 'image' || value.type === 'image_url')) return [value];
+  return Object.values(value).flatMap(requestImages);
 }
 
 async function collect(
@@ -105,7 +113,9 @@ beforeEach(() => {
       const isCompaction = JSON.stringify(requests.at(-1)).includes(COMPACTION_INSTRUCTIONS);
       const modelMessages = requests.at(-1)?.messages;
       const hasCompletedTool = Array.isArray(modelMessages) && modelMessages.some(
-        (message: unknown) => !!message && typeof message === 'object' && 'role' in message && message.role === 'tool',
+        (message: unknown) => !!message && typeof message === 'object' && 'role' in message && (
+          message.role === 'tool' || ('content' in message && JSON.stringify(message.content).includes('"tool_result"'))
+        ),
       );
       if (isCompaction && rejectCompaction) {
         return Response.json({ error: { message: 'Summary service rejected the request', type: 'invalid_request_error' } }, { status: 400 });
@@ -129,20 +139,21 @@ beforeEach(() => {
       if (rejectAudio && JSON.stringify(requests.at(-1)?.messages).includes('input_audio')) {
         return Response.json({ error: { message: 'Unsupported audio format', type: 'invalid_request_error' } }, { status: 400 });
       }
+      const scripted = isCompaction ? undefined : scriptedToolCalls.shift();
       if (new URL(request.url).pathname.endsWith('/messages')) {
         const requestBody = requests.at(-1)!;
         const hasToolResult = JSON.stringify(requestBody.messages).includes('tool_result');
         const body =
-          anthropicToolMode && !hasToolResult
+          !isCompaction && (scripted || (anthropicToolMode && !hasToolResult))
             ? [
                 'event: message_start',
                 'data: {"type":"message_start","message":{"id":"msg_minimax_tool","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0}}}',
                 '',
                 'event: content_block_start',
-                `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_minimax_1","name":"${slowToolMode ? 'bash' : 'mcp__nanoclaw__send_message'}","input":{}}}`,
+                `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_minimax_${requests.length}","name":"${scripted?.[0] ?? (slowToolMode ? 'bash' : 'mcp__nanoclaw__send_message')}","input":{}}}`,
                 '',
                 'event: content_block_delta',
-                `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":${JSON.stringify(slowToolMode ? '{"command":"sleep 30"}' : '{"text":"hello from direct tool"}')}}}`,
+                `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":${JSON.stringify(scripted?.[1] ?? (slowToolMode ? '{"command":"sleep 30"}' : '{"text":"hello from direct tool"}'))}}}`,
                 '',
                 'event: content_block_stop',
                 'data: {"type":"content_block_stop","index":0}',
@@ -181,7 +192,6 @@ beforeEach(() => {
       const requestBody = requests.at(-1)!;
       const messages = requestBody.messages as Array<{ role: string }>;
       const toolResultCount = messages.filter((message) => message.role === 'tool').length;
-      const scripted = scriptedToolCalls.shift();
       const shouldCallTool = scripted ? true : todoToolMode
         ? toolResultCount < 2
         : (toolMode || externalMcpToolMode || skillToolMode || slowToolMode) && toolResultCount === 0;
@@ -247,6 +257,302 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jv1sAAAAASUVORK5CYII=';
+  const gif = 'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+  function vision(protocol: nativeCatalog.NativeProtocol) {
+    process.env.NATIVE_PROTOCOL = protocol;
+    catalogModels = { local: { models: {
+      'vision-model': { modalities: { input: ['text', 'image'], output: ['text'] } },
+    } } };
+    return new NativeProvider({ model: 'local/vision-model' });
+  }
+  function wireImage(protocol: nativeCatalog.NativeProtocol, data = png, mime = 'image/png') {
+    return protocol === 'openai-chat'
+      ? { type: 'image_url', image_url: { url: `data:${mime};base64,${data}` } }
+      : { type: 'image', source: { type: 'base64', media_type: mime, data } };
+  }
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'sends actual local-image content through %s and replays without source files',
+    async (protocol) => {
+      const provider = vision(protocol);
+      const filename = path.join(root, 'screenshot.png');
+      fs.writeFileSync(filename, Buffer.from(png, 'base64'));
+      scriptedToolCalls = [
+        ['view_image', '{"path":"screenshot.png"}'],
+        ['view_image', JSON.stringify({ path: filename })],
+      ];
+      const events = await collect(provider);
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(JSON.stringify(requests[0]?.tools)).toContain('view_image');
+      expect(requestImages(requests[1]?.messages)).toContainEqual(wireImage(protocol));
+      expect(requestImages(requests[2]?.messages)).toHaveLength(2);
+      expect(events.filter((event) => event.type === 'progress' &&
+        event.step.tool === 'view_image' && event.step.status === 'completed')).toHaveLength(2);
+      const init = events.find((event) => event.type === 'init');
+      if (init?.type !== 'init') throw new Error('Missing native continuation');
+      fs.unlinkSync(filename);
+      const resumed = await collect(new NativeProvider({ model: 'local/vision-model' }), init.continuation);
+      expect(resumed.some((event) => event.type === 'error')).toBe(false);
+      expect(requestImages(requests.at(-1)?.messages)).toHaveLength(2);
+      expect(requestImages(requests.at(-1)?.messages)).toContainEqual(wireImage(protocol));
+      expect(resumed.some((event) => event.type === 'progress' && event.step.tool === 'view_image')).toBe(false);
+    },
+  );
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'reopens the updated source image after %s compaction omits old pixels',
+    async (protocol) => {
+      const provider = vision(protocol);
+      const filename = path.join(root, 'image-source.png');
+      fs.writeFileSync(filename, Buffer.from(png, 'base64'));
+      scriptedToolCalls = [['view_image', '{"path":"image-source.png"}']];
+      const first = await collect(provider);
+      const init = first.find((event) => event.type === 'init');
+      if (init?.type !== 'init') throw new Error('Missing native continuation');
+      const store = new NativeStore();
+      try {
+        store.append(init.continuation, [
+          { role: 'user', content: 'Subsequent requirements '.repeat(250) },
+          { role: 'assistant', content: 'Later work' },
+          { role: 'user', content: 'More work' },
+          { role: 'assistant', content: 'More results' },
+          { role: 'user', content: 'Another request' },
+          { role: 'assistant', content: 'Another answer' },
+        ]);
+        fs.writeFileSync(filename, Buffer.from(gif, 'base64'));
+        contextOverflows = 1;
+        scriptedToolCalls = [['view_image', '{"path":"image-source.png"}']];
+        const events = await collect(provider, init.continuation);
+        expect(events.some((event) => event.type === 'error')).toBe(false);
+        expect(events.some((event) => event.type === 'progress' &&
+          event.step.kind === 'compaction' && event.step.status === 'completed')).toBe(true);
+        const summary = requests.find((request) => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+        expect(summary).toBeDefined();
+        expect(JSON.stringify(summary)).toContain('image-source.png');
+        expect(requestImages(summary?.messages)).toEqual([]);
+        expect(JSON.stringify(summary)).not.toContain(png);
+        expect(requestImages(requests.at(-1)?.messages)).toEqual([wireImage(protocol, gif, 'image/gif')]);
+        expect(JSON.stringify(store.contextMessages(init.continuation))).not.toContain(png);
+        expect(JSON.stringify(store.messages(init.continuation))).toContain(png);
+        expect(JSON.stringify(store.messages(init.continuation))).toContain(gif);
+      } finally { store.close(); }
+    },
+  );
+
+  it('reports protected media that cannot be compacted instead of silently dropping it', async () => {
+    const provider = vision('openai-chat');
+    fs.writeFileSync(path.join(root, 'image.png'), Buffer.from(png, 'base64'));
+    const protectedPath = path.join(root, 'protected.png');
+    fs.writeFileSync(protectedPath, paddedPng(nativeAttachments.MAX_INLINE_BYTES));
+    scriptedToolCalls = [['view_image', '{"path":"image.png"}']];
+    const events = await collect(provider, undefined, [{
+      path: protectedPath, mime: 'image/png', filename: 'protected.png',
+    }]);
+    expect(events.some((event) => event.type === 'error' && event.message.includes('cannot be compacted'))).toBe(true);
+    expect(requestImages(requests.at(-1)?.messages)).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'progress' &&
+      event.step.tool === 'view_image' && event.step.status === 'completed')).toHaveLength(0);
+    expect(events.some((event) => event.type === 'progress' && event.step.status === 'error' &&
+      event.step.error?.includes('media budget'))).toBe(true);
+  });
+
+  function paddedPng(encodedBytes: number) {
+    const bytes = Buffer.from(png, 'base64');
+    const padding = Buffer.alloc(encodedBytes * 3 / 4 - bytes.length - 12, 65);
+    padding.write('Padding\0');
+    const chunk = Buffer.alloc(padding.length + 12);
+    chunk.writeUInt32BE(padding.length);
+    chunk.write('tEXt', 4);
+    padding.copy(chunk, 8);
+    chunk.writeUInt32BE(crc32(chunk.subarray(4, -4)), chunk.length - 4);
+    const image = Buffer.concat([bytes.subarray(0, -12), chunk, bytes.subarray(-12)]);
+    expect(image.toString('base64').length).toBe(encodedBytes);
+    return image;
+  }
+
+  function mediaHistory() {
+    const encodedBytes = nativeAttachments.MAX_INLINE_BYTES - png.length + 4;
+    const data = paddedPng(encodedBytes).toString('base64');
+    const store = new NativeStore();
+    try {
+      const continuation = store.createConversation();
+      store.append(continuation, [
+        { role: 'user', content: [
+          { type: 'text', text: 'Earlier image at /workspace/old.png' },
+          { type: 'file', mediaType: 'image/png', data },
+        ] },
+        { role: 'assistant', content: 'Earlier visual work done' },
+        { role: 'user', content: 'Later requirements '.repeat(250) },
+        { role: 'assistant', content: 'Later work done' },
+        { role: 'user', content: 'Another task' },
+        { role: 'assistant', content: 'Another task done' },
+      ]);
+      expect(nativeAttachments.inlineHistoryBytes(store.contextMessages(continuation))).toBe(encodedBytes);
+      return continuation;
+    } finally { store.close(); }
+  }
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'recovers actual media pressure on %s without replaying completed actions',
+    async (protocol) => {
+      const provider = vision(protocol);
+      const continuation = mediaHistory();
+      fs.writeFileSync(path.join(root, 'image.png'), Buffer.from(png, 'base64'));
+      scriptedToolCalls = [
+        ['bash', '{"command":"echo once >> once.txt"}'],
+        ['view_image', '{"path":"image.png"}'],
+        ['view_image', '{"path":"image.png"}'],
+      ];
+      const events = await collect(provider, continuation);
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(events.filter((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+        event.step.status === 'completed')).toHaveLength(1);
+      expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+        event.step.detail?.includes('media budget'))).toBe(true);
+      expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+      expect(events.filter((event) => event.type === 'progress' && event.step.tool === 'bash' &&
+        event.step.status === 'completed')).toHaveLength(1);
+      expect(requestImages(requests.at(-1)?.messages)).toEqual([wireImage(protocol)]);
+      const store = new NativeStore();
+      try {
+        expect(nativeAttachments.inlineHistoryBytes(store.contextMessages(continuation))).toBe(png.length);
+        expect(nativeAttachments.inlineHistoryBytes(store.messages(continuation))).toBe(
+          nativeAttachments.MAX_INLINE_BYTES + 4,
+        );
+      } finally { store.close(); }
+    },
+  );
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'compacts before preparing a new inline attachment on %s',
+    async (protocol) => {
+      const provider = vision(protocol);
+      const continuation = mediaHistory();
+      const filename = path.join(root, 'new.png');
+      fs.writeFileSync(filename, Buffer.from(png, 'base64'));
+      const events = await collect(provider, continuation, [{ path: filename, mime: 'image/png', filename: 'new.png' }]);
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+        event.step.status === 'completed')).toBe(true);
+      expect(requestImages(requests.at(-1)?.messages)).toEqual([wireImage(protocol)]);
+      expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain('inline-payload-limit');
+    },
+  );
+
+  it('surfaces media compaction failure without retrying tool side effects', async () => {
+    const provider = vision('openai-chat');
+    const continuation = mediaHistory();
+    fs.writeFileSync(path.join(root, 'image.png'), Buffer.from(png, 'base64'));
+    scriptedToolCalls = [
+      ['bash', '{"command":"echo once >> once.txt"}'],
+      ['view_image', '{"path":"image.png"}'],
+    ];
+    rejectCompaction = true;
+    const events = await collect(provider, continuation);
+    expect(events.some((event) => event.type === 'error' && event.message.includes('Summary service rejected'))).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'error')).toBe(true);
+  });
+
+  it('bounds recovery when the protected current image occupies the whole budget', async () => {
+    const provider = vision('openai-chat');
+    const continuation = history();
+    const filename = path.join(root, 'protected.png');
+    fs.writeFileSync(filename, paddedPng(nativeAttachments.MAX_INLINE_BYTES));
+    fs.writeFileSync(path.join(root, 'image.png'), Buffer.from(png, 'base64'));
+    scriptedToolCalls = Array.from({ length: 3 }, (): [string, string] => ['view_image', '{"path":"image.png"}']);
+    const events = await collect(provider, continuation, [{ path: filename, mime: 'image/png', filename: 'protected.png' }]);
+    expect(events.filter((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'running')).toHaveLength(2);
+    expect(events.some((event) => event.type === 'error' && event.message.includes('media budget recovery exhausted'))).toBe(true);
+    const store = new NativeStore();
+    try {
+      expect(nativeAttachments.inlineHistoryBytes(store.contextMessages(continuation))).toBe(nativeAttachments.MAX_INLINE_BYTES);
+    } finally { store.close(); }
+  });
+
+  it('shares the two recovery attempts between media and token pressure', async () => {
+    const provider = vision('openai-chat');
+    const continuation = mediaHistory();
+    fs.writeFileSync(path.join(root, 'image.png'), Buffer.from(png, 'base64'));
+    scriptedToolCalls = [['view_image', '{"path":"image.png"}']];
+    contextOverflows = 2;
+    overflowAfterTool = true;
+    const events = await collect(provider, continuation);
+    const compactions = events.filter((event) => event.type === 'progress' &&
+      event.step.kind === 'compaction' && event.step.status === 'running');
+    expect(compactions).toHaveLength(2);
+    expect(compactions[0]).toMatchObject({ step: { detail: expect.stringContaining('media budget') } });
+    expect(compactions[1]).toMatchObject({ step: { detail: expect.stringContaining('Context window') } });
+    expect(events.some((event) => event.type === 'error' && event.message.includes('2013'))).toBe(true);
+  });
+
+  it('compacts oversized tool-media history before sending the next model request', async () => {
+    const provider = vision('openai-chat');
+    const continuation = mediaHistory();
+    const create = nativeTools.createNativeTools;
+    const fixture = spyOn(nativeTools, 'createNativeTools').mockImplementation((...args) => ({
+      ...create(...args),
+      fixture_media: tool({
+        inputSchema: jsonSchema({ type: 'object' }),
+        execute: async () => png,
+        toModelOutput: ({ output }) => ({ type: 'content', value: [
+          { type: 'file', mediaType: 'image/png', data: { type: 'data', data: output } },
+        ] }),
+      }),
+    }));
+    try {
+      scriptedToolCalls = [['fixture_media', '{}']];
+      const events = await collect(provider, continuation);
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(events.filter((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+        event.step.status === 'completed')).toHaveLength(1);
+      expect(requestImages(requests.at(-1)?.messages)).toEqual([wireImage('openai-chat')]);
+      expect(events.filter((event) => event.type === 'progress' && event.step.tool === 'fixture_media' &&
+        event.step.status === 'completed')).toHaveLength(1);
+    } finally { fixture.mockRestore(); }
+  });
+
+  it.each([false, true])('prepares media steering after compaction, preserving acknowledgement ordering (abort=%s)', async (abort) => {
+    const provider = vision('openai-chat');
+    const continuation = mediaHistory();
+    const filename = path.join(root, 'guidance.png');
+    fs.writeFileSync(filename, Buffer.from(png, 'base64'));
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    const query = provider.query({ prompt: 'continue', continuation, cwd: root });
+    const events: ProviderEvent[] = [];
+    let offered = false;
+    for await (const event of query.events) {
+      events.push(event);
+      if (!offered && event.type === 'progress' && event.step.tool === 'bash' && event.step.status === 'completed') {
+        offered = true;
+        expect(query.steer!({
+          id: 'media-guidance', prompt: 'inspect this guidance',
+          files: [{ path: filename, mime: 'image/png', filename: 'guidance.png' }],
+        })).toBe(true);
+      }
+      if (abort && event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'running')
+        query.abort('user');
+      if (event.type === 'result') query.end();
+    }
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(provider.appliedSteering(continuation, ['media-guidance'])).toEqual(abort ? [] : ['media-guidance']);
+    if (abort) {
+      expect(events.some((event) => event.type === 'steering_applied')).toBe(false);
+      expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+        event.step.status === 'interrupted')).toBe(true);
+    } else {
+      const compacted = events.findIndex((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+        event.step.status === 'completed');
+      const acknowledged = events.findIndex((event) => event.type === 'steering_applied');
+      expect(compacted).toBeGreaterThan(-1);
+      expect(acknowledged).toBeGreaterThan(compacted);
+      expect(requestImages(requests.at(-1)?.messages)).toEqual([wireImage('openai-chat')]);
+    }
+  });
+
   function history(): string {
     const store = new NativeStore();
     try {

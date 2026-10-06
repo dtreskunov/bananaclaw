@@ -6,9 +6,20 @@ import { builtinToolResultError, toolActivityFields } from '../tool-activity.js'
 export const INTERRUPTED_TOOL =
   'Interrupted; outcome unknown. External side effects may have occurred. Do not retry without checking.';
 
+type ModelToolOutput = Extract<
+  Extract<ModelMessage, { role: 'tool' }>['content'][number], { type: 'tool-result' }
+>['output'];
+interface JournalToolCall {
+  name: string;
+  input: unknown;
+  output: unknown;
+  failed: boolean;
+  modelOutput?: ModelToolOutput;
+}
+
 /** Persist input and valid call/result pairs even before an SDK step finishes. */
 export class NativeTurnJournal {
-  private readonly calls = new Map<string, { name: string; input: unknown; output: unknown; failed: boolean }>();
+  private readonly calls = new Map<string, JournalToolCall>();
   private readonly executions = new Set<Promise<unknown>>();
   private readonly completedActivity: ActivityStep[] = [];
   private text = '';
@@ -33,20 +44,27 @@ export class NativeTurnJournal {
     return Object.fromEntries(
       Object.entries(tools).map(([name, definition]) => {
         const execute = definition.execute;
+        const toModelOutput = definition.toModelOutput;
         if (!execute) return [name, definition];
         return [
           name,
           {
             ...definition,
+            ...(toModelOutput ? {
+              toModelOutput: (options: Parameters<typeof toModelOutput>[0]) =>
+                this.calls.get(options.toolCallId)?.modelOutput ?? toModelOutput(options),
+            } : {}),
             execute: (input: unknown, options: Parameters<NonNullable<typeof execute>>[1]) => {
               signal.throwIfAborted();
-              const call = { name, input, output: INTERRUPTED_TOOL as unknown, failed: true };
+              const call: JournalToolCall = { name, input, output: INTERRUPTED_TOOL, failed: true };
               this.calls.set(options.toolCallId, call);
               this.save();
               const execution = (async () => {
                 try {
                   const result = await execute(input, { ...options, abortSignal: signal });
                   call.output = result;
+                  if (toModelOutput)
+                    call.modelOutput = await toModelOutput({ toolCallId: options.toolCallId, input, output: result });
                   call.failed = false;
                   return result;
                 } catch (error) {
@@ -106,7 +124,7 @@ export class NativeTurnJournal {
               toolName: call.name,
               output: call.failed
                 ? { type: 'error-text', value: String(call.output) }
-                : {
+                : call.modelOutput ?? {
                     type: 'text',
                     value: typeof call.output === 'string' ? call.output : (JSON.stringify(call.output) ?? 'null'),
                   },
