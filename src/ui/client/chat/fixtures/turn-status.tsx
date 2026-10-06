@@ -34,6 +34,10 @@ const scenes = [
   { id: 'completed', label: 'Completed tool (Thinking…)' },
   { id: 'parallel', label: 'Parallel tools (both running)' },
   { id: 'parallel-completed', label: 'Parallel tools (one completed)' },
+  { id: 'chapter-running', label: 'Command chapter (latest running)' },
+  { id: 'chapter-completed', label: 'Command chapter (latest completed)' },
+  { id: 'chapter-continued', label: 'Command chapter (next related step)' },
+  { id: 'chapter-switched', label: 'Command chapter (next unrelated step)' },
   { id: 'long', label: 'Long activity' },
   { id: 'stopping', label: 'Stopping' },
   { id: 'stop-error', label: 'Stop request failure' },
@@ -46,6 +50,11 @@ const scenes = [
   { id: 'card', label: 'Settled display card' },
 ] as const;
 type Scene = (typeof scenes)[number]['id'];
+const nextChapterScene: Partial<Record<Scene, Scene>> = {
+  'chapter-running': 'chapter-completed',
+  'chapter-completed': 'chapter-continued',
+  'chapter-continued': 'chapter-switched',
+};
 const scene = signal<Scene>('initial');
 const fixtureTurnId = 'fixture-status-turn';
 const fixtureThreadId = 'fixture-status-thread';
@@ -180,6 +189,25 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
             }),
           },
         ];
+  if (nextScene.startsWith('chapter-')) {
+    const continued = nextScene === 'chapter-continued' || nextScene === 'chapter-switched';
+    const commands = continued ? ['pnpm run build', 'git diff --check'] : ['pnpm run build'];
+    commands.forEach((detail, index) => {
+      const running = nextScene === 'chapter-running' ||
+        (nextScene === 'chapter-continued' && index === commands.length - 1);
+      activity.push({
+        ordinal: index + 1, ts: String(started + 4000 + index * 1000),
+        timelinePosition: (started + 4000 + index * 1000) * 1000,
+        text: JSON.stringify({ kind: 'tool', id: `fixture-command-${index + 1}`, tool: 'bash',
+          status: running ? 'running' : 'completed', detail, ...(running ? {} : { durationMs: 2200 }) }),
+      });
+    });
+    if (nextScene === 'chapter-switched') activity.push({
+      ordinal: 3, ts: String(started + 6000), timelinePosition: (started + 6000) * 1000,
+      text: JSON.stringify({ kind: 'tool', id: 'fixture-chapter-read', tool: 'read', status: 'running',
+        detail: 'src/ui/client/chat/src/components/ChatMain.tsx' }),
+    });
+  }
   if (nextScene === 'long' || nextScene === 'parallel' || nextScene === 'parallel-completed')
     activity.push({
       ordinal: 1,
@@ -330,7 +358,7 @@ function advance(nextScene: Scene): void {
   const startedAt = previous.conversation.turns[0]?.startedAt;
   if (!startedAt) throw new Error('Fixture turn start time is missing');
   const next = makeConversation(nextScene, startedAt);
-  if (nextScene === 'stopping') {
+  if (nextScene === 'stopping' || nextScene === 'reply') {
     next.turns[0] = { ...next.turns[0], activity: previous.conversation.turns[0].activity };
     next.timeline = conversationTimeline(next);
   }
@@ -458,6 +486,7 @@ window.turnStatusFixture = {
 };
 
 function Fixture() {
+  const nextChapter = nextChapterScene[scene.value];
   return (
     <div class="turn-status-fixture">
       <header class="turn-status-fixture-controls">
@@ -493,6 +522,10 @@ function Fixture() {
         <button type="button" disabled={!conversationState.value?.conversation.connection.activeTurnId} onClick={() => advance('reply')}>
           Settle current turn
         </button>
+        {scene.value.startsWith('chapter-') ? <button type="button" disabled={!nextChapter} onClick={() => {
+          if (!nextChapter) throw new Error('Fixture chapter sequence has ended');
+          advance(nextChapter);
+        }}>Advance chapter</button> : null}
         <p>
           Isolated production UI fixture. Send and Stop are simulated; all other network actions are blocked. Preferences are not
           saved.

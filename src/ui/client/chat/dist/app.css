@@ -3159,7 +3159,7 @@ nav.tab-bar-strip.group-strip {
   flex: none;
   font-variant-numeric: tabular-nums;
 }
-.chat-main .typing .trace-preview code.trace-subject,
+.chat-main .typing .hint code.trace-subject,
 .chat-main .activity-trace code.trace-subject {
   padding: 0 4px;
   background: var(--chip-bg);

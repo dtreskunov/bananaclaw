@@ -17679,36 +17679,10 @@ function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
 
-// ../../shared/timeline.ts
-function parseTimelinePosition(value) {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
-}
-function timelineSortKey(timestamp, timelinePosition) {
-  const position2 = parseTimelinePosition(timelinePosition);
-  if (position2 !== void 0) return position2;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
-  const milliseconds = Date.parse(normalized);
-  return Number.isFinite(milliseconds) ? milliseconds * 1e3 : 0;
-}
-
 // ../../shared/conversation-activity.ts
 var THINKING_TEXT = "Thinking\u2026";
-function completionMarker(turnId, timestamp) {
-  const step = {
-    kind: "notification",
-    id: `ui:done:${turnId}`,
-    text: "Done",
-    status: "completed"
-  };
-  const position2 = timestamp ? timelineSortKey(timestamp) : 0;
-  return { ts: position2 ? String(Math.floor(position2 / 1e3)) : "", text: JSON.stringify(step) };
-}
 function conversationActivity(turn2) {
-  const lines = [...turn2.activity].sort((a4, b5) => a4.timelinePosition - b5.timelinePosition);
-  if (turn2.phase === "settled") {
-    lines.push(completionMarker(turn2.id, turn2.endedAt));
-  }
-  return lines;
+  return [...turn2.activity].sort((a4, b5) => a4.timelinePosition - b5.timelinePosition);
 }
 
 // ../../shared/conversation-protocol.ts
@@ -21903,6 +21877,18 @@ function usePendingComposer(inputRef, autosize) {
   };
 }
 
+// ../../shared/timeline.ts
+function parseTimelinePosition(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
+}
+function timelineSortKey(timestamp, timelinePosition) {
+  const position2 = parseTimelinePosition(timelinePosition);
+  if (position2 !== void 0) return position2;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
+  const milliseconds = Date.parse(normalized);
+  return Number.isFinite(milliseconds) ? milliseconds * 1e3 : 0;
+}
+
 // src/queued-followups.ts
 function isQueuedFollowup(message2) {
   const state = message2.inputState;
@@ -22323,19 +22309,17 @@ function liveTurnActivity(turn2, lines, connected, stop) {
   );
   const current = notices.length ? { action: notices.map((notice) => notice.text).join(" \xB7 ") } : currentActivityHeadline(lines);
   const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
-  const last = activityChapters(lines, true).at(-1);
-  if (last?.title === headlineSummary(current)) return { lines, headline: current, ...presentation };
+  if (!notices.length) return { lines, headline: current, ...presentation };
   const marker = {
     kind: "notification",
     id: `ui:current:${turn2.id}`,
     text: current.action,
-    status: presentation.error ? "error" : !connected ? "interrupted" : "running",
-    ...current.subject ? { detail: current.subject } : {}
+    status: presentation.error ? "error" : !connected ? "interrupted" : "running"
   };
   return {
     ...presentation,
     lines: [...lines, { ts: "", text: JSON.stringify(marker) }],
-    headline: stepHeadline(marker)
+    headline: current
   };
 }
 function activeTurnNotices(turn2, connected, stop) {
@@ -23472,16 +23456,16 @@ function ActivityTraceList({ lines, live = false, now = null, following = false,
     if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
   const revealed = A2(false);
-  _2(() => {
-    if (!listRef.current || !lines.length) return;
-    if (!revealed.current || live && following) revealLatestActivity(listRef.current, live && following);
-    revealed.current = true;
-  }, [lines, live, following]);
   const chapters = activityChapters(lines, live);
   const latestChapter = chapters.at(-1);
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
-  const sel = following ? latestEntryId : target?.kind === "entry" ? target.id : null;
+  const sel = target?.kind === "entry" && (!following || target.id === latestEntryId) ? target.id : null;
   const openChapter = following ? latestChapter && latestChapter.entries.length > 1 ? latestChapter.id : null : target?.kind === "chapter" ? target.id : target?.kind === "entry" ? chapters.find((chapter) => chapter.entries.some((entry) => entry.id === target.id))?.id ?? null : null;
+  _2(() => {
+    if (!listRef.current || !lines.length) return;
+    if (!revealed.current || live && following) revealLatestActivity(listRef.current, live && following && sel === latestEntryId);
+    revealed.current = true;
+  }, [lines, live, following, sel, openChapter]);
   const toggle = (id2) => {
     const opening = sel !== id2;
     const chapter = chapters.find((candidate) => candidate.entries.some((entry) => entry.id === id2));

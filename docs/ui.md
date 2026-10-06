@@ -146,9 +146,13 @@ continuous rail; child steps are indented with smaller hollow dots and branches.
 Singleton steps stay directly on the rail. Only one chapter can be expanded at
 a time. Opening via **N steps** leaves every group and step collapsed until
 the user expands one, and scrolls to the latest visible group/step header.
-Opening via the live activity summary expands the latest step's group and
-details, and follows subsequent steps the same way, switching groups when
-necessary. Only one group and one step's details are open within a trace.
+Opening via the live activity summary expands the latest step's chapter, but
+leaves step details collapsed. Follow mode keeps that chapter open when its
+latest step completes and when another related step is appended; it switches
+only when the next entry belongs to a different chapter. Subsequent steps'
+details never open automatically. At most one chapter and one step's details
+are open within a trace. Explicitly opened latest details remain open while
+that step updates, but collapse when the next step arrives in follow mode.
 Reveal operations scroll only the trace viewport: short details are shown
 fully, while oversized details align at their beginning so the header remains
 visible. Expanding the latest step's details enables following, whether the
@@ -193,15 +197,14 @@ back into history. Cancelling a steering/queue choice preserves the draft,
 highlight and scroll position. A rejected send retains the draft and attachments.
 Question activity comes only from the recorded `nanoclaw.ask_user_question`
 tool call; question cards do not synthesize a second action in the trace.
-Live turns show at most one display-only **Thinking…** marker, only as the current
-trailing state while no activity is active. It disappears when work resumes or
-the turn settles; there is no permanent initial Thinking entry.
-Every settled turn ends with one
-display-only **Done** marker, including stopped or failed turns: it means the
-turn ended, not that the requested work succeeded. Outcome notes retain that
-distinction. Display-only markers remain part of the expanded trace but do not
-count as activity steps or enter the runner journal, stored activity, or usage
-accounting. The step-count disclosure is hidden when there are no recorded steps.
+**Thinking…** appears only in the status line while no activity is active, never
+as a trace entry. Current tool captions also remain in the status line instead
+of duplicating recorded entries as standalone rows after their chapters.
+Settled traces contain only recorded activities, with no synthetic **Done**
+entry. Completion and notable outcomes remain in the regular status footer;
+completion does not imply that the requested work succeeded. Transient notices
+do not count as activity steps or enter the runner journal, stored activity or
+usage accounting. The step-count disclosure is hidden when there are no recorded steps.
 Questions use their stored output-to-turn associations, and question cards never
 own separate traces. Missing output or turn references are explicit projection
 errors; reads never infer ownership or synthesize historical turns. Legacy imports
@@ -387,21 +390,20 @@ Only the failed bubble's **Retry** reuses its original identity and intent.
 When delivery is uncertain, use Retry rather than Send to avoid submitting a
 duplicate; the inline failure guidance explains this distinction.
 
-While live, the trace includes a transient, display-only current-status marker
-when needed so its last visible entry matches the footer. This includes
-**Thinking…** after completed activity, stopping, disconnection and Stop errors.
-The marker is replaced or removed when activity resumes; it is not retained as
-historical thinking between activities and never enters the durable journal.
-Thinking uses the same blue running presentation as tool calls; Done uses their
-green completion presentation. Stop errors use a red failed marker, without
+While live, Thinking and current tool captions are shown in the footer without
+adding trace entries. Stopping, disconnection and Stop errors still get a
+transient, display-only notice in the trace. The notice clears when its condition
+ends and never enters the durable journal.
+Stop errors use a red failed marker, without
 changing the durable activity or the still-running turn's outcome. Concurrent
 tool calls retain their individual lifecycle colors: a completed call is green
 even while another call remains blue. Execution concurrency depends on the
 provider, model and tools; adjacent calls alone are not proof of overlap.
 Stopping/disconnect notices and Stop errors occupy the same footer text slot,
 not separate transcript rows. Errors retain their alert role and retry control.
-Current activity remains visible with technical information hidden. The
-stopwatch uses minutes and seconds, freezes on settlement, and is not repeated
+Current activity remains visible with technical information hidden. The toggle
+does not change status font size or the font used for inline-code subjects.
+The stopwatch uses minutes and seconds, freezes on settlement, and is not repeated
 in the technical summary. Usage details still retain recorded accounting duration.
 Technical information and the expanded trace form one shared, compact block at
 the top of live, reply and display-card bubbles, before their content. This keeps
@@ -421,7 +423,8 @@ immediately visible simulated Stop failures and real simulated retry handling, f
 replies without recorded steps,
 replies, outputless turns, failures and display cards. Idle and busy submission
 scenarios exercise the production composer, retry action and queue/steering
-dialog:
+dialog. Chapter scenarios advance through a running step, completion, a related
+step and an unrelated step without resetting follow intent:
 
 ```bash
 pnpm --dir src/ui/client/chat run build:turn-status-fixture
@@ -743,8 +746,9 @@ The host publishes an explicit `timeline` of message references, question
 references, and typed turn trace/status rows. The host selects the final response
 or the synthetic bubble beneath the latest associated conversation content as
 the sole trace host. Recorded logical-clock positions order the turn's activities.
-The browser resolves those references and adds display-only Done and live
-current-status markers (including current-only Thinking…); it does not infer activity segments
+The browser resolves those references and adds display-only live notice markers;
+Thinking, current tool captions and completion stay in the status line.
+It does not infer activity segments
 from timestamps or invent messages, message IDs, or insertion positions for
 trace/status rows. Chapters remain presentation-only groups within a trace.
 Every recorded activity has a required position. Historical activity is normalized

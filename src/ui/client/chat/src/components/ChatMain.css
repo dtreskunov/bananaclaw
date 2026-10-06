@@ -421,7 +421,7 @@
 .chat-main .activity-trace ul.trace-children { list-style: none; margin: 0 0 0 var(--trace-child-indent); padding: 0; }
 .chat-main .activity-trace .trace-text { flex: 1; min-width: 0; white-space: nowrap; }
 .chat-main .activity-trace .trace-duration { flex: none; font-variant-numeric: tabular-nums; }
-.chat-main .typing .trace-preview code.trace-subject,
+.chat-main .typing .hint code.trace-subject,
 .chat-main .activity-trace code.trace-subject { padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); font-family: var(--font-mono, monospace); font-size: inherit; }
 .chat-main .activity-trace .trace-meta,
 .chat-main .activity-trace .trace-note { margin: 0 0 0 17px; color: var(--muted); font-family: var(--font-mono, monospace); font-size: inherit; opacity: 0.8; }

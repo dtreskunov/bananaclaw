@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { isValidElement } from 'preact';
-import { Composer, ChatMain, InputDock } from './ChatMain';
+import { ActivityTraceList, Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
 import { ComposerInput } from './ComposerInput';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
@@ -29,7 +29,7 @@ import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, open
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
 import { clearPinnedContext, removePending, respondQuestion, retryChatSend, sendChat, skipQuestion } from '../actions';
-import type { ChatMessage, PendingQuestionDto, Thread } from '../types';
+import type { ActivityLine, ChatMessage, PendingQuestionDto, Thread } from '../types';
 import { applyConversationFrame, completedResponse, resetConversation } from '../conversation-state';
 import { testSnapshot, testTurn, testWebSubmission } from '../conversation-test-fixtures';
 import { appearance } from '../appearance-state';
@@ -1005,6 +1005,7 @@ describe('main composer pending edits', () => {
         const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
         expect(toggle.type(toggle.props)).toBeNull();
         expect(findComponent(details, 'TurnElapsed')).toBeUndefined();
+        expect(findComponent(details, 'ActivityTracePanel').props.lines).toEqual([]);
       }
       const headline = footer.props.children.filter(Boolean).at(-1).props.children;
       expect(headline.type(headline.props).props.children).toContain('Thinking…');
@@ -1055,8 +1056,12 @@ describe('main composer pending edits', () => {
         const details = renderTechnicalDetails(row);
         expect(findComponent(details, 'TurnTechnicalInfo').props.count).toBe(1);
         const panel = findComponent(details, 'ActivityTracePanel');
-        expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(expected);
-        expect(panel.props.lines).toHaveLength(2);
+        if (phase === 'stopping') {
+          expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(expected);
+          expect(panel.props.lines).toHaveLength(2);
+        } else {
+          expect(panel.props.lines).toEqual(activity);
+        }
       }
       expect(turnRow.props.source.turn.activity).toEqual(activity);
       expect(turnRow.props.source.activity).toHaveLength(1);
@@ -1231,7 +1236,7 @@ describe('main composer pending edits', () => {
         expect(header.props.count).toBe(recorded ? 1 : 0);
         const toggle = findComponent(header.type(header.props), 'ActivityTraceToggle');
         expect(!!toggle.type(toggle.props)).toBe(recorded);
-        expect(JSON.parse(trace.props.lines.at(-1).text)).toMatchObject({ text: 'Done', status: 'completed' });
+        expect(trace.props.lines).toEqual(recorded ? testTurn.activity : []);
       }
       expect(title.props.class).toBe('display-card-title');
       expect(findComponent(row.props.children.at(-1), 'ReplyTurnInfo')).toBeTruthy();
@@ -1454,5 +1459,81 @@ describe('main composer pending edits', () => {
       hooks.capturePassive = false;
       for (const [key, value] of Object.entries(savedGlobals)) vi.stubGlobal(key, value);
     }
+  });
+});
+
+describe('activity trace chapter following', () => {
+  const line = (id: string, status: 'running' | 'completed', tool = 'bash'): ActivityLine => ({
+    ts: '1000',
+    text: JSON.stringify({ kind: 'tool', id, status, tool, detail: `${tool}-${id}` }),
+  });
+  let following: boolean;
+  const browse = vi.fn((follow: boolean) => {
+    following = follow;
+  });
+  function renderTrace(lines: ActivityLine[]) {
+    hooks.cursor = 0;
+    const list = ActivityTraceList({ lines, live: true, following, onBrowse: browse });
+    hooks.effects.splice(0).forEach((effect) => effect());
+    return list;
+  }
+  beforeEach(() => {
+    resetMount();
+    following = true;
+    browse.mockClear();
+  });
+
+  it('follows singleton and chapter headers without automatically expanding step details', () => {
+    const singleton = renderTrace([line('one', 'running')]);
+    expect(findComponent(singleton, 'ActivityTraceRow').props.open).toBe(false);
+    const chapter = renderTrace([line('one', 'completed'), line('two', 'running')]).props.children[0];
+    expect(chapter.props.children[0].props['aria-expanded']).toBe(true);
+    expect(
+      chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
+    ).toBe(true);
+  });
+
+  it('keeps a completed chapter open, continues it for related steps and closes it only for a new chapter', () => {
+    const initial = renderTrace([line('one', 'completed'), line('two', 'running')]).props.children[0];
+    const completed = renderTrace([line('one', 'completed'), line('two', 'completed')]).props.children[0];
+    expect(completed.key).toBe(initial.key);
+    expect(completed.props.children[0].props['aria-expanded']).toBe(true);
+    const commands = [line('one', 'completed'), line('two', 'completed'), line('three', 'running')];
+    const continued = renderTrace(commands).props.children[0];
+    expect(continued.key).toBe(initial.key);
+    expect(continued.props.children[0].props['aria-expanded']).toBe(true);
+    expect(continued.props.children[1].props.children).toHaveLength(3);
+    const switched = renderTrace([...commands, line('read-one', 'running', 'read')]);
+    expect(switched.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(findComponent(switched.props.children[1], 'ActivityTraceRow').props.open).toBe(false);
+    const next = renderTrace([...commands, line('read-one', 'completed', 'read'), line('read-two', 'running', 'read')]);
+    expect(next.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(next.props.children[1].props.children[0].props['aria-expanded']).toBe(true);
+  });
+
+  it('allows explicitly opening latest details but does not expand the next step automatically', () => {
+    const commands = [line('one', 'completed'), line('two', 'running')];
+    let list = renderTrace(commands);
+    list.props.children[0].props.children[1].props.children[1].props.onToggle();
+    expect(browse).toHaveBeenLastCalledWith(true);
+    list = renderTrace(commands);
+    expect(list.props.children[0].props.children[1].props.children[1].props.open).toBe(true);
+    list = renderTrace([...commands, line('three', 'running')]);
+    expect(
+      list.props.children[0].props.children[1].props.children.every(
+        (entry: { props: { open: boolean } }) => !entry.props.open,
+      ),
+    ).toBe(true);
+  });
+
+  it('preserves count-only expansion and manual browsing instead of forcing the latest chapter open', () => {
+    following = false;
+    const commands = [line('one', 'completed'), line('two', 'running')];
+    let list = renderTrace(commands);
+    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    list.props.children[0].props.children[0].props.onClick();
+    list = renderTrace([...commands, line('read-one', 'running', 'read')]);
+    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(browse).toHaveBeenLastCalledWith(false);
   });
 });

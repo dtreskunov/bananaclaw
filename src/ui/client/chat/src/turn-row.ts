@@ -1,7 +1,5 @@
 import type { ConversationTurn } from '../../../shared/conversation';
 import {
-  activityChapters,
-  headlineSummary,
   isSyntheticTraceStep,
   parseStep,
   stepHeadline,
@@ -48,20 +46,17 @@ export function liveTurnActivity(
     ? { action: notices.map((notice) => notice.text).join(' \u00b7 ') }
     : currentActivityHeadline(lines);
   const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
-  // Grouped or parallel activity may not expose the current caption at the visible tail.
-  const last = activityChapters(lines, true).at(-1);
-  if (last?.title === headlineSummary(current)) return { lines, headline: current, ...presentation };
+  if (!notices.length) return { lines, headline: current, ...presentation };
   const marker: TraceStep = {
     kind: 'notification',
     id: `ui:current:${turn.id}`,
     text: current.action,
     status: presentation.error ? 'error' : !connected ? 'interrupted' : 'running',
-    ...(current.subject ? { detail: current.subject } : {}),
   };
   return {
     ...presentation,
     lines: [...lines, { ts: '', text: JSON.stringify(marker) }],
-    headline: stepHeadline(marker),
+    headline: current,
   };
 }
 

@@ -4,9 +4,7 @@ import { testSnapshot, testTurn } from './conversation-test-fixtures';
 import { activeTurnNotices, currentActivityHeadline, liveTurnActivity, turnRowView } from './turn-row';
 import {
   activityChapters,
-  headlineSummary,
   parseStep,
-  stepHeadline,
   traceStatusClass,
   type TraceLine,
   type TraceStep,
@@ -102,49 +100,42 @@ describe('current activity headline', () => {
   });
 });
 
-describe('live status and trailing trace entry', () => {
+describe('live status and trace notices', () => {
   const line = (step: TraceStep): TraceLine => ({ ts: '1000', text: JSON.stringify(step) });
   const initial = conversationActivity({ ...testTurn, activity: [], startedAt: null });
   const finished = line({ kind: 'tool', id: 'call', tool: 'bash', status: 'completed', detail: 'pnpm test' });
   const running = line({ kind: 'tool', id: 'next', tool: 'read', status: 'running', detail: 'file.ts' });
 
-  it('projects one blue initial Thinking… marker without changing source activity', () => {
+  it('shows initial Thinking… only in the status line without inventing trace activity', () => {
     const result = liveTurnActivity(testTurn, initial, true, null)!;
     expect(initial).toEqual([]);
-    expect(result.lines).toHaveLength(1);
-    expect(traceStatusClass(parseStep(result.lines[0].text))).toBe('trace-status-running');
+    expect(result.lines).toBe(initial);
+    expect(result.lines).toHaveLength(0);
     expect(result.headline).toEqual({ action: 'Thinking…' });
   });
 
-  it('adds only a transient trailing Thinking… marker after completion and removes it on resumed activity', () => {
+  it('returns the status to Thinking… after completion without closing the recorded chapter', () => {
     const lines = [...initial, finished];
     const before = JSON.stringify(lines);
     const result = liveTurnActivity(testTurn, lines, true, null)!;
-    expect(result.lines.slice(0, -1)).toEqual(lines);
-    expect(parseStep(result.lines.at(-1)!.text)).toEqual({
-      kind: 'notification',
-      id: `ui:current:${testTurn.id}`,
-      text: 'Thinking…',
-      status: 'running',
-    });
-    expect(result.lines.at(-1)!.ts).toBe('');
-    expect(result.headline).toEqual(stepHeadline(parseStep(result.lines.at(-1)!.text)));
+    expect(result.lines).toBe(lines);
+    expect(result.headline).toEqual({ action: 'Thinking…' });
     expect(liveTurnActivity(testTurn, lines, true, null)).toEqual(result);
-    expect(result.lines.filter((entry) => parseStep(entry.text).text === 'Thinking…')).toHaveLength(1);
+    expect(result.lines.filter((entry) => parseStep(entry.text).text === 'Thinking…')).toHaveLength(0);
     const resumed = [...lines, running];
     expect(liveTurnActivity(testTurn, resumed, true, null)!.lines).toBe(resumed);
     expect(JSON.stringify(lines)).toBe(before);
   });
 
-  it('matches the last visible entry even when parallel or grouped activity hides the current caption', () => {
+  it('does not duplicate the current tool as a standalone marker after parallel or grouped activity', () => {
     for (const lines of [
       [...initial, running, finished],
       [...initial, running, line({ kind: 'tool', id: 'other', tool: 'read', status: 'running', detail: 'other.ts' })],
     ]) {
       const result = liveTurnActivity(testTurn, lines, true, null)!;
-      expect(result.lines.slice(0, -1)).toEqual(lines);
-      expect(activityChapters(result.lines, true).at(-1)!.title).toBe(headlineSummary(result.headline));
-      expect(parseStep(result.lines.at(-1)!.text).id).toBe(`ui:current:${testTurn.id}`);
+      expect(result.lines).toBe(lines);
+      expect(activityChapters(result.lines, true).flatMap((chapter) => chapter.entries)).toHaveLength(lines.length);
+      expect(result.lines.some((entry) => parseStep(entry.text).id?.startsWith('ui:current:'))).toBe(false);
     }
   });
 
@@ -271,8 +262,8 @@ describe('turn row placement', () => {
     const view = testSnapshot({ messages, turns: [imported('a', 'first'), imported('b', 'later')] }).conversation;
     expect(conversationMessages(view).map((m) => [m.id, m.activity?.length, m.statsTurn?.id])).toEqual([
       ['ask', undefined, undefined],
-      ['first', 2, 'a'],
-      ['later', 2, 'b'],
+      ['first', 1, 'a'],
+      ['later', 1, 'b'],
     ]);
   });
 
@@ -283,7 +274,7 @@ describe('turn row placement', () => {
     const view = testSnapshot({ messages, turns: [turn] }).conversation;
     expect(conversationMessages(view).map((m) => [m.id, m.activity?.length])).toEqual([
       ['ask', undefined],
-      ['reply', 2],
+      ['reply', 1],
     ]);
   });
 });
@@ -330,7 +321,7 @@ describe('turn activity placement', () => {
             : { id: row.submission.messageId, status: true },
     );
 
-  it('keeps activity across steering in the final response with a display-only Done marker', () => {
+  it('keeps recorded activity across steering in the final response without a completion marker', () => {
     const messages = [message('ask', 'in', -1), message('steer', 'in', 3000, 'applied'), message('reply', 'out', 9000)];
     const turn = settled({
       id: 's',
@@ -341,7 +332,7 @@ describe('turn activity placement', () => {
     expect(rows(testSnapshot({ messages, turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
       { id: 'steer', lines: undefined, status: false, stats: undefined },
-      { id: 'reply', lines: ['step 0', 'step 1', 'Done'], status: false, stats: 's' },
+      { id: 'reply', lines: ['step 0', 'step 1'], status: false, stats: 's' },
     ]);
   });
 
@@ -385,17 +376,17 @@ describe('turn activity placement', () => {
     const turn = settled({ id: 'q', outcome: 'silent', inputIds: ['ask'], activity: [step(0, 1000)] });
     expect(rows(testSnapshot({ messages: [message('ask', 'in', -1)], turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
-      { id: 'trace:q:after:ask', lines: ['step 0', 'Done'], status: true, stats: undefined },
+      { id: 'trace:q:after:ask', lines: ['step 0'], status: true, stats: undefined },
     ]);
   });
 
-  it('retains a display-only Done trace and stats on a reply without recorded activities', () => {
+  it('retains stats without inventing trace activity on a reply without recorded activities', () => {
     const turn = settled({ id: 'p', inputIds: ['ask'], outputIds: ['reply'], activity: [] });
     const messages = [message('ask', 'in', -1), message('reply', 'out', 2000)];
     expect(rows(testSnapshot({ messages, turns: [turn] }).conversation).map((r) => [r.id, r.stats])).toEqual([
       ['ask', undefined],
       ['reply', 'p'],
     ]);
-    expect(conversationMessages(testSnapshot({ messages, turns: [turn] }).conversation)[1].activity).toHaveLength(1);
+    expect(conversationMessages(testSnapshot({ messages, turns: [turn] }).conversation)[1].activity).toEqual([]);
   });
 });

@@ -61,7 +61,7 @@ describe('whole-turn activity presentation', () => {
     expect(JSON.stringify(shuffled)).toBe(before);
   });
 
-  it('represents every builtin call once followed by a completed Done marker', () => {
+  it('represents every builtin call once without appending a synthetic completion entry', () => {
     const activity = [...BUILTIN_TOOL_PRESENTATIONS.keys()].map((tool, ordinal) => ({
       ordinal,
       ts: String(ordinal),
@@ -72,9 +72,7 @@ describe('whole-turn activity presentation', () => {
     expect(steps.filter((step) => step.kind === 'tool').map((step) => step.id)).toEqual(
       activity.map((line) => `call-${line.ordinal}`),
     );
-    expect(steps.filter((step) => step.kind !== 'tool')).toEqual([
-      { kind: 'notification', id: 'ui:done:turn', text: 'Done', status: 'completed' },
-    ]);
+    expect(steps.filter((step) => step.kind !== 'tool')).toEqual([]);
   });
 
   it.each(['running', 'stopping', 'settling'] as const)('does not invent Done while %s', (phase) => {
@@ -82,30 +80,22 @@ describe('whole-turn activity presentation', () => {
   });
 
   it.each(['replied', 'silent', 'stopped', 'failed', 'warning', 'interrupted', 'unknown'] as const)(
-    'adds exactly one display-only Done marker after %s settlement',
+    'retains only recorded activities after %s settlement without changing the journal',
     (outcome) => {
       const settled = { ...turn, phase: 'settled' as const, outcome, endedAt: '2026-10-04T19:01:00Z' };
       const before = JSON.stringify(settled);
       const lines = conversationActivity(settled);
-      expect(lines).toHaveLength(4);
-      expect(parseStep(lines.at(-1)!.text)).toEqual({
-        kind: 'notification',
-        id: 'ui:done:turn',
-        text: 'Done',
-        status: 'completed',
-      });
-      expect(lines.at(-1)!.ts).toBe(String(Date.parse(settled.endedAt)));
+      expect(lines).toEqual(settled.activity);
+      expect(lines.map((line) => parseStep(line.text).text)).not.toContain('Done');
       expect(conversationActivity(settled)).toEqual(lines);
       expect(JSON.stringify(settled)).toBe(before);
       expect(settled.activity).toHaveLength(3);
     },
   );
 
-  it('retains only Done for an outputless settled turn without recorded activities or timestamps', () => {
+  it('leaves an outputless settled trace empty when there are no recorded activities or timestamps', () => {
     const lines = conversationActivity({ ...turn, phase: 'settled', outcome: 'silent', activity: [] });
-    expect(lines).toHaveLength(1);
-    expect(lines[0].ts).toBe('');
-    expect(stepHeadline(parseStep(lines[0].text))).toEqual({ action: 'Done' });
+    expect(lines).toEqual([]);
   });
 
   it.each(['running', 'stopping', 'settling', 'settled'] as const)(

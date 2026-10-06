@@ -219,19 +219,10 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
     if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
   const revealed = useRef(false);
-  useLayoutEffect(() => {
-    if (!listRef.current || !lines.length) return;
-    if (!revealed.current || (live && following)) revealLatestActivity(listRef.current, live && following);
-    revealed.current = true;
-  }, [lines, live, following]);
   const chapters = activityChapters(lines, live);
   const latestChapter = chapters.at(-1);
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
-  const sel = following
-    ? latestEntryId
-    : target?.kind === 'entry'
-      ? target.id
-      : null;
+  const sel = target?.kind === 'entry' && (!following || target.id === latestEntryId) ? target.id : null;
   const openChapter = following
     ? latestChapter && latestChapter.entries.length > 1
       ? latestChapter.id
@@ -241,6 +232,11 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
       : target?.kind === 'entry'
         ? chapters.find(chapter => chapter.entries.some(entry => entry.id === target.id))?.id ?? null
         : null;
+  useLayoutEffect(() => {
+    if (!listRef.current || !lines.length) return;
+    if (!revealed.current || (live && following)) revealLatestActivity(listRef.current, live && following && sel === latestEntryId);
+    revealed.current = true;
+  }, [lines, live, following, sel, openChapter]);
   const toggle = (id: string) => {
     const opening = sel !== id;
     const chapter = chapters.find(candidate => candidate.entries.some(entry => entry.id === id));
