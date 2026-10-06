@@ -118,8 +118,11 @@ export function onSessionTurnChange(listener: (sessionId: string, change: Sessio
 function notifyTurnChange(sessionId: string, change: SessionTurnChange): void {
   invalidateConversation(sessionId);
   for (const listener of turnChangeListeners) {
-    try { listener(sessionId, change); }
-    catch (err) { log.warn('Turn change listener failed', { sessionId, err }); }
+    try {
+      listener(sessionId, change);
+    } catch (err) {
+      log.warn('Turn change listener failed', { sessionId, err });
+    }
   }
 }
 
@@ -451,8 +454,13 @@ function applyActivity(frame: Record<string, unknown>, { state }: FrameContext):
   const turnId = frame.turnId as string | null;
   const ordinal = frame.ordinal as number;
   state.activity = state.activity.filter((line) => line.turnId !== turnId || line.ordinal !== ordinal);
-  state.activity.push({ ts: frame.ts as string, text: JSON.stringify(step), turnId, ordinal,
-    timelinePosition: frame.timelinePosition as number });
+  state.activity.push({
+    ts: frame.ts as string,
+    text: JSON.stringify(step),
+    turnId,
+    ordinal,
+    timelinePosition: frame.timelinePosition as number,
+  });
   if (state.activity.length > MAX_ACTIVITY_LINES) state.activity.splice(0, state.activity.length - MAX_ACTIVITY_LINES);
   return 'activity';
 }
@@ -563,8 +571,19 @@ const FRAME_SPECS = new Map<string, FrameSpec>([
 function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown): boolean {
   if (!isRecord(raw) || raw.v !== PROTOCOL_VERSION || typeof raw.type !== 'string') return false;
   const spec = FRAME_SPECS.get(raw.type);
-  if (!spec || !sanitizeFields(raw, spec.fields)) return false;
-  return spec.apply(raw, { sessionId, entry, state: stateFor(sessionId), now: Date.now() });
+  if (!spec) return false;
+  const valid =
+    Boolean(sanitizeFields(raw, spec.fields)) &&
+    spec.apply(raw, { sessionId, entry, state: stateFor(sessionId), now: Date.now() });
+  if (!valid && (raw.type === 'usage' || raw.type === 'activity')) {
+    log.warn('Skipped invalid optional live telemetry', {
+      sessionId,
+      type: raw.type,
+      error: 'schema validation failed',
+    });
+    return true;
+  }
+  return valid;
 }
 
 function handleConnection(sessionId: string, entry: SessionSignalServer, connection: net.Socket): void {
@@ -803,9 +822,7 @@ export function getSessionTurnSignals(sessionId: string): {
   return {
     active: getSessionActiveTurn(sessionId),
     activity: state?.activity.map((line) => ({ ...line })) ?? [],
-    usage: state?.usage
-      ? { turnId: state.usageTurnId, ts: state.usageUpdatedAt, value: { ...state.usage } }
-      : null,
+    usage: state?.usage ? { turnId: state.usageTurnId, ts: state.usageUpdatedAt, value: { ...state.usage } } : null,
   };
 }
 

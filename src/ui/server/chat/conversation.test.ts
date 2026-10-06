@@ -411,7 +411,8 @@ describe('authoritative conversation projection', () => {
     );
     expect(read().turns[0].metadata).toEqual({ status: 'provisional', model: 'm', durationMs: null });
     putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
-    expect(read().turns[0].metadata.durationMs).toBe(1000);
+    expect(read().turns[0].metadata).toEqual({ status: 'unavailable', model: 'm', durationMs: null });
+    expect(read().turns[0].endedAt).toBe('2026-09-29T00:00:02Z');
   });
 
   it.each(['silent', 'warning', 'interrupted', 'failed', 'stopped'] as const)(

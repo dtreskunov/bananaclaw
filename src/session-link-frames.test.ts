@@ -12,6 +12,7 @@ vi.mock('./config.js', async (importOriginal) => ({
 
 import { insertMessage } from './db/session-db.js';
 import { log } from './log.js';
+import { isRecord } from './session-link-validate.js';
 import {
   getSessionActiveTurn,
   getSessionSignalTurnEndedAt,
@@ -58,7 +59,7 @@ function line(frame: unknown): string {
   return `${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n`;
 }
 
-/** Sends `frame` then a heartbeat probe; the probe is only processed if `frame` was accepted. */
+/** Sends `frame` then a heartbeat probe to check whether the connection survived. */
 async function outcome(frame: unknown): Promise<'accepted' | 'rejected'> {
   const socket = await connect();
   let closed = false;
@@ -148,15 +149,33 @@ afterAll(() => {
 });
 
 describe('session link frame acceptance', () => {
-  it.each(['running', 'completed', 'error', 'interrupted'])('accepts %s compaction lifecycle updates', async (status) => {
-    expect(await outcome(activity({
-      kind: 'compaction', id: 'compact-1', auto: true, status,
-      detail: 'Context window exceeded', error: 'Summary failure', durationMs: 100,
-    }))).toBe('accepted');
-  });
+  it.each(['running', 'completed', 'error', 'interrupted'])(
+    'accepts %s compaction lifecycle updates',
+    async (status) => {
+      expect(
+        await outcome(
+          activity({
+            kind: 'compaction',
+            id: 'compact-1',
+            auto: true,
+            status,
+            detail: 'Context window exceeded',
+            error: 'Summary failure',
+            durationMs: 100,
+          }),
+        ),
+      ).toBe('accepted');
+    },
+  );
 
-  it('rejects invalid compaction lifecycle state', async () => {
-    expect(await outcome(activity({ kind: 'compaction', id: 'compact-1', status: 'success' }))).toBe('rejected');
+  it('warns and ignores invalid compaction lifecycle state without disconnecting', async () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    expect(await outcome(activity({ kind: 'compaction', id: 'compact-1', status: 'success' }))).toBe('accepted');
+    expect(getSessionTurnSignals(SESSION_ID).activity).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      'Skipped invalid optional live telemetry',
+      expect.objectContaining({ sessionId: SESSION_ID, type: 'activity' }),
+    );
   });
 
   const accepted: Array<[string, unknown]> = [
@@ -199,8 +218,14 @@ describe('session link frame acceptance', () => {
     ['internal', activity({ kind: 'internal', id: 's', text: 'x'.repeat(2_000) })],
     ['notification', activity({ kind: 'notification', id: 's', text: 'n' })],
     ['notification empty detail', activity({ kind: 'notification', id: 's', text: 'n', detail: '' })],
-    ['notification multiline detail', activity({ kind: 'notification', id: 's', text: 'n', detail: ' \n<b>cool</b>\n ' })],
-    ['notification 2000-char detail', activity({ kind: 'notification', id: 's', text: 'n', detail: 'x'.repeat(2_000) })],
+    [
+      'notification multiline detail',
+      activity({ kind: 'notification', id: 's', text: 'n', detail: ' \n<b>cool</b>\n ' }),
+    ],
+    [
+      'notification 2000-char detail',
+      activity({ kind: 'notification', id: 's', text: 'n', detail: 'x'.repeat(2_000) }),
+    ],
     ['file minimal', activity({ kind: 'file', id: 's' })],
     ['file full', activity({ kind: 'file', id: 's', path: '', name: 'n', mime: 'text/plain' })],
     ['patch empty', activity({ kind: 'patch', id: 's', files: [] })],
@@ -213,6 +238,9 @@ describe('session link frame acceptance', () => {
     ['subtask full', activity({ kind: 'subtask', id: 's', agent: 'a', description: '' })],
     ['usage minimal', usage(USAGE)],
     ['usage null turn', usage(USAGE, { turnId: null })],
+    ['usage fractional model time from an older runner', usage({ ...USAGE, duration_api_ms: 3328.568369 })],
+    ['usage zero model time', usage({ ...USAGE, duration_api_ms: 0 })],
+    ['usage maximum model time', usage({ ...USAGE, duration_api_ms: Number.MAX_SAFE_INTEGER })],
     [
       'usage full',
       usage({
@@ -399,9 +427,28 @@ describe('session link frame acceptance', () => {
     ['usage negative reasoning_tokens', usage({ ...USAGE, reasoning_tokens: -1 })],
     ['usage string context_tokens', usage({ ...USAGE, context_tokens: '5' })],
     ['usage null num_turns', usage({ ...USAGE, num_turns: null })],
+    ['usage negative model time', usage({ ...USAGE, duration_api_ms: -0.1 })],
+    ['usage string model time', usage({ ...USAGE, duration_api_ms: '3328.568369' })],
+    ['usage null model time', usage({ ...USAGE, duration_api_ms: null })],
+    ['usage non-finite model time', usage({ ...USAGE, duration_api_ms: Infinity })],
+    ['usage unsafe model time', usage({ ...USAGE, duration_api_ms: Number.MAX_SAFE_INTEGER + 1 })],
   ];
 
-  it.each(rejected)('rejects %s', async (_name, frame) => {
+  const optionalTelemetry = rejected.filter(
+    ([, frame]) => isRecord(frame) && frame.v === 5 && (frame.type === 'usage' || frame.type === 'activity'),
+  );
+  it.each(optionalTelemetry)('warns and ignores %s without disconnecting', async (_name, frame) => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    expect(await outcome(frame)).toBe('accepted');
+    expect(getSessionTurnSignals(SESSION_ID).usage).toBeNull();
+    expect(getSessionTurnSignals(SESSION_ID).activity).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Skipped invalid optional live telemetry',
+      expect.objectContaining({ sessionId: SESSION_ID, error: 'schema validation failed' }),
+    );
+  });
+  it.each(rejected.filter((item) => !optionalTelemetry.includes(item)))('rejects %s', async (_name, frame) => {
     expect(await outcome(frame)).toBe('rejected');
   });
 });
@@ -473,7 +520,13 @@ describe('session link live state', () => {
       lines = getSessionTurnSignals(SESSION_ID).activity;
       expect(lines).toHaveLength(128);
       expect(lines.filter((entry) => entry.turnId === 'turn-1' && entry.ordinal === 50)).toEqual([
-        { ts: TS, text: '{"kind":"internal","id":"r","text":"new"}', turnId: 'turn-1', ordinal: 50, timelinePosition: 100 },
+        {
+          ts: TS,
+          text: '{"kind":"internal","id":"r","text":"new"}',
+          turnId: 'turn-1',
+          ordinal: 50,
+          timelinePosition: 100,
+        },
       ]);
       expect(lines.at(-2)).toMatchObject({ turnId: 'turn-1', ordinal: 50 });
       expect(lines.at(-1)).toMatchObject({ turnId: 'turn-2', ordinal: 50 });

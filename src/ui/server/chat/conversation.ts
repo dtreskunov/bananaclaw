@@ -195,10 +195,23 @@ export function projectConversation(
       usage,
       metadata: {
         status:
-          turn.phase !== 'settled' ? 'provisional' : (metadata?.status ?? (usage.length ? 'partial' : 'unavailable')),
+          turn.phase !== 'settled'
+            ? 'provisional'
+            : metadata?.final
+              ? metadata.status
+              : usage.length
+                ? 'partial'
+                : 'unavailable',
         model: metadata?.model ?? usage.at(-1)?.value.model ?? liveUsage?.model ?? null,
-        // A running turn's stored duration is a stale checkpoint, not its elapsed time.
-        durationMs: turn.phase === 'settled' ? (metadata?.durationMs ?? usage.at(-1)?.value.duration_ms ?? null) : null,
+        // Without final metadata, native turns use their terminal timestamps rather than a stale checkpoint.
+        durationMs:
+          turn.phase !== 'settled'
+            ? null
+            : metadata?.final
+              ? metadata.durationMs
+              : turn.provenance === 'native'
+                ? null
+                : (usage.at(-1)?.value.duration_ms ?? null),
       },
       liveUsage,
     });

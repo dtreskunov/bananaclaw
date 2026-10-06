@@ -52,6 +52,10 @@ export const isTrue: Check = (value) => value === true;
 export const isRecordValue: Check = isRecord;
 export const isSafeInteger: Check = (value) => Number.isSafeInteger(value);
 export const isCount: Check = (value) => Number.isSafeInteger(value) && (value as number) >= 0;
+/** Older native runners journaled SDK sub-millisecond timing; accept it for replay, then round the projection. */
+export function isModelDurationMs(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+}
 /** Millisecond epoch encoded as a decimal string. */
 export const isTimestamp: Check = (value) => typeof value === 'string' && /^\d{1,16}$/.test(value);
 
@@ -132,14 +136,16 @@ const USAGE_FIELDS: readonly FieldSpec[] = [
   optional('reasoning_tokens', isCount),
   optional('num_turns', isCount),
   optional('duration_ms', isCount),
-  optional('duration_api_ms', isCount),
+  optional('duration_api_ms', isModelDurationMs),
   optional('context_window', isCount),
   optional('max_output_tokens', isCount),
   optional('context_tokens', isCount),
 ];
 
 export function sanitizeUsage(value: unknown): UsageSnapshot | null {
-  return isRecord(value) ? (sanitizeFields(value, USAGE_FIELDS) as UsageSnapshot | null) : null;
+  const usage = isRecord(value) ? (sanitizeFields(value, USAGE_FIELDS) as UsageSnapshot | null) : null;
+  if (usage?.duration_api_ms !== undefined) usage.duration_api_ms = Math.round(usage.duration_api_ms);
+  return usage;
 }
 
 const TURN_FIELDS: readonly FieldSpec[] = [

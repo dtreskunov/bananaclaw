@@ -88,24 +88,44 @@ describe('current turn control', () => {
       try {
         expect(db.prepare('SELECT id FROM turns').pluck().get()).toBe('committed-turn');
         observed.push(...change.turnIds);
-      } finally { db.close(); }
+      } finally {
+        db.close();
+      }
     });
     const socket = await connect();
-    const frame = { v: 5, type: 'durable', eventId: 'turn-commit', sequence: 1, event: {
-      type: 'turn.upsert', payload: {
-        id: 'committed-turn', origin_channel_type: 'web', origin_platform_id: 'room',
-        origin_thread_id: null, origin_source_session_id: null, started_at: '2026-09-01T00:00:00.000Z',
-        ended_at: null, phase: 'running', outcome: 'pending', provenance: 'native',
-        imported_from_session_id: null, imported_from_turn_id: null,
+    const frame = {
+      v: 5,
+      type: 'durable',
+      eventId: 'turn-commit',
+      sequence: 1,
+      event: {
+        type: 'turn.upsert',
+        payload: {
+          id: 'committed-turn',
+          origin_channel_type: 'web',
+          origin_platform_id: 'room',
+          origin_thread_id: null,
+          origin_source_session_id: null,
+          started_at: '2026-09-01T00:00:00.000Z',
+          ended_at: null,
+          phase: 'running',
+          outcome: 'pending',
+          provenance: 'native',
+          imported_from_session_id: null,
+          imported_from_turn_id: null,
+        },
       },
-    } };
+    };
     try {
       socket.write(`${JSON.stringify(frame)}\n`);
       await waitFor(() => observed.length === 1);
       socket.write(`${JSON.stringify(frame)}\n`);
       await new Promise((resolve) => setTimeout(resolve, 25));
       expect(observed).toEqual(['committed-turn']);
-    } finally { socket.destroy(); unsubscribe(); }
+    } finally {
+      socket.destroy();
+      unsubscribe();
+    }
   });
   it('retains a disconnected turn without a completion notification and reports confirmed exit separately', async () => {
     const changes: Array<{ turnIds: string[]; reason: string }> = [];
@@ -120,18 +140,31 @@ describe('current turn control', () => {
       expect(changes).toEqual([]);
       confirmSessionRunnerExit(SESSION_ID);
       expect(changes).toEqual([{ turnIds: [ACTIVE_TURN.id], reason: 'runner-exited' }]);
-    } finally { socket.destroy(); unsubscribe(); }
+    } finally {
+      socket.destroy();
+      unsubscribe();
+    }
   });
   it('accepts an optional native steering capability and replays it with the active turn', async () => {
     const socket = await connect();
-    socket.write(`${JSON.stringify({
-      v: 5, type: 'turn.state', turn: {
-        ...ACTIVE_TURN, supportsSteering: true, supportsInputEditing: true, supportsInputCancellation: true,
-      },
-    })}\n`);
+    socket.write(
+      `${JSON.stringify({
+        v: 5,
+        type: 'turn.state',
+        turn: {
+          ...ACTIVE_TURN,
+          supportsSteering: true,
+          supportsInputEditing: true,
+          supportsInputCancellation: true,
+        },
+      })}\n`,
+    );
     await waitFor(() => getSessionActiveTurn(SESSION_ID).turn?.supportsSteering === true);
     expect(getSessionActiveTurn(SESSION_ID).turn).toEqual({
-      ...ACTIVE_TURN, supportsSteering: true, supportsInputEditing: true, supportsInputCancellation: true,
+      ...ACTIVE_TURN,
+      supportsSteering: true,
+      supportsInputEditing: true,
+      supportsInputCancellation: true,
     });
     socket.destroy();
   });
@@ -279,15 +312,22 @@ describe('session signal link', () => {
       try {
         const row = db.prepare('SELECT value FROM session_state WHERE key = ?').get('input:test') as { value: string };
         observed.push(row.value);
-      } finally { db.close(); }
+      } finally {
+        db.close();
+      }
     });
     const socket = await connect();
     const value = JSON.stringify({ messageId: 'message-1', status: 'applied', turnId: 'turn-1' });
     try {
-      socket.write(`${JSON.stringify({
-        v: 5, type: 'durable', eventId: 'input-state-1', sequence: 1,
-        event: { type: 'state.upsert', payload: { key: 'input:test', value, updated_at: new Date().toISOString() } },
-      })}\n`);
+      socket.write(
+        `${JSON.stringify({
+          v: 5,
+          type: 'durable',
+          eventId: 'input-state-1',
+          sequence: 1,
+          event: { type: 'state.upsert', payload: { key: 'input:test', value, updated_at: new Date().toISOString() } },
+        })}\n`,
+      );
       await waitFor(() => observed.length === 1);
       expect(observed).toEqual([value]);
     } finally {
@@ -302,7 +342,10 @@ describe('session signal link', () => {
       `${JSON.stringify({
         v: 5,
         type: 'activity',
-        turnId: null, ts: String(Date.now()), ordinal: 0, timelinePosition: 100,
+        turnId: null,
+        ts: String(Date.now()),
+        ordinal: 0,
+        timelinePosition: 100,
         step: { kind: 'tool', id: 'stopped-tool', tool: 'write', status },
       })}\n`,
     );
@@ -318,7 +361,10 @@ describe('session signal link', () => {
       `${JSON.stringify({
         v: 5,
         type: 'activity',
-        turnId: null, ts: String(Date.now()), ordinal: 0, timelinePosition: 100,
+        turnId: null,
+        ts: String(Date.now()),
+        ordinal: 0,
+        timelinePosition: 100,
         step: { kind: 'tool', id: 'read-1', tool: 'read', status: 'running', detail: 'src/index.ts' },
       })}\n`,
     );
@@ -326,7 +372,8 @@ describe('session signal link', () => {
       `${JSON.stringify({
         v: 5,
         type: 'usage',
-        turnId: null, ts: String(Date.now()),
+        turnId: null,
+        ts: String(Date.now()),
         usage: {
           cost_usd: 0.1,
           input_tokens: 100,
@@ -354,7 +401,10 @@ describe('session signal link', () => {
       `${JSON.stringify({
         v: 5,
         type: 'activity',
-        turnId: null, ts: String(Date.now()), ordinal: 0, timelinePosition: 100,
+        turnId: null,
+        ts: String(Date.now()),
+        ordinal: 0,
+        timelinePosition: 100,
         step: {
           kind: 'tool',
           id: 'schema-rejected',
@@ -370,20 +420,21 @@ describe('session signal link', () => {
       `${JSON.stringify({
         v: 5,
         type: 'usage',
-        turnId: null, ts: String(Date.now()),
+        turnId: null,
+        ts: String(Date.now()),
         usage: {
           cost_usd: 0.1,
           input_tokens: 100,
           output_tokens: 20,
           cache_read_tokens: 0,
           cache_write_tokens: 0,
-          duration_api_ms: 250,
+          duration_api_ms: 3328.568369,
           model: 'test/model',
         },
       })}\n`,
     );
 
-    await waitFor(() => getSessionSignalUsage(SESSION_ID)?.duration_api_ms === 250);
+    await waitFor(() => getSessionSignalUsage(SESSION_ID)?.duration_api_ms === 3329);
     expect(JSON.parse(getSessionSignalActivity(SESSION_ID)[0].text)).toMatchObject({
       rejectedBeforeExecution: true,
       description: 'Subject: <literal>\nSecond line',
@@ -399,89 +450,122 @@ describe('session signal link', () => {
       detail: ' \nActually, sleep 5 more seconds. Append "<b>cool</b>".\n ',
     };
     const reply = {
-      v: 5, type: 'durable', eventId: 'reply-after-steering', sequence: 1,
-      event: { type: 'message.upsert', payload: {
-        id: 'reply-1', seq: 1, in_reply_to: null, timestamp: '2026-10-04T18:49:00.000Z',
-        deliver_after: null, recurrence: null, kind: 'chat', platform_id: 'room',
-        channel_type: 'web', thread_id: 'thread-1', turn_id: null,
-        content_base64: Buffer.from('{"text":"Elapsed: 5002 ms - cool"}').toString('base64'),
-      } },
+      v: 5,
+      type: 'durable',
+      eventId: 'reply-after-steering',
+      sequence: 1,
+      event: {
+        type: 'message.upsert',
+        payload: {
+          id: 'reply-1',
+          seq: 1,
+          in_reply_to: null,
+          timestamp: '2026-10-04T18:49:00.000Z',
+          deliver_after: null,
+          recurrence: null,
+          kind: 'chat',
+          platform_id: 'room',
+          channel_type: 'web',
+          thread_id: 'thread-1',
+          turn_id: null,
+          content_base64: Buffer.from('{"text":"Elapsed: 5002 ms - cool"}').toString('base64'),
+        },
+      },
     };
     const email = {
-      kind: 'tool', id: 'email-1', tool: 'mcp__nanoclaw__send_email', status: 'completed',
-      detail: 'alice@example.test', description: 'Subject: <literal>\nSecond line',
+      kind: 'tool',
+      id: 'email-1',
+      tool: 'mcp__nanoclaw__send_email',
+      status: 'completed',
+      detail: 'alice@example.test',
+      description: 'Subject: <literal>\nSecond line',
     };
     for (let attempt = 0; attempt < 2; attempt++) {
       const socket = await connect();
       let received = '';
-      socket.on('data', (chunk) => { received += String(chunk); });
+      socket.on('data', (chunk) => {
+        received += String(chunk);
+      });
       try {
         socket.write(`${JSON.stringify({ v: 5, type: 'activity.clear' })}\n`);
-        socket.write(`${JSON.stringify({
-          v: 5, type: 'activity', turnId: ACTIVE_TURN.id, ts: '1791139732667',
-          ordinal: 0, timelinePosition: 1791139732667000, step,
-        })}\n`);
-        socket.write(`${JSON.stringify({
-          v: 5, type: 'activity', turnId: ACTIVE_TURN.id, ts: '1791139732668',
-          ordinal: 1, timelinePosition: 1791139732668000, step: email,
-        })}\n`);
+        socket.write(
+          `${JSON.stringify({
+            v: 5,
+            type: 'activity',
+            turnId: ACTIVE_TURN.id,
+            ts: '1791139732667',
+            ordinal: 0,
+            timelinePosition: 1791139732667000,
+            step,
+          })}\n`,
+        );
+        socket.write(
+          `${JSON.stringify({
+            v: 5,
+            type: 'activity',
+            turnId: ACTIVE_TURN.id,
+            ts: '1791139732668',
+            ordinal: 1,
+            timelinePosition: 1791139732668000,
+            step: email,
+          })}\n`,
+        );
         socket.write(`${JSON.stringify({ v: 5, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
         socket.write(`${JSON.stringify(reply)}\n`);
-        await waitFor(() => received.endsWith('\n') && parsedFrames(received).some(
-          (frame) => frame.type === 'ack' && frame.eventId === reply.eventId,
-        ));
+        await waitFor(
+          () =>
+            received.endsWith('\n') &&
+            parsedFrames(received).some((frame) => frame.type === 'ack' && frame.eventId === reply.eventId),
+        );
         expect(getSessionActiveTurn(SESSION_ID).connected).toBe(true);
         expect(getSessionSignalActivity(SESSION_ID).map((line) => JSON.parse(line.text))).toEqual([step, email]);
         const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
         try {
-          expect(db.prepare('SELECT content FROM messages_out').pluck().all())
-            .toEqual(['{"text":"Elapsed: 5002 ms - cool"}']);
-        } finally { db.close(); }
-      } finally { socket.destroy(); }
+          expect(db.prepare('SELECT content FROM messages_out').pluck().all()).toEqual([
+            '{"text":"Elapsed: 5002 ms - cool"}',
+          ]);
+        } finally {
+          db.close();
+        }
+      } finally {
+        socket.destroy();
+      }
       await waitFor(() => !getSessionActiveTurn(SESSION_ID).connected);
     }
   });
 
-  it('rejects malformed frames without applying them', async () => {
+  it.each([
+    ['negative token count', { cost_usd: 0, input_tokens: -1 }],
+    ['pathological numeric values', { cost_usd: 1e308, input_tokens: Number.MAX_SAFE_INTEGER + 1 }],
+  ] as const)('ignores %s without disconnecting or applying usage', async (_label, invalid) => {
     const socket = await connect();
-    socket.write(
-      `${JSON.stringify({
-        v: 5,
-        type: 'usage',
-        turnId: null, ts: String(Date.now()),
-        usage: {
-          cost_usd: 0,
-          input_tokens: -1,
-          output_tokens: 0,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          model: 'bad',
-        },
-      })}\n`,
-    );
-    await waitFor(() => socket.destroyed);
-    expect(getSessionSignalUsage(SESSION_ID)).toBeNull();
-  });
-
-  it('rejects pathological numeric telemetry', async () => {
-    const socket = await connect();
-    socket.write(
-      `${JSON.stringify({
-        v: 5,
-        type: 'usage',
-        turnId: null, ts: String(Date.now()),
-        usage: {
-          cost_usd: 1e308,
-          input_tokens: Number.MAX_SAFE_INTEGER + 1,
-          output_tokens: 0,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          model: 'bad',
-        },
-      })}\n`,
-    );
-    await waitFor(() => socket.destroyed);
-    expect(getSessionSignalUsage(SESSION_ID)).toBeNull();
+    let beats = 0;
+    const unsubscribe = onSessionSignal((_id, kind) => {
+      if (kind === 'heartbeat') beats++;
+    });
+    try {
+      socket.write(
+        `${JSON.stringify({
+          v: 5,
+          type: 'usage',
+          turnId: null,
+          ts: String(Date.now()),
+          usage: {
+            ...invalid,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            model: 'bad',
+          },
+        })}\n${JSON.stringify({ v: 5, type: 'heartbeat' })}\n`,
+      );
+      await waitFor(() => beats === 1);
+      expect(socket.destroyed).toBe(false);
+      expect(getSessionSignalUsage(SESSION_ID)).toBeNull();
+    } finally {
+      unsubscribe();
+      socket.destroy();
+    }
   });
 
   it('rejects payload attempts to choose another session', async () => {
@@ -511,7 +595,10 @@ describe('session signal link', () => {
         `${JSON.stringify({
           v: 5,
           type: 'activity',
-          turnId: null, ts: String(Date.now()), ordinal: i, timelinePosition: 100 + i,
+          turnId: null,
+          ts: String(Date.now()),
+          ordinal: i,
+          timelinePosition: 100 + i,
           step: { kind: 'notification', id: `first-${i}`, text: 'ok' },
         })}\n`,
       );
@@ -525,7 +612,10 @@ describe('session signal link', () => {
       `${JSON.stringify({
         v: 5,
         type: 'activity',
-        turnId: null, ts: String(Date.now()), ordinal: 0, timelinePosition: 100,
+        turnId: null,
+        ts: String(Date.now()),
+        ordinal: 0,
+        timelinePosition: 100,
         step: { kind: 'notification', id: 'bypassed-budget', text: 'no' },
       })}\n`,
     );
@@ -618,6 +708,130 @@ describe('session signal link', () => {
       ]);
     } finally {
       db.close();
+      socket.destroy();
+    }
+  });
+
+  it('acknowledges invalid optional telemetry and delivers the following saved reply and settlement', async () => {
+    const socket = await connect();
+    let response = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => {
+      response += chunk;
+    });
+    const turn = {
+      id: 'optional-wire-turn',
+      origin_channel_type: 'web',
+      origin_platform_id: 'chat-1',
+      origin_thread_id: null,
+      origin_source_session_id: null,
+      started_at: '2026-09-01T00:00:00.000Z',
+      ended_at: null,
+      phase: 'running',
+      outcome: 'pending',
+      provenance: 'native',
+      imported_from_session_id: null,
+      imported_from_turn_id: null,
+    };
+    const events = [
+      { type: 'turn.upsert', payload: turn },
+      { type: 'usage.persist', payload: {} },
+      { type: 'activity.persist', payload: null },
+      {
+        type: 'state.upsert',
+        payload: {
+          key: `turn-metadata:${turn.id}`,
+          value: '{',
+          updated_at: 'now',
+        },
+      },
+      {
+        type: 'state.upsert',
+        payload: {
+          key: `turn-metadata:${turn.id}`,
+          updated_at: 'now',
+          value: JSON.stringify({
+            turnId: turn.id,
+            durationMs: 1000,
+            model: null,
+            usageId: 'missing-usage',
+            status: 'final',
+            final: true,
+          }),
+        },
+      },
+      {
+        type: 'message.upsert',
+        payload: {
+          id: 'saved-reply',
+          turn_id: turn.id,
+          seq: 1,
+          in_reply_to: null,
+          timestamp: '2026-09-01 00:00:01',
+          deliver_after: null,
+          recurrence: null,
+          kind: 'chat',
+          platform_id: 'chat-1',
+          channel_type: 'web',
+          thread_id: null,
+          content_base64: Buffer.from('{"text":"saved","delivery_origin":"response"}').toString('base64'),
+        },
+      },
+      {
+        type: 'turn.upsert',
+        payload: {
+          ...turn,
+          phase: 'settled',
+          outcome: 'replied',
+          ended_at: '2026-09-01T00:00:01.000Z',
+        },
+      },
+    ];
+    try {
+      socket.write(
+        JSON.stringify({
+          v: 5,
+          type: 'usage',
+          usage: {},
+          turnId: turn.id,
+          ts: '1790000000000',
+        }) +
+          '\n' +
+          JSON.stringify({
+            v: 5,
+            type: 'activity',
+            step: null,
+            turnId: turn.id,
+            ts: '1790000000000',
+            ordinal: 0,
+            timelinePosition: 1,
+          }) +
+          '\n',
+      );
+      socket.write(
+        events
+          .map((event, index) =>
+            JSON.stringify({
+              v: 5,
+              type: 'durable',
+              eventId: `optional-wire-${index + 1}`,
+              sequence: index + 1,
+              event,
+            }),
+          )
+          .join('\n') + '\n',
+      );
+      await waitFor(() => parsedFrames(response).filter((frame) => frame.type === 'ack').length === events.length);
+      expect(parsedFrames(response).some((frame) => frame.type === 'nack')).toBe(false);
+      const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+      try {
+        expect(db.prepare('SELECT phase, outcome FROM turns').get()).toEqual({ phase: 'settled', outcome: 'replied' });
+        expect(db.prepare('SELECT id FROM messages_out').pluck().get()).toBe('saved-reply');
+        expect(db.prepare('SELECT COUNT(*) FROM applied_runner_events').pluck().get()).toBe(events.length);
+      } finally {
+        db.close();
+      }
+    } finally {
       socket.destroy();
     }
   });

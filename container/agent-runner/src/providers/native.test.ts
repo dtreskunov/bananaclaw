@@ -539,6 +539,8 @@ describe('NativeProvider', () => {
       });
       const usage = events.find((event) => event.type === 'usage')!.data;
       const calls = events.filter((event) => event.type === 'usage_call');
+      expect(calls.every((event) => Number.isSafeInteger(event.data.duration_api_ms))).toBe(true);
+      expect(Number.isSafeInteger(usage.duration_api_ms)).toBe(true);
       expect(usage.duration_api_ms).toBeCloseTo(calls.reduce((total, event) => total + event.data.duration_api_ms!, 0), 6);
       expect(usage.duration_ms! - usage.duration_api_ms!).toBeGreaterThanOrEqual(90);
       expect(query.steer!({ id: 'late', prompt: 'too late' })).toBe(false);

@@ -218,8 +218,9 @@ the provider, so its first prompt always sees a complete routing/message snapsho
 Invalid host events receive a fatal `host.nack` and remain journaled for diagnosis.
 
 The final `turn.upsert` with `phase=settled` is the identity-bearing delivery
-barrier: its input associations, messages, usage, activity and metadata have
-already committed in journal order. The old anonymous `turn.persisted {}` event
+barrier: its input associations and messages have already committed in journal
+order. Optional usage, activity and display metadata have been applied or
+explicitly skipped. The old anonymous `turn.persisted {}` event
 is rejected. Tool-origin and system messages can wake delivery
 immediately. `batch.persisted` follows each fully persisted logical result and
 wakes processing reconciliation only after its task attempts and completion
@@ -253,6 +254,29 @@ One stable usage row (`tu-<turn ID>`) is overwritten with the accumulated
 reported billing across attempts; aggregate reports replace the current
 attempt's call deltas, not add them again. Provider durations never reset the
 logical turn's walltime. Usage timestamps and IDs survive re-linking.
+Model-call durations (`duration_api_ms`) are rounded to integer milliseconds
+before new native runner reports are emitted. For older runners and already
+journaled events, the host accepts finite, non-negative fractional model
+durations within the safe-integer range and rounds only the live/durable
+projection. Replay identity and the original journal payload stay unchanged;
+all token counts, sequence numbers and other integer-only fields remain strict.
+
+Invalid `usage.persist`, `activity.persist`, and `state.upsert` records under
+`turn-metadata:` log a warning and advance the journal through the normal commit
+and acknowledgement path. Validation failures roll back only that optional
+mutation; the original event ID, sequence and payload digest remain in the
+receipt ledger, so identical replay is idempotent and conflicting replay is
+still rejected. No quarantine or replacement usage row is created. Missing
+usage references make display metadata invalid as well, but neither prevents
+settlement; incomplete reports display as partial or unavailable, never zero.
+Warnings identify the session, event, sequence, type and validation reason
+without logging the payload. Database errors, invalid envelopes, ordering
+conflicts, unknown event types and all delivery, identity, input-receipt,
+continuation and task state remain fatal rather than being skipped.
+Invalid live `usage` and `activity` snapshots also warn and are ignored without
+closing the socket, so replayed snapshots cannot block the durable journal.
+Valid protocol versions, frame-size/rate limits and critical live control frames
+remain mandatory.
 
 `onSessionTurnChange` notifies host consumers after durable commits, with
 changed turn IDs and an optional settled ID; identical replays do not produce

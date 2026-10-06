@@ -108,6 +108,10 @@ function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
   };
 }
 
+function timedCallUsageFor(model: NativeModel, raw: unknown, responseTimeMs: number): CallUsage & { duration_api_ms: number } {
+  return { ...callUsageFor(model, raw), duration_api_ms: Math.round(responseTimeMs) };
+}
+
 function addUsage(total: TurnUsage, data: CallUsage): void {
   total.cost_usd += data.cost_usd;
   total.input_tokens += data.input_tokens;
@@ -426,9 +430,10 @@ export class NativeProvider implements AgentProvider {
                   // A model call can finish before its tool does. Retain its
                   // usage even if cancellation prevents finish-step.
                   onLanguageModelCallEnd: ({ usage, performance }) => {
-                    modelCallMs += performance.responseTimeMs;
+                    const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
+                    modelCallMs += data.duration_api_ms;
                     if (usage.inputTokens !== undefined || usage.outputTokens !== undefined) {
-                      callUsages.push({ ...callUsageFor(resolved, usage), duration_api_ms: performance.responseTimeMs });
+                      callUsages.push(data);
                     }
                   },
                   ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
@@ -501,8 +506,8 @@ export class NativeProvider implements AgentProvider {
                           maxRetries: 2,
                           abortSignal: compactSignal,
                           onLanguageModelCallEnd: ({ usage, performance }) => {
-                            modelCallMs += performance.responseTimeMs;
-                            const data = { ...callUsageFor(resolved, usage), duration_api_ms: performance.responseTimeMs };
+                            const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
+                            modelCallMs += data.duration_api_ms;
                             callUsages.push(data);
                             addUsage(totalUsage, data);
                           },
