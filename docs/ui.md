@@ -360,7 +360,9 @@ remains at the bottom and retains relative timestamps and message provenance.
 The disclosure is labelled **5 traces** (or **1 trace**), counting recorded
 trace entries, not model requests or exclusively tool calls; display-only markers
 are excluded. The count does not repeat in its adjacent summary, which shows
-available fields in the order `15s · $2.09 · 35% ctx`. Elapsed time of at least a
+available fields in the order `15s · $2.09 · 35% ctx`. Elapsed time appears here
+only after the turn settles; running, stopping, and settling turns retain timing
+in the live stopwatch and usage pop-up, not the trace status summary. Elapsed time of at least a
 minute uses minutes and seconds (`710s` becomes `11m 50s`), reusing the task
 panel's duration formatter (milliseconds below one second, rounded seconds otherwise). Missing fields and zero
 cost are omitted from the summary; a reported zero cost remains in the pop-up. Total cost is

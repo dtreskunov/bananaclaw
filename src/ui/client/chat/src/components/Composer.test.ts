@@ -1311,6 +1311,71 @@ describe('main composer pending edits', () => {
     },
   );
 
+  it.each(
+    (['running', 'stopping', 'settling'] as const).flatMap((phase) =>
+      [false, true].map((recorded) => ({ phase, recorded })),
+    ),
+  )(
+    'omits elapsed time from $phase trace status without losing popup or stopwatch timing (recorded=$recorded)',
+    ({ phase, recorded }) => {
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-29T00:00:07Z'));
+      onTestFinished(() => clock.mockRestore());
+      appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+      const value = {
+        cost_usd: 0.0123,
+        context_tokens: 7000,
+        context_window: 20_000,
+        input_tokens: 100,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: 'fixture-model',
+        duration_api_ms: 2000,
+        duration_ms: 999999,
+      };
+      applyConversationFrame(
+        testSnapshot({
+          turns: [
+            {
+              ...testTurn,
+              phase,
+              metadata: { status: 'final', model: 'fixture-model', durationMs: 999999 },
+              usage: recorded ? [{ id: 'usage', value }] : [],
+              liveUsage: recorded ? null : value,
+            },
+          ],
+          connection: { connected: true, activeTurnId: testTurn.id },
+        }),
+        'thread',
+      );
+      resetMount();
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      hooks.cursor = 0;
+      const status = findComponent(log.type(log.props), 'ResponseStatusRow');
+      resetMount();
+      hooks.cursor = 0;
+      const row = status.type(status.props);
+      const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+      const stats = findComponent(info.type(info.props), 'TurnStats');
+      const usage = findComponent(stats.type(stats.props), 'UsageMeta');
+      expect(usage.props.summary).toBe('$0.012 · 35% ctx');
+      expect(usage.props.wallElapsedMs).toBe(7000);
+      const stopwatch = findComponent(row.props.children.at(-1), 'TurnElapsed');
+      expect(stopwatch.props.elapsedMs).toBe(7000);
+      expect(stopwatch.props.live).toBe(true);
+      resetMount();
+      hooks.cursor = 0;
+      find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+      hooks.cursor = 0;
+      const popup = find(usage.type(usage.props), 'span', 'Turn usage details');
+      expect(find(popup, 'span', 'Total time')).toBeDefined();
+      expect(find(popup, 'strong', '0:07')).toBeDefined();
+      expect(find(popup, 'strong', '0:02')).toBeDefined();
+    },
+  );
+
   it.each([
     { modelMs: 3500, extraMs: 1000, modelText: '0:04', otherText: '0:02' },
     { modelMs: 0, extraMs: 0, modelText: '0:00', otherText: '0:06' },

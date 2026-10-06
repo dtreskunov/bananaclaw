@@ -1078,7 +1078,10 @@ function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }
   if (!hasTurnStats(turn, view)) return null;
   const records = view.usage.length ? view.usage
     : turn.liveUsage ? [{ id: 'live', value: turn.liveUsage }] : [];
-  const summary = technicalSummary({ elapsedMs: view.elapsedMs, usage: records.map(record => record.value) });
+  const summary = technicalSummary({
+    elapsedMs: turn.phase === 'settled' ? view.elapsedMs : null,
+    usage: records.map(record => record.value),
+  });
   return <UsageMeta u={records[0]?.value ?? {}} records={records} summary={summary} model={view.model}
     wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs}
     live={!turn.usage.length && !!turn.liveUsage}

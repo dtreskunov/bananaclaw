@@ -24329,7 +24329,10 @@ function hasTurnStats(turn2, view) {
 function TurnStats({ turn: turn2, view }) {
   if (!hasTurnStats(turn2, view)) return null;
   const records = view.usage.length ? view.usage : turn2.liveUsage ? [{ id: "live", value: turn2.liveUsage }] : [];
-  const summary = technicalSummary({ elapsedMs: view.elapsedMs, usage: records.map((record) => record.value) });
+  const summary = technicalSummary({
+    elapsedMs: turn2.phase === "settled" ? view.elapsedMs : null,
+    usage: records.map((record) => record.value)
+  });
   return /* @__PURE__ */ u4(
     UsageMeta,
     {
