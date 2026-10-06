@@ -369,7 +369,9 @@ cost are omitted from the summary; a reported zero cost remains in the pop-up. T
 shown only when every usage report includes cost; context is the latest reported
 valid context/window pair, not cumulative billed tokens. The usage pop-up retains
 model, tokens, model/other timing, and individual accounting reports.
-The pop-up is accessible only when technical information is on.
+The pop-up opens above the technical summary, retaining its original upward
+placement and internal scrolling for long reports. It is accessible only when
+technical information is on.
 Missing token accounting does not add a "Tokens unavailable" label to the
 transcript. Partial records show only reported values; a record with no summary
 values still offers **Usage details** for inspecting its available timing and
