@@ -16,7 +16,7 @@ import {
 } from '../state';
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
 import {
-  sendChat, addPendingFiles, removePending,
+  sendChat, retryChatSend, addPendingFiles, removePending,
   navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval,
   openChat, openTaskPanel, reconnectChatNow, forkThreadAt, editMessageInBranch,
 } from '../actions';
@@ -36,6 +36,7 @@ import {
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
 } from '../../../../shared/activity-presentation';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
+import { STARTING_RESPONSE_TEXT, submissionPresentation } from '../web-submissions';
 import {
   activityTraceOwner, activityTraceView, followActivityTrace, pauseActivityTrace, toggleActivityTrace,
 } from '../activity-trace-state';
@@ -64,7 +65,7 @@ import { attachScrollEdges } from '../scroll-edges';
 import { revealLatestActivity } from '../activity-trace-scroll';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
-import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, Thread, TranscriptRow, TurnUsage } from '../types';
+import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingWebSend, Thread, TranscriptRow, TurnUsage } from '../types';
 
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
 const revealedMobileMessageActionsId = signal<string | null>(null);
@@ -663,7 +664,8 @@ function Message(
     : systemNotice && ['warning', 'stopped', 'interrupted'].includes(m.statsTurn?.outcome ?? '')
       ? ' provenance-warning'
       : '';
-  const inputPresentation = m.direction === 'in' ? inputStatePresentation(m.inputState) : null;
+  const inputPresentation = m.direction === 'in' && !m.hideInitialQueuedCaption ? inputStatePresentation(m.inputState) : null;
+  const submission = m.submission;
   const activity = m.direction === 'out' ? m.activity ?? [] : [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '')
@@ -673,7 +675,8 @@ function Message(
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === 'web';
-  const hasPendingSend = pendingWebSends.value.some((pendingSend) => pendingSend.threadId === threadId.value);
+  const hasPendingSend = pendingWebSends.value.some((send) =>
+    send.groupId === groupId.value && send.threadId === threadId.value && send.status !== 'failed');
   const suggestedAction = m.suggestedAction ?? (isFutureWorkMessage(m.text) ? 'continue' : undefined);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : undefined;
   const showContinue = isWebChannel && allowContinue && m.direction === 'out' &&
@@ -769,10 +772,21 @@ function Message(
           </div>
         )
         : null}
+      {submission?.status === 'failed' ? <div class="message-send-error" role="alert">
+        <span>Send failed: {submission.error}<br />
+          Use Retry to resend this message; Send creates a new one.
+        </span>
+        <button type="button" class="message-action-btn"
+          disabled={!canSend.value || !chatReady.value || composerSendInFlight.value}
+          onClick={() => { void retryChatSend(submission.messageId).catch(console.error); }}
+        >Retry</button>
+      </div> : null}
       {m.ts || m.inputState || activity.length ? <div class="meta turn-info">
         {m.ts && <RelativeTime ts={m.ts} />}
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
-        <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} />
+        {submission?.status === 'sending' && !m.hideInitialQueuedCaption
+          ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
+        {!m.submission ? <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} /> : null}
         {showsMidTurnLabel(m.deliveryOrigin,
           !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled'))
           ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
@@ -786,8 +800,8 @@ function Message(
             />
           : null}
         <span class="msg-inline-actions">
-          <EditMessageButton m={m} />
-          <ForkButton m={m} isLatest={isLatest} />
+          {!m.submission ? <EditMessageButton m={m} /> : null}
+          {!m.submission ? <ForkButton m={m} isLatest={isLatest} /> : null}
           <CopyTranscriptButton getContent={() => mdRef.current} />
         </span>
       </div> : null}
@@ -847,6 +861,7 @@ interface ThoughtsGroup { kind: 'thoughts'; thoughts: ChatMessage[]; answer: Cha
 interface SingleGroup { kind: 'single'; m: ChatMessage }
 interface EventsGroup { kind: 'events'; events: ChatMessage[] }
 type MsgGroup = ThoughtsGroup | SingleGroup | EventsGroup
+  | { kind: 'starting'; row: Extract<TranscriptRow, { kind: 'starting' }> }
   | { kind: 'turn'; row: Extract<TranscriptRow, { kind: 'turn' }> }
   | { kind: 'question-answer'; row: Extract<TranscriptRow, { kind: 'question-answer' }> };
 
@@ -854,7 +869,10 @@ function messageKey(message: ChatMessage): string {
   return message.id || `${message.direction}:${message.ts}:${message.text}`;
 }
 
-function groupKey(group: MsgGroup): string {
+function groupKey(group: MsgGroup, responseTurnId: string | null): string {
+  if (group.kind === 'starting' || (group.kind === 'turn' && group.row.status &&
+    group.row.turn.phase !== 'settled' && group.row.turn.id === responseTurnId))
+    return 'response:active';
   if (group.kind === 'turn') return `turn:${group.row.turn.id}`;
   if (group.kind === 'question-answer') return `question-answer:${group.row.answer.id}`;
   if (group.kind === 'thoughts') return `thoughts:${messageKey(group.answer)}`;
@@ -863,7 +881,7 @@ function groupKey(group: MsgGroup): string {
 }
 
 function groupContains(group: MsgGroup, messageId: string): boolean {
-  if (group.kind === 'turn') return false;
+  if (group.kind === 'turn' || group.kind === 'starting') return false;
   if (group.kind === 'question-answer') return group.row.answer.id === messageId;
   if (group.kind === 'thoughts') {
     return group.answer.id === messageId || group.thoughts.some((t) => t.id === messageId);
@@ -890,7 +908,8 @@ function groupMessages(list: TranscriptRow[]): MsgGroup[] {
       flushEvents();
       for (const message of pendingMsgs) out.push({ kind: 'single', m: message });
       pendingMsgs = [];
-      if (row.kind === 'turn') out.push({ kind: 'turn', row });
+      if (row.kind === 'starting') out.push({ kind: 'starting', row });
+      else if (row.kind === 'turn') out.push({ kind: 'turn', row });
       else out.push({ kind: 'question-answer', row });
       continue;
     }
@@ -1123,7 +1142,7 @@ function TurnTechnicalDetails({
   now?: number | null;
 }) {
   const traceView = activityTraceView(ownerId, live);
-  if (!turn && !lines.length) return null;
+  if (!turn && (!lines.length || (!activityStepCount(lines) && !traceView.expanded))) return null;
   return (
     <div class="turn-technical-details">
       <TurnTechnicalInfo turn={turn} count={activityStepCount(lines)}
@@ -1161,36 +1180,68 @@ function ReplyTurnInfo({
   );
 }
 
-/**
- * A synthetic bubble carrying the whole turn trace while live or when there is no final response.
- * The status bubble also carries the live headline, timer, usage and Stop control, or settled stats
- * for a turn without a reply.
- */
-function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: ConversationTurn; lines: ActivityLine[]; status: boolean; ownerId: string }) {
+function startingResponsePresentation(submission: PendingWebSend) {
+  const ownerId = `submission:${submission.messageId}`;
+  return {
+    ownerId, status: true, busy: true, traceLive: true, traceNow: null,
+    attributes: { 'data-response-start': ownerId },
+    technicalTurn: undefined, stopControl: null, elapsedControl: null, note: null, tone: '',
+    activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
+    lines: [{ ts: '', text: JSON.stringify({
+      kind: 'notification', id: `ui:current:${submission.messageId}`,
+      text: STARTING_RESPONSE_TEXT, status: 'running',
+    }) }],
+  };
+}
+
+function turnResponsePresentation(
+  { turn, activity: lines, status, traceOwner: ownerId }: Extract<TranscriptRow, { kind: 'turn' }>,
+  now: number,
+) {
   const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
   const settled = turn.phase === 'settled';
   const live = status && !settled;
-  const traceView = activityTraceView(ownerId, !settled);
-  const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : null;
+  const view = turnRowView(turn, now);
+  const activity = live ? liveTurnActivity(turn, lines, turnConnected.value, stop) : null;
+  const tone = stop?.error || (settled && turn.outcome === 'failed')
+    ? ' provenance-error'
+    : (settled && ['warning', 'stopped', 'interrupted'].includes(turn.outcome)) || (live && !turnConnected.value)
+      ? ' provenance-warning'
+      : '';
+  return {
+    ownerId, status, busy: live, traceLive: !settled,
+    traceNow: turn.endedAt ? Date.parse(turn.endedAt) : now,
+    attributes: { 'data-turn-id': status ? turn.id : undefined },
+    technicalTurn: status ? turn : undefined,
+    stopControl: status && activeTurn.value?.id === turn.id
+      ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton /></span> : null,
+    elapsedControl: status ? <TurnElapsed elapsedMs={view.elapsedMs} live={live} /> : null,
+    note: status && settled ? view.note ?? 'Done' : null,
+    tone, activity, lines: activity?.lines ?? lines,
+  };
+}
+
+/** One stable shell for preparing, live, settled and trace-only response rows. */
+function ResponseStatusRow({ source }: {
+  source: Extract<TranscriptRow, { kind: 'starting' | 'turn' }>;
+}) {
+  const clock = source.kind === 'turn'
+    ? { startedAt: source.turn.startedAt, live: source.status && source.turn.phase !== 'settled' }
+    : { startedAt: null, live: false };
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
-    if (!live) return;
+    if (!clock.live) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [turn.startedAt, live]);
-  const view = turnRowView(turn, now);
+  }, [clock.startedAt, clock.live]);
+  const presentation = source.kind === 'starting'
+    ? startingResponsePresentation(source.submission)
+    : turnResponsePresentation(source, now);
+  const { ownerId, status, busy, lines, activity } = presentation;
+  const traceView = activityTraceView(ownerId, presentation.traceLive);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
-  const showStop = status && activeTurn.value?.id === turn.id;
-  const currentActivity = live ? liveTurnActivity(turn, lines, turnConnected.value, stop) : null;
-  const displayLines = currentActivity?.lines ?? lines;
-  const liveHeadline = currentActivity?.headline ?? null;
-  const provenanceTone = stop?.error || (settled && turn.outcome === 'failed')
-    ? ' provenance-error'
-    : (settled && ['warning', 'stopped', 'interrupted'].includes(turn.outcome)) ||
-        (live && !turnConnected.value)
-      ? ' provenance-warning'
-      : '';
+  const headline = activity?.headline;
   if (!lines.length && !status) return null;
   if (!status && !showTechnicalStatus) return null;
   const toggleFromPreview = () => {
@@ -1198,28 +1249,28 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
   };
   return (
     <div
-      class={`typing turn-system${status ? ' turn-status' : ''}${live ? ' turn-live' : ''}${traceView.expanded ? ' expanded' : ''}${provenanceTone}`}
-      data-turn-id={status ? turn.id : undefined}
-      aria-live={live ? 'polite' : 'off'}
+      class={`typing turn-system${status ? ' turn-status' : ''}${busy ? ' turn-live' : ''}${traceView.expanded ? ' expanded' : ''}${presentation.tone}`}
+      {...presentation.attributes}
+      aria-live={busy ? 'polite' : 'off'}
     >
       {showTechnicalStatus
         ? <TurnTechnicalDetails
-            turn={status ? turn : undefined}
-            lines={displayLines}
-            live={!settled}
-            now={endedAt ?? now}
+            turn={presentation.technicalTurn}
+            lines={lines}
+            live={presentation.traceLive}
+            now={presentation.traceNow}
             ownerId={ownerId}
           />
         : null}
       <div class="typing-summary turn-info">
-        {live ? <div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div> : null}
-        {showStop ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton /></span> : null}
-        {status ? <TurnElapsed elapsedMs={view.elapsedMs} live={live} /> : null}
-        {liveHeadline && currentActivity?.notice
-          ? <span class={`hint${currentActivity.error ? ' turn-stop-error' : ''}`}
-              role={currentActivity.error ? 'alert' : 'status'} title={headlineSummary(liveHeadline)}
-            ><StepHeadlineContent headline={liveHeadline} /></span>
-          : liveHeadline && showTechnicalStatus
+        {busy ? <div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div> : null}
+        {presentation.stopControl}
+        {presentation.elapsedControl}
+        {headline && activity?.notice
+          ? <span class={`hint${activity.error ? ' turn-stop-error' : ''}`}
+              role={activity.error ? 'alert' : 'status'} title={headlineSummary(headline)}
+            ><StepHeadlineContent headline={headline} /></span>
+          : headline && showTechnicalStatus
           ? <button
               type="button"
               class="hint trace-preview"
@@ -1227,9 +1278,9 @@ function ConversationTurnRow({ turn, lines, status, ownerId }: { turn: Conversat
               aria-label={traceView.expanded ? 'Hide activity' : 'Show latest activity'}
               title={traceView.expanded ? 'Hide activity' : 'Show latest activity'}
               onClick={toggleFromPreview}
-            ><StepHeadlineContent headline={liveHeadline} /></button>
-          : liveHeadline ? <span class="hint"><StepHeadlineContent headline={liveHeadline} /></span>
-          : status && settled ? <span class="hint">{view.note ?? 'Done'}</span> : null}
+            ><StepHeadlineContent headline={headline} /></button>
+          : headline ? <span class="hint"><StepHeadlineContent headline={headline} /></span>
+          : presentation.note ? <span class="hint">{presentation.note}</span> : null}
       </div>
     </div>
   );
@@ -1248,7 +1299,8 @@ function MessageLog() {
   const [newMessageBelow, setNewMessageBelow] = useState(false);
   const [, setDensityReflowTick] = useState(0);
   const highlight = highlightMessageId.value;
-  const timeline = chatTranscript.value;
+  const timeline = submissionPresentation(chatTranscript.value, pendingWebSends.value,
+    conversationState.value?.conversation ?? null, groupId.value, threadId.value);
   const { queued } = splitPendingInputs(chatMessages.value);
   const queuedIds = new Set(queued.map((message) => message.id));
   const transcript = timeline.filter((row) => row.kind !== 'message' || !queuedIds.has(row.message.id));
@@ -1446,7 +1498,7 @@ function MessageLog() {
       const currentlyAtBottom = measureScroll();
       const newMessages = msgCount > prevMsgCountRef.current;
       const repositioned = prevLayoutRef.current !== layoutKey;
-      // Only follow authoritative timeline changes while the viewer is pinned.
+      // Only follow timeline changes while the viewer is pinned.
       const shouldFollow = wasAtBottom && (newMessages || repositioned);
       if ((newMessages || repositioned) && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {
@@ -1461,6 +1513,9 @@ function MessageLog() {
   });
   const list = transcript;
   const groups = groupMessages(list);
+  const responseTurnId = list.some((row) => row.kind === 'starting') ? null :
+    activeTurnId ?? list.reduce<string | null>((id, row) =>
+      row.kind === 'turn' && row.status && row.turn.phase !== 'settled' ? row.turn.id : id, null);
   // The branch point, if this thread is a fork and the anchor is still in
   // view. Messages up to it were inherited; the divider closes that region.
   const thread = activeThread();
@@ -1495,10 +1550,9 @@ function MessageLog() {
             : list.length === 0 && queued.length === 0
               ? <div class="empty">No messages yet.</div>
               : groups.map((g) => {
-                  const key = `${threadId.value}:${groupKey(g)}`;
-                  const body = g.kind === 'turn'
-                    ? <ConversationTurnRow key={key} turn={g.row.turn} lines={g.row.activity}
-                        status={g.row.status} ownerId={g.row.traceOwner} />
+                  const key = `${threadId.value}:${groupKey(g, responseTurnId)}`;
+                  const body = g.kind === 'starting' || g.kind === 'turn'
+                    ? <ResponseStatusRow key={key} source={g.row} />
                     : g.kind === 'question-answer'
                       ? <QuestionAnswerBubble key={key} question={g.row.question} answer={g.row.answer} />
                     : g.kind === 'thoughts'
@@ -1628,16 +1682,23 @@ export function Composer() {
     sendBusyRef.current = true;
     composerSendInFlight.value = true;
     try {
-      const sent = await sendChat(fullText, files);
+      let draftReleased = false;
+      const clearSubmittedDraft = () => {
+        if (draftReleased) return;
+        draftReleased = true;
+        if (groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return;
+        if (inputRef.current?.value.trim() === text) inputRef.current.value = '';
+        autosize();
+        for (const file of files) {
+          const index = pending.value.indexOf(file);
+          if (index >= 0) removePending(index);
+        }
+        if (pinnedContext.value === pins) clearPinnedContext();
+        if (isMobile.value) document.getElementById('chat-log')?.focus({ preventScroll: true });
+      };
+      const sent = await sendChat(fullText, files, { onSubmitted: clearSubmittedDraft });
       if (!sent || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return false;
-      if (inputRef.current?.value.trim() === text) inputRef.current.value = '';
-      autosize();
-      for (const file of files) {
-        const index = pending.value.indexOf(file);
-        if (index >= 0) removePending(index);
-      }
-      if (pinnedContext.value === pins) clearPinnedContext();
-      if (isMobile.value) document.getElementById('chat-log')?.focus({ preventScroll: true });
+      clearSubmittedDraft();
       return true;
     } finally {
       sendBusyRef.current = false;

@@ -11,6 +11,7 @@ import type {
   ShareModalRequest,
   ToastMessage,
   PendingFile,
+  PendingWebSend,
   PendingApprovalDto,
   PendingQuestionDto,
   ChannelMetaEntry,
@@ -78,7 +79,7 @@ export const chatReloadRequired: Signal<boolean> = signal(false);
 export const activeTurn = signal<ActiveTurn | null>(null);
 export const turnConnected = signal(false);
 export const stopRequest = signal<{ turnId: string; busy: boolean; error: string } | null>(null);
-export const pendingWebSends: Signal<Array<{ threadId: string; messageId: string }>> = signal([]);
+export const pendingWebSends: Signal<PendingWebSend[]> = signal([]);
 export const pending: Signal<PendingFile[]> = signal<PendingFile[]>([]);
 
 // Search

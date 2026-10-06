@@ -17,6 +17,7 @@ import {
   chatStatus,
   pendingQuestions,
   pendingWebSends,
+  groupId,
   refs,
 } from './state';
 import { applyTurnState } from './stop-turn';
@@ -26,6 +27,7 @@ import { maybeNotify } from './notify';
 import { inheritActivityTrace, resetActivityTraceView } from './activity-trace-state';
 import { completedResponseId } from './turn-completion';
 import type { ChatMessage, TranscriptRow } from './types';
+import { reconcileWebSubmissions } from './web-submissions';
 
 export const conversationState = signal<ConversationSnapshot | null>(null);
 export const completedResponse = signal<string | null>(null);
@@ -117,10 +119,7 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
       if (response) completedResponse.value = response;
     }
     pendingQuestions.value = view.questions;
-    const inputs = new Set(view.messages.filter((m) => m.direction === 'in').map((m) => m.id));
-    pendingWebSends.value = pendingWebSends.value.filter(
-      (send) => send.threadId !== expectedThreadId || !inputs.has(send.messageId),
-    );
+    pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, view, groupId.value);
     refs.seenIds = new Set(view.messages.map((m) => `${m.direction}:${m.id}`));
     canSend.value = caps.canSend;
     applyTurnState(

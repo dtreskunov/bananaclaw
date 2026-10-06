@@ -357,6 +357,36 @@ remain, it returns to **Thinking…**, including before recorded activity arrive
 An activity finishing does not mask another activity that is still running.
 Completed, failed and interrupted entries stay in the trace, not in the live
 status text.
+Native web-chat submissions display their user bubble immediately, using the
+existing client-generated message identity to reconcile the server echo without
+duplicates. An idle submission also shows **Starting response…** in the response
+status slot before the real turn exists. This display-only phase survives HTTP
+acceptance and the initial generic queued receipt, then hands the same bubble
+over to the authoritative turn's Thinking/activity status. Stop and the stopwatch
+appear only once a real turn starts. The startup marker is synthetic and does
+not contribute to the step count or enter conversation records.
+Starting and real-turn presentations use one stable response component and shared
+trace/footer markup, so the handoff does not remount the bubble. The real-turn
+presentation receives a non-null turn; startup never needs a placeholder turn.
+Submission retention and startup visibility derive from one classifier, but
+remain separate decisions: an unconfirmed follow-up still retains its payload
+without displaying another Starting bubble.
+
+Real queued follow-ups and steering retain their authoritative captions; they
+do not create another startup bubble while a turn is active. A failed send stays
+visible with its error and **Retry**, preserving the original message identity,
+text, attachments and queue/steering intent. Submission releases the captured
+composer draft immediately, but never replaces a newer draft on failure or
+acknowledgement. An authoritative echo confirms acceptance even if the HTTP
+transport subsequently fails.
+Fresh sends and retries share the captured-packet transport; retry does not
+rebuild the original payload or resolve queue/steering intent again. Only failed
+submission states carry an error. **Send** always creates a new message identity
+and resolves current queue/steering intent, even for identical text and attachments.
+Only the failed bubble's **Retry** reuses its original identity and intent.
+When delivery is uncertain, use Retry rather than Send to avoid submitting a
+duplicate; the inline failure guidance explains this distinction.
+
 While live, the trace includes a transient, display-only current-status marker
 when needed so its last visible entry matches the footer. This includes
 **Thinking…** after completed activity, stopping, disconnection and Stop errors.
@@ -389,7 +419,9 @@ completed tools, two simultaneously running calls and one parallel call already
 completed, long activity text, stopping/disconnected/settling states,
 immediately visible simulated Stop failures and real simulated retry handling, final
 replies without recorded steps,
-replies, outputless turns, failures and display cards:
+replies, outputless turns, failures and display cards. Idle and busy submission
+scenarios exercise the production composer, retry action and queue/steering
+dialog:
 
 ```bash
 pnpm --dir src/ui/client/chat run build:turn-status-fixture
@@ -399,8 +431,11 @@ Open the content-hashed `/ui/chat/dist/turn-status-fixture-<hash>.html` URL prin
 by the build command on this host; the document hash includes both script and
 stylesheet references, so CSS-only changes also invalidate cached fixture pages.
 Its technical-info toggle is page-local and does not save preferences.
-Stop is simulated through
-the real UI action; every other fetch is explicitly blocked. The fixture can
+Send and Stop are simulated through the real UI actions; every other fetch is
+explicitly blocked. In the submission scenarios, **Accept send** / **Fail send**
+resolve HTTP independently of **Echo message** and **Start response**, allowing
+both HTTP-first and echo-first validation without contacting a real conversation.
+The fixture can
 advance the same turn into a reply to verify trace ownership and frozen elapsed
 time across settlement. Generated fixture assets are ignored and rebuilt from
 `src/ui/client/chat/fixtures/`.

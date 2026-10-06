@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { isValidElement } from 'preact';
 import { Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
 import { ComposerInput } from './ComposerInput';
@@ -15,6 +16,7 @@ import {
   messagingGroupId,
   chatMessages,
   pending,
+  pendingWebSends,
   canSend,
   chatReady,
   chatReloadRequired,
@@ -26,10 +28,10 @@ import {
 import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, openPendingEditor } from '../pending-edit';
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
-import { respondQuestion, sendChat, skipQuestion } from '../actions';
+import { clearPinnedContext, removePending, respondQuestion, retryChatSend, sendChat, skipQuestion } from '../actions';
 import type { ChatMessage, PendingQuestionDto, Thread } from '../types';
 import { applyConversationFrame, completedResponse, resetConversation } from '../conversation-state';
-import { testSnapshot, testTurn } from '../conversation-test-fixtures';
+import { testSnapshot, testTurn, testWebSubmission } from '../conversation-test-fixtures';
 import { appearance } from '../appearance-state';
 import { DEFAULT_APPEARANCE } from '../appearance';
 import { voice } from '../voice-audio';
@@ -74,6 +76,8 @@ vi.mock('preact/hooks', () => ({
 }));
 vi.mock('../actions', () => ({
   sendChat: vi.fn(),
+  retryChatSend: vi.fn(),
+  clearPinnedContext: vi.fn(),
   addPendingFiles: vi.fn(),
   removePending: vi.fn(),
   respondQuestion: vi.fn(),
@@ -174,6 +178,7 @@ beforeEach(() => {
   chatReady.value = true;
   isMobile.value = false;
   pendingQuestions.value = [];
+  pendingWebSends.value = [];
   pinnedContext.value = ['keep/context.txt'];
   pending.value = [{ name: 'unsent.txt', size: 1 }];
   activeTurn.value = { id: 'turn', status: 'running', supportsInputEditing: true, supportsInputCancellation: true };
@@ -185,10 +190,153 @@ beforeEach(() => {
       .mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, id: 'message', text: 'Revision' }) }),
   );
   vi.mocked(sendChat).mockReset();
+  vi.mocked(clearPinnedContext).mockImplementation(() => {
+    pinnedContext.value = [];
+  });
+  vi.mocked(removePending).mockImplementation((index) => {
+    pending.value = pending.value.filter((_, i) => i !== index);
+  });
   render();
 });
 
 describe('main composer pending edits', () => {
+  it('explains explicit Retry versus a new Send and retries the failed bubble identity', () => {
+    applyConversationFrame(testSnapshot(), 'thread');
+    pendingWebSends.value = [{ ...testWebSubmission, status: 'failed', error: 'Network error' }];
+    vi.mocked(retryChatSend).mockReset().mockResolvedValue(true);
+    hooks.slots = [];
+    hooks.cursor = 0;
+    const log = findComponent(ChatMain(), 'MessageLog');
+    hooks.slots = [];
+    hooks.cursor = 0;
+    const messageNode = findComponent(log.type(log.props), 'Message');
+    hooks.slots = [];
+    hooks.cursor = 0;
+    const row = messageNode.type(messageNode.props);
+    const alert = [row.props.children]
+      .flat(Infinity)
+      .find((child: unknown) => isValidElement(child) && 'role' in child.props && child.props.role === 'alert');
+    expect(alert).toBeDefined();
+    expect(find(alert, 'span').props.children).toContain('Network error');
+    expect(find(alert, 'span').props.children).toContain('Use Retry to resend this message; Send creates a new one.');
+    const retry = find(alert, 'button', 'Retry');
+    expect(retry.props.disabled).toBe(false);
+    retry.props.onClick();
+    expect(retryChatSend).toHaveBeenCalledWith(testWebSubmission.messageId);
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+
+  it('uses the same response component for startup and a real turn, with no startup timer or turn controls', () => {
+    const previousWindow = window;
+    const interval = vi.fn(() => 1);
+    vi.stubGlobal('window', { ...window, setInterval: interval, clearInterval: vi.fn() });
+    onTestFinished(() => {
+      vi.stubGlobal('window', previousWindow);
+    });
+    applyConversationFrame(testSnapshot(), 'thread');
+    pendingWebSends.value = [testWebSubmission];
+    const response = () => {
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      return findComponent(log.type(log.props), 'ResponseStatusRow');
+    };
+    const starting = response();
+    hooks.slots = [];
+    hooks.cursor = 0;
+    hooks.capturePassive = true;
+    const row = starting.type(starting.props);
+    hooks.passiveEffects.splice(0).forEach((effect) => effect());
+    hooks.capturePassive = false;
+    expect(interval).not.toHaveBeenCalled();
+    expect(row.props['data-response-start']).toBe(`submission:${testWebSubmission.messageId}`);
+    expect(findComponent(row, 'TurnElapsed')).toBeUndefined();
+    expect(findComponent(row, 'ActiveTurnStopButton')).toBeUndefined();
+    applyConversationFrame(
+      testSnapshot(
+        {
+          messages: [
+            { id: testWebSubmission.messageId, direction: 'in', text: 'Hello', timestamp: testWebSubmission.timestamp },
+          ],
+          turns: [{ ...testTurn, inputIds: [testWebSubmission.messageId] }],
+          connection: { connected: true, activeTurnId: testTurn.id },
+        },
+        'started-stream',
+      ),
+      'thread',
+    );
+    const running = response();
+    expect(running.type).toBe(starting.type);
+    expect(running.key).toBe(starting.key);
+    expect(running.props.source.kind).toBe('turn');
+  });
+
+  it('reserves the stable response key for only one current or preparing bubble', () => {
+    function responseKeys() {
+      hooks.cursor = 0;
+      const component = findComponent(ChatMain(), 'MessageLog');
+      const log = component.type(component.props);
+      const keys: string[] = [];
+      const visit = (node: unknown) => {
+        if (!isValidElement(node)) return;
+        if (typeof node.type === 'function' && node.type.name === 'ResponseStatusRow' && typeof node.key === 'string')
+          keys.push(node.key);
+        for (const child of [node.props?.children].flat(Infinity)) visit(child);
+      };
+      visit(log);
+      return keys;
+    }
+    const stale = { ...testTurn, id: 'stale' };
+    applyConversationFrame(
+      testSnapshot({ turns: [stale, testTurn], connection: { connected: true, activeTurnId: testTurn.id } }),
+      'thread',
+    );
+    let keys = responseKeys();
+    expect(new Set(keys).size).toBe(2);
+    expect(keys.filter((key) => key.endsWith('response:active'))).toHaveLength(1);
+    resetConversation();
+    applyConversationFrame(testSnapshot({ turns: [stale] }), 'thread');
+    pendingWebSends.value = [testWebSubmission];
+    keys = responseKeys();
+    expect(new Set(keys).size).toBe(2);
+    expect(keys.filter((key) => key.endsWith('response:active'))).toHaveLength(1);
+  });
+
+  it('releases the submitted draft immediately and does not clear a new identical draft at acknowledgement', async () => {
+    let acknowledge: (sent: boolean) => void = () => {
+      throw new Error('Missing submission');
+    };
+    vi.mocked(sendChat).mockImplementation((_text, _files, options) => {
+      options?.onSubmitted?.();
+      return new Promise((resolve) => {
+        acknowledge = resolve;
+      });
+    });
+    find(tree, 'form').props.onSubmit({ preventDefault() {} });
+    expect(input.value).toBe('');
+    expect(pinnedContext.value).toEqual([]);
+    type('Unsent composer draft');
+    acknowledge(true);
+    await vi.waitFor(() => expect(composerSendInFlight.value).toBe(false));
+    expect(input.value).toBe('Unsent composer draft');
+  });
+
+  it('keeps an unsubmitted draft on a cancelled choice and preserves new text after send failure', async () => {
+    vi.mocked(sendChat).mockResolvedValueOnce(false);
+    find(tree, 'form').props.onSubmit({ preventDefault() {} });
+    await vi.waitFor(() => expect(composerSendInFlight.value).toBe(false));
+    expect(input.value).toBe('Unsent composer draft');
+    expect(pinnedContext.value).toEqual(['keep/context.txt']);
+    vi.mocked(sendChat).mockImplementation(async (_text, _files, options) => {
+      options?.onSubmitted?.();
+      input.value = 'New draft';
+      return false;
+    });
+    find(tree, 'form').props.onSubmit({ preventDefault() {} });
+    await vi.waitFor(() => expect(composerSendInFlight.value).toBe(false));
+    expect(input.value).toBe('New draft');
+  });
+
   it('does not infer read-only permissions before a snapshot or while a client reload is required', () => {
     canSend.value = false;
     const banner = () => findComponent(ChatMain(), 'ReadonlyBanner').type();
@@ -843,7 +991,7 @@ describe('main composer pending edits', () => {
       const log = findComponent(ChatMain(), 'MessageLog');
       hooks.slots = [];
       hooks.cursor = 0;
-      const turnRow = findComponent(log.type(log.props), 'ConversationTurnRow');
+      const turnRow = findComponent(log.type(log.props), 'ResponseStatusRow');
       hooks.slots = [];
       hooks.cursor = 0;
       const row = turnRow.type(turnRow.props);
@@ -896,7 +1044,7 @@ describe('main composer pending edits', () => {
       const log = findComponent(ChatMain(), 'MessageLog');
       hooks.slots = [];
       hooks.cursor = 0;
-      const turnRow = findComponent(log.type(log.props), 'ConversationTurnRow');
+      const turnRow = findComponent(log.type(log.props), 'ResponseStatusRow');
       hooks.slots = [];
       hooks.cursor = 0;
       const row = turnRow.type(turnRow.props);
@@ -910,8 +1058,8 @@ describe('main composer pending edits', () => {
         expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(expected);
         expect(panel.props.lines).toHaveLength(2);
       }
-      expect(turnRow.props.turn.activity).toEqual(activity);
-      expect(turnRow.props.lines).toHaveLength(1);
+      expect(turnRow.props.source.turn.activity).toEqual(activity);
+      expect(turnRow.props.source.activity).toHaveLength(1);
     }
   });
 
@@ -939,7 +1087,7 @@ describe('main composer pending edits', () => {
       const log = findComponent(ChatMain(), 'MessageLog');
       hooks.slots = [];
       hooks.cursor = 0;
-      const turnRow = findComponent(log.type(log.props), 'ConversationTurnRow');
+      const turnRow = findComponent(log.type(log.props), 'ResponseStatusRow');
       hooks.slots = [];
       hooks.cursor = 0;
       const row = turnRow.type(turnRow.props);
@@ -1111,7 +1259,7 @@ describe('main composer pending edits', () => {
       const log = findComponent(ChatMain(), 'MessageLog');
       hooks.slots = [];
       hooks.cursor = 0;
-      const turnRow = findComponent(log.type(log.props), 'ConversationTurnRow');
+      const turnRow = findComponent(log.type(log.props), 'ResponseStatusRow');
       hooks.slots = [];
       hooks.cursor = 0;
       const row = turnRow.type(turnRow.props);
@@ -1136,7 +1284,12 @@ describe('main composer pending edits', () => {
       expect(findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo') !== undefined).toBe(technical);
       hooks.slots = [];
       hooks.cursor = 0;
-      const settled = turnRow.type({ ...turnRow.props, turn: { ...testTurn, phase: 'settled', outcome: 'silent' } });
+      const settled = turnRow.type({
+        source: {
+          ...turnRow.props.source,
+          turn: { ...testTurn, phase: 'settled', outcome: 'silent' },
+        },
+      });
       expect(settled?.props.class ?? '').not.toContain('turn-live');
       const footer = settled.props.children.at(-1);
       expect(footer.props.children.filter(Boolean).at(-1).props.children).toBe('No reply');

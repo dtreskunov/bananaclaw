@@ -4,6 +4,9 @@ import type { Conversation, ConversationTurn } from '../../../shared/conversatio
 import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared/conversation-protocol';
 import { conversationTimeline } from '../../../server/chat/conversation-timeline';
 import { ChatMain } from '../src/components/ChatMain';
+import { ChoiceModal } from '../src/components/PromptModal';
+import { publicWebMessageId } from '../src/chat-protocol';
+import type { InputHandling } from '../src/types';
 import { appearance, initAppearance } from '../src/appearance-state';
 import { applyConversationFrame, conversationState, resetConversation } from '../src/conversation-state';
 import { toggleActivityTrace } from '../src/activity-trace-state';
@@ -13,6 +16,8 @@ import {
   completionSoundMutedSig,
   groupId,
   isMobile,
+  pendingWebSends,
+  refs,
   stopRequest,
   progressSoundMutedSig,
   threadId,
@@ -22,6 +27,8 @@ import '../src/styles/global.css';
 import './turn-status.css';
 
 const scenes = [
+  { id: 'idle-send', label: 'Submit a message (idle)' },
+  { id: 'busy-send', label: 'Submit a message (busy)' },
   { id: 'initial', label: 'Initial Thinking…' },
   { id: 'running', label: 'Running tool' },
   { id: 'completed', label: 'Completed tool (Thinking…)' },
@@ -46,8 +53,105 @@ const fixtureGroupId = 'fixture-status-group';
 const requests: { url: string; turnId: string }[] = [];
 const stopFailure = 'Simulated Stop failure. Try again.';
 let generation = 0;
+interface SendRequest {
+  url: string;
+  clientMessageId: string;
+  messageId: string;
+  text: string;
+  files: { filename: string; size: number; contentType: string }[];
+  inputHandling?: InputHandling;
+}
+const sendRequests: SendRequest[] = [];
+const outstanding: { request: SendRequest; resolve: (response: Response) => void }[] = [];
+const outstandingCount = signal(0);
+
+function publish(next: Conversation): void {
+  const previous = conversationState.peek();
+  if (!previous) throw new Error('Fixture conversation is missing');
+  next.timeline = conversationTimeline(next);
+  applyConversationFrame({
+    kind: 'update', protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+    streamId: previous.streamId, baseRevision: previous.revision, revision: previous.revision + 1,
+    changes: diffConversation(previous.conversation, next),
+  }, fixtureThreadId);
+}
+
+function currentConversation(): Conversation {
+  const current = conversationState.peek();
+  if (!current) throw new Error('Fixture conversation is missing');
+  return structuredClone(current.conversation);
+}
+
+function latestSend(): SendRequest {
+  const request = sendRequests.at(-1);
+  if (!request) throw new Error('Fixture has no submitted message');
+  return request;
+}
+
+function respondToSend(accepted: boolean): void {
+  const request = outstanding.shift();
+  if (!request) throw new Error('Fixture has no outstanding send');
+  outstandingCount.value = outstanding.length;
+  request.resolve(new Response(JSON.stringify(accepted ? { ok: true } : { error: 'Simulated send failure. Try again.' }),
+    { status: accepted ? 200 : 503, headers: { 'Content-Type': 'application/json' } }));
+}
+
+function echoSend(): void {
+  const request = latestSend();
+  const next = currentConversation();
+  if (next.messages.some((message) => message.id === request.messageId)) return;
+  next.messages.push({
+    id: request.messageId, direction: 'in', text: request.text, files: request.files,
+    timestamp: new Date().toISOString(), timelinePosition: Date.now() * 1000,
+    inputState: {
+      messageId: request.messageId,
+      status: request.inputHandling?.mode === 'steer' ? 'steering' : 'queued',
+      ...(request.inputHandling ? { inputHandling: request.inputHandling } : {}),
+      ...(request.inputHandling?.mode === 'queue' ? { queuedForNextTurn: true } : {}),
+    },
+  });
+  publish(next);
+}
+
+function startResponse(): void {
+  echoSend();
+  const request = latestSend();
+  const next = currentConversation();
+  if (next.turns.some((turn) => turn.inputIds.includes(request.messageId))) return;
+  const current = next.turns.find((turn) => turn.id === next.connection.activeTurnId);
+  if (request.inputHandling?.mode === 'steer' && current) {
+    current.inputIds.push(request.messageId);
+    const input = next.messages.find((message) => message.id === request.messageId);
+    if (input) input.inputState = { messageId: request.messageId, status: 'applied', turnId: current.id };
+  } else {
+    if (current) {
+      current.phase = 'settled';
+      current.outcome = 'silent';
+      current.endedAt = new Date().toISOString();
+    }
+    const turn = makeConversation('initial', new Date().toISOString()).turns[0];
+    turn.id = 'fixture-submitted-turn';
+    turn.inputIds = [request.messageId];
+    turn.liveUsage = null;
+    turn.metadata.model = null;
+    next.turns.push(turn);
+    next.connection.activeTurnId = turn.id;
+    const input = next.messages.find((message) => message.id === request.messageId);
+    if (input?.inputState?.queuedForNextTurn)
+      input.inputState = { messageId: request.messageId, status: 'processing', turnId: turn.id };
+    // An idle send deliberately retains its generic queued receipt during turn handoff.
+  }
+  next.capabilities = { ...next.capabilities, stop: true, steer: true };
+  publish(next);
+}
 
 function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 7000).toISOString()): Conversation {
+  if (nextScene === 'idle-send') {
+    const view = { ...makeConversation('initial'), messages: [], turns: [],
+      connection: { connected: true, activeTurnId: null },
+      capabilities: { canSend: true, stop: false, steer: false, editInput: false, cancelInput: false } };
+    return { ...view, timeline: conversationTimeline(view) };
+  }
   const started = Date.parse(startedAt);
   const testing = nextScene === 'running' || nextScene === 'parallel' || nextScene === 'parallel-completed';
   const settled = ['reply', 'empty-reply', 'outputless', 'failed', 'card'].includes(nextScene);
@@ -174,12 +278,18 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
     turns: [turn],
     questions: [],
     connection: { connected: nextScene !== 'disconnected', activeTurnId: settled ? null : fixtureTurnId },
-    capabilities: { canSend: true, stop: !settled, steer: false, editInput: false, cancelInput: false },
+    capabilities: { canSend: true, stop: !settled, steer: nextScene === 'busy-send', editInput: false, cancelInput: false },
   };
   return { ...view, timeline: conversationTimeline(view) };
 }
 
 function show(nextScene: Scene): void {
+  refs.chatGeneration++;
+  for (const request of outstanding.splice(0))
+    request.resolve(new Response('{"error":"Fixture scenario changed"}', { status: 409 }));
+  outstandingCount.value = 0;
+  sendRequests.length = 0;
+  pendingWebSends.value = [];
   scene.value = nextScene;
   resetConversation();
   resetTurnState();
@@ -198,6 +308,23 @@ function show(nextScene: Scene): void {
 }
 
 function advance(nextScene: Scene): void {
+  if (sendRequests.length && nextScene === 'reply') {
+    const next = currentConversation();
+    const turn = next.turns.find((value) => value.id === next.connection.activeTurnId);
+    if (!turn) throw new Error('Fixture response has not started');
+    turn.phase = 'settled';
+    turn.outcome = 'replied';
+    turn.endedAt = new Date().toISOString();
+    turn.metadata.status = 'final';
+    turn.outputIds = ['fixture-submitted-reply'];
+    next.messages.push({ id: turn.outputIds[0], direction: 'out', turnId: turn.id,
+      text: 'The **submitted response** is complete.', timestamp: turn.endedAt,
+      timelinePosition: Date.now() * 1000, deliveryOrigin: 'response' });
+    next.connection.activeTurnId = null;
+    next.capabilities.stop = false;
+    publish(next);
+    return;
+  }
   const previous = conversationState.peek();
   if (!previous) throw new Error('Fixture conversation is missing');
   const startedAt = previous.conversation.turns[0]?.startedAt;
@@ -228,21 +355,68 @@ function tech(enabled: boolean): void {
   };
 }
 
+function fixtureTraceOwner(): string | null {
+  const view = conversationState.value?.conversation;
+  if (view?.connection.activeTurnId) return `turn:${view.connection.activeTurnId}`;
+  const submission = pendingWebSends.value.find((send) => send.startsResponse && send.status !== 'failed');
+  if (submission) return `submission:${submission.messageId}`;
+  const turn = view?.turns.at(-1);
+  return turn ? `turn:${turn.id}` : null;
+}
+
 globalThis.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url === `api/groups/${fixtureGroupId}/chat/${fixtureThreadId}/send` && init?.method === 'POST') {
+    let body: unknown;
+    const files: SendRequest['files'] = [];
+    if (init.body instanceof FormData) {
+      body = { text: init.body.get('text'), clientMessageId: init.body.get('clientMessageId'),
+        inputHandling: init.body.has('inputHandling') ? JSON.parse(String(init.body.get('inputHandling'))) : undefined };
+      for (const file of init.body.getAll('file')) {
+        if (!(file instanceof File)) throw new Error('Fixture received an invalid attachment');
+        files.push({ filename: file.name, size: file.size, contentType: file.type });
+      }
+    } else if (typeof init.body === 'string') body = JSON.parse(init.body);
+    if (!body || typeof body !== 'object' || !('text' in body) || typeof body.text !== 'string' ||
+      !('clientMessageId' in body) || typeof body.clientMessageId !== 'string')
+      throw new Error('Fixture received an invalid send payload');
+    let inputHandling: InputHandling | undefined;
+    if ('inputHandling' in body && body.inputHandling !== undefined) {
+      const handling = body.inputHandling;
+      if (!handling || typeof handling !== 'object' || !('mode' in handling) ||
+        (handling.mode !== 'steer' && handling.mode !== 'queue') ||
+        !('turnId' in handling) || typeof handling.turnId !== 'string')
+        throw new Error('Fixture received invalid input handling');
+      inputHandling = { mode: handling.mode, turnId: handling.turnId };
+    }
+    const request: SendRequest = { url, text: body.text, clientMessageId: body.clientMessageId,
+      messageId: publicWebMessageId(body.clientMessageId), files, inputHandling };
+    sendRequests.push(request);
+    return new Promise<Response>((resolve) => {
+      outstanding.push({ request, resolve });
+      outstandingCount.value = outstanding.length;
+    });
+  }
   if (url !== `api/groups/${fixtureGroupId}/chat/${fixtureThreadId}/stop` || init?.method !== 'POST')
     throw new Error(`Fixture blocked network request: ${url}`);
   if (typeof init.body !== 'string') throw new Error('Fixture stop request body is missing');
   const body: unknown = JSON.parse(init.body);
-  if (!body || typeof body !== 'object' || !('turnId' in body) || body.turnId !== fixtureTurnId)
+  const activeId = conversationState.peek()?.conversation.connection.activeTurnId;
+  if (!body || typeof body !== 'object' || !('turnId' in body) || typeof body.turnId !== 'string' || body.turnId !== activeId)
     throw new Error('Fixture received an invalid stop target');
-  requests.push({ url, turnId: fixtureTurnId });
+  requests.push({ url, turnId: body.turnId });
   if (scene.peek() === 'stop-error')
     return new Response(JSON.stringify({ error: stopFailure }), {
       status: 503,
       headers: { 'Content-Type': 'application/json' },
     });
-  advance('stopping');
+  if (sendRequests.length) {
+    const next = currentConversation();
+    const turn = next.turns.find((value) => value.id === activeId);
+    if (!turn) throw new Error('Fixture active turn is missing');
+    turn.phase = 'stopping';
+    publish(next);
+  } else advance('stopping');
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 };
 
@@ -250,7 +424,12 @@ interface FixtureApi {
   show: typeof show;
   advance: typeof advance;
   tech: typeof tech;
-  inspect: () => { scene: Scene; requests: { url: string; turnId: string }[]; conversation: Conversation };
+  acceptSend: () => void;
+  failSend: () => void;
+  echoSend: typeof echoSend;
+  startResponse: typeof startResponse;
+  inspect: () => { scene: Scene; requests: { url: string; turnId: string }[]; sendRequests: SendRequest[];
+    submissions: { messageId: string; text: string; status: string }[]; conversation: Conversation };
 }
 declare global {
   interface Window {
@@ -261,12 +440,18 @@ window.turnStatusFixture = {
   show,
   advance,
   tech,
+  acceptSend: () => respondToSend(true),
+  failSend: () => respondToSend(false),
+  echoSend,
+  startResponse,
   inspect() {
     const current = conversationState.peek();
     if (!current) throw new Error('Fixture conversation is missing');
     return {
       scene: scene.peek(),
       requests: structuredClone(requests),
+      sendRequests: structuredClone(sendRequests),
+      submissions: pendingWebSends.peek().map(({ messageId, text, status }) => ({ messageId, text, status })),
       conversation: structuredClone(current.conversation),
     };
   },
@@ -298,18 +483,29 @@ function Fixture() {
           />
           Show technical information
         </label>
-        <button type="button" onClick={() => toggleActivityTrace(`turn:${fixtureTurnId}`, true)}>
+        <button type="button" disabled={!fixtureTraceOwner()} onClick={() => {
+          const owner = fixtureTraceOwner();
+          if (!owner) throw new Error('Fixture has no activity trace');
+          toggleActivityTrace(owner, true);
+        }}>
           Toggle activity
         </button>
-        <button type="button" onClick={() => advance('reply')}>
+        <button type="button" disabled={!conversationState.value?.conversation.connection.activeTurnId} onClick={() => advance('reply')}>
           Settle current turn
         </button>
         <p>
-          Isolated production UI fixture. Stop is simulated; all other network actions are blocked. Preferences are not
+          Isolated production UI fixture. Send and Stop are simulated; all other network actions are blocked. Preferences are not
           saved.
         </p>
+        {scene.value === 'idle-send' || scene.value === 'busy-send' ? <>
+          <button type="button" disabled={!outstandingCount.value} onClick={() => respondToSend(true)}>Accept send</button>
+          <button type="button" disabled={!outstandingCount.value} onClick={() => respondToSend(false)}>Fail send</button>
+          <button type="button" disabled={!sendRequests.length} onClick={echoSend}>Echo message</button>
+          <button type="button" disabled={!sendRequests.length} onClick={startResponse}>Start response</button>
+        </> : null}
       </header>
       <ChatMain />
+      <ChoiceModal />
     </div>
   );
 }

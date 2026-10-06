@@ -2590,6 +2590,18 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.55;
   cursor: default;
 }
+.chat-main .message-send-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--danger, #b42318);
+  font-size: var(--font-xs);
+}
+.chat-main .message-send-error > span {
+  overflow-wrap: anywhere;
+}
 .chat-main .msg .reactions {
   display: flex;
   flex-wrap: wrap;

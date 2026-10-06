@@ -265,6 +265,8 @@
 .chat-main .message-action-btn { min-height: 32px; padding: 4px 12px; border: 1px solid var(--message-action-text); border-radius: var(--radius-md); background: var(--bg); color: var(--message-action-text); cursor: pointer; font: inherit; font-weight: 600; }
 .chat-main .message-action-btn:hover:not(:disabled) { background: var(--accent); color: var(--fg); }
 .chat-main .message-action-btn:disabled { opacity: 0.55; cursor: default; }
+.chat-main .message-send-error { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 4px; color: var(--danger, #b42318); font-size: var(--font-xs); }
+.chat-main .message-send-error > span { overflow-wrap: anywhere; }
 .chat-main .msg .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .chat-main .msg.in .reactions { justify-content: flex-end; }
 .chat-main .msg .reaction-chip { font-size: var(--font-sm); line-height: 1; background: var(--wash-strong); border: 1px solid var(--border, transparent); border-radius: 999px; padding: 2px 6px; }

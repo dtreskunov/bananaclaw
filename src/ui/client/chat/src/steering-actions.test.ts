@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearChat, respondQuestion, sendChat, skipQuestion } from './actions';
+import { clearChat, respondQuestion, retryChatSend, sendChat, skipQuestion } from './actions';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
 import { applyConversationFrame, conversationState } from './conversation-state';
@@ -23,6 +23,7 @@ import {
 } from './state';
 import { splitPendingInputs } from './queued-followups';
 import { inputStatePresentation } from './input-state';
+import { submissionPresentation } from './web-submissions';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 vi.mock('./components/PromptModal', () => ({ requestChoice: vi.fn() }));
@@ -131,14 +132,213 @@ describe('native command intent', () => {
     expect(await sendChat('wrong destination', null)).toBe(false);
     expect(fetch).not.toHaveBeenCalled();
   });
-  it('retains command identity on an ambiguous HTTP failure', async () => {
+  it.each(['permission', 'readiness', 'channel', 'messaging-group'])(
+    'revalidates %s after a queue/steer choice before submitting',
+    async (change) => {
+      channelType.value = 'web';
+      messagingGroupId.value = null;
+      const release = vi.fn();
+      vi.mocked(requestChoice).mockImplementation(async () => {
+        if (change === 'permission') canSend.value = false;
+        if (change === 'readiness') chatReady.value = false;
+        if (change === 'channel') channelType.value = 'telegram';
+        if (change === 'messaging-group') messagingGroupId.value = 'other-room';
+        return 'steer';
+      });
+      expect(await sendChat('draft', null, { onSubmitted: release })).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(release).not.toHaveBeenCalled();
+      expect(pendingWebSends.value).toEqual([]);
+    },
+  );
+  it('retains command identity on explicit retry after an ambiguous HTTP failure', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(fetch).mockRejectedValueOnce(new Error('network'));
     expect(await sendChat('retry', null)).toBe(false);
     applyTurnState({ id: 'successor', status: 'running', supportsSteering: true }, true);
-    expect(await sendChat('retry', null)).toBe(true);
+    expect(await retryChatSend(pendingWebSends.value[0].messageId)).toBe(true);
     expect(vi.mocked(fetch).mock.calls[0][1]?.body).toEqual(vi.mocked(fetch).mock.calls[1][1]?.body);
     expect(requestChoice).toHaveBeenCalledOnce();
+  });
+  it('treats identical text submitted again as a new command with current intent', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('network'));
+    expect(await sendChat('repeat', null)).toBe(false);
+    const failed = pendingWebSends.value[0];
+    applyTurnState({ id: 'successor', status: 'running', supportsSteering: true }, true);
+    vi.mocked(requestChoice).mockResolvedValue('queue');
+    expect(await sendChat('repeat', null)).toBe(true);
+    const original = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    const fresh = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string);
+    expect(fresh.clientMessageId).not.toBe(original.clientMessageId);
+    expect(fresh.text).toBe(original.text);
+    expect(fresh.inputHandling).toEqual({ mode: 'queue', turnId: 'successor' });
+    expect(pendingWebSends.value[0]).toEqual(failed);
+    expect(requestChoice).toHaveBeenCalledTimes(2);
+  });
+});
+describe('immediate web submission feedback', () => {
+  beforeEach(() => {
+    channelType.value = 'web';
+    messagingGroupId.value = null;
+    applyConversationFrame(testSnapshot(), 'thread');
+  });
+  function deferResponse() {
+    let resolve: (response: Response) => void = () => {
+      throw new Error('Missing request');
+    };
+    let reject: (error: Error) => void = () => {
+      throw new Error('Missing request');
+    };
+    const response = new Promise<Response>((accept, fail) => {
+      resolve = accept;
+      reject = fail;
+    });
+    vi.mocked(fetch).mockReturnValueOnce(response);
+    return { resolve, reject };
+  }
+  function echo() {
+    const submission = pendingWebSends.value[0];
+    if (!submission) throw new Error('Missing submission');
+    const message = {
+      id: submission.messageId,
+      direction: 'in' as const,
+      text: submission.text,
+      timestamp: submission.timestamp,
+      timelinePosition: 200,
+      inputState: { messageId: submission.messageId, status: 'queued' as const },
+    };
+    applyConversationFrame(testSnapshot({ messages: [message] }, 'echo-stream'), 'thread');
+    return message;
+  }
+  it('renders feedback before HTTP and clears the draft only after a real submission starts', async () => {
+    const response = deferResponse();
+    const release = vi.fn();
+    const sent = sendChat('Hello', null, { onSubmitted: release });
+    expect(release).toHaveBeenCalledOnce();
+    expect(chatMessages.value).toEqual([]);
+    expect(
+      submissionPresentation(
+        [],
+        pendingWebSends.value,
+        conversationState.value?.conversation ?? null,
+        'group',
+        'thread',
+      ).map((row) => row.kind),
+    ).toEqual(['message', 'starting']);
+    expect(pendingWebSends.value[0].status).toBe('sending');
+    response.resolve(new Response('{}', { status: 200 }));
+    expect(await sent).toBe(true);
+    expect(pendingWebSends.value[0].status).toBe('accepted');
+    const message = echo();
+    expect(pendingWebSends.value).toHaveLength(1);
+    applyConversationFrame(
+      testSnapshot(
+        {
+          messages: [message],
+          turns: [{ ...testTurn, inputIds: [message.id] }],
+          connection: { connected: true, activeTurnId: testTurn.id },
+        },
+        'turn-stream',
+      ),
+      'thread',
+    );
+    expect(pendingWebSends.value).toEqual([]);
+  });
+  it.each(['http', 'network'] as const)(
+    'uses a prior canonical echo rather than a later %s failure',
+    async (failure) => {
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const response = deferResponse();
+      const sent = sendChat('Hello', null);
+      echo();
+      if (failure === 'http') response.resolve(new Response('{"error":"transport failure"}', { status: 503 }));
+      else response.reject(new Error('network failure'));
+      expect(await sent).toBe(true);
+      expect(pendingWebSends.value[0].status).toBe('accepted');
+      expect(warning).toHaveBeenCalledOnce();
+    },
+  );
+  it('retains attachments, text, identity and intent on failed-message retry without consuming a new draft', async () => {
+    applyTurnState({ id: 'captured-turn', status: 'running', supportsSteering: true }, true);
+    const file = new File(['draft'], 'draft.txt');
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"Unavailable"}', { status: 503 }));
+    expect(await sendChat('Original', [{ name: file.name, size: file.size, file }])).toBe(false);
+    const submission = pendingWebSends.value[0];
+    expect(submission).toMatchObject({ status: 'failed', error: 'Unavailable' });
+    applyTurnState({ id: 'successor', status: 'running', supportsSteering: true }, true);
+    pending.value = [{ name: 'new.txt', size: 1 }];
+    expect(await retryChatSend(submission.messageId)).toBe(true);
+    const first = vi.mocked(fetch).mock.calls[0][1]?.body;
+    const retry = vi.mocked(fetch).mock.calls[1][1]?.body;
+    if (!(first instanceof FormData) || !(retry instanceof FormData)) throw new Error('Expected multipart requests');
+    expect(retry.get('clientMessageId')).toBe(first.get('clientMessageId'));
+    expect(retry.get('text')).toBe('Original');
+    expect(retry.get('inputHandling')).toBe(first.get('inputHandling'));
+    expect((retry.get('file') as File).name).toBe(file.name);
+    expect(pendingWebSends.value[0].timestamp).toBe(submission.timestamp);
+    expect(pendingWebSends.value[0]).not.toHaveProperty('error');
+    expect(pending.value[0].name).toBe('new.txt');
+    expect(requestChoice).toHaveBeenCalledOnce();
+  });
+  it('does not repurpose a failed packet when new text is submitted', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"Unavailable"}', { status: 503 }));
+    await sendChat('Original', null);
+    const failed = pendingWebSends.value[0];
+    expect(await sendChat('Changed', null)).toBe(true);
+    expect(pendingWebSends.value.find((send) => send.messageId === failed.messageId)).toEqual(failed);
+    expect(pendingWebSends.value[1].clientMessageId).not.toBe(failed.clientMessageId);
+    expect(pendingWebSends.value[1].text).toBe('Changed');
+  });
+  it.each([true, false])(
+    'creates a new message for identical text and attachments regardless of descriptor identity (%s)',
+    async (sameReferences) => {
+      const file = new File(['draft'], 'draft.txt');
+      const original = { name: file.name, size: file.size, file };
+      vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"Unavailable"}', { status: 503 }));
+      await sendChat('Original', [original]);
+      const failed = pendingWebSends.value[0];
+      expect(await sendChat('Original', [sameReferences ? original : { ...original }])).toBe(true);
+      const body = vi.mocked(fetch).mock.calls[1][1]?.body;
+      if (!(body instanceof FormData)) throw new Error('Expected multipart request');
+      expect(body.get('clientMessageId')).not.toBe(failed.clientMessageId);
+      expect(pendingWebSends.value).toHaveLength(2);
+      expect(pendingWebSends.value[0]).toEqual(failed);
+    },
+  );
+  it('posts the captured files even when releasing the draft mutates the original input array', async () => {
+    const file = new File(['draft'], 'draft.txt');
+    const files = [{ name: file.name, size: file.size, file }];
+    expect(
+      await sendChat('Original', files, {
+        onSubmitted: () => {
+          files.length = 0;
+        },
+      }),
+    ).toBe(true);
+    const body = vi.mocked(fetch).mock.calls[0][1]?.body;
+    if (!(body instanceof FormData)) throw new Error('Expected multipart request');
+    expect((body.get('file') as File).name).toBe(file.name);
+    expect(pendingWebSends.value[0].files).toHaveLength(1);
+  });
+  it('does not retry a web packet through an external channel', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"Unavailable"}', { status: 503 }));
+    await sendChat('Original', null);
+    channelType.value = 'telegram';
+    messagingGroupId.value = 'room';
+    expect(await retryChatSend(pendingWebSends.value[0].messageId)).toBe(false);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it('ignores late acknowledgement for a navigated composer and scopes retained failures by group', async () => {
+    const response = deferResponse();
+    const sent = sendChat('Original', null);
+    groupId.value = 'another-group';
+    response.resolve(new Response('{"error":"Unavailable"}', { status: 503 }));
+    expect(await sent).toBe(false);
+    expect(pendingWebSends.value[0]).toMatchObject({ groupId: 'group', status: 'failed' });
+    expect(await retryChatSend(pendingWebSends.value[0].messageId)).toBe(false);
+    expect(fetch).toHaveBeenCalledOnce();
   });
 });
 describe('question response requests', () => {

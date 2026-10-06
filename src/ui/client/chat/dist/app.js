@@ -18226,7 +18226,7 @@ function confirmCancelledInput(id2, key = currentInputKey(id2)) {
   cancelledInputs.add(key);
   if (key === currentInputKey(id2)) {
     pendingWebSends.value = pendingWebSends.value.filter(
-      (send) => send.threadId !== threadId.value || send.messageId !== id2
+      (send) => send.groupId !== groupId.value || send.threadId !== threadId.value || send.messageId !== id2
     );
   }
   const request = pendingCancellations.value.get(key);
@@ -18787,6 +18787,78 @@ function responseScrollTop(scrollTop, responseTop, viewportTop) {
   return Math.max(0, scrollTop + responseTop - viewportTop);
 }
 
+// src/web-submissions.ts
+var STARTING_RESPONSE_TEXT = "Starting response\u2026";
+function withWebSendState(submission, state) {
+  const { status: _status, error: _error, ...packet } = submission;
+  return { ...packet, ...state };
+}
+function hasFollowupDisposition(input) {
+  return input?.queuedForNextTurn === true || input?.status === "steering" || input?.status === "applied";
+}
+function submissionContext(view) {
+  return {
+    inputs: new Map(
+      view?.messages.filter((message2) => message2.direction === "in").map((message2) => [message2.id, message2])
+    ),
+    ownedIds: new Set(view?.turns.flatMap((turn2) => turn2.inputIds)),
+    active: !!view?.connection.activeTurnId
+  };
+}
+function classifySubmission(send, context) {
+  const input = context.inputs.get(send.messageId);
+  const awaitingTurn = send.startsResponse && !context.active && !context.ownedIds.has(send.messageId) && !hasFollowupDisposition(input?.inputState) && input?.inputState?.status !== "cancelled";
+  return {
+    echoed: !!input,
+    retain: !input || awaitingTurn,
+    starting: awaitingTurn && send.status !== "failed"
+  };
+}
+function reconcileWebSubmissions(submissions, view, groupId2) {
+  const context = submissionContext(view);
+  return submissions.flatMap((submission) => {
+    if (submission.groupId !== groupId2 || submission.threadId !== view.threadId) return [submission];
+    const disposition = classifySubmission(submission, context);
+    if (!disposition.retain) return [];
+    return [disposition.echoed ? withWebSendState(submission, { status: "accepted" }) : submission];
+  });
+}
+function submissionPresentation(transcript, submissions, view, groupId2, threadId2) {
+  const local = submissions.filter((send) => send.groupId === groupId2 && send.threadId === threadId2);
+  const context = submissionContext(view);
+  const starts = local.filter((send) => classifySubmission(send, context).starting);
+  const startingIds = new Set(starts.map((send) => send.messageId));
+  const seen = new Set(context.inputs.keys());
+  const rows = transcript.map((row) => {
+    if (row.kind !== "message") return row;
+    if (row.message.id) seen.add(row.message.id);
+    const id2 = row.message.id;
+    const owned = !!id2 && context.ownedIds.has(id2);
+    const startupReceipt = owned && row.message.inputState?.status === "queued" && !row.message.inputState.queuedForNextTurn;
+    if (!row.message.id || !startingIds.has(row.message.id) && !startupReceipt) return row;
+    return { ...row, message: { ...row.message, hideInitialQueuedCaption: true } };
+  });
+  for (const submission of local) {
+    if (seen.has(submission.messageId)) continue;
+    const message2 = {
+      id: submission.messageId,
+      direction: "in",
+      text: submission.text,
+      ts: submission.timestamp,
+      files: submission.files.map((file) => ({
+        filename: file.name,
+        size: file.size,
+        contentType: file.file?.type
+      })),
+      submission,
+      hideInitialQueuedCaption: startingIds.has(submission.messageId)
+    };
+    rows.push({ kind: "message", message: message2 });
+  }
+  if (starts.length) rows.push({ kind: "starting", submission: starts[0] });
+  return rows;
+}
+
 // src/conversation-state.ts
 var conversationState = y3(null);
 var completedResponse = y3(null);
@@ -18874,10 +18946,7 @@ function applyConversationFrame(raw, expectedThreadId) {
       if (response) completedResponse.value = response;
     }
     pendingQuestions.value = view.questions;
-    const inputs = new Set(view.messages.filter((m6) => m6.direction === "in").map((m6) => m6.id));
-    pendingWebSends.value = pendingWebSends.value.filter(
-      (send) => send.threadId !== expectedThreadId || !inputs.has(send.messageId)
-    );
+    pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, view, groupId.value);
     refs.seenIds = new Set(view.messages.map((m6) => `${m6.direction}:${m6.id}`));
     canSend.value = caps.canSend;
     applyTurnState(
@@ -19403,7 +19472,6 @@ function clearSearch() {
 }
 function clearChat() {
   resetConversation();
-  retryWebSend = null;
   resetTurnState();
   voice.detach();
   cancelRecording();
@@ -19770,20 +19838,54 @@ function connectChatWs(ctx2) {
     }
   };
 }
-var retryWebSend = null;
-async function sendChat(text2, files) {
-  if (!groupId.value || !threadId.value) return false;
-  const generation2 = refs.chatGeneration;
+function captureChatSendContext() {
   const gid = groupId.value;
   const tid = threadId.value;
+  if (!gid || !tid) return null;
+  const generation2 = refs.chatGeneration;
   const ct = channelType.value;
   const mg = messagingGroupId.value;
   const isWeb = !ct || ct === "web";
-  if (!canSend.value || isWeb && !chatReady.value) return false;
-  const retry = isWeb && retryWebSend?.generation === generation2 && retryWebSend.gid === gid && retryWebSend.tid === tid && retryWebSend.text === text2 && retryWebSend.files.length === (files?.length ?? 0) && retryWebSend.files.every((file, index) => file === files?.[index]) ? retryWebSend : null;
-  let inputHandling = retry?.inputHandling;
+  const contextCurrent = () => generation2 === refs.chatGeneration && groupId.value === gid && threadId.value === tid && channelType.value === ct && messagingGroupId.value === mg;
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/send`;
+  if (!isWeb && mg) url += `?channel=${encodeURIComponent(ct)}&mg=${encodeURIComponent(mg)}`;
+  return {
+    gid,
+    tid,
+    isWeb,
+    url,
+    contextCurrent,
+    canSubmit: () => contextCurrent() && canSend.value && (!isWeb || chatReady.value)
+  };
+}
+async function retryChatSend(messageId) {
+  const context = captureChatSendContext();
+  const submission = pendingWebSends.peek().find(
+    (send) => send.messageId === messageId && send.groupId === groupId.value && send.threadId === threadId.value && send.status === "failed"
+  );
+  if (!context?.isWeb || !submission) {
+    showToast("This message is no longer available to retry.", "err");
+    return false;
+  }
+  return submitChatPacket(submission, context);
+}
+function updateWebSend(gid, tid, messageId, update) {
+  pendingWebSends.value = pendingWebSends.peek().map(
+    (send) => send.groupId === gid && send.threadId === tid && send.messageId === messageId ? update(send) : send
+  );
+}
+function confirmedWebSend(gid, tid, messageId) {
+  const view = conversationState.peek()?.conversation;
+  return pendingWebSends.peek().some(
+    (send) => send.groupId === gid && send.threadId === tid && send.messageId === messageId && send.status === "accepted"
+  ) || groupId.value === gid && threadId.value === tid && !!view && view.threadId === tid && view.messages.some((message2) => message2.direction === "in" && message2.id === messageId);
+}
+async function sendChat(text2, files, options = {}) {
+  const context = captureChatSendContext();
+  if (!context?.canSubmit()) return false;
+  let inputHandling;
   const turn2 = activeTurn.value;
-  if (!retry && isWeb && turnConnected.value && turn2?.status === "running" && turn2.supportsSteering === true) {
+  if (context.isWeb && turnConnected.value && turn2?.status === "running" && turn2.supportsSteering === true) {
     const choice = await requestChoice({
       title: "Send while the agent is working",
       message: "Steer the current turn with this message, or queue it for later.",
@@ -19796,28 +19898,45 @@ async function sendChat(text2, files) {
     if (choice !== "steer" && choice !== "queue") return false;
     inputHandling = { mode: choice, turnId: turn2.id };
   }
-  if (generation2 !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid || channelType.value !== ct || messagingGroupId.value !== mg || !canSend.value || isWeb && !chatReady.value)
-    return false;
-  const clientMessageId = retry?.clientMessageId ?? crypto.randomUUID();
+  return submitChatPacket(
+    {
+      clientMessageId: crypto.randomUUID(),
+      text: text2,
+      files: files?.slice() ?? [],
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      inputHandling,
+      startsResponse: !turn2
+    },
+    context,
+    options.onSubmitted
+  );
+}
+async function submitChatPacket({ clientMessageId, text: text2, files, timestamp, inputHandling, startsResponse }, { gid, tid, isWeb, url, contextCurrent, canSubmit }, onSubmitted) {
+  if (!canSubmit()) return false;
   const messageId = publicWebMessageId(clientMessageId);
   n2(() => {
     highlightMessageId.value = null;
     requestScrollToBottom();
   });
   if (isWeb) {
-    retryWebSend = { generation: generation2, gid, tid, text: text2, files: files?.slice() ?? [], clientMessageId, inputHandling };
-    if (!pendingWebSends.value.some((send) => send.messageId === messageId)) {
-      pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, messageId });
-    }
-  }
-  const hasFiles = Array.isArray(files) && files.length > 0;
-  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/send`;
-  if (!isWeb && messagingGroupId.value) {
-    url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
+    const submission = {
+      groupId: gid,
+      threadId: tid,
+      messageId,
+      clientMessageId,
+      text: text2,
+      files,
+      timestamp,
+      inputHandling,
+      startsResponse,
+      status: "sending"
+    };
+    pendingWebSends.value = pendingWebSends.peek().filter((send) => send.groupId !== gid || send.threadId !== tid || send.messageId !== messageId).concat(submission);
   }
   try {
+    if (isWeb) onSubmitted?.();
     let res;
-    if (hasFiles) {
+    if (files.length) {
       const fd = new FormData();
       fd.append("text", text2 || "");
       fd.append("clientMessageId", clientMessageId);
@@ -19835,33 +19954,37 @@ async function sendChat(text2, files) {
       });
     }
     if (!res.ok) {
-      if (res.status < 500 && retryWebSend?.clientMessageId === clientMessageId) retryWebSend = null;
-      pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
-    }
-    if (generation2 !== refs.chatGeneration) return false;
-    if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
         const j6 = await res.json();
         if (j6 && j6.error) detail = j6.error + (j6.detail ? ` (${j6.detail})` : "");
       } catch {
       }
-      showToast(`Send failed: ${detail}`, "err");
+      if (isWeb && confirmedWebSend(gid, tid, messageId)) {
+        console.warn("Send request failed after authoritative confirmation", { messageId, detail });
+        return contextCurrent();
+      }
+      if (contextCurrent()) showToast(`Send failed: ${detail}`, "err");
+      updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "failed", error: detail }));
       return false;
     } else if (!isWeb) {
+      if (!contextCurrent()) return false;
       try {
         await runSync({ replaceThreadMessages: true });
       } catch {
       }
     }
-    if (retryWebSend?.clientMessageId === clientMessageId) retryWebSend = null;
-    return true;
+    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "accepted" }));
+    return contextCurrent();
   } catch (err) {
     console.error("send failed", err);
-    pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
-    if (generation2 !== refs.chatGeneration) return false;
+    if (isWeb && confirmedWebSend(gid, tid, messageId)) {
+      console.warn("Send transport failed after authoritative confirmation", { messageId });
+      return contextCurrent();
+    }
     const m6 = err instanceof Error ? err.message : "network error";
-    showToast(`Send failed: ${m6}`, "err");
+    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "failed", error: m6 }));
+    if (contextCurrent()) showToast(`Send failed: ${m6}`, "err");
     return false;
   }
 }
@@ -22190,10 +22313,14 @@ function currentActivityHeadline(lines) {
 }
 function liveTurnActivity(turn2, lines, connected, stop) {
   if (turn2.phase === "settled") return null;
-  const notices = activeTurnNotices({
-    id: turn2.id,
-    status: turn2.phase === "stopping" ? "stopping" : "running"
-  }, connected, stop);
+  const notices = activeTurnNotices(
+    {
+      id: turn2.id,
+      status: turn2.phase === "stopping" ? "stopping" : "running"
+    },
+    connected,
+    stop
+  );
   const current = notices.length ? { action: notices.map((notice) => notice.text).join(" \xB7 ") } : currentActivityHeadline(lines);
   const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
   const last = activityChapters(lines, true).at(-1);
@@ -23781,14 +23908,15 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
   const systemNotice = isSystemNotice(m6.direction, m6.systemGenerated, m6.suggestedAction);
   const systemNoticeTone = systemNotice && m6.statsTurn?.outcome === "failed" ? " provenance-error" : systemNotice && ["warning", "stopped", "interrupted"].includes(m6.statsTurn?.outcome ?? "") ? " provenance-warning" : "";
-  const inputPresentation = m6.direction === "in" ? inputStatePresentation(m6.inputState) : null;
+  const inputPresentation = m6.direction === "in" && !m6.hideInitialQueuedCaption ? inputStatePresentation(m6.inputState) : null;
+  const submission = m6.submission;
   const activity = m6.direction === "out" ? m6.activity ?? [] : [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (systemNotice ? ` system-notice${systemNoticeTone}` : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "") + (revealedMobileMessageActionsId.value === m6.id ? " mobile-actions-visible" : "");
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === "web";
-  const hasPendingSend = pendingWebSends.value.some((pendingSend) => pendingSend.threadId === threadId.value);
+  const hasPendingSend = pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const suggestedAction = m6.suggestedAction ?? (isFutureWorkMessage(m6.text) ? "continue" : void 0);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && action != null;
@@ -23863,10 +23991,34 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           }
         ) }) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
+        submission?.status === "failed" ? /* @__PURE__ */ u4("div", { class: "message-send-error", role: "alert", children: [
+          /* @__PURE__ */ u4("span", { children: [
+            "Send failed: ",
+            submission.error,
+            /* @__PURE__ */ u4("br", {}),
+            "Use Retry to resend this message; Send creates a new one."
+          ] }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "message-action-btn",
+              disabled: !canSend.value || !chatReady.value || composerSendInFlight.value,
+              onClick: () => {
+                void retryChatSend(submission.messageId).catch(console.error);
+              },
+              children: "Retry"
+            }
+          )
+        ] }) : null,
         m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
           m6.ts && /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
           inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
-          /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }),
+          submission?.status === "sending" && !m6.hideInitialQueuedCaption ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: [
+            "Sending",
+            "\u2026"
+          ] }) : null,
+          !m6.submission ? /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }) : null,
           showsMidTurnLabel(
             m6.deliveryOrigin,
             !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
@@ -23879,8 +24031,8 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             }
           ) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
-            /* @__PURE__ */ u4(EditMessageButton, { m: m6 }),
-            /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }),
+            !m6.submission ? /* @__PURE__ */ u4(EditMessageButton, { m: m6 }) : null,
+            !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
             /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current })
           ] })
         ] }) : null
@@ -23933,7 +24085,9 @@ function DisplayCardMessage({ message: message2, card }) {
 function messageKey(message2) {
   return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
 }
-function groupKey(group) {
+function groupKey(group, responseTurnId) {
+  if (group.kind === "starting" || group.kind === "turn" && group.row.status && group.row.turn.phase !== "settled" && group.row.turn.id === responseTurnId)
+    return "response:active";
   if (group.kind === "turn") return `turn:${group.row.turn.id}`;
   if (group.kind === "question-answer") return `question-answer:${group.row.answer.id}`;
   if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
@@ -23941,7 +24095,7 @@ function groupKey(group) {
   return `single:${messageKey(group.m)}`;
 }
 function groupContains(group, messageId) {
-  if (group.kind === "turn") return false;
+  if (group.kind === "turn" || group.kind === "starting") return false;
   if (group.kind === "question-answer") return group.row.answer.id === messageId;
   if (group.kind === "thoughts") {
     return group.answer.id === messageId || group.thoughts.some((t4) => t4.id === messageId);
@@ -23964,7 +24118,8 @@ function groupMessages(list) {
       flushEvents();
       for (const message2 of pendingMsgs) out.push({ kind: "single", m: message2 });
       pendingMsgs = [];
-      if (row.kind === "turn") out.push({ kind: "turn", row });
+      if (row.kind === "starting") out.push({ kind: "starting", row });
+      else if (row.kind === "turn") out.push({ kind: "turn", row });
       else out.push({ kind: "question-answer", row });
       continue;
     }
@@ -24165,7 +24320,7 @@ function TurnTechnicalDetails({
   now = null
 }) {
   const traceView = activityTraceView(ownerId, live);
-  if (!turn2 && !lines.length) return null;
+  if (!turn2 && (!lines.length || !activityStepCount(lines) && !traceView.expanded)) return null;
   return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
     /* @__PURE__ */ u4(
       TurnTechnicalInfo,
@@ -24212,26 +24367,66 @@ function ReplyTurnInfo({
     showOutcomeNote && view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null
   ] });
 }
-function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
+function startingResponsePresentation(submission) {
+  const ownerId = `submission:${submission.messageId}`;
+  return {
+    ownerId,
+    status: true,
+    busy: true,
+    traceLive: true,
+    traceNow: null,
+    attributes: { "data-response-start": ownerId },
+    technicalTurn: void 0,
+    stopControl: null,
+    elapsedControl: null,
+    note: null,
+    tone: "",
+    activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
+    lines: [{ ts: "", text: JSON.stringify({
+      kind: "notification",
+      id: `ui:current:${submission.messageId}`,
+      text: STARTING_RESPONSE_TEXT,
+      status: "running"
+    }) }]
+  };
+}
+function turnResponsePresentation({ turn: turn2, activity: lines, status, traceOwner: ownerId }, now) {
   const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
   const settled = turn2.phase === "settled";
   const live = status && !settled;
-  const traceView = activityTraceView(ownerId, !settled);
-  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : null;
+  const view = turnRowView(turn2, now);
+  const activity = live ? liveTurnActivity(turn2, lines, turnConnected.value, stop) : null;
+  const tone2 = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
+  return {
+    ownerId,
+    status,
+    busy: live,
+    traceLive: !settled,
+    traceNow: turn2.endedAt ? Date.parse(turn2.endedAt) : now,
+    attributes: { "data-turn-id": status ? turn2.id : void 0 },
+    technicalTurn: status ? turn2 : void 0,
+    stopControl: status && activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null,
+    elapsedControl: status ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs, live }) : null,
+    note: status && settled ? view.note ?? "Done" : null,
+    tone: tone2,
+    activity,
+    lines: activity?.lines ?? lines
+  };
+}
+function ResponseStatusRow({ source }) {
+  const clock = source.kind === "turn" ? { startedAt: source.turn.startedAt, live: source.status && source.turn.phase !== "settled" } : { startedAt: null, live: false };
   const [now, setNow] = h2(() => Date.now());
   y2(() => {
     setNow(Date.now());
-    if (!live) return;
+    if (!clock.live) return;
     const timer2 = window.setInterval(() => setNow(Date.now()), 1e3);
     return () => window.clearInterval(timer2);
-  }, [turn2.startedAt, live]);
-  const view = turnRowView(turn2, now);
+  }, [clock.startedAt, clock.live]);
+  const presentation = source.kind === "starting" ? startingResponsePresentation(source.submission) : turnResponsePresentation(source, now);
+  const { ownerId, status, busy, lines, activity } = presentation;
+  const traceView = activityTraceView(ownerId, presentation.traceLive);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
-  const showStop = status && activeTurn.value?.id === turn2.id;
-  const currentActivity = live ? liveTurnActivity(turn2, lines, turnConnected.value, stop) : null;
-  const displayLines = currentActivity?.lines ?? lines;
-  const liveHeadline = currentActivity?.headline ?? null;
-  const provenanceTone = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
+  const headline = activity?.headline;
   if (!lines.length && !status) return null;
   if (!status && !showTechnicalStatus) return null;
   const toggleFromPreview = () => {
@@ -24240,37 +24435,37 @@ function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: `typing turn-system${status ? " turn-status" : ""}${live ? " turn-live" : ""}${traceView.expanded ? " expanded" : ""}${provenanceTone}`,
-      "data-turn-id": status ? turn2.id : void 0,
-      "aria-live": live ? "polite" : "off",
+      class: `typing turn-system${status ? " turn-status" : ""}${busy ? " turn-live" : ""}${traceView.expanded ? " expanded" : ""}${presentation.tone}`,
+      ...presentation.attributes,
+      "aria-live": busy ? "polite" : "off",
       children: [
         showTechnicalStatus ? /* @__PURE__ */ u4(
           TurnTechnicalDetails,
           {
-            turn: status ? turn2 : void 0,
-            lines: displayLines,
-            live: !settled,
-            now: endedAt ?? now,
+            turn: presentation.technicalTurn,
+            lines,
+            live: presentation.traceLive,
+            now: presentation.traceNow,
             ownerId
           }
         ) : null,
         /* @__PURE__ */ u4("div", { class: "typing-summary turn-info", children: [
-          live ? /* @__PURE__ */ u4("div", { class: "typing-dots", "aria-hidden": "true", children: [
+          busy ? /* @__PURE__ */ u4("div", { class: "typing-dots", "aria-hidden": "true", children: [
             /* @__PURE__ */ u4("span", {}),
             /* @__PURE__ */ u4("span", {}),
             /* @__PURE__ */ u4("span", {})
           ] }) : null,
-          showStop ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null,
-          status ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs, live }) : null,
-          liveHeadline && currentActivity?.notice ? /* @__PURE__ */ u4(
+          presentation.stopControl,
+          presentation.elapsedControl,
+          headline && activity?.notice ? /* @__PURE__ */ u4(
             "span",
             {
-              class: `hint${currentActivity.error ? " turn-stop-error" : ""}`,
-              role: currentActivity.error ? "alert" : "status",
-              title: headlineSummary(liveHeadline),
-              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
+              class: `hint${activity.error ? " turn-stop-error" : ""}`,
+              role: activity.error ? "alert" : "status",
+              title: headlineSummary(headline),
+              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline })
             }
-          ) : liveHeadline && showTechnicalStatus ? /* @__PURE__ */ u4(
+          ) : headline && showTechnicalStatus ? /* @__PURE__ */ u4(
             "button",
             {
               type: "button",
@@ -24279,9 +24474,9 @@ function ConversationTurnRow({ turn: turn2, lines, status, ownerId }) {
               "aria-label": traceView.expanded ? "Hide activity" : "Show latest activity",
               title: traceView.expanded ? "Hide activity" : "Show latest activity",
               onClick: toggleFromPreview,
-              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline })
+              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline })
             }
-          ) : liveHeadline ? /* @__PURE__ */ u4("span", { class: "hint", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: liveHeadline }) }) : status && settled ? /* @__PURE__ */ u4("span", { class: "hint", children: view.note ?? "Done" }) : null
+          ) : headline ? /* @__PURE__ */ u4("span", { class: "hint", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }) : presentation.note ? /* @__PURE__ */ u4("span", { class: "hint", children: presentation.note }) : null
         ] })
       ]
     }
@@ -24300,7 +24495,13 @@ function MessageLog() {
   const [newMessageBelow, setNewMessageBelow] = h2(false);
   const [, setDensityReflowTick] = h2(0);
   const highlight = highlightMessageId.value;
-  const timeline = chatTranscript.value;
+  const timeline = submissionPresentation(
+    chatTranscript.value,
+    pendingWebSends.value,
+    conversationState.value?.conversation ?? null,
+    groupId.value,
+    threadId.value
+  );
   const { queued } = splitPendingInputs(chatMessages.value);
   const queuedIds = new Set(queued.map((message2) => message2.id));
   const transcript = timeline.filter((row) => row.kind !== "message" || !queuedIds.has(row.message.id));
@@ -24492,6 +24693,7 @@ function MessageLog() {
   });
   const list = transcript;
   const groups2 = groupMessages(list);
+  const responseTurnId = list.some((row) => row.kind === "starting") ? null : activeTurnId ?? list.reduce((id2, row) => row.kind === "turn" && row.status && row.turn.phase !== "settled" ? row.turn.id : id2, null);
   const thread = activeThread();
   const forkOrigin = thread?.forkedFrom;
   const inheritedUntil = forkOrigin && list.some((row) => row.kind === "message" && row.message.id === forkOrigin.messageId) ? forkOrigin.messageId : null;
@@ -24514,17 +24716,8 @@ function MessageLog() {
   return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
     /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
       chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
-        const key = `${threadId.value}:${groupKey(g8)}`;
-        const body = g8.kind === "turn" ? /* @__PURE__ */ u4(
-          ConversationTurnRow,
-          {
-            turn: g8.row.turn,
-            lines: g8.row.activity,
-            status: g8.row.status,
-            ownerId: g8.row.traceOwner
-          },
-          key
-        ) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswerBubble, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
+        const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
+        const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswerBubble, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
           ThoughtGroup,
           {
             thoughts: g8.thoughts,
@@ -24633,16 +24826,23 @@ function Composer() {
     sendBusyRef.current = true;
     composerSendInFlight.value = true;
     try {
-      const sent = await sendChat(fullText, files);
+      let draftReleased = false;
+      const clearSubmittedDraft = () => {
+        if (draftReleased) return;
+        draftReleased = true;
+        if (groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return;
+        if (inputRef.current?.value.trim() === text2) inputRef.current.value = "";
+        autosize();
+        for (const file of files) {
+          const index = pending.value.indexOf(file);
+          if (index >= 0) removePending(index);
+        }
+        if (pinnedContext.value === pins) clearPinnedContext();
+        if (isMobile.value) document.getElementById("chat-log")?.focus({ preventScroll: true });
+      };
+      const sent = await sendChat(fullText, files, { onSubmitted: clearSubmittedDraft });
       if (!sent || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return false;
-      if (inputRef.current?.value.trim() === text2) inputRef.current.value = "";
-      autosize();
-      for (const file of files) {
-        const index = pending.value.indexOf(file);
-        if (index >= 0) removePending(index);
-      }
-      if (pinnedContext.value === pins) clearPinnedContext();
-      if (isMobile.value) document.getElementById("chat-log")?.focus({ preventScroll: true });
+      clearSubmittedDraft();
       return true;
     } finally {
       sendBusyRef.current = false;

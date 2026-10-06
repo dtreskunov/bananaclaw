@@ -46,7 +46,7 @@ export function confirmCancelledInput(id: string, key = currentInputKey(id)): vo
   cancelledInputs.add(key);
   if (key === currentInputKey(id)) {
     pendingWebSends.value = pendingWebSends.value.filter(
-      (send) => send.threadId !== threadId.value || send.messageId !== id,
+      (send) => send.groupId !== groupId.value || send.threadId !== threadId.value || send.messageId !== id,
     );
   }
   const request = pendingCancellations.value.get(key);

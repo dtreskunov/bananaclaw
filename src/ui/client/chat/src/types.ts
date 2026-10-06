@@ -1,5 +1,5 @@
 // Shared types used across the chat UI client.
-import type { InputState } from '../../../shared/input-state';
+import type { InputHandling, InputState } from '../../../shared/input-state';
 export type { InputHandling, InputState } from '../../../shared/input-state';
 
 export type ChannelType =
@@ -180,6 +180,9 @@ export interface ChatMessage {
   timelinePosition?: number;
   canEditPending?: boolean;
   inputState?: InputState;
+  submission?: PendingWebSend;
+  /** Suppress a generic queued receipt while a response starts or already owns this input. */
+  hideInitialQueuedCaption?: boolean;
   id?: string;
   direction: Direction;
   text: string;
@@ -209,6 +212,7 @@ export interface ChatMessage {
 
 export type TranscriptRow =
   | { kind: 'message'; message: ChatMessage }
+  | { kind: 'starting'; submission: PendingWebSend }
   | {
       kind: 'question-answer';
       question: PendingQuestionDto;
@@ -328,6 +332,23 @@ export interface PendingFile {
   // uses it via FormData.
   file?: File;
 }
+
+export interface ChatSendPacket {
+  readonly clientMessageId: string;
+  readonly text: string;
+  readonly files: readonly PendingFile[];
+  readonly timestamp: string;
+  readonly inputHandling?: InputHandling;
+  readonly startsResponse: boolean;
+}
+
+export type WebSendState = { status: 'sending' | 'accepted'; error?: never } | { status: 'failed'; error: string };
+
+export type PendingWebSend = ChatSendPacket & {
+  readonly groupId: string;
+  readonly threadId: string;
+  readonly messageId: string;
+} & WebSendState;
 
 export interface PendingApprovalDto {
   approvalId: string;

@@ -1,6 +1,19 @@
 import type { Conversation, ConversationTurn } from '../../../shared/conversation';
 import { CONVERSATION_PROTOCOL_VERSION, type ConversationSnapshot } from '../../../shared/conversation-protocol';
 import { conversationTimeline } from '../../../server/chat/conversation-timeline';
+import type { PendingWebSend } from './types';
+
+export const testWebSubmission: PendingWebSend = {
+  groupId: 'group',
+  threadId: 'thread',
+  messageId: 'web-client-123',
+  clientMessageId: 'client-123',
+  text: 'Hello',
+  files: [],
+  timestamp: '2026-09-29T00:00:00Z',
+  startsResponse: true,
+  status: 'sending',
+};
 
 export function presentedConversation(view: Omit<Conversation, 'timeline'>): Conversation {
   return { ...view, timeline: conversationTimeline(view) };

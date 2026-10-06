@@ -56,7 +56,7 @@ import {
 import { api, postJson } from './api';
 import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
-import { applyConversationFrame, resetConversation } from './conversation-state';
+import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
 import { ConversationProtocolError, type ConversationSnapshot } from '../../../shared/conversation-protocol';
 import type { QuestionResponse } from '../../../shared/question-response';
 import { applyTurnState, resetTurnState } from './stop-turn';
@@ -65,6 +65,7 @@ import { parentPath } from './utils';
 import { showToast } from './components/Toast';
 import { showClientReloadPrompt } from './notify';
 import { requestChoice } from './components/PromptModal';
+import { withWebSendState } from './web-submissions';
 import type {
   Thread,
   ThreadCtx,
@@ -72,6 +73,8 @@ import type {
   TreeEntry,
   PreviewBlock,
   PendingFile,
+  ChatSendPacket,
+  PendingWebSend,
   PendingApprovalDto,
   VoiceInputCapability,
   SearchResult,
@@ -358,7 +361,6 @@ export function clearSearch(): void {
 // ── chat ────────────────────────────────────────────────────────────
 export function clearChat(): void {
   resetConversation();
-  retryWebSend = null;
   resetTurnState();
   voice.detach();
   cancelRecording();
@@ -813,38 +815,90 @@ function connectChatWs(ctx: ChatSocketContext): void {
   };
 }
 
-let retryWebSend: {
-  generation: number;
-  gid: string;
-  tid: string;
-  text: string;
-  files: PendingFile[];
-  clientMessageId: string;
-  inputHandling?: InputHandling;
-} | null = null;
-
-export async function sendChat(text: string, files: PendingFile[] | null | undefined): Promise<boolean> {
-  if (!groupId.value || !threadId.value) return false;
-  const generation = refs.chatGeneration;
+function captureChatSendContext() {
   const gid = groupId.value;
   const tid = threadId.value;
+  if (!gid || !tid) return null;
+  const generation = refs.chatGeneration;
   const ct = channelType.value;
   const mg = messagingGroupId.value;
   const isWeb = !ct || ct === 'web';
-  if (!canSend.value || (isWeb && !chatReady.value)) return false;
-  const retry =
-    isWeb &&
-    retryWebSend?.generation === generation &&
-    retryWebSend.gid === gid &&
-    retryWebSend.tid === tid &&
-    retryWebSend.text === text &&
-    retryWebSend.files.length === (files?.length ?? 0) &&
-    retryWebSend.files.every((file, index) => file === files?.[index])
-      ? retryWebSend
-      : null;
-  let inputHandling = retry?.inputHandling;
+  const contextCurrent = () =>
+    generation === refs.chatGeneration &&
+    groupId.value === gid &&
+    threadId.value === tid &&
+    channelType.value === ct &&
+    messagingGroupId.value === mg;
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/send`;
+  if (!isWeb && mg) url += `?channel=${encodeURIComponent(ct)}&mg=${encodeURIComponent(mg)}`;
+  return {
+    gid,
+    tid,
+    isWeb,
+    url,
+    contextCurrent,
+    canSubmit: () => contextCurrent() && canSend.value && (!isWeb || chatReady.value),
+  };
+}
+
+export async function retryChatSend(messageId: string): Promise<boolean> {
+  const context = captureChatSendContext();
+  const submission = pendingWebSends
+    .peek()
+    .find(
+      (send) =>
+        send.messageId === messageId &&
+        send.groupId === groupId.value &&
+        send.threadId === threadId.value &&
+        send.status === 'failed',
+    );
+  if (!context?.isWeb || !submission) {
+    showToast('This message is no longer available to retry.', 'err');
+    return false;
+  }
+  return submitChatPacket(submission, context);
+}
+
+function updateWebSend(
+  gid: string,
+  tid: string,
+  messageId: string,
+  update: (send: PendingWebSend) => PendingWebSend,
+): void {
+  pendingWebSends.value = pendingWebSends
+    .peek()
+    .map((send) =>
+      send.groupId === gid && send.threadId === tid && send.messageId === messageId ? update(send) : send,
+    );
+}
+
+function confirmedWebSend(gid: string, tid: string, messageId: string): boolean {
+  const view = conversationState.peek()?.conversation;
+  return (
+    pendingWebSends
+      .peek()
+      .some(
+        (send) =>
+          send.groupId === gid && send.threadId === tid && send.messageId === messageId && send.status === 'accepted',
+      ) ||
+    (groupId.value === gid &&
+      threadId.value === tid &&
+      !!view &&
+      view.threadId === tid &&
+      view.messages.some((message) => message.direction === 'in' && message.id === messageId))
+  );
+}
+
+export async function sendChat(
+  text: string,
+  files: PendingFile[] | null | undefined,
+  options: { onSubmitted?: () => void } = {},
+): Promise<boolean> {
+  const context = captureChatSendContext();
+  if (!context?.canSubmit()) return false;
+  let inputHandling: InputHandling | undefined;
   const turn = activeTurn.value;
-  if (!retry && isWeb && turnConnected.value && turn?.status === 'running' && turn.supportsSteering === true) {
+  if (context.isWeb && turnConnected.value && turn?.status === 'running' && turn.supportsSteering === true) {
     const choice = await requestChoice({
       title: 'Send while the agent is working',
       message: 'Steer the current turn with this message, or queue it for later.',
@@ -857,41 +911,58 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
     if (choice !== 'steer' && choice !== 'queue') return false;
     inputHandling = { mode: choice, turnId: turn.id };
   }
-  if (
-    generation !== refs.chatGeneration ||
-    groupId.value !== gid ||
-    threadId.value !== tid ||
-    channelType.value !== ct ||
-    messagingGroupId.value !== mg ||
-    !canSend.value ||
-    (isWeb && !chatReady.value)
-  )
-    return false;
-  const clientMessageId = retry?.clientMessageId ?? crypto.randomUUID();
+  return submitChatPacket(
+    {
+      clientMessageId: crypto.randomUUID(),
+      text,
+      files: files?.slice() ?? [],
+      timestamp: new Date().toISOString(),
+      inputHandling,
+      startsResponse: !turn,
+    },
+    context,
+    options.onSubmitted,
+  );
+}
+
+async function submitChatPacket(
+  { clientMessageId, text, files, timestamp, inputHandling, startsResponse }: ChatSendPacket,
+  { gid, tid, isWeb, url, contextCurrent, canSubmit }: NonNullable<ReturnType<typeof captureChatSendContext>>,
+  onSubmitted?: () => void,
+): Promise<boolean> {
+  if (!canSubmit()) return false;
   const messageId = publicWebMessageId(clientMessageId);
   batch(() => {
     highlightMessageId.value = null;
     requestScrollToBottom();
   });
   if (isWeb) {
-    retryWebSend = { generation, gid, tid, text, files: files?.slice() ?? [], clientMessageId, inputHandling };
-    if (!pendingWebSends.value.some((send) => send.messageId === messageId)) {
-      pendingWebSends.value = pendingWebSends.value.concat({ threadId: tid, messageId });
-    }
-  }
-  const hasFiles = Array.isArray(files) && files.length > 0;
-  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/send`;
-  if (!isWeb && messagingGroupId.value) {
-    url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
+    const submission: PendingWebSend = {
+      groupId: gid,
+      threadId: tid,
+      messageId,
+      clientMessageId,
+      text,
+      files,
+      timestamp,
+      inputHandling,
+      startsResponse,
+      status: 'sending',
+    };
+    pendingWebSends.value = pendingWebSends
+      .peek()
+      .filter((send) => send.groupId !== gid || send.threadId !== tid || send.messageId !== messageId)
+      .concat(submission);
   }
   try {
+    if (isWeb) onSubmitted?.();
     let res: Response;
-    if (hasFiles) {
+    if (files.length) {
       const fd = new FormData();
       fd.append('text', text || '');
       fd.append('clientMessageId', clientMessageId);
       if (inputHandling) fd.append('inputHandling', JSON.stringify(inputHandling));
-      for (const f of files!) {
+      for (const f of files) {
         if (f.file) fd.append('file', f.file, f.name);
       }
       res = await fetch(url, { method: 'POST', credentials: 'same-origin', body: fd });
@@ -904,11 +975,6 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
       });
     }
     if (!res.ok) {
-      if (res.status < 500 && retryWebSend?.clientMessageId === clientMessageId) retryWebSend = null;
-      pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
-    }
-    if (generation !== refs.chatGeneration) return false;
-    if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
         const j = (await res.json()) as { error?: string; detail?: string };
@@ -916,23 +982,32 @@ export async function sendChat(text: string, files: PendingFile[] | null | undef
       } catch {
         /* ignore */
       }
-      showToast(`Send failed: ${detail}`, 'err');
+      if (isWeb && confirmedWebSend(gid, tid, messageId)) {
+        console.warn('Send request failed after authoritative confirmation', { messageId, detail });
+        return contextCurrent();
+      }
+      if (contextCurrent()) showToast(`Send failed: ${detail}`, 'err');
+      updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: 'failed', error: detail }));
       return false;
     } else if (!isWeb) {
+      if (!contextCurrent()) return false;
       try {
         await runSync({ replaceThreadMessages: true });
       } catch {
         /* ignore */
       }
     }
-    if (retryWebSend?.clientMessageId === clientMessageId) retryWebSend = null;
-    return true;
+    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: 'accepted' }));
+    return contextCurrent();
   } catch (err) {
     console.error('send failed', err);
-    pendingWebSends.value = pendingWebSends.value.filter((pendingSend) => pendingSend.messageId !== messageId);
-    if (generation !== refs.chatGeneration) return false;
+    if (isWeb && confirmedWebSend(gid, tid, messageId)) {
+      console.warn('Send transport failed after authoritative confirmation', { messageId });
+      return contextCurrent();
+    }
     const m = err instanceof Error ? err.message : 'network error';
-    showToast(`Send failed: ${m}`, 'err');
+    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: 'failed', error: m }));
+    if (contextCurrent()) showToast(`Send failed: ${m}`, 'err');
     return false;
   }
 }

@@ -325,7 +325,9 @@ describe('turn activity placement', () => {
               status: row.status,
               stats: undefined,
             }
-          : { id: row.question.questionId, status: false },
+          : row.kind === 'question-answer'
+            ? { id: row.question.questionId, status: false }
+            : { id: row.submission.messageId, status: true },
     );
 
   it('keeps activity across steering in the final response with a display-only Done marker', () => {

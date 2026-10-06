@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyTurnState, resetTurnState, stopActiveTurn } from './stop-turn';
+import { testWebSubmission } from './conversation-test-fixtures';
 import {
   activeTurn,
   canSend,
@@ -74,11 +75,12 @@ describe('turn-scoped Stop', () => {
 
   it('preserves drafts, pending files and queued follow-ups', async () => {
     pending.value = [{ name: 'draft.txt', size: 3 }];
-    pendingWebSends.value = [{ threadId: 'thread', messageId: 'queued-1' }];
+    const submission = { ...testWebSubmission, messageId: 'queued-1' };
+    pendingWebSends.value = [submission];
     await stopActiveTurn('turn-1');
     applyTurnState(null, true);
     expect(pending.value).toEqual([{ name: 'draft.txt', size: 3 }]);
-    expect(pendingWebSends.value).toEqual([{ threadId: 'thread', messageId: 'queued-1' }]);
+    expect(pendingWebSends.value).toEqual([submission]);
   });
 
   it('scopes external channel stops using the existing context parameters', async () => {
