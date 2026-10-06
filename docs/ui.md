@@ -353,18 +353,36 @@ reveal actions on hover or focus. User-message timestamps stay anchored to the
 left while actions occupy the right side of the row.
 
 **Appearance → Transcript details → Show technical information** controls technical
-details on all bubbles: activity trace, cost, model, and
-context use. Technical information occupies a separate line at the top of live, reply and display-card
+details on all bubbles: activity trace, elapsed time, recorded activity count,
+cost, and context use. Technical information occupies a separate line at the top of live, reply and display-card
 bubbles, and is absent when the toggle is off. The regular information line
-remains at the bottom and retains relative timestamps and notable outcomes.
-The usage pop-up contains completed timing; the technical line does not show
-model or other time, including on replies, display cards and outputless turns.
+remains at the bottom and retains relative timestamps and message provenance.
+The disclosure is labelled **5 traces** (or **1 trace**), counting recorded
+trace entries, not model requests or exclusively tool calls; display-only markers
+are excluded. The count does not repeat in its adjacent summary, which shows
+available fields in the order `15s · $2.09 · 35% ctx`. Elapsed time of at least a
+minute uses minutes and seconds (`710s` becomes `11m 50s`), reusing the task
+panel's duration formatter (milliseconds below one second, rounded seconds otherwise). Missing fields and zero
+cost are omitted from the summary; a reported zero cost remains in the pop-up. Total cost is
+shown only when every usage report includes cost; context is the latest reported
+valid context/window pair, not cumulative billed tokens. The usage pop-up retains
+model, tokens, model/other timing, and individual accounting reports.
 The pop-up is accessible only when technical information is on.
 Missing token accounting does not add a "Tokens unavailable" label to the
 transcript. Partial records show only reported values; a record with no summary
 values still offers **Usage details** for inspecting its available timing and
-accounting. The **Failed** outcome remains distinct from an error bubble: failed
-turns can instead deliver a normal-language failure acknowledgement.
+accounting. Completed turns do not show standalone outcome labels or a **Done** label.
+**Stopped by user**, **Ended with a warning**, **Interrupted; outcome unknown**,
+and **No reply** appear at the end of the owning activity trace, derived from the
+existing settled outcome and end time without changing the journal. A recorded
+stop entry is reused rather than duplicated. Display-only outcome entries do not
+increase the recorded-entry count; a trace containing only an outcome still offers
+the **trace** disclosure.
+Future provider failures and failure-explanation
+attempts are recorded in the activity trace, including whether model output or
+a system notice was recorded. A model-written acknowledgement remains a normal
+assistant bubble and does not change the failed outcome. Historical
+failure-explanation attempts are not inferred or backfilled.
 Live rows order the bouncing dots, Stop, stopwatch, and current
 activity text. Only pending or running activities drive that text; when none
 remain, it returns to **Thinking…**, including before recorded activity arrives.

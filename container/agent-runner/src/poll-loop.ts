@@ -479,6 +479,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           const failureRouting = promptTracker.routing;
           execution.current.failure = true;
           finishUsageAttempt(execution.current);
+          appendProviderFailure(errMsg);
           const ack = await tryAcknowledgeFailure(config, failureRouting, errMsg, undefined, execution);
           if (!ack.delivered) {
             writeMessageOut({
@@ -492,6 +493,12 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
                 delivery_origin: 'response',
                 system_generated: true,
               }),
+            });
+            appendActivity({
+              kind: 'notification',
+              id: `failure-notice:${generateId()}`,
+              text: 'Error notice recorded',
+              detail: 'A static error notice was used because the explanation attempt produced no response.',
             });
           }
           await settleTurn(execution.current, 'failed');
@@ -660,9 +667,18 @@ function renderFailedTurnReplay(failed: { prompt: string; error: string; recorde
 }
 
 interface AcknowledgeResult {
-  /** True when the agent emitted at least one user-visible message
-   *  during the ack turn — caller skips the static error fallback. */
+  /** True when the acknowledgement attempt emitted a response,
+   *  including a runner notice — caller skips the static fallback. */
   delivered: boolean;
+}
+
+function appendProviderFailure(message: string, classification?: string): void {
+  appendActivity({
+    kind: 'notification',
+    id: `provider-failure:${generateId()}`,
+    text: 'Provider request failed',
+    detail: classification ? `[${classification}] ${message}` : message,
+  });
 }
 
 /**
@@ -711,9 +727,13 @@ async function tryAcknowledgeFailure(
   errorClassification: string | undefined,
   execution: { current: TurnExecution },
 ): Promise<AcknowledgeResult> {
-  const outputCount = () => (getOutboundDb().prepare("SELECT COUNT(*) AS n FROM messages_out WHERE turn_id = ? AND kind NOT IN ('system','internal')")
-    .get(execution.current.turnId) as { n: number }).n;
+  const outputCount = (modelOnly = false) => (getOutboundDb().prepare(
+    `SELECT COUNT(*) AS n FROM messages_out
+     WHERE turn_id = ? AND kind NOT IN ('system','internal')
+       AND (? = 0 OR COALESCE(json_extract(content, '$.system_generated'), 0) = 0)`,
+  ).get(execution.current.turnId, Number(modelOnly)) as { n: number }).n;
   const priorOutputCount = outputCount();
+  const priorModelOutputCount = outputCount(true);
   const tag = errorClassification ? ` (${errorClassification})` : '';
   const ackPrompt = [
     `<system>`,
@@ -730,6 +750,14 @@ async function tryAcknowledgeFailure(
   // re-asking the model there often trips it again. The ack only needs
   // the error string itself — no conversation context required.
   log('Generating in-turn acknowledgment of provider error');
+  appendActivity({
+    kind: 'notification',
+    id: `failure-explanation:${generateId()}`,
+    text: 'Asking model to explain failure',
+    detail: 'Starting a fresh model query to report the error, not retry the original request.',
+  });
+  let delivered = false;
+  let explanationError: string | undefined;
   try {
     const query = config.provider.query({
       prompt: ackPrompt,
@@ -743,12 +771,30 @@ async function tryAcknowledgeFailure(
       execution,
       deferFailureSettlement: true,
     });
-    return { delivered: result.delivered || outputCount() > priorOutputCount };
+    delivered = result.delivered;
+    explanationError = result.unsurfacedError?.message;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     log(`Acknowledgment turn threw: ${errMsg}`);
-    return { delivered: outputCount() > priorOutputCount };
+    explanationError = errMsg;
   }
+  delivered ||= outputCount() > priorOutputCount;
+  const modelOutput = outputCount(true) > priorModelOutputCount;
+  if (!execution.current.settled) {
+    appendActivity({
+      kind: 'notification',
+      id: `failure-explanation-result:${generateId()}`,
+      text: modelOutput
+        ? 'Model output recorded after failure'
+        : delivered ? 'System notice recorded after failure' : 'Failure explanation unavailable',
+      detail: explanationError
+        ? `The explanation attempt also encountered an error: ${explanationError}`
+        : modelOutput
+          ? 'The original request remains unsuccessful; this output came from the failure-handling query.'
+          : 'The model did not produce a deliverable explanation.',
+    });
+  }
+  return { delivered };
 }
 
 interface QueryResult {
@@ -1147,6 +1193,9 @@ export async function processQuery(
   const settleAtBoundary = async (): Promise<void> => {
     if (!turnActive && (recovery.sentAny || recovery.silenceConfirmed)) {
       if (!execution.current.failure) {
+        if (lastProviderError && !execution.current.settled) {
+          appendProviderFailure(lastProviderError.message, lastProviderError.classification);
+        }
         await settleTurn(execution.current, lastProviderError ? 'failed' : recovery.sentAny ? 'replied' : 'silent');
       }
       if (recovery.silenceConfirmed) {
@@ -1323,6 +1372,10 @@ export async function processQuery(
   }
 
   if (userStopped) return { continuation: queryContinuation ?? initialContinuation, delivered: true };
+
+  if (lastProviderError && !execution.current.settled && !execution.current.failure) {
+    appendProviderFailure(lastProviderError.message, lastProviderError.classification);
+  }
 
   // FORK-HOOK:finish — a turn that delivered nothing gets one notice saying why.
   const notice = recovery.terminalNotice(routing, lastProviderError !== null, runaway.abortReason);

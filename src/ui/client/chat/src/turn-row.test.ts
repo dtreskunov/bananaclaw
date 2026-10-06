@@ -233,17 +233,15 @@ describe('active turn notices', () => {
 describe('turn row presentation', () => {
   it('ticks elapsed time live while running and strips stale checkpoint timing from usage', () => {
     const turn = { ...testTurn, usage: [usage] };
-    expect(turnRowView(turn, start + 7000)).toMatchObject({ elapsedMs: 7000, status: 'Thinking…', note: null });
+    expect(turnRowView(turn, start + 7000)).toMatchObject({ elapsedMs: 7000, status: 'Thinking…' });
     expect(turnRowView(turn, start + 9000).elapsedMs).toBe(9000);
     expect(turnRowView(turn, start).usage[0].value).toMatchObject({ duration_ms: undefined, model: undefined });
-    expect(turnRowView(turn, start).showModel).toBe(true);
   });
 
   it('keeps settled elapsed time separate from model and usage metadata', () => {
     const view = turnRowView(settled({ usage: [usage] }), start + 60_000);
-    expect(view).toMatchObject({ elapsedMs: 5000, showModel: false, status: null });
+    expect(view).toMatchObject({ elapsedMs: 5000, status: null });
     expect(view.usage).toEqual([usage]);
-    expect(turnRowView(settled(), 0)).toMatchObject({ showModel: true });
   });
 
   it('keeps settling live without flashing a finalization notice or settled accounting', () => {
@@ -251,19 +249,24 @@ describe('turn row presentation', () => {
     expect(turnRowView(turn, start + 7000)).toMatchObject({
       hidden: false,
       status: null,
-      note: null,
       elapsedMs: 7000,
-      showModel: true,
     });
     expect(turnRowView(turn, start).usage[0].value).toMatchObject({ duration_ms: undefined, model: undefined });
   });
 
-  it('labels only outcomes that change how the reply reads', () => {
-    for (const outcome of ['replied', 'unknown', 'pending'] as const)
-      expect(turnRowView(settled({ outcome }), 0).note).toBeNull();
-    expect(turnRowView(settled({ outcome: 'stopped' }), 0).note).toBe('Stopped');
-    expect(turnRowView(settled({ outcome: 'silent' }), 0).note).toBe('No reply');
-    expect(turnRowView({ ...testTurn, phase: 'stopping' }, 0)).toMatchObject({ note: 'Stopping…', status: null });
+  it('does not expose completed outcome labels and keeps stopping as a live notice', () => {
+    for (const outcome of [
+      'replied',
+      'failed',
+      'unknown',
+      'pending',
+      'stopped',
+      'silent',
+      'warning',
+      'interrupted',
+    ] as const)
+      expect(turnRowView(settled({ outcome }), 0)).not.toHaveProperty('note');
+    expect(turnRowView({ ...testTurn, phase: 'stopping' }, 0).status).toBeNull();
   });
 
   it('hides a settled turn with nothing to show, but never a notable or traced one', () => {
@@ -275,7 +278,9 @@ describe('turn row presentation', () => {
       metadata: { status: 'unavailable', durationMs: null, model: null },
     });
     expect(turnRowView(empty, 0).hidden).toBe(true);
-    expect(turnRowView({ ...empty, outcome: 'failed' }, 0).hidden).toBe(false);
+    expect(turnRowView({ ...empty, outcome: 'failed' }, 0).hidden).toBe(true);
+    for (const outcome of ['stopped', 'silent', 'warning', 'interrupted'] as const)
+      expect(turnRowView({ ...empty, outcome }, 0).hidden).toBe(false);
     expect(turnRowView({ ...empty, activity: testTurn.activity }, 0).hidden).toBe(false);
     expect(turnRowView({ ...empty, usage: [usage] }, 0).hidden).toBe(false);
   });
@@ -411,7 +416,7 @@ describe('turn activity placement', () => {
     const turn = settled({ id: 'q', outcome: 'silent', inputIds: ['ask'], activity: [step(0, 1000)] });
     expect(rows(testSnapshot({ messages: [message('ask', 'in', -1)], turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
-      { id: 'trace:q:after:ask', lines: ['step 0'], status: true, stats: undefined },
+      { id: 'trace:q:after:ask', lines: ['step 0', 'No reply'], status: true, stats: undefined },
     ]);
   });
 

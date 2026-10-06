@@ -1173,8 +1173,7 @@ describe('main composer pending edits', () => {
       }
       const footer = row.props.children.at(-1);
       expect(footer.props.class).toBe('meta turn-info');
-      const info = findComponent(footer, 'ReplyTurnInfo');
-      expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
+      expect(findComponent(footer, 'ReplyTurnInfo')).toBeUndefined();
     },
   );
 
@@ -1207,12 +1206,9 @@ describe('main composer pending edits', () => {
     const status = findComponent(log.type(log.props), 'ResponseStatusRow');
     resetMount();
     const row = status.type(status.props);
-    expect(find(row, 'span', 'Failed')).toBeDefined();
+    expect(find(row, 'span', 'Failed')).toBeUndefined();
+    expect(find(row, 'span', 'Done')).toBeUndefined();
     const details = renderTechnicalDetails(row);
-    if (!model && !usage.length) {
-      expect(details).toBeNull();
-      return;
-    }
     const info = findComponent(details, 'TurnTechnicalInfo');
     const header = info.type(info.props);
     const stats = findComponent(header, 'TurnStats');
@@ -1225,7 +1221,7 @@ describe('main composer pending edits', () => {
       const summary = record.type(record.props);
       const button = find(summary, 'button');
       expect(button.props.children).not.toContain('Tokens unavailable');
-      expect(button.props.children).toBe(model ? '$0.010' : 'Usage details');
+      expect(button.props.children).toBe(model ? '7s · $0.010' : '7s');
       button.props.onClick({ stopPropagation() {} });
       hooks.cursor = 0;
       const popup = find(record.type(record.props), 'span', 'Turn usage details');
@@ -1234,45 +1230,86 @@ describe('main composer pending edits', () => {
     }
   });
 
-  it('keeps Failed on a normal-language failure acknowledgement without an error bubble', () => {
-    applyConversationFrame(
-      testSnapshot({
-        messages: [
-          {
-            id: 'failure-ack',
-            direction: 'out',
-            text: 'The provider could not complete your request.',
-            timestamp: '2026-09-29T00:00:02Z',
-            timelinePosition: 200,
-            turnId: testTurn.id,
-            deliveryOrigin: 'response',
-          },
-        ],
-        turns: [
-          {
-            ...testTurn,
-            phase: 'settled',
-            outcome: 'failed',
-            outputIds: ['failure-ack'],
-            metadata: { status: 'partial', model: 'fixture-model', durationMs: 6500 },
-          },
-        ],
-        connection: { connected: true, activeTurnId: null },
-      }),
-      'thread',
-    );
-    resetMount();
-    const log = findComponent(ChatMain(), 'MessageLog');
-    resetMount();
-    const message = findComponent(log.type(log.props), 'Message');
-    resetMount();
-    const bubble = message.type(message.props);
-    expect(
-      isSystemNotice(message.props.m.direction, message.props.m.systemGenerated, message.props.m.suggestedAction),
-    ).toBe(false);
-    const info = findComponent(bubble, 'ReplyTurnInfo');
-    expect(find(info.type(info.props), 'span', 'Failed')).toBeDefined();
-  });
+  it.each([false, true])(
+    'shows failure handling only in the trace without a Failed label (system notice=%s)',
+    (systemGenerated) => {
+      appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+      const activity = [
+        {
+          kind: 'notification',
+          id: 'failure',
+          text: 'Provider request failed',
+          detail: 'Provider rejected the request.',
+        },
+        { kind: 'notification', id: 'explanation', text: 'Asking model to explain failure' },
+        {
+          kind: 'notification',
+          id: 'explanation-result',
+          text: systemGenerated ? 'System notice recorded after failure' : 'Model output recorded after failure',
+        },
+      ].map((step, ordinal) => ({
+        ordinal,
+        ts: String(1000 + ordinal),
+        timelinePosition: 150 + ordinal,
+        text: JSON.stringify(step),
+      }));
+      applyConversationFrame(
+        testSnapshot({
+          messages: [
+            {
+              id: 'failure-ack',
+              direction: 'out',
+              text: 'The provider could not complete your request.',
+              timestamp: '2026-09-29T00:00:02Z',
+              timelinePosition: 200,
+              turnId: testTurn.id,
+              deliveryOrigin: 'response',
+              systemGenerated,
+            },
+          ],
+          turns: [
+            {
+              ...testTurn,
+              phase: 'settled',
+              outcome: 'failed',
+              outputIds: ['failure-ack'],
+              activity,
+              metadata: { status: 'partial', model: 'fixture-model', durationMs: 6500 },
+            },
+          ],
+          connection: { connected: true, activeTurnId: null },
+        }),
+        'thread',
+      );
+      resetMount();
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      const logTree = log.type(log.props);
+      const message = findComponent(logTree, 'Message');
+      resetMount();
+      const bubble = message.type(message.props);
+      expect(
+        isSystemNotice(message.props.m.direction, message.props.m.systemGenerated, message.props.m.suggestedAction),
+      ).toBe(systemGenerated);
+      expect(findComponent(bubble, 'ReplyTurnInfo')).toBeUndefined();
+      expect(find(bubble, 'span', 'Failed')).toBeUndefined();
+      expect(find(bubble, 'span', 'Done')).toBeUndefined();
+      expect(bubble.props.class.includes('system-notice')).toBe(systemGenerated);
+      let details = renderTechnicalDetails(bubble);
+      if (!details) {
+        resetMount();
+        const status = findComponent(logTree, 'ResponseStatusRow');
+        const row = status.type(status.props);
+        expect(find(row, 'span', 'Failed')).toBeUndefined();
+        expect(find(row, 'span', 'Done')).toBeUndefined();
+        details = renderTechnicalDetails(row);
+      }
+      const panel = findComponent(details, 'ActivityTracePanel');
+      expect(panel.props.lines).toEqual(activity);
+      const header = findComponent(details, 'TurnTechnicalInfo');
+      expect(header.props.count).toBe(3);
+    },
+  );
 
   it.each([
     { modelMs: 3500, extraMs: 1000, modelText: '0:04', otherText: '0:02' },
@@ -1392,9 +1429,7 @@ describe('main composer pending edits', () => {
       }
       expect(title.props.class).toBe('display-card-title');
       const footer = row.props.children.at(-1);
-      const info = findComponent(footer, 'ReplyTurnInfo');
-      expect(info).toBeTruthy();
-      expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
+      expect(findComponent(footer, 'ReplyTurnInfo')).toBeUndefined();
     },
   );
 
@@ -1403,13 +1438,16 @@ describe('main composer pending edits', () => {
       (
         [
           { outcome: 'silent', note: 'No reply' },
-          { outcome: 'failed', note: 'Failed' },
-          { outcome: 'stopped', note: 'Stopped' },
+          { outcome: 'failed', note: null },
+          { outcome: 'stopped', note: 'Stopped by user' },
+          { outcome: 'warning', note: 'Ended with a warning' },
+          { outcome: 'interrupted', note: 'Interrupted; outcome unknown' },
+          { outcome: 'replied', note: null },
         ] as const
       ).map(({ outcome, note }) => ({ technical, outcome, note })),
     ),
   )(
-    'keeps $outcome outcome in the footer without inline settled timing ($technical)',
+    'keeps $outcome outcome only in the trace without completed footer labels ($technical)',
     ({ technical, outcome, note }) => {
       appearance.value = {
         ...appearance.peek(),
@@ -1438,11 +1476,24 @@ describe('main composer pending edits', () => {
       hooks.slots = [];
       hooks.cursor = 0;
       const row = turnRow.type(turnRow.props);
+      if (!technical) {
+        expect(row).toBeNull();
+        return;
+      }
       const footer = row.props.children.at(-1);
       expect(findComponent(footer, 'TurnElapsed')).toBeUndefined();
-      expect(find(footer, 'span').props.children).toBe(note);
+      expect(find(footer, 'span')).toBeUndefined();
+      expect(find(row, 'span', 'Done')).toBeUndefined();
       if (technical) {
         const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+        const panel = findComponent(renderTechnicalDetails(row), 'ActivityTracePanel');
+        expect(info.props.count).toBe(1);
+        const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
+        expect(find(toggle.type(toggle.props), 'span', '1 trace')).toBeTruthy();
+        const stats = findComponent(info.type(info.props), 'TurnStats');
+        expect(findComponent(stats.type(stats.props), 'UsageMeta').props.summary).not.toContain('call');
+        expect(panel.props.lines).toHaveLength(note ? 2 : 1);
+        if (note) expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(note);
         expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
         expect(find(info.type(info.props), 'span', 'Model-call time')).toBeUndefined();
       } else {
@@ -1450,6 +1501,63 @@ describe('main composer pending edits', () => {
       }
     },
   );
+
+  it.each(
+    [false, true].flatMap((technical) =>
+      (['silent', 'stopped', 'warning', 'interrupted'] as const).map((outcome) => ({ technical, outcome })),
+    ),
+  )('offers an outcome-only $outcome disclosure with technical information $technical', ({ technical, outcome }) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical } };
+    applyConversationFrame(
+      testSnapshot({
+        turns: [
+          {
+            ...testTurn,
+            phase: 'settled',
+            outcome,
+            activity: [],
+            usage: [],
+            liveUsage: null,
+            startedAt: null,
+            endedAt: null,
+            metadata: { status: 'unavailable', model: null, durationMs: null },
+          },
+        ],
+        connection: { connected: true, activeTurnId: null },
+      }),
+      'thread',
+    );
+    resetMount();
+    hooks.cursor = 0;
+    const log = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    hooks.cursor = 0;
+    const turnRow = findComponent(log.type(log.props), 'ResponseStatusRow');
+    resetMount();
+    hooks.cursor = 0;
+    const row = turnRow.type(turnRow.props);
+    if (!technical) {
+      expect(row).toBeNull();
+      return;
+    }
+    const details = renderTechnicalDetails(row);
+    const info = findComponent(details, 'TurnTechnicalInfo');
+    expect(info.props.count).toBe(0);
+    expect(info.props.hasOutcome).toBe(true);
+    const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
+    const button = toggle.type(toggle.props);
+    expect(find(button, 'span', 'trace')).toBeTruthy();
+    expect(button.props['aria-expanded']).toBe(false);
+    const panel = findComponent(details, 'ActivityTracePanel');
+    expect(panel.props.lines).toHaveLength(1);
+    expect(panel.props.lines[0].ts).toBe('');
+    expect(find(row.props.children.at(-1), 'span')).toBeUndefined();
+    button.props.onClick();
+    hooks.cursor = 0;
+    const expanded = renderTechnicalDetails(turnRow.type(turnRow.props));
+    expect(findComponent(expanded, 'ActivityTracePanel').props.expanded).toBe(true);
+    expect(findComponent(expanded, 'TurnTechnicalInfo').props.count).toBe(0);
+  });
 
   it.each([false, true])(
     'keeps dots, Stop, stopwatch and current activity in the footer with technical information %s',
@@ -1509,8 +1617,11 @@ describe('main composer pending edits', () => {
         },
       });
       expect(settled?.props.class ?? '').not.toContain('turn-live');
-      const footer = settled.props.children.at(-1);
-      expect(footer.props.children.filter(Boolean).at(-1).props.children).toBe('No reply');
+      if (!technical) expect(settled).toBeNull();
+      else {
+        const footer = settled.props.children.at(-1);
+        expect(footer.props.children.filter(Boolean)).toEqual([]);
+      }
     },
   );
 

@@ -46,12 +46,30 @@ const scenes = [
   { id: 'reply', label: 'Settled reply' },
   { id: 'empty-reply', label: 'Settled reply (no recorded steps)' },
   { id: 'outputless', label: 'Settled without reply' },
+  { id: 'silent-empty', label: 'No reply (outcome only)' },
+  { id: 'stopped-empty', label: 'Stopped (outcome only)' },
+  { id: 'stopped-recorded', label: 'Stopped (recorded stop entry)' },
+  { id: 'warning-empty', label: 'Warning (outcome only)' },
+  { id: 'interrupted-empty', label: 'Interrupted (outcome only)' },
+  { id: 'card-warning', label: 'Display card (warning only)' },
+  { id: 'technical-summary', label: 'Compact technical summary (41 entries)' },
+  { id: 'technical-summary-multiple', label: 'Compact technical summary (two reports)' },
+  { id: 'technical-summary-zero-cost', label: 'Elapsed minutes and zero cost' },
   { id: 'failed', label: 'Failed reply' },
+  { id: 'failed-model-handled', label: 'Failed request (model explanation)' },
   { id: 'failed-no-usage', label: 'Failed reply (no accounting)' },
   { id: 'failed-timing-only', label: 'Failed reply (timing only)' },
   { id: 'card', label: 'Settled display card' },
 ] as const;
 type Scene = (typeof scenes)[number]['id'];
+const terminalScenes: Partial<Record<Scene, ConversationTurn['outcome']>> = {
+  'silent-empty': 'silent',
+  'stopped-empty': 'stopped',
+  'stopped-recorded': 'stopped',
+  'warning-empty': 'warning',
+  'interrupted-empty': 'interrupted',
+  'card-warning': 'warning',
+};
 const nextChapterScene: Partial<Record<Scene, Scene>> = {
   'chapter-running': 'chapter-completed',
   'chapter-completed': 'chapter-continued',
@@ -165,9 +183,13 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
   }
   const started = Date.parse(startedAt);
   const testing = nextScene === 'running' || nextScene === 'parallel' || nextScene === 'parallel-completed';
-  const failed = ['failed', 'failed-no-usage', 'failed-timing-only'].includes(nextScene);
+  const failed = ['failed', 'failed-model-handled', 'failed-no-usage', 'failed-timing-only'].includes(nextScene);
   const missingAccounting = nextScene === 'failed-no-usage' || nextScene === 'failed-timing-only';
-  const settled = failed || ['reply', 'empty-reply', 'outputless', 'card'].includes(nextScene);
+  const terminalOutcome = terminalScenes[nextScene];
+  const compactSummary = nextScene.startsWith('technical-summary');
+  const elapsedMs = nextScene === 'technical-summary-zero-cost' ? 710_000 : compactSummary ? 15_000 : 12_000;
+  const outcomeOnly = nextScene.endsWith('-empty') || nextScene === 'card-warning';
+  const settled = compactSummary || !!terminalOutcome || failed || ['reply', 'empty-reply', 'outputless', 'card'].includes(nextScene);
   const phase = settled
     ? 'settled'
     : nextScene === 'stopping'
@@ -176,7 +198,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
         ? 'settling'
         : 'running';
   const activity: ConversationTurn['activity'] =
-    nextScene === 'initial' || nextScene === 'empty-reply' || missingAccounting
+    nextScene === 'initial' || nextScene === 'empty-reply' || missingAccounting || outcomeOnly
       ? []
       : [
           {
@@ -193,6 +215,18 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
             }),
           },
         ];
+  if (nextScene === 'stopped-recorded') activity.push({
+    ordinal: 1, ts: String(started + 12_000), timelinePosition: (started + 12_000) * 1000,
+    text: JSON.stringify({ kind: 'notification', id: `stopped:${fixtureTurnId}`, text: 'Stopped by user.' }),
+  });
+  if (compactSummary) activity.splice(0, activity.length, ...Array.from({ length: 41 }, (_, ordinal) => ({
+    ordinal, ts: String(started + ordinal * 100), timelinePosition: (started + ordinal * 100) * 1000,
+    text: JSON.stringify(ordinal < 39
+      ? { kind: 'tool', id: `fixture-summary-tool-${ordinal}`, tool: 'bash', status: 'completed', detail: 'echo test' }
+      : ordinal === 39
+        ? { kind: 'compaction', id: 'fixture-summary-compaction', status: 'completed' }
+        : { kind: 'notification', id: 'fixture-summary-notice', text: 'Provider notice' }),
+  })));
   if (nextScene.startsWith('chapter-')) {
     const continued = nextScene === 'chapter-continued' || nextScene === 'chapter-switched';
     const commands = continued ? ['pnpm run build', 'git diff --check'] : ['pnpm run build'];
@@ -212,6 +246,19 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
         detail: 'src/ui/client/chat/src/components/ChatMain.tsx' }),
     });
   }
+  if (nextScene === 'failed-model-handled') {
+    [
+      { text: 'Provider request failed', detail: 'Output blocked by content filtering policy.' },
+      { text: 'Asking model to explain failure', detail: 'Starting a fresh model query to report the error, not retry the original request.' },
+      { text: 'Model output recorded after failure', detail: 'The original request remains unsuccessful; this output came from the failure-handling query.' },
+    ].forEach((step, index) => {
+      activity.push({
+        ordinal: index + 1, ts: String(started + 4000 + index * 1000),
+        timelinePosition: (started + 4000 + index * 1000) * 1000,
+        text: JSON.stringify({ kind: 'notification', id: `fixture-failure-${index}`, ...step }),
+      });
+    });
+  }
   if (nextScene === 'long' || nextScene === 'parallel' || nextScene === 'parallel-completed')
     activity.push({
       ordinal: 1,
@@ -229,17 +276,25 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
         ...(nextScene === 'parallel-completed' ? { durationMs: 1200 } : {}),
       }),
     });
-  const hasReply = settled && nextScene !== 'outputless';
+  const hasReply = settled && nextScene !== 'outputless' && (!terminalOutcome || nextScene === 'card-warning');
   const turn: ConversationTurn = {
     id: fixtureTurnId,
     phase,
-    outcome: !settled ? 'pending' : failed ? 'failed' : hasReply ? 'replied' : 'silent',
-    startedAt,
-    endedAt: settled ? new Date(started + 12_000).toISOString() : null,
+    outcome: compactSummary ? 'warning' : terminalOutcome ?? (!settled ? 'pending' : failed ? 'failed' : hasReply ? 'replied' : 'silent'),
+    startedAt: outcomeOnly ? null : startedAt,
+    endedAt: settled && !outcomeOnly ? new Date(started + elapsedMs).toISOString() : null,
     inputIds: ['fixture-status-input'],
     outputIds: hasReply ? ['fixture-status-reply'] : [],
     activity,
-    usage: nextScene === 'failed-no-usage'
+    usage: nextScene === 'technical-summary-multiple' ? [
+      { id: 'fixture-summary-first', value: { cost_usd: 1, model: 'MiniMax-M3', input_tokens: 100,
+        output_tokens: 10, context_tokens: 150_000, context_window: 200_000 } },
+      { id: 'fixture-summary-second', value: { cost_usd: 1.09, model: 'fixture-model', input_tokens: 200,
+        output_tokens: 20, context_tokens: 70_000, context_window: 200_000 } },
+    ] : compactSummary ? [{
+      id: 'fixture-summary-usage', value: { cost_usd: nextScene === 'technical-summary-zero-cost' ? 0 : 2.09, model: 'MiniMax-M3', input_tokens: 798_800,
+        output_tokens: 0, context_tokens: 70_000, context_window: 200_000, num_turns: 5 },
+    }] : nextScene === 'failed-no-usage' || outcomeOnly
       ? []
       : nextScene === 'failed-timing-only'
       ? [{ id: 'fixture-timing-usage', value: { duration_api_ms: 8000 } }]
@@ -274,9 +329,9 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
           context_window: 200_000,
         },
     metadata: {
-      status: failed ? 'partial' : settled ? 'final' : 'provisional',
-      model: missingAccounting ? null : 'fixture-model',
-      durationMs: settled ? 12_000 : null,
+      status: outcomeOnly ? 'unavailable' : failed ? 'partial' : settled ? 'final' : 'provisional',
+      model: missingAccounting || outcomeOnly ? null : 'fixture-model',
+      durationMs: settled && !outcomeOnly ? elapsedMs : null,
     },
   };
   const view: Omit<Conversation, 'timeline'> = {
@@ -296,10 +351,13 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
               direction: 'out' as const,
               turnId: fixtureTurnId,
               deliveryOrigin: 'response' as const,
-              text: failed ? 'The fixture response failed.' : 'The **fixture response** is complete.',
-              timestamp: new Date(started + 12_000).toISOString(),
-              timelinePosition: (started + 12_000) * 1000,
-              ...(nextScene === 'card'
+              text: nextScene === 'failed-model-handled'
+                ? 'Your message could not be processed: the provider blocked it with its content filtering policy.'
+                : failed ? 'The fixture response failed.' : 'The **fixture response** is complete.',
+              ...(failed && nextScene !== 'failed-model-handled' ? { systemGenerated: true } : {}),
+              timestamp: new Date(started + elapsedMs).toISOString(),
+              timelinePosition: (started + elapsedMs) * 1000,
+              ...(nextScene === 'card' || nextScene === 'card-warning'
                 ? {
                     card: {
                       title: 'Fixture card',

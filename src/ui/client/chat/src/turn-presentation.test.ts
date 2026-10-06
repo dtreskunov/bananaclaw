@@ -27,6 +27,7 @@ import {
 import { dismissToast } from './components/Toast';
 import { appearance } from './appearance-state';
 import { DEFAULT_APPEARANCE } from './appearance';
+import { isOutcomeTraceStep, parseStep } from '../../../shared/activity-presentation';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 vi.mock('./hash', () => ({ writeHash: vi.fn() }));
@@ -504,7 +505,65 @@ describe('authoritative turn presentation', () => {
         kind: 'turn',
         turn: { phase: 'settled', outcome, activity: testTurn.activity, usage: [] },
       });
+      const row = chatTranscript.value[0];
+      if (row.kind !== 'turn') throw new Error('Expected a turn trace');
+      expect(row.activity.slice(0, testTurn.activity.length)).toEqual(testTurn.activity);
+      expect(row.activity.filter((line) => isOutcomeTraceStep(parseStep(line.text)))).toHaveLength(
+        outcome === 'failed' ? 0 : 1,
+      );
+      expect(conversationState.value?.conversation.turns[0].activity).toEqual(testTurn.activity);
       expect(activeTurn.value).toBeNull();
+    },
+  );
+  it.each(['reply', 'system-notice', 'card', 'outputless'] as const)(
+    'projects a terminal marker exactly once on its owning %s carrier without changing wire state',
+    (carrier) => {
+      const messages: Conversation['messages'] =
+        carrier === 'outputless'
+          ? []
+          : [
+              {
+                id: 'mid-turn',
+                direction: 'out',
+                turnId: testTurn.id,
+                text: 'Progress',
+                timestamp: '',
+                timelinePosition: 150,
+                deliveryOrigin: 'send_message',
+              },
+              {
+                id: 'reply',
+                direction: 'out',
+                turnId: testTurn.id,
+                text: 'Response',
+                timestamp: '',
+                timelinePosition: 200,
+                deliveryOrigin: 'response',
+                ...(carrier === 'system-notice' ? { systemGenerated: true } : {}),
+                ...(carrier === 'card' ? { card: { title: 'Card', description: '', children: [], actions: [] } } : {}),
+              },
+            ];
+      const view = testSnapshot({
+        messages,
+        turns: [
+          {
+            ...testTurn,
+            phase: 'settled',
+            outcome: 'warning',
+            endedAt: '2026-09-29T00:00:02Z',
+            outputIds: messages.map((message) => message.id),
+          },
+        ],
+        connection: { connected: true, activeTurnId: null },
+      }).conversation;
+      const before = JSON.stringify(view);
+      const projection = conversationPresentation(view);
+      const activity = projection.transcript.flatMap((row) =>
+        row.kind === 'turn' ? row.activity : row.kind === 'message' ? (row.message.activity ?? []) : [],
+      );
+      expect(activity.filter((line) => isOutcomeTraceStep(parseStep(line.text)))).toHaveLength(1);
+      expect(activity.map((line) => parseStep(line.text).text)).toContain('Ended with a warning');
+      expect(JSON.stringify(view)).toBe(before);
     },
   );
   it('updates responses, metadata and completion in one envelope without copying usage onto outputs', () => {

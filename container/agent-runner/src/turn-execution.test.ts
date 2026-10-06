@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { initTestSessionDb, getInboundDb, getOutboundDb, closeSessionDb } from './db/connection.js';
-import { appendActivity, setContinuation } from './db/session-state.js';
+import { appendActivity, getContinuation, setContinuation } from './db/session-state.js';
 import { getTurn } from './db/turns.js';
 import { getTurnContext } from './current-batch.js';
 import { beginTurn, finishUsageAttempt, recordTurnUsage, settleTurn } from './turn-execution.js';
@@ -8,7 +8,7 @@ import { runPollLoop } from './poll-loop.js';
 import { requestTurnStop, resetHostEventsForTesting } from './session-link.js';
 import { invokeRegisteredTool, registerTools } from './mcp-tools/tool-registry.js';
 import { writeMessageOut } from './db/messages-out.js';
-import type { AgentProvider, ProviderEvent } from './providers/types.js';
+import type { ActivityStep, AgentProvider, ProviderEvent, QueryInput } from './providers/types.js';
 
 const route = { channelType: 'web', platformId: 'room', threadId: 'thread', inReplyTo: 'input' };
 const usage = { cost_usd: 0.25, input_tokens: 12, output_tokens: 3, cache_read_tokens: 0, cache_write_tokens: 0, model: 'model' };
@@ -36,6 +36,23 @@ function provider(events: () => AsyncGenerator<ProviderEvent>): AgentProvider {
 function metadata(id: string) {
   return JSON.parse((getOutboundDb().prepare('SELECT value FROM session_state WHERE key = ?')
     .get(`turn-metadata:${id}`) as { value: string }).value);
+}
+
+function activitySteps(): ActivityStep[] {
+  const rows = getOutboundDb().prepare('SELECT text FROM turn_activity ORDER BY ordinal')
+    .all() as Array<{ text: string }>;
+  return rows.map(({ text }) => JSON.parse(text) as ActivityStep);
+}
+
+function expectOutputBeforeSettlement(): void {
+  const events = getOutboundDb().prepare('SELECT sequence, event_type, payload FROM pending_runner_events ORDER BY sequence')
+    .all() as Array<{ sequence: number; event_type: string; payload: string }>;
+  const settled = events.find((event) => event.event_type === 'turn.upsert' && JSON.parse(event.payload).phase === 'settled');
+  expect(settled).toBeDefined();
+  if (!settled) throw new Error('Turn was not settled');
+  expect(JSON.parse(settled.payload).outcome).toBe('failed');
+  expect(events.filter((event) => ['activity.persist', 'message.upsert', 'usage.persist'].includes(event.event_type))
+    .every((event) => event.sequence < settled.sequence)).toBe(true);
 }
 
 it('persists model time across retries and replaces call checkpoints with attempt totals', async () => {
@@ -74,6 +91,11 @@ it.each([
     const final = rows.find((row) => row.event_type === 'turn.upsert' && JSON.parse(row.payload).phase === 'settled')!;
     expect(rows.filter((row) => ['message.upsert', 'activity.persist', 'usage.persist'].includes(row.event_type))
       .every((row) => row.sequence < final.sequence)).toBe(true);
+    if (outcome === 'failed') {
+      expect(activitySteps()).toEqual([
+        expect.objectContaining({ kind: 'notification', text: 'Provider request failed', detail: 'failed' }),
+      ]);
+    }
   } finally { controller.abort(); await loop; }
 });
 
@@ -86,6 +108,142 @@ it('records provider construction failures and fallback output on one failed tur
     await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE outcome='failed'").get());
     expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM turns').get()).toEqual({ n: 1 });
     expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out WHERE turn_id IS NOT NULL').get()).toEqual({ n: 1 });
+    expect(activitySteps().filter((step) => step.kind === 'notification').map((step) => step.text)).toEqual([
+      'Provider request failed',
+      'Asking model to explain failure',
+      'Failure explanation unavailable',
+      'Error notice recorded',
+    ]);
+  } finally { controller.abort(); await loop; }
+});
+
+it('records a model-handled failure on the original turn without losing activity, usage or continuation', async () => {
+  input();
+  setContinuation('test', 'good-session');
+  let attempts = 0;
+  const inputs: QueryInput[] = [];
+  const p = provider(async function* () {
+    if (++attempts === 1) {
+      yield { type: 'init', continuation: 'incomplete-session' };
+      appendActivity({ kind: 'tool', id: 'original-work', tool: 'read', status: 'completed', detail: 'input.txt' });
+      yield { type: 'usage_call', data: usage };
+      throw new Error('provider rejected the request');
+    }
+    yield { type: 'init', continuation: 'explanation-session' };
+    yield { type: 'usage', data: usage };
+    yield { type: 'result', text: '<message to="web">The provider rejected your request.</message>' };
+  });
+  const query = p.query.bind(p);
+  p.query = (parameters) => {
+    inputs.push(parameters);
+    return query(parameters);
+  };
+  const controller = new AbortController();
+  const loop = runPollLoop({ provider: p, providerName: 'test', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE outcome='failed'").get());
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0].continuation).toBe('good-session');
+    expect(inputs[1].continuation).toBeUndefined();
+    expect(inputs[1].prompt).toContain('Do not retry the failed action.');
+    expect(getContinuation('test')).toBe('good-session');
+    expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM turns').get()).toEqual({ n: 1 });
+    expect(getOutboundDb().prepare('SELECT SUM(cost_usd) AS cost FROM turn_usage').get()).toEqual({ cost: 0.5 });
+    expect(activitySteps()).toEqual([
+      expect.objectContaining({ kind: 'tool', id: 'original-work' }),
+      expect.objectContaining({ kind: 'notification', text: 'Provider request failed', detail: 'provider rejected the request' }),
+      expect.objectContaining({ kind: 'notification', text: 'Asking model to explain failure' }),
+      expect.objectContaining({ kind: 'notification', text: 'Model output recorded after failure' }),
+    ]);
+    const output = getOutboundDb().prepare('SELECT content FROM messages_out').get() as { content: string };
+    expect(JSON.parse(output.content)).toMatchObject({ text: 'The provider rejected your request.', delivery_origin: 'response' });
+    expect(JSON.parse(output.content).system_generated).not.toBe(true);
+    expectOutputBeforeSettlement();
+  } finally { controller.abort(); await loop; }
+});
+
+it.each(['throw', 'event'] as const)('records an unsuccessful %s acknowledgement before its static notice and settlement', async (mode) => {
+  input();
+  let attempts = 0;
+  const p = provider(async function* () {
+    if (++attempts === 1) throw new Error('original failure');
+    if (mode === 'throw') throw new Error('explanation offline');
+    yield { type: 'error', retryable: false, message: 'explanation offline' };
+  });
+  const controller = new AbortController();
+  const loop = runPollLoop({ provider: p, providerName: 'test', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE outcome='failed'").get());
+    expect(attempts).toBe(2);
+    const steps = activitySteps();
+    expect(steps).toEqual([
+      expect.objectContaining({ text: 'Provider request failed', detail: 'original failure' }),
+      expect.objectContaining({ text: 'Asking model to explain failure' }),
+      expect.objectContaining({ text: 'Failure explanation unavailable', detail: expect.stringContaining('explanation offline') }),
+      expect.objectContaining({ text: 'Error notice recorded' }),
+    ]);
+    expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out').get()).toEqual({ n: 1 });
+    const output = getOutboundDb().prepare('SELECT content FROM messages_out').get() as { content: string };
+    expect(JSON.parse(output.content).system_generated).toBe(true);
+    expectOutputBeforeSettlement();
+  } finally { controller.abort(); await loop; }
+});
+
+it('does not describe a runner notice from an empty acknowledgement as model output', async () => {
+  input();
+  let attempts = 0;
+  const p = provider(async function* () {
+    if (++attempts === 1) throw new Error('original failure');
+    yield { type: 'result', text: '' };
+  });
+  const controller = new AbortController();
+  const loop = runPollLoop({ provider: p, providerName: 'test', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE outcome='failed'").get());
+    expect(activitySteps()).toEqual([
+      expect.objectContaining({ text: 'Provider request failed' }),
+      expect.objectContaining({ text: 'Asking model to explain failure' }),
+      expect.objectContaining({ text: 'System notice recorded after failure' }),
+    ]);
+    expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out').get()).toEqual({ n: 1 });
+  } finally { controller.abort(); await loop; }
+});
+
+it('records a provider failure even when its final result contains partial output', async () => {
+  input();
+  const p = provider(async function* () {
+    yield { type: 'error', message: 'quota exhausted mid-turn', classification: 'quota', retryable: false };
+    yield { type: 'result', text: '<message to="web">Partial answer.</message>' };
+  });
+  const controller = new AbortController();
+  const loop = runPollLoop({ provider: p, providerName: 'test', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE outcome='failed'").get());
+    expect(activitySteps()).toEqual([
+      expect.objectContaining({ text: 'Provider request failed', detail: '[quota] quota exhausted mid-turn' }),
+    ]);
+    expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out').get()).toEqual({ n: 1 });
+  } finally { controller.abort(); await loop; }
+});
+
+it('does not append acknowledgement completion activity after the user stops and settles the turn', async () => {
+  input();
+  let attempts = 0;
+  const p = provider(async function* () {
+    if (++attempts === 1) throw new Error('original failure');
+    requestTurnStop(getTurnContext()!.turnId);
+    yield { type: 'activity' };
+  });
+  const controller = new AbortController();
+  const loop = runPollLoop({ provider: p, providerName: 'test', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE phase='settled'").get());
+    expect(activitySteps()).toEqual([
+      expect.objectContaining({ text: 'Provider request failed' }),
+      expect.objectContaining({ text: 'Asking model to explain failure' }),
+      expect.objectContaining({ text: 'Stopped by user.' }),
+    ]);
+    expectOutputBeforeSettlement();
   } finally { controller.abort(); await loop; }
 });
 
@@ -126,6 +284,7 @@ it('does not turn an idle warm transport error into a second answer or mutate se
     expect(getOutboundDb().prepare('SELECT outcome FROM turns').get()).toEqual({ outcome: 'replied' });
     expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out').get()).toEqual({ n: 1 });
     expect(getOutboundDb().prepare('SELECT SUM(cost_usd) AS cost FROM turn_usage').get()).toEqual({ cost: 0.25 });
+    expect(activitySteps()).toEqual([]);
   } finally { controller.abort(); await loop; }
 });
 
@@ -158,6 +317,10 @@ it('retains one usage ID and full walltime across a stale retry, without double 
     expect(rows[0].duration_ms).toBeGreaterThanOrEqual(30);
     expect(metadata(seen[0])).toMatchObject({ status: 'partial', final: true });
     expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM turn_activity').get()).toEqual({ n: 2 });
+    expect(activitySteps().filter((step) => step.kind === 'notification')).toEqual([
+      expect.objectContaining({ text: 'work' }),
+      expect.objectContaining({ text: 'work' }),
+    ]);
   } finally { controller.abort(); await loop; }
 });
 

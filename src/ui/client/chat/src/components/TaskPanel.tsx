@@ -13,6 +13,7 @@ import { taskUrl } from '../actions';
 import { api, postJson, patchJson } from '../api';
 import { showToast } from './Toast';
 import { renderMarkdown } from '../utils';
+import { formatDuration as fmtDuration } from '../duration-format';
 import { highlightCode } from '../highlight';
 import type { TaskDetailDto } from '../types';
 
@@ -77,14 +78,6 @@ function toDatetimeLocal(iso: string | null): string {
   const d = Number.isFinite(t) ? new Date(t) : new Date();
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function fmtDuration(ms: number | null): string {
-  if (ms === null) return '';
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 /** Compact, view-only task card for list mode. Clicking the summary opens

@@ -39,6 +39,7 @@ describe('activity presentation', () => {
       { kind: 'notification', id: 'ui:current:turn', text: 'Stopping…', status: 'running' },
       { kind: 'notification', id: 'ui:current:turn', text: 'Stop failed', status: 'error' },
       { kind: 'notification', id: 'ui:current:turn', text: 'Runner disconnected', status: 'interrupted' },
+      { kind: 'notification', id: 'ui:outcome:turn', text: 'No reply' },
     ];
     const synthetic = markers.map((step, index) => line(index, step));
     const recorded = [

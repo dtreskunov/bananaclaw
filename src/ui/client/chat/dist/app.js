@@ -17679,10 +17679,414 @@ function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
 
+// ../../shared/activity-presentation.ts
+var TRACE_STATUS_LABELS = {
+  queued: "Pending",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  interrupted: "Interrupted (outcome unknown)",
+  unknown: "Outcome unknown",
+  neutral: "Activity"
+};
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function isStep(value) {
+  if (!isRecord(value)) return false;
+  for (const key of ["id", "tool", "detail", "title", "error", "text", "path", "name", "agent", "description"]) {
+    if (value[key] !== void 0 && typeof value[key] !== "string") return false;
+  }
+  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification"].includes(value.kind)))
+    return false;
+  if (value.status !== void 0 && (typeof value.status !== "string" || !["pending", "running", "completed", "error", "interrupted", "unknown"].includes(value.status)))
+    return false;
+  if (value.durationMs !== void 0 && (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs < 0))
+    return false;
+  if (value.attempt !== void 0 && typeof value.attempt !== "number") return false;
+  if (value.auto !== void 0 && typeof value.auto !== "boolean") return false;
+  return value.files === void 0 || Array.isArray(value.files) && value.files.every((file) => typeof file === "string");
+}
+function parseStep(text2) {
+  try {
+    const value = JSON.parse(text2);
+    return isStep(value) ? value : {};
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return {};
+  }
+}
+function isSyntheticTraceStep(step) {
+  return step.kind === "notification" && /^ui:(current|done|thinking|outcome):/.test(step.id ?? "");
+}
+function isOutcomeTraceStep(step) {
+  return step.kind === "notification" && (step.id ?? "").startsWith("ui:outcome:");
+}
+function activityStepCount(lines) {
+  return lines.reduce((count, line) => count + (isSyntheticTraceStep(parseStep(line.text)) ? 0 : 1), 0);
+}
+function cleanToolName(tool) {
+  if (tool.toLowerCase().startsWith("nanoclaw_"))
+    return `nanoclaw.${tool.slice("nanoclaw_".length).replace(/^_/, "")}`.toLowerCase();
+  if (!tool.startsWith("mcp__")) return tool.toLowerCase();
+  const [server, ...name] = tool.slice(5).split("__");
+  return `${server}.${name.join(".") || server}`.toLowerCase();
+}
+function toolKind(step) {
+  return cleanToolName(step.tool || "").split(".").at(-1) || "";
+}
+function isTodoStep(step) {
+  return step.kind === "tool" && ["todo", "todowrite", "todo_write"].includes(toolKind(step));
+}
+function isTitleStep(step) {
+  return step.kind === "tool" && ["nanoclaw.set_thread_title", "set_thread_title"].includes(cleanToolName(step.tool || ""));
+}
+function todoItems(step) {
+  if (!isTodoStep(step) || !step.detail) return null;
+  const items = [];
+  for (const line of step.detail.split("\n")) {
+    const match2 = line.match(/^(Completed|In progress|Pending|Cancelled|Task):\s*(.*)$/i);
+    if (!match2) {
+      if (!items.length) return null;
+      items[items.length - 1].content += `
+${line}`;
+      continue;
+    }
+    const status = match2[1].toLowerCase();
+    const priority = match2[2].match(/\s+\(([^()\n]+) priority\)$/i);
+    items.push({
+      content: priority ? match2[2].slice(0, priority.index).trimEnd() : match2[2],
+      status: status === "completed" ? "completed" : status === "in progress" ? "in_progress" : status === "pending" ? "pending" : status === "cancelled" ? "cancelled" : "unknown",
+      ...priority ? { priority: priority[1] } : {}
+    });
+  }
+  return items.length ? items : null;
+}
+function singleLine(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+var FILE_OP_VERBS = {
+  read: { present: "Reading", past: "Read" },
+  write: { present: "Writing", past: "Wrote" },
+  edit: { present: "Editing", past: "Edited" }
+};
+var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
+var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
+var BUILTIN_TOOL_PRESENTATIONS = /* @__PURE__ */ new Map([
+  ["send_message", ["Sending message", "Sent message", "send message", "Message", "to"]],
+  ["send_file", ["Sending file", "Sent file", "send file", "File send"]],
+  ["edit_message", ["Editing message", "Edited message", "edit message", "Message edit"]],
+  ["add_reaction", ["Reacting", "Reacted", "react", "Reaction", "with"]],
+  ["send_email", ["Emailing", "Emailed", "email", "Email"]],
+  ["ask_user_question", ["Requesting an answer", "Requested an answer", "request an answer", "Question request", "to"]],
+  ["send_card", ["Sending card", "Sent card", "send card", "Card send"]],
+  ["schedule_task", ["Scheduling task", "Scheduled task", "schedule task", "Task scheduling", "for"]],
+  ["list_tasks", ["Listing tasks", "Listed tasks", "list tasks", "Task listing", "with status"]],
+  [
+    "update_task",
+    ["Requesting task update", "Requested task update", "request task update", "Task update request", "for"]
+  ],
+  [
+    "cancel_task",
+    [
+      "Requesting task cancellation",
+      "Requested task cancellation",
+      "request task cancellation",
+      "Task cancellation request",
+      "for"
+    ]
+  ],
+  ["pause_task", ["Requesting task pause", "Requested task pause", "request task pause", "Task pause request", "for"]],
+  [
+    "resume_task",
+    ["Requesting task resume", "Requested task resume", "request task resume", "Task resume request", "for"]
+  ],
+  [
+    "create_agent",
+    [
+      "Requesting agent creation",
+      "Requested agent creation",
+      "request agent creation",
+      "Agent creation request",
+      "for"
+    ]
+  ],
+  [
+    "add_agent_destination",
+    ["Requesting agent link", "Requested agent link", "request agent link", "Agent link request", "for"]
+  ],
+  [
+    "install_packages",
+    [
+      "Requesting package installation",
+      "Requested package installation",
+      "request package installation",
+      "Package installation request",
+      "for"
+    ]
+  ],
+  [
+    "add_mcp_server",
+    [
+      "Requesting MCP server setup",
+      "Requested MCP server setup",
+      "request MCP server setup",
+      "MCP server setup request",
+      "for"
+    ]
+  ],
+  ["set_thread_title", ["Setting title", "Set title", "set title", "Title change", "to"]],
+  [
+    "request_login_link",
+    ["Requesting login link", "Requested login link", "request login link", "Login link request", "for"]
+  ],
+  [
+    "mint_file_link",
+    ["Requesting download link", "Requested download link", "request download link", "Download link request", "for"]
+  ]
+]);
+function builtinHeadline(step) {
+  const name = cleanToolName(step.tool || "");
+  const verbs = name.startsWith("nanoclaw.") ? BUILTIN_TOOL_PRESENTATIONS.get(name.slice("nanoclaw.".length)) : void 0;
+  if (!verbs) return null;
+  const [present, past, infinitive, noun, joiner] = verbs;
+  const subject = singleLine(step.detail || "");
+  const uncertain = !step.status || step.status === "unknown" || step.status === "interrupted";
+  const action = uncertain ? `${noun} ${step.status === "interrupted" ? "interrupted (outcome unknown)" : "outcome unknown"}${subject ? ":" : ""}` : step.status === "error" ? `Failed to ${infinitive}` : step.status === "pending" ? `Queued ${noun.toLowerCase()}` : step.status === "completed" ? past : present;
+  return {
+    action: joiner && subject && !uncertain ? `${action} ${joiner}` : action,
+    ...subject ? { subject, codeSubject: true } : {}
+  };
+}
+function stepBody(step) {
+  if (step.kind === "tool") return [step.detail, step.description, step.error].filter(Boolean).join("\n\n") || null;
+  if (step.kind === "notification") return step.detail || null;
+  if (step.kind === "internal") return step.text || null;
+  if (step.kind === "patch") return step.files?.join("\n") || null;
+  if (step.kind === "retry") return step.error || null;
+  if (step.kind === "compaction") return [step.detail, step.error].filter(Boolean).join("\n\n") || null;
+  if (step.kind === "file") return step.path || null;
+  return null;
+}
+function stepHeadline(step) {
+  switch (step.kind) {
+    case "tool": {
+      const builtin = builtinHeadline(step);
+      if (builtin) return builtin;
+      const tool = toolKind(step);
+      if (!step.status || step.status === "interrupted" || step.status === "unknown") {
+        return {
+          action: step.status === "interrupted" ? "Interrupted (outcome unknown):" : "Outcome unknown:",
+          subject: [cleanToolName(step.tool || "tool"), singleLine(step.detail || step.title || "")].filter(Boolean).join(" "),
+          codeSubject: true
+        };
+      }
+      const finished = step.status === "completed" || step.status === "error";
+      if (isTitleStep(step))
+        return {
+          action: finished ? step.detail ? "Set title to" : "Set title" : step.detail ? "Setting title to" : "Setting title",
+          ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {}
+        };
+      if (isTodoStep(step)) return { action: finished ? "Updated TODO items" : "Updating TODO items" };
+      const fileOp = FILE_OP_VERBS[tool];
+      if (fileOp) {
+        const target = step.detail || step.title || "";
+        return {
+          action: finished ? fileOp.past : fileOp.present,
+          ...target ? { subject: singleLine(target), codeSubject: true } : {}
+        };
+      }
+      if (COMMAND_TOOLS.has(tool))
+        return {
+          action: step.status === "pending" ? "Queued" : finished ? "Ran" : "Running",
+          subject: singleLine(step.detail || cleanToolName(step.tool || "command")),
+          codeSubject: true
+        };
+      if (SEARCH_TOOLS.has(tool) && (step.detail || step.title))
+        return {
+          action: finished ? "Searched for" : "Searching for",
+          subject: singleLine(step.detail || step.title || ""),
+          codeSubject: true
+        };
+      if (step.title)
+        return { action: step.title, ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {} };
+      return { action: finished ? "Used" : "Using", subject: cleanToolName(step.tool || "tool"), codeSubject: true };
+    }
+    case "internal":
+      return { action: "Internal activity" };
+    case "file":
+      return { action: "Opened", subject: step.name || step.path || "file", codeSubject: true };
+    case "patch":
+      return {
+        action: "Updated",
+        subject: step.files?.length === 1 ? step.files[0] : `${step.files?.length || 0} files`,
+        codeSubject: step.files?.length === 1
+      };
+    case "retry":
+      return { action: "Retrying", subject: `attempt ${step.attempt ?? 0}` };
+    case "compaction":
+      if (step.status === "running") return { action: "Compacting context" };
+      if (step.status === "error") return { action: "Compaction failed" };
+      if (step.status === "interrupted") return { action: "Compaction interrupted" };
+      if (step.status === "unknown") return { action: "Compaction outcome unknown" };
+      return { action: step.auto ? "Compacted context automatically" : "Compacted context" };
+    case "subtask":
+      return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
+    case "notification":
+      return {
+        action: step.text === "Steering message injected" ? "Considered" : step.text || "Notification",
+        ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {}
+      };
+    default:
+      return { action: "" };
+  }
+}
+function headlineSummary(headline, repetitions = 1) {
+  return [headline.action, headline.subject].filter(Boolean).join(" ") + (repetitions > 1 ? ` \xB7 ${repetitions} times` : "");
+}
+function chapterEntryHeadline(step) {
+  if (isTodoStep(step)) {
+    const items = todoItems(step);
+    return { action: items ? `${items.length} TODO item${items.length === 1 ? "" : "s"}` : "TODO items" };
+  }
+  if (isTitleStep(step) && !step.detail) return { action: "Title not recorded" };
+  if (step.kind === "tool" && step.detail) {
+    return { action: "", subject: singleLine(step.detail), codeSubject: true };
+  }
+  const headline = stepHeadline(step);
+  return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
+}
+function recordedFilePaths(entries) {
+  const paths = /* @__PURE__ */ new Set();
+  for (const { step } of entries) {
+    const targets = step.kind === "patch" ? step.files : step.kind === "file" ? step.path ? [step.path] : void 0 : ["read", "write", "edit"].includes(toolKind(step)) && step.detail ? [step.detail] : void 0;
+    if (!targets || targets.some((path) => !path.trim())) return null;
+    targets.forEach((path) => paths.add(path.trim()));
+  }
+  return paths;
+}
+function chapterHeadline(category, entries) {
+  const latest = entries[entries.length - 1].step;
+  const status = traceStatus(latest);
+  const executing = status === "running" || status === "queued";
+  const uncertain = status === "unknown" || status === "interrupted";
+  if (category === "commands") {
+    return { action: uncertain ? "Command" : executing ? "Running command" : "Ran command" };
+  }
+  if (category === "read" || category === "change") {
+    const files = recordedFilePaths(entries);
+    const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
+    return {
+      action: uncertain ? category === "read" ? "File reads" : "File changes" : verb,
+      subject: files?.size === 1 ? files.values().next().value : files ? `${files.size} files` : uncertain ? void 0 : "files",
+      codeSubject: files?.size === 1
+    };
+  }
+  if (category === "search") return { action: uncertain ? "Search" : executing ? "Searching" : "Searched" };
+  if (isTodoStep(latest))
+    return { action: uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items" };
+  const builtin = builtinHeadline(latest);
+  if (builtin) {
+    const shared = entries.every((entry) => stepHeadline(entry.step).subject === builtin.subject);
+    return shared ? builtin : builtinHeadline({ ...latest, detail: void 0 }) ?? { action: builtin.action };
+  }
+  if (isTitleStep(latest)) return { action: uncertain ? "Title change" : executing ? "Setting title" : "Set title" };
+  const headline = stepHeadline(latest);
+  return {
+    ...headline,
+    action: headline.action || "Activities",
+    subject: entries.every((entry) => stepHeadline(entry.step).subject === headline.subject) ? headline.subject : void 0
+  };
+}
+function traceStatus(step) {
+  if (step.kind === "retry") return "queued";
+  if (step.kind !== "tool" && step.kind !== "compaction" && step.kind !== "notification") return "neutral";
+  if ((step.kind === "compaction" || step.kind === "notification") && !step.status) return "neutral";
+  return step.status === "pending" ? "queued" : step.status === "error" ? "failed" : step.status || "unknown";
+}
+function traceStatusClass(step) {
+  return `trace-status-${traceStatus(step)}`;
+}
+function activityLineId(line, index) {
+  if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
+  const step = parseStep(line.text);
+  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
+}
+function displayStep(line, live) {
+  const step = parseStep(line.text);
+  return (step.kind === "tool" || (step.kind === "compaction" || step.kind === "notification") && step.status !== void 0) && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
+}
+function chapterCategory(step, index) {
+  if (step.kind === "file" || step.kind === "tool" && toolKind(step) === "read") return "read";
+  if (step.kind === "patch" || step.kind === "tool" && ["write", "edit", "patch"].includes(toolKind(step)))
+    return "change";
+  if (step.kind === "tool" && COMMAND_TOOLS.has(toolKind(step))) return "commands";
+  if (step.kind === "tool" && SEARCH_TOOLS.has(toolKind(step))) return "search";
+  return step.kind === "tool" ? `tool:${cleanToolName(step.tool || "tool")}` : `event:${index}`;
+}
+function activityChapters(lines, live = false) {
+  const groups2 = [];
+  lines.forEach((line, index) => {
+    const step = displayStep(line, live);
+    const entry = { id: activityLineId(line, index), line, step };
+    const category = chapterCategory(step, index);
+    const last = groups2.at(-1);
+    if (last?.category === category) last.entries.push(entry);
+    else groups2.push({ category, entries: [entry] });
+  });
+  return groups2.map(({ category, entries }) => {
+    const statuses = entries.map((entry) => traceStatus(entry.step));
+    const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
+      (candidate) => statuses.includes(candidate)
+    ) || "neutral";
+    const headline = chapterHeadline(category, entries);
+    return {
+      id: entries[0].id,
+      entries,
+      headline,
+      title: headlineSummary(headline, entries.length),
+      status,
+      failures: statuses.filter((item) => item === "failed").length
+    };
+  });
+}
+
 // ../../shared/conversation-activity.ts
 var THINKING_TEXT = "Thinking\u2026";
-function conversationActivity(turn2) {
-  return [...turn2.activity].sort((a4, b5) => a4.timelinePosition - b5.timelinePosition);
+var TERMINAL_OUTCOMES = {
+  stopped: "Stopped by user",
+  warning: "Ended with a warning",
+  interrupted: "Interrupted; outcome unknown",
+  silent: "No reply"
+};
+function terminalOutcomeStep(turn2) {
+  if (turn2.phase !== "settled") return null;
+  const text2 = TERMINAL_OUTCOMES[turn2.outcome];
+  if (!text2) return null;
+  if (turn2.outcome === "stopped" && turn2.activity.some((line) => {
+    const step = parseStep(line.text);
+    return step.kind === "notification" && step.id === `stopped:${turn2.id}`;
+  }))
+    return null;
+  return {
+    kind: "notification",
+    id: `ui:outcome:${turn2.id}`,
+    text: text2,
+    ...turn2.outcome === "interrupted" ? { status: "interrupted" } : {}
+  };
+}
+function conversationActivity(turn2, activity = turn2.activity) {
+  const lines = [...activity].sort((a4, b5) => a4.timelinePosition - b5.timelinePosition);
+  const outcome = terminalOutcomeStep(turn2);
+  if (!outcome) return lines;
+  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
+  return [
+    ...lines,
+    {
+      ts: Number.isFinite(endedAt) ? String(endedAt) : "",
+      text: JSON.stringify(outcome)
+    }
+  ];
 }
 
 // ../../shared/conversation-protocol.ts
@@ -19055,7 +19459,7 @@ function conversationPresentation(view) {
     if (!turn2) throw new ConversationProtocolError("invalid_frame");
     const ordinals = new Set(trace2.ordinals);
     const activity = turn2.activity.filter((line) => ordinals.has(line.ordinal));
-    return trace2.ownsTurn ? conversationActivity({ ...turn2, activity }) : activity;
+    return trace2.ownsTurn ? conversationActivity(turn2, activity) : activity;
   };
   const transcript = view.timeline.flatMap((row) => {
     const turn2 = row.trace ? turns.get(row.trace.turnId) : void 0;
@@ -21917,375 +22321,6 @@ function splitPendingInputs(messages) {
   return { transcript, queued };
 }
 
-// ../../shared/activity-presentation.ts
-var TRACE_STATUS_LABELS = {
-  queued: "Pending",
-  running: "Running",
-  completed: "Completed",
-  failed: "Failed",
-  interrupted: "Interrupted (outcome unknown)",
-  unknown: "Outcome unknown",
-  neutral: "Activity"
-};
-function isRecord(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-function isStep(value) {
-  if (!isRecord(value)) return false;
-  for (const key of ["id", "tool", "detail", "title", "error", "text", "path", "name", "agent", "description"]) {
-    if (value[key] !== void 0 && typeof value[key] !== "string") return false;
-  }
-  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification"].includes(value.kind)))
-    return false;
-  if (value.status !== void 0 && (typeof value.status !== "string" || !["pending", "running", "completed", "error", "interrupted", "unknown"].includes(value.status)))
-    return false;
-  if (value.durationMs !== void 0 && (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs < 0))
-    return false;
-  if (value.attempt !== void 0 && typeof value.attempt !== "number") return false;
-  if (value.auto !== void 0 && typeof value.auto !== "boolean") return false;
-  return value.files === void 0 || Array.isArray(value.files) && value.files.every((file) => typeof file === "string");
-}
-function parseStep(text2) {
-  try {
-    const value = JSON.parse(text2);
-    return isStep(value) ? value : {};
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
-    return {};
-  }
-}
-function isSyntheticTraceStep(step) {
-  return step.kind === "notification" && /^ui:(current|done|thinking):/.test(step.id ?? "");
-}
-function activityStepCount(lines) {
-  return lines.reduce((count, line) => count + (isSyntheticTraceStep(parseStep(line.text)) ? 0 : 1), 0);
-}
-function cleanToolName(tool) {
-  if (tool.toLowerCase().startsWith("nanoclaw_"))
-    return `nanoclaw.${tool.slice("nanoclaw_".length).replace(/^_/, "")}`.toLowerCase();
-  if (!tool.startsWith("mcp__")) return tool.toLowerCase();
-  const [server, ...name] = tool.slice(5).split("__");
-  return `${server}.${name.join(".") || server}`.toLowerCase();
-}
-function toolKind(step) {
-  return cleanToolName(step.tool || "").split(".").at(-1) || "";
-}
-function isTodoStep(step) {
-  return step.kind === "tool" && ["todo", "todowrite", "todo_write"].includes(toolKind(step));
-}
-function isTitleStep(step) {
-  return step.kind === "tool" && ["nanoclaw.set_thread_title", "set_thread_title"].includes(cleanToolName(step.tool || ""));
-}
-function todoItems(step) {
-  if (!isTodoStep(step) || !step.detail) return null;
-  const items = [];
-  for (const line of step.detail.split("\n")) {
-    const match2 = line.match(/^(Completed|In progress|Pending|Cancelled|Task):\s*(.*)$/i);
-    if (!match2) {
-      if (!items.length) return null;
-      items[items.length - 1].content += `
-${line}`;
-      continue;
-    }
-    const status = match2[1].toLowerCase();
-    const priority = match2[2].match(/\s+\(([^()\n]+) priority\)$/i);
-    items.push({
-      content: priority ? match2[2].slice(0, priority.index).trimEnd() : match2[2],
-      status: status === "completed" ? "completed" : status === "in progress" ? "in_progress" : status === "pending" ? "pending" : status === "cancelled" ? "cancelled" : "unknown",
-      ...priority ? { priority: priority[1] } : {}
-    });
-  }
-  return items.length ? items : null;
-}
-function singleLine(value) {
-  return value.replace(/\s+/g, " ").trim();
-}
-var FILE_OP_VERBS = {
-  read: { present: "Reading", past: "Read" },
-  write: { present: "Writing", past: "Wrote" },
-  edit: { present: "Editing", past: "Edited" }
-};
-var COMMAND_TOOLS = /* @__PURE__ */ new Set(["bash", "shell", "run", "run_in_terminal"]);
-var SEARCH_TOOLS = /* @__PURE__ */ new Set(["grep", "glob", "search", "websearch", "web_search"]);
-var BUILTIN_TOOL_PRESENTATIONS = /* @__PURE__ */ new Map([
-  ["send_message", ["Sending message", "Sent message", "send message", "Message", "to"]],
-  ["send_file", ["Sending file", "Sent file", "send file", "File send"]],
-  ["edit_message", ["Editing message", "Edited message", "edit message", "Message edit"]],
-  ["add_reaction", ["Reacting", "Reacted", "react", "Reaction", "with"]],
-  ["send_email", ["Emailing", "Emailed", "email", "Email"]],
-  ["ask_user_question", ["Requesting an answer", "Requested an answer", "request an answer", "Question request", "to"]],
-  ["send_card", ["Sending card", "Sent card", "send card", "Card send"]],
-  ["schedule_task", ["Scheduling task", "Scheduled task", "schedule task", "Task scheduling", "for"]],
-  ["list_tasks", ["Listing tasks", "Listed tasks", "list tasks", "Task listing", "with status"]],
-  [
-    "update_task",
-    ["Requesting task update", "Requested task update", "request task update", "Task update request", "for"]
-  ],
-  [
-    "cancel_task",
-    [
-      "Requesting task cancellation",
-      "Requested task cancellation",
-      "request task cancellation",
-      "Task cancellation request",
-      "for"
-    ]
-  ],
-  ["pause_task", ["Requesting task pause", "Requested task pause", "request task pause", "Task pause request", "for"]],
-  [
-    "resume_task",
-    ["Requesting task resume", "Requested task resume", "request task resume", "Task resume request", "for"]
-  ],
-  [
-    "create_agent",
-    [
-      "Requesting agent creation",
-      "Requested agent creation",
-      "request agent creation",
-      "Agent creation request",
-      "for"
-    ]
-  ],
-  [
-    "add_agent_destination",
-    ["Requesting agent link", "Requested agent link", "request agent link", "Agent link request", "for"]
-  ],
-  [
-    "install_packages",
-    [
-      "Requesting package installation",
-      "Requested package installation",
-      "request package installation",
-      "Package installation request",
-      "for"
-    ]
-  ],
-  [
-    "add_mcp_server",
-    [
-      "Requesting MCP server setup",
-      "Requested MCP server setup",
-      "request MCP server setup",
-      "MCP server setup request",
-      "for"
-    ]
-  ],
-  ["set_thread_title", ["Setting title", "Set title", "set title", "Title change", "to"]],
-  [
-    "request_login_link",
-    ["Requesting login link", "Requested login link", "request login link", "Login link request", "for"]
-  ],
-  [
-    "mint_file_link",
-    ["Requesting download link", "Requested download link", "request download link", "Download link request", "for"]
-  ]
-]);
-function builtinHeadline(step) {
-  const name = cleanToolName(step.tool || "");
-  const verbs = name.startsWith("nanoclaw.") ? BUILTIN_TOOL_PRESENTATIONS.get(name.slice("nanoclaw.".length)) : void 0;
-  if (!verbs) return null;
-  const [present, past, infinitive, noun, joiner] = verbs;
-  const subject = singleLine(step.detail || "");
-  const uncertain = !step.status || step.status === "unknown" || step.status === "interrupted";
-  const action = uncertain ? `${noun} ${step.status === "interrupted" ? "interrupted (outcome unknown)" : "outcome unknown"}${subject ? ":" : ""}` : step.status === "error" ? `Failed to ${infinitive}` : step.status === "pending" ? `Queued ${noun.toLowerCase()}` : step.status === "completed" ? past : present;
-  return {
-    action: joiner && subject && !uncertain ? `${action} ${joiner}` : action,
-    ...subject ? { subject, codeSubject: true } : {}
-  };
-}
-function stepBody(step) {
-  if (step.kind === "tool") return [step.detail, step.description, step.error].filter(Boolean).join("\n\n") || null;
-  if (step.kind === "notification") return step.detail || null;
-  if (step.kind === "internal") return step.text || null;
-  if (step.kind === "patch") return step.files?.join("\n") || null;
-  if (step.kind === "retry") return step.error || null;
-  if (step.kind === "compaction") return [step.detail, step.error].filter(Boolean).join("\n\n") || null;
-  if (step.kind === "file") return step.path || null;
-  return null;
-}
-function stepHeadline(step) {
-  switch (step.kind) {
-    case "tool": {
-      const builtin = builtinHeadline(step);
-      if (builtin) return builtin;
-      const tool = toolKind(step);
-      if (!step.status || step.status === "interrupted" || step.status === "unknown") {
-        return {
-          action: step.status === "interrupted" ? "Interrupted (outcome unknown):" : "Outcome unknown:",
-          subject: [cleanToolName(step.tool || "tool"), singleLine(step.detail || step.title || "")].filter(Boolean).join(" "),
-          codeSubject: true
-        };
-      }
-      const finished = step.status === "completed" || step.status === "error";
-      if (isTitleStep(step))
-        return {
-          action: finished ? step.detail ? "Set title to" : "Set title" : step.detail ? "Setting title to" : "Setting title",
-          ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {}
-        };
-      if (isTodoStep(step)) return { action: finished ? "Updated TODO items" : "Updating TODO items" };
-      const fileOp = FILE_OP_VERBS[tool];
-      if (fileOp) {
-        const target = step.detail || step.title || "";
-        return {
-          action: finished ? fileOp.past : fileOp.present,
-          ...target ? { subject: singleLine(target), codeSubject: true } : {}
-        };
-      }
-      if (COMMAND_TOOLS.has(tool))
-        return {
-          action: step.status === "pending" ? "Queued" : finished ? "Ran" : "Running",
-          subject: singleLine(step.detail || cleanToolName(step.tool || "command")),
-          codeSubject: true
-        };
-      if (SEARCH_TOOLS.has(tool) && (step.detail || step.title))
-        return {
-          action: finished ? "Searched for" : "Searching for",
-          subject: singleLine(step.detail || step.title || ""),
-          codeSubject: true
-        };
-      if (step.title)
-        return { action: step.title, ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {} };
-      return { action: finished ? "Used" : "Using", subject: cleanToolName(step.tool || "tool"), codeSubject: true };
-    }
-    case "internal":
-      return { action: "Internal activity" };
-    case "file":
-      return { action: "Opened", subject: step.name || step.path || "file", codeSubject: true };
-    case "patch":
-      return {
-        action: "Updated",
-        subject: step.files?.length === 1 ? step.files[0] : `${step.files?.length || 0} files`,
-        codeSubject: step.files?.length === 1
-      };
-    case "retry":
-      return { action: "Retrying", subject: `attempt ${step.attempt ?? 0}` };
-    case "compaction":
-      if (step.status === "running") return { action: "Compacting context" };
-      if (step.status === "error") return { action: "Compaction failed" };
-      if (step.status === "interrupted") return { action: "Compaction interrupted" };
-      if (step.status === "unknown") return { action: "Compaction outcome unknown" };
-      return { action: step.auto ? "Compacted context automatically" : "Compacted context" };
-    case "subtask":
-      return step.agent ? { action: "Started subtask with", subject: step.agent, codeSubject: true } : { action: step.description || "Started subtask" };
-    case "notification":
-      return {
-        action: step.text === "Steering message injected" ? "Considered" : step.text || "Notification",
-        ...step.detail ? { subject: singleLine(step.detail), codeSubject: true } : {}
-      };
-    default:
-      return { action: "" };
-  }
-}
-function headlineSummary(headline, repetitions = 1) {
-  return [headline.action, headline.subject].filter(Boolean).join(" ") + (repetitions > 1 ? ` \xB7 ${repetitions} times` : "");
-}
-function chapterEntryHeadline(step) {
-  if (isTodoStep(step)) {
-    const items = todoItems(step);
-    return { action: items ? `${items.length} TODO item${items.length === 1 ? "" : "s"}` : "TODO items" };
-  }
-  if (isTitleStep(step) && !step.detail) return { action: "Title not recorded" };
-  if (step.kind === "tool" && step.detail) {
-    return { action: "", subject: singleLine(step.detail), codeSubject: true };
-  }
-  const headline = stepHeadline(step);
-  return headline.subject ? { action: "", subject: headline.subject, codeSubject: headline.codeSubject } : { action: TRACE_STATUS_LABELS[traceStatus(step)] };
-}
-function recordedFilePaths(entries) {
-  const paths = /* @__PURE__ */ new Set();
-  for (const { step } of entries) {
-    const targets = step.kind === "patch" ? step.files : step.kind === "file" ? step.path ? [step.path] : void 0 : ["read", "write", "edit"].includes(toolKind(step)) && step.detail ? [step.detail] : void 0;
-    if (!targets || targets.some((path) => !path.trim())) return null;
-    targets.forEach((path) => paths.add(path.trim()));
-  }
-  return paths;
-}
-function chapterHeadline(category, entries) {
-  const latest = entries[entries.length - 1].step;
-  const status = traceStatus(latest);
-  const executing = status === "running" || status === "queued";
-  const uncertain = status === "unknown" || status === "interrupted";
-  if (category === "commands") {
-    return { action: uncertain ? "Command" : executing ? "Running command" : "Ran command" };
-  }
-  if (category === "read" || category === "change") {
-    const files = recordedFilePaths(entries);
-    const verb = category === "read" ? executing ? "Reading" : "Read" : executing ? "Editing" : "Edited";
-    return {
-      action: uncertain ? category === "read" ? "File reads" : "File changes" : verb,
-      subject: files?.size === 1 ? files.values().next().value : files ? `${files.size} files` : uncertain ? void 0 : "files",
-      codeSubject: files?.size === 1
-    };
-  }
-  if (category === "search") return { action: uncertain ? "Search" : executing ? "Searching" : "Searched" };
-  if (isTodoStep(latest))
-    return { action: uncertain ? "TODO items" : executing ? "Updating TODO items" : "Updated TODO items" };
-  const builtin = builtinHeadline(latest);
-  if (builtin) {
-    const shared = entries.every((entry) => stepHeadline(entry.step).subject === builtin.subject);
-    return shared ? builtin : builtinHeadline({ ...latest, detail: void 0 }) ?? { action: builtin.action };
-  }
-  if (isTitleStep(latest)) return { action: uncertain ? "Title change" : executing ? "Setting title" : "Set title" };
-  const headline = stepHeadline(latest);
-  return {
-    ...headline,
-    action: headline.action || "Activities",
-    subject: entries.every((entry) => stepHeadline(entry.step).subject === headline.subject) ? headline.subject : void 0
-  };
-}
-function traceStatus(step) {
-  if (step.kind === "retry") return "queued";
-  if (step.kind !== "tool" && step.kind !== "compaction" && step.kind !== "notification") return "neutral";
-  if ((step.kind === "compaction" || step.kind === "notification") && !step.status) return "neutral";
-  return step.status === "pending" ? "queued" : step.status === "error" ? "failed" : step.status || "unknown";
-}
-function traceStatusClass(step) {
-  return `trace-status-${traceStatus(step)}`;
-}
-function activityLineId(line, index) {
-  if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
-  const step = parseStep(line.text);
-  return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
-}
-function displayStep(line, live) {
-  const step = parseStep(line.text);
-  return (step.kind === "tool" || (step.kind === "compaction" || step.kind === "notification") && step.status !== void 0) && (!step.status || !live && (step.status === "pending" || step.status === "running")) ? { ...step, status: "unknown" } : step;
-}
-function chapterCategory(step, index) {
-  if (step.kind === "file" || step.kind === "tool" && toolKind(step) === "read") return "read";
-  if (step.kind === "patch" || step.kind === "tool" && ["write", "edit", "patch"].includes(toolKind(step)))
-    return "change";
-  if (step.kind === "tool" && COMMAND_TOOLS.has(toolKind(step))) return "commands";
-  if (step.kind === "tool" && SEARCH_TOOLS.has(toolKind(step))) return "search";
-  return step.kind === "tool" ? `tool:${cleanToolName(step.tool || "tool")}` : `event:${index}`;
-}
-function activityChapters(lines, live = false) {
-  const groups2 = [];
-  lines.forEach((line, index) => {
-    const step = displayStep(line, live);
-    const entry = { id: activityLineId(line, index), line, step };
-    const category = chapterCategory(step, index);
-    const last = groups2.at(-1);
-    if (last?.category === category) last.entries.push(entry);
-    else groups2.push({ category, entries: [entry] });
-  });
-  return groups2.map(({ category, entries }) => {
-    const statuses = entries.map((entry) => traceStatus(entry.step));
-    const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
-      (candidate) => statuses.includes(candidate)
-    ) || "neutral";
-    const headline = chapterHeadline(category, entries);
-    return {
-      id: entries[0].id,
-      entries,
-      headline,
-      title: headlineSummary(headline, entries.length),
-      status,
-      failures: statuses.filter((item) => item === "failed").length
-    };
-  });
-}
-
 // src/turn-row.ts
 function currentActivityHeadline(lines) {
   const seen = /* @__PURE__ */ new Set();
@@ -22337,13 +22372,6 @@ function activeTurnNotices(turn2, connected, stop) {
   if (!connected && !error) notices.push({ text: "Runner disconnected", error: false });
   return notices;
 }
-var OUTCOME_NOTES = {
-  stopped: "Stopped",
-  failed: "Failed",
-  warning: "Ended with a warning",
-  interrupted: "Interrupted; outcome unknown",
-  silent: "No reply"
-};
 function turnRowView(turn2, now) {
   const settled = turn2.phase === "settled";
   const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
@@ -22352,20 +22380,53 @@ function turnRowView(turn2, now) {
   const model = turn2.metadata.model;
   const timings = turn2.usage.length ? turn2.usage.map(({ value }) => value.duration_api_ms) : turn2.liveUsage ? [turn2.liveUsage.duration_api_ms] : [];
   const modelCallMs = timings.length && timings.every((value) => value !== void 0) ? timings.reduce((total, value) => total + value, 0) : null;
-  const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : null;
   const hasTiming = elapsedMs !== null || !!model;
   return {
-    hidden: settled && !turn2.activity.length && !turn2.usage.length && !hasTiming && !note,
+    hidden: settled && !turn2.activity.length && !terminalOutcomeStep(turn2) && !turn2.usage.length && !hasTiming,
     status: !settled && turn2.phase === "running" ? THINKING_TEXT : null,
-    note,
     elapsedMs,
     modelCallMs,
     nonModelMs: elapsedMs !== null && modelCallMs !== null ? elapsedMs - modelCallMs : null,
     model,
-    showModel: !settled || !turn2.usage.length,
     // While running, the live line owns elapsed time and model; checkpointed values would be stale.
     usage: settled ? turn2.usage : turn2.usage.map(({ id: id2, value }) => ({ id: id2, value: { ...value, duration_ms: void 0, model: void 0 } }))
   };
+}
+
+// src/duration-format.ts
+function formatDuration(ms) {
+  if (ms === null) return "";
+  if (ms < 1e3) return `${ms}ms`;
+  const seconds = Math.round(ms / 1e3);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+// src/technical-summary.ts
+function formatUsageCost(usd) {
+  if (usd >= 1) return "$" + usd.toFixed(2);
+  if (usd >= 0.01) return "$" + usd.toFixed(3);
+  return "$" + usd.toFixed(4);
+}
+function formatContextPercent(used, limit) {
+  const pct = used / limit * 100;
+  if (pct > 0 && pct < 1) return "<1%";
+  return Math.min(100, Math.round(pct)) + "%";
+}
+function technicalSummary({
+  elapsedMs,
+  usage: usage2
+}) {
+  const costs = usage2.map((record) => record.cost_usd);
+  const cost = costs.length && costs.every((value) => value !== void 0) ? costs.reduce((total, value) => total + value, 0) : null;
+  const context = [...usage2].reverse().find(
+    (record) => record.context_tokens !== void 0 && record.context_window !== void 0 && record.context_window > 0 && record.context_tokens >= 0 && record.context_tokens <= record.context_window
+  );
+  return [
+    formatDuration(elapsedMs),
+    cost !== null && cost !== 0 ? formatUsageCost(cost) : "",
+    context?.context_tokens !== void 0 && context.context_window !== void 0 ? `${formatContextPercent(context.context_tokens, context.context_window)} ctx` : ""
+  ].filter(Boolean).join(" \xB7 ");
 }
 
 // src/input-state.ts
@@ -23391,10 +23452,10 @@ function stepMeta(s5, elapsedMs) {
   if (s5.kind !== "tool") return null;
   const status = TRACE_STATUS_LABELS[traceStatus(s5)];
   const duration = s5.status === "running" ? elapsedMs : s5.durationMs;
-  const formattedDuration = typeof duration !== "number" ? "" : s5.status === "running" ? `${Math.floor(duration / 1e3)}s` : formatDuration(duration);
+  const formattedDuration = typeof duration !== "number" ? "" : s5.status === "running" ? `${Math.floor(duration / 1e3)}s` : formatDuration2(duration);
   return `${status}${formattedDuration ? ` \xB7 ${formattedDuration}` : ""}`;
 }
-function formatDuration(ms) {
+function formatDuration2(ms) {
   if (ms < 1e3) return `${Math.round(ms)}ms`;
   if (ms < 1e4) return `${(ms / 1e3).toFixed(1)}s`;
   return `${Math.round(ms / 1e3)}s`;
@@ -23433,7 +23494,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
         children: [
           /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
           /* @__PURE__ */ u4("span", { class: "trace-text", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }),
-          !open && typeof duration === "number" && (duration >= 2e3 || running || step.status === "error") ? /* @__PURE__ */ u4("span", { class: "trace-duration", children: formatDuration(duration) }) : null
+          !open && typeof duration === "number" && (duration >= 2e3 || running || step.status === "error") ? /* @__PURE__ */ u4("span", { class: "trace-duration", children: formatDuration2(duration) }) : null
         ]
       }
     ),
@@ -23466,7 +23527,7 @@ function ActivityTraceList({ lines, live = false, now = null, following = false,
   }, []);
   const revealed = A2(false);
   const chapters = activityChapters(lines, live);
-  const latestChapter = chapters.at(-1);
+  const latestChapter = [...chapters].reverse().find((chapter) => chapter.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
   const sel = target?.kind === "entry" && (!following || target.id === latestEntryId) ? target.id : null;
   const openChapter = following ? latestChapter && latestChapter.entries.length > 1 ? latestChapter.id : null : target?.kind === "chapter" ? target.id : target?.kind === "entry" ? chapters.find((chapter) => chapter.entries.some((entry) => entry.id === target.id))?.id ?? null : null;
@@ -23528,8 +23589,8 @@ function ActivityTraceList({ lines, live = false, now = null, following = false,
     ] }, chapter.id);
   }) });
 }
-function ActivityTraceToggle({ count, expanded, onToggle }) {
-  if (!count) return null;
+function ActivityTraceToggle({ count, hasOutcome = false, expanded, onToggle }) {
+  if (!count && !hasOutcome) return null;
   return /* @__PURE__ */ u4(
     "button",
     {
@@ -23541,11 +23602,7 @@ function ActivityTraceToggle({ count, expanded, onToggle }) {
       onClick: onToggle,
       children: [
         /* @__PURE__ */ u4("span", { class: `chevron${expanded ? " open" : ""}`, children: "\u203A" }),
-        /* @__PURE__ */ u4("span", { class: "trace-count", children: [
-          count,
-          " step",
-          count === 1 ? "" : "s"
-        ] })
+        /* @__PURE__ */ u4("span", { class: "trace-count", children: count ? `${count} trace${count === 1 ? "" : "s"}` : "trace" })
       ]
     }
   );
@@ -23571,11 +23628,6 @@ function ActivityTracePanel({
     ownerId
   ) });
 }
-function fmtCost(usd) {
-  if (usd >= 1) return "$" + usd.toFixed(2);
-  if (usd >= 0.01) return "$" + usd.toFixed(3);
-  return "$" + usd.toFixed(4);
-}
 function shortModel(model) {
   return model.split("/").pop() || model;
 }
@@ -23587,31 +23639,14 @@ function mediaKind(filename, contentType) {
   if (["mp4", "mov", "m4v", "ogv"].includes(ext)) return "video";
   return null;
 }
-function fmtPct(used, limit) {
-  const pct = used / limit * 100;
-  if (pct > 0 && pct < 1) return "<1%";
-  return Math.min(100, Math.round(pct)) + "%";
-}
 function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ u: u5, live = false, partial = false, provisional = false, wallElapsedMs = u5.duration_ms ?? null, modelElapsedMs = u5.duration_api_ms ?? null }) {
+function UsageMeta({ u: u5, summary, records, model, live = false, partial = false, provisional = false, wallElapsedMs = u5.duration_ms ?? null, modelElapsedMs = u5.duration_api_ms ?? null }) {
   const [expanded, setExpanded] = h2(false);
-  const cost = u5.cost_usd !== void 0 ? fmtCost(u5.cost_usd) : "Cost unavailable";
-  const estimatedCost = u5.cost_usd !== void 0 ? `${cost} est.` : cost;
-  const input = u5.input_tokens !== void 0 ? fmtTok(u5.input_tokens) : "unavailable";
-  const output = u5.output_tokens !== void 0 ? fmtTok(u5.output_tokens) : "unavailable";
-  const reported = u5.input_tokens !== void 0 && u5.output_tokens !== void 0 ? `${fmtTok(u5.input_tokens + u5.output_tokens)} tokens reported` : [
-    u5.input_tokens !== void 0 ? `${input} input tokens reported` : "",
-    u5.output_tokens !== void 0 ? `${output} output tokens reported` : ""
-  ].filter(Boolean).join(" \xB7 ");
-  const model = u5.model ? shortModel(u5.model) : "";
-  const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
-  const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
-  const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
-  const short = live ? [estimatedCost, `${input} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [u5.cost_usd !== void 0 ? cost : "", model, reported].filter(Boolean).join(" \xB7 ") || "Usage details" : [provisional ? estimatedCost : cost, model, ctx2].filter(Boolean).join(" \xB7 ");
-  const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
+  const short = summary || "Usage details";
+  const reports = records?.length ? records : [{ id: "usage", value: u5 }];
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
       "button",
@@ -23636,10 +23671,6 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false, 
       /* @__PURE__ */ u4("span", { class: "usage-popover", role: "dialog", "aria-label": "Turn usage details", children: [
         partial ? /* @__PURE__ */ u4("span", { class: "usage-row", children: "Partial usage report; final totals may be higher." }) : null,
         provisional ? /* @__PURE__ */ u4("span", { class: "usage-row", children: "Usage reported so far; awaiting final totals." }) : null,
-        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: partial ? "Reported cost" : "Estimated cost" }),
-          /* @__PURE__ */ u4("strong", { children: cost })
-        ] }),
         /* @__PURE__ */ u4("span", { class: "usage-time-breakdown", role: "group", "aria-label": "Response time breakdown", children: [
           /* @__PURE__ */ u4("span", { class: "usage-row", children: [
             /* @__PURE__ */ u4("span", { children: "Total time" }),
@@ -23654,42 +23685,60 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false, 
             /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null || modelElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs - modelElapsedMs) })
           ] })
         ] }),
-        model ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Model" }),
-          /* @__PURE__ */ u4("strong", { title: u5.model, children: model })
-        ] }) : null,
-        contextDetail ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: live ? "Context after latest call" : "Context at end" }),
-          /* @__PURE__ */ u4("strong", { children: contextDetail })
-        ] }) : null,
-        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: live ? "Processing so far" : "Turn processing" }),
-          /* @__PURE__ */ u4("strong", { children: [
-            input,
-            " input ",
-            "\xB7",
-            " ",
-            output,
-            " output"
-          ] })
-        ] }),
-        u5.num_turns ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: live ? "Model calls so far" : "Model calls" }),
-          /* @__PURE__ */ u4("strong", { children: u5.num_turns })
-        ] }) : null,
-        u5.cache_read_tokens !== void 0 && u5.cache_read_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Cache read" }),
-          /* @__PURE__ */ u4("strong", { children: fmtTok(u5.cache_read_tokens) })
-        ] }) : null,
-        u5.cache_write_tokens !== void 0 && u5.cache_write_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Cache write" }),
-          /* @__PURE__ */ u4("strong", { children: fmtTok(u5.cache_write_tokens) })
-        ] }) : null,
-        u5.reasoning_tokens ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Reasoning" }),
-          /* @__PURE__ */ u4("strong", { children: fmtTok(u5.reasoning_tokens) })
-        ] }) : null
+        reports.map((record, index) => /* @__PURE__ */ u4("div", { class: "usage-report", children: [
+          reports.length > 1 ? /* @__PURE__ */ u4("strong", { children: [
+            "Usage report ",
+            index + 1
+          ] }) : null,
+          /* @__PURE__ */ u4(UsageReport, { u: record.value, model, live, partial })
+        ] }, record.id))
       ] })
+    ] }) : null
+  ] });
+}
+function UsageReport({ u: u5, model, live, partial }) {
+  const reportedModel = u5.model || model;
+  const contextTokens = u5.context_tokens !== void 0 && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
+  const contextDetail = contextTokens !== void 0 ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${formatContextPercent(contextTokens, u5.context_window)})` : ""}` : void 0;
+  return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+      /* @__PURE__ */ u4("span", { children: partial ? "Reported cost" : "Estimated cost" }),
+      /* @__PURE__ */ u4("strong", { children: u5.cost_usd !== void 0 ? formatUsageCost(u5.cost_usd) : "Cost unavailable" })
+    ] }),
+    reportedModel ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+      /* @__PURE__ */ u4("span", { children: "Model" }),
+      /* @__PURE__ */ u4("strong", { title: reportedModel, children: shortModel(reportedModel) })
+    ] }) : null,
+    contextDetail ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+      /* @__PURE__ */ u4("span", { children: live ? "Context after latest call" : "Context at end" }),
+      /* @__PURE__ */ u4("strong", { children: contextDetail })
+    ] }) : null,
+    /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+      /* @__PURE__ */ u4("span", { children: live ? "Processing so far" : "Turn processing" }),
+      /* @__PURE__ */ u4("strong", { children: [
+        u5.input_tokens !== void 0 ? fmtTok(u5.input_tokens) : "unavailable",
+        " input ",
+        "\xB7",
+        " ",
+        u5.output_tokens !== void 0 ? fmtTok(u5.output_tokens) : "unavailable",
+        " output"
+      ] })
+    ] }),
+    u5.num_turns ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+      /* @__PURE__ */ u4("span", { children: live ? "Model calls so far" : "Model calls" }),
+      /* @__PURE__ */ u4("strong", { children: u5.num_turns })
+    ] }) : null,
+    u5.cache_read_tokens !== void 0 && u5.cache_read_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+      /* @__PURE__ */ u4("span", { children: "Cache read" }),
+      /* @__PURE__ */ u4("strong", { children: fmtTok(u5.cache_read_tokens) })
+    ] }) : null,
+    u5.cache_write_tokens !== void 0 && u5.cache_write_tokens > 0 ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+      /* @__PURE__ */ u4("span", { children: "Cache write" }),
+      /* @__PURE__ */ u4("strong", { children: fmtTok(u5.cache_write_tokens) })
+    ] }) : null,
+    u5.reasoning_tokens ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+      /* @__PURE__ */ u4("span", { children: "Reasoning" }),
+      /* @__PURE__ */ u4("strong", { children: fmtTok(u5.reasoning_tokens) })
     ] }) : null
   ] });
 }
@@ -24021,13 +24070,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             m6.deliveryOrigin,
             !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
           ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-          m6.direction === "out" && m6.statsTurn ? /* @__PURE__ */ u4(
-            ReplyTurnInfo,
-            {
-              turn: m6.statsTurn,
-              showOutcomeNote: !systemNotice
-            }
-          ) : null,
           /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
             !m6.submission ? /* @__PURE__ */ u4(EditMessageButton, { m: m6 }) : null,
             !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
@@ -24075,8 +24117,7 @@ function DisplayCardMessage({ message: message2, card }) {
     message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
     message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
       message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
-      /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }),
-      message2.statsTurn ? /* @__PURE__ */ u4(ReplyTurnInfo, { turn: message2.statsTurn }) : null
+      /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" })
     ] }) : null
   ] });
 }
@@ -24283,36 +24324,39 @@ function TaskIndicator() {
   }) });
 }
 function hasTurnStats(turn2, view) {
-  return view.showModel && !!view.model || view.usage.length > 0 || !!turn2.liveUsage;
+  return view.elapsedMs !== null || !!view.model || view.usage.length > 0 || !!turn2.liveUsage;
 }
 function TurnStats({ turn: turn2, view }) {
-  return /* @__PURE__ */ u4(k, { children: [
-    view.showModel && view.model ? /* @__PURE__ */ u4("span", { class: "typing-meta", children: shortModel(view.model) }) : null,
-    view.usage.map((record) => /* @__PURE__ */ u4(
-      UsageMeta,
-      {
-        u: record.value,
-        wallElapsedMs: view.elapsedMs,
-        modelElapsedMs: view.modelCallMs,
-        provisional: turn2.metadata.status === "provisional",
-        partial: turn2.metadata.status === "partial"
-      },
-      record.id
-    )),
-    !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, wallElapsedMs: view.elapsedMs, modelElapsedMs: view.modelCallMs, live: true, provisional: true }) : null
-  ] });
+  if (!hasTurnStats(turn2, view)) return null;
+  const records = view.usage.length ? view.usage : turn2.liveUsage ? [{ id: "live", value: turn2.liveUsage }] : [];
+  const summary = technicalSummary({ elapsedMs: view.elapsedMs, usage: records.map((record) => record.value) });
+  return /* @__PURE__ */ u4(
+    UsageMeta,
+    {
+      u: records[0]?.value ?? {},
+      records,
+      summary,
+      model: view.model,
+      wallElapsedMs: view.elapsedMs,
+      modelElapsedMs: view.modelCallMs,
+      live: !turn2.usage.length && !!turn2.liveUsage,
+      provisional: turn2.metadata.status === "provisional",
+      partial: turn2.metadata.status === "partial"
+    }
+  );
 }
 function TurnTechnicalInfo({
   turn: turn2,
   count,
+  hasOutcome = false,
   expanded,
   onToggle
 }) {
-  if (!turn2 && !count) return null;
+  if (!turn2 && !count && !hasOutcome) return null;
   const view = turn2 ? turnRowView(turn2, Date.now()) : null;
-  if (!count && (!turn2 || !view || !hasTurnStats(turn2, view))) return null;
+  if (!count && !hasOutcome && (!turn2 || !view || !hasTurnStats(turn2, view))) return null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
-    /* @__PURE__ */ u4(ActivityTraceToggle, { count, expanded, onToggle }),
+    /* @__PURE__ */ u4(ActivityTraceToggle, { count, hasOutcome, expanded, onToggle }),
     turn2 && view ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
   ] });
 }
@@ -24324,14 +24368,17 @@ function TurnTechnicalDetails({
   now = null
 }) {
   const traceView = activityTraceView(ownerId, live);
-  if (!turn2 && (!lines.length || !activityStepCount(lines) && !traceView.expanded)) return null;
+  const count = activityStepCount(lines);
+  const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
+  if (!turn2 && (!lines.length || !count && !hasOutcome && !traceView.expanded)) return null;
   if (turn2 && !lines.length && !hasTurnStats(turn2, turnRowView(turn2, Date.now()))) return null;
   return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
     /* @__PURE__ */ u4(
       TurnTechnicalInfo,
       {
         turn: turn2,
-        count: activityStepCount(lines),
+        count,
+        hasOutcome,
         expanded: traceView.expanded,
         onToggle: () => toggleActivityTrace(ownerId)
       }
@@ -24363,13 +24410,6 @@ function TurnElapsed({ elapsedMs, live = false }) {
     }
   );
 }
-function ReplyTurnInfo({
-  turn: turn2,
-  showOutcomeNote = true
-}) {
-  const view = turnRowView(turn2, Date.now());
-  return /* @__PURE__ */ u4(k, { children: showOutcomeNote && view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null });
-}
 function startingResponsePresentation(submission) {
   const ownerId = `submission:${submission.messageId}`;
   return {
@@ -24382,7 +24422,6 @@ function startingResponsePresentation(submission) {
     technicalTurn: void 0,
     stopControl: null,
     elapsedControl: null,
-    note: null,
     tone: "",
     activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
     lines: [{ ts: "", text: JSON.stringify({
@@ -24408,9 +24447,8 @@ function turnResponsePresentation({ turn: turn2, activity: lines, status, traceO
     traceNow: turn2.endedAt ? Date.parse(turn2.endedAt) : now,
     attributes: { "data-turn-id": status ? turn2.id : void 0 },
     technicalTurn: status ? turn2 : void 0,
-    stopControl: status && activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null,
+    stopControl: live && activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null,
     elapsedControl: live ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs, live: true }) : null,
-    note: status && settled ? view.note ?? "Done" : null,
     tone: tone2,
     activity,
     lines: activity?.lines ?? lines
@@ -24432,6 +24470,8 @@ function ResponseStatusRow({ source }) {
   const headline = activity?.headline;
   if (!lines.length && !status) return null;
   if (!status && !showTechnicalStatus) return null;
+  const hasTechnicalInformation = showTechnicalStatus && (lines.length > 0 || !!presentation.technicalTurn && hasTurnStats(presentation.technicalTurn, turnRowView(presentation.technicalTurn, now)));
+  if (!busy && !presentation.stopControl && !hasTechnicalInformation) return null;
   const toggleFromPreview = () => {
     toggleActivityTrace(ownerId, true);
   };
@@ -24479,7 +24519,7 @@ function ResponseStatusRow({ source }) {
               onClick: toggleFromPreview,
               children: /* @__PURE__ */ u4(StepHeadlineContent, { headline })
             }
-          ) : headline ? /* @__PURE__ */ u4("span", { class: "hint", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }) : presentation.note ? /* @__PURE__ */ u4("span", { class: "hint", children: presentation.note }) : null
+          ) : headline ? /* @__PURE__ */ u4("span", { class: "hint", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }) : null
         ] })
       ]
     }
@@ -27589,13 +27629,6 @@ function toDatetimeLocal(iso) {
   const pad = (n3) => String(n3).padStart(2, "0");
   return `${d5.getFullYear()}-${pad(d5.getMonth() + 1)}-${pad(d5.getDate())}T${pad(d5.getHours())}:${pad(d5.getMinutes())}`;
 }
-function fmtDuration(ms) {
-  if (ms === null) return "";
-  if (ms < 1e3) return `${ms}ms`;
-  const seconds = Math.round(ms / 1e3);
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}
 function TaskCard({ task, onOpen }) {
   return /* @__PURE__ */ u4("div", { class: "task-card" + (task.status === "paused" ? " paused" : ""), "data-series-id": task.seriesId, children: [
     /* @__PURE__ */ u4("button", { type: "button", class: "task-card-summary", onClick: onOpen, title: "Open task", children: task.summary || "(no prompt)" }),
@@ -27862,7 +27895,7 @@ function TaskSingle({
         task.script ? hi ? /* @__PURE__ */ u4("pre", { class: "hljs", "data-lang": hi.language, children: /* @__PURE__ */ u4("code", { dangerouslySetInnerHTML: { __html: hi.html } }) }) : /* @__PURE__ */ u4("pre", { class: "hljs", children: /* @__PURE__ */ u4("code", { children: task.script }) }) : /* @__PURE__ */ u4("div", { class: "muted", children: "No script." }),
         /* @__PURE__ */ u4("div", { class: "task-script-timeout muted", children: [
           "Timeout ",
-          fmtDuration(task.scriptTimeoutMs)
+          formatDuration(task.scriptTimeoutMs)
         ] }),
         /* @__PURE__ */ u4(
           "button",
@@ -27885,7 +27918,7 @@ function TaskSingle({
         /* @__PURE__ */ u4("div", { class: "task-attempt-main", children: [
           /* @__PURE__ */ u4("span", { class: "task-attempt-status " + attempt.status, children: attempt.status.replace("_", " ") }),
           /* @__PURE__ */ u4("span", { children: attempt.triggerSource }),
-          attempt.durationMs !== null ? /* @__PURE__ */ u4("span", { children: fmtDuration(attempt.durationMs) }) : null,
+          attempt.durationMs !== null ? /* @__PURE__ */ u4("span", { children: formatDuration(attempt.durationMs) }) : null,
           /* @__PURE__ */ u4("time", { title: new Date(attempt.startedAt).toLocaleString(), children: new Date(attempt.startedAt).toLocaleString() })
         ] }),
         attempt.error ? /* @__PURE__ */ u4("div", { class: "task-attempt-error", children: attempt.error }) : null

@@ -102,7 +102,11 @@ export function parseStep(text: string): TraceStep {
 }
 
 export function isSyntheticTraceStep(step: TraceStep): boolean {
-  return step.kind === 'notification' && /^ui:(current|done|thinking):/.test(step.id ?? '');
+  return step.kind === 'notification' && /^ui:(current|done|thinking|outcome):/.test(step.id ?? '');
+}
+
+export function isOutcomeTraceStep(step: TraceStep): boolean {
+  return step.kind === 'notification' && (step.id ?? '').startsWith('ui:outcome:');
 }
 
 export function activityStepCount(lines: readonly TraceLine[]): number {

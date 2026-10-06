@@ -89,6 +89,16 @@ type ProviderEvent =
 - **`error`** — emitted on failure. `retryable` indicates whether the agent-runner should retry. `classification` is optional detail (e.g., 'quota', 'auth', 'transport').
 - **`progress`** — optional, for logging. The agent-runner logs these but doesn't act on them.
 
+Terminal provider failures also append a notification to the current turn's
+activity trace, with the error detail. After an unrecoverable thrown query error,
+the existing fresh-session acknowledgement query records **Asking model to
+explain failure**, followed by whether model output, a system notice, or no
+response was recorded. This does not retry the original request, replace its
+continuation, or change its failed outcome. Returned provider errors keep their
+system-notice path; transparent stale-session retries and errors on an already
+settled warm transport do not add terminal-failure entries. These entries are
+recorded prospectively, without rewriting historical traces.
+
 ## Provider Implementations
 
 Only the `claude` provider ships in trunk. The Codex and OpenCode sections below document the provider interface for reference and for skills that install additional providers — they are not baked into the core image.

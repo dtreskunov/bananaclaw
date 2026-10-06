@@ -32,7 +32,7 @@ import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import {
-  activityChapters, activityStepCount, chapterEntryHeadline, displayStep, headlineSummary, isTitleStep, isTodoStep, stepHeadline, stepBody,
+  activityChapters, activityStepCount, chapterEntryHeadline, displayStep, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep, stepHeadline, stepBody,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
 } from '../../../../shared/activity-presentation';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
@@ -42,6 +42,7 @@ import {
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
 import { activeTurnNotices, liveTurnActivity, turnRowView, type TurnRowView } from '../turn-row';
+import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, technicalSummary } from '../technical-summary';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -220,7 +221,8 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
   }, []);
   const revealed = useRef(false);
   const chapters = activityChapters(lines, live);
-  const latestChapter = chapters.at(-1);
+  // Outcome summaries do not advance chapter following.
+  const latestChapter = [...chapters].reverse().find(chapter => chapter.entries.some(entry => !isOutcomeTraceStep(entry.step)));
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
   const sel = target?.kind === 'entry' && (!following || target.id === latestEntryId) ? target.id : null;
   const openChapter = following
@@ -282,9 +284,9 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
   );
 }
 
-/** The "› N steps" disclosure counts recorded activity, not presentation markers. */
-function ActivityTraceToggle({ count, expanded, onToggle }: { count: number; expanded: boolean; onToggle: () => void }) {
-  if (!count) return null;
+/** Display-only outcome entries can offer a trace even without recorded activity. */
+function ActivityTraceToggle({ count, hasOutcome = false, expanded, onToggle }: { count: number; hasOutcome?: boolean; expanded: boolean; onToggle: () => void }) {
+  if (!count && !hasOutcome) return null;
   return (
     <button
       type="button"
@@ -295,7 +297,7 @@ function ActivityTraceToggle({ count, expanded, onToggle }: { count: number; exp
       onClick={onToggle}
     >
       <span class={`chevron${expanded ? ' open' : ''}`}>{'\u203A'}</span>
-      <span class="trace-count">{count} step{count === 1 ? '' : 's'}</span>
+      <span class="trace-count">{count ? `${count} trace${count === 1 ? '' : 's'}` : 'trace'}</span>
     </button>
   );
 }
@@ -325,12 +327,6 @@ function ActivityTracePanel({
   );
 }
 
-function fmtCost(usd: number): string {
-  if (usd >= 1) return '$' + usd.toFixed(2);
-  if (usd >= 0.01) return '$' + usd.toFixed(3);
-  return '$' + usd.toFixed(4);
-}
-
 function shortModel(model: string): string {
   // Show the last `/`-separated component (e.g. "anthropic/claude-sonnet-4"
   // -> "claude-sonnet-4", "openai/gpt-4o" -> "gpt-4o"). Plain ids pass through.
@@ -346,51 +342,18 @@ function mediaKind(filename: string, contentType?: string | null): 'audio' | 'vi
   return null;
 }
 
-function fmtPct(used: number, limit: number): string {
-  const pct = (used / limit) * 100;
-  if (pct > 0 && pct < 1) return '<1%';
-  return Math.min(100, Math.round(pct)) + '%';
-}
-
 function fmtContextLimit(tokens: number): string {
   if (tokens < 1_000_000) return fmtTok(tokens);
   return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
 }
 
-function UsageMeta({ u, live = false, partial = false, provisional = false, wallElapsedMs = u.duration_ms ?? null, modelElapsedMs = u.duration_api_ms ?? null }: {
-  u: Partial<TurnUsage>; live?: boolean; partial?: boolean; provisional?: boolean; wallElapsedMs?: number | null; modelElapsedMs?: number | null;
+function UsageMeta({ u, summary, records, model, live = false, partial = false, provisional = false, wallElapsedMs = u.duration_ms ?? null, modelElapsedMs = u.duration_api_ms ?? null }: {
+  u: Partial<TurnUsage>; summary: string; records?: ConversationTurn['usage']; model?: string | null;
+  live?: boolean; partial?: boolean; provisional?: boolean; wallElapsedMs?: number | null; modelElapsedMs?: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const cost = u.cost_usd !== undefined ? fmtCost(u.cost_usd) : 'Cost unavailable';
-  const estimatedCost = u.cost_usd !== undefined ? `${cost} est.` : cost;
-  const input = u.input_tokens !== undefined ? fmtTok(u.input_tokens) : 'unavailable';
-  const output = u.output_tokens !== undefined ? fmtTok(u.output_tokens) : 'unavailable';
-  const reported = u.input_tokens !== undefined && u.output_tokens !== undefined
-    ? `${fmtTok(u.input_tokens + u.output_tokens)} tokens reported`
-    : [
-        u.input_tokens !== undefined ? `${input} input tokens reported` : '',
-        u.output_tokens !== undefined ? `${output} output tokens reported` : '',
-      ].filter(Boolean).join(' \u00b7 ');
-  const model = u.model ? shortModel(u.model) : '';
-  const contextTokens = u.context_tokens && (!u.context_window || u.context_tokens <= u.context_window)
-    ? u.context_tokens
-    : undefined;
-  // Context fill, not tokens billed: the counts below sum every round trip of
-  // the turn, so only `context_tokens` can be read against the window.
-  const ctx = contextTokens && u.context_window
-    ? `Context ${fmtPct(contextTokens, u.context_window)}`
-    : '';
-  const calls = u.num_turns ? `${u.num_turns} call${u.num_turns === 1 ? '' : 's'}` : '';
-  const short = live
-    ? [estimatedCost, `${input} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
-    : partial
-      ? [u.cost_usd !== undefined ? cost : '', model, reported].filter(Boolean).join(' \u00b7 ') || 'Usage details'
-      : [provisional ? estimatedCost : cost, model, ctx].filter(Boolean).join(' \u00b7 ');
-  const contextDetail = contextTokens
-    ? `${fmtTok(contextTokens)}${u.context_window
-      ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})`
-      : ''}`
-    : undefined;
+  const short = summary || 'Usage details';
+  const reports = records?.length ? records : [{ id: 'usage', value: u }];
   return (
     <span class="usage-wrap">
       <button
@@ -410,24 +373,41 @@ function UsageMeta({ u, live = false, partial = false, provisional = false, wall
           <span class="usage-popover" role="dialog" aria-label="Turn usage details">
             {partial ? <span class="usage-row">Partial usage report; final totals may be higher.</span> : null}
             {provisional ? <span class="usage-row">Usage reported so far; awaiting final totals.</span> : null}
-            <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{cost}</strong></span>
             <span class="usage-time-breakdown" role="group" aria-label="Response time breakdown">
               <span class="usage-row"><span>Total time</span><strong>{wallElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs)}</strong></span>
               <span class="usage-row usage-time-part"><span>Model time</span><strong>{modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(modelElapsedMs)}</strong></span>
               <span class="usage-row usage-time-part" title="Total time minus cumulative model-call time"><span>Other time</span><strong>{wallElapsedMs === null || modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs - modelElapsedMs)}</strong></span>
             </span>
-            {model ? <span class="usage-row"><span>Model</span><strong title={u.model}>{model}</strong></span> : null}
-            {contextDetail ? <span class="usage-row"><span>{live ? 'Context after latest call' : 'Context at end'}</span><strong>{contextDetail}</strong></span> : null}
-            <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{input} input {'\u00b7'} {output} output</strong></span>
-            {u.num_turns ? <span class="usage-row"><span>{live ? 'Model calls so far' : 'Model calls'}</span><strong>{u.num_turns}</strong></span> : null}
-            {u.cache_read_tokens !== undefined && u.cache_read_tokens > 0 ? <span class="usage-row"><span>Cache read</span><strong>{fmtTok(u.cache_read_tokens)}</strong></span> : null}
-            {u.cache_write_tokens !== undefined && u.cache_write_tokens > 0 ? <span class="usage-row"><span>Cache write</span><strong>{fmtTok(u.cache_write_tokens)}</strong></span> : null}
-            {u.reasoning_tokens ? <span class="usage-row"><span>Reasoning</span><strong>{fmtTok(u.reasoning_tokens)}</strong></span> : null}
+            {reports.map((record, index) => <div class="usage-report" key={record.id}>
+              {reports.length > 1 ? <strong>Usage report {index + 1}</strong> : null}
+              <UsageReport u={record.value} model={model} live={live} partial={partial} />
+            </div>)}
           </span>
         </>
       ) : null}
     </span>
   );
+}
+
+function UsageReport({ u, model, live, partial }: {
+  u: Partial<TurnUsage>; model?: string | null; live: boolean; partial: boolean;
+}) {
+  const reportedModel = u.model || model;
+  const contextTokens = u.context_tokens !== undefined && (!u.context_window || u.context_tokens <= u.context_window)
+    ? u.context_tokens : undefined;
+  const contextDetail = contextTokens !== undefined
+    ? `${fmtTok(contextTokens)}${u.context_window
+      ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})` : ''}` : undefined;
+  return <>
+    <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{u.cost_usd !== undefined ? fmtCost(u.cost_usd) : 'Cost unavailable'}</strong></span>
+    {reportedModel ? <span class="usage-row"><span>Model</span><strong title={reportedModel}>{shortModel(reportedModel)}</strong></span> : null}
+    {contextDetail ? <span class="usage-row"><span>{live ? 'Context after latest call' : 'Context at end'}</span><strong>{contextDetail}</strong></span> : null}
+    <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{u.input_tokens !== undefined ? fmtTok(u.input_tokens) : 'unavailable'} input {'\u00b7'} {u.output_tokens !== undefined ? fmtTok(u.output_tokens) : 'unavailable'} output</strong></span>
+    {u.num_turns ? <span class="usage-row"><span>{live ? 'Model calls so far' : 'Model calls'}</span><strong>{u.num_turns}</strong></span> : null}
+    {u.cache_read_tokens !== undefined && u.cache_read_tokens > 0 ? <span class="usage-row"><span>Cache read</span><strong>{fmtTok(u.cache_read_tokens)}</strong></span> : null}
+    {u.cache_write_tokens !== undefined && u.cache_write_tokens > 0 ? <span class="usage-row"><span>Cache write</span><strong>{fmtTok(u.cache_write_tokens)}</strong></span> : null}
+    {u.reasoning_tokens ? <span class="usage-row"><span>Reasoning</span><strong>{fmtTok(u.reasoning_tokens)}</strong></span> : null}
+  </>;
 }
 
 function AgentActionLabel({ label, title }: { label: string; title: string }) {
@@ -787,12 +767,6 @@ function Message(
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
-        {m.direction === 'out' && m.statsTurn
-          ? <ReplyTurnInfo
-              turn={m.statsTurn}
-              showOutcomeNote={!systemNotice}
-            />
-          : null}
         <span class="msg-inline-actions">
           {!m.submission ? <EditMessageButton m={m} /> : null}
           {!m.submission ? <ForkButton m={m} isLatest={isLatest} /> : null}
@@ -843,9 +817,6 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
       {message.ts || activity.length ? <div class="meta turn-info">
         {message.ts ? <RelativeTime ts={message.ts} /> : null}
         <AgentActionLabel label="card" title="Sent with send_card" />
-        {message.statsTurn
-          ? <ReplyTurnInfo turn={message.statsTurn} />
-          : null}
       </div> : null}
     </div>
   );
@@ -1100,32 +1071,31 @@ function TaskIndicator() {
 }
 
 function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
-  return (view.showModel && !!view.model) || view.usage.length > 0 || !!turn.liveUsage;
+  return view.elapsedMs !== null || !!view.model || view.usage.length > 0 || !!turn.liveUsage;
 }
 
-/** Reported model and usage. */
 function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }) {
-  return (
-    <>
-      {view.showModel && view.model ? <span class="typing-meta">{shortModel(view.model)}</span> : null}
-      {view.usage.map((record) => <UsageMeta key={record.id} u={record.value} wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs}
-        provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
-      {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs} live provisional /> : null}
-    </>
-  );
+  if (!hasTurnStats(turn, view)) return null;
+  const records = view.usage.length ? view.usage
+    : turn.liveUsage ? [{ id: 'live', value: turn.liveUsage }] : [];
+  const summary = technicalSummary({ elapsedMs: view.elapsedMs, usage: records.map(record => record.value) });
+  return <UsageMeta u={records[0]?.value ?? {}} records={records} summary={summary} model={view.model}
+    wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs}
+    live={!turn.usage.length && !!turn.liveUsage}
+    provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />;
 }
 
 function TurnTechnicalInfo({
-  turn, count, expanded, onToggle,
+  turn, count, hasOutcome = false, expanded, onToggle,
 }: {
-  turn?: ConversationTurn; count: number; expanded: boolean; onToggle: () => void;
+  turn?: ConversationTurn; count: number; hasOutcome?: boolean; expanded: boolean; onToggle: () => void;
 }) {
-  if (!turn && !count) return null;
+  if (!turn && !count && !hasOutcome) return null;
   const view = turn ? turnRowView(turn, Date.now()) : null;
-  if (!count && (!turn || !view || !hasTurnStats(turn, view))) return null;
+  if (!count && !hasOutcome && (!turn || !view || !hasTurnStats(turn, view))) return null;
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
-      <ActivityTraceToggle count={count} expanded={expanded} onToggle={onToggle} />
+      <ActivityTraceToggle count={count} hasOutcome={hasOutcome} expanded={expanded} onToggle={onToggle} />
       {turn && view ? <TurnStats turn={turn} view={view} /> : null}
     </div>
   );
@@ -1141,11 +1111,13 @@ function TurnTechnicalDetails({
   now?: number | null;
 }) {
   const traceView = activityTraceView(ownerId, live);
-  if (!turn && (!lines.length || (!activityStepCount(lines) && !traceView.expanded))) return null;
+  const count = activityStepCount(lines);
+  const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
+  if (!turn && (!lines.length || (!count && !hasOutcome && !traceView.expanded))) return null;
   if (turn && !lines.length && !hasTurnStats(turn, turnRowView(turn, Date.now()))) return null;
   return (
     <div class="turn-technical-details">
-      <TurnTechnicalInfo turn={turn} count={activityStepCount(lines)}
+      <TurnTechnicalInfo turn={turn} count={count} hasOutcome={hasOutcome}
         expanded={traceView.expanded} onToggle={() => toggleActivityTrace(ownerId)} />
       <ActivityTracePanel lines={lines} expanded={traceView.expanded} live={live} now={now}
         ownerId={ownerId} following={activityTraceFollowing(ownerId)} />
@@ -1164,28 +1136,12 @@ function TurnElapsed({ elapsedMs, live = false }: { elapsedMs: number | null; li
   );
 }
 
-/** A settled turn's notable outcome remains visible in its reply footer. */
-function ReplyTurnInfo({
-  turn,
-  showOutcomeNote = true,
-}: {
-  turn: ConversationTurn;
-  showOutcomeNote?: boolean;
-}) {
-  const view = turnRowView(turn, Date.now());
-  return (
-    <>
-      {showOutcomeNote && view.note ? <span class="turn-outcome-note">{view.note}</span> : null}
-    </>
-  );
-}
-
 function startingResponsePresentation(submission: PendingWebSend) {
   const ownerId = `submission:${submission.messageId}`;
   return {
     ownerId, status: true, busy: true, traceLive: true, traceNow: null,
     attributes: { 'data-response-start': ownerId },
-    technicalTurn: undefined, stopControl: null, elapsedControl: null, note: null, tone: '',
+    technicalTurn: undefined, stopControl: null, elapsedControl: null, tone: '',
     activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
     lines: [{ ts: '', text: JSON.stringify({
       kind: 'notification', id: `ui:current:${submission.messageId}`,
@@ -1213,10 +1169,9 @@ function turnResponsePresentation(
     traceNow: turn.endedAt ? Date.parse(turn.endedAt) : now,
     attributes: { 'data-turn-id': status ? turn.id : undefined },
     technicalTurn: status ? turn : undefined,
-    stopControl: status && activeTurn.value?.id === turn.id
+    stopControl: live && activeTurn.value?.id === turn.id
       ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton /></span> : null,
     elapsedControl: live ? <TurnElapsed elapsedMs={view.elapsedMs} live /> : null,
-    note: status && settled ? view.note ?? 'Done' : null,
     tone, activity, lines: activity?.lines ?? lines,
   };
 }
@@ -1244,6 +1199,9 @@ function ResponseStatusRow({ source }: {
   const headline = activity?.headline;
   if (!lines.length && !status) return null;
   if (!status && !showTechnicalStatus) return null;
+  const hasTechnicalInformation = showTechnicalStatus && (lines.length > 0 ||
+    (!!presentation.technicalTurn && hasTurnStats(presentation.technicalTurn, turnRowView(presentation.technicalTurn, now))));
+  if (!busy && !presentation.stopControl && !hasTechnicalInformation) return null;
   const toggleFromPreview = () => {
     toggleActivityTrace(ownerId, true);
   };
@@ -1279,8 +1237,7 @@ function ResponseStatusRow({ source }: {
               title={traceView.expanded ? 'Hide activity' : 'Show latest activity'}
               onClick={toggleFromPreview}
             ><StepHeadlineContent headline={headline} /></button>
-          : headline ? <span class="hint"><StepHeadlineContent headline={headline} /></span>
-          : presentation.note ? <span class="hint">{presentation.note}</span> : null}
+          : headline ? <span class="hint"><StepHeadlineContent headline={headline} /></span> : null}
       </div>
     </div>
   );

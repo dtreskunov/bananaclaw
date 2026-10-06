@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_TOOL_PRESENTATIONS, parseStep, stepHeadline } from './activity-presentation.js';
+import {
+  activityChapters,
+  activityStepCount,
+  BUILTIN_TOOL_PRESENTATIONS,
+  parseStep,
+  stepHeadline,
+} from './activity-presentation.js';
 import { conversationActivity } from './conversation-activity.js';
 import type { ConversationTurn } from './conversation.js';
 
@@ -79,7 +85,7 @@ describe('whole-turn activity presentation', () => {
     expect(conversationActivity({ ...turn, phase }).map((line) => parseStep(line.text).text)).not.toContain('Done');
   });
 
-  it.each(['replied', 'silent', 'stopped', 'failed', 'warning', 'interrupted', 'unknown'] as const)(
+  it.each(['replied', 'failed', 'unknown', 'pending'] as const)(
     'retains only recorded activities after %s settlement without changing the journal',
     (outcome) => {
       const settled = { ...turn, phase: 'settled' as const, outcome, endedAt: '2026-10-04T19:01:00Z' };
@@ -93,9 +99,71 @@ describe('whole-turn activity presentation', () => {
     },
   );
 
-  it('leaves an outputless settled trace empty when there are no recorded activities or timestamps', () => {
+  it.each([
+    { outcome: 'silent', text: 'No reply' },
+    { outcome: 'stopped', text: 'Stopped by user' },
+    { outcome: 'warning', text: 'Ended with a warning' },
+    { outcome: 'interrupted', text: 'Interrupted; outcome unknown' },
+  ] as const)(
+    'appends a stable display-only outcome for $outcome without changing recorded steps',
+    ({ outcome, text }) => {
+      const settled = {
+        ...turn,
+        phase: 'settled' as const,
+        outcome,
+        endedAt: '1970-01-01T00:00:00.500Z',
+        activity: [...turn.activity].reverse(),
+      };
+      const before = JSON.stringify(settled);
+      const lines = conversationActivity(settled);
+      expect(lines.slice(0, -1)).toEqual(turn.activity);
+      expect(lines.at(-1)).toEqual({
+        ts: '500',
+        text: JSON.stringify({
+          kind: 'notification',
+          id: 'ui:outcome:turn',
+          text,
+          ...(outcome === 'interrupted' ? { status: 'interrupted' } : {}),
+        }),
+      });
+      expect(activityStepCount(lines)).toBe(3);
+      expect(activityChapters(lines).at(-1)?.entries[0].step.text).toBe(text);
+      expect(conversationActivity(settled)).toEqual(lines);
+      expect(JSON.stringify(settled)).toBe(before);
+      for (const phase of ['running', 'stopping', 'settling'] as const)
+        expect(conversationActivity({ ...settled, phase })).toEqual(turn.activity);
+    },
+  );
+
+  it('offers an outcome for an outputless settled turn without inventing a timestamp or recorded step', () => {
     const lines = conversationActivity({ ...turn, phase: 'settled', outcome: 'silent', activity: [] });
-    expect(lines).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].ts).toBe('');
+    expect(lines[0]).not.toHaveProperty('ordinal');
+    expect(parseStep(lines[0].text).text).toBe('No reply');
+    expect(activityStepCount(lines)).toBe(0);
+  });
+
+  it('reuses a recorded stop notification, including when it belongs to another trace segment', () => {
+    const stop = {
+      ordinal: 3,
+      ts: '10000',
+      timelinePosition: 400,
+      text: JSON.stringify({ kind: 'notification', id: 'stopped:turn', text: 'Stopped by user.' }),
+    };
+    const settled = {
+      ...turn,
+      phase: 'settled' as const,
+      outcome: 'stopped' as const,
+      activity: [...turn.activity, stop],
+    };
+    expect(conversationActivity(settled)).toEqual(settled.activity);
+    expect(conversationActivity(settled, turn.activity)).toEqual(turn.activity);
+    const otherTurn = {
+      ...stop,
+      text: JSON.stringify({ kind: 'notification', id: 'stopped:other', text: 'Stopped by user.' }),
+    };
+    expect(conversationActivity({ ...settled, activity: [otherTurn] })).toHaveLength(2);
   });
 
   it.each(['running', 'stopping', 'settling', 'settled'] as const)(

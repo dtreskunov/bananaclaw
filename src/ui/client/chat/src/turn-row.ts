@@ -7,7 +7,7 @@ import {
   type TraceLine,
   type TraceStep,
 } from '../../../shared/activity-presentation';
-import { THINKING_TEXT } from '../../../shared/conversation-activity';
+import { terminalOutcomeStep, THINKING_TEXT } from '../../../shared/conversation-activity';
 import type { ActiveTurn } from './types';
 
 export function currentActivityHeadline(lines: readonly TraceLine[]): StepHeadline {
@@ -74,27 +74,15 @@ export function activeTurnNotices(
   return notices;
 }
 
-/** Only outcomes that change how the reply should be read get a label; a normal reply speaks for itself. */
-const OUTCOME_NOTES: Partial<Record<ConversationTurn['outcome'], string>> = {
-  stopped: 'Stopped',
-  failed: 'Failed',
-  warning: 'Ended with a warning',
-  interrupted: 'Interrupted; outcome unknown',
-  silent: 'No reply',
-};
-
 export interface TurnRowView {
   /** Settled with nothing to show: no trace, accounting, timing or notable outcome. */
   hidden: boolean;
   /** Fallback headline while running without current activity. */
   status: string | null;
-  note: string | null;
   elapsedMs: number | null;
   modelCallMs: number | null;
   nonModelMs: number | null;
   model: string | null;
-  /** Settled usage summaries already carry the model. */
-  showModel: boolean;
   usage: ConversationTurn['usage'];
 }
 
@@ -118,17 +106,14 @@ export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
     timings.length && timings.every((value) => value !== undefined)
       ? timings.reduce((total, value) => total + value, 0)
       : null;
-  const note = settled ? (OUTCOME_NOTES[turn.outcome] ?? null) : turn.phase === 'stopping' ? 'Stopping…' : null;
   const hasTiming = elapsedMs !== null || !!model;
   return {
-    hidden: settled && !turn.activity.length && !turn.usage.length && !hasTiming && !note,
+    hidden: settled && !turn.activity.length && !terminalOutcomeStep(turn) && !turn.usage.length && !hasTiming,
     status: !settled && turn.phase === 'running' ? THINKING_TEXT : null,
-    note,
     elapsedMs,
     modelCallMs,
     nonModelMs: elapsedMs !== null && modelCallMs !== null ? elapsedMs - modelCallMs : null,
     model,
-    showModel: !settled || !turn.usage.length,
     // While running, the live line owns elapsed time and model; checkpointed values would be stale.
     usage: settled
       ? turn.usage
