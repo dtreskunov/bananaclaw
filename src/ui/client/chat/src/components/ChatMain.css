@@ -317,6 +317,8 @@
   align-items: baseline;
 }
 .chat-main .usage-row > span { color: var(--muted); }
+.chat-main .usage-time-breakdown { display: flex; flex-direction: column; gap: 4px; }
+.chat-main .usage-time-part { padding-inline-start: 12px; }
 .chat-main .usage-row > strong { min-width: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .chat-main .turn-tech-info { position: relative; }
 .chat-main .turn-technical-details { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; max-width: 100%; }

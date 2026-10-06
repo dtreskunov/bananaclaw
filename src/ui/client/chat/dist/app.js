@@ -18733,6 +18733,10 @@ function activityTraceView(ownerId, live = false) {
   const expanded = current?.ownerId === ownerId;
   return { expanded, following: expanded && current.mode === "follow" && live };
 }
+function activityTraceFollowing(ownerId) {
+  const current = intent.value;
+  return current?.ownerId === ownerId && current.mode === "follow";
+}
 function toggleActivityTrace(ownerId, follow = false) {
   const current = intent.peek();
   intent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? "follow" : "open" };
@@ -18743,12 +18747,208 @@ function pauseActivityTrace(ownerId) {
 function followActivityTrace(ownerId) {
   if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: "follow" };
 }
-function inheritActivityTrace(ownerId) {
+function inheritActivityTrace(ownerId, automatic = false) {
   const current = intent.peek();
-  if (current?.mode === "follow" && current.ownerId !== ownerId) intent.value = { ownerId, mode: "follow" };
+  if (automatic || current?.mode === "follow" && current.ownerId !== ownerId)
+    intent.value = { ownerId, mode: "follow" };
 }
 function resetActivityTraceView() {
   intent.value = null;
+}
+
+// src/appearance.ts
+var THEMES = [
+  { id: "default", name: "Default", description: "The original look" },
+  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
+];
+var APPEARANCE_MODES = [
+  { id: "system", name: "System" },
+  { id: "light", name: "Light" },
+  { id: "dark", name: "Dark" }
+];
+var TEXT_DENSITIES = [
+  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
+  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
+];
+var APPEARANCE_KEY = "nanoclaw:appearance";
+var DEFAULT_APPEARANCE = {
+  version: 3,
+  theme: "default",
+  mode: "system",
+  density: "compact",
+  showTechnicalStatus: false
+};
+var InvalidAppearanceError = class extends Error {
+};
+function parseAppearance(raw) {
+  if (raw === null) return { ...DEFAULT_APPEARANCE };
+  const value = JSON.parse(raw);
+  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
+  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
+    throw new InvalidAppearanceError("Invalid appearance preferences");
+  }
+  return {
+    version: 3,
+    theme: value.theme,
+    mode: value.mode,
+    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
+    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
+  };
+}
+function isThemeId(value) {
+  return THEMES.some((theme) => theme.id === value);
+}
+function isAppearanceMode(value) {
+  return APPEARANCE_MODES.some((mode) => mode.id === value);
+}
+function isTextDensity(value) {
+  return TEXT_DENSITIES.some((density) => density.id === value);
+}
+function isStorageError(cause) {
+  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
+}
+function resolveMode(mode, systemDark) {
+  return mode === "system" ? systemDark ? "dark" : "light" : mode;
+}
+function createAppearanceController(win, doc) {
+  const media = win.matchMedia("(prefers-color-scheme: dark)");
+  const listeners = /* @__PURE__ */ new Set();
+  const densityListeners = /* @__PURE__ */ new Set();
+  let preferences = { ...DEFAULT_APPEARANCE };
+  let error = null;
+  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
+  function report(message2, cause) {
+    console.warn(message2, cause);
+    error = message2;
+  }
+  function read(raw, persistMigration = false) {
+    try {
+      preferences = parseAppearance(raw);
+    } catch (cause) {
+      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
+      preferences = { ...DEFAULT_APPEARANCE };
+      report("Saved appearance was invalid and has been reset to the defaults.", cause);
+      try {
+        win.localStorage.removeItem(APPEARANCE_KEY);
+      } catch (storageError) {
+        if (!isStorageError(storageError)) throw storageError;
+        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
+      }
+      return;
+    }
+    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report(
+          "Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.",
+          cause
+        );
+      }
+    }
+  }
+  try {
+    read(win.localStorage.getItem(APPEARANCE_KEY), true);
+  } catch (cause) {
+    if (!isStorageError(cause)) throw cause;
+    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
+  }
+  function getSnapshot() {
+    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
+  }
+  function updateBrowserColor() {
+    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
+    const next = color || brandedBrowserColor;
+    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
+  }
+  function apply2() {
+    const snapshot = getSnapshot();
+    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
+    doc.documentElement.dataset.theme = preferences.theme;
+    doc.documentElement.dataset.mode = snapshot.resolvedMode;
+    doc.documentElement.dataset.density = preferences.density;
+    updateBrowserColor();
+    for (const restore of restoreDensity) restore();
+    for (const listener of listeners) listener(snapshot);
+  }
+  function onStorage(event) {
+    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
+    try {
+      if (event.storageArea !== win.localStorage) return;
+    } catch (cause) {
+      if (!isStorageError(cause)) throw cause;
+      report("Appearance could not be synchronized with another tab.", cause);
+      apply2();
+      return;
+    }
+    error = null;
+    read(event.key === null ? null : event.newValue);
+    apply2();
+  }
+  function onSystemChange() {
+    if (preferences.mode === "system") apply2();
+  }
+  apply2();
+  media.addEventListener("change", onSystemChange);
+  win.addEventListener("storage", onStorage);
+  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
+  return {
+    getSnapshot,
+    setPreferences(next) {
+      preferences = parseAppearance(JSON.stringify(next));
+      error = null;
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
+      }
+      apply2();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    beforeDensityChange(listener) {
+      densityListeners.add(listener);
+      return () => {
+        densityListeners.delete(listener);
+      };
+    },
+    dispose() {
+      listeners.clear();
+      densityListeners.clear();
+      media.removeEventListener("change", onSystemChange);
+      win.removeEventListener("storage", onStorage);
+      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
+    }
+  };
+}
+function getAppearanceController() {
+  return window.nanoclawAppearance ??= createAppearanceController(window, document);
+}
+
+// src/appearance-state.ts
+var appearance = y3({
+  preferences: { ...DEFAULT_APPEARANCE },
+  resolvedMode: "light",
+  error: null
+});
+function initAppearance(onError) {
+  const controller = getAppearanceController();
+  const update = (snapshot) => {
+    const previousError = appearance.value.error;
+    appearance.value = snapshot;
+    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
+  };
+  update(controller.getSnapshot());
+  return controller.subscribe(update);
+}
+function setAppearance(preferences) {
+  getAppearanceController().setPreferences(preferences);
 }
 
 // src/turn-completion.ts
@@ -18911,9 +19111,9 @@ function applyConversationFrame(raw, expectedThreadId) {
     for (const message2 of view.messages) {
       if (message2.inputState?.status === "cancelled") confirmCancelledInput(message2.id);
     }
-    if (frame.kind === "snapshot") resetActivityTraceView();
-    else if (current && current.phase !== "settled" && current.id !== previous?.conversation.connection.activeTurnId)
-      inheritActivityTrace(`turn:${current.id}`);
+    if (frame.kind === "snapshot" && previous?.conversation.threadId !== view.threadId) resetActivityTraceView();
+    if (current && current.phase !== "settled" && current.id !== previous?.conversation.connection.activeTurnId)
+      inheritActivityTrace(`turn:${current.id}`, appearance.peek().preferences.showTechnicalStatus);
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === "update") {
@@ -21422,201 +21622,6 @@ function ThreadsRail() {
   );
 }
 
-// src/appearance.ts
-var THEMES = [
-  { id: "default", name: "Default", description: "The original look" },
-  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
-];
-var APPEARANCE_MODES = [
-  { id: "system", name: "System" },
-  { id: "light", name: "Light" },
-  { id: "dark", name: "Dark" }
-];
-var TEXT_DENSITIES = [
-  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
-  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
-];
-var APPEARANCE_KEY = "nanoclaw:appearance";
-var DEFAULT_APPEARANCE = {
-  version: 3,
-  theme: "default",
-  mode: "system",
-  density: "compact",
-  showTechnicalStatus: false
-};
-var InvalidAppearanceError = class extends Error {
-};
-function parseAppearance(raw) {
-  if (raw === null) return { ...DEFAULT_APPEARANCE };
-  const value = JSON.parse(raw);
-  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
-  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
-    throw new InvalidAppearanceError("Invalid appearance preferences");
-  }
-  return {
-    version: 3,
-    theme: value.theme,
-    mode: value.mode,
-    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
-    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
-  };
-}
-function isThemeId(value) {
-  return THEMES.some((theme) => theme.id === value);
-}
-function isAppearanceMode(value) {
-  return APPEARANCE_MODES.some((mode) => mode.id === value);
-}
-function isTextDensity(value) {
-  return TEXT_DENSITIES.some((density) => density.id === value);
-}
-function isStorageError(cause) {
-  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
-}
-function resolveMode(mode, systemDark) {
-  return mode === "system" ? systemDark ? "dark" : "light" : mode;
-}
-function createAppearanceController(win, doc) {
-  const media = win.matchMedia("(prefers-color-scheme: dark)");
-  const listeners = /* @__PURE__ */ new Set();
-  const densityListeners = /* @__PURE__ */ new Set();
-  let preferences = { ...DEFAULT_APPEARANCE };
-  let error = null;
-  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
-  function report(message2, cause) {
-    console.warn(message2, cause);
-    error = message2;
-  }
-  function read(raw, persistMigration = false) {
-    try {
-      preferences = parseAppearance(raw);
-    } catch (cause) {
-      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
-      preferences = { ...DEFAULT_APPEARANCE };
-      report("Saved appearance was invalid and has been reset to the defaults.", cause);
-      try {
-        win.localStorage.removeItem(APPEARANCE_KEY);
-      } catch (storageError) {
-        if (!isStorageError(storageError)) throw storageError;
-        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
-      }
-      return;
-    }
-    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report(
-          "Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.",
-          cause
-        );
-      }
-    }
-  }
-  try {
-    read(win.localStorage.getItem(APPEARANCE_KEY), true);
-  } catch (cause) {
-    if (!isStorageError(cause)) throw cause;
-    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
-  }
-  function getSnapshot() {
-    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
-  }
-  function updateBrowserColor() {
-    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
-    const next = color || brandedBrowserColor;
-    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
-  }
-  function apply2() {
-    const snapshot = getSnapshot();
-    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
-    doc.documentElement.dataset.theme = preferences.theme;
-    doc.documentElement.dataset.mode = snapshot.resolvedMode;
-    doc.documentElement.dataset.density = preferences.density;
-    updateBrowserColor();
-    for (const restore of restoreDensity) restore();
-    for (const listener of listeners) listener(snapshot);
-  }
-  function onStorage(event) {
-    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
-    try {
-      if (event.storageArea !== win.localStorage) return;
-    } catch (cause) {
-      if (!isStorageError(cause)) throw cause;
-      report("Appearance could not be synchronized with another tab.", cause);
-      apply2();
-      return;
-    }
-    error = null;
-    read(event.key === null ? null : event.newValue);
-    apply2();
-  }
-  function onSystemChange() {
-    if (preferences.mode === "system") apply2();
-  }
-  apply2();
-  media.addEventListener("change", onSystemChange);
-  win.addEventListener("storage", onStorage);
-  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
-  return {
-    getSnapshot,
-    setPreferences(next) {
-      preferences = parseAppearance(JSON.stringify(next));
-      error = null;
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
-      }
-      apply2();
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    beforeDensityChange(listener) {
-      densityListeners.add(listener);
-      return () => {
-        densityListeners.delete(listener);
-      };
-    },
-    dispose() {
-      listeners.clear();
-      densityListeners.clear();
-      media.removeEventListener("change", onSystemChange);
-      win.removeEventListener("storage", onStorage);
-      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
-    }
-  };
-}
-function getAppearanceController() {
-  return window.nanoclawAppearance ??= createAppearanceController(window, document);
-}
-
-// src/appearance-state.ts
-var appearance = y3({
-  preferences: { ...DEFAULT_APPEARANCE },
-  resolvedMode: "light",
-  error: null
-});
-function initAppearance(onError) {
-  const controller = getAppearanceController();
-  const update = (snapshot) => {
-    const previousError = appearance.value.error;
-    appearance.value = snapshot;
-    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
-  };
-  update(controller.getSnapshot());
-  return controller.subscribe(update);
-}
-function setAppearance(preferences) {
-  getAppearanceController().setPreferences(preferences);
-}
-
 // src/components/VoiceButton.tsx
 function VoiceButton({ target, controller, onStart, configured, unavailable, disabled, id: id2, className = "" }) {
   const state = controller.state.value;
@@ -23564,7 +23569,7 @@ function ActivityTracePanel({
       following,
       onBrowse: (follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)
     },
-    `${ownerId}:${live}`
+    ownerId
   ) });
 }
 function fmtCost(usd) {
@@ -23592,7 +23597,7 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ u: u5, live = false, partial = false, provisional = false, wallElapsedMs = u5.duration_ms ?? null }) {
+function UsageMeta({ u: u5, live = false, partial = false, provisional = false, wallElapsedMs = u5.duration_ms ?? null, modelElapsedMs = u5.duration_api_ms ?? null }) {
   const [expanded, setExpanded] = h2(false);
   const cost = u5.cost_usd !== void 0 ? fmtCost(u5.cost_usd) : "Cost unavailable";
   const estimatedCost = u5.cost_usd !== void 0 ? `${cost} est.` : cost;
@@ -23636,17 +23641,19 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false, 
           /* @__PURE__ */ u4("span", { children: partial ? "Reported cost" : "Estimated cost" }),
           /* @__PURE__ */ u4("strong", { children: cost })
         ] }),
-        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Wall-clock time" }),
-          /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs) })
-        ] }),
-        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: live ? "Model-call time so far" : "Model-call time" }),
-          /* @__PURE__ */ u4("strong", { children: u5.duration_api_ms === void 0 ? "Unavailable" : formatElapsedDuration(u5.duration_api_ms) })
-        ] }),
-        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Other time (wall minus model)" }),
-          /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null || u5.duration_api_ms === void 0 ? "Unavailable" : formatElapsedDuration(wallElapsedMs - u5.duration_api_ms) })
+        /* @__PURE__ */ u4("span", { class: "usage-time-breakdown", role: "group", "aria-label": "Response time breakdown", children: [
+          /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+            /* @__PURE__ */ u4("span", { children: "Total time" }),
+            /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs) })
+          ] }),
+          /* @__PURE__ */ u4("span", { class: "usage-row usage-time-part", children: [
+            /* @__PURE__ */ u4("span", { children: "Model time" }),
+            /* @__PURE__ */ u4("strong", { children: modelElapsedMs === null ? "Unavailable" : formatElapsedDuration(modelElapsedMs) })
+          ] }),
+          /* @__PURE__ */ u4("span", { class: "usage-row usage-time-part", title: "Total time minus cumulative model-call time", children: [
+            /* @__PURE__ */ u4("span", { children: "Other time" }),
+            /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null || modelElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs - modelElapsedMs) })
+          ] })
         ] }),
         model ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
           /* @__PURE__ */ u4("span", { children: "Model" }),
@@ -24284,12 +24291,13 @@ function TurnStats({ turn: turn2, view }) {
       {
         u: record.value,
         wallElapsedMs: view.elapsedMs,
+        modelElapsedMs: view.modelCallMs,
         provisional: turn2.metadata.status === "provisional",
         partial: turn2.metadata.status === "partial"
       },
       record.id
     )),
-    !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, wallElapsedMs: view.elapsedMs, live: true, provisional: true }) : null,
+    !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, wallElapsedMs: view.elapsedMs, modelElapsedMs: view.modelCallMs, live: true, provisional: true }) : null,
     view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null
   ] });
 }
@@ -24343,7 +24351,7 @@ function TurnTechnicalDetails({
         live,
         now,
         ownerId,
-        following: traceView.following
+        following: activityTraceFollowing(ownerId)
       }
     )
   ] });
@@ -24358,7 +24366,7 @@ function TurnElapsed({ elapsedMs, live = false, kind = "wall" }) {
       "aria-live": live ? "off" : void 0,
       "aria-label": kind === "wall" ? "Elapsed response time" : "Non-model response time",
       title: kind === "wall" ? "Response time, including tools and waiting for replies" : "Wall-clock time minus cumulative model-call time",
-      children: elapsedMs === null ? "Other time unavailable" : `${kind === "wall" ? "Time" : "Other"} ${formatElapsedDuration(elapsedMs)}`
+      children: elapsedMs === null ? "Other time unavailable" : `${kind === "wall" ? "" : "Other "}${formatElapsedDuration(elapsedMs)}`
     }
   );
 }

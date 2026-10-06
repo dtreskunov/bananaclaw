@@ -163,11 +163,14 @@ steps** disclosure opens every group collapsed and does not enable following.
 Only one activity trace can be expanded across the transcript. Its global
 state stores only the owning row and whether live activity is being followed;
 the selected group and step are local to the mounted trace.
-Follow intent survives settlement within the current conversation: when the
-next live turn starts, its trace opens in follow mode and the previous trace
-collapses, even if the new turn has not recorded its first activity yet.
-Manual browsing or collapsing disables this carry-over. Reconnect snapshots
-and conversation navigation still reset transient trace state.
+When technical information is enabled, each new live turn automatically opens
+its trace in follow mode and closes the previously expanded transcript trace,
+even before its first activity arrives. Completing the turn does not close the
+trace or its followed chapter. Manually browsing or collapsing is respected
+through subsequent updates to that turn; the next new turn opens afresh.
+With technical information disabled, only existing follow intent carries over.
+Same-conversation reconnect snapshots preserve trace state, including manual
+collapse; conversation navigation resets it.
 Each logical turn has one complete activity trace. Steering, questions, and
 intermediate assistant outputs never split it. While running, a synthetic
 bubble below the turn's latest conversation content carries the trace and
@@ -406,13 +409,14 @@ not separate transcript rows. Errors retain their alert role and retry control.
 Current activity remains visible with technical information hidden. The toggle
 does not change status font size or the font used for inline-code subjects.
 The stopwatch uses minutes and seconds and remains in the regular footer while
-the turn is live, labeled simply **Time**, whether technical information is on
-or off. On settlement the technical summary shows
+the turn is live, as a plain duration with no label, whether technical
+information is on or off. On settlement the technical summary shows
 **Other** time (wall-clock time minus cumulative model-call time), not wall time.
 Technical information also shows **Model** time:
 cumulative time requesting and streaming model responses, excluding tool
-execution and waits for user input. The usage pop-up labels both **Wall-clock
-time**, **Model-call time**, and **Other time (wall minus model)**; wall time uses the authoritative logical turn,
+execution and waits for user input. The usage pop-up shows **Total time** with
+indented **Model time** and **Other time** as its breakdown; total time uses
+the authoritative logical turn,
 not the provider attempt's duration. Native measures model responses using the
 SDK's model-call performance callback, including compaction calls; Claude
 reports API time. Other providers and older records without isolated timing

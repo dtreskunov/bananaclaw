@@ -338,15 +338,18 @@ function show(nextScene: Scene): void {
 }
 
 function advance(nextScene: Scene): void {
-  if (sendRequests.length && nextScene === 'reply') {
+  if ((sendRequests.length || currentConversation().turns.length > 1) && nextScene === 'reply') {
     const next = currentConversation();
     const turn = next.turns.find((value) => value.id === next.connection.activeTurnId);
     if (!turn) throw new Error('Fixture response has not started');
     turn.phase = 'settled';
     turn.outcome = 'replied';
     turn.endedAt = new Date().toISOString();
-    turn.metadata.status = 'final';
-    turn.outputIds = ['fixture-submitted-reply'];
+    const settled = makeConversation('reply').turns[0];
+    turn.metadata = settled.metadata;
+    turn.usage = settled.usage;
+    turn.liveUsage = null;
+    turn.outputIds = [turn.id === 'fixture-submitted-turn' ? 'fixture-submitted-reply' : `${turn.id}:reply`];
     next.messages.push({ id: turn.outputIds[0], direction: 'out', turnId: turn.id,
       text: 'The **submitted response** is complete.', timestamp: turn.endedAt,
       timelinePosition: Date.now() * 1000, deliveryOrigin: 'response' });
@@ -357,6 +360,18 @@ function advance(nextScene: Scene): void {
   }
   const previous = conversationState.peek();
   if (!previous) throw new Error('Fixture conversation is missing');
+  if (previous.conversation.turns.length > 1 && nextScene.startsWith('chapter-')) {
+    const next = currentConversation();
+    const turn = next.turns.find((value) => value.id === next.connection.activeTurnId);
+    if (!turn?.startedAt) throw new Error('Fixture has no active chapter turn');
+    const position = Math.max(...next.turns.flatMap((value) => value.activity.map((line) => line.timelinePosition))) + 1000;
+    const activity = makeConversation(nextScene, turn.startedAt).turns[0].activity;
+    turn.activity = activity.map((line) => ({ ...line,
+      timelinePosition: turn.activity.find((value) => value.ordinal === line.ordinal)?.timelinePosition ?? position + line.ordinal }));
+    scene.value = nextScene;
+    publish(next);
+    return;
+  }
   const startedAt = previous.conversation.turns[0]?.startedAt;
   if (!startedAt) throw new Error('Fixture turn start time is missing');
   const next = makeConversation(nextScene, startedAt);
@@ -376,6 +391,25 @@ function advance(nextScene: Scene): void {
     },
     fixtureThreadId,
   );
+}
+
+function nextTurn(): void {
+  const next = currentConversation();
+  if (next.connection.activeTurnId) throw new Error('Settle the fixture turn before starting another');
+  const position = Math.max(Date.now() * 1000,
+    ...next.messages.map((message) => message.timelinePosition ?? 0),
+    ...next.turns.flatMap((turn) => turn.activity.map((line) => line.timelinePosition))) + 1000;
+  const turn = makeConversation('chapter-running').turns[0];
+  turn.id = `fixture-next-turn-${generation}-${next.turns.length}`;
+  turn.inputIds = [`${turn.id}:input`];
+  turn.activity = turn.activity.map((line, ordinal) => ({ ...line, timelinePosition: position + ordinal + 1 }));
+  next.messages.push({ id: turn.inputIds[0], direction: 'in', text: 'Start the next fixture turn.',
+    timestamp: new Date().toISOString(), timelinePosition: position });
+  next.turns.push(turn);
+  next.connection.activeTurnId = turn.id;
+  next.capabilities.stop = true;
+  scene.value = 'chapter-running';
+  publish(next);
 }
 
 function tech(enabled: boolean): void {
@@ -453,6 +487,7 @@ globalThis.fetch = async (input, init) => {
 interface FixtureApi {
   show: typeof show;
   advance: typeof advance;
+  nextTurn: typeof nextTurn;
   tech: typeof tech;
   acceptSend: () => void;
   failSend: () => void;
@@ -469,6 +504,7 @@ declare global {
 window.turnStatusFixture = {
   show,
   advance,
+  nextTurn,
   tech,
   acceptSend: () => respondToSend(true),
   failSend: () => respondToSend(false),
@@ -523,6 +559,9 @@ function Fixture() {
         </button>
         <button type="button" disabled={!conversationState.value?.conversation.connection.activeTurnId} onClick={() => advance('reply')}>
           Settle current turn
+        </button>
+        <button type="button" disabled={!!conversationState.value?.conversation.connection.activeTurnId} onClick={nextTurn}>
+          Start next turn
         </button>
         {scene.value.startsWith('chapter-') ? <button type="button" disabled={!nextChapter} onClick={() => {
           if (!nextChapter) throw new Error('Fixture chapter sequence has ended');

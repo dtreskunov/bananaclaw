@@ -24,6 +24,11 @@ export function activityTraceView(ownerId: string, live = false): { expanded: bo
   return { expanded, following: expanded && current.mode === 'follow' && live };
 }
 
+export function activityTraceFollowing(ownerId: string): boolean {
+  const current = intent.value;
+  return current?.ownerId === ownerId && current.mode === 'follow';
+}
+
 export function toggleActivityTrace(ownerId: string, follow = false): void {
   const current = intent.peek();
   intent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? 'follow' : 'open' };
@@ -37,9 +42,10 @@ export function followActivityTrace(ownerId: string): void {
   if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: 'follow' };
 }
 
-export function inheritActivityTrace(ownerId: string): void {
+export function inheritActivityTrace(ownerId: string, automatic = false): void {
   const current = intent.peek();
-  if (current?.mode === 'follow' && current.ownerId !== ownerId) intent.value = { ownerId, mode: 'follow' };
+  if (automatic || (current?.mode === 'follow' && current.ownerId !== ownerId))
+    intent.value = { ownerId, mode: 'follow' };
 }
 
 export function resetActivityTraceView(): void {

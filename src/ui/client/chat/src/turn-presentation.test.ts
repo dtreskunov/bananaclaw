@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat } from './actions';
-import { chatTranscript, completedResponse, conversationPresentation, conversationState } from './conversation-state';
+import {
+  chatTranscript,
+  completedResponse,
+  conversationPresentation,
+  conversationState,
+  resetConversation,
+} from './conversation-state';
 import { activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace } from './activity-trace-state';
 import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared/conversation-protocol';
 import { dockQuestions } from './question-dock';
@@ -19,6 +25,8 @@ import {
   toastMessage,
 } from './state';
 import { dismissToast } from './components/Toast';
+import { appearance } from './appearance-state';
+import { DEFAULT_APPEARANCE } from './appearance';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 vi.mock('./hash', () => ({ writeHash: vi.fn() }));
@@ -41,6 +49,7 @@ function update(next: Conversation): void {
   });
 }
 beforeEach(async () => {
+  appearance.value = { preferences: { ...DEFAULT_APPEARANCE }, resolvedMode: 'light', error: null };
   vi.useFakeTimers();
   const sockets: Array<{ onmessage?: (event: { data: string }) => void }> = [];
   vi.stubGlobal('location', { protocol: 'https:', host: 'example.test' });
@@ -356,11 +365,54 @@ describe('authoritative turn presentation', () => {
     },
   );
 
-  it('clears transient trace state on a reconnect snapshot', () => {
+  it('preserves transient trace state on a same-conversation reconnect snapshot', () => {
     toggleActivityTrace('turn:turn-1', true);
     receive(testSnapshot(initial, 'reconnect'));
-    expect(activityTraceView('turn:turn-1', true)).toEqual({ expanded: false, following: false });
+    expect(activityTraceView('turn:turn-1', true)).toEqual({ expanded: true, following: true });
   });
+
+  it.each([false, true])(
+    'automatically opens a snapshot live turn only when technical info is enabled (%s)',
+    (technical) => {
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
+      resetConversation();
+      receive(testSnapshot(initial));
+      expect(activityTraceView('turn:turn-1', true)).toEqual({ expanded: technical, following: technical });
+    },
+  );
+
+  it.each(['none', 'browse', 'collapse', 'history'] as const)(
+    'opens exactly one new turn trace with tech enabled after %s',
+    (action) => {
+      appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+      if (action === 'history') toggleActivityTrace('message:history');
+      else if (action !== 'none') {
+        toggleActivityTrace('turn:turn-1', true);
+        if (action === 'collapse') toggleActivityTrace('turn:turn-1');
+        else pauseActivityTrace('turn:turn-1');
+      }
+      const next = { ...testTurn, id: 'turn-2', activity: [] };
+      const view = {
+        ...initial,
+        turns: [{ ...testTurn, phase: 'settled' as const, outcome: 'silent' as const }, next],
+        connection: { connected: true, activeTurnId: next.id },
+      };
+      update(view);
+      expect(activityTraceView('turn:turn-1').expanded).toBe(false);
+      expect(activityTraceView('message:history').expanded).toBe(false);
+      expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: true, following: true });
+      toggleActivityTrace('turn:turn-2');
+      update({
+        ...view,
+        turns: [view.turns[0], { ...next, activity: [{ ...testTurn.activity[0], timelinePosition: 300 }] }],
+      });
+      receive(testSnapshot(conversationState.peek()!.conversation, 'reconnect'));
+      expect(activityTraceView('turn:turn-2', true).expanded).toBe(false);
+    },
+  );
 
   it.each([false, true])('inherits follow into a new turn with separate settlement = %s', (separate) => {
     toggleActivityTrace('turn:turn-1', true);

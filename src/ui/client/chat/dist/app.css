@@ -2686,6 +2686,14 @@ nav.tab-bar-strip.group-strip {
 .chat-main .usage-row > span {
   color: var(--muted);
 }
+.chat-main .usage-time-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-main .usage-time-part {
+  padding-inline-start: 12px;
+}
 .chat-main .usage-row > strong {
   min-width: 0;
   font-weight: 600;

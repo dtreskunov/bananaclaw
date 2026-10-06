@@ -1180,9 +1180,14 @@ describe('main composer pending edits', () => {
     },
   );
 
-  it.each([3500, 0, undefined])(
+  it.each([
+    { modelMs: 3500, extraMs: 1000, totalModelMs: 4500, modelText: '0:04', otherText: '0:02' },
+    { modelMs: 0, extraMs: 0, totalModelMs: 0, modelText: '0:00', otherText: '0:06' },
+    { modelMs: undefined, extraMs: 1000, totalModelMs: null, modelText: 'Unavailable', otherText: 'Unavailable' },
+    { modelMs: 8500, extraMs: 0, totalModelMs: 8500, modelText: '0:08', otherText: '-0:02' },
+  ])(
     'shows wall and model timing separately in technical information and its popup (%s)',
-    (modelMs) => {
+    ({ modelMs, extraMs, totalModelMs, modelText, otherText }) => {
       appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
       applyConversationFrame(
         testSnapshot({
@@ -1192,7 +1197,10 @@ describe('main composer pending edits', () => {
               phase: 'settled',
               outcome: 'silent',
               metadata: { status: 'final', model: 'm', durationMs: 6500 },
-              usage: [{ id: 'timing', value: { cost_usd: 0.1, duration_ms: 999999, duration_api_ms: modelMs } }],
+              usage: [
+                { id: 'timing', value: { cost_usd: 0.1, duration_ms: 999999, duration_api_ms: modelMs } },
+                { id: 'extra-timing', value: { duration_api_ms: extraMs } },
+              ],
             },
           ],
           connection: { connected: true, activeTurnId: null },
@@ -1208,9 +1216,7 @@ describe('main composer pending edits', () => {
       const info = findComponent(details, 'TurnTechnicalInfo');
       const header = info.type(info.props);
       const model = find(header, 'span', 'Model-call time');
-      expect(model.props.children).toBe(
-        modelMs === undefined ? 'Model time unavailable' : modelMs === 0 ? 'Model 0:00' : 'Model 0:03',
-      );
+      expect(model.props.children).toBe(totalModelMs === null ? 'Model time unavailable' : `Model ${modelText}`);
       const stats = findComponent(header, 'TurnStats');
       const usage = findComponent(stats.type(stats.props), 'UsageMeta');
       resetMount();
@@ -1219,19 +1225,18 @@ describe('main composer pending edits', () => {
       find(summary, 'button').props.onClick({ stopPropagation() {} });
       hooks.cursor = 0;
       const popup = find(usage.type(usage.props), 'span', 'Turn usage details');
-      expect(find(popup, 'span', 'Wall-clock time')).toBeDefined();
+      expect(find(popup, 'span', 'Total time')).toBeDefined();
       expect(find(popup, 'strong', '0:06')).toBeDefined();
-      expect(find(popup, 'span', 'Model-call time')).toBeDefined();
-      expect(
-        find(popup, 'strong', modelMs === undefined ? 'Unavailable' : modelMs === 0 ? '0:00' : '0:03'),
-      ).toBeDefined();
+      expect(find(popup, 'span', 'Model time')).toBeDefined();
+      expect(find(popup, 'strong', modelText)).toBeDefined();
       expect(find(popup, 'strong', '166:39')).toBeUndefined();
-      expect(find(popup, 'span', 'Other time (wall minus model)')).toBeDefined();
-      expect(
-        find(popup, 'strong', modelMs === undefined ? 'Unavailable' : modelMs === 0 ? '0:06' : '0:03'),
-      ).toBeDefined();
+      expect(find(popup, 'span', 'Other time')).toBeDefined();
+      expect(find(popup, 'strong', otherText)).toBeDefined();
       const other = findComponent(header, 'TurnElapsed');
-      expect(other.props.elapsedMs).toBe(modelMs === undefined ? null : 6500 - modelMs);
+      expect(other.props.elapsedMs).toBe(totalModelMs === null ? null : 6500 - totalModelMs);
+      expect(other.type(other.props).props.children).toBe(
+        totalModelMs === null ? 'Other time unavailable' : `Other ${otherText}`,
+      );
     },
   );
 
@@ -1396,7 +1401,7 @@ describe('main composer pending edits', () => {
       expect(controls[2].type.name).toBe('TurnElapsed');
       expect(controls[2].props.elapsedMs).toBeGreaterThanOrEqual(7000);
       const stopwatch = controls[2].type(controls[2].props);
-      expect(stopwatch.props.children).toBe('Time 0:07');
+      expect(stopwatch.props.children).toBe('0:07');
       expect(stopwatch.props['aria-live']).toBe('off');
       expect(controls[3].type).toBe(technical ? 'button' : 'span');
       expect(findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo') !== undefined).toBe(technical);
@@ -1572,6 +1577,66 @@ describe('main composer pending edits', () => {
       hooks.capturePassive = false;
       for (const [key, value] of Object.entries(savedGlobals)) vi.stubGlobal(key, value);
     }
+  });
+});
+
+describe('activity trace completion', () => {
+  it('keeps the same trace and followed chapter open through outputless settlement', () => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    const turn = {
+      ...testTurn,
+      activity: [0, 1].map((ordinal) => ({
+        ordinal,
+        ts: '1000',
+        timelinePosition: 100 + ordinal,
+        text: JSON.stringify({
+          kind: 'tool',
+          tool: 'bash',
+          id: `step-${ordinal}`,
+          status: 'completed',
+          detail: 'echo test',
+        }),
+      })),
+    };
+    const renderDetails = () => {
+      resetMount();
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      hooks.cursor = 0;
+      const row = findComponent(log.type(log.props), 'ResponseStatusRow');
+      resetMount();
+      hooks.cursor = 0;
+      return renderTechnicalDetails(row.type(row.props));
+    };
+    applyConversationFrame(
+      testSnapshot({ turns: [turn], connection: { connected: true, activeTurnId: turn.id } }),
+      'thread',
+    );
+    const live = findComponent(renderDetails(), 'ActivityTracePanel');
+    expect(live.props).toMatchObject({ expanded: true, following: true, live: true });
+    const liveList = live.type(live.props).props.children;
+    applyConversationFrame(
+      testSnapshot(
+        {
+          turns: [{ ...turn, phase: 'settled', outcome: 'silent' }],
+          connection: { connected: true, activeTurnId: null },
+        },
+        'completed-outputless',
+      ),
+      'thread',
+    );
+    const completed = findComponent(renderDetails(), 'ActivityTracePanel');
+    expect(completed.props).toMatchObject({ expanded: true, following: true, live: false });
+    const list = completed.type(completed.props).props.children;
+    expect(list.key).toBe(liveList.key);
+    resetMount();
+    hooks.cursor = 0;
+    const chapter = ActivityTraceList(list.props).props.children[0];
+    expect(chapter.props.children[0].props['aria-expanded']).toBe(true);
+    expect(
+      chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
+    ).toBe(true);
   });
 });
 

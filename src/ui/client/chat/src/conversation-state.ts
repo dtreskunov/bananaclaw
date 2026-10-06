@@ -25,6 +25,7 @@ import { confirmCancelledInput } from './pending-cancel';
 import { playCompletionChime, playProgressTick } from './sound';
 import { maybeNotify } from './notify';
 import { inheritActivityTrace, resetActivityTraceView } from './activity-trace-state';
+import { appearance } from './appearance-state';
 import { completedResponseId } from './turn-completion';
 import type { ChatMessage, TranscriptRow } from './types';
 import { reconcileWebSubmissions } from './web-submissions';
@@ -109,9 +110,9 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
     for (const message of view.messages) {
       if (message.inputState?.status === 'cancelled') confirmCancelledInput(message.id);
     }
-    if (frame.kind === 'snapshot') resetActivityTraceView();
-    else if (current && current.phase !== 'settled' && current.id !== previous?.conversation.connection.activeTurnId)
-      inheritActivityTrace(`turn:${current.id}`);
+    if (frame.kind === 'snapshot' && previous?.conversation.threadId !== view.threadId) resetActivityTraceView();
+    if (current && current.phase !== 'settled' && current.id !== previous?.conversation.connection.activeTurnId)
+      inheritActivityTrace(`turn:${current.id}`, appearance.peek().preferences.showTechnicalStatus);
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === 'update') {

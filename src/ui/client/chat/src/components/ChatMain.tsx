@@ -38,7 +38,7 @@ import {
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
 import { STARTING_RESPONSE_TEXT, submissionPresentation } from '../web-submissions';
 import {
-  activityTraceOwner, activityTraceView, followActivityTrace, pauseActivityTrace, toggleActivityTrace,
+  activityTraceOwner, activityTraceView, activityTraceFollowing, followActivityTrace, pauseActivityTrace, toggleActivityTrace,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
 import { activeTurnNotices, liveTurnActivity, turnRowView, type TurnRowView } from '../turn-row';
@@ -319,7 +319,7 @@ function ActivityTracePanel({
   if (!lines.length || !expanded) return null;
   return (
     <div class="msg-activity expanded">
-      <ActivityTraceList key={`${ownerId}:${live}`} lines={lines} live={live} now={now}
+      <ActivityTraceList key={ownerId} lines={lines} live={live} now={now}
         following={following} onBrowse={(follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)} />
     </div>
   );
@@ -357,8 +357,8 @@ function fmtContextLimit(tokens: number): string {
   return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
 }
 
-function UsageMeta({ u, live = false, partial = false, provisional = false, wallElapsedMs = u.duration_ms ?? null }: {
-  u: Partial<TurnUsage>; live?: boolean; partial?: boolean; provisional?: boolean; wallElapsedMs?: number | null;
+function UsageMeta({ u, live = false, partial = false, provisional = false, wallElapsedMs = u.duration_ms ?? null, modelElapsedMs = u.duration_api_ms ?? null }: {
+  u: Partial<TurnUsage>; live?: boolean; partial?: boolean; provisional?: boolean; wallElapsedMs?: number | null; modelElapsedMs?: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const cost = u.cost_usd !== undefined ? fmtCost(u.cost_usd) : 'Cost unavailable';
@@ -411,9 +411,11 @@ function UsageMeta({ u, live = false, partial = false, provisional = false, wall
             {partial ? <span class="usage-row">Partial usage report; final totals may be higher.</span> : null}
             {provisional ? <span class="usage-row">Usage reported so far; awaiting final totals.</span> : null}
             <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{cost}</strong></span>
-            <span class="usage-row"><span>Wall-clock time</span><strong>{wallElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs)}</strong></span>
-            <span class="usage-row"><span>{live ? 'Model-call time so far' : 'Model-call time'}</span><strong>{u.duration_api_ms === undefined ? 'Unavailable' : formatElapsedDuration(u.duration_api_ms)}</strong></span>
-            <span class="usage-row"><span>Other time (wall minus model)</span><strong>{wallElapsedMs === null || u.duration_api_ms === undefined ? 'Unavailable' : formatElapsedDuration(wallElapsedMs - u.duration_api_ms)}</strong></span>
+            <span class="usage-time-breakdown" role="group" aria-label="Response time breakdown">
+              <span class="usage-row"><span>Total time</span><strong>{wallElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs)}</strong></span>
+              <span class="usage-row usage-time-part"><span>Model time</span><strong>{modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(modelElapsedMs)}</strong></span>
+              <span class="usage-row usage-time-part" title="Total time minus cumulative model-call time"><span>Other time</span><strong>{wallElapsedMs === null || modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs - modelElapsedMs)}</strong></span>
+            </span>
             {model ? <span class="usage-row"><span>Model</span><strong title={u.model}>{model}</strong></span> : null}
             {contextDetail ? <span class="usage-row"><span>{live ? 'Context after latest call' : 'Context at end'}</span><strong>{contextDetail}</strong></span> : null}
             <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{input} input {'\u00b7'} {output} output</strong></span>
@@ -1102,9 +1104,9 @@ function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }
   return (
     <>
       {view.showModel && view.model ? <span class="typing-meta">{shortModel(view.model)}</span> : null}
-      {view.usage.map((record) => <UsageMeta key={record.id} u={record.value} wallElapsedMs={view.elapsedMs}
+      {view.usage.map((record) => <UsageMeta key={record.id} u={record.value} wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs}
         provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
-      {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} wallElapsedMs={view.elapsedMs} live provisional /> : null}
+      {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs} live provisional /> : null}
       {view.showTokensUnavailable ? <span>Tokens unavailable</span> : null}
     </>
   );
@@ -1146,7 +1148,7 @@ function TurnTechnicalDetails({
       <TurnTechnicalInfo turn={turn} count={activityStepCount(lines)}
         expanded={traceView.expanded} onToggle={() => toggleActivityTrace(ownerId)} />
       <ActivityTracePanel lines={lines} expanded={traceView.expanded} live={live} now={now}
-        ownerId={ownerId} following={traceView.following} />
+        ownerId={ownerId} following={activityTraceFollowing(ownerId)} />
     </div>
   );
 }
@@ -1157,7 +1159,7 @@ function TurnElapsed({ elapsedMs, live = false, kind = 'wall' }: { elapsedMs: nu
     <span class="turn-elapsed" role={live ? 'timer' : undefined} aria-live={live ? 'off' : undefined}
       aria-label={kind === 'wall' ? 'Elapsed response time' : 'Non-model response time'}
       title={kind === 'wall' ? 'Response time, including tools and waiting for replies' : 'Wall-clock time minus cumulative model-call time'}>
-      {elapsedMs === null ? 'Other time unavailable' : `${kind === 'wall' ? 'Time' : 'Other'} ${formatElapsedDuration(elapsedMs)}`}
+      {elapsedMs === null ? 'Other time unavailable' : `${kind === 'wall' ? '' : 'Other '}${formatElapsedDuration(elapsedMs)}`}
     </span>
   );
 }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   activityTraceView,
+  activityTraceFollowing,
   followActivityTrace,
   inheritActivityTrace,
   pauseActivityTrace,
@@ -11,6 +12,20 @@ import {
 afterEach(resetActivityTraceView);
 
 describe('activity trace follow intent', () => {
+  it.each(['none', 'browse', 'collapse'] as const)('automatically opens a new owner after %s', (prior) => {
+    if (prior !== 'none') {
+      toggleActivityTrace('turn:first', true);
+      if (prior === 'browse') pauseActivityTrace('turn:first');
+      else toggleActivityTrace('turn:first');
+    }
+    inheritActivityTrace('turn:next', true);
+    expect(activityTraceView('turn:first', true).expanded).toBe(false);
+    expect(activityTraceView('turn:next', true)).toEqual({ expanded: true, following: true });
+    expect(activityTraceFollowing('turn:next')).toBe(true);
+    expect(activityTraceView('turn:next')).toEqual({ expanded: true, following: false });
+    toggleActivityTrace('turn:next');
+    expect(activityTraceFollowing('turn:next')).toBe(false);
+  });
   it('enables following without collapsing an already expanded count-only trace', () => {
     toggleActivityTrace('turn:first');
     expect(activityTraceView('turn:first', true)).toEqual({ expanded: true, following: false });
