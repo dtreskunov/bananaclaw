@@ -523,6 +523,7 @@ describe('NativeProvider', () => {
       expect(requests).toHaveLength(1);
       expect(toolSignal?.aborted).toBe(false);
       expect(events.some((event) => event.type === 'steering_applied')).toBe(false);
+      await Bun.sleep(100);
       release();
       await consume;
       expect(requests).toHaveLength(2);
@@ -536,6 +537,10 @@ describe('NativeProvider', () => {
       expect(events.find((event) => event.type === 'usage')).toMatchObject({
         data: { input_tokens: 15, output_tokens: 5, num_turns: 2, context_tokens: 7 },
       });
+      const usage = events.find((event) => event.type === 'usage')!.data;
+      const calls = events.filter((event) => event.type === 'usage_call');
+      expect(usage.duration_api_ms).toBeCloseTo(calls.reduce((total, event) => total + event.data.duration_api_ms!, 0), 6);
+      expect(usage.duration_ms! - usage.duration_api_ms!).toBeGreaterThanOrEqual(90);
       expect(query.steer!({ id: 'late', prompt: 'too late' })).toBe(false);
       const continuation = events.find((event) => event.type === 'init')!.continuation;
       expect(provider.appliedSteering(continuation, ['s1', 'late'])).toEqual(['s1']);

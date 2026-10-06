@@ -350,11 +350,11 @@ reveal actions on hover or focus. User-message timestamps stay anchored to the
 left while actions occupy the right side of the row.
 
 **Appearance → Transcript details → Show technical information** controls technical
-details on all bubbles: activity trace, completed elapsed time, cost, model, and
+details on all bubbles: activity trace, model-call and other time, cost, model, and
 context use. Technical information occupies a separate line at the top of live, reply and display-card
 bubbles, and is absent when the toggle is off. The regular information line
 remains at the bottom and retains relative timestamps and notable outcomes.
-Completed elapsed time appears only in the technical line, including on replies,
+Completed timing appears only in the technical line, including on replies,
 display cards and outputless turns, and is hidden when technical information is off.
 Live rows order the bouncing dots, Stop, stopwatch, and current
 activity text. Only pending or running activities drive that text; when none
@@ -406,8 +406,22 @@ not separate transcript rows. Errors retain their alert role and retry control.
 Current activity remains visible with technical information hidden. The toggle
 does not change status font size or the font used for inline-code subjects.
 The stopwatch uses minutes and seconds and remains in the regular footer while
-the turn is live. On settlement its frozen elapsed time moves into the technical
-summary. Usage details still retain recorded accounting duration.
+the turn is live, labeled simply **Time**, whether technical information is on
+or off. On settlement the technical summary shows
+**Other** time (wall-clock time minus cumulative model-call time), not wall time.
+Technical information also shows **Model** time:
+cumulative time requesting and streaming model responses, excluding tool
+execution and waits for user input. The usage pop-up labels both **Wall-clock
+time**, **Model-call time**, and **Other time (wall minus model)**; wall time uses the authoritative logical turn,
+not the provider attempt's duration. Native measures model responses using the
+SDK's model-call performance callback, including compaction calls; Claude
+reports API time. Other providers and older records without isolated timing
+explicitly show **unavailable** for model and other time, never substitute wall
+time or zero. The subtraction is signed, not clamped: cumulative overlapping
+calls or inconsistent historical clocks can produce a negative difference.
+Live model timing reflects reported calls so far, not a second running stopwatch.
+Stopped/failed calls retain reported timing alongside partial usage; unfinished
+calls without a usage report cannot provide a complete model-time total.
 Technical information and the expanded trace form one shared, compact block at
 the top of live, reply and display-card bubbles, before their content. This keeps
 header-to-trace spacing consistent without accumulating card-content gaps or

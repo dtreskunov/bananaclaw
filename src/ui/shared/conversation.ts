@@ -14,6 +14,7 @@ export interface ConversationUsage {
   max_output_tokens?: number;
   context_tokens?: number;
   duration_ms?: number;
+  duration_api_ms?: number;
 }
 
 export interface ConversationMessage {

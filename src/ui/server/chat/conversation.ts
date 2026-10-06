@@ -77,6 +77,7 @@ function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
     'max_output_tokens',
     'context_tokens',
     'duration_ms',
+    'duration_api_ms',
   ])
     if (row[key] !== null && row[key] !== undefined) value[key] = row[key];
   return value as Partial<ConversationUsage>;

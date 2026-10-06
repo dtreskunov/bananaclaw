@@ -60,6 +60,26 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('authoritative conversation projection', () => {
+  it('projects independently measured model timing and validates its wire shape', () => {
+    db.prepare('INSERT INTO turn_usage (id, turn_id, duration_ms, duration_api_ms) VALUES (?, ?, ?, ?)').run(
+      'timing',
+      turn.id,
+      5000,
+      1000,
+    );
+    const view = read();
+    expect(view.turns[0].usage[0].value).toEqual({ duration_ms: 5000, duration_api_ms: 1000 });
+    const frame = {
+      kind: 'snapshot',
+      protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+      streamId: 'timing',
+      revision: 0,
+      conversation: view,
+    };
+    expect(parseConversationFrame(frame)).toBe(frame);
+    view.turns[0].usage[0].value.duration_api_ms = -1;
+    expect(() => parseConversationFrame(frame)).toThrow('invalid_frame');
+  });
   it('keeps the first recorded position through tool lifecycle reduction and final output anchoring', () => {
     const step = (status: string) =>
       JSON.stringify({ kind: 'tool', id: 'tool', tool: 'Read', status, detail: 'file.txt' });

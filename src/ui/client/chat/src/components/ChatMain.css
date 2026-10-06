@@ -321,7 +321,7 @@
 .chat-main .turn-tech-info { position: relative; }
 .chat-main .turn-technical-details { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; max-width: 100%; }
 .chat-main .msg:not(.display-card) > .turn-technical-details { margin-bottom: var(--text-block-gap); }
-.chat-main .turn-technical-details > .meta.turn-tech-info { margin: 0; min-height: 0; }
+.chat-main .turn-technical-details > .meta.turn-tech-info { margin: 0; min-height: 0; flex-wrap: wrap; row-gap: 2px; }
 .chat-main .turn-technical-details > .msg-activity { margin-top: 0; }
 .chat-main .turn-tech-info .usage-wrap { position: static; }
 .chat-main .turn-tech-info .usage-popover { top: calc(100% + 6px); bottom: auto; }
@@ -360,6 +360,7 @@
 .chat-main .typing .trace-preview:hover { color: var(--fg); opacity: 1; }
 .chat-main .typing .trace-preview:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; border-radius: 2px; }
 .chat-main .typing .typing-meta { flex: 0 1 auto; white-space: nowrap; font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
+.chat-main .turn-model-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Expanded historical traces need room even when their summary is short. */
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
 /* Synthetic turn bubble while live or when there is no final response. */

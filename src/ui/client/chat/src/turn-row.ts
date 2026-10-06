@@ -90,6 +90,8 @@ export interface TurnRowView {
   status: string | null;
   note: string | null;
   elapsedMs: number | null;
+  modelCallMs: number | null;
+  nonModelMs: number | null;
   model: string | null;
   /** Settled usage summaries already carry the model. */
   showModel: boolean;
@@ -108,6 +110,15 @@ export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
       ? Math.max(0, now - startedAt)
       : null;
   const model = turn.metadata.model;
+  const timings = turn.usage.length
+    ? turn.usage.map(({ value }) => value.duration_api_ms)
+    : turn.liveUsage
+      ? [turn.liveUsage.duration_api_ms]
+      : [];
+  const modelCallMs =
+    timings.length && timings.every((value) => value !== undefined)
+      ? timings.reduce((total, value) => total + value, 0)
+      : null;
   const note = settled ? (OUTCOME_NOTES[turn.outcome] ?? null) : turn.phase === 'stopping' ? 'Stopping…' : null;
   const hasTiming = elapsedMs !== null || !!model;
   return {
@@ -115,6 +126,8 @@ export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
     status: !settled && turn.phase === 'running' ? THINKING_TEXT : null,
     note,
     elapsedMs,
+    modelCallMs,
+    nonModelMs: elapsedMs !== null && modelCallMs !== null ? elapsedMs - modelCallMs : null,
     model,
     showModel: !settled || !turn.usage.length,
     showTokensUnavailable: settled && !turn.usage.length && hasTiming,

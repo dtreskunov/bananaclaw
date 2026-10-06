@@ -84,6 +84,7 @@ const usageFields = {
   max_output_tokens: optional(number),
   context_tokens: optional(number),
   duration_ms: optional(number),
+  duration_api_ms: optional(number),
 };
 const usage = shape(usageFields);
 const reportedUsage = shape(

@@ -78,7 +78,7 @@ export function AppearanceSettings() {
           <span>
             <strong>Show technical information</strong>
             <small id="status-details-description">
-              Activity trace, completed elapsed time, cost, model, and context use. Live elapsed time stays visible.
+              Activity trace, model-call and other time, cost, model, and context use. Live time stays visible.
             </small>
           </span>
         </label>

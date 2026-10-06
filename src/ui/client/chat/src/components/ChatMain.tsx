@@ -152,9 +152,9 @@ function formatDuration(ms: number): string {
 }
 
 function formatElapsedDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
+  const seconds = Math.floor(Math.abs(ms) / 1000);
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
+  return `${ms < 0 ? '-' : ''}${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
 
 function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void; child?: boolean }) {
@@ -331,11 +331,6 @@ function fmtCost(usd: number): string {
   return '$' + usd.toFixed(4);
 }
 
-function fmtDur(ms: number): string {
-  if (ms >= 60_000) return Math.round(ms / 60_000) + 'm';
-  return Math.round(ms / 1_000) + 's';
-}
-
 function shortModel(model: string): string {
   // Show the last `/`-separated component (e.g. "anthropic/claude-sonnet-4"
   // -> "claude-sonnet-4", "openai/gpt-4o" -> "gpt-4o"). Plain ids pass through.
@@ -362,8 +357,8 @@ function fmtContextLimit(tokens: number): string {
   return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
 }
 
-function UsageMeta({ u, live = false, partial = false, provisional = false }: {
-  u: Partial<TurnUsage>; live?: boolean; partial?: boolean; provisional?: boolean;
+function UsageMeta({ u, live = false, partial = false, provisional = false, wallElapsedMs = u.duration_ms ?? null }: {
+  u: Partial<TurnUsage>; live?: boolean; partial?: boolean; provisional?: boolean; wallElapsedMs?: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const cost = u.cost_usd !== undefined ? fmtCost(u.cost_usd) : 'Cost unavailable';
@@ -377,7 +372,6 @@ function UsageMeta({ u, live = false, partial = false, provisional = false }: {
         u.output_tokens !== undefined ? `${output} output tokens reported` : '',
       ].filter(Boolean).join(' \u00b7 ') || 'Tokens unavailable';
   const model = u.model ? shortModel(u.model) : '';
-  const dur = u.duration_ms != null ? fmtDur(u.duration_ms) : '';
   const contextTokens = u.context_tokens && (!u.context_window || u.context_tokens <= u.context_window)
     ? u.context_tokens
     : undefined;
@@ -417,7 +411,9 @@ function UsageMeta({ u, live = false, partial = false, provisional = false }: {
             {partial ? <span class="usage-row">Partial usage report; final totals may be higher.</span> : null}
             {provisional ? <span class="usage-row">Usage reported so far; awaiting final totals.</span> : null}
             <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{cost}</strong></span>
-            {dur ? <span class="usage-row"><span>Elapsed</span><strong>{dur}</strong></span> : null}
+            <span class="usage-row"><span>Wall-clock time</span><strong>{wallElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs)}</strong></span>
+            <span class="usage-row"><span>{live ? 'Model-call time so far' : 'Model-call time'}</span><strong>{u.duration_api_ms === undefined ? 'Unavailable' : formatElapsedDuration(u.duration_api_ms)}</strong></span>
+            <span class="usage-row"><span>Other time (wall minus model)</span><strong>{wallElapsedMs === null || u.duration_api_ms === undefined ? 'Unavailable' : formatElapsedDuration(wallElapsedMs - u.duration_api_ms)}</strong></span>
             {model ? <span class="usage-row"><span>Model</span><strong title={u.model}>{model}</strong></span> : null}
             {contextDetail ? <span class="usage-row"><span>{live ? 'Context after latest call' : 'Context at end'}</span><strong>{contextDetail}</strong></span> : null}
             <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{input} input {'\u00b7'} {output} output</strong></span>
@@ -1106,9 +1102,9 @@ function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }
   return (
     <>
       {view.showModel && view.model ? <span class="typing-meta">{shortModel(view.model)}</span> : null}
-      {view.usage.map((record) => <UsageMeta key={record.id} u={record.value}
+      {view.usage.map((record) => <UsageMeta key={record.id} u={record.value} wallElapsedMs={view.elapsedMs}
         provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
-      {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} live provisional /> : null}
+      {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} wallElapsedMs={view.elapsedMs} live provisional /> : null}
       {view.showTokensUnavailable ? <span>Tokens unavailable</span> : null}
     </>
   );
@@ -1124,7 +1120,11 @@ function TurnTechnicalInfo({
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
       <ActivityTraceToggle count={count} expanded={expanded} onToggle={onToggle} />
-      {turn?.phase === 'settled' && view ? <TurnElapsed elapsedMs={view.elapsedMs} /> : null}
+      {turn?.phase === 'settled' && view ? <TurnElapsed elapsedMs={view.nonModelMs} kind="other" /> : null}
+      {view ? <span class="turn-model-time" aria-label="Model-call time"
+        title="Cumulative model-request and streaming time; excludes tools and waits for user input">
+        {view.modelCallMs === null ? 'Model time unavailable' : `Model ${formatElapsedDuration(view.modelCallMs)}`}
+      </span> : null}
       {turn && view ? <TurnStats turn={turn} view={view} /> : null}
     </div>
   );
@@ -1151,12 +1151,13 @@ function TurnTechnicalDetails({
   );
 }
 
-function TurnElapsed({ elapsedMs, live = false }: { elapsedMs: number | null; live?: boolean }) {
-  if (elapsedMs === null) return null;
+function TurnElapsed({ elapsedMs, live = false, kind = 'wall' }: { elapsedMs: number | null; live?: boolean; kind?: 'wall' | 'other' }) {
+  if (elapsedMs === null && kind === 'wall') return null;
   return (
     <span class="turn-elapsed" role={live ? 'timer' : undefined} aria-live={live ? 'off' : undefined}
-      aria-label="Elapsed response time">
-      {formatElapsedDuration(elapsedMs)}
+      aria-label={kind === 'wall' ? 'Elapsed response time' : 'Non-model response time'}
+      title={kind === 'wall' ? 'Response time, including tools and waiting for replies' : 'Wall-clock time minus cumulative model-call time'}>
+      {elapsedMs === null ? 'Other time unavailable' : `${kind === 'wall' ? 'Time' : 'Other'} ${formatElapsedDuration(elapsedMs)}`}
     </span>
   );
 }

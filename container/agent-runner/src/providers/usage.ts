@@ -14,6 +14,9 @@ export function accumulateTurnUsage(total: TurnUsage | null, next: TurnUsage): T
     cache_write_tokens: total.cache_write_tokens + next.cache_write_tokens,
     reasoning_tokens: (total.reasoning_tokens ?? 0) + (next.reasoning_tokens ?? 0),
     num_turns: (total.num_turns ?? 0) + (next.num_turns ?? 0) || undefined,
+    duration_api_ms: total.duration_api_ms !== undefined && next.duration_api_ms !== undefined
+      ? total.duration_api_ms + next.duration_api_ms
+      : undefined,
     context_tokens: next.context_tokens ?? total.context_tokens,
   };
 }

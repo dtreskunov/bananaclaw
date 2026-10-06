@@ -3,7 +3,7 @@ import { initTestSessionDb, getInboundDb, getOutboundDb, closeSessionDb } from '
 import { appendActivity, setContinuation } from './db/session-state.js';
 import { getTurn } from './db/turns.js';
 import { getTurnContext } from './current-batch.js';
-import { beginTurn, recordTurnUsage, settleTurn } from './turn-execution.js';
+import { beginTurn, finishUsageAttempt, recordTurnUsage, settleTurn } from './turn-execution.js';
 import { runPollLoop } from './poll-loop.js';
 import { requestTurnStop, resetHostEventsForTesting } from './session-link.js';
 import { invokeRegisteredTool, registerTools } from './mcp-tools/tool-registry.js';
@@ -37,6 +37,18 @@ function metadata(id: string) {
   return JSON.parse((getOutboundDb().prepare('SELECT value FROM session_state WHERE key = ?')
     .get(`turn-metadata:${id}`) as { value: string }).value);
 }
+
+it('persists model time across retries and replaces call checkpoints with attempt totals', async () => {
+  const turn = beginTurn(route, []);
+  recordTurnUsage(turn, { ...usage, duration_api_ms: 100 }, false);
+  finishUsageAttempt(turn);
+  recordTurnUsage(turn, { ...usage, duration_api_ms: 200 }, false);
+  recordTurnUsage(turn, { ...usage, duration_api_ms: 300, duration_ms: 999999 }, true);
+  await settleTurn(turn, 'silent');
+  expect(getOutboundDb().prepare('SELECT duration_api_ms FROM turn_usage WHERE turn_id = ?').get(turn.turnId))
+    .toEqual({ duration_api_ms: 400 });
+  expect(metadata(turn.turnId).durationMs).toBeLessThan(999999);
+});
 
 it.each([
   { name: 'success', events: [{ type: 'result', text: '<message to="web">answer</message>' }], outcome: 'replied' },

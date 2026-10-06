@@ -17721,7 +17721,8 @@ var usageFields = {
   context_window: optional(number),
   max_output_tokens: optional(number),
   context_tokens: optional(number),
-  duration_ms: optional(number)
+  duration_ms: optional(number),
+  duration_api_ms: optional(number)
 };
 var usage = shape(usageFields);
 var reportedUsage = shape(
@@ -22344,6 +22345,8 @@ function turnRowView(turn2, now) {
   const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
   const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
   const model = turn2.metadata.model;
+  const timings = turn2.usage.length ? turn2.usage.map(({ value }) => value.duration_api_ms) : turn2.liveUsage ? [turn2.liveUsage.duration_api_ms] : [];
+  const modelCallMs = timings.length && timings.every((value) => value !== void 0) ? timings.reduce((total, value) => total + value, 0) : null;
   const note = settled ? OUTCOME_NOTES[turn2.outcome] ?? null : turn2.phase === "stopping" ? "Stopping\u2026" : null;
   const hasTiming = elapsedMs !== null || !!model;
   return {
@@ -22351,6 +22354,8 @@ function turnRowView(turn2, now) {
     status: !settled && turn2.phase === "running" ? THINKING_TEXT : null,
     note,
     elapsedMs,
+    modelCallMs,
+    nonModelMs: elapsedMs !== null && modelCallMs !== null ? elapsedMs - modelCallMs : null,
     model,
     showModel: !settled || !turn2.usage.length,
     showTokensUnavailable: settled && !turn2.usage.length && hasTiming,
@@ -23391,9 +23396,9 @@ function formatDuration(ms) {
   return `${Math.round(ms / 1e3)}s`;
 }
 function formatElapsedDuration(ms) {
-  const seconds = Math.floor(ms / 1e3);
+  const seconds = Math.floor(Math.abs(ms) / 1e3);
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
+  return `${ms < 0 ? "-" : ""}${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
 function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
   const step = displayStep(line, live);
@@ -23567,10 +23572,6 @@ function fmtCost(usd) {
   if (usd >= 0.01) return "$" + usd.toFixed(3);
   return "$" + usd.toFixed(4);
 }
-function fmtDur(ms) {
-  if (ms >= 6e4) return Math.round(ms / 6e4) + "m";
-  return Math.round(ms / 1e3) + "s";
-}
 function shortModel(model) {
   return model.split("/").pop() || model;
 }
@@ -23591,7 +23592,7 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ u: u5, live = false, partial = false, provisional = false }) {
+function UsageMeta({ u: u5, live = false, partial = false, provisional = false, wallElapsedMs = u5.duration_ms ?? null }) {
   const [expanded, setExpanded] = h2(false);
   const cost = u5.cost_usd !== void 0 ? fmtCost(u5.cost_usd) : "Cost unavailable";
   const estimatedCost = u5.cost_usd !== void 0 ? `${cost} est.` : cost;
@@ -23602,7 +23603,6 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false }
     u5.output_tokens !== void 0 ? `${output} output tokens reported` : ""
   ].filter(Boolean).join(" \xB7 ") || "Tokens unavailable";
   const model = u5.model ? shortModel(u5.model) : "";
-  const dur = u5.duration_ms != null ? fmtDur(u5.duration_ms) : "";
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
   const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
   const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
@@ -23636,10 +23636,18 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false }
           /* @__PURE__ */ u4("span", { children: partial ? "Reported cost" : "Estimated cost" }),
           /* @__PURE__ */ u4("strong", { children: cost })
         ] }),
-        dur ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-          /* @__PURE__ */ u4("span", { children: "Elapsed" }),
-          /* @__PURE__ */ u4("strong", { children: dur })
-        ] }) : null,
+        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Wall-clock time" }),
+          /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs) })
+        ] }),
+        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: live ? "Model-call time so far" : "Model-call time" }),
+          /* @__PURE__ */ u4("strong", { children: u5.duration_api_ms === void 0 ? "Unavailable" : formatElapsedDuration(u5.duration_api_ms) })
+        ] }),
+        /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+          /* @__PURE__ */ u4("span", { children: "Other time (wall minus model)" }),
+          /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null || u5.duration_api_ms === void 0 ? "Unavailable" : formatElapsedDuration(wallElapsedMs - u5.duration_api_ms) })
+        ] }),
         model ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
           /* @__PURE__ */ u4("span", { children: "Model" }),
           /* @__PURE__ */ u4("strong", { title: u5.model, children: model })
@@ -24275,12 +24283,13 @@ function TurnStats({ turn: turn2, view }) {
       UsageMeta,
       {
         u: record.value,
+        wallElapsedMs: view.elapsedMs,
         provisional: turn2.metadata.status === "provisional",
         partial: turn2.metadata.status === "partial"
       },
       record.id
     )),
-    !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, live: true, provisional: true }) : null,
+    !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, wallElapsedMs: view.elapsedMs, live: true, provisional: true }) : null,
     view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null
   ] });
 }
@@ -24294,7 +24303,16 @@ function TurnTechnicalInfo({
   const view = turn2 ? turnRowView(turn2, Date.now()) : null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
     /* @__PURE__ */ u4(ActivityTraceToggle, { count, expanded, onToggle }),
-    turn2?.phase === "settled" && view ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs }) : null,
+    turn2?.phase === "settled" && view ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.nonModelMs, kind: "other" }) : null,
+    view ? /* @__PURE__ */ u4(
+      "span",
+      {
+        class: "turn-model-time",
+        "aria-label": "Model-call time",
+        title: "Cumulative model-request and streaming time; excludes tools and waits for user input",
+        children: view.modelCallMs === null ? "Model time unavailable" : `Model ${formatElapsedDuration(view.modelCallMs)}`
+      }
+    ) : null,
     turn2 && view ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
   ] });
 }
@@ -24330,16 +24348,17 @@ function TurnTechnicalDetails({
     )
   ] });
 }
-function TurnElapsed({ elapsedMs, live = false }) {
-  if (elapsedMs === null) return null;
+function TurnElapsed({ elapsedMs, live = false, kind = "wall" }) {
+  if (elapsedMs === null && kind === "wall") return null;
   return /* @__PURE__ */ u4(
     "span",
     {
       class: "turn-elapsed",
       role: live ? "timer" : void 0,
       "aria-live": live ? "off" : void 0,
-      "aria-label": "Elapsed response time",
-      children: formatElapsedDuration(elapsedMs)
+      "aria-label": kind === "wall" ? "Elapsed response time" : "Non-model response time",
+      title: kind === "wall" ? "Response time, including tools and waiting for replies" : "Wall-clock time minus cumulative model-call time",
+      children: elapsedMs === null ? "Other time unavailable" : `${kind === "wall" ? "Time" : "Other"} ${formatElapsedDuration(elapsedMs)}`
     }
   );
 }
@@ -26920,7 +26939,7 @@ function AppearanceSettings() {
         ),
         /* @__PURE__ */ u4("span", { children: [
           /* @__PURE__ */ u4("strong", { children: "Show technical information" }),
-          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, completed elapsed time, cost, model, and context use. Live elapsed time stays visible." })
+          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, model-call and other time, cost, model, and context use. Live time stays visible." })
         ] })
       ] })
     ] }),

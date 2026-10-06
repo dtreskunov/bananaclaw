@@ -154,6 +154,7 @@ export interface TurnUsage {
    *  comparable to `context_window`. The counts above are billing sums. */
   context_tokens?: number;
   duration_ms?: number;
+  duration_api_ms?: number;
 }
 
 export interface DisplayCardAction {

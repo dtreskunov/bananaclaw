@@ -47,6 +47,7 @@ describe('current activity headline', () => {
       subject: 'pnpm test',
       codeSubject: true,
     });
+
     expect(currentActivityHeadline([line({ ...tool, status: 'pending' })])).toEqual({
       action: 'Queued',
       subject: 'pnpm test',
@@ -97,6 +98,41 @@ describe('current activity headline', () => {
         line({ kind: 'notification', id: 'ui:current:turn', text: 'Thinking…', status: 'running' }),
       ]),
     ).toEqual({ action: 'Running', subject: 'pnpm test', codeSubject: true });
+  });
+});
+
+describe('model time versus wall time', () => {
+  it('sums independently measured call timing, not provider wall duration', () => {
+    const turn = settled({
+      usage: [
+        { ...usage, value: { ...usage.value, duration_api_ms: 1000 } },
+        { id: 'other', value: { ...usage.value, duration_api_ms: 2000 } },
+      ],
+    });
+    expect(turnRowView(turn, start)).toMatchObject({ elapsedMs: 5000, modelCallMs: 3000, nonModelMs: 2000 });
+  });
+  it('uses live timing checkpoints and preserves measured zero', () => {
+    expect(
+      turnRowView(
+        { ...testTurn, liveUsage: { ...usage.value, cache_read_tokens: 0, cache_write_tokens: 0, duration_api_ms: 0 } },
+        start,
+      ),
+    ).toMatchObject({ modelCallMs: 0 });
+  });
+  it('does not invent model timing when any record is missing it', () => {
+    const turn = settled({
+      usage: [
+        { ...usage, value: { ...usage.value, duration_api_ms: 1000 } },
+        { id: 'missing', value: usage.value },
+      ],
+    });
+    expect(turnRowView(turn, start).modelCallMs).toBeNull();
+    expect(turnRowView(turn, start).nonModelMs).toBeNull();
+    expect(turnRowView(testTurn, start).modelCallMs).toBeNull();
+  });
+  it('preserves the signed difference when cumulative calls exceed wall time', () => {
+    const turn = settled({ usage: [{ ...usage, value: { ...usage.value, duration_api_ms: 7000 } }] });
+    expect(turnRowView(turn, start).nonModelMs).toBe(-2000);
   });
 });
 

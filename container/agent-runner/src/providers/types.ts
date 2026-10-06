@@ -263,6 +263,7 @@ export interface TurnUsage {
   reasoning_tokens?: number;
   num_turns?: number;
   duration_ms?: number;
+  /** Cumulative model-request/streaming time, excluding tools and human waits. */
   duration_api_ms?: number;
   model: string;
   context_window?: number;
@@ -280,7 +281,7 @@ export interface TurnUsage {
 /** Usage for one completed model call. The runner accumulates these into a
  * TurnUsage snapshot so lossy host polling never has to reconstruct totals
  * from individual events. */
-export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms' | 'duration_api_ms'>;
+export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms'>;
 
 /**
  * One step of a turn's activity trace, in structured form. Providers emit

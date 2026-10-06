@@ -243,6 +243,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
               cost_usd: 0.0123,
               model: 'fixture-model',
               duration_ms: 10_000,
+              duration_api_ms: 8000,
               input_tokens: 2500,
               output_tokens: 350,
               context_tokens: 8000,
@@ -255,6 +256,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
       ? null
       : {
           cost_usd: 0.004,
+          duration_api_ms: 3000,
           model: 'fixture-model',
           input_tokens: 2100,
           output_tokens: 0,

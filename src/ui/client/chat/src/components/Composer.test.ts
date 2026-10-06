@@ -1145,6 +1145,7 @@ describe('main composer pending edits', () => {
         }),
         'thread',
       );
+
       hooks.slots = [];
       hooks.cursor = 0;
       const log = findComponent(ChatMain(), 'MessageLog');
@@ -1167,15 +1168,70 @@ describe('main composer pending edits', () => {
         const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
         expect(!!toggle.type(toggle.props)).toBe(recorded);
         const elapsed = findComponent(info.type(info.props), 'TurnElapsed');
-        expect(elapsed.props.elapsedMs).toBe(6500);
+        expect(elapsed.props.elapsedMs).toBeNull();
         const stopwatch = elapsed.type(elapsed.props);
-        expect(stopwatch.props.children).toBe('0:06');
+        expect(stopwatch.props.children).toBe('Other time unavailable');
         expect(stopwatch.props.role).toBeUndefined();
       }
       const footer = row.props.children.at(-1);
       expect(footer.props.class).toBe('meta turn-info');
       const info = findComponent(footer, 'ReplyTurnInfo');
       expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
+    },
+  );
+
+  it.each([3500, 0, undefined])(
+    'shows wall and model timing separately in technical information and its popup (%s)',
+    (modelMs) => {
+      appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+      applyConversationFrame(
+        testSnapshot({
+          turns: [
+            {
+              ...testTurn,
+              phase: 'settled',
+              outcome: 'silent',
+              metadata: { status: 'final', model: 'm', durationMs: 6500 },
+              usage: [{ id: 'timing', value: { cost_usd: 0.1, duration_ms: 999999, duration_api_ms: modelMs } }],
+            },
+          ],
+          connection: { connected: true, activeTurnId: null },
+        }),
+        'thread',
+      );
+      resetMount();
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      const status = findComponent(log.type(log.props), 'ResponseStatusRow');
+      resetMount();
+      const details = renderTechnicalDetails(status.type(status.props));
+      const info = findComponent(details, 'TurnTechnicalInfo');
+      const header = info.type(info.props);
+      const model = find(header, 'span', 'Model-call time');
+      expect(model.props.children).toBe(
+        modelMs === undefined ? 'Model time unavailable' : modelMs === 0 ? 'Model 0:00' : 'Model 0:03',
+      );
+      const stats = findComponent(header, 'TurnStats');
+      const usage = findComponent(stats.type(stats.props), 'UsageMeta');
+      resetMount();
+      hooks.cursor = 0;
+      const summary = usage.type(usage.props);
+      find(summary, 'button').props.onClick({ stopPropagation() {} });
+      hooks.cursor = 0;
+      const popup = find(usage.type(usage.props), 'span', 'Turn usage details');
+      expect(find(popup, 'span', 'Wall-clock time')).toBeDefined();
+      expect(find(popup, 'strong', '0:06')).toBeDefined();
+      expect(find(popup, 'span', 'Model-call time')).toBeDefined();
+      expect(
+        find(popup, 'strong', modelMs === undefined ? 'Unavailable' : modelMs === 0 ? '0:00' : '0:03'),
+      ).toBeDefined();
+      expect(find(popup, 'strong', '166:39')).toBeUndefined();
+      expect(find(popup, 'span', 'Other time (wall minus model)')).toBeDefined();
+      expect(
+        find(popup, 'strong', modelMs === undefined ? 'Unavailable' : modelMs === 0 ? '0:06' : '0:03'),
+      ).toBeDefined();
+      const other = findComponent(header, 'TurnElapsed');
+      expect(other.props.elapsedMs).toBe(modelMs === undefined ? null : 6500 - modelMs);
     },
   );
 
@@ -1238,7 +1294,7 @@ describe('main composer pending edits', () => {
         expect(!!toggle.type(toggle.props)).toBe(recorded);
         expect(trace.props.lines).toEqual(recorded ? testTurn.activity : []);
         const elapsed = findComponent(header.type(header.props), 'TurnElapsed');
-        expect(elapsed.props.elapsedMs).toBe(6500);
+        expect(elapsed.props.elapsedMs).toBeNull();
       }
       expect(title.props.class).toBe('display-card-title');
       const footer = row.props.children.at(-1);
@@ -1293,7 +1349,7 @@ describe('main composer pending edits', () => {
       expect(find(footer, 'span').props.children).toBe(note);
       if (technical) {
         const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
-        expect(findComponent(info.type(info.props), 'TurnElapsed').props.elapsedMs).toBe(6500);
+        expect(findComponent(info.type(info.props), 'TurnElapsed').props.elapsedMs).toBeNull();
       } else {
         expect(renderTechnicalDetails(row)).toBeUndefined();
       }
@@ -1340,7 +1396,7 @@ describe('main composer pending edits', () => {
       expect(controls[2].type.name).toBe('TurnElapsed');
       expect(controls[2].props.elapsedMs).toBeGreaterThanOrEqual(7000);
       const stopwatch = controls[2].type(controls[2].props);
-      expect(stopwatch.props.children).toBe('0:07');
+      expect(stopwatch.props.children).toBe('Time 0:07');
       expect(stopwatch.props['aria-live']).toBe('off');
       expect(controls[3].type).toBe(technical ? 'button' : 'span');
       expect(findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo') !== undefined).toBe(technical);

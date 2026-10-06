@@ -328,6 +328,7 @@ export class NativeProvider implements AgentProvider {
             const turn = pending.shift()!;
             active = true;
             const startedAt = Date.now();
+            let modelCallMs = 0;
             let journal: NativeTurnJournal | undefined;
             const callUsages: CallUsage[] = [];
             function* flushCallUsage(): Generator<ProviderEvent> {
@@ -424,9 +425,10 @@ export class NativeProvider implements AgentProvider {
                   abortSignal: abortController.signal,
                   // A model call can finish before its tool does. Retain its
                   // usage even if cancellation prevents finish-step.
-                  onLanguageModelCallEnd: ({ usage }) => {
+                  onLanguageModelCallEnd: ({ usage, performance }) => {
+                    modelCallMs += performance.responseTimeMs;
                     if (usage.inputTokens !== undefined || usage.outputTokens !== undefined) {
-                      callUsages.push(callUsageFor(resolved, usage));
+                      callUsages.push({ ...callUsageFor(resolved, usage), duration_api_ms: performance.responseTimeMs });
                     }
                   },
                   ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
@@ -498,8 +500,9 @@ export class NativeProvider implements AgentProvider {
                           maxOutputTokens: Math.min(2048, Math.max(64, Math.floor((resolved.contextWindow ?? 32_768) / 8))),
                           maxRetries: 2,
                           abortSignal: compactSignal,
-                          onLanguageModelCallEnd: ({ usage }) => {
-                            const data = callUsageFor(resolved, usage);
+                          onLanguageModelCallEnd: ({ usage, performance }) => {
+                            modelCallMs += performance.responseTimeMs;
+                            const data = { ...callUsageFor(resolved, usage), duration_api_ms: performance.responseTimeMs };
                             callUsages.push(data);
                             addUsage(totalUsage, data);
                           },
@@ -621,7 +624,7 @@ export class NativeProvider implements AgentProvider {
               active = false;
               yield {
                 type: 'usage',
-                data: { ...totalUsage, duration_ms: Date.now() - startedAt, num_turns: stepsCompleted },
+                data: { ...totalUsage, duration_ms: Date.now() - startedAt, duration_api_ms: modelCallMs, num_turns: stepsCompleted },
               };
               yield { type: 'checkpoint', ref: checkpoint };
               yield {
