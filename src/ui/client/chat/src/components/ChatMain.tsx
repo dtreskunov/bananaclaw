@@ -370,7 +370,7 @@ function UsageMeta({ u, live = false, partial = false, provisional = false, wall
     : [
         u.input_tokens !== undefined ? `${input} input tokens reported` : '',
         u.output_tokens !== undefined ? `${output} output tokens reported` : '',
-      ].filter(Boolean).join(' \u00b7 ') || 'Tokens unavailable';
+      ].filter(Boolean).join(' \u00b7 ');
   const model = u.model ? shortModel(u.model) : '';
   const contextTokens = u.context_tokens && (!u.context_window || u.context_tokens <= u.context_window)
     ? u.context_tokens
@@ -384,7 +384,7 @@ function UsageMeta({ u, live = false, partial = false, provisional = false, wall
   const short = live
     ? [estimatedCost, `${input} input`, calls, ctx].filter(Boolean).join(' \u00b7 ')
     : partial
-      ? [u.cost_usd !== undefined ? cost : '', model, reported].filter(Boolean).join(' \u00b7 ')
+      ? [u.cost_usd !== undefined ? cost : '', model, reported].filter(Boolean).join(' \u00b7 ') || 'Usage details'
       : [provisional ? estimatedCost : cost, model, ctx].filter(Boolean).join(' \u00b7 ');
   const contextDetail = contextTokens
     ? `${fmtTok(contextTokens)}${u.context_window
@@ -1099,7 +1099,11 @@ function TaskIndicator() {
   );
 }
 
-/** Model, usage and token availability. */
+function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
+  return (view.showModel && !!view.model) || view.usage.length > 0 || !!turn.liveUsage;
+}
+
+/** Reported model and usage. */
 function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }) {
   return (
     <>
@@ -1107,7 +1111,6 @@ function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }
       {view.usage.map((record) => <UsageMeta key={record.id} u={record.value} wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs}
         provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />)}
       {!turn.usage.length && turn.liveUsage ? <UsageMeta u={turn.liveUsage} wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs} live provisional /> : null}
-      {view.showTokensUnavailable ? <span>Tokens unavailable</span> : null}
     </>
   );
 }
@@ -1119,6 +1122,7 @@ function TurnTechnicalInfo({
 }) {
   if (!turn && !count) return null;
   const view = turn ? turnRowView(turn, Date.now()) : null;
+  if (!count && (!turn || !view || !hasTurnStats(turn, view))) return null;
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
       <ActivityTraceToggle count={count} expanded={expanded} onToggle={onToggle} />
@@ -1138,6 +1142,7 @@ function TurnTechnicalDetails({
 }) {
   const traceView = activityTraceView(ownerId, live);
   if (!turn && (!lines.length || (!activityStepCount(lines) && !traceView.expanded))) return null;
+  if (turn && !lines.length && !hasTurnStats(turn, turnRowView(turn, Date.now()))) return null;
   return (
     <div class="turn-technical-details">
       <TurnTechnicalInfo turn={turn} count={activityStepCount(lines)}

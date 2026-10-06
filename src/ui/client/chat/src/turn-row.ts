@@ -95,7 +95,6 @@ export interface TurnRowView {
   model: string | null;
   /** Settled usage summaries already carry the model. */
   showModel: boolean;
-  showTokensUnavailable: boolean;
   usage: ConversationTurn['usage'];
 }
 
@@ -130,7 +129,6 @@ export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
     nonModelMs: elapsedMs !== null && modelCallMs !== null ? elapsedMs - modelCallMs : null,
     model,
     showModel: !settled || !turn.usage.length,
-    showTokensUnavailable: settled && !turn.usage.length && hasTiming,
     // While running, the live line owns elapsed time and model; checkpointed values would be stale.
     usage: settled
       ? turn.usage

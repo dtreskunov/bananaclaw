@@ -22363,7 +22363,6 @@ function turnRowView(turn2, now) {
     nonModelMs: elapsedMs !== null && modelCallMs !== null ? elapsedMs - modelCallMs : null,
     model,
     showModel: !settled || !turn2.usage.length,
-    showTokensUnavailable: settled && !turn2.usage.length && hasTiming,
     // While running, the live line owns elapsed time and model; checkpointed values would be stale.
     usage: settled ? turn2.usage : turn2.usage.map(({ id: id2, value }) => ({ id: id2, value: { ...value, duration_ms: void 0, model: void 0 } }))
   };
@@ -23606,12 +23605,12 @@ function UsageMeta({ u: u5, live = false, partial = false, provisional = false, 
   const reported = u5.input_tokens !== void 0 && u5.output_tokens !== void 0 ? `${fmtTok(u5.input_tokens + u5.output_tokens)} tokens reported` : [
     u5.input_tokens !== void 0 ? `${input} input tokens reported` : "",
     u5.output_tokens !== void 0 ? `${output} output tokens reported` : ""
-  ].filter(Boolean).join(" \xB7 ") || "Tokens unavailable";
+  ].filter(Boolean).join(" \xB7 ");
   const model = u5.model ? shortModel(u5.model) : "";
   const contextTokens = u5.context_tokens && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
   const ctx2 = contextTokens && u5.context_window ? `Context ${fmtPct(contextTokens, u5.context_window)}` : "";
   const calls = u5.num_turns ? `${u5.num_turns} call${u5.num_turns === 1 ? "" : "s"}` : "";
-  const short = live ? [estimatedCost, `${input} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [u5.cost_usd !== void 0 ? cost : "", model, reported].filter(Boolean).join(" \xB7 ") : [provisional ? estimatedCost : cost, model, ctx2].filter(Boolean).join(" \xB7 ");
+  const short = live ? [estimatedCost, `${input} input`, calls, ctx2].filter(Boolean).join(" \xB7 ") : partial ? [u5.cost_usd !== void 0 ? cost : "", model, reported].filter(Boolean).join(" \xB7 ") || "Usage details" : [provisional ? estimatedCost : cost, model, ctx2].filter(Boolean).join(" \xB7 ");
   const contextDetail = contextTokens ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${fmtPct(contextTokens, u5.context_window)})` : ""}` : void 0;
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
@@ -24283,6 +24282,9 @@ function TaskIndicator() {
     );
   }) });
 }
+function hasTurnStats(turn2, view) {
+  return view.showModel && !!view.model || view.usage.length > 0 || !!turn2.liveUsage;
+}
 function TurnStats({ turn: turn2, view }) {
   return /* @__PURE__ */ u4(k, { children: [
     view.showModel && view.model ? /* @__PURE__ */ u4("span", { class: "typing-meta", children: shortModel(view.model) }) : null,
@@ -24297,8 +24299,7 @@ function TurnStats({ turn: turn2, view }) {
       },
       record.id
     )),
-    !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, wallElapsedMs: view.elapsedMs, modelElapsedMs: view.modelCallMs, live: true, provisional: true }) : null,
-    view.showTokensUnavailable ? /* @__PURE__ */ u4("span", { children: "Tokens unavailable" }) : null
+    !turn2.usage.length && turn2.liveUsage ? /* @__PURE__ */ u4(UsageMeta, { u: turn2.liveUsage, wallElapsedMs: view.elapsedMs, modelElapsedMs: view.modelCallMs, live: true, provisional: true }) : null
   ] });
 }
 function TurnTechnicalInfo({
@@ -24309,6 +24310,7 @@ function TurnTechnicalInfo({
 }) {
   if (!turn2 && !count) return null;
   const view = turn2 ? turnRowView(turn2, Date.now()) : null;
+  if (!count && (!turn2 || !view || !hasTurnStats(turn2, view))) return null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
     /* @__PURE__ */ u4(ActivityTraceToggle, { count, expanded, onToggle }),
     turn2 && view ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
@@ -24323,6 +24325,7 @@ function TurnTechnicalDetails({
 }) {
   const traceView = activityTraceView(ownerId, live);
   if (!turn2 && (!lines.length || !activityStepCount(lines) && !traceView.expanded)) return null;
+  if (turn2 && !lines.length && !hasTurnStats(turn2, turnRowView(turn2, Date.now()))) return null;
   return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
     /* @__PURE__ */ u4(
       TurnTechnicalInfo,

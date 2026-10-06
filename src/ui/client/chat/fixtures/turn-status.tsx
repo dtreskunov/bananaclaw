@@ -47,6 +47,8 @@ const scenes = [
   { id: 'empty-reply', label: 'Settled reply (no recorded steps)' },
   { id: 'outputless', label: 'Settled without reply' },
   { id: 'failed', label: 'Failed reply' },
+  { id: 'failed-no-usage', label: 'Failed reply (no accounting)' },
+  { id: 'failed-timing-only', label: 'Failed reply (timing only)' },
   { id: 'card', label: 'Settled display card' },
 ] as const;
 type Scene = (typeof scenes)[number]['id'];
@@ -163,7 +165,9 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
   }
   const started = Date.parse(startedAt);
   const testing = nextScene === 'running' || nextScene === 'parallel' || nextScene === 'parallel-completed';
-  const settled = ['reply', 'empty-reply', 'outputless', 'failed', 'card'].includes(nextScene);
+  const failed = ['failed', 'failed-no-usage', 'failed-timing-only'].includes(nextScene);
+  const missingAccounting = nextScene === 'failed-no-usage' || nextScene === 'failed-timing-only';
+  const settled = failed || ['reply', 'empty-reply', 'outputless', 'card'].includes(nextScene);
   const phase = settled
     ? 'settled'
     : nextScene === 'stopping'
@@ -172,7 +176,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
         ? 'settling'
         : 'running';
   const activity: ConversationTurn['activity'] =
-    nextScene === 'initial' || nextScene === 'empty-reply'
+    nextScene === 'initial' || nextScene === 'empty-reply' || missingAccounting
       ? []
       : [
           {
@@ -229,13 +233,17 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
   const turn: ConversationTurn = {
     id: fixtureTurnId,
     phase,
-    outcome: !settled ? 'pending' : nextScene === 'failed' ? 'failed' : hasReply ? 'replied' : 'silent',
+    outcome: !settled ? 'pending' : failed ? 'failed' : hasReply ? 'replied' : 'silent',
     startedAt,
     endedAt: settled ? new Date(started + 12_000).toISOString() : null,
     inputIds: ['fixture-status-input'],
     outputIds: hasReply ? ['fixture-status-reply'] : [],
     activity,
-    usage: settled
+    usage: nextScene === 'failed-no-usage'
+      ? []
+      : nextScene === 'failed-timing-only'
+      ? [{ id: 'fixture-timing-usage', value: { duration_api_ms: 8000 } }]
+      : settled
       ? [
           {
             id: 'fixture-status-usage',
@@ -266,8 +274,8 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
           context_window: 200_000,
         },
     metadata: {
-      status: nextScene === 'failed' ? 'partial' : settled ? 'final' : 'provisional',
-      model: 'fixture-model',
+      status: failed ? 'partial' : settled ? 'final' : 'provisional',
+      model: missingAccounting ? null : 'fixture-model',
       durationMs: settled ? 12_000 : null,
     },
   };
@@ -288,7 +296,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
               direction: 'out' as const,
               turnId: fixtureTurnId,
               deliveryOrigin: 'response' as const,
-              text: nextScene === 'failed' ? 'The fixture response failed.' : 'The **fixture response** is complete.',
+              text: failed ? 'The fixture response failed.' : 'The **fixture response** is complete.',
               timestamp: new Date(started + 12_000).toISOString(),
               timelinePosition: (started + 12_000) * 1000,
               ...(nextScene === 'card'

@@ -34,6 +34,7 @@ import { applyConversationFrame, completedResponse, resetConversation } from '..
 import { testSnapshot, testTurn, testWebSubmission } from '../conversation-test-fixtures';
 import { appearance } from '../appearance-state';
 import { DEFAULT_APPEARANCE } from '../appearance';
+import { isSystemNotice } from '../chat-protocol';
 import { voice } from '../voice-audio';
 
 // Exercise the real Composer's refs, layout transitions, handlers and rendered
@@ -1176,6 +1177,102 @@ describe('main composer pending edits', () => {
       expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
     },
   );
+
+  it.each([
+    { model: null, usage: [] },
+    { model: 'fixture-model', usage: [] },
+    { model: null, usage: [{ id: 'timing-only', value: { duration_api_ms: 1200 } }] },
+    { model: 'fixture-model', usage: [{ id: 'cost-only', value: { cost_usd: 0.01 } }] },
+  ])('omits unavailable-token labels without losing partial usage details (%s)', ({ model, usage }) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    applyConversationFrame(
+      testSnapshot({
+        turns: [
+          {
+            ...testTurn,
+            phase: 'settled',
+            outcome: 'failed',
+            activity: [],
+            usage,
+            metadata: { status: 'partial', model, durationMs: 6500 },
+          },
+        ],
+        connection: { connected: true, activeTurnId: null },
+      }),
+      'thread',
+    );
+    resetMount();
+    const log = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    const status = findComponent(log.type(log.props), 'ResponseStatusRow');
+    resetMount();
+    const row = status.type(status.props);
+    expect(find(row, 'span', 'Failed')).toBeDefined();
+    const details = renderTechnicalDetails(row);
+    if (!model && !usage.length) {
+      expect(details).toBeNull();
+      return;
+    }
+    const info = findComponent(details, 'TurnTechnicalInfo');
+    const header = info.type(info.props);
+    const stats = findComponent(header, 'TurnStats');
+    const rendered = stats.type(stats.props);
+    expect(find(rendered, 'span', 'Tokens unavailable')).toBeUndefined();
+    const record = findComponent(rendered, 'UsageMeta');
+    if (usage.length) {
+      resetMount();
+      hooks.cursor = 0;
+      const summary = record.type(record.props);
+      const button = find(summary, 'button');
+      expect(button.props.children).not.toContain('Tokens unavailable');
+      expect(button.props.children).toBe(model ? '$0.010' : 'Usage details');
+      button.props.onClick({ stopPropagation() {} });
+      hooks.cursor = 0;
+      const popup = find(record.type(record.props), 'span', 'Turn usage details');
+      expect(popup).toBeDefined();
+      expect(find(popup, 'span', 'Total time')).toBeDefined();
+    }
+  });
+
+  it('keeps Failed on a normal-language failure acknowledgement without an error bubble', () => {
+    applyConversationFrame(
+      testSnapshot({
+        messages: [
+          {
+            id: 'failure-ack',
+            direction: 'out',
+            text: 'The provider could not complete your request.',
+            timestamp: '2026-09-29T00:00:02Z',
+            timelinePosition: 200,
+            turnId: testTurn.id,
+            deliveryOrigin: 'response',
+          },
+        ],
+        turns: [
+          {
+            ...testTurn,
+            phase: 'settled',
+            outcome: 'failed',
+            outputIds: ['failure-ack'],
+            metadata: { status: 'partial', model: 'fixture-model', durationMs: 6500 },
+          },
+        ],
+        connection: { connected: true, activeTurnId: null },
+      }),
+      'thread',
+    );
+    resetMount();
+    const log = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    const message = findComponent(log.type(log.props), 'Message');
+    resetMount();
+    const bubble = message.type(message.props);
+    expect(
+      isSystemNotice(message.props.m.direction, message.props.m.systemGenerated, message.props.m.suggestedAction),
+    ).toBe(false);
+    const info = findComponent(bubble, 'ReplyTurnInfo');
+    expect(find(info.type(info.props), 'span', 'Failed')).toBeDefined();
+  });
 
   it.each([
     { modelMs: 3500, extraMs: 1000, modelText: '0:04', otherText: '0:02' },

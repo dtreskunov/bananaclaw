@@ -241,9 +241,9 @@ describe('turn row presentation', () => {
 
   it('keeps settled elapsed time separate from model and usage metadata', () => {
     const view = turnRowView(settled({ usage: [usage] }), start + 60_000);
-    expect(view).toMatchObject({ elapsedMs: 5000, showModel: false, showTokensUnavailable: false, status: null });
+    expect(view).toMatchObject({ elapsedMs: 5000, showModel: false, status: null });
     expect(view.usage).toEqual([usage]);
-    expect(turnRowView(settled(), 0)).toMatchObject({ showModel: true, showTokensUnavailable: true });
+    expect(turnRowView(settled(), 0)).toMatchObject({ showModel: true });
   });
 
   it('keeps settling live without flashing a finalization notice or settled accounting', () => {
@@ -254,7 +254,6 @@ describe('turn row presentation', () => {
       note: null,
       elapsedMs: 7000,
       showModel: true,
-      showTokensUnavailable: false,
     });
     expect(turnRowView(turn, start).usage[0].value).toMatchObject({ duration_ms: undefined, model: undefined });
   });

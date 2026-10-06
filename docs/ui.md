@@ -360,6 +360,11 @@ remains at the bottom and retains relative timestamps and notable outcomes.
 The usage pop-up contains completed timing; the technical line does not show
 model or other time, including on replies, display cards and outputless turns.
 The pop-up is accessible only when technical information is on.
+Missing token accounting does not add a "Tokens unavailable" label to the
+transcript. Partial records show only reported values; a record with no summary
+values still offers **Usage details** for inspecting its available timing and
+accounting. The **Failed** outcome remains distinct from an error bubble: failed
+turns can instead deliver a normal-language failure acknowledgement.
 Live rows order the bouncing dots, Stop, stopwatch, and current
 activity text. Only pending or running activities drive that text; when none
 remain, it returns to **Thinking…**, including before recorded activity arrives.
