@@ -353,12 +353,13 @@ reveal actions on hover or focus. User-message timestamps stay anchored to the
 left while actions occupy the right side of the row.
 
 **Appearance → Transcript details → Show technical information** controls technical
-details on all bubbles: activity trace, model-call and other time, cost, model, and
+details on all bubbles: activity trace, cost, model, and
 context use. Technical information occupies a separate line at the top of live, reply and display-card
 bubbles, and is absent when the toggle is off. The regular information line
 remains at the bottom and retains relative timestamps and notable outcomes.
-Completed timing appears only in the technical line, including on replies,
-display cards and outputless turns, and is hidden when technical information is off.
+The usage pop-up contains completed timing; the technical line does not show
+model or other time, including on replies, display cards and outputless turns.
+The pop-up is accessible only when technical information is on.
 Live rows order the bouncing dots, Stop, stopwatch, and current
 activity text. Only pending or running activities drive that text; when none
 remain, it returns to **Thinking…**, including before recorded activity arrives.
@@ -410,13 +411,11 @@ Current activity remains visible with technical information hidden. The toggle
 does not change status font size or the font used for inline-code subjects.
 The stopwatch uses minutes and seconds and remains in the regular footer while
 the turn is live, as a plain duration with no label, whether technical
-information is on or off. On settlement the technical summary shows
-**Other** time (wall-clock time minus cumulative model-call time), not wall time.
-Technical information also shows **Model** time:
-cumulative time requesting and streaming model responses, excluding tool
-execution and waits for user input. The usage pop-up shows **Total time** with
-indented **Model time** and **Other time** as its breakdown; total time uses
-the authoritative logical turn,
+information is on or off. The technical summary omits inline timing.
+The usage pop-up shows **Total time** with
+indented **Model time** and **Other time** as its breakdown. Model time is cumulative time requesting and
+streaming model responses, excluding tool execution and waits for user input;
+other time is total time minus model time. Total time uses the authoritative logical turn,
 not the provider attempt's duration. Native measures model responses using the
 SDK's model-call performance callback, including compaction calls; Claude
 reports API time. Other providers and older records without isolated timing

@@ -1113,7 +1113,7 @@ describe('main composer pending edits', () => {
   });
 
   it.each([false, true].flatMap((technical) => [false, true].map((recorded) => ({ technical, recorded }))))(
-    'shows settled elapsed only in the shared technical line ($technical, recorded steps $recorded)',
+    'omits settled timing from the shared technical line ($technical, recorded steps $recorded)',
     ({ technical, recorded }) => {
       appearance.value = {
         ...appearance.peek(),
@@ -1167,11 +1167,8 @@ describe('main composer pending edits', () => {
         expect(info.props.count).toBe(recorded ? 1 : 0);
         const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
         expect(!!toggle.type(toggle.props)).toBe(recorded);
-        const elapsed = findComponent(info.type(info.props), 'TurnElapsed');
-        expect(elapsed.props.elapsedMs).toBeNull();
-        const stopwatch = elapsed.type(elapsed.props);
-        expect(stopwatch.props.children).toBe('Other time unavailable');
-        expect(stopwatch.props.role).toBeUndefined();
+        expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
+        expect(find(info.type(info.props), 'span', 'Model-call time')).toBeUndefined();
       }
       const footer = row.props.children.at(-1);
       expect(footer.props.class).toBe('meta turn-info');
@@ -1181,13 +1178,13 @@ describe('main composer pending edits', () => {
   );
 
   it.each([
-    { modelMs: 3500, extraMs: 1000, totalModelMs: 4500, modelText: '0:04', otherText: '0:02' },
-    { modelMs: 0, extraMs: 0, totalModelMs: 0, modelText: '0:00', otherText: '0:06' },
-    { modelMs: undefined, extraMs: 1000, totalModelMs: null, modelText: 'Unavailable', otherText: 'Unavailable' },
-    { modelMs: 8500, extraMs: 0, totalModelMs: 8500, modelText: '0:08', otherText: '-0:02' },
+    { modelMs: 3500, extraMs: 1000, modelText: '0:04', otherText: '0:02' },
+    { modelMs: 0, extraMs: 0, modelText: '0:00', otherText: '0:06' },
+    { modelMs: undefined, extraMs: 1000, modelText: 'Unavailable', otherText: 'Unavailable' },
+    { modelMs: 8500, extraMs: 0, modelText: '0:08', otherText: '-0:02' },
   ])(
-    'shows wall and model timing separately in technical information and its popup (%s)',
-    ({ modelMs, extraMs, totalModelMs, modelText, otherText }) => {
+    'keeps total, model and other timing in the popup but not the technical line (%s)',
+    ({ modelMs, extraMs, modelText, otherText }) => {
       appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
       applyConversationFrame(
         testSnapshot({
@@ -1215,8 +1212,8 @@ describe('main composer pending edits', () => {
       const details = renderTechnicalDetails(status.type(status.props));
       const info = findComponent(details, 'TurnTechnicalInfo');
       const header = info.type(info.props);
-      const model = find(header, 'span', 'Model-call time');
-      expect(model.props.children).toBe(totalModelMs === null ? 'Model time unavailable' : `Model ${modelText}`);
+      expect(find(header, 'span', 'Model-call time')).toBeUndefined();
+      expect(findComponent(header, 'TurnElapsed')).toBeUndefined();
       const stats = findComponent(header, 'TurnStats');
       const usage = findComponent(stats.type(stats.props), 'UsageMeta');
       resetMount();
@@ -1232,11 +1229,6 @@ describe('main composer pending edits', () => {
       expect(find(popup, 'strong', '166:39')).toBeUndefined();
       expect(find(popup, 'span', 'Other time')).toBeDefined();
       expect(find(popup, 'strong', otherText)).toBeDefined();
-      const other = findComponent(header, 'TurnElapsed');
-      expect(other.props.elapsedMs).toBe(totalModelMs === null ? null : 6500 - totalModelMs);
-      expect(other.type(other.props).props.children).toBe(
-        totalModelMs === null ? 'Other time unavailable' : `Other ${otherText}`,
-      );
     },
   );
 
@@ -1298,8 +1290,8 @@ describe('main composer pending edits', () => {
         const toggle = findComponent(header.type(header.props), 'ActivityTraceToggle');
         expect(!!toggle.type(toggle.props)).toBe(recorded);
         expect(trace.props.lines).toEqual(recorded ? testTurn.activity : []);
-        const elapsed = findComponent(header.type(header.props), 'TurnElapsed');
-        expect(elapsed.props.elapsedMs).toBeNull();
+        expect(findComponent(header.type(header.props), 'TurnElapsed')).toBeUndefined();
+        expect(find(header.type(header.props), 'span', 'Model-call time')).toBeUndefined();
       }
       expect(title.props.class).toBe('display-card-title');
       const footer = row.props.children.at(-1);
@@ -1320,7 +1312,7 @@ describe('main composer pending edits', () => {
       ).map(({ outcome, note }) => ({ technical, outcome, note })),
     ),
   )(
-    'keeps $outcome outcome in the footer and gates settled elapsed on technical information ($technical)',
+    'keeps $outcome outcome in the footer without inline settled timing ($technical)',
     ({ technical, outcome, note }) => {
       appearance.value = {
         ...appearance.peek(),
@@ -1354,7 +1346,8 @@ describe('main composer pending edits', () => {
       expect(find(footer, 'span').props.children).toBe(note);
       if (technical) {
         const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
-        expect(findComponent(info.type(info.props), 'TurnElapsed').props.elapsedMs).toBeNull();
+        expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
+        expect(find(info.type(info.props), 'span', 'Model-call time')).toBeUndefined();
       } else {
         expect(renderTechnicalDetails(row)).toBeUndefined();
       }
@@ -1405,6 +1398,11 @@ describe('main composer pending edits', () => {
       expect(stopwatch.props['aria-live']).toBe('off');
       expect(controls[3].type).toBe(technical ? 'button' : 'span');
       expect(findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo') !== undefined).toBe(technical);
+      if (technical) {
+        const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+        expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
+        expect(find(info.type(info.props), 'span', 'Model-call time')).toBeUndefined();
+      }
       hooks.slots = [];
       hooks.cursor = 0;
       const settled = turnRow.type({

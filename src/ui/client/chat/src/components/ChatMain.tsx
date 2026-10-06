@@ -1122,11 +1122,6 @@ function TurnTechnicalInfo({
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
       <ActivityTraceToggle count={count} expanded={expanded} onToggle={onToggle} />
-      {turn?.phase === 'settled' && view ? <TurnElapsed elapsedMs={view.nonModelMs} kind="other" /> : null}
-      {view ? <span class="turn-model-time" aria-label="Model-call time"
-        title="Cumulative model-request and streaming time; excludes tools and waits for user input">
-        {view.modelCallMs === null ? 'Model time unavailable' : `Model ${formatElapsedDuration(view.modelCallMs)}`}
-      </span> : null}
       {turn && view ? <TurnStats turn={turn} view={view} /> : null}
     </div>
   );
@@ -1153,13 +1148,13 @@ function TurnTechnicalDetails({
   );
 }
 
-function TurnElapsed({ elapsedMs, live = false, kind = 'wall' }: { elapsedMs: number | null; live?: boolean; kind?: 'wall' | 'other' }) {
-  if (elapsedMs === null && kind === 'wall') return null;
+function TurnElapsed({ elapsedMs, live = false }: { elapsedMs: number | null; live?: boolean }) {
+  if (elapsedMs === null) return null;
   return (
     <span class="turn-elapsed" role={live ? 'timer' : undefined} aria-live={live ? 'off' : undefined}
-      aria-label={kind === 'wall' ? 'Elapsed response time' : 'Non-model response time'}
-      title={kind === 'wall' ? 'Response time, including tools and waiting for replies' : 'Wall-clock time minus cumulative model-call time'}>
-      {elapsedMs === null ? 'Other time unavailable' : `${kind === 'wall' ? '' : 'Other '}${formatElapsedDuration(elapsedMs)}`}
+      aria-label="Elapsed response time"
+      title="Response time, including tools and waiting for replies">
+      {formatElapsedDuration(elapsedMs)}
     </span>
   );
 }

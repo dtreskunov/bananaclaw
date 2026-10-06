@@ -2908,10 +2908,6 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
 }
-.chat-main .turn-model-time {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
 .chat-main .typing.expanded {
   min-width: min(78%, 460px);
 }

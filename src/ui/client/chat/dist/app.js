@@ -24311,16 +24311,6 @@ function TurnTechnicalInfo({
   const view = turn2 ? turnRowView(turn2, Date.now()) : null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
     /* @__PURE__ */ u4(ActivityTraceToggle, { count, expanded, onToggle }),
-    turn2?.phase === "settled" && view ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.nonModelMs, kind: "other" }) : null,
-    view ? /* @__PURE__ */ u4(
-      "span",
-      {
-        class: "turn-model-time",
-        "aria-label": "Model-call time",
-        title: "Cumulative model-request and streaming time; excludes tools and waits for user input",
-        children: view.modelCallMs === null ? "Model time unavailable" : `Model ${formatElapsedDuration(view.modelCallMs)}`
-      }
-    ) : null,
     turn2 && view ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
   ] });
 }
@@ -24356,17 +24346,17 @@ function TurnTechnicalDetails({
     )
   ] });
 }
-function TurnElapsed({ elapsedMs, live = false, kind = "wall" }) {
-  if (elapsedMs === null && kind === "wall") return null;
+function TurnElapsed({ elapsedMs, live = false }) {
+  if (elapsedMs === null) return null;
   return /* @__PURE__ */ u4(
     "span",
     {
       class: "turn-elapsed",
       role: live ? "timer" : void 0,
       "aria-live": live ? "off" : void 0,
-      "aria-label": kind === "wall" ? "Elapsed response time" : "Non-model response time",
-      title: kind === "wall" ? "Response time, including tools and waiting for replies" : "Wall-clock time minus cumulative model-call time",
-      children: elapsedMs === null ? "Other time unavailable" : `${kind === "wall" ? "" : "Other "}${formatElapsedDuration(elapsedMs)}`
+      "aria-label": "Elapsed response time",
+      title: "Response time, including tools and waiting for replies",
+      children: formatElapsedDuration(elapsedMs)
     }
   );
 }
@@ -26947,7 +26937,7 @@ function AppearanceSettings() {
         ),
         /* @__PURE__ */ u4("span", { children: [
           /* @__PURE__ */ u4("strong", { children: "Show technical information" }),
-          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, model-call and other time, cost, model, and context use. Live time stays visible." })
+          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, cost, model, and context use. Live time stays visible." })
         ] })
       ] })
     ] }),
