@@ -1004,7 +1004,7 @@ describe('main composer pending edits', () => {
         expect(info.props.count).toBe(0);
         const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
         expect(toggle.type(toggle.props)).toBeNull();
-        expect(findComponent(details, 'TurnElapsed')).toBeUndefined();
+        expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
         expect(findComponent(details, 'ActivityTracePanel').props.lines).toEqual([]);
       }
       const headline = footer.props.children.filter(Boolean).at(-1).props.children;
@@ -1113,7 +1113,7 @@ describe('main composer pending edits', () => {
   });
 
   it.each([false, true].flatMap((technical) => [false, true].map((recorded) => ({ technical, recorded }))))(
-    'keeps settled elapsed time in the footer and a shared technical block at the top ($technical, recorded steps $recorded)',
+    'shows settled elapsed only in the shared technical line ($technical, recorded steps $recorded)',
     ({ technical, recorded }) => {
       appearance.value = {
         ...appearance.peek(),
@@ -1166,16 +1166,16 @@ describe('main composer pending edits', () => {
         expect(info.props.count).toBe(recorded ? 1 : 0);
         const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
         expect(!!toggle.type(toggle.props)).toBe(recorded);
-        expect(findComponent(details, 'TurnElapsed')).toBeUndefined();
+        const elapsed = findComponent(info.type(info.props), 'TurnElapsed');
+        expect(elapsed.props.elapsedMs).toBe(6500);
+        const stopwatch = elapsed.type(elapsed.props);
+        expect(stopwatch.props.children).toBe('0:06');
+        expect(stopwatch.props.role).toBeUndefined();
       }
       const footer = row.props.children.at(-1);
       expect(footer.props.class).toBe('meta turn-info');
       const info = findComponent(footer, 'ReplyTurnInfo');
-      const elapsed = findComponent(info.type(info.props), 'TurnElapsed');
-      expect(elapsed.props.elapsedMs).toBe(6500);
-      const stopwatch = elapsed.type(elapsed.props);
-      expect(stopwatch.props.children).toBe('0:06');
-      expect(stopwatch.props.role).toBeUndefined();
+      expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
     },
   );
 
@@ -1237,9 +1237,66 @@ describe('main composer pending edits', () => {
         const toggle = findComponent(header.type(header.props), 'ActivityTraceToggle');
         expect(!!toggle.type(toggle.props)).toBe(recorded);
         expect(trace.props.lines).toEqual(recorded ? testTurn.activity : []);
+        const elapsed = findComponent(header.type(header.props), 'TurnElapsed');
+        expect(elapsed.props.elapsedMs).toBe(6500);
       }
       expect(title.props.class).toBe('display-card-title');
-      expect(findComponent(row.props.children.at(-1), 'ReplyTurnInfo')).toBeTruthy();
+      const footer = row.props.children.at(-1);
+      const info = findComponent(footer, 'ReplyTurnInfo');
+      expect(info).toBeTruthy();
+      expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((technical) =>
+      (
+        [
+          { outcome: 'silent', note: 'No reply' },
+          { outcome: 'failed', note: 'Failed' },
+          { outcome: 'stopped', note: 'Stopped' },
+        ] as const
+      ).map(({ outcome, note }) => ({ technical, outcome, note })),
+    ),
+  )(
+    'keeps $outcome outcome in the footer and gates settled elapsed on technical information ($technical)',
+    ({ technical, outcome, note }) => {
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
+      applyConversationFrame(
+        testSnapshot({
+          turns: [
+            {
+              ...testTurn,
+              phase: 'settled',
+              outcome,
+              metadata: { status: 'final', model: 'fixture-model', durationMs: 6500 },
+            },
+          ],
+          connection: { connected: true, activeTurnId: null },
+        }),
+        'thread',
+      );
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const turnRow = findComponent(log.type(log.props), 'ResponseStatusRow');
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const row = turnRow.type(turnRow.props);
+      const footer = row.props.children.at(-1);
+      expect(findComponent(footer, 'TurnElapsed')).toBeUndefined();
+      expect(find(footer, 'span').props.children).toBe(note);
+      if (technical) {
+        const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+        expect(findComponent(info.type(info.props), 'TurnElapsed').props.elapsedMs).toBe(6500);
+      } else {
+        expect(renderTechnicalDetails(row)).toBeUndefined();
+      }
     },
   );
 

@@ -350,11 +350,13 @@ reveal actions on hover or focus. User-message timestamps stay anchored to the
 left while actions occupy the right side of the row.
 
 **Appearance → Transcript details → Show technical information** controls technical
-details on all bubbles: activity trace, cost, model, and context use. Technical
-information occupies a separate line at the top of live, reply and display-card
+details on all bubbles: activity trace, completed elapsed time, cost, model, and
+context use. Technical information occupies a separate line at the top of live, reply and display-card
 bubbles, and is absent when the toggle is off. The regular information line
-remains at the bottom and always includes available elapsed time and notable
-outcomes. Live rows order the bouncing dots, Stop, stopwatch, and current
+remains at the bottom and retains relative timestamps and notable outcomes.
+Completed elapsed time appears only in the technical line, including on replies,
+display cards and outputless turns, and is hidden when technical information is off.
+Live rows order the bouncing dots, Stop, stopwatch, and current
 activity text. Only pending or running activities drive that text; when none
 remain, it returns to **Thinking…**, including before recorded activity arrives.
 An activity finishing does not mask another activity that is still running.
@@ -403,8 +405,9 @@ Stopping/disconnect notices and Stop errors occupy the same footer text slot,
 not separate transcript rows. Errors retain their alert role and retry control.
 Current activity remains visible with technical information hidden. The toggle
 does not change status font size or the font used for inline-code subjects.
-The stopwatch uses minutes and seconds, freezes on settlement, and is not repeated
-in the technical summary. Usage details still retain recorded accounting duration.
+The stopwatch uses minutes and seconds and remains in the regular footer while
+the turn is live. On settlement its frozen elapsed time moves into the technical
+summary. Usage details still retain recorded accounting duration.
 Technical information and the expanded trace form one shared, compact block at
 the top of live, reply and display-card bubbles, before their content. This keeps
 header-to-trace spacing consistent without accumulating card-content gaps or
@@ -640,7 +643,7 @@ by stopping the response.
 
 Stopped responses retain elapsed time, the model when known, and any token usage
 already reported. Counts are labeled **tokens reported** and may exclude an
-unfinished model call; if no usage was reported, the footer says **Tokens
+unfinished model call; if no usage was reported, technical details say **Tokens
 unavailable** instead of showing zero. Native model-call usage is captured before
 waiting for tools to finish. This metadata is persisted for reloads, but cannot
 be reconstructed for older stopped responses that never recorded it.

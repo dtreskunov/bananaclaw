@@ -1101,7 +1101,7 @@ function TaskIndicator() {
   );
 }
 
-/** Model, usage and token availability; elapsed time belongs to the regular info line. */
+/** Model, usage and token availability. */
 function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }) {
   return (
     <>
@@ -1120,10 +1120,12 @@ function TurnTechnicalInfo({
   turn?: ConversationTurn; count: number; expanded: boolean; onToggle: () => void;
 }) {
   if (!turn && !count) return null;
+  const view = turn ? turnRowView(turn, Date.now()) : null;
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
       <ActivityTraceToggle count={count} expanded={expanded} onToggle={onToggle} />
-      {turn ? <TurnStats turn={turn} view={turnRowView(turn, Date.now())} /> : null}
+      {turn?.phase === 'settled' && view ? <TurnElapsed elapsedMs={view.elapsedMs} /> : null}
+      {turn && view ? <TurnStats turn={turn} view={view} /> : null}
     </div>
   );
 }
@@ -1159,7 +1161,7 @@ function TurnElapsed({ elapsedMs, live = false }: { elapsedMs: number | null; li
   );
 }
 
-/** A settled turn's elapsed time and outcome note, always visible in its reply footer. */
+/** A settled turn's notable outcome remains visible in its reply footer. */
 function ReplyTurnInfo({
   turn,
   showOutcomeNote = true,
@@ -1170,7 +1172,6 @@ function ReplyTurnInfo({
   const view = turnRowView(turn, Date.now());
   return (
     <>
-      <TurnElapsed elapsedMs={view.elapsedMs} />
       {showOutcomeNote && view.note ? <span class="turn-outcome-note">{view.note}</span> : null}
     </>
   );
@@ -1211,7 +1212,7 @@ function turnResponsePresentation(
     technicalTurn: status ? turn : undefined,
     stopControl: status && activeTurn.value?.id === turn.id
       ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton /></span> : null,
-    elapsedControl: status ? <TurnElapsed elapsedMs={view.elapsedMs} live={live} /> : null,
+    elapsedControl: live ? <TurnElapsed elapsedMs={view.elapsedMs} live /> : null,
     note: status && settled ? view.note ?? 'Done' : null,
     tone, activity, lines: activity?.lines ?? lines,
   };

@@ -24291,9 +24291,11 @@ function TurnTechnicalInfo({
   onToggle
 }) {
   if (!turn2 && !count) return null;
+  const view = turn2 ? turnRowView(turn2, Date.now()) : null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
     /* @__PURE__ */ u4(ActivityTraceToggle, { count, expanded, onToggle }),
-    turn2 ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view: turnRowView(turn2, Date.now()) }) : null
+    turn2?.phase === "settled" && view ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs }) : null,
+    turn2 && view ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
   ] });
 }
 function TurnTechnicalDetails({
@@ -24346,10 +24348,7 @@ function ReplyTurnInfo({
   showOutcomeNote = true
 }) {
   const view = turnRowView(turn2, Date.now());
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs }),
-    showOutcomeNote && view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null
-  ] });
+  return /* @__PURE__ */ u4(k, { children: showOutcomeNote && view.note ? /* @__PURE__ */ u4("span", { class: "turn-outcome-note", children: view.note }) : null });
 }
 function startingResponsePresentation(submission) {
   const ownerId = `submission:${submission.messageId}`;
@@ -24390,7 +24389,7 @@ function turnResponsePresentation({ turn: turn2, activity: lines, status, traceO
     attributes: { "data-turn-id": status ? turn2.id : void 0 },
     technicalTurn: status ? turn2 : void 0,
     stopControl: status && activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null,
-    elapsedControl: status ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs, live }) : null,
+    elapsedControl: live ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs, live: true }) : null,
     note: status && settled ? view.note ?? "Done" : null,
     tone: tone2,
     activity,
@@ -26921,7 +26920,7 @@ function AppearanceSettings() {
         ),
         /* @__PURE__ */ u4("span", { children: [
           /* @__PURE__ */ u4("strong", { children: "Show technical information" }),
-          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, cost, model, and context use. Elapsed time is always shown." })
+          /* @__PURE__ */ u4("small", { id: "status-details-description", children: "Activity trace, completed elapsed time, cost, model, and context use. Live elapsed time stays visible." })
         ] })
       ] })
     ] }),
