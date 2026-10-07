@@ -1,4 +1,4 @@
-import { isStepCount, streamText, wrapLanguageModel, type ModelMessage, type ToolSet } from 'ai';
+import { isStepCount, streamText, wrapLanguageModel, type LanguageModelCallEndEvent, type ModelMessage, type ToolSet } from 'ai';
 
 import { registerProvider } from './provider-registry.js';
 import { loadConfig } from '../config.js';
@@ -26,7 +26,9 @@ import { loadNativeInstructions } from './native/instructions.js';
 import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
 import { NativeTurnJournal } from './native/turn-journal.js';
-import { compactNativeContext, COMPACTION_INSTRUCTIONS, isContextOverflow, MAX_COMPACTION_ATTEMPTS } from './native/compaction.js';
+import {
+  compactNativeContext, COMPACTION_INSTRUCTIONS, createCompactionPolicy, isContextOverflow, type NativeCompactionPlan,
+} from './native/compaction.js';
 import { createNativeTools } from './native/tools.js';
 import { openAiToolImages } from './native/tool-images.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
@@ -52,23 +54,6 @@ function log(message: string): void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function usageFor(
-  model: NativeModel,
-  raw: unknown,
-  finalStepRaw: unknown,
-  durationMs: number,
-  numTurns: number,
-): TurnUsage {
-  const usage = callUsageFor(model, raw);
-  const finalStepUsage = callUsageFor(model, finalStepRaw);
-  return {
-    ...usage,
-    num_turns: numTurns,
-    duration_ms: durationMs,
-    context_tokens: finalStepUsage.context_tokens,
-  };
 }
 
 /**
@@ -105,7 +90,9 @@ function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
     model: model.wireId,
     context_window: model.contextWindow,
     max_output_tokens: model.maxOutputTokens,
-    context_tokens: input + cacheRead + cacheWrite + output,
+    context_tokens: typeof usage.inputTokens === 'number' && Number.isFinite(usage.inputTokens) && usage.inputTokens >= 0 &&
+      typeof usage.outputTokens === 'number' && Number.isFinite(usage.outputTokens) && usage.outputTokens >= 0
+      ? input + cacheRead + cacheWrite + output : undefined,
   };
 }
 
@@ -223,18 +210,13 @@ export function portableHistory(messages: ModelMessage[]): ModelMessage[] {
   const isTodoTool = (toolName: string): boolean =>
     ['todowrite', 'todoread', 'todo_update', 'todo_read'].includes(toolName);
   for (const message of messages) {
-    if (message.role === 'assistant' && Array.isArray(message.content)) {
-      for (const part of message.content) {
-        if ('toolName' in part && typeof part.toolName === 'string' && isTodoTool(part.toolName)) {
-          ephemeralToolCallIds.add(part.toolCallId);
-        }
-      }
-    } else if (message.role === 'tool') {
+    if ((message.role === 'assistant' || message.role === 'tool') && Array.isArray(message.content)) {
       for (const part of message.content) {
         if ('toolName' in part && typeof part.toolName === 'string' && isTodoTool(part.toolName)) {
           ephemeralToolCallIds.add(part.toolCallId);
         }
         if (
+          message.role === 'tool' &&
           part.type === 'tool-result' &&
           part.output.type === 'error-text' &&
           /Available tools: (?:todowrite|todo_update)/.test(part.output.value)
@@ -336,6 +318,7 @@ export class NativeProvider implements AgentProvider {
             active = true;
             const startedAt = Date.now();
             let modelCallMs = 0;
+            let compactionCalls = 0;
             let journal: NativeTurnJournal | undefined;
             const callUsages: CallUsage[] = [];
             function* flushCallUsage(): Generator<ProviderEvent> {
@@ -378,52 +361,55 @@ export class NativeProvider implements AgentProvider {
               let silence: string | null = null;
               let checkpoint = journal.checkpoint;
               const appliedSteeringIds: string[] = [];
-              const totalUsage: TurnUsage = usageFor(resolved, {}, {}, 0, 0);
+              const totalUsage: TurnUsage = callUsageFor(resolved, {});
+              function recordCall({ usage, performance }: LanguageModelCallEndEvent, summary = false): void {
+                const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
+                modelCallMs += data.duration_api_ms;
+                if (summary) {
+                  data.context_tokens = undefined;
+                  compactionCalls++;
+                }
+                if (summary || usage.inputTokens !== undefined || usage.outputTokens !== undefined) callUsages.push(data);
+                addUsage(totalUsage, data);
+              }
               // One-off instruction for the next step; never persisted.
               let nudge: string | null = null;
               // Past the step limit: one more step, without tools, to report progress.
               let wrappingUp = false;
               // Text written alongside tool calls, which is never delivered.
               let undeliveredChars = 0;
-              let compactionAttempts = 0;
-              async function* recoverContext(reason: 'context' | 'media'): AsyncGenerator<ProviderEvent> {
-                if (compactionAttempts >= MAX_COMPACTION_ATTEMPTS)
-                  throw new Error(`Native ${reason === 'media' ? 'media budget' : 'context'} recovery exhausted; reduce input size or media history`);
+              const compactionPolicy = createCompactionPolicy(resolved.contextWindow);
+              async function* compactContext(plan: NativeCompactionPlan): AsyncGenerator<ProviderEvent> {
                 abortController.signal.throwIfAborted();
                 const compactStartedAt = Date.now();
-                const compactId = `native-compaction-${continuation}-${++compactionAttempts}-${compactStartedAt}`;
+                const compactId = `native-compaction-${continuation}-${plan.ordinal}-${compactStartedAt}`;
                 yield { type: 'progress', step: {
                   kind: 'compaction', id: compactId, auto: true, status: 'running',
-                  detail: reason === 'media'
-                    ? 'Inline media budget exceeded; summarizing older context'
-                    : 'Context window exceeded; summarizing older context',
+                  detail: plan.detail,
                 } };
                 try {
                   await turnJournal.settle();
-                  const compactSignal = AbortSignal.any([abortController.signal, AbortSignal.timeout(120_000)]);
-                  await compactNativeContext({
+                  const compactedContext = await compactNativeContext({
                     store, conversation, protectedInputs: turnJournal.inputRefs(),
-                    attempt: compactionAttempts, contextWindow: resolved.contextWindow, signal: compactSignal,
-                    summarize: async (prompt) => {
+                    attempt: plan.attempt, contextWindow: resolved.contextWindow, maxOutputTokens: resolved.maxOutputTokens,
+                    signal: abortController.signal,
+                    summarize: async (prompt, request) => {
                       const compacted = streamText({
                         model, system: COMPACTION_INSTRUCTIONS, messages: [{ role: 'user', content: prompt }],
-                        maxOutputTokens: Math.min(2048, Math.max(64, Math.floor((resolved.contextWindow ?? 32_768) / 8))),
-                        maxRetries: 2, abortSignal: compactSignal,
-                        onLanguageModelCallEnd: ({ usage, performance }) => {
-                          const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
-                          modelCallMs += data.duration_api_ms;
-                          callUsages.push(data);
-                          addUsage(totalUsage, data);
-                        },
+                        maxOutputTokens: request.maxOutputTokens,
+                        maxRetries: 0, abortSignal: request.signal,
+                        onLanguageModelCallEnd: (event) => recordCall(event, true),
                       });
                       for await (const part of compacted.stream) if (part.type === 'error') throw part.error;
                       return compacted.text;
                     },
                   });
                   messages.splice(0, messages.length, ...portableHistory(store.contextMessages(conversation)));
+                  compactionPolicy.observe(undefined);
                   yield* flushCallUsage();
                   yield { type: 'progress', step: {
                     kind: 'compaction', id: compactId, auto: true, status: 'completed',
+                    detail: `Summarized ${compactedContext.sourceBytes} UTF-8 bytes in ${compactedContext.requests} model requests`,
                     durationMs: Date.now() - compactStartedAt,
                   } };
                 } catch (error) {
@@ -434,6 +420,30 @@ export class NativeProvider implements AgentProvider {
                     error: errorMessage(error), durationMs: Date.now() - compactStartedAt,
                   } };
                   throw error;
+                }
+              }
+              async function* maybeCompactContext(): AsyncGenerator<ProviderEvent> {
+                const plan = compactionPolicy.proactive();
+                if (!plan) return;
+                if (plan === 'limit') {
+                  yield { type: 'progress', step: {
+                    kind: 'notification', id: `native-compaction-limit-${continuation}-${startedAt}`,
+                    text: 'Automatic compaction limit reached for this turn',
+                    detail: 'Continuing normally; context-overflow and media recovery remain available.',
+                  } };
+                  return;
+                }
+                try {
+                  yield* compactContext(plan);
+                } catch (error) {
+                  abortController.signal.throwIfAborted();
+                  compactionPolicy.disableProactive();
+                  log(`Proactive compaction failed; retaining context: ${errorMessage(error)}`);
+                  yield { type: 'progress', step: {
+                    kind: 'notification', id: `native-compaction-${continuation}-${plan.ordinal}-${startedAt}-fallback`,
+                    text: 'Automatic compaction failed; continuing with existing context',
+                    detail: errorMessage(error),
+                  } };
                 }
               }
               async function* prepareInput(
@@ -448,7 +458,7 @@ export class NativeProvider implements AgentProvider {
                     ...(historyBytes > 0 ? { onMediaPressure: () => { pressure = true; } } : {}),
                   });
                   if (!pressure) return message;
-                  yield* recoverContext('media');
+                  yield* compactContext(compactionPolicy.recover('media'));
                 }
               }
               const incoming = yield* prepareInput(turn.text, turn.files);
@@ -475,7 +485,8 @@ export class NativeProvider implements AgentProvider {
               while (true) {
                 abortController.signal.throwIfAborted();
                 while (inlineHistoryBytes(messages) > MAX_INLINE_BYTES)
-                  yield* recoverContext('media');
+                  yield* compactContext(compactionPolicy.recover('media'));
+                yield* maybeCompactContext();
                 toolMediaPressure = false;
                 const stepNudge: string | null = nudge;
                 nudge = null;
@@ -510,13 +521,7 @@ export class NativeProvider implements AgentProvider {
                   abortSignal: abortController.signal,
                   // A model call can finish before its tool does. Retain its
                   // usage even if cancellation prevents finish-step.
-                  onLanguageModelCallEnd: ({ usage, performance }) => {
-                    const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
-                    modelCallMs += data.duration_api_ms;
-                    if (usage.inputTokens !== undefined || usage.outputTokens !== undefined) {
-                      callUsages.push(data);
-                    }
-                  },
+                  onLanguageModelCallEnd: recordCall,
                   ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
                   ...(typeof options.modelParams?.temperature === 'number'
                     ? { temperature: options.modelParams.temperature }
@@ -554,8 +559,8 @@ export class NativeProvider implements AgentProvider {
                     }
                   }
                 } catch (error) {
-                  if (!isContextOverflow(error) || stepProducedOutput || compactionAttempts >= MAX_COMPACTION_ATTEMPTS) throw error;
-                  yield* recoverContext('context');
+                  if (!isContextOverflow(error) || stepProducedOutput || !compactionPolicy.canRecover()) throw error;
+                  yield* compactContext(compactionPolicy.recover('context'));
                   nudge = stepNudge;
                   continue;
                 }
@@ -566,11 +571,10 @@ export class NativeProvider implements AgentProvider {
                 if (abortController.signal.aborted) throw new Error('Turn stopped');
                 checkpoint = journal.finishSegment(portableHistory(responseMessages));
                 messages.push(...responseMessages);
-                const [usage, steps] = await Promise.all([result.usage, result.steps]);
+                const steps = await result.steps;
                 stepsCompleted += steps.length;
-                const segmentUsage = usageFor(resolved, usage, steps.at(-1)?.usage, 0, 0);
-                addUsage(totalUsage, segmentUsage);
-                totalUsage.context_tokens = segmentUsage.context_tokens;
+                totalUsage.context_tokens = callUsageFor(resolved, steps.at(-1)?.usage).context_tokens;
+                compactionPolicy.observe(totalUsage.context_tokens);
                 const stepText = (await result.text).trim() || null;
                 finishReason = String(await result.finishReason);
                 const step = steps.at(-1);
@@ -617,7 +621,7 @@ export class NativeProvider implements AgentProvider {
                     (part.type === 'tool-result' || part.type === 'tool-error') &&
                     part.toolCallId === call.toolCallId));
                 if (toolMediaPressure) {
-                  yield* recoverContext('media');
+                  yield* compactContext(compactionPolicy.recover('media'));
                   nudge = 'Media history was compacted. Retry the failed view_image read if still needed; do not repeat completed actions.';
                 }
                 if (applied) {
@@ -643,7 +647,8 @@ export class NativeProvider implements AgentProvider {
               active = false;
               yield {
                 type: 'usage',
-                data: { ...totalUsage, duration_ms: Date.now() - startedAt, duration_api_ms: modelCallMs, num_turns: stepsCompleted },
+                data: { ...totalUsage, duration_ms: Date.now() - startedAt, duration_api_ms: modelCallMs,
+                  num_turns: stepsCompleted + compactionCalls },
               };
               yield { type: 'checkpoint', ref: checkpoint };
               yield {

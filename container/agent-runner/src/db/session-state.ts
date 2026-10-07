@@ -84,17 +84,19 @@ export interface FailedTurnRecord {
   /** Wall-clock when we recorded the failure. Lets the next turn render a
    *  rough "a few seconds ago" hint if desired. */
   recorded_at: number;
+  /** Recorded execution evidence, so a retry does not assume actions were undone. */
+  execution_note?: string;
 }
 
 /** Persist a failed-turn record. Called when a turn surfaces an error to
  *  the user (either via the unsurfacedError path or by throwing after
  *  stale-session retry is exhausted). Read once on the next turn so the
- *  agent has visibility into what was lost.
+ *  agent has visibility into the unfinished request and execution evidence.
  *
  *  Pairs with the continuation rollback in processQuery: when we revert
- *  to the prior good session id, the resumed transcript has no record of
- *  the failed message or its error. This row carries that context across
- *  turns instead. */
+ *  to the prior good session id, the resumed transcript may omit the failed
+ *  request or its error. This row carries that context across turns without
+ *  implying that completed external actions were undone. */
 export function setFailedTurn(record: FailedTurnRecord): void {
   setValue(FAILED_TURN_KEY, JSON.stringify(record));
 }

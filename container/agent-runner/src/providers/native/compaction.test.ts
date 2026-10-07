@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { compactNativeContext, isContextOverflow, planCompaction } from './compaction.js';
+import {
+  compactNativeContext, COMPACTION_INSTRUCTIONS, createCompactionPolicy, isContextOverflow, planCompaction, shouldCompactContext,
+  MAX_COMPACTION_LEAVES, MAX_COMPACTION_REQUESTS,
+} from './compaction.js';
 import { NativeStore } from './store.js';
 
 let root: string;
@@ -63,6 +66,16 @@ function seed(): { conversation: string; protectedRef: string } {
   return { conversation, protectedRef };
 }
 
+function compactionOptions(conversation: string, protectedRef: string, attempt = 1) {
+  return {
+    store,
+    conversation,
+    protectedInputs: new Set([protectedRef]),
+    attempt,
+    signal: new AbortController().signal,
+  };
+}
+
 it('preserves current input and complete tool pairs while persisting a non-destructive summary', async () => {
   const { conversation, protectedRef } = seed();
   const original = store.messages(conversation);
@@ -70,11 +83,7 @@ it('preserves current input and complete tool pairs while persisting a non-destr
   expect(plan.retainedRefs).toEqual([protectedRef]);
   let prompts = '';
   await compactNativeContext({
-    store,
-    conversation,
-    protectedInputs: new Set([protectedRef]),
-    attempt: 2,
-    signal: new AbortController().signal,
+    ...compactionOptions(conversation, protectedRef, 2),
     summarize: async (prompt) => {
       prompts += prompt;
       return 'Earlier work done; once.txt was written. Continue remaining work.';
@@ -117,11 +126,7 @@ it('omits inline media only from summarizer input, retaining the original transc
   });
   let promptText = '';
   await compactNativeContext({
-    store,
-    conversation,
-    protectedInputs: new Set([protectedRef]),
-    attempt: 1,
-    signal: new AbortController().signal,
+    ...compactionOptions(conversation, protectedRef),
     summarize: async (prompt) => {
       promptText += prompt;
       return 'Earlier requirements and diagram were considered.';
@@ -131,48 +136,34 @@ it('omits inline media only from summarizer input, retaining the original transc
   expect(JSON.stringify(store.messages(conversation))).toContain('PRIVATE_MEDIA_BYTES');
 });
 
-it('does not persist failed or non-reducing compaction', async () => {
+it('does not persist failed or empty compaction', async () => {
   const { conversation, protectedRef } = seed();
   const before = store.contextMessages(conversation);
-  await expect(
-    compactNativeContext({
-      store,
-      conversation,
-      protectedInputs: new Set([protectedRef]),
-      attempt: 1,
-      signal: new AbortController().signal,
-      summarize: async () => {
-        throw new Error('Summary service unavailable');
-      },
-    }),
-  ).rejects.toThrow('Summary service unavailable');
-  expect(store.contextMessages(conversation)).toEqual(before);
-  await expect(
-    compactNativeContext({
-      store,
-      conversation,
-      protectedInputs: new Set([protectedRef]),
-      attempt: 1,
-      signal: new AbortController().signal,
-      summarize: async () => '',
-    }),
-  ).rejects.toThrow('empty or oversized');
-  expect(store.contextMessages(conversation)).toEqual(before);
+  for (const [summarize, expected] of [
+    [async () => { throw new Error('Summary service unavailable'); }, 'Summary service unavailable'],
+    [async () => '', 'empty or oversized'],
+  ] as const) {
+    await expect(compactNativeContext({
+      ...compactionOptions(conversation, protectedRef), summarize,
+    })).rejects.toThrow(expected);
+    expect(store.contextMessages(conversation)).toEqual(before);
+  }
 });
 
 it.each([
   ['oversized', 'x'.repeat(17_000), 'empty or oversized'],
-  ['non-reducing', 'x'.repeat(10_000), 'did not reduce context'],
+  ['non-reducing', 'x'.repeat(1000), 'did not reduce context'],
 ])('rejects a %s summary without changing the prompt projection', async (_name, summary, expected) => {
   const { conversation, protectedRef } = seed();
+  if (_name === 'non-reducing') {
+    for (const entry of store.contextEntries(conversation).slice(0, 2)) {
+      store.updateMessage(conversation, entry.ref!, { role: 'user', content: 'Done.' });
+    }
+  }
   const before = store.contextMessages(conversation);
   await expect(
     compactNativeContext({
-      store,
-      conversation,
-      protectedInputs: new Set([protectedRef]),
-      attempt: 1,
-      signal: new AbortController().signal,
+      ...compactionOptions(conversation, protectedRef),
       summarize: async () => summary,
     }),
   ).rejects.toThrow(expected);
@@ -186,11 +177,7 @@ it('does not save a partial summary if a later fragment fails', async () => {
   let calls = 0;
   await expect(
     compactNativeContext({
-      store,
-      conversation,
-      protectedInputs: new Set([protectedRef]),
-      attempt: 1,
-      signal: new AbortController().signal,
+      ...compactionOptions(conversation, protectedRef),
       summarize: async () => {
         if (++calls === 2) throw new Error('Second fragment failed');
         return 'Earlier work is complete.';
@@ -209,14 +196,13 @@ it('rejects excessive fragments and cancellation before calling the summarizer',
     calls++;
     return 'Earlier work is complete.';
   };
-  const options = { store, conversation, protectedInputs: new Set([protectedRef]), attempt: 1, summarize };
+  const options = { ...compactionOptions(conversation, protectedRef), summarize };
   await expect(
     compactNativeContext({
       ...options,
       contextWindow: 512,
-      signal: new AbortController().signal,
     }),
-  ).rejects.toThrow('64-chunk recovery budget');
+  ).rejects.toThrow('request budget is too small');
   const controller = new AbortController();
   controller.abort(new Error('Compaction cancelled'));
   await expect(compactNativeContext({ ...options, signal: controller.signal })).rejects.toThrow('Compaction cancelled');
@@ -227,14 +213,323 @@ it('rejects excessive fragments and cancellation before calling the summarizer',
 it('invalidates a summary when history is rolled back before its boundary', async () => {
   const { conversation, protectedRef } = seed();
   await compactNativeContext({
-    store,
-    conversation,
-    protectedInputs: new Set([protectedRef]),
-    attempt: 2,
-    signal: new AbortController().signal,
+    ...compactionOptions(conversation, protectedRef, 2),
     summarize: async () => 'Completed prior work.',
   });
   const first = store.contextEntries(conversation).find((entry) => entry.ref !== null)!.ref!;
   store.replaceAfter(conversation, first, []);
   expect(store.contextEntries(conversation).every((entry) => entry.ref !== null)).toBe(true);
+});
+
+it.each([
+  [749_999, 1_000_000, false],
+  [750_000, 1_000_000, true],
+  [800_000, 1_000_000, true],
+  [undefined, 1_000_000, false],
+  [750_000, undefined, false],
+  [750_000, 0, false],
+  [Number.NaN, 1_000_000, false],
+  [750_000, Number.POSITIVE_INFINITY, false],
+  [-1, 1_000_000, false],
+])('checks measured utilization (%s / %s)', (tokens, window, expected) => {
+  expect(shouldCompactContext(tokens, window)).toBe(expected);
+});
+
+describe('per-turn compaction policy', () => {
+  it('derives unique ordinals from separate proactive and emergency attempts', () => {
+    const policy = createCompactionPolicy(1_000_000);
+    expect(policy.proactive()).toBeUndefined();
+    expect(policy.recover('media')).toMatchObject({ ordinal: 1, attempt: 1 });
+    policy.observe(750_000);
+    expect(policy.proactive()).toMatchObject({ ordinal: 2, attempt: 1, detail: expect.stringContaining('75%') });
+    policy.observe(undefined);
+    expect(policy.proactive()).toBeUndefined();
+    expect(policy.canRecover()).toBe(true);
+    expect(policy.recover('context')).toMatchObject({ ordinal: 3, attempt: 2 });
+    expect(policy.canRecover()).toBe(false);
+    expect(() => policy.recover('context')).toThrow('context recovery exhausted');
+    policy.observe(800_000);
+    expect(policy.proactive()).toMatchObject({ ordinal: 4, attempt: 1 });
+    expect(policy.proactive()).toBe('limit');
+    expect(policy.proactive()).toBeUndefined();
+  });
+
+  it('disables proactive failures without disabling emergency recovery', () => {
+    const policy = createCompactionPolicy(1_000_000);
+    policy.observe(750_000);
+    expect(policy.proactive()).toBeDefined();
+    policy.disableProactive();
+    policy.observe(800_000);
+    expect(policy.proactive()).toBeUndefined();
+    expect(policy.recover('context')).toMatchObject({ attempt: 1, ordinal: 2 });
+    expect(policy.recover('media')).toMatchObject({ attempt: 2, ordinal: 3 });
+    expect(() => policy.recover('media')).toThrow('media budget recovery exhausted');
+  });
+
+  it('does not spend proactive attempts on unknown or below-threshold measurements', () => {
+    const unknown = createCompactionPolicy(undefined);
+    unknown.observe(900_000);
+    expect(unknown.proactive()).toBeUndefined();
+    expect(unknown.recover('context')).toMatchObject({ ordinal: 1, attempt: 1 });
+    const policy = createCompactionPolicy(1_000_000);
+    for (const tokens of [749_999, undefined, Number.NaN]) {
+      policy.observe(tokens);
+      expect(policy.proactive()).toBeUndefined();
+    }
+    policy.observe(750_000);
+    expect(policy.proactive()).toMatchObject({ ordinal: 1, attempt: 1 });
+  });
+});
+
+it('compacts a synthetic two-million-character transcript with oversized tool results within bounded requests', async () => {
+  const conversation = store.createConversation();
+  store.append(conversation, [
+    { role: 'user', content: 'Requirements '.repeat(103_000) },
+    { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'read-one', toolName: 'read', input: { path: 'one.txt' } }] },
+    { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'read-one', toolName: 'read',
+      output: { type: 'text', value: 'a'.repeat(309_000) } }] },
+    { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'read-two', toolName: 'read', input: { path: 'two.txt' } }] },
+    { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'read-two', toolName: 'read',
+      output: { type: 'text', value: 'b'.repeat(309_000) } }] },
+  ]);
+  const protectedRef = store.append(conversation, [{ role: 'user', content: 'Current request' }]);
+  store.append(conversation, [
+    { role: 'assistant', content: 'Recent completed work' },
+    { role: 'user', content: 'Recent guidance' },
+    { role: 'assistant', content: 'Continue now' },
+  ]);
+  const original = store.messages(conversation);
+  const prompts: string[] = [];
+  let active = 0;
+  let maxActive = 0;
+  const result = await compactNativeContext({
+    ...compactionOptions(conversation, protectedRef), contextWindow: 1_000_000,
+    summarize: async (prompt, request) => {
+      prompts.push(prompt);
+      expect(Buffer.byteLength(prompt) + Buffer.byteLength(COMPACTION_INSTRUCTIONS) + request.maxOutputTokens)
+        .toBeLessThanOrEqual(128_000);
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await Bun.sleep(1);
+      active--;
+      return 'Completed file reads. Preserve current requirements and continue remaining work.';
+    },
+  });
+  expect(result.sourceBytes).toBeGreaterThan(1_950_000);
+  expect(result.leafChunks).toBeLessThanOrEqual(MAX_COMPACTION_LEAVES);
+  expect(result.requests).toBeLessThanOrEqual(MAX_COMPACTION_REQUESTS);
+  expect(result.requests).toBe(prompts.length);
+  expect(maxActive).toBe(2);
+  expect(prompts.some((prompt) => prompt.includes('read/read-one') && prompt.includes('fragment'))).toBe(true);
+  expect(prompts.at(-1)).toContain('Chronological summary 1/');
+  expect(store.messages(conversation)).toEqual(original);
+  expect(JSON.stringify(store.contextMessages(conversation))).toContain('Current request');
+  expect(JSON.stringify(store.contextMessages(conversation))).not.toContain('a'.repeat(309_000));
+});
+
+function largeHistory(characters: number) {
+  const { conversation, protectedRef } = seed();
+  store.updateMessage(conversation, store.contextEntries(conversation)[0].ref!, { role: 'user', content: 'x'.repeat(characters) });
+  return { ...compactionOptions(conversation, protectedRef), contextWindow: 1_000_000 };
+}
+
+it('summarizes a fitting single chunk once with the final output budget', async () => {
+  const options = largeHistory(2000);
+  const original = store.messages(options.conversation);
+  let calls = 0;
+  const result = await compactNativeContext({
+    ...options, maxOutputTokens: 4096,
+    summarize: async (prompt, request) => {
+      calls++;
+      expect(request.maxOutputTokens).toBe(4096);
+      expect(prompt).toContain('conversation history');
+      expect(prompt).toContain('[Exchange 1;');
+      expect(prompt).not.toContain('[Chronological summary');
+      return 'Completed earlier work; continue the current pending request.';
+    },
+  });
+  expect(result.leafChunks).toBe(1);
+  expect(result.requests).toBe(1);
+  expect(calls).toBe(1);
+  expect(store.messages(options.conversation)).toEqual(original);
+  expect(JSON.stringify(store.contextMessages(options.conversation))).toContain('Current pending request');
+});
+
+it('retains the two-stage path when a single leaf does not fit final-request capacity', async () => {
+  const options = largeHistory(120_000);
+  const budgets: number[] = [];
+  const result = await compactNativeContext({
+    ...options, summarize: async (_prompt, request) => {
+      budgets.push(request.maxOutputTokens);
+      return 'Completed earlier work; continue pending requests.';
+    },
+  });
+  expect(result.leafChunks).toBe(1);
+  expect(result.requests).toBe(2);
+  expect(budgets).toEqual([2048, 8000]);
+});
+
+it('packs dense UTF-8 exchanges without repeatedly measuring accumulated chunk prefixes', async () => {
+  const conversation = store.createConversation();
+  store.append(conversation, Array.from({ length: 500 }, (_, index) =>
+    ({ role: 'user' as const, content: `Requirement ${index}: \u{1f642}\u{1f642}` })));
+  const protectedRef = store.append(conversation, [{ role: 'user', content: 'Current request' }]);
+  store.append(conversation, [{ role: 'assistant', content: 'Recent work' }]);
+  const measure = spyOn(Buffer, 'byteLength');
+  try {
+    const result = await compactNativeContext({
+      ...compactionOptions(conversation, protectedRef), contextWindow: 1_000_000,
+      summarize: async () => 'Earlier requirements preserved in chronological order.',
+    });
+    const chunkScans = measure.mock.calls.filter(([text]) => typeof text === 'string' &&
+      text.startsWith('[Exchange ') && text.includes('\n\n[Exchange '));
+    expect(chunkScans).toHaveLength(2);
+    expect(result.requests).toBe(1);
+  } finally { measure.mockRestore(); }
+});
+
+it('splits context-rejected summarization requests without losing chronological fragment labels', async () => {
+  const options = largeHistory(60_000);
+  const original = store.messages(options.conversation);
+  let rejections = 0;
+  const result = await compactNativeContext({
+    ...options,
+    summarize: async (prompt) => {
+      if (Buffer.byteLength(prompt) > 30_000) {
+        rejections++;
+        throw new Error('context_length_exceeded');
+      }
+      return 'Earlier work completed; preserve requirements and unknown side effects.';
+    },
+  });
+  expect(rejections).toBeGreaterThan(0);
+  expect(result.leafChunks).toBeGreaterThan(1);
+  expect(result.requests).toBeLessThanOrEqual(MAX_COMPACTION_REQUESTS);
+  expect(store.messages(options.conversation)).toEqual(original);
+});
+
+it('rejects work above the leaf limit before making any model calls', async () => {
+  const options = largeHistory(4_500_000);
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options, summarize: async () => { calls++; return 'Earlier work.'; },
+  })).rejects.toThrow('leaf chunks');
+  expect(calls).toBe(0);
+  expect(store.contextEntries(options.conversation).every((entry) => entry.ref !== null)).toBe(true);
+});
+
+it('bounds all leaf splitting and reduction requests, including rejected requests', async () => {
+  const options = largeHistory(1_950_000);
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options,
+    summarize: async (prompt) => {
+      calls++;
+      if (prompt.includes('Exchange ') && !prompt.includes('Rejected request fragment'))
+        throw new Error('context_length_exceeded');
+      return 'Completed work; continue pending requests.';
+    },
+  })).rejects.toThrow('64-request budget');
+  expect(calls).toBe(MAX_COMPACTION_REQUESTS);
+  expect(store.contextEntries(options.conversation).every((entry) => entry.ref !== null)).toBe(true);
+});
+
+it('cancels and settles the sibling request when a parallel leaf fails', async () => {
+  const options = largeHistory(240_000);
+  let calls = 0;
+  let cancelled = false;
+  await expect(compactNativeContext({
+    ...options,
+    summarize: async (_prompt, request) => {
+      if (++calls === 1) {
+        await Bun.sleep(1);
+        throw new Error('Leaf failed');
+      }
+      await new Promise<void>((resolve) => request.signal.addEventListener('abort', () => {
+        cancelled = true;
+        resolve();
+      }, { once: true }));
+      request.signal.throwIfAborted();
+      return 'Never activated';
+    },
+  })).rejects.toThrow('Leaf failed');
+  expect(calls).toBe(2);
+  expect(cancelled).toBe(true);
+  expect(store.contextEntries(options.conversation).every((entry) => entry.ref !== null)).toBe(true);
+});
+
+it('does not activate a summary returned after cancellation', async () => {
+  const options = largeHistory(60_000);
+  const controller = new AbortController();
+  await expect(compactNativeContext({
+    ...options, signal: controller.signal,
+    summarize: async () => {
+      controller.abort(new Error('Compaction cancelled'));
+      return 'A late summary';
+    },
+  })).rejects.toThrow('Compaction cancelled');
+  expect(store.contextEntries(options.conversation).every((entry) => entry.ref !== null)).toBe(true);
+});
+
+it('reduces multiple levels of summaries within the same work budget', async () => {
+  const options = largeHistory(3_700_000);
+  let reductions = 0;
+  const result = await compactNativeContext({
+    ...options,
+    summarize: async (prompt) => {
+      if (prompt.includes('[Chronological summary')) reductions++;
+      return 'Completed work. '.repeat(400);
+    },
+  });
+  expect(reductions).toBeGreaterThan(1);
+  expect(result.requests).toBeGreaterThan(result.leafChunks + 1);
+  expect(result.requests).toBeLessThanOrEqual(MAX_COMPACTION_REQUESTS);
+});
+
+it('preserves UTF-8 characters across oversized exchange fragments', async () => {
+  const options = largeHistory(0);
+  store.updateMessage(options.conversation, store.contextEntries(options.conversation)[0].ref!, {
+    role: 'user', content: '\u{1f642}'.repeat(60_000),
+  });
+  const prompts: string[] = [];
+  await compactNativeContext({
+    ...options, summarize: async (prompt) => {
+      prompts.push(prompt);
+      return 'Earlier requirements preserved.';
+    },
+  });
+  expect(prompts.every((prompt) => !prompt.includes('\ufffd'))).toBe(true);
+  expect(prompts.some((prompt) => prompt.includes('\u{1f642}'))).toBe(true);
+});
+
+it('reduces leaf results in chronological order rather than completion order', async () => {
+  const options = largeHistory(240_000);
+  let leaf = 0;
+  let reduction = '';
+  await compactNativeContext({
+    ...options,
+    summarize: async (prompt) => {
+      if (prompt.includes('[Chronological summary')) {
+        reduction = prompt;
+        return 'First work then second work.';
+      }
+      const order = ++leaf;
+      if (order === 1) await Bun.sleep(5);
+      return `Completed chunk ${order}.`;
+    },
+  });
+  expect(reduction.indexOf('Completed chunk 1.')).toBeLessThan(reduction.indexOf('Completed chunk 2.'));
+});
+
+it('surfaces quota errors without splitting or retrying requests', async () => {
+  const options = largeHistory(60_000);
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options, summarize: async () => {
+      calls++;
+      throw new Error('Token Plan usage limit reached (2056)');
+    },
+  })).rejects.toThrow('Token Plan usage limit');
+  expect(calls).toBe(1);
+  expect(store.contextEntries(options.conversation).every((entry) => entry.ref !== null)).toBe(true);
 });

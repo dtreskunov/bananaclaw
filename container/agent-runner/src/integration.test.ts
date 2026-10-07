@@ -716,7 +716,7 @@ describe('poll loop — provider error recovery', () => {
 
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
-    expect(JSON.parse(out[0].content).text).toContain("couldn't be processed");
+    expect(JSON.parse(out[0].content).text).toContain('could not be completed');
     expect(JSON.parse(out[0].content).text).toContain('API rate limit exceeded');
     expect(JSON.parse(out[0].content).suggested_action).toBeUndefined();
 
@@ -746,7 +746,7 @@ describe('poll loop — stale session recovery', () => {
     // Error was written to outbound
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
-    expect(JSON.parse(out[0].content).text).toContain("couldn't be processed");
+    expect(JSON.parse(out[0].content).text).toContain('could not be completed');
 
     // The invalid session was cleared (isSessionInvalid returned true). The
     // runner persists each fresh `init` continuation immediately for crash

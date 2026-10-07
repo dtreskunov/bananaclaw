@@ -4,7 +4,13 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getPendingMessages, markCompleted, MAX_TIMER_DELAY_MS, nextPendingDueDelayMs } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
-import { friendlyProviderErrorFallback, shouldDeferInteractiveResponse } from './poll-loop.js';
+import {
+  friendlyProviderErrorFallback, providerFailureSummary, renderFailedTurnReplay, shouldDeferInteractiveResponse,
+} from './poll-loop.js';
+import { appendActivity } from './db/session-state.js';
+import { beginTurn } from './turn-execution.js';
+import { setTurnContext } from './current-batch.js';
+import { writeResponseRow } from './query/notices.js';
 import { isCorruptionError, isMissingDbError } from './query/follow-up-watcher.js';
 import { MockProvider } from './providers/mock.js';
 
@@ -13,7 +19,26 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setTurnContext(null);
   closeSessionDb();
+});
+
+it.each([
+  ['routing-input', 'routing-input'],
+  [undefined, 'turn-input'],
+  [null, null],
+])('writes system responses with reply target %s', (inReplyTo, expected) => {
+  const turn = beginTurn({ channelType: 'web', platformId: 'room', threadId: 'thread', inReplyTo: 'turn-input' }, []);
+  setTurnContext(turn);
+  const id = writeResponseRow(
+    { channelType: 'web', platformId: 'room', threadId: 'thread', inReplyTo },
+    'Provider error',
+    { system_generated: true },
+  );
+  const row = getUndeliveredMessages()[0];
+  expect(row).toMatchObject({ id, turn_id: turn.turnId, in_reply_to: expected,
+    channel_type: 'web', platform_id: 'room', thread_id: 'thread' });
+  expect(JSON.parse(row.content)).toMatchObject({ text: 'Provider error', delivery_origin: 'response', system_generated: true });
 });
 
 describe('future message timing', () => {
@@ -443,35 +468,82 @@ describe('friendlyProviderErrorFallback', () => {
   it('extracts message from JSON-formatted error', () => {
     const err = '{"type":"error","message":"Rate limit exceeded","code":429}';
     expect(friendlyProviderErrorFallback(err)).toBe(
-      'Your message couldn\'t be processed: "Rate limit exceeded". You may want to rephrase and try again.',
+      'The turn could not be completed: "Rate limit exceeded". No final response was produced.',
     );
   });
 
   it('surfaces short plain-text errors directly', () => {
     const err = 'Budget limit exceeded (weekly limit). Contact your org admin.';
     expect(friendlyProviderErrorFallback(err)).toBe(
-      `Your message couldn't be processed: "${err}". You may want to rephrase and try again.`,
+      `The turn could not be completed: "${err}". No final response was produced.`,
     );
   });
 
   it('falls back to generic message for long errors', () => {
     const err = 'x'.repeat(201);
     expect(friendlyProviderErrorFallback(err)).toBe(
-      "Your message couldn't be processed due to a provider error. You may want to rephrase and try again.",
+      "The turn could not be completed due to a provider error. No final response was produced.",
     );
   });
 
   it('falls back to generic message for JSON blobs without "message" key', () => {
     const err = '{"error": {"type": "server_error", "details": "something broke internally"}}';
     expect(friendlyProviderErrorFallback(err)).toBe(
-      "Your message couldn't be processed due to a provider error. You may want to rephrase and try again.",
+      "The turn could not be completed due to a provider error. No final response was produced.",
     );
   });
 
   it('falls back to generic message for stack traces', () => {
     const err = 'TypeError: Cannot read properties\n    at Object.<anonymous> (file.js:1:1)';
     expect(friendlyProviderErrorFallback(err)).toBe(
-      "Your message couldn't be processed due to a provider error. You may want to rephrase and try again.",
+      "The turn could not be completed due to a provider error. No final response was produced.",
     );
+  });
+
+  describe('partial-work failure notices', () => {
+    function turn() {
+      return beginTurn({ channelType: 'web', platformId: 'room', threadId: 'thread', inReplyTo: 'input' }, []);
+    }
+
+    it('does not claim that a turn without recorded tools was unprocessed', () => {
+      expect(providerFailureSummary(turn().turnId, 'native')).toBe('The turn did not finish. No final response was produced.');
+    });
+
+    it('preserves native completed actions in direct and fallback notices', () => {
+      const current = turn();
+      appendActivity({ kind: 'tool', id: 'write', tool: 'write', status: 'completed' });
+      const note = providerFailureSummary(current.turnId, 'native');
+      expect(note).toContain('Completed tool actions remain in the conversation');
+      expect(friendlyProviderErrorFallback('context overflow', note)).toContain(note);
+      expect(providerFailureSummary(current.turnId, 'claude')).toContain('may already have run');
+    });
+
+    it('keeps interrupted outcomes uncertain', () => {
+      const current = turn();
+      appendActivity({ kind: 'tool', id: 'write', tool: 'write', status: 'running' });
+      expect(providerFailureSummary(current.turnId, 'native')).toContain('may already have run');
+      expect(providerFailureSummary(current.turnId, 'native')).not.toContain('Completed tool actions');
+    });
+
+    it('does not attribute another turn to the failed turn', () => {
+      const prior = turn();
+      appendActivity({ kind: 'tool', id: 'prior-write', tool: 'write', status: 'completed' });
+      const current = turn();
+      expect(providerFailureSummary(current.turnId, 'native')).not.toContain('Completed tool actions');
+      expect(providerFailureSummary(prior.turnId, 'native')).toContain('Completed tool actions');
+    });
+
+    it('replays failures without telling the agent to repeat completed actions', () => {
+      const replay = renderFailedTurnReplay({
+        prompt: 'Fix the page', error: 'context overflow', recorded_at: 0,
+        execution_note: 'The file edit completed.',
+      });
+      expect(replay).toContain('<previous_user_request>');
+      expect(replay).toContain('The file edit completed.');
+      expect(replay).toContain('complete only unfinished work');
+      expect(replay).not.toContain('user_message_that_was_not_processed');
+      const legacy = renderFailedTurnReplay({ prompt: 'Fix the page', error: 'context overflow', recorded_at: 0 });
+      expect(legacy).toContain('Some tool actions may already have run');
+    });
   });
 });

@@ -23,6 +23,7 @@ import {
   setContinuation,
   setFailedTurn,
   setTurnEnded,
+  type FailedTurnRecord,
 } from './db/session-state.js';
 import { getForkOrigin, type ForkOriginRow } from './db/fork-origin.js';
 import {
@@ -52,7 +53,7 @@ import { processPendingInputEdits, startInputProcessing, writeInputState } from 
 import { getHostEventGeneration, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
 import { TurnAccounting, resetLiveTurnState } from './query/accounting.js';
 import { FollowUpWatcher } from './query/follow-up-watcher.js';
-import { finalizeStoppedTurn, writeTurnNotice } from './query/notices.js';
+import { finalizeStoppedTurn, writeResponseRow, writeTurnNotice } from './query/notices.js';
 import { DeliveryRecovery, type SuggestedAction } from './query/recovery.js';
 import { RunawayGuard } from './query/runaway-guard.js';
 import { SteeringSession } from './query/steering.js';
@@ -425,18 +426,12 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             taskProviderFailed = true;
             const errorRouting = result.unsurfacedError.routing;
             const tag = result.unsurfacedError.classification ? ` [${result.unsurfacedError.classification}]` : '';
-            writeMessageOut({
-              id: generateId(),
-              kind: 'chat',
-              platform_id: errorRouting.platformId,
-              channel_type: errorRouting.channelType,
-              thread_id: errorRouting.threadId,
-              content: JSON.stringify({
-                delivery_origin: 'response',
-                system_generated: true,
-                text: `⚠️ Agent provider error${tag}: ${result.unsurfacedError.message}\n\nYour message was not processed.`,
-              }),
-            });
+            writeResponseRow(
+              { ...errorRouting, inReplyTo: undefined },
+              `⚠️ Agent provider error${tag}: ${result.unsurfacedError.message}\n\n` +
+                providerFailureSummary(execution.current.turnId, config.providerName),
+              { system_generated: true },
+            );
             log(`Surfaced provider error to user: ${result.unsurfacedError.message}`);
             await settleTurn(execution.current, 'failed');
           }
@@ -472,7 +467,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           // rolled-back `continuation` we already have.
           try {
             taskProviderFailed = true;
-            setFailedTurn({ prompt: promptTracker.latest, error: errMsg, recorded_at: Date.now() });
+            setFailedTurn({
+              prompt: promptTracker.latest, error: errMsg, recorded_at: Date.now(),
+              execution_note: providerFailureSummary(execution.current.turnId, config.providerName),
+            });
           } catch (e) {
             log(`Failed to persist failed-turn record: ${e instanceof Error ? e.message : String(e)}`);
           }
@@ -482,18 +480,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           appendProviderFailure(errMsg);
           const ack = await tryAcknowledgeFailure(config, failureRouting, errMsg, undefined, execution);
           if (!ack.delivered) {
-            writeMessageOut({
-              id: generateId(),
-              kind: 'chat',
-              platform_id: failureRouting.platformId,
-              channel_type: failureRouting.channelType,
-              thread_id: failureRouting.threadId,
-              content: JSON.stringify({
-                text: friendlyProviderErrorFallback(errMsg),
-                delivery_origin: 'response',
-                system_generated: true,
-              }),
-            });
+            writeResponseRow(
+              { ...failureRouting, inReplyTo: undefined },
+              friendlyProviderErrorFallback(errMsg, providerFailureSummary(execution.current.turnId, config.providerName)),
+              { system_generated: true },
+            );
             appendActivity({
               kind: 'notification',
               id: `failure-notice:${generateId()}`,
@@ -649,19 +640,20 @@ function formatMessagesWithCommands(messages: MessageInRow[], nativeSlashCommand
  * next prompt. Tells the agent verbatim what the user said last time and
  * what error the provider returned, so it can acknowledge the failure
  * instead of acting as if the message never happened. Paired with the
- * continuation rollback in processQuery — the resumed transcript has no
- * memory of the failed turn, so this block is the only signal.
+ * continuation rollback in processQuery — the resumed transcript may lack
+ * the failed turn, but completed external actions must not be repeated.
  */
-function renderFailedTurnReplay(failed: { prompt: string; error: string; recorded_at: number }): string {
+export function renderFailedTurnReplay(failed: FailedTurnRecord): string {
   const when = new Date(failed.recorded_at).toISOString();
   return [
     `<previous_turn_failed at="${when}">`,
-    `<user_message_that_was_not_processed>`,
+    `<previous_user_request>`,
     failed.prompt,
-    `</user_message_that_was_not_processed>`,
+    `</previous_user_request>`,
     `<provider_error>${failed.error}</provider_error>`,
-    `<note>The provider rejected only the single user turn shown above. Your earlier conversation history is intact — do not claim you have forgotten it. The user has already seen a one-line "your message couldn't be processed" notice, so you do not need to re-explain the failure.`,
-    `\nThe user's intent in that failed turn still stands. Now: actually do what they asked, using your tools. If their current message is a retry/prod ("try again", "you there?", "all done?", etc.), interpret it as "complete the work from the failed turn" — do NOT respond with a verbal-only acknowledgement ("on it", "continuing", "doing it now", "yep, here") and end the turn without making the actual change. If their current message is unrelated, address that instead.</note>`,
+    `<execution_note>${failed.execution_note ?? 'Some tool actions may already have run. Do not assume their effects were rolled back.'}</execution_note>`,
+    `<note>The previous turn did not finish. A restored continuation may omit some of that turn's transcript, but external actions are not automatically undone. Do not claim that earlier conversation history was lost.`,
+    `\nThe user's intent still stands. If the current message is a retry, inspect available results and current state first, then complete only unfinished work. Do not repeat completed actions or treat interrupted outcomes as confirmed failures. If the current message is unrelated, address that instead.</note>`,
     `</previous_turn_failed>`,
   ].join('\n');
 }
@@ -681,30 +673,42 @@ function appendProviderFailure(message: string, classification?: string): void {
   });
 }
 
+export function providerFailureSummary(turnId: string, providerName: string): string {
+  const tools = getOutboundDb().prepare(`
+    SELECT COUNT(*) AS attempted,
+      COALESCE(SUM(json_extract(text, '$.status') = 'completed'), 0) AS completed
+    FROM turn_activity WHERE turn_id = ? AND json_valid(text)
+      AND json_extract(text, '$.kind') = 'tool'
+  `).get(turnId) as { attempted: number; completed: number };
+  if (providerName === 'native' && tools.completed > 0) {
+    return 'The turn did not finish. Completed tool actions remain in the conversation; their effects were not rolled back. No final response was produced.';
+  }
+  if (tools.attempted > 0) {
+    return 'The turn did not finish. Tool actions may already have run; do not assume their effects were rolled back. No final response was produced.';
+  }
+  return 'The turn did not finish. No final response was produced.';
+}
+
 /**
- * Static fallback message used only when both the agent's normal turn
- * AND the in-turn ack failed. Pulls the human-readable message out of
- * Claude Code-style API errors so the user gets one short line instead
- * of a wall of JSON. Best-effort — if extraction misses, returns a
- * generic message and drops the raw error entirely (the user can't act
- * on it anyway).
+ * Static fallback when both the original turn and its explanation fail.
+ * Extract a short error while retaining the recorded execution evidence.
  */
-export function friendlyProviderErrorFallback(errMsg: string): string {
+export function friendlyProviderErrorFallback(errMsg: string, executionNote = 'No final response was produced.'): string {
   // Match either `"message":"..."` (JSON-escaped) or a bare error line
   // anywhere in the string. The first capture wins.
   const jsonMatch = errMsg.match(/"message"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
   if (jsonMatch) {
     const quoted = jsonMatch[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').trim();
-    if (quoted) return `Your message couldn't be processed: "${quoted}". You may want to rephrase and try again.`;
+    if (quoted) return `The turn could not be completed: "${quoted}". ${executionNote}`;
   }
   // If the error is short, doesn't contain raw JSON or stack traces, surface
   // it directly — it's likely a human-readable provider message (e.g. budget
   // limits, rate limits, auth errors).
   const trimmed = errMsg.trim();
   if (trimmed.length <= 200 && !trimmed.includes('{') && !trimmed.includes('\n    at ')) {
-    return `Your message couldn't be processed: "${trimmed}". You may want to rephrase and try again.`;
+    return `The turn could not be completed: "${trimmed}". ${executionNote}`;
   }
-  return "Your message couldn't be processed due to a provider error. You may want to rephrase and try again.";
+  return `The turn could not be completed due to a provider error. ${executionNote}`;
 }
 
 /**
@@ -737,11 +741,13 @@ async function tryAcknowledgeFailure(
   const tag = errorClassification ? ` (${errorClassification})` : '';
   const ackPrompt = [
     `<system>`,
-    `The user's most recent message could not be processed because the model provider returned an error${tag}:`,
+    `The user's most recent turn did not finish because the model provider returned an error${tag}:`,
     ``,
     errorMessage,
     ``,
-    `Briefly (one or two short sentences) tell the user that their message failed and, if useful, quote the most relevant phrase from the error verbatim so they can act on it. Do not retry the failed action. Do not speculate about causes beyond what the error literally says. Do not apologize at length.`,
+    providerFailureSummary(execution.current.turnId, config.providerName),
+    ``,
+    `Briefly (one or two short sentences) tell the user that the turn did not finish and, if useful, quote the most relevant phrase from the error verbatim so they can act on it. Do not claim that no work happened or that tool effects were undone. Do not retry the failed action. Do not speculate about causes beyond what the error literally says. Do not apologize at length.`,
     `</system>`,
   ].join('\n');
 

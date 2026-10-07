@@ -385,14 +385,35 @@ Reopening requires the source file to still exist; temporary container files
 disappear on exit, so images needed later should be saved in the workspace.
 No screenshots are automatically attached or re-read.
 
-### Native Provider: Context-overflow compaction
+### Native Provider: Automatic and context-overflow compaction
+
+The native provider automatically compacts at **75% context utilization**,
+using the latest successful normal model step's prompt (including cached
+input) plus output, not cumulative billing tokens or the rounded UI percentage.
+The check runs between completed model/tool steps, after journaling their
+results, only when another generation is needed. A final answer is delivered
+without trailing compaction. Missing usage or an unknown model window disables
+this proactive trigger, not emergency recovery. Utilization is not persisted:
+the first successful step after a resume establishes a new measurement.
+
+Each turn permits two proactive attempts, retaining the latest three exchange
+groups. Successful compaction invalidates the triggering measurement; summary
+calls cannot retrigger it. A failed proactive attempt emits an error activity
+and notification, preserves the active context, and disables further proactive
+attempts for that turn while normal generation continues. Reaching the
+proactive limit emits a notification and does not itself fail the turn.
+Per-turn policy owns eligibility, suppression, and the two attempt budgets;
+the shared executor only runs the selected plan and reports its lifecycle.
+Activity ordinals derive from the sum of proactive and emergency attempts,
+without a separate sequence counter.
 
 Recognized context rejections, including MiniMax's
 `context window exceeds limit (2013)`, trigger automatic compaction inside the
 native provider. Unrelated authentication, validation, and rate-limit errors
 do not. Recovery retries only the rejected model step, keeps the same turn and
-continuation, and is limited to two compaction attempts per turn. A rejected
-step that already streamed text or tool execution is not automatically retried.
+continuation, and shares a separate two-attempt emergency budget with inline
+media recovery. Proactive attempts do not consume this budget. A rejected step
+that already streamed text or tool execution is not automatically retried.
 
 The full native transcript and checkpoint IDs remain unchanged. A persistent
 `context_compactions` projection supplies a model-generated factual summary
@@ -404,15 +425,52 @@ checkpoint-bounded transcript, never a summary from a later point in time.
 Summarization uses the current model with no tools. Transcript fragments omit
 inline media bytes, not the archived originals, and the prompt preserves
 completed actions, results, file paths, constraints, pending work, and unknown
-side effects. Inputs and output summaries are bounded; a compaction has a
-two-minute deadline and a 64-fragment limit. Empty, oversized, non-reducing,
-failed, or cancelled summaries are not saved. Exhausted recovery surfaces an
-explicit provider failure rather than silently dropping history.
+side effects. Budgeted chronological chunks are summarized independently with
+at most two concurrent requests, then reduced to one continuation summary.
+Complete exchanges stay together where possible; oversized exchanges split
+into labelled, ordered fragments carrying message and tool identities. The
+originals are never truncated. Intermediate summaries remain temporary; only
+the validated final summary is activated atomically.
+
+A single chronological chunk that fits the final-request budget is summarized
+directly with the final output allowance, avoiding an intermediate summary and
+reduction call. A single leaf that fits only the larger intermediate request
+budget still uses the two-stage path. Packing counts each fragment's UTF-8
+bytes once and joins text only when closing a chunk, rather than repeatedly
+scanning growing prefixes.
+
+There is no model-specific tokenizer dependency. Request sizing conservatively
+counts UTF-8 bytes as estimated tokens, with room for instructions, protocol
+framing, and output. The combined request budget is the smaller of 128,000
+estimated tokens or 25% of the model window (32,768 when unknown). Intermediate
+output is capped at 2,048 tokens and final output at 8,192 tokens, additionally
+bounded by model capability and one-sixteenth of the request budget. Summary
+text must also fit a byte cap of four times its requested output tokens.
+
+Each compaction has a five-minute deadline, 60-second request timeouts, at most
+32 leaf chunks, and at most 64 model requests, counting rejections and reduction.
+There are no hidden SDK retries. A context-specific summarizer rejection splits
+the offending request and summarizes its ordered fragments within the same
+limits; other provider errors are surfaced without splitting. Work exceeding
+the leaf limit is rejected before model calls. Empty, oversized, non-reducing,
+failed, or cancelled summaries are not saved. Exhausted emergency recovery
+surfaces an explicit provider failure rather than silently dropping history.
 
 Compaction is recorded as its own activity with running/completed/failed/
 interrupted lifecycle states and duration, including failed attempts. Its
-model usage is included in turn accounting. Rebuild/restart the host before
-starting new runners so its activity validator accepts the lifecycle fields.
+model calls, usage, and cumulative model time are included in turn accounting
+exactly once through the same call-end recorder as normal generations.
+Occupancy is updated separately after a normal model/tool step settles;
+summarization occupancy never replaces it, including partial reports on failure.
+Concurrent request durations can sum to more than wall-clock time. Completion details
+report source bytes and model request count. Existing lifecycle fields are
+reused; no host protocol or database migration is needed.
+
+Provider failure notices distinguish an unfinished turn from no execution:
+completed native tool actions remain in the transcript and their effects are
+not rolled back. Interrupted tools retain uncertain outcomes. Fallback
+explanations and failed-turn replay instructions likewise avoid blindly
+repeating completed actions.
 
 ### Native Provider: External MCP Tools
 

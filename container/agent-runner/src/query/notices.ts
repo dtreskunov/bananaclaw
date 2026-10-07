@@ -1,6 +1,5 @@
 /**
- * Runner-authored chat rows that close a turn: the "Stopped by user." notice
- * and the warning shown when a turn ends having delivered nothing.
+ * Runner-authored response rows and terminal notices.
  */
 import { writeMessageOut } from '../db/messages-out.js';
 import { appendActivity, clearFailedTurn, getActivityBuffer, setTurnEnded } from '../db/session-state.js';
@@ -20,7 +19,10 @@ export function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function writeResponseRow(routing: RoutingContext, text: string, extra: Record<string, unknown>): string {
+type ResponseRouting = Omit<RoutingContext, 'inReplyTo'> & { inReplyTo?: string | null };
+
+/** An omitted reply target inherits the active turn's target. */
+export function writeResponseRow(routing: ResponseRouting, text: string, extra: Record<string, unknown>): string {
   const id = generateId();
   writeMessageOut({
     id,

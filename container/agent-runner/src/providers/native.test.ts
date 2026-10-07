@@ -42,6 +42,9 @@ let catalogModels: Record<string, unknown>;
 let contextOverflows: number;
 let overflowAfterTool: boolean;
 let rejectCompaction: boolean;
+type StubUsage = { prompt_tokens?: number; completion_tokens?: number };
+let scriptedUsage: StubUsage[];
+let compactionUsage: StubUsage;
 
 const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
   (executable) => spawnSync(executable, ['-version'], { stdio: 'ignore' }).status === 0,
@@ -97,6 +100,8 @@ beforeEach(() => {
   contextOverflows = 0;
   overflowAfterTool = false;
   rejectCompaction = false;
+  scriptedUsage = [];
+  compactionUsage = { prompt_tokens: 4, completion_tokens: 3 };
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -140,6 +145,7 @@ beforeEach(() => {
         return Response.json({ error: { message: 'Unsupported audio format', type: 'invalid_request_error' } }, { status: 400 });
       }
       const scripted = isCompaction ? undefined : scriptedToolCalls.shift();
+      const customUsage = isCompaction ? compactionUsage : scriptedUsage.shift();
       if (new URL(request.url).pathname.endsWith('/messages')) {
         const requestBody = requests.at(-1)!;
         const hasToolResult = JSON.stringify(requestBody.messages).includes('tool_result');
@@ -147,7 +153,7 @@ beforeEach(() => {
           !isCompaction && (scripted || (anthropicToolMode && !hasToolResult))
             ? [
                 'event: message_start',
-                'data: {"type":"message_start","message":{"id":"msg_minimax_tool","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0}}}',
+                `data: {"type":"message_start","message":{"id":"msg_minimax_tool","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":${customUsage?.prompt_tokens ?? 4},"output_tokens":0}}}`,
                 '',
                 'event: content_block_start',
                 `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_minimax_${requests.length}","name":"${scripted?.[0] ?? (slowToolMode ? 'bash' : 'mcp__nanoclaw__send_message')}","input":{}}}`,
@@ -159,7 +165,7 @@ beforeEach(() => {
                 'data: {"type":"content_block_stop","index":0}',
                 '',
                 'event: message_delta',
-                'data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":10}}',
+                `data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":${customUsage?.completion_tokens ?? 10}}}`,
                 '',
                 'event: message_stop',
                 'data: {"type":"message_stop"}',
@@ -168,7 +174,7 @@ beforeEach(() => {
               ].join('\n')
             : [
                 'event: message_start',
-                'data: {"type":"message_start","message":{"id":"msg_minimax","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":0,"cache_read_input_tokens":20,"cache_creation_input_tokens":3}}}',
+                `data: {"type":"message_start","message":{"id":"msg_minimax","type":"message","role":"assistant","content":[],"model":"MiniMax-M3","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":${customUsage?.prompt_tokens ?? 4},"output_tokens":0,"cache_read_input_tokens":20,"cache_creation_input_tokens":3}}}`,
                 '',
                 'event: content_block_start',
                 'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
@@ -180,7 +186,7 @@ beforeEach(() => {
                 'data: {"type":"content_block_stop","index":0}',
                 '',
                 'event: message_delta',
-                'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}',
+                `data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":${customUsage?.completion_tokens ?? 5}}}`,
                 '',
                 'event: message_stop',
                 'data: {"type":"message_stop"}',
@@ -192,9 +198,9 @@ beforeEach(() => {
       const requestBody = requests.at(-1)!;
       const messages = requestBody.messages as Array<{ role: string }>;
       const toolResultCount = messages.filter((message) => message.role === 'tool').length;
-      const shouldCallTool = scripted ? true : todoToolMode
+      const shouldCallTool = !isCompaction && (scripted ? true : todoToolMode
         ? toolResultCount < 2
-        : (toolMode || externalMcpToolMode || skillToolMode || slowToolMode) && toolResultCount === 0;
+        : (toolMode || externalMcpToolMode || skillToolMode || slowToolMode) && toolResultCount === 0);
       const toolName = scripted ? scripted[0] : slowToolMode ? 'bash' : todoToolMode
         ? toolResultCount === 0
           ? 'todowrite'
@@ -213,6 +219,9 @@ beforeEach(() => {
           : externalMcpToolMode
             ? '{"value":"from-model"}'
             : '{"text":"hello user"}';
+      const usage = customUsage ?? (shouldCallTool
+        ? { prompt_tokens: 11, completion_tokens: 2 }
+        : { prompt_tokens: 4, completion_tokens: 3 });
       const body = shouldCallTool
         ? [
             ...(toolCallText
@@ -223,15 +232,15 @@ beforeEach(() => {
               : []),
             `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_${requests.length}","type":"function","function":{"name":"${toolName}","arguments":${JSON.stringify(toolArguments)}}}]},"finish_reason":null}]}`,
             '',
-            'data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}',
+            `data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":${JSON.stringify(usage)}}`,
             '',
             'data: [DONE]',
             '',
           ].join('\n')
         : [
-            `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(scriptedTexts.shift() ?? 'hello from stub')}},"finish_reason":null}]}`,
+            `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(isCompaction ? 'Earlier work completed; continue pending requests without repeating tools.' : scriptedTexts.shift() ?? 'hello from stub')}},"finish_reason":null}]}`,
             '',
-            'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}',
+            `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":${JSON.stringify(usage)}}`,
             '',
             'data: [DONE]',
             '',
@@ -596,6 +605,199 @@ describe('NativeProvider', () => {
     expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'completed')).toBe(true);
     expect(JSON.stringify(requests.at(-1)?.messages)).toContain('tool_call_id');
     expect(replyTexts(events)).toEqual([['hello from stub']]);
+  });
+
+  function knownContext() {
+    catalogModels = { local: { models: { 'test-model': {
+      modalities: { input: ['text'], output: ['text'] },
+      limit: { context: 1_000_000, output: 8192 },
+    } } } };
+    return new NativeProvider({ model: 'local/test-model' });
+  }
+
+  function compactions(events: ProviderEvent[], status: 'running' | 'completed' | 'error') {
+    return events.filter((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === status);
+  }
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'compacts at exactly 75%% between completed steps through %s without replaying tools', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      const provider = knownContext();
+      scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+      scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
+      const events = await collect(provider, history());
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(compactions(events, 'completed')).toHaveLength(1);
+      expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+      const start = events.findIndex((event) => event.type === 'progress' && event.step.kind === 'compaction');
+      const toolEnd = events.findIndex((event) => event.type === 'progress' && event.step.kind === 'tool' &&
+        event.step.status === 'completed');
+      expect(start).toBeGreaterThan(toolEnd);
+      expect(JSON.stringify(requests.at(-1)?.messages)).toContain('once.txt');
+      expect(requests.filter((request) => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS))).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    { name: 'below threshold', usage: { prompt_tokens: 749_997, completion_tokens: 2 }, known: true },
+    { name: 'missing usage', usage: {}, known: true },
+    { name: 'unknown window', usage: { prompt_tokens: 900_000, completion_tokens: 2 }, known: false },
+  ])('does not proactively compact with $name', async ({ usage, known }) => {
+    const provider = known ? knownContext() : new NativeProvider({ model: 'local/test-model' });
+    scriptedToolCalls = [['bash', '{"command":"echo once"}']];
+    scriptedUsage = [usage];
+    const events = await collect(provider, history());
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(compactions(events, 'running')).toHaveLength(0);
+  });
+
+  it('does not compact a final answer even above the threshold', async () => {
+    const provider = knownContext();
+    scriptedUsage = [{ prompt_tokens: 800_000, completion_tokens: 3 }];
+    const events = await collect(provider, history());
+    expect(compactions(events, 'running')).toHaveLength(0);
+    expect(replyTexts(events)).toEqual([['hello from stub']]);
+  });
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'does not reuse stale occupancy or summarizer usage, and bills %s summary calls exactly once', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      const provider = knownContext();
+      const continuation = history();
+      scriptedToolCalls = [
+        ['bash', '{"command":"echo first"}'],
+        ['bash', '{"command":"echo second"}'],
+      ];
+      scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
+      compactionUsage = { prompt_tokens: 900_000, completion_tokens: 3 };
+      const events = await collect(provider, continuation);
+      expect(compactions(events, 'completed')).toHaveLength(1);
+      const calls = events.filter((event) => event.type === 'usage_call');
+      const summaries = calls.filter((event) => event.type === 'usage_call' && event.data.input_tokens === 900_000);
+      expect(summaries).toHaveLength(1);
+      expect(summaries.every((event) => event.type === 'usage_call' && event.data.context_tokens === undefined)).toBe(true);
+      const total = events.find((event) => event.type === 'usage');
+      expect(total).toMatchObject({ data: protocol === 'anthropic-messages'
+        ? { input_tokens: 1_650_006, output_tokens: 20, cache_read_tokens: 40, cache_write_tokens: 6, context_tokens: 32, num_turns: 4 }
+        : { input_tokens: 1_650_013, output_tokens: 10, cache_read_tokens: 0, cache_write_tokens: 0, context_tokens: 7, num_turns: 4 } });
+      expect(calls.reduce((sum, event) => sum + (event.type === 'usage_call' ? event.data.input_tokens : 0), 0))
+        .toBe(total?.type === 'usage' ? total.data.input_tokens : -1);
+      const resumed = await collect(provider, continuation);
+      expect(compactions(resumed, 'running')).toHaveLength(0);
+    },
+  );
+
+  it('reports proactive failure once, continues unchanged, and keeps emergency recovery available', async () => {
+    const provider = knownContext();
+    const continuation = history();
+    scriptedToolCalls = [
+      ['bash', '{"command":"echo once >> once.txt"}'],
+      ['bash', '{"command":"echo twice >> once.txt"}'],
+    ];
+    scriptedUsage = [{ prompt_tokens: 800_000, completion_tokens: 2 }, { prompt_tokens: 800_000, completion_tokens: 2 }];
+    rejectCompaction = true;
+    const events = await collect(provider, continuation);
+    expect(compactions(events, 'error')).toHaveLength(1);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'notification' &&
+      event.step.text.includes('Automatic compaction failed'))).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\ntwice\n');
+    rejectCompaction = false;
+    contextOverflows = 1;
+    const recovered = await collect(provider, continuation);
+    expect(compactions(recovered, 'completed')).toHaveLength(1);
+    expect(recovered.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('caps proactive compactions without spending the emergency recovery budget', async () => {
+    const provider = knownContext();
+    scriptedToolCalls = Array.from({ length: 4 }, () => ['bash', '{"command":"echo once >> once.txt"}']);
+    scriptedUsage = Array.from({ length: 4 }, () => ({ prompt_tokens: 800_000, completion_tokens: 2 }));
+    const events = await collect(provider, history());
+    expect(compactions(events, 'completed')).toHaveLength(2);
+    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'notification' &&
+      event.step.text.includes('compaction limit'))).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\nonce\nonce\nonce\n');
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('retains both emergency attempts in the same turn after proactive compaction', async () => {
+    const provider = knownContext();
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
+    const query = provider.query({ prompt: 'follow up', continuation: history(), cwd: root });
+    query.end();
+    const events: ProviderEvent[] = [];
+    let rejected = false;
+    for await (const event of query.events) {
+      events.push(event);
+      if (!rejected && event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'completed') {
+        rejected = true;
+        contextOverflows = 2;
+      }
+    }
+    expect(compactions(events, 'completed')).toHaveLength(3);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+  });
+
+  it('keeps protected steering through proactive compaction and acknowledges it at generation start', async () => {
+    const provider = knownContext();
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
+    const query = provider.query({ prompt: 'follow up', continuation: history(), cwd: root });
+    const events: ProviderEvent[] = [];
+    let offered = false;
+    for await (const event of query.events) {
+      events.push(event);
+      if (!offered && event.type === 'progress' && event.step.kind === 'tool' && event.step.status === 'completed') {
+        offered = true;
+        expect(query.steer?.({ id: 'threshold-guidance', prompt: 'Keep the completed file edit; report the next task.' })).toBe(true);
+      }
+      if (event.type === 'result') query.end();
+    }
+    expect(compactions(events, 'completed')).toHaveLength(1);
+    const compacted = events.findIndex((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'completed');
+    expect(events.findIndex((event) => event.type === 'steering_applied')).toBeGreaterThan(compacted);
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain('Keep the completed file edit');
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+  });
+
+  it('stops a proactive compaction without activating a summary or starting the next model step', async () => {
+    const provider = knownContext();
+    const continuation = history();
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
+    const query = provider.query({ prompt: 'follow up', continuation, cwd: root });
+    query.end();
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'running')
+        query.abort('user');
+    }
+    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'interrupted')).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(replyTexts(events)).toEqual([]);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    const store = new NativeStore();
+    try {
+      expect(JSON.stringify(store.contextMessages(continuation))).toContain('Earlier requirements '.repeat(250));
+    } finally { store.close(); }
+  });
+
+  it('continues after proactive compaction cannot remove protected or recent history', async () => {
+    const provider = knownContext();
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
+    const events = await collect(provider);
+    expect(compactions(events, 'error')).toHaveLength(1);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(replyTexts(events)).toEqual([['hello from stub']]);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
   });
 
   it('bounds overflow recovery to two compactions and surfaces a persistent rejection', async () => {

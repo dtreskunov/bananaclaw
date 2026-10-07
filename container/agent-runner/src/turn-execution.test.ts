@@ -67,6 +67,35 @@ it('persists model time across retries and replaces call checkpoints with attemp
   expect(metadata(turn.turnId).durationMs).toBeLessThan(999999);
 });
 
+it('preserves main-model occupancy and billed summary calls in failed-turn partial accounting', async () => {
+  const turn = beginTurn(route, []);
+  recordTurnUsage(turn, { ...usage, context_tokens: 786_376, context_window: 1_000_000, duration_api_ms: 100 }, false);
+  recordTurnUsage(turn, { ...usage, input_tokens: 900_000, context_tokens: undefined,
+    context_window: 1_000_000, duration_api_ms: 200 }, false);
+  finishUsageAttempt(turn);
+  await settleTurn(turn, 'failed');
+  expect(getOutboundDb().prepare(
+    'SELECT input_tokens, context_tokens, duration_api_ms, num_turns FROM turn_usage WHERE turn_id = ?',
+  ).get(turn.turnId)).toEqual({ input_tokens: 900_012, context_tokens: 786_376, duration_api_ms: 300, num_turns: 2 });
+  expect(metadata(turn.turnId)).toMatchObject({ status: 'partial', final: true });
+});
+
+it('reports completed native tool work when the turn fails before its final answer', async () => {
+  input();
+  const controller = new AbortController();
+  const loop = runPollLoop({ provider: provider(async function* () {
+    yield { type: 'progress', step: { kind: 'tool', id: 'write-once', tool: 'write', status: 'completed' } };
+    yield { type: 'error', message: 'context recovery failed', retryable: false };
+  }), providerName: 'native', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE phase='settled'").get());
+    const output = getOutboundDb().prepare('SELECT content FROM messages_out ORDER BY seq DESC LIMIT 1')
+      .get() as { content: string };
+    expect(JSON.parse(output.content).text).toContain('Completed tool actions remain in the conversation');
+    expect(JSON.parse(output.content).text).not.toContain('Your message was not processed');
+  } finally { controller.abort(); await loop; }
+});
+
 it.each([
   { name: 'success', events: [{ type: 'result', text: '<message to="web">answer</message>' }], outcome: 'replied' },
   { name: 'empty warning', events: [{ type: 'result', text: '' }], outcome: 'warning' },
