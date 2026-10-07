@@ -256,7 +256,7 @@
 .chat-main .msg .inline-media-name { font-size: var(--font-2xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* No group opacity here — it would cap the branch chip's contrast too. */
 .chat-main .msg .meta, .chat-main .typing .meta { font-size: var(--font-2xs); color: var(--message-meta, var(--muted)); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; min-width: 0; white-space: nowrap; }
-.chat-main .meta > span:not(.ts):not(.msg-inline-actions):not(.usage-wrap):not(.delivery-origin) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chat-main .meta > span:not(.ts):not(.msg-inline-actions):not(.delivery-origin) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chat-main .meta > .ts { flex: none; white-space: nowrap; }
 .chat-main .msg.in .meta > .ts { margin-right: auto; }
 .chat-main .msg .delivery-origin { font-style: italic; }
@@ -271,66 +271,54 @@
 .chat-main .msg.in .reactions { justify-content: flex-end; }
 .chat-main .msg .reaction-chip { font-size: var(--font-sm); line-height: 1; background: var(--wash-strong); border: 1px solid var(--border, transparent); border-radius: 999px; padding: 2px 6px; }
 .chat-main .msg.in .meta { text-align: right; justify-content: flex-end; }
-.chat-main .usage-wrap { position: relative; display: inline-flex; min-width: 0; }
-.chat-main .usage {
-  appearance: none;
-  padding: 1px 4px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  line-height: inherit;
-  text-align: inherit;
+.chat-main .msg:has(.usage-details) { width: 100%; }
+.chat-main .usage-details {
+  container: turn-usage / inline-size;
+  width: 100%;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-main .usage:hover { opacity: 1; color: var(--fg); background: var(--wash); }
-.chat-main .usage:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
-.chat-main .usage-backdrop { position: fixed; inset: 0; z-index: 20; }
-.chat-main .usage-popover {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  z-index: 21;
-  display: grid;
-  gap: 5px;
-  width: min(320px, calc(100vw - 32px));
-  max-height: min(70vh, 600px);
-  overflow-y: auto;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  color: var(--surface-fg);
-  box-shadow: 0 4px 16px var(--shadow-color);
-  font-size: var(--font-xs);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-block: 6px;
+  color: var(--fg);
+  font-size: var(--font-2xs);
   line-height: 1.35;
   text-align: left;
   white-space: normal;
 }
+.chat-main .usage-grid {
+  --usage-pairs: 1;
+  display: grid;
+  grid-template-columns: repeat(min(var(--usage-pairs), var(--usage-pair-limit, 1)), max-content minmax(max-content, 1fr));
+  grid-auto-flow: row dense;
+  gap: 5px 24px;
+}
+@container turn-usage (min-width: 464px) {
+  .chat-main .usage-grid { --usage-pairs: 2; }
+}
+@container turn-usage (min-width: 708px) {
+  .chat-main .usage-grid { --usage-pairs: 3; }
+}
 .chat-main .usage-row {
   display: grid;
-  grid-template-columns: minmax(92px, 1fr) auto;
-  gap: 16px;
+  grid-column: span 2;
+  grid-template-columns: subgrid;
+  column-gap: 16px;
   align-items: baseline;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 .chat-main .usage-row > span { color: var(--muted); }
-.chat-main .usage-time-breakdown { display: flex; flex-direction: column; gap: 4px; }
-.chat-main .usage-time-part { padding-inline-start: 12px; }
-.chat-main .usage-report { display: flex; flex-direction: column; gap: 5px; }
-.chat-main .usage-report + .usage-report { border-top: 1px solid var(--border); padding-top: 5px; }
-.chat-main .usage-row > strong { min-width: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
-.chat-main .turn-tech-info { position: relative; }
+.chat-main .usage-time-breakdown,
+.chat-main .usage-report { display: contents; }
+.chat-main .usage-time-breakdown > .usage-row { grid-column: 1 / span 2; }
+.chat-main .usage-notice { grid-column: 1 / -1; }
+.chat-main .usage-report > strong { grid-column: span 2; border-bottom: 1px solid var(--border); }
+.chat-main .usage-row > strong { font-weight: 600; text-align: right; }
 .chat-main .turn-technical-details { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; max-width: 100%; }
 .chat-main .msg:not(.display-card) > .turn-technical-details { margin-bottom: var(--text-block-gap); }
 .chat-main .turn-technical-details > .meta.turn-tech-info { margin: 0; min-height: 0; flex-wrap: wrap; row-gap: 2px; }
 .chat-main .turn-technical-details > .msg-activity { margin-top: 0; }
-.chat-main .turn-tech-info .usage-wrap { position: static; }
-.chat-main .turn-tech-info .usage { white-space: normal; overflow: visible; }
+.chat-main .turn-tech-info .usage-summary { white-space: normal; }
 .chat-main .turn-elapsed { flex: none; color: var(--muted); font-size: var(--font-2xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chat-main .msg.markdown { white-space: normal; }
 .chat-main .msg.markdown > :first-child { margin-top: 0; }
@@ -378,7 +366,7 @@
 .chat-main .msg .meta .turn-outcome-note { color: var(--surface-fg, inherit); opacity: 0.8; font-weight: 600; }
 .chat-main .activity-trace li .ts { margin-right: 6px; opacity: 0.6; font-variant-numeric: tabular-nums; }
 /* Shared live and persisted activity chapters. */
-.chat-main .msg-activity { margin-top: var(--text-block-gap); display: flex; flex-direction: column; align-items: flex-start; gap: var(--text-block-gap); max-width: 100%; }
+.chat-main .msg-activity { margin-top: var(--text-block-gap); display: flex; flex-direction: column; align-items: flex-start; gap: var(--text-block-gap); width: 100%; min-width: 0; max-width: 100%; }
 .chat-main .meta .trace-toggle { display: inline-flex; flex: none; align-items: center; gap: 3px; padding: 1px 4px; border: none; background: none; color: inherit; cursor: pointer; border-radius: var(--radius-pill); font: inherit; white-space: nowrap; }
 .chat-main .meta .trace-toggle:hover { background: var(--wash); color: var(--fg); }
 .chat-main .meta .trace-toggle:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }

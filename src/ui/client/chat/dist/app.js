@@ -19240,6 +19240,16 @@ function urlBase64ToUint8Array(base64String) {
 
 // src/activity-trace-state.ts
 var intent = y3(null);
+var expandedMetrics = y3(/* @__PURE__ */ new Set());
+function activityMetricsExpanded(ownerId) {
+  return expandedMetrics.value.has(ownerId);
+}
+function toggleActivityMetrics(ownerId) {
+  const next = new Set(expandedMetrics.peek());
+  if (next.has(ownerId)) next.delete(ownerId);
+  else next.add(ownerId);
+  expandedMetrics.value = next;
+}
 function activityTraceOwner(message2) {
   if (message2.turnTraceOwner) {
     if (!message2.turnId) throw new Error("Activity trace owner is missing its authoritative turn ID");
@@ -19274,6 +19284,7 @@ function inheritActivityTrace(ownerId, automatic = false) {
 }
 function resetActivityTraceView() {
   intent.value = null;
+  expandedMetrics.value = /* @__PURE__ */ new Set();
 }
 
 // src/appearance.ts
@@ -23696,20 +23707,25 @@ function ActivityTracePanel({
   live = false,
   now = null,
   ownerId,
-  following = false
+  following = false,
+  metrics = null
 }) {
-  if (!lines.length || !expanded) return null;
-  return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: /* @__PURE__ */ u4(
-    ActivityTraceList,
-    {
-      lines,
-      live,
-      now,
-      following,
-      onBrowse: (follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)
-    },
-    ownerId
-  ) });
+  const showTrace = lines.length > 0 && expanded;
+  if (!showTrace && !metrics) return null;
+  return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: [
+    metrics,
+    showTrace ? /* @__PURE__ */ u4(
+      ActivityTraceList,
+      {
+        lines,
+        live,
+        now,
+        following,
+        onBrowse: (follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)
+      },
+      ownerId
+    ) : null
+  ] });
 }
 function shortModel(model) {
   return model.split("/").pop() || model;
@@ -23726,60 +23742,67 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ u: u5, summary, records, context, model, live = false, partial = false, provisional = false, wallElapsedMs = u5.duration_ms ?? null, modelElapsedMs = u5.duration_api_ms ?? null }) {
-  const [expanded, setExpanded] = h2(false);
+function UsageMeta({ summary, ownerId }) {
+  const expanded = activityMetricsExpanded(ownerId);
   const short = summary || "Usage details";
-  const reports = records?.length ? records : [{ id: "usage", value: u5 }];
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "trace-toggle usage",
+      "aria-expanded": expanded,
+      "aria-controls": `turn-usage-${ownerId}`,
+      "aria-label": `${short}. ${expanded ? "Hide" : "Show"} usage details`,
+      title: expanded ? "Hide usage details" : "Show usage details",
+      onClick: (e4) => {
+        e4.stopPropagation();
+        toggleActivityMetrics(ownerId);
+      },
+      onKeyDown: (e4) => {
+        if (e4.key === "Escape" && expanded) toggleActivityMetrics(ownerId);
+      },
+      children: [
+        /* @__PURE__ */ u4("span", { class: `chevron${expanded ? " open" : ""}`, "aria-hidden": "true", children: "\u203A" }),
+        /* @__PURE__ */ u4("span", { class: "usage-summary", children: short })
+      ]
+    }
+  );
+}
+function UsageDetails({ ownerId, records, context, model, live, partial, wallElapsedMs, modelElapsedMs }) {
+  const grid = A2(null);
+  const reports = records.length ? records : [{ id: "usage", value: {} }];
   const showLiveContext = live && context != null;
-  return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "usage",
-        "aria-expanded": expanded,
-        "aria-label": `${short}. ${expanded ? "Hide" : "Show"} usage details`,
-        title: expanded ? "Hide usage details" : "Show usage details",
-        onClick: (e4) => {
-          e4.stopPropagation();
-          setExpanded((v5) => !v5);
-        },
-        onKeyDown: (e4) => {
-          if (e4.key === "Escape") setExpanded(false);
-        },
-        children: short
-      }
-    ),
-    expanded ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { class: "usage-backdrop", onClick: () => setExpanded(false) }),
-      /* @__PURE__ */ u4("span", { class: "usage-popover", role: "dialog", "aria-label": "Turn usage details", children: [
-        partial ? /* @__PURE__ */ u4("span", { class: "usage-row", children: "Partial usage report; final totals may be higher." }) : null,
-        provisional ? /* @__PURE__ */ u4("span", { class: "usage-row", children: "Usage reported so far; awaiting final totals." }) : null,
-        /* @__PURE__ */ u4("span", { class: "usage-time-breakdown", role: "group", "aria-label": "Response time breakdown", children: [
-          /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-            /* @__PURE__ */ u4("span", { children: "Total time" }),
-            /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs) })
-          ] }),
-          /* @__PURE__ */ u4("span", { class: "usage-row usage-time-part", children: [
-            /* @__PURE__ */ u4("span", { children: "Model time" }),
-            /* @__PURE__ */ u4("strong", { children: modelElapsedMs === null ? "Unavailable" : formatElapsedDuration(modelElapsedMs) })
-          ] }),
-          /* @__PURE__ */ u4("span", { class: "usage-row usage-time-part", title: "Total time minus cumulative model-call time", children: [
-            /* @__PURE__ */ u4("span", { children: "Other time" }),
-            /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null || modelElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs - modelElapsedMs) })
-          ] })
-        ] }),
-        showLiveContext ? /* @__PURE__ */ u4(UsageContext, { context, live: true }) : null,
-        reports.map((record, index) => /* @__PURE__ */ u4("div", { class: "usage-report", children: [
-          reports.length > 1 ? /* @__PURE__ */ u4("strong", { children: [
-            "Usage report ",
-            index + 1
-          ] }) : null,
-          /* @__PURE__ */ u4(UsageReport, { u: record.value, model, live, partial, showContext: !showLiveContext })
-        ] }, record.id))
+  _2(() => {
+    const element = grid.current;
+    if (!element) return;
+    const cells = element.querySelectorAll(".usage-row, .usage-report > strong").length;
+    element.style.setProperty("--usage-pair-limit", String(Math.max(1, Math.floor((cells - 1) / 2))));
+  }, [records, context, model, live]);
+  return /* @__PURE__ */ u4("div", { class: "usage-details", id: `turn-usage-${ownerId}`, role: "group", "aria-label": "Turn usage details", children: /* @__PURE__ */ u4("div", { class: "usage-grid", ref: grid, children: [
+    partial ? /* @__PURE__ */ u4("span", { class: "usage-notice", children: "Partial usage report; final totals may be higher." }) : null,
+    /* @__PURE__ */ u4("span", { class: "usage-time-breakdown", role: "group", "aria-label": "Response time breakdown", children: [
+      /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+        /* @__PURE__ */ u4("span", { children: "Total time" }),
+        /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs) })
+      ] }),
+      /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+        /* @__PURE__ */ u4("span", { children: "Model time" }),
+        /* @__PURE__ */ u4("strong", { children: modelElapsedMs === null ? "Unavailable" : formatElapsedDuration(modelElapsedMs) })
+      ] }),
+      /* @__PURE__ */ u4("span", { class: "usage-row", title: "Total time minus cumulative model-call time", children: [
+        /* @__PURE__ */ u4("span", { children: "Other time" }),
+        /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null || modelElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs - modelElapsedMs) })
       ] })
-    ] }) : null
-  ] });
+    ] }),
+    showLiveContext ? /* @__PURE__ */ u4(UsageContext, { context, live: true }) : null,
+    reports.map((record, index) => /* @__PURE__ */ u4("div", { class: "usage-report", children: [
+      reports.length > 1 ? /* @__PURE__ */ u4("strong", { children: [
+        "Usage report ",
+        index + 1
+      ] }) : null,
+      /* @__PURE__ */ u4(UsageReport, { u: record.value, model, live, partial, showContext: !showLiveContext })
+    ] }, record.id))
+  ] }) });
 }
 function UsageContext({ context, partialTokens, live }) {
   const contextTokens = context ? context.context_tokens : partialTokens !== void 0 && Number.isFinite(partialTokens) && partialTokens >= 0 ? partialTokens : void 0;
@@ -24422,46 +24445,37 @@ function TaskIndicator() {
 function hasTurnStats(turn2, view) {
   return view.usage.length > 0 || (turn2.phase === "settled" ? view.elapsedMs !== null || !!view.model : !!turn2.liveUsage);
 }
-function TurnStats({ turn: turn2, view }) {
+function turnUsage(turn2, ownerId, now) {
+  const view = turnRowView(turn2, now);
   if (!hasTurnStats(turn2, view)) return null;
   const live = turn2.phase !== "settled";
-  const records = view.usage.length ? view.usage : live && turn2.liveUsage ? [{ id: "live", value: turn2.liveUsage }] : [];
+  const liveUsage = live ? turn2.liveUsage : null;
+  const records = liveUsage && !view.usage.length ? [{ id: "live", value: liveUsage }] : view.usage;
   const usage2 = records.map((record) => record.value);
-  const context = selectContextUsage(usage2, live ? turn2.liveUsage : null);
-  const summary = technicalSummary({
-    elapsedMs: live ? null : view.elapsedMs,
-    usage: usage2,
-    context
-  });
-  return /* @__PURE__ */ u4(
-    UsageMeta,
-    {
-      u: records[0]?.value ?? {},
-      records,
-      context,
-      summary,
-      model: view.model,
-      wallElapsedMs: view.elapsedMs,
-      modelElapsedMs: view.modelCallMs,
-      live,
-      provisional: turn2.metadata.status === "provisional",
-      partial: turn2.metadata.status === "partial"
-    }
-  );
+  const context = selectContextUsage(usage2, liveUsage);
+  return {
+    ownerId,
+    records,
+    context,
+    model: view.model,
+    summary: technicalSummary({ elapsedMs: live ? null : view.elapsedMs, usage: usage2, context }),
+    wallElapsedMs: view.elapsedMs,
+    modelElapsedMs: view.modelCallMs,
+    live,
+    partial: turn2.metadata.status === "partial"
+  };
 }
 function TurnTechnicalInfo({
-  turn: turn2,
+  usage: usage2,
   count,
   hasOutcome = false,
   expanded,
   onToggle
 }) {
-  if (!turn2 && !count && !hasOutcome) return null;
-  const view = turn2 ? turnRowView(turn2, Date.now()) : null;
-  if (!count && !hasOutcome && (!turn2 || !view || !hasTurnStats(turn2, view))) return null;
+  if (!usage2 && !count && !hasOutcome) return null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
     /* @__PURE__ */ u4(ActivityTraceToggle, { count, hasOutcome, expanded, onToggle }),
-    turn2 && view ? /* @__PURE__ */ u4(TurnStats, { turn: turn2, view }) : null
+    usage2 ? /* @__PURE__ */ u4(UsageMeta, { summary: usage2.summary, ownerId: usage2.ownerId }) : null
   ] });
 }
 function TurnTechnicalDetails({
@@ -24472,15 +24486,17 @@ function TurnTechnicalDetails({
   now = null
 }) {
   const traceView = activityTraceView(ownerId, live);
+  const metricsExpanded = activityMetricsExpanded(ownerId);
+  const usage2 = turn2 ? turnUsage(turn2, ownerId, now ?? Date.now()) : null;
   const count = activityStepCount(lines);
   const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
-  if (!turn2 && (!lines.length || !count && !hasOutcome && !traceView.expanded)) return null;
-  if (turn2 && !lines.length && !hasTurnStats(turn2, turnRowView(turn2, Date.now()))) return null;
+  if (!lines.length && !usage2) return null;
+  if (!turn2 && !count && !hasOutcome && !traceView.expanded) return null;
   return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
     /* @__PURE__ */ u4(
       TurnTechnicalInfo,
       {
-        turn: turn2,
+        usage: usage2,
         count,
         hasOutcome,
         expanded: traceView.expanded,
@@ -24495,7 +24511,8 @@ function TurnTechnicalDetails({
         live,
         now,
         ownerId,
-        following: activityTraceFollowing(ownerId)
+        following: activityTraceFollowing(ownerId),
+        metrics: metricsExpanded && usage2 ? /* @__PURE__ */ u4(UsageDetails, { ...usage2 }) : null
       }
     )
   ] });

@@ -39,6 +39,7 @@ import { chatTranscript, completedResponse, conversationState } from '../convers
 import { STARTING_RESPONSE_TEXT, submissionPresentation } from '../web-submissions';
 import {
   activityTraceOwner, activityTraceView, activityTraceFollowing, followActivityTrace, pauseActivityTrace, toggleActivityTrace,
+  activityMetricsExpanded, toggleActivityMetrics,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
 import { activeTurnNotices, liveTurnActivity, turnRowView, type TurnRowView } from '../turn-row';
@@ -302,7 +303,7 @@ function ActivityTraceToggle({ count, hasOutcome = false, expanded, onToggle }: 
   );
 }
 
-/** Expanded step list, shared by live and completed traces. */
+/** Inline metrics and step list, shared by live and completed traces. */
 function ActivityTracePanel({
   lines,
   expanded,
@@ -310,6 +311,7 @@ function ActivityTracePanel({
   now = null,
   ownerId,
   following = false,
+  metrics = null,
 }: {
   lines: ActivityLine[];
   expanded: boolean;
@@ -317,12 +319,15 @@ function ActivityTracePanel({
   now?: number | null;
   ownerId: string;
   following?: boolean;
+  metrics?: JSX.Element | null;
 }) {
-  if (!lines.length || !expanded) return null;
+  const showTrace = lines.length > 0 && expanded;
+  if (!showTrace && !metrics) return null;
   return (
     <div class="msg-activity expanded">
-      <ActivityTraceList key={ownerId} lines={lines} live={live} now={now}
-        following={following} onBrowse={(follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)} />
+      {metrics}
+      {showTrace ? <ActivityTraceList key={ownerId} lines={lines} live={live} now={now}
+        following={following} onBrowse={(follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)} /> : null}
     </div>
   );
 }
@@ -347,48 +352,59 @@ function fmtContextLimit(tokens: number): string {
   return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
 }
 
-function UsageMeta({ u, summary, records, context, model, live = false, partial = false, provisional = false, wallElapsedMs = u.duration_ms ?? null, modelElapsedMs = u.duration_api_ms ?? null }: {
-  u: Partial<TurnUsage>; summary: string; records?: ConversationTurn['usage']; model?: string | null;
-  context?: KnownContext | null;
-  live?: boolean; partial?: boolean; provisional?: boolean; wallElapsedMs?: number | null; modelElapsedMs?: number | null;
-}) {
-  const [expanded, setExpanded] = useState(false);
+type UsageProps = {
+  ownerId: string; summary: string; records: ConversationTurn['usage']; model: string | null;
+  context: KnownContext | null;
+  live: boolean; partial: boolean; wallElapsedMs: number | null; modelElapsedMs: number | null;
+};
+
+function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>) {
+  const expanded = activityMetricsExpanded(ownerId);
   const short = summary || 'Usage details';
-  const reports = records?.length ? records : [{ id: 'usage', value: u }];
-  const showLiveContext = live && context != null;
   return (
-    <span class="usage-wrap">
-      <button
-        type="button"
-        class="usage"
-        aria-expanded={expanded}
-        aria-label={`${short}. ${expanded ? 'Hide' : 'Show'} usage details`}
-        title={expanded ? 'Hide usage details' : 'Show usage details'}
-        onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
-        onKeyDown={(e) => { if (e.key === 'Escape') setExpanded(false); }}
-      >
-        {short}
-      </button>
-      {expanded ? (
-        <>
-          <span class="usage-backdrop" onClick={() => setExpanded(false)} />
-          <span class="usage-popover" role="dialog" aria-label="Turn usage details">
-            {partial ? <span class="usage-row">Partial usage report; final totals may be higher.</span> : null}
-            {provisional ? <span class="usage-row">Usage reported so far; awaiting final totals.</span> : null}
-            <span class="usage-time-breakdown" role="group" aria-label="Response time breakdown">
-              <span class="usage-row"><span>Total time</span><strong>{wallElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs)}</strong></span>
-              <span class="usage-row usage-time-part"><span>Model time</span><strong>{modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(modelElapsedMs)}</strong></span>
-              <span class="usage-row usage-time-part" title="Total time minus cumulative model-call time"><span>Other time</span><strong>{wallElapsedMs === null || modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs - modelElapsedMs)}</strong></span>
-            </span>
-            {showLiveContext ? <UsageContext context={context} live /> : null}
-            {reports.map((record, index) => <div class="usage-report" key={record.id}>
-              {reports.length > 1 ? <strong>Usage report {index + 1}</strong> : null}
-              <UsageReport u={record.value} model={model} live={live} partial={partial} showContext={!showLiveContext} />
-            </div>)}
-          </span>
-        </>
-      ) : null}
-    </span>
+    <button
+      type="button"
+      class="trace-toggle usage"
+      aria-expanded={expanded}
+      aria-controls={`turn-usage-${ownerId}`}
+      aria-label={`${short}. ${expanded ? 'Hide' : 'Show'} usage details`}
+      title={expanded ? 'Hide usage details' : 'Show usage details'}
+      onClick={(e) => { e.stopPropagation(); toggleActivityMetrics(ownerId); }}
+      onKeyDown={(e) => { if (e.key === 'Escape' && expanded) toggleActivityMetrics(ownerId); }}
+    >
+      <span class={`chevron${expanded ? ' open' : ''}`} aria-hidden="true">{'\u203A'}</span>
+      <span class="usage-summary">{short}</span>
+    </button>
+  );
+}
+
+function UsageDetails({ ownerId, records, context, model, live, partial, wallElapsedMs, modelElapsedMs }: Omit<UsageProps, 'summary'>) {
+  const grid = useRef<HTMLDivElement>(null);
+  const reports = records.length ? records : [{ id: 'usage', value: {} }];
+  const showLiveContext = live && context != null;
+  useLayoutEffect(() => {
+    const element = grid.current;
+    if (!element) return;
+    const cells = element.querySelectorAll('.usage-row, .usage-report > strong').length;
+    // Fill the two rows preceding the last timing cell before allowing trailing blanks.
+    element.style.setProperty('--usage-pair-limit', String(Math.max(1, Math.floor((cells - 1) / 2))));
+  }, [records, context, model, live]);
+  return (
+    <div class="usage-details" id={`turn-usage-${ownerId}`} role="group" aria-label="Turn usage details">
+      <div class="usage-grid" ref={grid}>
+        {partial ? <span class="usage-notice">Partial usage report; final totals may be higher.</span> : null}
+        <span class="usage-time-breakdown" role="group" aria-label="Response time breakdown">
+          <span class="usage-row"><span>Total time</span><strong>{wallElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs)}</strong></span>
+          <span class="usage-row"><span>Model time</span><strong>{modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(modelElapsedMs)}</strong></span>
+          <span class="usage-row" title="Total time minus cumulative model-call time"><span>Other time</span><strong>{wallElapsedMs === null || modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs - modelElapsedMs)}</strong></span>
+        </span>
+        {showLiveContext ? <UsageContext context={context} live /> : null}
+        {reports.map((record, index) => <div class="usage-report" key={record.id}>
+          {reports.length > 1 ? <strong>Usage report {index + 1}</strong> : null}
+          <UsageReport u={record.value} model={model} live={live} partial={partial} showContext={!showLiveContext} />
+        </div>)}
+      </div>
+    </div>
   );
 }
 
@@ -1087,35 +1103,32 @@ function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
     : !!turn.liveUsage);
 }
 
-function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }) {
+function turnUsage(turn: ConversationTurn, ownerId: string, now: number): UsageProps | null {
+  const view = turnRowView(turn, now);
   if (!hasTurnStats(turn, view)) return null;
   const live = turn.phase !== 'settled';
-  const records = view.usage.length ? view.usage
-    : live && turn.liveUsage ? [{ id: 'live', value: turn.liveUsage }] : [];
+  const liveUsage = live ? turn.liveUsage : null;
+  const records = liveUsage && !view.usage.length ? [{ id: 'live', value: liveUsage }] : view.usage;
   const usage = records.map(record => record.value);
-  const context = selectContextUsage(usage, live ? turn.liveUsage : null);
-  const summary = technicalSummary({
-    elapsedMs: live ? null : view.elapsedMs,
-    usage, context,
-  });
-  return <UsageMeta u={records[0]?.value ?? {}} records={records} context={context} summary={summary} model={view.model}
-    wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs}
-    live={live}
-    provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />;
+  const context = selectContextUsage(usage, liveUsage);
+  return {
+    ownerId, records, context, model: view.model,
+    summary: technicalSummary({ elapsedMs: live ? null : view.elapsedMs, usage, context }),
+    wallElapsedMs: view.elapsedMs, modelElapsedMs: view.modelCallMs, live,
+    partial: turn.metadata.status === 'partial',
+  };
 }
 
 function TurnTechnicalInfo({
-  turn, count, hasOutcome = false, expanded, onToggle,
+  usage, count, hasOutcome = false, expanded, onToggle,
 }: {
-  turn?: ConversationTurn; count: number; hasOutcome?: boolean; expanded: boolean; onToggle: () => void;
+  usage: UsageProps | null; count: number; hasOutcome?: boolean; expanded: boolean; onToggle: () => void;
 }) {
-  if (!turn && !count && !hasOutcome) return null;
-  const view = turn ? turnRowView(turn, Date.now()) : null;
-  if (!count && !hasOutcome && (!turn || !view || !hasTurnStats(turn, view))) return null;
+  if (!usage && !count && !hasOutcome) return null;
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
       <ActivityTraceToggle count={count} hasOutcome={hasOutcome} expanded={expanded} onToggle={onToggle} />
-      {turn && view ? <TurnStats turn={turn} view={view} /> : null}
+      {usage ? <UsageMeta summary={usage.summary} ownerId={usage.ownerId} /> : null}
     </div>
   );
 }
@@ -1130,16 +1143,19 @@ function TurnTechnicalDetails({
   now?: number | null;
 }) {
   const traceView = activityTraceView(ownerId, live);
+  const metricsExpanded = activityMetricsExpanded(ownerId);
+  const usage = turn ? turnUsage(turn, ownerId, now ?? Date.now()) : null;
   const count = activityStepCount(lines);
   const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
-  if (!turn && (!lines.length || (!count && !hasOutcome && !traceView.expanded))) return null;
-  if (turn && !lines.length && !hasTurnStats(turn, turnRowView(turn, Date.now()))) return null;
+  if (!lines.length && !usage) return null;
+  if (!turn && !count && !hasOutcome && !traceView.expanded) return null;
   return (
     <div class="turn-technical-details">
-      <TurnTechnicalInfo turn={turn} count={count} hasOutcome={hasOutcome}
+      <TurnTechnicalInfo usage={usage} count={count} hasOutcome={hasOutcome}
         expanded={traceView.expanded} onToggle={() => toggleActivityTrace(ownerId)} />
       <ActivityTracePanel lines={lines} expanded={traceView.expanded} live={live} now={now}
-        ownerId={ownerId} following={activityTraceFollowing(ownerId)} />
+        ownerId={ownerId} following={activityTraceFollowing(ownerId)}
+        metrics={metricsExpanded && usage ? <UsageDetails {...usage} /> : null} />
     </div>
   );
 }

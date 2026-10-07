@@ -102,15 +102,56 @@ describe('theme CSS contract', () => {
     expect(css.match(/max\(16px, calc\(\(100% - var\(--chat-max\)\)/g)).toHaveLength(1);
   });
 
-  it('keeps message metadata controls on one row and truncates usage details', () => {
+  it('keeps metadata on one row and uses shared disclosure styling for inline metrics', () => {
     const css = read('./components/ChatMain.css');
     const meta = css.match(/\.chat-main \.msg \.meta, \.chat-main \.typing \.meta \{([^}]+)\}/)?.[1];
     expect(meta).toContain('color: var(--message-meta, var(--muted))');
     expect(meta).toContain('flex-wrap: nowrap');
     expect(meta).toContain('min-width: 0');
-    const usage = css.match(/\.chat-main \.usage \{([^}]+)\}/)?.[1];
-    expect(usage).toContain('text-overflow: ellipsis');
-    expect(usage).toContain('white-space: nowrap');
+    const toggle = css.match(/\.chat-main \.meta \.trace-toggle \{([^}]+)\}/)?.[1];
+    expect(toggle).toContain('display: inline-flex');
+    expect(toggle).toContain('font: inherit');
+    const details = css.match(/\.chat-main \.usage-details \{([^}]+)\}/)?.[1];
+    expect(details).toContain('width: 100%');
+    expect(details).toContain('font-size: var(--font-2xs)');
+    expect(details).not.toMatch(/position:|z-index:|box-shadow:/);
+    expect(css).not.toMatch(/usage-popover|usage-backdrop/);
+  });
+
+  it('shares responsive column tracks across every metrics row and report', () => {
+    const css = read('./components/ChatMain.css');
+    const groups = css.match(/\.chat-main \.usage-time-breakdown,\s*\.chat-main \.usage-report \{([^}]+)\}/)?.[1];
+    expect(groups).toContain('display: contents');
+    const grid = css.match(/\.chat-main \.usage-grid \{([^}]+)\}/)?.[1];
+    expect(grid).toContain('--usage-pairs: 1');
+    expect(grid).toContain(
+      'repeat(min(var(--usage-pairs), var(--usage-pair-limit, 1)), max-content minmax(max-content, 1fr))',
+    );
+    expect(grid).toContain('grid-auto-flow: row dense');
+    expect(css).toContain('@container turn-usage (min-width: 464px)');
+    expect(css).toContain('.chat-main .usage-grid { --usage-pairs: 2; }');
+    expect(css).toContain('@container turn-usage (min-width: 708px)');
+    expect(css).toContain('.chat-main .usage-grid { --usage-pairs: 3; }');
+    const row = css.match(/\.chat-main \.usage-row \{([^}]+)\}/)?.[1];
+    expect(row).toContain('grid-column: span 2');
+    expect(row).toContain('grid-template-columns: subgrid');
+    expect(row).not.toContain('flex:');
+    expect(css).toContain('.chat-main .msg:has(.usage-details) { width: 100%; }');
+    expect(css).toContain('.chat-main .usage-time-breakdown > .usage-row { grid-column: 1 / span 2; }');
+    expect(css).toContain('.chat-main .usage-report > strong { grid-column: span 2;');
+    expect(css).not.toContain('usage-time-part');
+  });
+
+  it('keeps labels and values non-breaking without clipping oversized metrics', () => {
+    const css = read('./components/ChatMain.css');
+    const row = css.match(/\.chat-main \.usage-row \{([^}]+)\}/)?.[1];
+    expect(row).toContain('white-space: nowrap');
+    expect(row).toContain('grid-template-columns: subgrid');
+    expect(row).toContain('overflow-wrap: normal');
+    const details = css.match(/\.chat-main \.usage-details \{([^}]+)\}/)?.[1];
+    expect(details).toContain('overflow-x: auto');
+    expect(details).toContain('container: turn-usage / inline-size');
+    expect(css).not.toMatch(/\.usage-row > (?:span|strong) \{[^}]*overflow-wrap: anywhere/);
   });
 
   it('uses one inset provenance rail with accent, neutral and semantic tones', () => {

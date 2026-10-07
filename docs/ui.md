@@ -142,9 +142,9 @@ Live in-progress turn-system bubbles use the full transcript width and remain
 transparent in every theme and color mode, whether their activity is collapsed
 or expanded. Settled turn-system bubbles remain content-sized. Timing and model
 All bubble status-line entries stay on one line, including outcome, provenance
-and token-availability labels. Flexible text and usage details truncate when
-space is limited; timestamps and trace controls retain their size, and usage
-popovers still wrap their full details. The live
+and token-availability labels. Flexible metadata text truncates when
+space is limited; timestamps and trace controls retain their size. Inline metrics
+keep labels and values on one line and scroll horizontally when needed. The live
 progress-summary row places Stop between the bouncing dots and label text;
 the controls keep their size while long labels truncate.
 Activity trace previews and expanded rows use the same small type scale as
@@ -378,25 +378,40 @@ trace entries, not model requests or exclusively tool calls; display-only marker
 are excluded. The count does not repeat in its adjacent summary, which shows
 available fields in the order `15s · $2.09 · 35% ctx`. Elapsed time appears here
 only after the turn settles; running, stopping, and settling turns retain timing
-in the live stopwatch and usage pop-up, not the trace status summary. Elapsed time of at least a
+in the live stopwatch and inline usage details, not the trace status summary. Elapsed time of at least a
 minute uses minutes and seconds (`710s` becomes `11m 50s`), reusing the task
 panel's duration formatter (milliseconds below one second, rounded seconds otherwise). Missing fields and zero
-cost are omitted from the summary; a reported zero cost remains in the pop-up. Total cost is
+cost are omitted from the summary; a reported zero cost remains in the details. Total cost is
 shown only when every usage report includes cost; context is the latest reported
 valid context/window pair, not cumulative billed tokens. For running, stopping,
 and settling turns, newer live context takes precedence over checkpointed usage;
 incomplete or invalid live context retains the latest known valid measurement.
 Model-call counts prevent an older live snapshot from replacing newer recorded context.
 The client selects and validates that context once, then shares it with the
-summary and pop-up without reusing its billing fields. Partial accounting
+summary and details without reusing its billing fields. Partial accounting
 reports can still display a known token count when the context window is unknown.
 Settled turns use their recorded context. Live context is displayed separately
-from accounting reports in the usage pop-up, so neither cost nor billed tokens
-are counted twice. The usage pop-up retains
+from accounting reports in the inline details, so neither cost nor billed tokens
+are counted twice. The inline details retain
 model, tokens, model/other timing, and individual accounting reports.
-The pop-up opens above the technical summary, retaining its original upward
-placement and internal scrolling for long reports. It is accessible only when
-technical information is on.
+The summary is a chevron toggle styled like the adjacent **trace** disclosure,
+retaining its duration/cost/context label. It opens detailed metrics inline at
+the top of the activity panel, not in a pop-up. Metrics and trace expand
+independently: either or both can be shown, including metrics on turns without
+recorded activity. Metrics selection follows its owning turn across live and
+settled bubbles and reconnects; conversation navigation resets it. Both
+disclosures are accessible only when technical information is on.
+Expanded metrics use the available bubble width, placing multiple label/value
+pairs side by side when there is room and returning to a single pair per row
+on narrow layouts. All rows and reports share the same responsive column tracks;
+Total, Model, and Other time stack in the first column without indents. Remaining
+metrics pack into the available cells around them, with empty cells only at the
+end of the grid. Sparse reports use fewer columns to avoid interior gaps.
+Labels and values each stay on one line. Oversized values scroll horizontally
+within the metrics panel rather than wrapping or being clipped. Individual report
+headings occupy a metric cell so multiple reports can share the compact layout.
+Live usage does not add an awaiting-final-totals notice; partial reports still
+retain their warning.
 Live turns without recorded or live usage hide the usage disclosure; their
 stopwatch and any activity trace remain available until accounting arrives.
 Missing token accounting does not add a "Tokens unavailable" label to the
@@ -466,8 +481,9 @@ does not change status font size or the font used for inline-code subjects.
 The stopwatch uses minutes and seconds and remains in the regular footer while
 the turn is live, as a plain duration with no label, whether technical
 information is on or off. The technical summary omits inline timing.
-The usage pop-up shows **Total time** with
-indented **Model time** and **Other time** as its breakdown. Model time is cumulative time requesting and
+The inline usage details show **Total time** with
+**Model time** and **Other time** beneath it in the same column, without indents.
+Model time is cumulative time requesting and
 streaming model responses, excluding tool execution and waits for user input;
 other time is total time minus model time. Total time uses the authoritative logical turn,
 not the provider attempt's duration. Native measures model responses using the

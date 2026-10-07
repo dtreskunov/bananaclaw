@@ -7,9 +7,37 @@ import {
   pauseActivityTrace,
   resetActivityTraceView,
   toggleActivityTrace,
+  activityMetricsExpanded,
+  toggleActivityMetrics,
 } from './activity-trace-state';
 
 afterEach(resetActivityTraceView);
+
+describe('activity metrics disclosure', () => {
+  it('is independent of trace expansion and following', () => {
+    toggleActivityMetrics('turn:first');
+    expect(activityMetricsExpanded('turn:first')).toBe(true);
+    expect(activityTraceView('turn:first', true).expanded).toBe(false);
+    toggleActivityTrace('turn:first', true);
+    toggleActivityMetrics('turn:first');
+    expect(activityMetricsExpanded('turn:first')).toBe(false);
+    expect(activityTraceView('turn:first', true)).toEqual({ expanded: true, following: true });
+    toggleActivityMetrics('turn:first');
+    toggleActivityTrace('turn:first');
+    expect(activityMetricsExpanded('turn:first')).toBe(true);
+  });
+
+  it('retains each turn selection until conversation navigation resets it', () => {
+    toggleActivityMetrics('turn:first');
+    inheritActivityTrace('turn:next', true);
+    expect(activityMetricsExpanded('turn:first')).toBe(true);
+    expect(activityMetricsExpanded('turn:next')).toBe(false);
+    toggleActivityMetrics('turn:next');
+    resetActivityTraceView();
+    expect(activityMetricsExpanded('turn:first')).toBe(false);
+    expect(activityMetricsExpanded('turn:next')).toBe(false);
+  });
+});
 
 describe('activity trace follow intent', () => {
   it.each(['none', 'browse', 'collapse'] as const)('automatically opens a new owner after %s', (prior) => {

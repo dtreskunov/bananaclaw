@@ -8,6 +8,18 @@ export interface ActivityTraceIntent {
 }
 
 const intent = signal<ActivityTraceIntent | null>(null);
+const expandedMetrics = signal<ReadonlySet<string>>(new Set());
+
+export function activityMetricsExpanded(ownerId: string): boolean {
+  return expandedMetrics.value.has(ownerId);
+}
+
+export function toggleActivityMetrics(ownerId: string): void {
+  const next = new Set(expandedMetrics.peek());
+  if (next.has(ownerId)) next.delete(ownerId);
+  else next.add(ownerId);
+  expandedMetrics.value = next;
+}
 
 export function activityTraceOwner(message: ChatMessage): string {
   if (message.turnTraceOwner) {
@@ -50,4 +62,5 @@ export function inheritActivityTrace(ownerId: string, automatic = false): void {
 
 export function resetActivityTraceView(): void {
   intent.value = null;
+  expandedMetrics.value = new Set();
 }
