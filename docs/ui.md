@@ -64,6 +64,18 @@ After redeem the browser lands on `/ui/chat/`. Log out via the button in the hea
 
 In-browser chat + read-only browser for the per-agent-group filesystem at `groups/<folder>/`.
 
+#### Startup recovery
+
+The chat shell displays a loading screen before JavaScript or account data
+finishes loading. Account and group requests have a shared 10-second timeout.
+Temporary network or server failures show an error and **Try again** instead
+of leaving an empty screen. Startup retries every five seconds while visible,
+and immediately when connectivity returns, the app becomes visible, or the
+page is restored. Concurrent retry triggers share one attempt; background
+retries pause while hidden. Recovery listeners and timers stop after successful
+startup. Authentication failures still redirect to sign-in with the original
+URL, including the selected thread, preserved.
+
 #### Appearance
 
 In **My Profile / Settings → Appearance**, choose **Default** or **Autumn**,

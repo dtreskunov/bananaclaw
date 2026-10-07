@@ -15473,12 +15473,18 @@ function A3() {
 }
 
 // src/api.ts
+var UnauthorizedError = class extends Error {
+  constructor() {
+    super("unauthorized");
+    this.name = "UnauthorizedError";
+  }
+};
 async function api(url, opts) {
   const r4 = await fetch(url, { credentials: "same-origin", ...opts });
   if (r4.status === 401) {
     const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
     window.location.replace(`/ui/login?next=${next}`);
-    throw new Error("unauthorized");
+    throw new UnauthorizedError();
   }
   if (!r4.ok) throw new Error("HTTP " + r4.status);
   return r4.json();
@@ -15510,6 +15516,126 @@ async function patchJson(path, body) {
   } catch {
   }
   return { ok: r4.ok, status: r4.status, data };
+}
+
+// src/brand.ts
+var g4 = globalThis.__BRAND__ ?? {};
+var BRAND = {
+  name: g4.name || "NanoClaw",
+  shortName: g4.shortName || g4.name || "NanoClaw",
+  description: g4.description || "",
+  themeColor: g4.themeColor || "#151515",
+  backgroundColor: g4.backgroundColor || "#0d1117"
+};
+
+// src/reconnect-countdown.ts
+function startReconnectCountdown(delayMs, onTick, onElapsed) {
+  const deadline = Date.now() + delayMs;
+  let timer2 = null;
+  let cancelled = false;
+  const tick = () => {
+    if (cancelled) return;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      cancelled = true;
+      onElapsed();
+      return;
+    }
+    onTick(Math.ceil(remaining / 1e3));
+    timer2 = setTimeout(tick, Math.min(1e3, remaining));
+  };
+  tick();
+  return () => {
+    cancelled = true;
+    if (timer2) clearTimeout(timer2);
+  };
+}
+function runReconnectImmediately(cancelCountdown, reconnect) {
+  if (!cancelCountdown) return false;
+  cancelCountdown();
+  reconnect();
+  return true;
+}
+function startConnectionTimeout(delayMs, onElapsed) {
+  let active = true;
+  const timer2 = setTimeout(() => {
+    if (!active) return;
+    active = false;
+    onElapsed();
+  }, delayMs);
+  return () => {
+    active = false;
+    clearTimeout(timer2);
+  };
+}
+
+// src/startup.ts
+var REQUEST_TIMEOUT_MS = 1e4;
+var RETRY_DELAY_MS = 5e3;
+function loadStartupData(load, onState) {
+  return new Promise((resolve, reject) => {
+    let active = null;
+    let retryTimer = null;
+    let finished = false;
+    const clearRetry = () => {
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+    };
+    const retryWhenVisible = () => {
+      if (!document.hidden) void attempt();
+    };
+    const cleanup2 = () => {
+      clearRetry();
+      window.removeEventListener("online", retryWhenVisible);
+      window.removeEventListener("pageshow", retryWhenVisible);
+      document.removeEventListener("visibilitychange", retryWhenVisible);
+    };
+    const attempt = async () => {
+      if (finished || active) return;
+      clearRetry();
+      const controller = new AbortController();
+      active = controller;
+      onState({ kind: "loading" });
+      const cancelTimeout = startConnectionTimeout(REQUEST_TIMEOUT_MS, () => {
+        controller.abort(new Error("The server did not respond within 10 seconds."));
+      });
+      try {
+        const data = await load(controller.signal);
+        if (controller.signal.aborted) throw controller.signal.reason;
+        finished = true;
+        cleanup2();
+        resolve(data);
+      } catch (error) {
+        controller.abort();
+        if (error instanceof UnauthorizedError) {
+          finished = true;
+          cleanup2();
+          onState({ kind: "redirecting" });
+          reject(error);
+          return;
+        }
+        console.error("App startup failed", error);
+        onState({
+          kind: "error",
+          message: error instanceof Error ? error.message : "An unexpected startup error occurred.",
+          retry: () => {
+            void attempt();
+          }
+        });
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          retryWhenVisible();
+        }, RETRY_DELAY_MS);
+      } finally {
+        cancelTimeout();
+        active = null;
+      }
+    };
+    window.addEventListener("online", retryWhenVisible);
+    window.addEventListener("pageshow", retryWhenVisible);
+    document.addEventListener("visibilitychange", retryWhenVisible);
+    void attempt();
+  });
 }
 
 // src/state.ts
@@ -15634,16 +15760,6 @@ var CHANNEL_META = {
 function channelMeta(ct) {
   return ct && CHANNEL_META[ct] || { label: ct || "Channel", icon: "\u2022" };
 }
-
-// src/brand.ts
-var g4 = globalThis.__BRAND__ ?? {};
-var BRAND = {
-  name: g4.name || "NanoClaw",
-  shortName: g4.shortName || g4.name || "NanoClaw",
-  description: g4.description || "",
-  themeColor: g4.themeColor || "#151515",
-  backgroundColor: g4.backgroundColor || "#0d1117"
-};
 
 // src/voice.ts
 function replaceSegment(segments, next) {
@@ -19554,47 +19670,6 @@ function applyConversationFrame(raw, expectedThreadId) {
   for (const message2 of view.messages) {
     if (message2.direction === "out" && !oldOutputs.has(message2.id)) maybeNotify(message2.text, message2.files ?? []);
   }
-}
-
-// src/reconnect-countdown.ts
-function startReconnectCountdown(delayMs, onTick, onElapsed) {
-  const deadline = Date.now() + delayMs;
-  let timer2 = null;
-  let cancelled = false;
-  const tick = () => {
-    if (cancelled) return;
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      cancelled = true;
-      onElapsed();
-      return;
-    }
-    onTick(Math.ceil(remaining / 1e3));
-    timer2 = setTimeout(tick, Math.min(1e3, remaining));
-  };
-  tick();
-  return () => {
-    cancelled = true;
-    if (timer2) clearTimeout(timer2);
-  };
-}
-function runReconnectImmediately(cancelCountdown, reconnect) {
-  if (!cancelCountdown) return false;
-  cancelCountdown();
-  reconnect();
-  return true;
-}
-function startConnectionTimeout(delayMs, onElapsed) {
-  let active = true;
-  const timer2 = setTimeout(() => {
-    if (!active) return;
-    active = false;
-    onElapsed();
-  }, delayMs);
-  return () => {
-    active = false;
-    clearTimeout(timer2);
-  };
 }
 
 // src/components/MobileDialog.tsx
@@ -32242,6 +32317,21 @@ function observeTableScrollEdges(root) {
 }
 
 // src/index.tsx
+function StartupScreen({ state }) {
+  const title = {
+    loading: `Loading ${BRAND.name}...`,
+    redirecting: "Redirecting to sign in...",
+    error: `Could not load ${BRAND.name}`
+  }[state.kind];
+  return /* @__PURE__ */ u4("div", { class: "startup-screen", role: "status", "aria-live": "polite", "aria-busy": state.kind !== "error", children: [
+    /* @__PURE__ */ u4("p", { class: "startup-title", children: title }),
+    state.kind === "error" ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4("p", { class: "startup-error", role: "alert", children: state.message }),
+      /* @__PURE__ */ u4("p", { children: "Check your connection and try again." }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: state.retry, children: "Try again" })
+    ] }) : /* @__PURE__ */ u4("p", { children: "Please wait." })
+  ] });
+}
 function sortGroups(list) {
   return list.slice().sort((a4, b5) => {
     const parseTs = (s5) => {
@@ -32300,6 +32390,8 @@ function maybeShowIosInstallHint() {
   document.body.appendChild(el);
 }
 async function init() {
+  const app = document.getElementById("app");
+  if (!app) throw new Error("Chat app root is missing");
   initAppearance((message2) => showToast(message2, "err"));
   initNotif();
   initSound();
@@ -32309,32 +32401,27 @@ async function init() {
   installLivenessHandlers();
   applyPanelClasses();
   maybeShowIosInstallHint();
-  try {
-    const [meRes, groupsRes] = await Promise.all([
-      api("api/me"),
-      api("api/groups")
-    ]);
-    n2(() => {
-      me.value = meRes.displayName || meRes.userId;
-      currentUserId.value = meRes.userId;
-      isElevatedUser.value = meRes.isElevated === true;
-      groups.value = sortGroups(groupsRes.groups);
-    });
-  } catch {
-    return;
-  }
+  const [meRes, groupsRes] = await loadStartupData(
+    (signal) => Promise.all([
+      api("api/me", { signal }),
+      api("api/groups", { signal })
+    ]),
+    (state) => D(/* @__PURE__ */ u4(StartupScreen, { state }), app)
+  );
+  n2(() => {
+    me.value = meRes.displayName || meRes.userId;
+    currentUserId.value = meRes.userId;
+    isElevatedUser.value = meRes.isElevated === true;
+    groups.value = sortGroups(groupsRes.groups);
+  });
   if (groups.value.length === 0) {
-    const app2 = document.getElementById("app");
-    if (app2) app2.innerHTML = '<div style="padding:24px;font:14px var(--font-ui)">No accessible groups.</div>';
+    D(/* @__PURE__ */ u4("div", { class: "startup-screen", children: "No accessible groups." }), app);
     return;
   }
   const parsed = parseHash();
   if (parsed && parsed.groupId) chatLoading.value = true;
-  const app = document.getElementById("app");
-  if (app) {
-    D(/* @__PURE__ */ u4(App, {}), app);
-    observeTableScrollEdges(app);
-  }
+  D(/* @__PURE__ */ u4(App, {}), app);
+  observeTableScrollEdges(app);
   await applyHash(router).catch((err) => console.error("initial route failed", err));
   startSyncPoll();
   try {
@@ -32378,5 +32465,14 @@ function handleShareTarget() {
   const nextPath = onShareRoute ? "/ui/chat/" : window.location.pathname;
   window.history.replaceState(null, "", nextPath + window.location.hash);
 }
-init().catch((err) => console.error(err));
+init().catch((err) => {
+  if (err instanceof UnauthorizedError) return;
+  console.error("App initialization failed", err);
+  const app = document.getElementById("app");
+  if (app) D(/* @__PURE__ */ u4(StartupScreen, { state: {
+    kind: "error",
+    message: err instanceof Error ? err.message : "An unexpected startup error occurred.",
+    retry: () => window.location.reload()
+  } }), app);
+});
 //# sourceMappingURL=app.js.map

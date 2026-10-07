@@ -564,6 +564,24 @@ h6 {
   flex-direction: column;
   min-height: 0;
 }
+.startup-screen {
+  margin: auto;
+  padding: 24px;
+  max-width: 480px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.startup-title {
+  font-size: var(--font-xl);
+  font-weight: var(--font-weight-heading);
+}
+.startup-error {
+  color: var(--error);
+}
+.startup-screen button {
+  min-height: 44px;
+  padding: 8px 20px;
+}
 button {
   font: inherit;
   padding: 4px 10px;

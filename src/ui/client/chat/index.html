@@ -19,7 +19,12 @@
     <link rel="stylesheet" href="dist/app.css" />
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="startup-screen" role="status" aria-live="polite" aria-busy="true">
+        <p class="startup-title">Loading {{BRAND_NAME}}...</p>
+        <p>Please wait.</p>
+      </div>
+    </div>
     {{BRAND_BOOTSTRAP}}
     <script type="module" src="dist/app.js"></script>
   </body>

@@ -1,12 +1,19 @@
 // HTTP helpers. Treats 401 as a global "not logged in" — redirects to
 // the shared login page so the user can pick a sign-in provider.
 
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('unauthorized');
+    this.name = 'UnauthorizedError';
+  }
+}
+
 export async function api<T = unknown>(url: string, opts?: RequestInit): Promise<T> {
   const r = await fetch(url, { credentials: 'same-origin', ...opts });
   if (r.status === 401) {
     const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
     window.location.replace(`/ui/login?next=${next}`);
-    throw new Error('unauthorized');
+    throw new UnauthorizedError();
   }
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json() as Promise<T>;

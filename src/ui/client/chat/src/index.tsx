@@ -2,7 +2,9 @@
 import './styles/global.css';
 import { render } from 'preact';
 import { batch } from '@preact/signals';
-import { api } from './api';
+import { api, UnauthorizedError } from './api';
+import { BRAND } from './brand';
+import { loadStartupData, type StartupState } from './startup';
 import { me, currentUserId, groups, settingsOpen, chatLoading, isElevatedUser } from './state';
 import { App } from './components/App';
 import { initNotif, shouldShowIosInstallHint } from './notify';
@@ -20,6 +22,26 @@ import type { Group } from './types';
 
 interface MeResponse { displayName?: string; userId: string; isElevated?: boolean }
 interface GroupsResponse { groups: Group[] }
+
+function StartupScreen({ state }: { state: StartupState }) {
+  const title = {
+    loading: `Loading ${BRAND.name}...`,
+    redirecting: 'Redirecting to sign in...',
+    error: `Could not load ${BRAND.name}`,
+  }[state.kind];
+  return (
+    <div class="startup-screen" role="status" aria-live="polite" aria-busy={state.kind !== 'error'}>
+      <p class="startup-title">{title}</p>
+      {state.kind === 'error'
+        ? <>
+            <p class="startup-error" role="alert">{state.message}</p>
+            <p>Check your connection and try again.</p>
+            <button type="button" onClick={state.retry}>Try again</button>
+          </>
+        : <p>Please wait.</p>}
+    </div>
+  );
+}
 
 function sortGroups(list: Group[]): Group[] {
   return list.slice().sort((a, b) => {
@@ -82,6 +104,8 @@ function maybeShowIosInstallHint(): void {
 }
 
 async function init(): Promise<void> {
+  const app = document.getElementById('app');
+  if (!app) throw new Error('Chat app root is missing');
   initAppearance((message) => showToast(message, 'err'));
   initNotif();
   initSound();
@@ -91,32 +115,27 @@ async function init(): Promise<void> {
   installLivenessHandlers();
   applyPanelClasses();
   maybeShowIosInstallHint();
-  try {
-    const [meRes, groupsRes] = await Promise.all([
-      api<MeResponse>('api/me'),
-      api<GroupsResponse>('api/groups'),
-    ]);
-    batch(() => {
-      me.value = meRes.displayName || meRes.userId;
-      currentUserId.value = meRes.userId;
-      isElevatedUser.value = meRes.isElevated === true;
-      groups.value = sortGroups(groupsRes.groups);
-    });
-  } catch {
-    return;
-  }
+  const [meRes, groupsRes] = await loadStartupData(
+    (signal) => Promise.all([
+      api<MeResponse>('api/me', { signal }),
+      api<GroupsResponse>('api/groups', { signal }),
+    ]),
+    (state) => render(<StartupScreen state={state} />, app),
+  );
+  batch(() => {
+    me.value = meRes.displayName || meRes.userId;
+    currentUserId.value = meRes.userId;
+    isElevatedUser.value = meRes.isElevated === true;
+    groups.value = sortGroups(groupsRes.groups);
+  });
   if (groups.value.length === 0) {
-    const app = document.getElementById('app');
-    if (app) app.innerHTML = '<div style="padding:24px;font:14px var(--font-ui)">No accessible groups.</div>';
+    render(<div class="startup-screen">No accessible groups.</div>, app);
     return;
   }
   const parsed = parseHash();
   if (parsed && parsed.groupId) chatLoading.value = true;
-  const app = document.getElementById('app');
-  if (app) {
-    render(<App />, app);
-    observeTableScrollEdges(app);
-  }
+  render(<App />, app);
+  observeTableScrollEdges(app);
   await applyHash(router).catch((err) => console.error('initial route failed', err));
   startSyncPoll();
   try {
@@ -166,4 +185,13 @@ function handleShareTarget(): void {
   window.history.replaceState(null, '', nextPath + window.location.hash);
 }
 
-init().catch((err) => console.error(err));
+init().catch((err) => {
+  if (err instanceof UnauthorizedError) return;
+  console.error('App initialization failed', err);
+  const app = document.getElementById('app');
+  if (app) render(<StartupScreen state={{
+    kind: 'error',
+    message: err instanceof Error ? err.message : 'An unexpected startup error occurred.',
+    retry: () => window.location.reload(),
+  }} />, app);
+});
