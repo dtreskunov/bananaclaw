@@ -8,7 +8,7 @@ import { clearContainerToolInFlight, setContainerToolInFlight } from '../../db/c
 import { invokeRegisteredTool, listRegisteredTools } from '../../mcp-tools/registry.js';
 import type { NativeSkillRegistry } from './skills.js';
 import { NativeTodoState, type NativeTodo } from './todos.js';
-import { createNativeImageTool, type NativeImageToolOptions } from './images.js';
+import { createNativeMediaTools, createNativeMediaBudget, type NativeMediaToolOptions } from './media.js';
 
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_RESULTS = 200;
@@ -114,7 +114,7 @@ export function createNativeTools(
   cwd: string,
   skills?: NativeSkillRegistry,
   todoState?: NativeTodoState,
-  imageOptions?: NativeImageToolOptions,
+  mediaOptions?: NativeMediaToolOptions,
 ): ToolSet {
   const tools: ToolSet = {};
   for (const definition of listRegisteredTools()) {
@@ -137,8 +137,10 @@ export function createNativeTools(
     },
   });
 
-  if (imageOptions?.model.inputModalities?.includes('image'))
-    tools.view_image = createNativeImageTool(cwd, imageOptions.maxInlineBytes, imageOptions.onMediaPressure);
+  if (mediaOptions) {
+    const budget = createNativeMediaBudget(mediaOptions.maxInlineBytes);
+    Object.assign(tools, createNativeMediaTools(cwd, mediaOptions.model, budget, mediaOptions.onMediaPressure));
+  }
 
   tools.write = tool({
     description: 'Write a UTF-8 text file inside the agent container. Paths may be absolute or relative to the workspace.',

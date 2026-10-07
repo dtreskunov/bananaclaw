@@ -340,50 +340,64 @@ For example, `glob({ pattern: "*.txt", path: "/tmp" })` lists matching files
 under `/tmp`, and `grep({ query: "needle", path: "../shared" })` searches a
 sibling directory.
 
-### Native Provider: Viewing images
+### Native Provider: Viewing local media
 
-Vision-capable native models expose `view_image({ path })` in addition to the
-UTF-8-only `read` tool. It accepts absolute or workspace-relative paths with the
-same container filesystem boundary, including temporary browser screenshots
-and symlinked files. Known text-only models and models with unknown image
-capabilities do not advertise it.
+The native provider exposes these local-file tools when the model catalog
+and selected adapter both support the input modality:
 
-The tool identifies JPEG, PNG, GIF, and WebP by their byte signatures rather
-than trusting filename extensions, rejects empty, truncated or unsupported
-files, and returns tagged multimodal image data through the AI SDK's
-`toModelOutput`. The next request to either the OpenAI-compatible or Anthropic
-Messages adapter therefore contains the actual image pixels. Source path and
-MIME metadata accompany the image; no second model or vision service is used.
-OpenAI Chat cannot embed images in tool responses, so request middleware moves
-those images into adjacent user image blocks after all associated tool results.
-This changes only the wire representation, not the saved conversation or input
-receipts. Anthropic receives image content inside tool results directly.
-Malformed content that passes signature checks can still be rejected by the
-model's image decoder and is surfaced through normal provider error handling.
+| Tool | Model input capability | Adapters | Accepted file formats |
+| --- | --- | --- | --- |
+| `view_image({ path })` | `image` | OpenAI Chat, Anthropic Messages | JPEG, PNG, GIF, WebP |
+| `view_pdf({ path })` | `pdf` | OpenAI Chat, Anthropic Messages | PDF |
+| `listen_audio({ path })` | `audio` | OpenAI Chat | WAV, MP3 |
+| `view_video({ path })` | `video` | OpenAI Chat | MP4, WebM |
 
-The existing 16 MiB inline-media budget counts user attachments and tool media,
-including replayed history. Parallel `view_image` calls share the remaining
-per-step budget; limits and filesystem failures are explicit tool errors, not
-text-only substitutes. Media pressure reuses the context-overflow compaction
-recovery path, including its two-attempt per-turn bound, cancellation, usage
-accounting, protected inputs, and activity events. New user attachments and
-steering inputs are prepared again after compaction, before ingestion or
-acknowledgement. A budget-blocked `view_image` finishes its tool exchange first;
-the runner then compacts and continues the model with guidance to retry only the
-failed image read, never replaying the completed SDK step or other tool actions.
-Over-budget tool history is also compacted before the next model request.
+All four tools use the same registration, file reader, schema, budget validation,
+and model-output path. They accept absolute paths, workspace-relative paths,
+temporary browser artifacts, and symlinks within the container filesystem
+boundary. They check file signatures rather than extensions and return the
+**original bytes unchanged**, with source path and MIME metadata through the
+AI SDK's `toModelOutput`. Unknown model capabilities and unsupported
+adapter/modality combinations do not advertise the corresponding tool.
+The model's media instructions are composed from the actual enabled tool set,
+so unsupported tools are not mentioned. With no available media tools (including
+disabled or wrap-up steps), the entire media-guidance section is omitted.
+They do not render PDF pages, transcode audio/video, transcribe speech, extract
+frames, call a second model, or provide text-only fallbacks. Audio in other
+containers is rejected even though incoming user attachments may use the
+separate audio-normalization path. Signature checks are not full decoding;
+malformed or model-incompatible content can still be rejected by the provider.
 
-Images larger than the entire budget cannot benefit from compaction and keep
-their explicit rejection (or the existing user-attachment reference fallback).
-Protected/recent media can prevent recovery; compaction failure and exhaustion
-are surfaced explicitly without dropping protected inputs. Successful results
-are snapshotted as multimodal content
-in incremental checkpoints and final history, so resume does not require the
-source file. Compaction retains the full original transcript but can omit older
-images from active context; the agent can reopen their source paths on demand.
-Reopening requires the source file to still exist; temporary container files
-disappear on exit, so images needed later should be saved in the workspace.
-No screenshots are automatically attached or re-read.
+OpenAI Chat cannot embed media in tool responses. The `tool-media.ts` middleware
+moves image, PDF, audio, and video file outputs into adjacent user content after
+all associated tool results, regardless of which tool produced them (including
+MCP tools). Every moved part uses the same `Media returned by tool` metadata.
+This changes only the wire representation, not saved history or input receipts.
+Images use `image_url`, PDFs native file blocks, audio `input_audio`, and video
+`video_url` with inline original bytes. Anthropic receives supported image/PDF
+content directly in tool results. Unsupported non-media file results remain
+unchanged; adapter or model rejections surface through normal error handling.
+
+All four tools share the existing 16 MiB encoded inline-media budget, including
+attachments, replayed history, and parallel tool calls. Invalid budgets use one
+generic media error, and every modality uses the same over-budget guidance.
+Limits, unstable files, and filesystem failures are explicit tool errors.
+Media pressure reuses context-overflow recovery, including its two-attempt
+per-turn bound, cancellation, usage accounting, protected inputs, and activity
+events. New attachments and steering inputs are prepared again after compaction,
+before ingestion or acknowledgement. A budget-blocked tool finishes its exchange
+first; the runner then compacts and guides the model to retry only that failed
+tool, never completed actions. Over-budget history is also compacted before the
+next request. Files larger than the entire budget cannot benefit from compaction.
+Protected/recent media can prevent recovery; failures and exhaustion are surfaced
+without dropping protected inputs.
+
+Successful multimodal results are snapshotted in incremental checkpoints and
+final history, so resume does not require the source file. Compaction retains
+the full original transcript but can omit older media from active context.
+Reopening then requires the source path to still exist; files needed later should
+be saved in the workspace because temporary container files disappear on exit.
+No media is automatically reread or attached.
 
 ### Native Provider: Automatic and context-overflow compaction
 

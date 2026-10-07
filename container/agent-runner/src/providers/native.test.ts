@@ -320,6 +320,89 @@ describe('NativeProvider', () => {
       : { type: 'image', source: { type: 'base64', media_type: mime, data } };
   }
 
+  it.each([
+    ['openai-chat', 'pdf', 'view_pdf', 'application/pdf', Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n')],
+    ['anthropic-messages', 'pdf', 'view_pdf', 'application/pdf', Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n')],
+    ['openai-chat', 'audio', 'listen_audio', 'audio/mpeg', Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0]), Buffer.alloc(413)])],
+    ['openai-chat', 'audio', 'listen_audio', 'audio/wav', Buffer.from('524946462600000057415645666d74201000000001000100401f0000803e00000200100064617461020000000000', 'hex')],
+    ['openai-chat', 'video', 'view_video', 'video/mp4', Buffer.from('000000186674797069736f6d0000020069736f6d6d703432', 'hex')],
+    ['openai-chat', 'video', 'view_video', 'video/webm', Buffer.from('1a45dfa3874282847765626d', 'hex')],
+  ] as const)(
+    'sends original %s/%s tool bytes in native blocks and resumes without reopening the source',
+    async (protocol, modality, toolName, mime, bytes) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      catalogModels = { local: { models: {
+        'media-model': { modalities: { input: ['text', modality], output: ['text'] } },
+      } } };
+      const filename = path.join(root, 'source.txt');
+      fs.writeFileSync(filename, bytes);
+      scriptedToolCalls = [[toolName, '{"path":"source.txt"}']];
+      const prepare = spyOn(nativeAudio, 'prepareAudio');
+      let events: ProviderEvent[];
+      try {
+        events = await collect(new NativeProvider({ model: 'local/media-model' }));
+        expect(prepare).not.toHaveBeenCalled();
+      } finally { prepare.mockRestore(); }
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(JSON.stringify(requests[0]?.tools)).toContain(toolName);
+      const instructions = JSON.stringify(protocol === 'anthropic-messages'
+        ? requests[0]?.system : requests[0]?.messages);
+      for (const name of ['view_image', 'view_pdf', 'listen_audio', 'view_video']) {
+        expect(instructions.includes(name)).toBe(name === toolName);
+      }
+      const data = bytes.toString('base64');
+      let wire: Record<string, unknown>;
+      if (protocol === 'anthropic-messages') {
+        wire = { type: 'document', source: { type: 'base64', media_type: mime, data } };
+      } else if (modality === 'pdf') {
+        wire = { type: 'file', file: { filename: 'document.pdf', file_data: `data:${mime};base64,${data}` } };
+      } else if (modality === 'audio') {
+        wire = { type: 'input_audio', input_audio: { data, format: mime === 'audio/wav' ? 'wav' : 'mp3' } };
+      } else {
+        wire = { type: 'video_url', video_url: { url: `data:${mime};base64,${data}` } };
+      }
+      expect(JSON.stringify(requests[1]?.messages)).toContain(JSON.stringify(wire));
+      expect(events.some((event) => event.type === 'progress' && event.step.tool === toolName &&
+        event.step.status === 'completed' && event.step.detail === 'source.txt')).toBe(true);
+      const init = events.find((event) => event.type === 'init');
+      if (init?.type !== 'init') throw new Error('Missing native continuation');
+      const store = new NativeStore();
+      try {
+        expect(nativeAttachments.inlineHistoryBytes(store.messages(init.continuation))).toBe(data.length);
+      } finally { store.close(); }
+      fs.unlinkSync(filename);
+      const resumed = await collect(new NativeProvider({ model: 'local/media-model' }), init.continuation);
+      expect(resumed.some((event) => event.type === 'error')).toBe(false);
+      expect(JSON.stringify(requests.at(-1)?.messages)).toContain(JSON.stringify(wire));
+      expect(resumed.some((event) => event.type === 'progress' && event.step.tool === toolName)).toBe(false);
+    },
+  );
+
+  it('recovers PDF tool media pressure without replaying completed actions', async () => {
+    process.env.NATIVE_PROTOCOL = 'openai-chat';
+    catalogModels = { local: { models: {
+      'media-model': { modalities: { input: ['text', 'pdf', 'image'], output: ['text'] } },
+    } } };
+    const continuation = mediaHistory();
+    const bytes = Buffer.from(`%PDF-1.4\n${' '.repeat(200)}\n%%EOF\n`);
+    fs.writeFileSync(path.join(root, 'document.pdf'), bytes);
+    scriptedToolCalls = [
+      ['bash', '{"command":"echo once >> once.txt"}'],
+      ['view_pdf', '{"path":"document.pdf"}'],
+      ['view_pdf', '{"path":"document.pdf"}'],
+    ];
+    const events = await collect(new NativeProvider({ model: 'local/media-model' }), continuation);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(events.filter((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'completed')).toHaveLength(1);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain(`data:application/pdf;base64,${bytes.toString('base64')}`);
+    const store = new NativeStore();
+    try {
+      expect(nativeAttachments.inlineHistoryBytes(store.contextMessages(continuation))).toBe(bytes.toString('base64').length);
+    } finally { store.close(); }
+  });
+
   it.each(['openai-chat', 'anthropic-messages'] as const)(
     'sends actual local-image content through %s and replays without source files',
     async (protocol) => {
@@ -333,6 +416,10 @@ describe('NativeProvider', () => {
       const events = await collect(provider);
       expect(events.some((event) => event.type === 'error')).toBe(false);
       expect(JSON.stringify(requests[0]?.tools)).toContain('view_image');
+      const instructions = JSON.stringify(protocol === 'anthropic-messages'
+        ? requests[0]?.system : requests[0]?.messages);
+      expect(instructions).toContain('view_image');
+      for (const name of ['view_pdf', 'listen_audio', 'view_video']) expect(instructions).not.toContain(name);
       expect(requestImages(requests[1]?.messages)).toContainEqual(wireImage(protocol));
       expect(requestImages(requests[2]?.messages)).toHaveLength(2);
       expect(events.filter((event) => event.type === 'progress' &&

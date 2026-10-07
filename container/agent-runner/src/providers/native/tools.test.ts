@@ -53,6 +53,18 @@ describe('native coding tools', () => {
     ]);
   });
 
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'gates each native file tool independently by known capabilities and %s adapter support',
+    (protocol) => {
+      for (const inputModalities of [undefined, ['text'], ['pdf'], ['audio'], ['video'], ['pdf', 'audio', 'video']]) {
+        const tools = createNativeTools(root, undefined, undefined, { model: { protocol, inputModalities } });
+        expect('view_pdf' in tools).toBe(inputModalities?.includes('pdf') ?? false);
+        expect('listen_audio' in tools).toBe(protocol === 'openai-chat' && (inputModalities?.includes('audio') ?? false));
+        expect('view_video' in tools).toBe(protocol === 'openai-chat' && (inputModalities?.includes('video') ?? false));
+      }
+    },
+  );
+
   it('writes new nested files, reads them, and performs exact edits', async () => {
     await execute('write', { path: 'nested/note.txt', content: 'alpha beta' });
     expect(await execute('read', { path: 'nested/note.txt' })).toBe('alpha beta');

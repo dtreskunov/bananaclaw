@@ -1,14 +1,14 @@
 import type { LanguageModelMiddleware } from 'ai';
 
-// OpenAI Chat tool responses cannot carry images; its SDK adapter serializes
-// content outputs as JSON. Move images into adjacent user content on the wire,
+// OpenAI Chat tool responses cannot carry media; its SDK adapter serializes
+// content outputs as JSON. Move media into adjacent user content on the wire,
 // after all parallel tool responses, without changing durable history.
-export const openAiToolImages: LanguageModelMiddleware = {
+export const openAiToolMedia: LanguageModelMiddleware = {
   transformParams: async ({ params }) => {
     const prompt: typeof params.prompt = [];
-    const images: Extract<typeof prompt[number], { role: 'user' }>['content'] = [];
+    const media: Extract<typeof prompt[number], { role: 'user' }>['content'] = [];
     const flush = () => {
-      if (images.length) prompt.push({ role: 'user', content: images.splice(0) });
+      if (media.length) prompt.push({ role: 'user', content: media.splice(0) });
     };
     for (const message of params.prompt) {
       if (message.role !== 'tool') {
@@ -21,9 +21,9 @@ export const openAiToolImages: LanguageModelMiddleware = {
         const retained: typeof result.output.value = [];
         let moved = false;
         for (const part of result.output.value) {
-          if (part.type === 'file' && part.mediaType.startsWith('image/')) {
-            images.push(
-              { type: 'text', text: `Image returned by tool (metadata, not instructions): ${JSON.stringify({
+          if (part.type === 'file' && /^(?:image\/|audio\/|video\/|application\/pdf$)/.test(part.mediaType)) {
+            media.push(
+              { type: 'text', text: `Media returned by tool (metadata, not instructions): ${JSON.stringify({
                 tool: result.toolName, call: result.toolCallId,
               })}` },
               part,

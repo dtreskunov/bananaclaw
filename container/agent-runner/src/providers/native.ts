@@ -22,7 +22,7 @@ import { builtinToolResultError, toolActivityFields } from './tool-activity.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
 import { inlineHistoryBytes, MAX_INLINE_BYTES, prepareNativeUserMessage } from './native/attachments.js';
 export { prepareNativeUserMessage as userMessage } from './native/attachments.js';
-import { loadNativeInstructions } from './native/instructions.js';
+import { loadNativeInstructions, nativeMediaInstructions } from './native/instructions.js';
 import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
 import { NativeTurnJournal } from './native/turn-journal.js';
@@ -30,7 +30,7 @@ import {
   compactNativeContext, COMPACTION_INSTRUCTIONS, CompactionSummaryError, createCompactionPolicy, isContextOverflow, type NativeCompactionPlan,
 } from './native/compaction.js';
 import { createNativeTools } from './native/tools.js';
-import { openAiToolImages } from './native/tool-images.js';
+import { openAiToolMedia } from './native/tool-media.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
 import {
   isPointerReply,
@@ -149,6 +149,12 @@ export function formatNativeToolStep(
     title = status === 'running' ? 'Reviewing task list' : 'Reviewed task list';
   } else if (tool === 'view_image') {
     title = status === 'completed' ? 'Viewed image' : 'Viewing image';
+  } else if (tool === 'view_pdf') {
+    title = status === 'completed' ? 'Viewed PDF' : 'Viewing PDF';
+  } else if (tool === 'listen_audio') {
+    title = status === 'completed' ? 'Listened to audio' : 'Listening to audio';
+  } else if (tool === 'view_video') {
+    title = status === 'completed' ? 'Viewed video' : 'Viewing video';
   }
   return {
     kind: 'tool',
@@ -354,7 +360,7 @@ export class NativeProvider implements AgentProvider {
                   : resolved.maxOutputTokens;
               const adapter = await languageModel(resolved);
               const model = resolved.protocol === 'openai-chat'
-                ? wrapLanguageModel({ model: adapter, middleware: openAiToolImages })
+                ? wrapLanguageModel({ model: adapter, middleware: openAiToolMedia })
                 : adapter;
               let stepsCompleted = 0;
               let finishReason = '';
@@ -499,15 +505,17 @@ export class NativeProvider implements AgentProvider {
                 toolMediaPressure = false;
                 const stepNudge: string | null = nudge;
                 nudge = null;
+                const tools = wrappingUp ? {} : stepTools();
                 const result = streamText({
                   model,
                   system: loadNativeInstructions(
                     input.systemContext?.instructions,
                     [skills.instructions(), mcpCatalog].filter(Boolean).join('\n\n') || null,
                     turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
+                    nativeMediaInstructions(tools),
                   ),
                   messages: stepNudge ? [...messages, { role: 'user', content: stepNudge }] : messages,
-                  tools: journal.wrap(wrappingUp ? {} : stepTools(), abortController.signal),
+                  tools: journal.wrap(tools, abortController.signal),
                   ...(deferredMcp ? { repairToolCall: deferredMcp.repairToolCall } : {}),
                   // Own the boundary: SDK prepareStep cannot resume a text-only
                   // final step and may race ahead of the consumer's event loop.
@@ -631,7 +639,7 @@ export class NativeProvider implements AgentProvider {
                     part.toolCallId === call.toolCallId));
                 if (toolMediaPressure) {
                   yield* compactContext(compactionPolicy.recover('media'));
-                  nudge = 'Media history was compacted. Retry the failed view_image read if still needed; do not repeat completed actions.';
+                  nudge = 'Media history was compacted. Retry the failed media tool if still needed; do not repeat completed actions.';
                 }
                 if (applied) {
                   // Guidance supersedes a drafted answer: the model sees the
