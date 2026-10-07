@@ -10,7 +10,7 @@ beforeEach(() => {
       example: {
         npm: '@ai-sdk/openai-compatible',
         api: 'https://original.example/v1',
-        models: { audio: { modalities: { input: ['text', 'audio'], output: ['text'] }, limit: { context: 1000 } } },
+        models: { audio: { reasoning: true, modalities: { input: ['text', 'audio'], output: ['text'] }, limit: { context: 1000 } } },
       },
     }),
   );
@@ -49,6 +49,7 @@ describe('native protocol resolution', () => {
       inputModalities: ['text', 'audio'],
       protocol: 'openai-chat',
       contextWindow: 1000,
+      reasoning: true,
     });
     await resolveNativeModel('example/audio');
     expect(fetchMock).toHaveBeenCalledTimes(1);

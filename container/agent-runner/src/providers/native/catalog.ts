@@ -25,6 +25,7 @@ export function nativeProtocolForPackage(packageName: string): NativeProtocol | 
 
 interface CatalogModel {
   id?: string;
+  reasoning?: boolean;
   tool_call?: boolean;
   modalities?: { input?: string[]; output?: string[] };
   limit?: { context?: number; output?: number };
@@ -47,6 +48,7 @@ export interface NativeModel {
   modelId: string;
   baseURL: string;
   protocol: NativeProtocol;
+  reasoning?: boolean;
   contextWindow?: number;
   maxOutputTokens?: number;
   inputCostPerMTok?: number;
@@ -139,6 +141,7 @@ export async function resolveNativeModel(wireId: string): Promise<NativeModel> {
     modelId: explicitBaseURL ? modelId : (model?.id ?? modelId),
     baseURL,
     protocol,
+    reasoning: model?.reasoning,
     contextWindow: model?.limit?.context,
     maxOutputTokens: model?.limit?.output,
     inputCostPerMTok: model?.cost?.input,

@@ -141,7 +141,7 @@ it('does not persist failed or empty compaction', async () => {
   const before = store.contextMessages(conversation);
   for (const [summarize, expected] of [
     [async () => { throw new Error('Summary service unavailable'); }, 'Summary service unavailable'],
-    [async () => '', 'empty or oversized'],
+    [async () => '', 'empty summary'],
   ] as const) {
     await expect(compactNativeContext({
       ...compactionOptions(conversation, protectedRef), summarize,
@@ -151,7 +151,7 @@ it('does not persist failed or empty compaction', async () => {
 });
 
 it.each([
-  ['oversized', 'x'.repeat(17_000), 'empty or oversized'],
+  ['oversized', 'x'.repeat(17_000), 'oversized summary'],
   ['non-reducing', 'x'.repeat(1000), 'did not reduce context'],
 ])('rejects a %s summary without changing the prompt projection', async (_name, summary, expected) => {
   const { conversation, protectedRef } = seed();
@@ -333,6 +333,102 @@ function largeHistory(characters: number) {
   return { ...compactionOptions(conversation, protectedRef), contextWindow: 1_000_000 };
 }
 
+it('reserves reasoning and retry output without enlarging the visible summary target', async () => {
+  const options = largeHistory(60_000);
+  const budgets: number[] = [];
+  const logs = spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const result = await compactNativeContext({
+      ...options, reasoning: true, maxOutputTokens: 512_000,
+      summarize: async (prompt, request) => {
+        budgets.push(request.maxOutputTokens);
+        expect(prompt).toContain('8000 tokens and 32000 UTF-8 bytes');
+        expect(Buffer.byteLength(prompt) + Buffer.byteLength(COMPACTION_INSTRUCTIONS) + request.maxOutputTokens)
+          .toBeLessThanOrEqual(128_000);
+        return budgets.length === 1
+          ? { text: '', finishReason: 'length', outputTokens: 16_000, reasoningTokens: 16_000 }
+          : { text: 'Previous work completed; continue unfinished tasks.', finishReason: 'stop', outputTokens: 100, reasoningTokens: 40 };
+      },
+    });
+    expect(budgets).toEqual([16_000, 24_000]);
+    expect(result.requests).toBe(2);
+    expect(logs.mock.calls.some(([line]) => String(line).includes('finish=length') &&
+      String(line).includes('summary_bytes=0/32000'))).toBe(true);
+    expect(store.contextEntries(options.conversation).some((entry) => entry.ref === null)).toBe(true);
+  } finally { logs.mockRestore(); }
+});
+
+it.each([
+  ['persistent reasoning-only response', '', 24_000, 24_000, 'empty summary'],
+  ['oversized bytes', 'x'.repeat(33_000), 100, 40, 'oversized summary'],
+  ['oversized visible tokens', 'Short-looking text', 10_000, 1000, 'oversized summary'],
+])('preserves history after %s on the one permitted retry', async (_name, text, outputTokens, reasoningTokens, error) => {
+  const options = largeHistory(60_000);
+  const before = store.contextMessages(options.conversation);
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens: 512_000,
+    summarize: async () => ++calls === 1
+      ? { text: '', finishReason: 'length', outputTokens: 16_000, reasoningTokens: 16_000 }
+      : { text, finishReason: text ? 'stop' : 'length', outputTokens, reasoningTokens },
+  })).rejects.toThrow(error);
+  expect(calls).toBe(2);
+  expect(store.contextMessages(options.conversation)).toEqual(before);
+});
+
+it.each([
+  ['non-truncated response', 'stop', 100, 512_000],
+  ['no reported reasoning', 'length', undefined, 512_000],
+  ['model generation cap reached', 'length', 9000, 9000],
+])('does not retry an empty summary with %s', async (_name, finishReason, reasoningTokens, maxOutputTokens) => {
+  const options = largeHistory(60_000);
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens,
+    summarize: async () => {
+      calls++;
+      return { text: '', finishReason, outputTokens: reasoningTokens, reasoningTokens };
+    },
+  })).rejects.toThrow('empty summary');
+  expect(calls).toBe(1);
+  expect(store.contextEntries(options.conversation).every((entry) => entry.ref !== null)).toBe(true);
+});
+
+it('does not retry reasoning-only output after cancellation', async () => {
+  const options = largeHistory(60_000);
+  const controller = new AbortController();
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens: 512_000, signal: controller.signal,
+    summarize: async () => {
+      calls++;
+      controller.abort(new Error('Compaction stopped'));
+      return { text: '', finishReason: 'length', outputTokens: 16_000, reasoningTokens: 16_000 };
+    },
+  })).rejects.toThrow('Compaction stopped');
+  expect(calls).toBe(1);
+});
+
+it('keeps reasoning-aware leaf requests and their retries within the shared request budget', async () => {
+  const options = largeHistory(1_950_000);
+  const seen = new Set<string>();
+  const result = await compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens: 512_000,
+    summarize: async (prompt, request) => {
+      expect(Buffer.byteLength(prompt) + Buffer.byteLength(COMPACTION_INSTRUCTIONS) + request.maxOutputTokens)
+        .toBeLessThanOrEqual(128_000);
+      if (!seen.has(prompt)) {
+        seen.add(prompt);
+        return { text: '', finishReason: 'length', outputTokens: request.maxOutputTokens, reasoningTokens: request.maxOutputTokens };
+      }
+      return { text: 'Earlier actions completed; preserve current requirements.', finishReason: 'stop', outputTokens: 60, reasoningTokens: 20 };
+    },
+  });
+  expect(result.requests).toBe(seen.size * 2);
+  expect(result.requests).toBeLessThanOrEqual(MAX_COMPACTION_REQUESTS);
+  expect(result.leafChunks).toBeLessThanOrEqual(MAX_COMPACTION_LEAVES);
+});
+
 it('summarizes a fitting single chunk once with the final output budget', async () => {
   const options = largeHistory(2000);
   const original = store.messages(options.conversation);
@@ -418,11 +514,11 @@ it('rejects work above the leaf limit before making any model calls', async () =
   expect(store.contextEntries(options.conversation).every((entry) => entry.ref !== null)).toBe(true);
 });
 
-it('bounds all leaf splitting and reduction requests, including rejected requests', async () => {
-  const options = largeHistory(1_950_000);
+it.each([false, true])('bounds all splitting and reduction requests with reasoning=%s', async (reasoning) => {
+  const options = largeHistory(reasoning ? 1_650_000 : 1_950_000);
   let calls = 0;
   await expect(compactNativeContext({
-    ...options,
+    ...options, reasoning, maxOutputTokens: 512_000,
     summarize: async (prompt) => {
       calls++;
       if (prompt.includes('Exchange ') && !prompt.includes('Rejected request fragment'))

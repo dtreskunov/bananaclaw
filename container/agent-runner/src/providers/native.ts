@@ -27,7 +27,7 @@ import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
 import { NativeTurnJournal } from './native/turn-journal.js';
 import {
-  compactNativeContext, COMPACTION_INSTRUCTIONS, createCompactionPolicy, isContextOverflow, type NativeCompactionPlan,
+  compactNativeContext, COMPACTION_INSTRUCTIONS, CompactionSummaryError, createCompactionPolicy, isContextOverflow, type NativeCompactionPlan,
 } from './native/compaction.js';
 import { createNativeTools } from './native/tools.js';
 import { openAiToolImages } from './native/tool-images.js';
@@ -333,6 +333,7 @@ export class NativeProvider implements AgentProvider {
               journal = turnJournal;
               abortController.signal.throwIfAborted();
               const resolved = await resolveNativeModel(configuredModel);
+              const miniMaxFlash = /^MiniMax-M3\.1-Flash-Preview$/i.test(resolved.modelId);
               const conversation = continuation;
               abortController.signal.throwIfAborted();
               const messages: ModelMessage[] = [...prior, { role: 'user', content: turn.text }];
@@ -392,16 +393,24 @@ export class NativeProvider implements AgentProvider {
                   const compactedContext = await compactNativeContext({
                     store, conversation, protectedInputs: turnJournal.inputRefs(),
                     attempt: plan.attempt, contextWindow: resolved.contextWindow, maxOutputTokens: resolved.maxOutputTokens,
+                    reasoning: resolved.reasoning === true || miniMaxFlash,
                     signal: abortController.signal,
                     summarize: async (prompt, request) => {
                       const compacted = streamText({
                         model, system: COMPACTION_INSTRUCTIONS, messages: [{ role: 'user', content: prompt }],
                         maxOutputTokens: request.maxOutputTokens,
+                        ...(miniMaxFlash ? { providerOptions: resolved.protocol === 'anthropic-messages'
+                          ? { anthropic: { effort: 'low' } }
+                          : { [resolved.providerId]: { reasoningEffort: 'low' } } } : {}),
                         maxRetries: 0, abortSignal: request.signal,
                         onLanguageModelCallEnd: (event) => recordCall(event, true),
                       });
                       for await (const part of compacted.stream) if (part.type === 'error') throw part.error;
-                      return compacted.text;
+                      const [text, finishReason, usage] = await Promise.all([
+                        compacted.text, compacted.finishReason, compacted.usage,
+                      ]);
+                      return { text, finishReason, outputTokens: usage.outputTokens,
+                        reasoningTokens: usage.outputTokenDetails?.reasoningTokens };
                     },
                   });
                   messages.splice(0, messages.length, ...portableHistory(store.contextMessages(conversation)));
@@ -675,7 +684,7 @@ export class NativeProvider implements AgentProvider {
               yield {
                 type: 'error',
                 message: errorMessage(error),
-                retryable: /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
+                retryable: !(error instanceof CompactionSummaryError) && /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
               };
             } finally {
               active = false;

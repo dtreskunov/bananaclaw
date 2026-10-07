@@ -445,7 +445,25 @@ framing, and output. The combined request budget is the smaller of 128,000
 estimated tokens or 25% of the model window (32,768 when unknown). Intermediate
 output is capped at 2,048 tokens and final output at 8,192 tokens, additionally
 bounded by model capability and one-sixteenth of the request budget. Summary
-text must also fit a byte cap of four times its requested output tokens.
+text must also fit a byte cap of four times its requested visible output tokens.
+
+For catalog-declared reasoning models (and MiniMax-M3.1-Flash-Preview even when
+metadata is unavailable), generation allowances include an additional reasoning
+reserve: at most 8,192 tokens or one-sixteenth of the request budget. An empty,
+length-limited response reporting reasoning gets one retry with twice that
+reserve, provided the model output cap permits an increase. Source packing
+reserves the larger allowance from the start. Both calls count toward the
+64-request limit and share the overall deadline; visible summary targets and
+byte caps do not grow. Reported visible tokens are checked separately when
+reasoning usage is available.
+
+MiniMax-M3.1-Flash-Preview summaries use low effort (`output_config.effort` for
+Anthropic, `reasoning_effort` for Chat Completions), without changing normal
+generation settings. This model cannot disable thinking, and thinking consumes
+the generation allowance; see the [MiniMax compatibility documentation](https://platform.minimax.io/docs/api-reference/text-anthropic-api).
+Summary diagnostics record request number, finish reason, output/reasoning
+tokens, visible bytes and limits, never transcript or reasoning content.
+Empty and oversized failures have distinct messages with these measurements.
 
 Each compaction has a five-minute deadline, 60-second request timeouts, at most
 32 leaf chunks, and at most 64 model requests, counting rejections and reduction.

@@ -45,6 +45,7 @@ let rejectCompaction: boolean;
 type StubUsage = { prompt_tokens?: number; completion_tokens?: number };
 let scriptedUsage: StubUsage[];
 let compactionUsage: StubUsage;
+let reasoningOnlyCompactions: number;
 
 const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
   (executable) => spawnSync(executable, ['-version'], { stdio: 'ignore' }).status === 0,
@@ -102,6 +103,7 @@ beforeEach(() => {
   rejectCompaction = false;
   scriptedUsage = [];
   compactionUsage = { prompt_tokens: 4, completion_tokens: 3 };
+  reasoningOnlyCompactions = 0;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -124,6 +126,43 @@ beforeEach(() => {
       );
       if (isCompaction && rejectCompaction) {
         return Response.json({ error: { message: 'Summary service rejected the request', type: 'invalid_request_error' } }, { status: 400 });
+      }
+      if (isCompaction && reasoningOnlyCompactions > 0) {
+        reasoningOnlyCompactions--;
+        const tokens = Number(requests.at(-1)?.max_tokens);
+        if (!Number.isInteger(tokens) || tokens < 1) throw new Error('Summarization request is missing its generation limit');
+        const body = new URL(request.url).pathname.endsWith('/messages')
+          ? [
+              'event: message_start',
+              'data: {"type":"message_start","message":{"id":"reasoning-only","type":"message","role":"assistant","content":[],"model":"MiniMax-M3.1-Flash-Preview","stop_reason":null,"usage":{"input_tokens":4,"output_tokens":0}}}',
+              '',
+              'event: content_block_start',
+              'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}',
+              '',
+              'event: content_block_delta',
+              'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Review the completed actions."}}',
+              '',
+              'event: content_block_stop',
+              'data: {"type":"content_block_stop","index":0}',
+              '',
+              'event: message_delta',
+              `data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":${tokens},"output_tokens_details":{"thinking_tokens":${tokens}}}}`,
+              '',
+              'event: message_stop',
+              'data: {"type":"message_stop"}',
+              '',
+              '',
+            ].join('\n')
+          : [
+              'data: {"id":"reasoning-only","object":"chat.completion.chunk","created":1,"model":"MiniMax-M3.1-Flash-Preview","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Review the completed actions."},"finish_reason":null}]}',
+              '',
+              `data: {"id":"reasoning-only","object":"chat.completion.chunk","created":1,"model":"MiniMax-M3.1-Flash-Preview","choices":[{"index":0,"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":4,"completion_tokens":${tokens},"completion_tokens_details":{"reasoning_tokens":${tokens}}}}`,
+              '',
+              'data: [DONE]',
+              '',
+              '',
+            ].join('\n');
+        return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
       }
       if (!isCompaction && contextOverflows > 0 && (!overflowAfterTool || hasCompletedTool)) {
         contextOverflows--;
@@ -619,6 +658,72 @@ describe('NativeProvider', () => {
     return events.filter((event) => event.type === 'progress' && event.step.kind === 'compaction' &&
       event.step.status === status);
   }
+
+  function miniMaxFlash(maxOutputTokens = 512_000) {
+    catalogModels = { local: { models: { 'MiniMax-M3.1-Flash-Preview': {
+      modalities: { input: ['text'], output: ['text'] },
+      limit: { context: 1_000_000, output: maxOutputTokens },
+    } } } };
+    return new NativeProvider({ model: 'local/MiniMax-M3.1-Flash-Preview' });
+  }
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'recovers a reasoning-only MiniMax compaction through %s without duplicate billing', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      contextOverflows = 1;
+      reasoningOnlyCompactions = 1;
+      const events = await collect(miniMaxFlash(), history());
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(compactions(events, 'completed')).toHaveLength(1);
+      const summaries = requests.filter((request) => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+      expect(summaries.map((request) => request.max_tokens)).toEqual([16_000, 24_000]);
+      for (const request of summaries) {
+        if (protocol === 'anthropic-messages') {
+          expect(request.output_config).toEqual({ effort: 'low' });
+          expect(request.thinking).toBeUndefined();
+        } else expect(request.reasoning_effort).toBe('low');
+      }
+      const normal = requests.filter((request) => !JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+      expect(normal.every((request) => request.output_config === undefined && request.reasoning_effort === undefined)).toBe(true);
+      const calls = events.filter((event) => event.type === 'usage_call');
+      expect(calls).toHaveLength(3);
+      expect(calls.filter((event) => event.type === 'usage_call' && event.data.reasoning_tokens === 16_000)).toHaveLength(1);
+      const total = events.find((event) => event.type === 'usage');
+      expect(total).toMatchObject({ data: { input_tokens: 12, reasoning_tokens: 16_000, num_turns: 3,
+        output_tokens: protocol === 'anthropic-messages' ? 16_008 : 16_006,
+        context_tokens: protocol === 'anthropic-messages' ? 32 : 7 } });
+      expect(replyTexts(events)).toHaveLength(1);
+    },
+  );
+
+  it('reports exact diagnostics after a second reasoning-only MiniMax summary without activating it', async () => {
+    process.env.NATIVE_PROTOCOL = 'anthropic-messages';
+    contextOverflows = 1;
+    reasoningOnlyCompactions = 2;
+    const continuation = history();
+    const events = await collect(miniMaxFlash(), continuation);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringContaining('empty summary') }));
+    expect(compactions(events, 'error')).toHaveLength(1);
+    expect(JSON.stringify(compactions(events, 'error'))).toContain('reasoning=24000');
+    expect(JSON.stringify(compactions(events, 'error'))).toContain('summary_bytes=0/32000');
+    expect(events.filter((event) => event.type === 'usage_call')).toHaveLength(2);
+    expect(requests).toHaveLength(3);
+    const store = new NativeStore();
+    try {
+      expect(JSON.stringify(store.contextMessages(continuation))).toContain('Earlier requirements '.repeat(250));
+    } finally { store.close(); }
+  });
+
+  it('does not treat numeric summary diagnostics as a retryable HTTP error', async () => {
+    process.env.NATIVE_PROTOCOL = 'anthropic-messages';
+    contextOverflows = 1;
+    reasoningOnlyCompactions = 1;
+    const events = await collect(miniMaxFlash(512), history());
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error', retryable: false, message: expect.stringContaining('generation_limit=512'),
+    }));
+    expect(requests).toHaveLength(2);
+  });
 
   it.each(['openai-chat', 'anthropic-messages'] as const)(
     'compacts at exactly 75%% between completed steps through %s without replaying tools', async (protocol) => {

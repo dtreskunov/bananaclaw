@@ -133,6 +133,8 @@ export function planCompaction(
 
 interface SummaryBudget {
   outputTokens: number;
+  generationTokens: number;
+  retryGenerationTokens: number;
   summaryBytes: number;
   sourceBytes: number;
   instructions: string;
@@ -143,21 +145,33 @@ export interface CompactionRequest {
   signal: AbortSignal;
 }
 
-function summaryBudget(window: number, maxOutput: number, final: boolean): SummaryBudget {
+export interface CompactionSummary {
+  text: string;
+  finishReason?: string;
+  outputTokens?: number;
+  reasoningTokens?: number;
+}
+
+export class CompactionSummaryError extends Error {}
+
+function summaryBudget(window: number, maxOutput: number, final: boolean, reasoning: boolean): SummaryBudget {
   const requestTokens = Math.min(MAX_REQUEST_TOKENS, Math.floor(window / 4));
   const outputTokens = Math.min(final ? 8192 : 2048, maxOutput, Math.floor(requestTokens / 16));
+  const reasoningTokens = reasoning ? Math.min(8192, Math.floor(requestTokens / 16)) : 0;
+  const generationTokens = Math.min(maxOutput, outputTokens + reasoningTokens);
+  const retryGenerationTokens = Math.min(maxOutput, outputTokens + 2 * reasoningTokens);
   const summaryBytes = outputTokens * SUMMARY_BYTES_PER_TOKEN;
   const instructions =
     `Summarize the following chronological ${final ? 'conversation history' : 'transcript or summary fragments'}. ` +
-    `Keep the result within ${outputTokens} tokens and ${summaryBytes} UTF-8 bytes.\n\n`;
+    `Keep the final summary text within ${outputTokens} tokens and ${summaryBytes} UTF-8 bytes.\n\n`;
   // No model-specific tokenizer is available. Count UTF-8 bytes conservatively
   // and reserve additional room for protocol framing and the generated reply.
-  const sourceBytes = requestTokens - outputTokens - Math.min(1024, Math.floor(requestTokens / 8)) -
+  const sourceBytes = requestTokens - retryGenerationTokens - Math.min(1024, Math.floor(requestTokens / 8)) -
     Buffer.byteLength(COMPACTION_INSTRUCTIONS) - Buffer.byteLength(instructions);
   if (outputTokens < 1 || sourceBytes < 256 || summaryBytes >= sourceBytes) {
     throw new Error(`Compaction request budget is too small (context window ${window}); full transcript was preserved`);
   }
-  return { outputTokens, summaryBytes, sourceBytes, instructions };
+  return { outputTokens, generationTokens, retryGenerationTokens, summaryBytes, sourceBytes, instructions };
 }
 
 function splitUtf8(text: string, bytes: number): string[] {
@@ -218,8 +232,9 @@ export async function compactNativeContext(options: {
   attempt: number;
   contextWindow?: number;
   maxOutputTokens?: number;
+  reasoning?: boolean;
   signal: AbortSignal;
-  summarize: (prompt: string, request: CompactionRequest) => Promise<string>;
+  summarize: (prompt: string, request: CompactionRequest) => Promise<string | CompactionSummary>;
 }): Promise<{ sourceBytes: number; leafChunks: number; requests: number }> {
   const { store, conversation, protectedInputs, signal } = options;
   signal.throwIfAborted();
@@ -230,8 +245,8 @@ export async function compactNativeContext(options: {
   if (!Number.isFinite(window) || window <= 0 || !Number.isFinite(maxOutput) || maxOutput < 1) {
     throw new Error('Invalid compaction model limits; full transcript was preserved');
   }
-  const leafBudget = summaryBudget(window, Math.floor(maxOutput), false);
-  const finalBudget = summaryBudget(window, Math.floor(maxOutput), true);
+  const leafBudget = summaryBudget(window, Math.floor(maxOutput), false, options.reasoning === true);
+  const finalBudget = summaryBudget(window, Math.floor(maxOutput), true, options.reasoning === true);
   const chunks = transcriptChunks(plan.prefix, leafBudget.sourceBytes);
   let leafChunks = chunks.length;
   const sourceBytes = Buffer.byteLength(source);
@@ -250,46 +265,68 @@ export async function compactNativeContext(options: {
     if (Buffer.byteLength(text) > budget.sourceBytes) {
       throw new Error('Compaction fragment exceeds its request budget; full transcript was preserved');
     }
-    if (requests >= MAX_COMPACTION_REQUESTS) {
-      throw new Error(`Compaction exceeds the ${MAX_COMPACTION_REQUESTS}-request budget; full transcript was preserved`);
-    }
-    requests++;
-    let summary: string;
-    const requestSignal = AbortSignal.any([compactSignal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
-    try {
-      summary = (await options.summarize(budget.instructions + text, {
-        maxOutputTokens: budget.outputTokens,
-        signal: requestSignal,
-      })).trim();
-      requestSignal.throwIfAborted();
-    } catch (error) {
+    let generationTokens = budget.generationTokens;
+    let retried = false;
+    while (true) {
       compactSignal.throwIfAborted();
-      if (!isContextOverflow(error)) throw error;
-      const halfBytes = Math.floor(Buffer.byteLength(text) / 2);
-      if (halfBytes < 256) throw error;
-      const fragments = splitUtf8(text, halfBytes);
-      const parts = [fragments[0], fragments.slice(1).join('')];
-      if (leaf) {
-        leafChunks += parts.length - 1;
-        if (leafChunks > MAX_COMPACTION_LEAVES)
-          throw new Error(`Compaction splitting exceeds the ${MAX_COMPACTION_LEAVES}-leaf budget; full transcript was preserved`);
+      if (requests >= MAX_COMPACTION_REQUESTS) {
+        throw new Error(`Compaction exceeds the ${MAX_COMPACTION_REQUESTS}-request budget; full transcript was preserved`);
       }
-      console.error(`[native-compaction] Context rejection; splitting ${leaf ? 'transcript' : 'summary'} request into ${parts.length} fragments`);
-      const summaries: string[] = [];
-      for (const [index, part] of parts.entries()) {
-        summaries.push(await summarize(`[Rejected request fragment ${index + 1}/${parts.length}]\n${part}`, leafBudget, leaf));
+      const requestId = ++requests;
+      let response: string | CompactionSummary;
+      const requestSignal = AbortSignal.any([compactSignal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
+      try {
+        response = await options.summarize(budget.instructions + text, {
+          maxOutputTokens: generationTokens,
+          signal: requestSignal,
+        });
+        requestSignal.throwIfAborted();
+      } catch (error) {
+        compactSignal.throwIfAborted();
+        if (!isContextOverflow(error)) throw error;
+        const halfBytes = Math.floor(Buffer.byteLength(text) / 2);
+        if (halfBytes < 256) throw error;
+        const fragments = splitUtf8(text, halfBytes);
+        const parts = [fragments[0], fragments.slice(1).join('')];
+        if (leaf) {
+          leafChunks += parts.length - 1;
+          if (leafChunks > MAX_COMPACTION_LEAVES)
+            throw new Error(`Compaction splitting exceeds the ${MAX_COMPACTION_LEAVES}-leaf budget; full transcript was preserved`);
+        }
+        console.error(`[native-compaction] Context rejection; splitting ${leaf ? 'transcript' : 'summary'} request into ${parts.length} fragments`);
+        const summaries: string[] = [];
+        for (const [index, part] of parts.entries()) {
+          summaries.push(await summarize(`[Rejected request fragment ${index + 1}/${parts.length}]\n${part}`, leafBudget, leaf));
+        }
+        const combined = summaries.map((value, index) => `[Fragment ${index + 1} summary]\n${value}`).join('\n\n');
+        if (Buffer.byteLength(combined) >= Buffer.byteLength(text)) {
+          throw new Error('Compaction splitting did not reduce context; full transcript was preserved');
+        }
+        return summarize(combined, budget, false);
       }
-      const combined = summaries.map((value, index) => `[Fragment ${index + 1} summary]\n${value}`).join('\n\n');
-      if (Buffer.byteLength(combined) >= Buffer.byteLength(text)) {
-        throw new Error('Compaction splitting did not reduce context; full transcript was preserved');
+      compactSignal.throwIfAborted();
+      const result: CompactionSummary = typeof response === 'string' ? { text: response } : response;
+      const summary = result.text.trim();
+      const bytes = Buffer.byteLength(summary);
+      const textTokens = result.outputTokens !== undefined && result.reasoningTokens !== undefined
+        ? result.outputTokens - result.reasoningTokens : undefined;
+      const detail = `request=${requestId}, finish=${result.finishReason ?? 'unknown'}, ` +
+        `output=${result.outputTokens ?? 'unknown'}, reasoning=${result.reasoningTokens ?? 'unknown'}, ` +
+        `summary_tokens=${textTokens ?? 'unknown'}/${budget.outputTokens}, ` +
+        `summary_bytes=${bytes}/${budget.summaryBytes}, generation_limit=${generationTokens}`;
+      console.error(`[native-compaction] Summary ${leaf ? 'transcript' : 'reduction'} response: ${detail}`);
+      if (!summary && !retried && result.finishReason === 'length' && (result.reasoningTokens ?? 0) > 0 &&
+        generationTokens < budget.retryGenerationTokens) {
+        retried = true;
+        generationTokens = budget.retryGenerationTokens;
+        console.error(`[native-compaction] Retrying reasoning-only summary with ${generationTokens} generated tokens`);
+        continue;
       }
-      return summarize(combined, budget, false);
+      if (!summary || bytes > budget.summaryBytes || (textTokens !== undefined && textTokens > budget.outputTokens)) {
+        throw new CompactionSummaryError(`Compaction returned an ${summary ? 'oversized' : 'empty'} summary (${detail}); full transcript was preserved`);
+      }
+      return summary;
     }
-    compactSignal.throwIfAborted();
-    if (!summary || Buffer.byteLength(summary) > budget.summaryBytes) {
-      throw new Error('Compaction returned an empty or oversized summary; full transcript was preserved');
-    }
-    return summary;
   }
 
   async function summarizeAll(texts: string[], leaf: boolean): Promise<string[]> {
