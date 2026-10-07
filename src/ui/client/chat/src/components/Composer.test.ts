@@ -975,7 +975,7 @@ describe('main composer pending edits', () => {
   });
 
   it.each([false, true])(
-    'shows initial Thinking with a bottom stopwatch and optional top technical line (%s)',
+    'shows initial Thinking with a bottom stopwatch but no empty usage disclosure (%s)',
     (technical) => {
       appearance.value = {
         ...appearance.peek(),
@@ -1001,18 +1001,75 @@ describe('main composer pending edits', () => {
       expect(!!header).toBe(technical);
       if (technical) {
         expect(header.type.name).toBe('TurnTechnicalDetails');
-        const details = renderTechnicalDetails(row);
-        const info = findComponent(details, 'TurnTechnicalInfo');
-        expect(info.props.count).toBe(0);
-        const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
-        expect(toggle.type(toggle.props)).toBeNull();
-        expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
-        expect(findComponent(details, 'ActivityTracePanel').props.lines).toEqual([]);
+        expect(renderTechnicalDetails(row)).toBeNull();
       }
+      expect(findComponent(footer, 'TurnElapsed').props.live).toBe(true);
       const headline = footer.props.children.filter(Boolean).at(-1).props.children;
       expect(headline.type(headline.props).props.children).toContain('Thinking…');
     },
   );
+
+  it.each(
+    (['running', 'stopping', 'settling'] as const).flatMap((phase) =>
+      [false, true].map((recordedActivity) => ({ phase, recordedActivity })),
+    ),
+  )('only offers $phase usage when accounting arrives (activity=$recordedActivity)', ({ phase, recordedActivity }) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    for (const accounting of [
+      { usage: [], liveUsage: null },
+      {
+        usage: [],
+        liveUsage: {
+          cost_usd: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          model: 'fixture-model',
+        },
+      },
+      { usage: [{ id: 'timing-only', value: { duration_api_ms: 0 } }], liveUsage: null },
+    ]) {
+      resetConversation();
+      applyConversationFrame(
+        testSnapshot({
+          turns: [
+            {
+              ...testTurn,
+              phase,
+              activity: recordedActivity ? testTurn.activity : [],
+              metadata: { status: 'provisional', model: 'fixture-model', durationMs: null },
+              ...accounting,
+            },
+          ],
+          connection: { connected: true, activeTurnId: testTurn.id },
+        }),
+        'thread',
+      );
+      resetMount();
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      const status = findComponent(log.type(log.props), 'ResponseStatusRow');
+      resetMount();
+      const row = status.type(status.props);
+      expect(findComponent(row.props.children.at(-1), 'TurnElapsed').props.live).toBe(true);
+      const details = renderTechnicalDetails(row);
+      const info = findComponent(details, 'TurnTechnicalInfo');
+      const header = info?.type(info.props);
+      if (recordedActivity) {
+        const trace = findComponent(header, 'ActivityTraceToggle');
+        expect(trace.type(trace.props)).not.toBeNull();
+      }
+      const stats = findComponent(header, 'TurnStats');
+      const rendered = stats?.type(stats.props);
+      const usage = findComponent(rendered, 'UsageMeta');
+      expect(!!usage).toBe(accounting.usage.length > 0 || accounting.liveUsage !== null);
+      if (usage) {
+        resetMount();
+        expect(find(usage.type(usage.props), 'button').props.children).toBe('Usage details');
+      }
+    }
+  });
 
   it.each([false, true])('returns to Thinking after activity finishes with technical information %s', (technical) => {
     appearance.value = {
@@ -1106,8 +1163,7 @@ describe('main composer pending edits', () => {
         const details = renderTechnicalDetails(row);
         const info = findComponent(details, 'TurnTechnicalInfo');
         expect(info.props.count).toBe(0);
-        const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
-        expect(toggle.type(toggle.props)).toBeNull();
+        expect(info.type(info.props)).toBeNull();
         const panel = findComponent(details, 'ActivityTracePanel');
         expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(notice.text);
       }

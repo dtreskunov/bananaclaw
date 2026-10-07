@@ -385,6 +385,8 @@ model, tokens, model/other timing, and individual accounting reports.
 The pop-up opens above the technical summary, retaining its original upward
 placement and internal scrolling for long reports. It is accessible only when
 technical information is on.
+Live turns without recorded or live usage hide the usage disclosure; their
+stopwatch and any activity trace remain available until accounting arrives.
 Missing token accounting does not add a "Tokens unavailable" label to the
 transcript. Partial records show only reported values; a record with no summary
 values still offers **Usage details** for inspecting its available timing and

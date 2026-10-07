@@ -1082,7 +1082,9 @@ function TaskIndicator() {
 }
 
 function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
-  return view.elapsedMs !== null || !!view.model || view.usage.length > 0 || !!turn.liveUsage;
+  return view.usage.length > 0 || (turn.phase === 'settled'
+    ? view.elapsedMs !== null || !!view.model
+    : !!turn.liveUsage);
 }
 
 function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }) {

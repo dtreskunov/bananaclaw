@@ -331,7 +331,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
           },
         ]
       : [],
-    liveUsage: settled
+    liveUsage: settled || nextScene === 'initial'
       ? null
       : {
           cost_usd: 0.004,

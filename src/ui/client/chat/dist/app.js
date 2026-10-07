@@ -24345,7 +24345,7 @@ function TaskIndicator() {
   }) });
 }
 function hasTurnStats(turn2, view) {
-  return view.elapsedMs !== null || !!view.model || view.usage.length > 0 || !!turn2.liveUsage;
+  return view.usage.length > 0 || (turn2.phase === "settled" ? view.elapsedMs !== null || !!view.model : !!turn2.liveUsage);
 }
 function TurnStats({ turn: turn2, view }) {
   if (!hasTurnStats(turn2, view)) return null;
