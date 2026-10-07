@@ -3,7 +3,7 @@ import {
   activityTraceView,
   activityTraceFollowing,
   followActivityTrace,
-  inheritActivityTrace,
+  inheritActivityPanels,
   pauseActivityTrace,
   resetActivityTraceView,
   toggleActivityTrace,
@@ -27,26 +27,49 @@ describe('activity metrics disclosure', () => {
     expect(activityMetricsExpanded('turn:first')).toBe(true);
   });
 
-  it('retains each turn selection until conversation navigation resets it', () => {
+  it('opens metrics for only one turn at a time', () => {
     toggleActivityMetrics('turn:first');
-    inheritActivityTrace('turn:next', true);
-    expect(activityMetricsExpanded('turn:first')).toBe(true);
-    expect(activityMetricsExpanded('turn:next')).toBe(false);
     toggleActivityMetrics('turn:next');
+    expect(activityMetricsExpanded('turn:first')).toBe(false);
+    expect(activityMetricsExpanded('turn:next')).toBe(true);
+    toggleActivityMetrics('turn:next');
+    expect(activityMetricsExpanded('turn:next')).toBe(false);
+  });
+
+  it('retains selection through settlement and transfers it to the next turn', () => {
+    toggleActivityMetrics('turn:first', true);
+    expect(activityMetricsExpanded('turn:first')).toBe(true);
+    inheritActivityPanels('turn:next');
+    expect(activityMetricsExpanded('turn:first')).toBe(false);
+    expect(activityMetricsExpanded('turn:next')).toBe(true);
+    inheritActivityPanels('turn:next');
+    expect(activityMetricsExpanded('turn:next')).toBe(true);
     resetActivityTraceView();
     expect(activityMetricsExpanded('turn:first')).toBe(false);
     expect(activityMetricsExpanded('turn:next')).toBe(false);
   });
+
+  it('keeps manually opened metrics pinned while the trace follows new turns', () => {
+    toggleActivityMetrics('turn:first');
+    toggleActivityTrace('turn:first', true);
+    inheritActivityPanels('turn:next');
+    expect(activityMetricsExpanded('turn:first')).toBe(true);
+    expect(activityMetricsExpanded('turn:next')).toBe(false);
+    expect(activityTraceView('turn:first', true).expanded).toBe(false);
+    expect(activityTraceView('turn:next', true)).toEqual({ expanded: true, following: true });
+    inheritActivityPanels('turn:third');
+    expect(activityMetricsExpanded('turn:first')).toBe(true);
+    expect(activityMetricsExpanded('turn:third')).toBe(false);
+    toggleActivityMetrics('turn:first');
+    inheritActivityPanels('turn:fourth');
+    expect(activityMetricsExpanded('turn:first')).toBe(false);
+    expect(activityMetricsExpanded('turn:fourth')).toBe(false);
+  });
 });
 
 describe('activity trace follow intent', () => {
-  it.each(['none', 'browse', 'collapse'] as const)('automatically opens a new owner after %s', (prior) => {
-    if (prior !== 'none') {
-      toggleActivityTrace('turn:first', true);
-      if (prior === 'browse') pauseActivityTrace('turn:first');
-      else toggleActivityTrace('turn:first');
-    }
-    inheritActivityTrace('turn:next', true);
+  it('automatically opens the initial live trace', () => {
+    inheritActivityPanels('turn:next', true);
     expect(activityTraceView('turn:first', true).expanded).toBe(false);
     expect(activityTraceView('turn:next', true)).toEqual({ expanded: true, following: true });
     expect(activityTraceFollowing('turn:next')).toBe(true);
@@ -72,29 +95,44 @@ describe('activity trace follow intent', () => {
   it('retains intent after settlement and transfers it to exactly one new owner', () => {
     toggleActivityTrace('turn:first', true);
     expect(activityTraceView('turn:first')).toEqual({ expanded: true, following: false });
-    inheritActivityTrace('turn:next');
+    inheritActivityPanels('turn:next');
     expect(activityTraceView('turn:first')).toEqual({ expanded: false, following: false });
     expect(activityTraceView('turn:next', true)).toEqual({ expanded: true, following: true });
-    inheritActivityTrace('turn:next');
+    inheritActivityPanels('turn:next');
     expect(activityTraceView('turn:next', true)).toEqual({ expanded: true, following: true });
   });
 
-  it.each(['browse', 'collapse', 'reset'] as const)('does not inherit after %s', (action) => {
+  it.each(['collapse', 'reset'] as const)('does not inherit after %s', (action) => {
     toggleActivityTrace('turn:first', true);
-    if (action === 'browse') pauseActivityTrace('turn:first');
-    else if (action === 'collapse') toggleActivityTrace('turn:first');
-    else resetActivityTraceView();
-    inheritActivityTrace('turn:next');
+    toggleActivityMetrics('turn:first');
+    if (action === 'collapse') {
+      toggleActivityTrace('turn:first');
+      toggleActivityMetrics('turn:first');
+    } else resetActivityTraceView();
+    inheritActivityPanels('turn:next');
     expect(activityTraceView('turn:next', true)).toEqual({ expanded: false, following: false });
-    expect(activityTraceView('turn:first', true).expanded).toBe(action === 'browse');
+    expect(activityTraceView('turn:first', true).expanded).toBe(false);
+    expect(activityMetricsExpanded('turn:next')).toBe(false);
+    expect(activityMetricsExpanded('turn:first')).toBe(false);
   });
 
-  it('does not inherit a count-only expansion or invent follow intent', () => {
-    inheritActivityTrace('turn:first');
+  it.each([false, true])('retains a manually opened or browsed trace (paused=%s)', (paused) => {
+    inheritActivityPanels('turn:first');
     expect(activityTraceView('turn:first', true).expanded).toBe(false);
-    toggleActivityTrace('turn:first');
-    inheritActivityTrace('turn:next');
+    toggleActivityTrace('turn:first', paused);
+    if (paused) pauseActivityTrace('turn:first');
+    toggleActivityMetrics('turn:first', true);
+    inheritActivityPanels('turn:next');
     expect(activityTraceView('turn:first', true)).toEqual({ expanded: true, following: false });
-    expect(activityTraceView('turn:next', true).expanded).toBe(false);
+    expect(activityTraceView('turn:next', true)).toEqual({ expanded: false, following: false });
+    expect(activityMetricsExpanded('turn:first')).toBe(false);
+    expect(activityMetricsExpanded('turn:next')).toBe(true);
+    inheritActivityPanels('turn:third', true);
+    expect(activityTraceView('turn:first', true)).toEqual({ expanded: true, following: false });
+    expect(activityTraceView('turn:third', true)).toEqual({ expanded: false, following: false });
+    followActivityTrace('turn:first');
+    inheritActivityPanels('turn:third');
+    expect(activityTraceView('turn:first', true).expanded).toBe(false);
+    expect(activityTraceView('turn:third', true)).toEqual({ expanded: true, following: true });
   });
 });

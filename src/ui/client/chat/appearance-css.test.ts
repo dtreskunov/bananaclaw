@@ -102,6 +102,19 @@ describe('theme CSS contract', () => {
     expect(css.match(/max\(16px, calc\(\(100% - var\(--chat-max\)\)/g)).toHaveLength(1);
   });
 
+  it('keeps pending controls visible and status captions consistent with delivery labels', () => {
+    const css = read('./components/ChatMain.css');
+    const pending = css.match(/\.chat-main \.msg \.msg-inline-actions\.pending-input-actions \{([^}]+)\}/)?.[1];
+    expect(pending).toContain('display: inline-flex');
+    expect(pending).toContain('opacity: 1');
+    expect(css).not.toContain('pending-input-action {');
+    const labels = css.match(
+      /\.chat-main \.msg \.delivery-origin,\s*\.chat-main \.input-state-caption \{([^}]+)\}/,
+    )?.[1];
+    expect(labels).toContain('font-style: italic');
+    expect(labels).not.toMatch(/color:|opacity:/);
+  });
+
   it('keeps metadata on one row and uses shared disclosure styling for inline metrics', () => {
     const css = read('./components/ChatMain.css');
     const meta = css.match(/\.chat-main \.msg \.meta, \.chat-main \.typing \.meta \{([^}]+)\}/)?.[1];

@@ -20,6 +20,7 @@ import {
 } from './state';
 import { currentPendingEditor, openPendingEditor, pendingEditorKey, pendingEditorSessions } from './pending-edit';
 import { PendingMessageActions } from './components/PendingMessageActions';
+import { EditIcon, TrashIcon } from './components/ActionIcons';
 import type { ChatMessage, Thread } from './types';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
@@ -64,6 +65,49 @@ beforeEach(() => {
 });
 
 describe('pending input cancellation', () => {
+  it.each(['queued', 'steering'] as const)('uses persistent shared icon controls for %s input', (status) => {
+    const target = { ...message, inputState: { ...message.inputState!, status } };
+    const actions = PendingMessageActions({ message: target, thread, gid: 'group', children: 'copy-control' })!;
+    const controls = actions.props.children[0];
+    expect(controls.props.class).toBe('msg-inline-actions pending-input-actions');
+    const [edit, cancel, copy] = controls.props.children;
+    expect(edit.props.class).toBe('msg-action-btn msg-edit-btn');
+    expect(edit.props.title).toBe('Edit pending message');
+    expect(edit.props['aria-label']).toBe('Edit pending message');
+    expect(edit.props.children.type).toBe(EditIcon);
+    expect(cancel.props.class).toBe('msg-action-btn msg-cancel-btn');
+    expect(cancel.props.title).toBe('Cancel pending message');
+    expect(cancel.props['aria-label']).toBe('Cancel pending message');
+    expect(cancel.props.children.type).toBe(TrashIcon);
+    expect(copy).toBe('copy-control');
+    edit.props.onClick();
+    expect(currentPendingEditor()?.[1].messageId).toBe(message.id);
+  });
+
+  it('preserves ordinary message actions when pending actions do not apply', () => {
+    const actions = PendingMessageActions({
+      message: { ...message, direction: 'out' },
+      thread,
+      gid: 'group',
+      children: 'copy-control',
+    })!;
+    expect(actions.props.class).toBe('msg-inline-actions');
+    expect(actions.props.children).toBe('copy-control');
+  });
+
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+  ])('keeps persistent visibility aligned with available actions (edit=%s, cancel=%s)', (edit, cancel) => {
+    activeTurn.value = { ...activeTurn.value!, supportsInputEditing: edit, supportsInputCancellation: cancel };
+    const actions = PendingMessageActions({ message, thread, gid: 'group', children: 'copy-control' })!;
+    const controls = actions.props.children[0];
+    expect(controls.props.class).toBe(`msg-inline-actions${edit || cancel ? ' pending-input-actions' : ''}`);
+    expect(!!controls.props.children[0]).toBe(edit);
+    expect(!!controls.props.children[1]).toBe(cancel);
+  });
+
   it('requires an owned web pending target and explicit native cancellation support', () => {
     expect(canCancelPendingMessage(message, thread, activeTurn.value, true)).toBe(true);
     expect(canCancelPendingMessage(message, thread, { ...activeTurn.value!, supportsInputEditing: false }, true)).toBe(
@@ -104,6 +148,12 @@ describe('pending input cancellation', () => {
     const cancelling = cancellation.cancel();
     expect(chatMessages.value).toHaveLength(2);
     expect(cancellation.state.value.busy).toBe(true);
+    const controls = PendingMessageActions({ message, thread, gid: 'group' })!.props.children[0];
+    const cancel = controls.props.children[1];
+    expect(cancel.props['aria-label']).toBe('Cancelling…');
+    expect(cancel.props.title).toBe('Cancelling…');
+    expect(cancel.props['aria-busy']).toBe(true);
+    expect(cancel.props.disabled).toBe(true);
     expect(fetch).toHaveBeenCalledWith(
       'api/groups/group/chat/thread%2Fid/messages/message%2Fid?channel=web&mg=web%2Fgroup',
       expect.objectContaining({
@@ -136,8 +186,14 @@ describe('pending input cancellation', () => {
       expect(chatMessages.value).toHaveLength(2);
       expect(cancellationOutstanding(key)).toBe(true);
       const actions = PendingMessageActions({ message, thread, gid: 'group' })!;
-      const buttons = [actions.props.children].flat(Infinity).filter((node: any) => node?.type === 'button') as any[];
-      expect(buttons.find((button) => button.props.children === 'Edit').props.disabled).toBe(true);
+      const controls = actions.props.children[0];
+      expect(controls.props.class).toBe('msg-inline-actions pending-input-actions');
+      const buttons = [controls.props.children].flat(Infinity).filter((node: any) => node?.type === 'button') as any[];
+      expect(buttons.find((button) => button.props['aria-label'] === 'Edit pending message').props.disabled).toBe(true);
+      const retry = buttons.find((button) => button.props['aria-label'] === 'Retry cancel');
+      expect(retry.props.title).toBe('Retry cancel');
+      expect(retry.props.class).toBe('msg-action-btn msg-cancel-btn');
+      expect(actions.props.children[1].props.role).toBe('alert');
       await cancellation.cancel();
       expect(vi.mocked(fetch).mock.calls[1][1]?.body).toBe(vi.mocked(fetch).mock.calls[0][1]?.body);
     },

@@ -358,7 +358,7 @@ type UsageProps = {
   live: boolean; partial: boolean; wallElapsedMs: number | null; modelElapsedMs: number | null;
 };
 
-function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>) {
+function UsageMeta({ summary, ownerId, live }: Pick<UsageProps, 'summary' | 'ownerId' | 'live'>) {
   const expanded = activityMetricsExpanded(ownerId);
   const short = summary || 'Usage details';
   return (
@@ -369,7 +369,7 @@ function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>
       aria-controls={`turn-usage-${ownerId}`}
       aria-label={`${short}. ${expanded ? 'Hide' : 'Show'} usage details`}
       title={expanded ? 'Hide usage details' : 'Show usage details'}
-      onClick={(e) => { e.stopPropagation(); toggleActivityMetrics(ownerId); }}
+      onClick={(e) => { e.stopPropagation(); toggleActivityMetrics(ownerId, live); }}
       onKeyDown={(e) => { if (e.key === 'Escape' && expanded) toggleActivityMetrics(ownerId); }}
     >
       <span class={`chevron${expanded ? ' open' : ''}`} aria-hidden="true">{'\u203A'}</span>
@@ -787,18 +787,17 @@ function Message(
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
         {submission?.status === 'sending' && !m.hideInitialQueuedCaption
           ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
-        {!m.submission ? <PendingMessageActions message={m} thread={activeThread() ?? null} gid={groupId.value} /> : null}
         {showsMidTurnLabel(m.deliveryOrigin,
           !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled'))
           ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
             : null}
-        <span class="msg-inline-actions">
+        <PendingMessageActions message={m} thread={activeThread() ?? null} gid={m.submission ? null : groupId.value}>
           {!m.submission ? <EditMessageButton m={m} /> : null}
           {!m.submission ? <ForkButton m={m} isLatest={isLatest} /> : null}
           <CopyTranscriptButton getContent={() => mdRef.current} />
-        </span>
+        </PendingMessageActions>
       </div> : null}
     </div>
   );
@@ -1128,7 +1127,7 @@ function TurnTechnicalInfo({
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
       <ActivityTraceToggle count={count} hasOutcome={hasOutcome} expanded={expanded} onToggle={onToggle} />
-      {usage ? <UsageMeta summary={usage.summary} ownerId={usage.ownerId} /> : null}
+      {usage ? <UsageMeta summary={usage.summary} ownerId={usage.ownerId} live={usage.live} /> : null}
     </div>
   );
 }

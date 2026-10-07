@@ -1,24 +1,22 @@
 import { signal } from '@preact/signals';
 import type { ChatMessage } from './types';
 
-export type ActivityTraceMode = 'open' | 'follow';
-export interface ActivityTraceIntent {
+export type ActivityPanelMode = 'open' | 'follow';
+export interface ActivityPanelIntent {
   ownerId: string;
-  mode: ActivityTraceMode;
+  mode: ActivityPanelMode;
 }
 
-const intent = signal<ActivityTraceIntent | null>(null);
-const expandedMetrics = signal<ReadonlySet<string>>(new Set());
+const intent = signal<ActivityPanelIntent | null>(null);
+const metricsIntent = signal<ActivityPanelIntent | null>(null);
 
 export function activityMetricsExpanded(ownerId: string): boolean {
-  return expandedMetrics.value.has(ownerId);
+  return metricsIntent.value?.ownerId === ownerId;
 }
 
-export function toggleActivityMetrics(ownerId: string): void {
-  const next = new Set(expandedMetrics.peek());
-  if (next.has(ownerId)) next.delete(ownerId);
-  else next.add(ownerId);
-  expandedMetrics.value = next;
+export function toggleActivityMetrics(ownerId: string, follow = false): void {
+  const current = metricsIntent.peek();
+  metricsIntent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? 'follow' : 'open' };
 }
 
 export function activityTraceOwner(message: ChatMessage): string {
@@ -54,13 +52,15 @@ export function followActivityTrace(ownerId: string): void {
   if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: 'follow' };
 }
 
-export function inheritActivityTrace(ownerId: string, automatic = false): void {
-  const current = intent.peek();
-  if (automatic || (current?.mode === 'follow' && current.ownerId !== ownerId))
-    intent.value = { ownerId, mode: 'follow' };
+export function inheritActivityPanels(ownerId: string, openInitialTrace = false): void {
+  if (openInitialTrace && !intent.peek()) intent.value = { ownerId, mode: 'follow' };
+  for (const panel of [intent, metricsIntent]) {
+    const current = panel.peek();
+    if (current?.mode === 'follow' && current.ownerId !== ownerId) panel.value = { ...current, ownerId };
+  }
 }
 
 export function resetActivityTraceView(): void {
   intent.value = null;
-  expandedMetrics.value = new Set();
+  metricsIntent.value = null;
 }

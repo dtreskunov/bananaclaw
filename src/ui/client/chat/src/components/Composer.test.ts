@@ -38,6 +38,7 @@ import { DEFAULT_APPEARANCE } from '../appearance';
 import { isSystemNotice } from '../chat-protocol';
 import { voice } from '../voice-audio';
 import * as turnRow from '../turn-row';
+import { activityMetricsExpanded } from '../activity-trace-state';
 
 // Exercise the real Composer's refs, layout transitions, handlers and rendered
 // controls without adding a browser-DOM dependency to the repository.
@@ -799,7 +800,7 @@ describe('main composer pending edits', () => {
     const body = vi.mocked(fetch).mock.calls[0][1]?.body;
     expect(find(tree, 'textarea').props.readOnly).toBe(true);
     const actions = PendingMessageActions({ gid: 'group', thread, message });
-    expect(find(actions, 'button', 'Cancel').props.disabled).toBe(true);
+    expect(find(actions, 'button', 'Cancel pending message').props.disabled).toBe(true);
     exit();
     expect(input.value).toBe('Unsent composer draft');
     open();
@@ -2079,6 +2080,41 @@ describe('main composer pending edits', () => {
 });
 
 describe('inline activity metrics', () => {
+  it.each([false, true])('pins completed-turn metrics but follows metrics opened on a live turn (live=%s)', (live) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    const turn = {
+      ...testTurn,
+      phase: live ? ('running' as const) : ('settled' as const),
+      outcome: live ? ('pending' as const) : ('silent' as const),
+      usage: [{ id: 'usage', value: { cost_usd: 0.01 } }],
+    };
+    applyConversationFrame(
+      testSnapshot({
+        turns: [turn],
+        connection: { connected: true, activeTurnId: live ? turn.id : null },
+      }),
+      'thread',
+    );
+    const row = renderResponseStatusRow();
+    const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+    const usage = findComponent(info.type(info.props), 'UsageMeta');
+    expect(usage.props.live).toBe(live);
+    find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+    const next = { ...testTurn, id: 'turn:next' };
+    applyConversationFrame(
+      testSnapshot(
+        {
+          turns: [{ ...turn, phase: 'settled', outcome: 'silent' }, next],
+          connection: { connected: true, activeTurnId: next.id },
+        },
+        'next-turn',
+      ),
+      'thread',
+    );
+    expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(!live);
+    expect(activityMetricsExpanded(`turn:${next.id}`)).toBe(live);
+  });
+
   it.each([
     [5, 2],
     [6, 2],

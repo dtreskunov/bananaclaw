@@ -175,14 +175,15 @@ steps** disclosure opens every group collapsed and does not enable following.
 Only one activity trace can be expanded across the transcript. Its global
 state stores only the owning row and whether live activity is being followed;
 the selected group and step are local to the mounted trace.
-When technical information is enabled, each new live turn automatically opens
-its trace in follow mode and closes the previously expanded transcript trace,
-even before its first activity arrives. Completing the turn does not close the
-trace or its followed chapter. Manually browsing or collapsing is respected
-through subsequent updates to that turn; the next new turn opens afresh.
-With technical information disabled, only existing follow intent carries over.
-Same-conversation reconnect snapshots preserve trace state, including manual
-collapse; conversation navigation resets it.
+When technical information is enabled, opening a conversation with a live turn
+initially opens its trace in follow mode. Subsequent new turns inherit panels
+in follow mode, closing those panels on their previous owner. Manually opened or
+browsed traces and metrics opened on completed turns remain pinned to their
+selected turn instead of closing or transferring automatically. Following traces transfer even before the
+new turn's first activity arrives. A collapsed disclosure stays collapsed.
+Completing the turn does not close its panels or its followed chapter. Updates and same-turn reconnect
+snapshots preserve manual browsing and collapse; conversation navigation resets
+both disclosures.
 Each logical turn has one complete activity trace. Steering, questions, and
 intermediate assistant outputs never split it. While running, a synthetic
 bubble below the turn's latest conversation content carries the trace and
@@ -398,8 +399,14 @@ The summary is a chevron toggle styled like the adjacent **trace** disclosure,
 retaining its duration/cost/context label. It opens detailed metrics inline at
 the top of the activity panel, not in a pop-up. Metrics and trace expand
 independently: either or both can be shown, including metrics on turns without
-recorded activity. Metrics selection follows its owning turn across live and
-settled bubbles and reconnects; conversation navigation resets it. Both
+recorded activity. Each disclosure expands for at most one owner at a time.
+Selection survives live-to-settled handoff and same-turn reconnects; on a new
+turn, following panels move to that turn and close on their previous owner.
+Opening metrics on a live turn enables following; opening them on a completed
+turn pins them there. Following persists through settlement unless the metrics
+are closed and manually reopened. Manually browsed traces likewise stay open
+where selected. Closed panels stay closed, and conversation navigation resets both. Metrics can inherit
+their open state before accounting arrives, appearing when usage is available. Both
 disclosures are accessible only when technical information is on.
 Expanded metrics use the available bubble width, placing multiple label/value
 pairs side by side when there is room and returning to a single pair per row
@@ -533,7 +540,7 @@ advance the same turn into a reply to verify trace ownership and frozen elapsed
 time across settlement. Generated fixture assets are ignored and rebuilt from
 `src/ui/client/chat/fixtures/`.
 
-Your own pending native web-chat messages instead offer **Edit**
+Your own pending native web-chat messages instead offer an **Edit** icon
 while the connected runner advertises input editing. This changes text in place,
 preserving attachments, ordering, message identity, and steering/queue intent;
 it uses the main composer without creating a branch. The composer shows a
@@ -553,6 +560,15 @@ another edit. **Exit edit** restores the unsent composer draft and keeps the
 pending edit draft available on reopening; it cannot withdraw a save already
 submitted, which may still apply. Drafts and requests remain scoped to their
 original conversation across navigation.
+
+Pending Edit (pencil), Cancel (trash), and Copy share the same icon-button group
+and hover/focus styling as historical branch/edit/copy controls. Pending controls
+remain visible on desktop and mobile without hovering or tapping the bubble.
+Waiting-to-steer and queued captions use the same muted, italic metadata styling
+as **mid-turn update** while retaining their status wording.
+Tooltips and accessible labels identify each action;
+Cancel retains its cancelling/retry state, and cancellation errors remain visible
+outside the action group.
 
 The bubble's **Cancel** action removes only your own queued or waiting-to-steer
 input, and only when the connected native runner advertises cancellation.

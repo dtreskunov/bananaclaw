@@ -24,7 +24,7 @@ import { applyTurnState } from './stop-turn';
 import { confirmCancelledInput } from './pending-cancel';
 import { playCompletionChime, playProgressTick } from './sound';
 import { maybeNotify } from './notify';
-import { inheritActivityTrace, resetActivityTraceView } from './activity-trace-state';
+import { inheritActivityPanels, resetActivityTraceView } from './activity-trace-state';
 import { appearance } from './appearance-state';
 import { completedResponseId } from './turn-completion';
 import type { ChatMessage, TranscriptRow } from './types';
@@ -105,14 +105,18 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
   const current = view.turns.find((turn) => turn.id === view.connection.activeTurnId);
   const caps = view.capabilities;
   const { messages, transcript } = conversationPresentation(view);
+  const changedConversation = frame.kind === 'snapshot' && previous?.conversation.threadId !== view.threadId;
   batch(() => {
     conversationState.value = next;
     for (const message of view.messages) {
       if (message.inputState?.status === 'cancelled') confirmCancelledInput(message.id);
     }
-    if (frame.kind === 'snapshot' && previous?.conversation.threadId !== view.threadId) resetActivityTraceView();
+    if (changedConversation) resetActivityTraceView();
     if (current && current.phase !== 'settled' && current.id !== previous?.conversation.connection.activeTurnId)
-      inheritActivityTrace(`turn:${current.id}`, appearance.peek().preferences.showTechnicalStatus);
+      inheritActivityPanels(
+        `turn:${current.id}`,
+        changedConversation && appearance.peek().preferences.showTechnicalStatus,
+      );
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === 'update') {

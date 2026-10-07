@@ -2123,18 +2123,6 @@ nav.tab-bar-strip.group-strip {
 }
 
 /* src/components/ChatMain.css */
-.chat-main .pending-input-action {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-decoration: underline;
-  padding: 2px 4px;
-  cursor: pointer;
-}
-.chat-main .pending-input-action:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
 .chat-main .pending-input-error {
   color: var(--muted);
   font-size: var(--font-sm);
@@ -2332,10 +2320,6 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg.input-steering {
   --provenance-rail-color: var(--input-steering-accent, var(--approve));
 }
-.chat-main .input-state-caption {
-  color: var(--surface-fg);
-  opacity: 0.75;
-}
 .chat-main .msg.internal {
   align-self: flex-start;
   background: transparent !important;
@@ -2427,6 +2411,10 @@ nav.tab-bar-strip.group-strip {
   align-items: center;
   gap: 2px;
   flex: none;
+}
+.chat-main .msg .msg-inline-actions.pending-input-actions {
+  display: inline-flex;
+  opacity: 1;
 }
 @media (min-width: 721px) and (hover: hover) and (pointer: fine) {
   .chat-main .msg .msg-inline-actions {
@@ -2578,7 +2566,8 @@ nav.tab-bar-strip.group-strip {
 .chat-main .msg.in .meta > .ts {
   margin-right: auto;
 }
-.chat-main .msg .delivery-origin {
+.chat-main .msg .delivery-origin,
+.chat-main .input-state-caption {
   font-style: italic;
 }
 .chat-main .msg .meta > .delivery-origin {

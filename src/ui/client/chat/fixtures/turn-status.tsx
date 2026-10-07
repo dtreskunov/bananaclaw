@@ -29,6 +29,8 @@ import './turn-status.css';
 const scenes = [
   { id: 'idle-send', label: 'Submit a message (idle)' },
   { id: 'busy-send', label: 'Submit a message (busy)' },
+  { id: 'pending-queued', label: 'Queued input controls' },
+  { id: 'pending-steering', label: 'Steering input controls' },
   { id: 'initial', label: 'Initial Thinking…' },
   { id: 'running', label: 'Running tool' },
   { id: 'completed', label: 'Completed tool (Thinking…)' },
@@ -194,6 +196,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
   }
   const started = Date.parse(startedAt);
   const testing = nextScene === 'running' || nextScene === 'parallel' || nextScene === 'parallel-completed';
+  const pendingInput = nextScene === 'pending-queued' || nextScene === 'pending-steering';
   const failed = ['failed', 'failed-model-handled', 'failed-no-usage', 'failed-timing-only'].includes(nextScene);
   const missingAccounting = nextScene === 'failed-no-usage' || nextScene === 'failed-timing-only';
   const terminalOutcome = terminalScenes[nextScene];
@@ -296,7 +299,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
     outcome: compactSummary ? 'warning' : terminalOutcome ?? (!settled ? 'pending' : failed ? 'failed' : hasReply ? 'replied' : 'silent'),
     startedAt: outcomeOnly ? null : startedAt,
     endedAt: settled && !outcomeOnly ? new Date(started + elapsedMs).toISOString() : null,
-    inputIds: ['fixture-status-input'],
+    inputIds: pendingInput ? [] : ['fixture-status-input'],
     outputIds: hasReply ? ['fixture-status-reply'] : [],
     activity,
     usage: liveContext ? [{
@@ -362,6 +365,14 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
         text: 'Validate the turn status layout.',
         timestamp: new Date(started - 1000).toISOString(),
         timelinePosition: (started - 1000) * 1000,
+        ...(pendingInput ? {
+          canEditPending: true,
+          inputState: {
+            messageId: 'fixture-status-input',
+            status: nextScene === 'pending-steering' ? 'steering' as const : 'queued' as const,
+            queuedForNextTurn: nextScene === 'pending-queued',
+          },
+        } : {}),
       },
       ...(hasReply
         ? [
@@ -396,7 +407,8 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
     turns: [turn],
     questions: [],
     connection: { connected: nextScene !== 'disconnected', activeTurnId: settled ? null : fixtureTurnId },
-    capabilities: { canSend: true, stop: !settled, steer: nextScene === 'busy-send', editInput: false, cancelInput: false },
+    capabilities: { canSend: true, stop: !settled, steer: nextScene === 'busy-send',
+      editInput: pendingInput, cancelInput: pendingInput },
   };
   return { ...view, timeline: conversationTimeline(view) };
 }

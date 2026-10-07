@@ -19240,15 +19240,13 @@ function urlBase64ToUint8Array(base64String) {
 
 // src/activity-trace-state.ts
 var intent = y3(null);
-var expandedMetrics = y3(/* @__PURE__ */ new Set());
+var metricsIntent = y3(null);
 function activityMetricsExpanded(ownerId) {
-  return expandedMetrics.value.has(ownerId);
+  return metricsIntent.value?.ownerId === ownerId;
 }
-function toggleActivityMetrics(ownerId) {
-  const next = new Set(expandedMetrics.peek());
-  if (next.has(ownerId)) next.delete(ownerId);
-  else next.add(ownerId);
-  expandedMetrics.value = next;
+function toggleActivityMetrics(ownerId, follow = false) {
+  const current = metricsIntent.peek();
+  metricsIntent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? "follow" : "open" };
 }
 function activityTraceOwner(message2) {
   if (message2.turnTraceOwner) {
@@ -19277,14 +19275,16 @@ function pauseActivityTrace(ownerId) {
 function followActivityTrace(ownerId) {
   if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: "follow" };
 }
-function inheritActivityTrace(ownerId, automatic = false) {
-  const current = intent.peek();
-  if (automatic || current?.mode === "follow" && current.ownerId !== ownerId)
-    intent.value = { ownerId, mode: "follow" };
+function inheritActivityPanels(ownerId, openInitialTrace = false) {
+  if (openInitialTrace && !intent.peek()) intent.value = { ownerId, mode: "follow" };
+  for (const panel of [intent, metricsIntent]) {
+    const current = panel.peek();
+    if (current?.mode === "follow" && current.ownerId !== ownerId) panel.value = { ...current, ownerId };
+  }
 }
 function resetActivityTraceView() {
   intent.value = null;
-  expandedMetrics.value = /* @__PURE__ */ new Set();
+  metricsIntent.value = null;
 }
 
 // src/appearance.ts
@@ -19637,14 +19637,15 @@ function applyConversationFrame(raw, expectedThreadId) {
   const current = view.turns.find((turn2) => turn2.id === view.connection.activeTurnId);
   const caps = view.capabilities;
   const { messages, transcript } = conversationPresentation(view);
+  const changedConversation = frame.kind === "snapshot" && previous?.conversation.threadId !== view.threadId;
   n2(() => {
     conversationState.value = next;
     for (const message2 of view.messages) {
       if (message2.inputState?.status === "cancelled") confirmCancelledInput(message2.id);
     }
-    if (frame.kind === "snapshot" && previous?.conversation.threadId !== view.threadId) resetActivityTraceView();
+    if (changedConversation) resetActivityTraceView();
     if (current && current.phase !== "settled" && current.id !== previous?.conversation.connection.activeTurnId)
-      inheritActivityTrace(`turn:${current.id}`, appearance.peek().preferences.showTechnicalStatus);
+      inheritActivityPanels(`turn:${current.id}`, changedConversation && appearance.peek().preferences.showTechnicalStatus);
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === "update") {
@@ -22263,44 +22264,55 @@ function ActiveTurnStopButton() {
 }
 
 // src/components/PendingMessageActions.tsx
-function PendingMessageActions({ message: message2, thread, gid }) {
-  if (!gid || !thread || !message2.id || message2.direction !== "in") return null;
+function PendingMessageActions({ message: message2, thread, gid, children }) {
+  if (!gid || !thread || !message2.id || message2.direction !== "in")
+    return children ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children }) : null;
   const key = pendingEditorKey(gid, thread, message2.id);
   const editor = pendingEditorSessions.value.get(key);
   const cancellation = pendingCancellations.value.get(key);
   const cancelState = cancellation?.state.value;
-  const editAllowed = canEditPendingMessage(message2, thread, activeTurn.value, turnConnected.value);
-  const cancelAllowed = canCancelPendingMessage(message2, thread, activeTurn.value, turnConnected.value);
+  const showEdit = canEditPendingMessage(message2, thread, activeTurn.value, turnConnected.value) || !!editor;
+  const showCancel = canCancelPendingMessage(message2, thread, activeTurn.value, turnConnected.value) || !!cancelState?.unresolved;
+  const hasPendingActions = showEdit || showCancel;
   const recording = isRecording.value || !["idle", "error"].includes(voice.state.value.phase) || voice.state.value.sending;
+  let cancelLabel = "Cancel pending message";
+  if (cancelState?.busy) cancelLabel = "Cancelling\u2026";
+  else if (cancelState?.unresolved) cancelLabel = "Retry cancel";
   return /* @__PURE__ */ u4(k, { children: [
-    (editAllowed || editor) && /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "pending-input-action",
-        disabled: cancellationOutstanding(key) || recording || composerSendInFlight.value,
-        onClick: () => {
-          if (!cancellationOutstanding(key) && !recording) openPendingEditor(gid, thread, message2);
-        },
-        "aria-label": "Edit pending message",
-        children: "Edit"
-      }
-    ),
-    (cancelAllowed || cancelState?.unresolved) && /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "pending-input-action",
-        disabled: cancelState?.busy || editRequestOutstanding(key),
-        "aria-busy": cancelState?.busy,
-        onClick: () => {
-          const request = cancellation ?? new PendingCancellation(gid, { ...thread }, message2.id);
-          if (!cancellation) pendingCancellations.value = new Map(pendingCancellations.value).set(key, request);
-          void request.cancel();
-        },
-        children: cancelState?.busy ? "Cancelling\u2026" : cancelState?.unresolved ? "Retry cancel" : "Cancel"
-      }
-    ),
+    /* @__PURE__ */ u4("span", { class: `msg-inline-actions${hasPendingActions ? " pending-input-actions" : ""}`, children: [
+      showEdit && /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "msg-action-btn msg-edit-btn",
+          disabled: cancellationOutstanding(key) || recording || composerSendInFlight.value,
+          onClick: () => {
+            if (!cancellationOutstanding(key) && !recording) openPendingEditor(gid, thread, message2);
+          },
+          title: "Edit pending message",
+          "aria-label": "Edit pending message",
+          children: /* @__PURE__ */ u4(EditIcon, {})
+        }
+      ),
+      showCancel && /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "msg-action-btn msg-cancel-btn",
+          disabled: cancelState?.busy || editRequestOutstanding(key),
+          "aria-busy": cancelState?.busy,
+          title: cancelLabel,
+          "aria-label": cancelLabel,
+          onClick: () => {
+            const request = cancellation ?? new PendingCancellation(gid, { ...thread }, message2.id);
+            if (!cancellation) pendingCancellations.value = new Map(pendingCancellations.value).set(key, request);
+            void request.cancel();
+          },
+          children: /* @__PURE__ */ u4(TrashIcon, {})
+        }
+      ),
+      children
+    ] }),
     cancelState?.error && /* @__PURE__ */ u4("span", { class: "pending-input-error", role: "alert", children: cancelState.error })
   ] });
 }
@@ -23742,7 +23754,7 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ summary, ownerId }) {
+function UsageMeta({ summary, ownerId, live }) {
   const expanded = activityMetricsExpanded(ownerId);
   const short = summary || "Usage details";
   return /* @__PURE__ */ u4(
@@ -23756,7 +23768,7 @@ function UsageMeta({ summary, ownerId }) {
       title: expanded ? "Hide usage details" : "Show usage details",
       onClick: (e4) => {
         e4.stopPropagation();
-        toggleActivityMetrics(ownerId);
+        toggleActivityMetrics(ownerId, live);
       },
       onKeyDown: (e4) => {
         if (e4.key === "Escape" && expanded) toggleActivityMetrics(ownerId);
@@ -24184,12 +24196,11 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             "Sending",
             "\u2026"
           ] }) : null,
-          !m6.submission ? /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: groupId.value }) : null,
           showsMidTurnLabel(
             m6.deliveryOrigin,
             !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
           ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-          /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: [
+          /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: m6.submission ? null : groupId.value, children: [
             !m6.submission ? /* @__PURE__ */ u4(EditMessageButton, { m: m6 }) : null,
             !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
             /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current })
@@ -24475,7 +24486,7 @@ function TurnTechnicalInfo({
   if (!usage2 && !count && !hasOutcome) return null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
     /* @__PURE__ */ u4(ActivityTraceToggle, { count, hasOutcome, expanded, onToggle }),
-    usage2 ? /* @__PURE__ */ u4(UsageMeta, { summary: usage2.summary, ownerId: usage2.ownerId }) : null
+    usage2 ? /* @__PURE__ */ u4(UsageMeta, { summary: usage2.summary, ownerId: usage2.ownerId, live: usage2.live }) : null
   ] });
 }
 function TurnTechnicalDetails({

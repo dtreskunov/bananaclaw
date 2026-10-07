@@ -7,7 +7,14 @@ import {
   conversationState,
   resetConversation,
 } from './conversation-state';
-import { activityTraceOwner, activityTraceView, pauseActivityTrace, toggleActivityTrace } from './activity-trace-state';
+import {
+  activityTraceOwner,
+  activityTraceView,
+  pauseActivityTrace,
+  toggleActivityTrace,
+  activityMetricsExpanded,
+  toggleActivityMetrics,
+} from './activity-trace-state';
 import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared/conversation-protocol';
 import { dockQuestions } from './question-dock';
 import type { Conversation } from '../../../shared/conversation';
@@ -366,10 +373,12 @@ describe('authoritative turn presentation', () => {
     },
   );
 
-  it('preserves transient trace state on a same-conversation reconnect snapshot', () => {
+  it('preserves both disclosures on a same-conversation reconnect snapshot', () => {
     toggleActivityTrace('turn:turn-1', true);
+    toggleActivityMetrics('turn:turn-1');
     receive(testSnapshot(initial, 'reconnect'));
     expect(activityTraceView('turn:turn-1', true)).toEqual({ expanded: true, following: true });
+    expect(activityMetricsExpanded('turn:turn-1')).toBe(true);
   });
 
   it.each([false, true])(
@@ -386,7 +395,7 @@ describe('authoritative turn presentation', () => {
   );
 
   it.each(['none', 'browse', 'collapse', 'history'] as const)(
-    'opens exactly one new turn trace with tech enabled after %s',
+    'preserves manual trace browsing and collapse with tech enabled after %s',
     (action) => {
       appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
       if (action === 'history') toggleActivityTrace('message:history');
@@ -402,16 +411,17 @@ describe('authoritative turn presentation', () => {
         connection: { connected: true, activeTurnId: next.id },
       };
       update(view);
-      expect(activityTraceView('turn:turn-1').expanded).toBe(false);
-      expect(activityTraceView('message:history').expanded).toBe(false);
-      expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: true, following: true });
-      toggleActivityTrace('turn:turn-2');
+      expect(activityTraceView('turn:turn-1').expanded).toBe(action === 'browse');
+      expect(activityTraceView('message:history').expanded).toBe(action === 'history');
+      expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: false, following: false });
       update({
         ...view,
         turns: [view.turns[0], { ...next, activity: [{ ...testTurn.activity[0], timelinePosition: 300 }] }],
       });
       receive(testSnapshot(conversationState.peek()!.conversation, 'reconnect'));
       expect(activityTraceView('turn:turn-2', true).expanded).toBe(false);
+      expect(activityTraceView('turn:turn-1').expanded).toBe(action === 'browse');
+      expect(activityTraceView('message:history').expanded).toBe(action === 'history');
     },
   );
 
@@ -445,19 +455,86 @@ describe('authoritative turn presentation', () => {
     expect(activityTraceView('turn:turn-1', true).expanded).toBe(false);
   });
 
-  it.each([false, true])('does not inherit a manually browsed or collapsed trace; collapsed = %s', (collapsed) => {
-    toggleActivityTrace('turn:turn-1', true);
-    if (collapsed) toggleActivityTrace('turn:turn-1');
-    else pauseActivityTrace('turn:turn-1');
-    const next = { ...testTurn, id: 'turn-2', startedAt: '2026-09-29T00:00:02Z' };
-    update({
-      ...initial,
-      turns: [{ ...testTurn, phase: 'settled', outcome: 'silent' }, next],
-      connection: { connected: true, activeTurnId: next.id },
-    });
-    expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: false, following: false });
-    expect(activityTraceView('turn:turn-1', true).expanded).toBe(!collapsed);
-  });
+  it.each([false, true].flatMap((collapsed) => [false, true].map((snapshot) => ({ collapsed, snapshot }))))(
+    'retains browsed traces while metrics transfer (collapsed=$collapsed, snapshot=$snapshot)',
+    ({ collapsed, snapshot }) => {
+      toggleActivityTrace('turn:turn-1', true);
+      if (collapsed) toggleActivityTrace('turn:turn-1');
+      else pauseActivityTrace('turn:turn-1');
+      toggleActivityMetrics('turn:turn-1', true);
+      const next = { ...testTurn, id: 'turn-2', startedAt: '2026-09-29T00:00:02Z' };
+      const view: Conversation = {
+        ...initial,
+        turns: [{ ...testTurn, phase: 'settled', outcome: 'silent' }, next],
+        connection: { connected: true, activeTurnId: next.id },
+      };
+      if (snapshot) receive(testSnapshot(view, 'next-turn'));
+      else update(view);
+      receive(testSnapshot(conversationState.peek()!.conversation, 'reconnect'));
+      expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: false, following: false });
+      expect(activityTraceView('turn:turn-1')).toEqual({ expanded: !collapsed, following: false });
+      expect(activityMetricsExpanded('turn:turn-1')).toBe(false);
+      expect(activityMetricsExpanded('turn:turn-2')).toBe(true);
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((technical) =>
+      [false, true].flatMap((trace) =>
+        (['closed', 'open', 'follow'] as const).flatMap((metrics) =>
+          [false, true].flatMap((separate) =>
+            [false, true].map((snapshot) => ({ technical, trace, metrics, separate, snapshot })),
+          ),
+        ),
+      ),
+    ),
+  )(
+    'transfers disclosures (technical=$technical, trace=$trace, metrics=$metrics, separate settlement=$separate, snapshot=$snapshot)',
+    ({ technical, trace, metrics, separate, snapshot }) => {
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
+      if (trace) toggleActivityTrace('turn:turn-1', true);
+      const metricsOpen = metrics !== 'closed';
+      const metricsFollow = metrics === 'follow';
+      if (metricsOpen) toggleActivityMetrics('turn:turn-1', metricsFollow);
+      const settled: Conversation = {
+        ...initial,
+        turns: [{ ...testTurn, phase: 'settled', outcome: 'silent' }],
+        connection: { connected: true, activeTurnId: null },
+      };
+      if (separate) {
+        update(settled);
+        expect(activityTraceView('turn:turn-1').expanded).toBe(trace);
+        expect(activityMetricsExpanded('turn:turn-1')).toBe(metricsOpen);
+      }
+      const next = { ...testTurn, id: 'turn-2', activity: [], usage: [], liveUsage: null };
+      const view = {
+        ...settled,
+        turns: [...settled.turns, next],
+        connection: { connected: true, activeTurnId: next.id },
+      };
+      if (snapshot) receive(testSnapshot(view, 'next-turn'));
+      else update(view);
+      expect(activityTraceView('turn:turn-1').expanded).toBe(false);
+      expect(activityMetricsExpanded('turn:turn-1')).toBe(metrics === 'open');
+      expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: trace, following: trace });
+      expect(activityMetricsExpanded('turn:turn-2')).toBe(metricsFollow);
+
+      update({ ...view, turns: [...settled.turns, { ...next, usage: [{ id: 'usage', value: { cost_usd: 0.01 } }] }] });
+      receive(testSnapshot(conversationState.peek()!.conversation, 'reconnect'));
+      expect(activityTraceView('turn:turn-2', true)).toEqual({ expanded: trace, following: trace });
+      expect(activityMetricsExpanded('turn:turn-1')).toBe(metrics === 'open');
+      expect(activityMetricsExpanded('turn:turn-2')).toBe(metricsFollow);
+      if (trace) toggleActivityTrace('turn:turn-2');
+      if (metricsOpen) toggleActivityMetrics(metricsFollow ? 'turn:turn-2' : 'turn:turn-1');
+      receive(testSnapshot(conversationState.peek()!.conversation, 'reconnect-closed'));
+      expect(activityTraceView('turn:turn-2', true).expanded).toBe(false);
+      expect(activityMetricsExpanded('turn:turn-2')).toBe(false);
+      expect(activityMetricsExpanded('turn:turn-1')).toBe(false);
+    },
+  );
 
   it('retains a migrated partial accounting record without synthesizing the absent counters', () => {
     const imported = {
