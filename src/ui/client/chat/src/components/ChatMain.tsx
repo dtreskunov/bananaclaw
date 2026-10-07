@@ -42,7 +42,7 @@ import {
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
 import { activeTurnNotices, liveTurnActivity, turnRowView, type TurnRowView } from '../turn-row';
-import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, technicalSummary } from '../technical-summary';
+import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, latestContextUsage, selectContextUsage, technicalSummary, type KnownContext } from '../technical-summary';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -347,13 +347,15 @@ function fmtContextLimit(tokens: number): string {
   return (tokens / 1_000_000).toFixed(2).replace(/\.0+$|0+$/, '') + 'M';
 }
 
-function UsageMeta({ u, summary, records, model, live = false, partial = false, provisional = false, wallElapsedMs = u.duration_ms ?? null, modelElapsedMs = u.duration_api_ms ?? null }: {
+function UsageMeta({ u, summary, records, context, model, live = false, partial = false, provisional = false, wallElapsedMs = u.duration_ms ?? null, modelElapsedMs = u.duration_api_ms ?? null }: {
   u: Partial<TurnUsage>; summary: string; records?: ConversationTurn['usage']; model?: string | null;
+  context?: KnownContext | null;
   live?: boolean; partial?: boolean; provisional?: boolean; wallElapsedMs?: number | null; modelElapsedMs?: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const short = summary || 'Usage details';
   const reports = records?.length ? records : [{ id: 'usage', value: u }];
+  const showLiveContext = live && context != null;
   return (
     <span class="usage-wrap">
       <button
@@ -378,9 +380,10 @@ function UsageMeta({ u, summary, records, model, live = false, partial = false, 
               <span class="usage-row usage-time-part"><span>Model time</span><strong>{modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(modelElapsedMs)}</strong></span>
               <span class="usage-row usage-time-part" title="Total time minus cumulative model-call time"><span>Other time</span><strong>{wallElapsedMs === null || modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs - modelElapsedMs)}</strong></span>
             </span>
+            {showLiveContext ? <UsageContext context={context} live /> : null}
             {reports.map((record, index) => <div class="usage-report" key={record.id}>
               {reports.length > 1 ? <strong>Usage report {index + 1}</strong> : null}
-              <UsageReport u={record.value} model={model} live={live} partial={partial} />
+              <UsageReport u={record.value} model={model} live={live} partial={partial} showContext={!showLiveContext} />
             </div>)}
           </span>
         </>
@@ -389,19 +392,27 @@ function UsageMeta({ u, summary, records, model, live = false, partial = false, 
   );
 }
 
-function UsageReport({ u, model, live, partial }: {
+function UsageContext({ context, partialTokens, live }: {
+  context: KnownContext | null; partialTokens?: number; live: boolean;
+}) {
+  const contextTokens = context ? context.context_tokens
+    : partialTokens !== undefined && Number.isFinite(partialTokens) && partialTokens >= 0 ? partialTokens : undefined;
+  if (contextTokens === undefined) return null;
+  const detail = `${fmtTok(contextTokens)}${context
+    ? ` / ${fmtContextLimit(context.context_window)} (${fmtPct(contextTokens, context.context_window)})` : ''}`;
+  return <span class="usage-row"><span>{live ? 'Latest known context' : 'Context at end'}</span><strong>{detail}</strong></span>;
+}
+
+function UsageReport({ u, model, live, partial, showContext = true }: {
   u: Partial<TurnUsage>; model?: string | null; live: boolean; partial: boolean;
+  showContext?: boolean;
 }) {
   const reportedModel = u.model || model;
-  const contextTokens = u.context_tokens !== undefined && (!u.context_window || u.context_tokens <= u.context_window)
-    ? u.context_tokens : undefined;
-  const contextDetail = contextTokens !== undefined
-    ? `${fmtTok(contextTokens)}${u.context_window
-      ? ` / ${fmtContextLimit(u.context_window)} (${fmtPct(contextTokens, u.context_window)})` : ''}` : undefined;
   return <>
     <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{u.cost_usd !== undefined ? fmtCost(u.cost_usd) : 'Cost unavailable'}</strong></span>
     {reportedModel ? <span class="usage-row"><span>Model</span><strong title={reportedModel}>{shortModel(reportedModel)}</strong></span> : null}
-    {contextDetail ? <span class="usage-row"><span>{live ? 'Context after latest call' : 'Context at end'}</span><strong>{contextDetail}</strong></span> : null}
+    {showContext ? <UsageContext context={latestContextUsage([u])}
+      partialTokens={u.context_window === undefined ? u.context_tokens : undefined} live={live} /> : null}
     <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{u.input_tokens !== undefined ? fmtTok(u.input_tokens) : 'unavailable'} input {'\u00b7'} {u.output_tokens !== undefined ? fmtTok(u.output_tokens) : 'unavailable'} output</strong></span>
     {u.num_turns ? <span class="usage-row"><span>{live ? 'Model calls so far' : 'Model calls'}</span><strong>{u.num_turns}</strong></span> : null}
     {u.cache_read_tokens !== undefined && u.cache_read_tokens > 0 ? <span class="usage-row"><span>Cache read</span><strong>{fmtTok(u.cache_read_tokens)}</strong></span> : null}
@@ -1076,15 +1087,18 @@ function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
 
 function TurnStats({ turn, view }: { turn: ConversationTurn; view: TurnRowView }) {
   if (!hasTurnStats(turn, view)) return null;
+  const live = turn.phase !== 'settled';
   const records = view.usage.length ? view.usage
-    : turn.liveUsage ? [{ id: 'live', value: turn.liveUsage }] : [];
+    : live && turn.liveUsage ? [{ id: 'live', value: turn.liveUsage }] : [];
+  const usage = records.map(record => record.value);
+  const context = selectContextUsage(usage, live ? turn.liveUsage : null);
   const summary = technicalSummary({
-    elapsedMs: turn.phase === 'settled' ? view.elapsedMs : null,
-    usage: records.map(record => record.value),
+    elapsedMs: live ? null : view.elapsedMs,
+    usage, context,
   });
-  return <UsageMeta u={records[0]?.value ?? {}} records={records} summary={summary} model={view.model}
+  return <UsageMeta u={records[0]?.value ?? {}} records={records} context={context} summary={summary} model={view.model}
     wallElapsedMs={view.elapsedMs} modelElapsedMs={view.modelCallMs}
-    live={!turn.usage.length && !!turn.liveUsage}
+    live={live}
     provisional={turn.metadata.status === 'provisional'} partial={turn.metadata.status === 'partial'} />;
 }
 

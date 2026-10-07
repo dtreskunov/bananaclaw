@@ -59,6 +59,10 @@ const scenes = [
   { id: 'technical-summary', label: 'Compact technical summary (41 entries)' },
   { id: 'technical-summary-multiple', label: 'Compact technical summary (two reports)' },
   { id: 'technical-summary-zero-cost', label: 'Elapsed minutes and zero cost' },
+  { id: 'live-context', label: 'Newer live context (80%, checkpoint 12%)' },
+  { id: 'compacted-context', label: 'Lower live context after compaction (5%, checkpoint 12%)' },
+  { id: 'unknown-live-context', label: 'Unknown live context (retain checkpoint 12%)' },
+  { id: 'stale-live-context', label: 'Older live context (retain newer checkpoint 12%)' },
   { id: 'failed', label: 'Failed reply' },
   { id: 'failed-model-handled', label: 'Failed request (model explanation)' },
   { id: 'failed-no-usage', label: 'Failed reply (no accounting)' },
@@ -194,6 +198,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
   const missingAccounting = nextScene === 'failed-no-usage' || nextScene === 'failed-timing-only';
   const terminalOutcome = terminalScenes[nextScene];
   const compactSummary = nextScene.startsWith('technical-summary');
+  const liveContext = ['live-context', 'compacted-context', 'unknown-live-context', 'stale-live-context'].includes(nextScene);
   const elapsedMs = nextScene === 'technical-summary-zero-cost' ? 710_000 : compactSummary ? 15_000 : 12_000;
   const outcomeOnly = nextScene.endsWith('-empty') || nextScene === 'card-warning';
   const noticeReply = ['warning-reply', 'stopped-reply', 'interrupted-reply'].includes(nextScene);
@@ -294,7 +299,10 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
     inputIds: ['fixture-status-input'],
     outputIds: hasReply ? ['fixture-status-reply'] : [],
     activity,
-    usage: nextScene === 'technical-summary-multiple' ? [
+    usage: liveContext ? [{
+      id: 'fixture-checkpoint-usage', value: { cost_usd: 0.0123, model: 'fixture-model',
+        input_tokens: 2500, output_tokens: 350, context_tokens: 24_000, context_window: 200_000, num_turns: 10 },
+    }] : nextScene === 'technical-summary-multiple' ? [
       { id: 'fixture-summary-first', value: { cost_usd: 1, model: 'MiniMax-M3', input_tokens: 100,
         output_tokens: 10, context_tokens: 150_000, context_window: 200_000 } },
       { id: 'fixture-summary-second', value: { cost_usd: 1.09, model: 'fixture-model', input_tokens: 200,
@@ -329,11 +337,14 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
           cost_usd: 0.004,
           duration_api_ms: 3000,
           model: 'fixture-model',
+          num_turns: liveContext ? nextScene === 'stale-live-context' ? 9 : 11 : undefined,
           input_tokens: 2100,
           output_tokens: 0,
           cache_read_tokens: 0,
           cache_write_tokens: 0,
-          context_tokens: 7500,
+          context_tokens: liveContext
+            ? nextScene === 'unknown-live-context' ? undefined : nextScene === 'compacted-context' ? 10_000 : 160_000
+            : 7500,
           context_window: 200_000,
         },
     metadata: {

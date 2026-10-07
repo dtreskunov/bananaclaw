@@ -371,7 +371,16 @@ minute uses minutes and seconds (`710s` becomes `11m 50s`), reusing the task
 panel's duration formatter (milliseconds below one second, rounded seconds otherwise). Missing fields and zero
 cost are omitted from the summary; a reported zero cost remains in the pop-up. Total cost is
 shown only when every usage report includes cost; context is the latest reported
-valid context/window pair, not cumulative billed tokens. The usage pop-up retains
+valid context/window pair, not cumulative billed tokens. For running, stopping,
+and settling turns, newer live context takes precedence over checkpointed usage;
+incomplete or invalid live context retains the latest known valid measurement.
+Model-call counts prevent an older live snapshot from replacing newer recorded context.
+The client selects and validates that context once, then shares it with the
+summary and pop-up without reusing its billing fields. Partial accounting
+reports can still display a known token count when the context window is unknown.
+Settled turns use their recorded context. Live context is displayed separately
+from accounting reports in the usage pop-up, so neither cost nor billed tokens
+are counted twice. The usage pop-up retains
 model, tokens, model/other timing, and individual accounting reports.
 The pop-up opens above the technical summary, retaining its original upward
 placement and internal scrolling for long reports. It is accessible only when

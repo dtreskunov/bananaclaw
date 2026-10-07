@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { technicalSummary } from './technical-summary';
+import { selectContextUsage, technicalSummary } from './technical-summary';
 
 describe('compact technical summary', () => {
   it('matches the requested shape without model, token or model-call counts', () => {
@@ -67,6 +67,82 @@ describe('compact technical summary', () => {
         ],
       }),
     ).toBe('15s · $2.09 · 35% ctx');
+  });
+
+  it.each([
+    { context_tokens: 800, context_window: 1000, expected: '80%' },
+    { context_tokens: 40, context_window: 1000, expected: '4%' },
+    { context_tokens: 40, context_window: 100, expected: '40%' },
+    { context_tokens: 0, context_window: 1000, expected: '0%' },
+  ])('uses newer context independently of billing ($expected)', ({ expected, ...latest }) => {
+    const recorded = { cost_usd: 2.09, context_tokens: 120, context_window: 1000 };
+    expect(
+      technicalSummary({
+        elapsedMs: null,
+        usage: [recorded],
+        context: selectContextUsage([recorded], { ...latest, cost_usd: 99, input_tokens: 999_999 }),
+      }),
+    ).toBe(`$2.09 · ${expected} ctx`);
+  });
+
+  it.each([
+    {},
+    { context_tokens: 800 },
+    { context_tokens: -1, context_window: 1000 },
+    { context_tokens: 1001, context_window: 1000 },
+    { context_tokens: 800, context_window: 0 },
+    { context_tokens: NaN, context_window: 1000 },
+    { context_tokens: Infinity, context_window: Infinity },
+  ])('retains the latest known valid context when newer telemetry is incomplete or invalid (%s)', (latest) => {
+    const recorded = { context_tokens: 120, context_window: 1000 };
+    expect(
+      technicalSummary({
+        elapsedMs: null,
+        usage: [recorded],
+        context: selectContextUsage([recorded], latest),
+      }),
+    ).toBe('12% ctx');
+  });
+
+  it.each([
+    { recordedCalls: 10, liveCalls: 9, expected: 'recorded' },
+    { recordedCalls: 10, liveCalls: 10, expected: 'live' },
+    { recordedCalls: 10, liveCalls: 11, expected: 'live' },
+    { recordedCalls: undefined, liveCalls: 9, expected: 'live' },
+    { recordedCalls: 10, liveCalls: undefined, expected: 'live' },
+  ])(
+    'selects $expected context with recorded=$recordedCalls and live=$liveCalls',
+    ({ recordedCalls, liveCalls, expected }) => {
+      const recorded = { context_tokens: 120, context_window: 1000, num_turns: recordedCalls };
+      const live = { context_tokens: 800, context_window: 1000, num_turns: liveCalls };
+      expect(selectContextUsage([recorded], live)).toBe(expected === 'live' ? live : recorded);
+    },
+  );
+
+  it('returns no context without valid sources and preserves recorded context without live data', () => {
+    expect(selectContextUsage([])).toBeNull();
+    const recorded = { context_tokens: 120, context_window: 1000 };
+    expect(selectContextUsage([recorded])).toBe(recorded);
+  });
+
+  it.each([
+    { context: { context_tokens: 800, context_window: 1000 }, expected: '$2.09 · 80% ctx' },
+    { context: null, expected: '$2.09' },
+  ])('does not rescan context after selection ($expected)', ({ context, expected }) => {
+    expect(
+      technicalSummary({
+        elapsedMs: null,
+        context,
+        usage: [
+          {
+            cost_usd: 2.09,
+            get context_tokens(): number {
+              throw new Error('Selected context was rescanned');
+            },
+          },
+        ],
+      }),
+    ).toBe(expected);
   });
 
   it('does not invent a complete cost total or a missing context window', () => {

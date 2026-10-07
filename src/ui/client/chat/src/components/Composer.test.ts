@@ -1466,6 +1466,82 @@ describe('main composer pending edits', () => {
   );
 
   it.each([
+    { phase: 'running', context: 16_000, window: 20_000, liveCalls: 11, expected: '80%' },
+    { phase: 'stopping', context: 16_000, window: 20_000, liveCalls: 11, expected: '80%' },
+    { phase: 'settling', context: 16_000, window: 20_000, liveCalls: 11, expected: '80%' },
+    { phase: 'running', context: 1000, window: 20_000, liveCalls: 11, expected: '5%' },
+    { phase: 'running', context: undefined, window: 20_000, liveCalls: 11, expected: '12%' },
+    { phase: 'running', context: 16_000, window: 20_000, liveCalls: 9, expected: '12%' },
+    { phase: 'settled', context: 16_000, window: 20_000, liveCalls: 11, expected: '12%' },
+    { phase: 'running', context: 16_000, window: undefined, liveCalls: 11, expected: '' },
+  ] as const)(
+    'uses latest known context without replacing billing ($phase, $context)',
+    ({ phase, context, window, liveCalls, expected }) => {
+      appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+      const recorded = {
+        cost_usd: 0.0123,
+        context_tokens: 2400,
+        context_window: window,
+        input_tokens: 100,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: 'fixture-model',
+        num_turns: 10,
+      };
+      applyConversationFrame(
+        testSnapshot({
+          turns: [
+            {
+              ...testTurn,
+              phase,
+              outcome: phase === 'settled' ? 'silent' : 'pending',
+              usage: [{ id: 'recorded', value: recorded }],
+              liveUsage: {
+                ...recorded,
+                cost_usd: 99,
+                input_tokens: 999_999,
+                context_tokens: context,
+                num_turns: liveCalls,
+              },
+            },
+          ],
+          connection: { connected: true, activeTurnId: phase === 'settled' ? null : testTurn.id },
+        }),
+        'thread',
+      );
+      resetMount();
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      const status = findComponent(log.type(log.props), 'ResponseStatusRow');
+      resetMount();
+      const details = renderTechnicalDetails(status.type(status.props));
+      const info = findComponent(details, 'TurnTechnicalInfo');
+      const stats = findComponent(info.type(info.props), 'TurnStats');
+      const usage = findComponent(stats.type(stats.props), 'UsageMeta');
+      expect(usage.props.summary).toContain(expected ? `$0.012 · ${expected} ctx` : '$0.012');
+      expect(usage.props.records).toHaveLength(1);
+      expect(usage.props.records[0].value.cost_usd).toBe(0.0123);
+      expect(usage.props.records[0].value.input_tokens).toBe(100);
+      expect(stats.props.turn.usage[0].value.context_tokens).toBe(2400);
+      expect(usage.props.live).toBe(phase !== 'settled');
+      resetMount();
+      hooks.cursor = 0;
+      find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+      hooks.cursor = 0;
+      const popup = find(usage.type(usage.props), 'span', 'Turn usage details');
+      const report = findComponent(popup, 'UsageReport');
+      const contextRow = findComponent(
+        phase === 'settled' || !expected ? report.type(report.props) : popup,
+        'UsageContext',
+      );
+      const contextTree = contextRow.type(contextRow.props);
+      expect(find(contextTree, 'span', phase === 'settled' ? 'Context at end' : 'Latest known context')).toBeDefined();
+      expect(contextTree.props.children[1].props.children).toContain(expected ? `(${expected})` : '2.4k');
+    },
+  );
+
+  it.each([
     { modelMs: 3500, extraMs: 1000, modelText: '0:04', otherText: '0:02' },
     { modelMs: 0, extraMs: 0, modelText: '0:00', otherText: '0:06' },
     { modelMs: undefined, extraMs: 1000, modelText: 'Unavailable', otherText: 'Unavailable' },

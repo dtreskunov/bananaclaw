@@ -22413,19 +22413,27 @@ function formatContextPercent(used, limit) {
   if (pct > 0 && pct < 1) return "<1%";
   return Math.min(100, Math.round(pct)) + "%";
 }
+function latestContextUsage(usage2) {
+  return [...usage2].reverse().find(
+    (record) => record.context_tokens !== void 0 && record.context_window !== void 0 && Number.isFinite(record.context_tokens) && Number.isFinite(record.context_window) && record.context_window > 0 && record.context_tokens >= 0 && record.context_tokens <= record.context_window
+  ) ?? null;
+}
+function selectContextUsage(usage2, liveUsage = null) {
+  const recorded = latestContextUsage(usage2);
+  const live = liveUsage ? latestContextUsage([liveUsage]) : null;
+  return live && (live.num_turns === void 0 || recorded?.num_turns === void 0 || live.num_turns >= recorded.num_turns) ? live : recorded;
+}
 function technicalSummary({
   elapsedMs,
-  usage: usage2
+  usage: usage2,
+  context = latestContextUsage(usage2)
 }) {
   const costs = usage2.map((record) => record.cost_usd);
   const cost = costs.length && costs.every((value) => value !== void 0) ? costs.reduce((total, value) => total + value, 0) : null;
-  const context = [...usage2].reverse().find(
-    (record) => record.context_tokens !== void 0 && record.context_window !== void 0 && record.context_window > 0 && record.context_tokens >= 0 && record.context_tokens <= record.context_window
-  );
   return [
     formatDuration(elapsedMs),
     cost !== null && cost !== 0 ? formatUsageCost(cost) : "",
-    context?.context_tokens !== void 0 && context.context_window !== void 0 ? `${formatContextPercent(context.context_tokens, context.context_window)} ctx` : ""
+    context ? `${formatContextPercent(context.context_tokens, context.context_window)} ctx` : ""
   ].filter(Boolean).join(" \xB7 ");
 }
 
@@ -23643,10 +23651,11 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ u: u5, summary, records, model, live = false, partial = false, provisional = false, wallElapsedMs = u5.duration_ms ?? null, modelElapsedMs = u5.duration_api_ms ?? null }) {
+function UsageMeta({ u: u5, summary, records, context, model, live = false, partial = false, provisional = false, wallElapsedMs = u5.duration_ms ?? null, modelElapsedMs = u5.duration_api_ms ?? null }) {
   const [expanded, setExpanded] = h2(false);
   const short = summary || "Usage details";
   const reports = records?.length ? records : [{ id: "usage", value: u5 }];
+  const showLiveContext = live && context != null;
   return /* @__PURE__ */ u4("span", { class: "usage-wrap", children: [
     /* @__PURE__ */ u4(
       "button",
@@ -23685,21 +23694,29 @@ function UsageMeta({ u: u5, summary, records, model, live = false, partial = fal
             /* @__PURE__ */ u4("strong", { children: wallElapsedMs === null || modelElapsedMs === null ? "Unavailable" : formatElapsedDuration(wallElapsedMs - modelElapsedMs) })
           ] })
         ] }),
+        showLiveContext ? /* @__PURE__ */ u4(UsageContext, { context, live: true }) : null,
         reports.map((record, index) => /* @__PURE__ */ u4("div", { class: "usage-report", children: [
           reports.length > 1 ? /* @__PURE__ */ u4("strong", { children: [
             "Usage report ",
             index + 1
           ] }) : null,
-          /* @__PURE__ */ u4(UsageReport, { u: record.value, model, live, partial })
+          /* @__PURE__ */ u4(UsageReport, { u: record.value, model, live, partial, showContext: !showLiveContext })
         ] }, record.id))
       ] })
     ] }) : null
   ] });
 }
-function UsageReport({ u: u5, model, live, partial }) {
+function UsageContext({ context, partialTokens, live }) {
+  const contextTokens = context ? context.context_tokens : partialTokens !== void 0 && Number.isFinite(partialTokens) && partialTokens >= 0 ? partialTokens : void 0;
+  if (contextTokens === void 0) return null;
+  const detail = `${fmtTok(contextTokens)}${context ? ` / ${fmtContextLimit(context.context_window)} (${formatContextPercent(contextTokens, context.context_window)})` : ""}`;
+  return /* @__PURE__ */ u4("span", { class: "usage-row", children: [
+    /* @__PURE__ */ u4("span", { children: live ? "Latest known context" : "Context at end" }),
+    /* @__PURE__ */ u4("strong", { children: detail })
+  ] });
+}
+function UsageReport({ u: u5, model, live, partial, showContext = true }) {
   const reportedModel = u5.model || model;
-  const contextTokens = u5.context_tokens !== void 0 && (!u5.context_window || u5.context_tokens <= u5.context_window) ? u5.context_tokens : void 0;
-  const contextDetail = contextTokens !== void 0 ? `${fmtTok(contextTokens)}${u5.context_window ? ` / ${fmtContextLimit(u5.context_window)} (${formatContextPercent(contextTokens, u5.context_window)})` : ""}` : void 0;
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("span", { class: "usage-row", children: [
       /* @__PURE__ */ u4("span", { children: partial ? "Reported cost" : "Estimated cost" }),
@@ -23709,10 +23726,14 @@ function UsageReport({ u: u5, model, live, partial }) {
       /* @__PURE__ */ u4("span", { children: "Model" }),
       /* @__PURE__ */ u4("strong", { title: reportedModel, children: shortModel(reportedModel) })
     ] }) : null,
-    contextDetail ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
-      /* @__PURE__ */ u4("span", { children: live ? "Context after latest call" : "Context at end" }),
-      /* @__PURE__ */ u4("strong", { children: contextDetail })
-    ] }) : null,
+    showContext ? /* @__PURE__ */ u4(
+      UsageContext,
+      {
+        context: latestContextUsage([u5]),
+        partialTokens: u5.context_window === void 0 ? u5.context_tokens : void 0,
+        live
+      }
+    ) : null,
     /* @__PURE__ */ u4("span", { class: "usage-row", children: [
       /* @__PURE__ */ u4("span", { children: live ? "Processing so far" : "Turn processing" }),
       /* @__PURE__ */ u4("strong", { children: [
@@ -24328,21 +24349,26 @@ function hasTurnStats(turn2, view) {
 }
 function TurnStats({ turn: turn2, view }) {
   if (!hasTurnStats(turn2, view)) return null;
-  const records = view.usage.length ? view.usage : turn2.liveUsage ? [{ id: "live", value: turn2.liveUsage }] : [];
+  const live = turn2.phase !== "settled";
+  const records = view.usage.length ? view.usage : live && turn2.liveUsage ? [{ id: "live", value: turn2.liveUsage }] : [];
+  const usage2 = records.map((record) => record.value);
+  const context = selectContextUsage(usage2, live ? turn2.liveUsage : null);
   const summary = technicalSummary({
-    elapsedMs: turn2.phase === "settled" ? view.elapsedMs : null,
-    usage: records.map((record) => record.value)
+    elapsedMs: live ? null : view.elapsedMs,
+    usage: usage2,
+    context
   });
   return /* @__PURE__ */ u4(
     UsageMeta,
     {
       u: records[0]?.value ?? {},
       records,
+      context,
       summary,
       model: view.model,
       wallElapsedMs: view.elapsedMs,
       modelElapsedMs: view.modelCallMs,
-      live: !turn2.usage.length && !!turn2.liveUsage,
+      live,
       provisional: turn2.metadata.status === "provisional",
       partial: turn2.metadata.status === "partial"
     }
