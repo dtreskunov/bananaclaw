@@ -60,6 +60,58 @@ function validate(view: Conversation): void {
 }
 
 describe('explicit host trace placement', () => {
+  it.each(['running', 'stopping', 'settling'] as const)(
+    'keeps an unassociated active %s turn after the latest message until its input association arrives',
+    (phase) => {
+      const messages = [message('previous-reply', 'out', 100), message('ask', 'in', 200)];
+      const pending = present(messages, { ...turn, phase, inputIds: [] });
+      const associated = present(messages, { ...turn, phase });
+      expect(pending.timeline.at(-1)).toMatchObject({ kind: 'turn', turnId: turn.id, afterId: 'ask' });
+      expect(pending.timeline).toEqual(associated.timeline);
+      validate(pending);
+      validate(associated);
+    },
+  );
+
+  it.each(['inactive', 'settled'] as const)('does not reanchor an unassociated %s turn to new messages', (state) => {
+    const view = present([message('new-message', 'in', 200)], {
+      ...turn,
+      inputIds: [],
+      ...(state === 'settled' ? { phase: 'settled', outcome: 'silent' } : {}),
+    });
+    view.connection.activeTurnId = null;
+    view.timeline = conversationTimeline(view);
+    expect(view.timeline[0]).toMatchObject({ kind: 'turn', turnId: turn.id, afterId: null });
+    validate(view);
+  });
+
+  it('still shows an unassociated active turn when the conversation has no messages', () => {
+    const view = present([], { ...turn, inputIds: [] });
+    expect(view.timeline).toEqual([
+      {
+        kind: 'turn',
+        turnId: turn.id,
+        afterId: null,
+        status: true,
+        trace: { turnId: turn.id, ordinals: [], ownsTurn: true },
+      },
+    ]);
+    validate(view);
+  });
+
+  it('prefers the active turn owned anchor over a newer queued message', () => {
+    const view = present([
+      message('ask', 'in', 100),
+      {
+        ...message('queued', 'in', 200),
+        inputState: { messageId: 'queued', status: 'queued', queuedForNextTurn: true },
+      },
+    ]);
+    expect(view.timeline[1]).toMatchObject({ kind: 'turn', turnId: turn.id, afterId: 'ask' });
+    expect(view.timeline.at(-1)).toEqual({ kind: 'message', messageId: 'queued' });
+    validate(view);
+  });
+
   it('uses recorded order across mid-turn output and steering despite colliding/backwards timestamps and final reanchoring', () => {
     const messages = [
       message('final', 'out', 600),

@@ -71,7 +71,9 @@ export function conversationTimeline(view: Omit<Conversation, 'timeline'>): Conv
       finalReply.row.trace = trace;
       finalReply.row.statsTurnId = turn.id;
     } else {
-      const anchor = content.at(-1);
+      // A live turn can be projected before its input association.
+      const anchor =
+        content.at(-1) ?? (!settled && turn.id === view.connection.activeTurnId ? ordered.at(-1) : undefined);
       appendAfter(anchor?.row ?? null, {
         kind: 'turn',
         turnId: turn.id,

@@ -19645,7 +19645,10 @@ function applyConversationFrame(raw, expectedThreadId) {
     }
     if (changedConversation) resetActivityTraceView();
     if (current && current.phase !== "settled" && current.id !== previous?.conversation.connection.activeTurnId)
-      inheritActivityPanels(`turn:${current.id}`, changedConversation && appearance.peek().preferences.showTechnicalStatus);
+      inheritActivityPanels(
+        `turn:${current.id}`,
+        changedConversation && appearance.peek().preferences.showTechnicalStatus
+      );
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === "update") {
@@ -22227,8 +22230,11 @@ function ComposerInput({
 
 // src/components/TurnStopButton.tsx
 function TurnStopButton({ turn: turn2, connected, busy, error, onStop }) {
-  const stopping = !error && (busy || turn2.status === "stopping");
+  const stopping = !error && (busy || turn2?.status === "stopping");
   const label = stopping ? "Stopping response" : error ? "Retry stopping response" : "Stop response";
+  let title = "Reconnect to stop this response.";
+  if (!turn2) title = "Available once the response starts.";
+  else if (connected) title = `${label}. Queued follow-ups will still run, including steering not yet applied; completed actions are not undone.`;
   return /* @__PURE__ */ u4(
     "button",
     {
@@ -22236,19 +22242,20 @@ function TurnStopButton({ turn: turn2, connected, busy, error, onStop }) {
       class: "msg-action-btn turn-stop",
       "aria-label": label,
       "aria-busy": stopping,
-      title: connected ? `${label}. Queued follow-ups will still run, including steering not yet applied; completed actions are not undone.` : "Reconnect to stop this response.",
-      disabled: !connected || stopping,
-      onClick: () => onStop(turn2.id),
+      title,
+      disabled: !turn2 || !connected || stopping,
+      onClick: turn2 ? () => onStop(turn2.id) : void 0,
       children: /* @__PURE__ */ u4(StopIcon, {})
     }
   );
 }
 
 // src/components/ActiveTurnStopButton.tsx
-function ActiveTurnStopButton() {
-  const turn2 = activeTurn.value;
-  if (!turn2 || !canSend.value) return null;
-  const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
+function ActiveTurnStopButton({ turnId }) {
+  const active = activeTurn.value;
+  const turn2 = active?.id === turnId ? active : null;
+  if (!canSend.value) return null;
+  const stop = stopRequest.value?.turnId === turn2?.id ? stopRequest.value : null;
   return /* @__PURE__ */ u4(
     TurnStopButton,
     {
@@ -24043,7 +24050,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card });
   const md = renderMarkdown(m6.text, groupId.value);
   const q5 = searchQuery.value;
-  y2(() => {
+  _2(() => {
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
     if (md != null && mdRef.current && groupId.value) {
       rewriteFileLinks(mdRef.current, groupId.value, (entry) => navFile(entry).catch(console.error));
@@ -24552,8 +24559,8 @@ function startingResponsePresentation(submission) {
     traceNow: null,
     attributes: { "data-response-start": ownerId },
     technicalTurn: void 0,
-    stopControl: null,
-    elapsedControl: null,
+    stopControl: /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, { turnId: null }) }),
+    elapsedControl: /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: 0 }),
     tone: "",
     activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
     lines: [{ ts: "", text: JSON.stringify({
@@ -24579,7 +24586,7 @@ function turnResponsePresentation({ turn: turn2, activity: lines, status, traceO
     traceNow: turn2.endedAt ? Date.parse(turn2.endedAt) : now,
     attributes: { "data-turn-id": status ? turn2.id : void 0 },
     technicalTurn: status ? turn2 : void 0,
-    stopControl: live && activeTurn.value?.id === turn2.id ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, {}) }) : null,
+    stopControl: live ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, { turnId: turn2.id }) }) : null,
     elapsedControl: live ? /* @__PURE__ */ u4(TurnElapsed, { elapsedMs: view.elapsedMs, live: true }) : null,
     tone: tone2,
     activity,
@@ -24756,6 +24763,14 @@ function MessageLog() {
     };
   }, [activeThreadId]);
   _2(() => {
+    prevMsgCountRef.current = 0;
+    prevLayoutRef.current = "";
+    atBottomRef.current = true;
+    followingBottomRef.current = true;
+    leavingBottomRef.current = false;
+    setNewMessageBelow(false);
+  }, [activeThreadId]);
+  _2(() => {
     if (!responseId) {
       revealedResponse.current = null;
       return;
@@ -24819,15 +24834,7 @@ function MessageLog() {
     observer.observe(bubble);
     return () => observer.disconnect();
   }, [activeTurnId, activeThreadId]);
-  y2(() => {
-    prevMsgCountRef.current = 0;
-    prevLayoutRef.current = "";
-    atBottomRef.current = true;
-    followingBottomRef.current = true;
-    leavingBottomRef.current = false;
-    setNewMessageBelow(false);
-  }, [activeThreadId]);
-  y2(() => {
+  _2(() => {
     if (!ref.current) return;
     if (densityReflowRef.current) return;
     if (scrollTick !== prevScrollTickRef.current) {

@@ -155,35 +155,39 @@ function echoSend(): void {
   publish(next);
 }
 
-function startResponse(): void {
+function startResponse(activate = true): void {
   echoSend();
   const request = latestSend();
   const next = currentConversation();
-  if (next.turns.some((turn) => turn.inputIds.includes(request.messageId))) return;
-  const current = next.turns.find((turn) => turn.id === next.connection.activeTurnId);
-  if (request.inputHandling?.mode === 'steer' && current) {
-    current.inputIds.push(request.messageId);
-    const input = next.messages.find((message) => message.id === request.messageId);
-    if (input) input.inputState = { messageId: request.messageId, status: 'applied', turnId: current.id };
-  } else {
-    if (current) {
-      current.phase = 'settled';
-      current.outcome = 'silent';
-      current.endedAt = new Date().toISOString();
+  let turn = next.turns.find((value) => value.inputIds.includes(request.messageId));
+  if (turn && next.connection.activeTurnId === (activate ? turn.id : null)) return;
+  if (!turn) {
+    const current = next.turns.find((value) => value.id === next.connection.activeTurnId);
+    if (request.inputHandling?.mode === 'steer' && current) {
+      current.inputIds.push(request.messageId);
+      turn = current;
+      const input = next.messages.find((message) => message.id === request.messageId);
+      if (input) input.inputState = { messageId: request.messageId, status: 'applied', turnId: current.id };
+    } else {
+      if (current) {
+        current.phase = 'settled';
+        current.outcome = 'silent';
+        current.endedAt = new Date().toISOString();
+      }
+      turn = makeConversation('initial', new Date().toISOString()).turns[0];
+      turn.id = 'fixture-submitted-turn';
+      turn.inputIds = [request.messageId];
+      turn.liveUsage = null;
+      turn.metadata.model = null;
+      next.turns.push(turn);
+      const input = next.messages.find((message) => message.id === request.messageId);
+      if (input?.inputState?.queuedForNextTurn)
+        input.inputState = { messageId: request.messageId, status: 'processing', turnId: turn.id };
+      // An idle send deliberately retains its generic queued receipt during turn handoff.
     }
-    const turn = makeConversation('initial', new Date().toISOString()).turns[0];
-    turn.id = 'fixture-submitted-turn';
-    turn.inputIds = [request.messageId];
-    turn.liveUsage = null;
-    turn.metadata.model = null;
-    next.turns.push(turn);
-    next.connection.activeTurnId = turn.id;
-    const input = next.messages.find((message) => message.id === request.messageId);
-    if (input?.inputState?.queuedForNextTurn)
-      input.inputState = { messageId: request.messageId, status: 'processing', turnId: turn.id };
-    // An idle send deliberately retains its generic queued receipt during turn handoff.
   }
-  next.capabilities = { ...next.capabilities, stop: true, steer: true };
+  next.connection.activeTurnId = activate ? turn.id : null;
+  next.capabilities = { ...next.capabilities, stop: activate, steer: activate };
   publish(next);
 }
 
@@ -586,6 +590,7 @@ globalThis.fetch = async (input, init) => {
 
 interface FixtureApi {
   show: typeof show;
+  publish: typeof publish;
   advance: typeof advance;
   nextTurn: typeof nextTurn;
   tech: typeof tech;
@@ -603,6 +608,7 @@ declare global {
 }
 window.turnStatusFixture = {
   show,
+  publish,
   advance,
   nextTurn,
   tech,
@@ -675,7 +681,7 @@ function Fixture() {
           <button type="button" disabled={!outstandingCount.value} onClick={() => respondToSend(true)}>Accept send</button>
           <button type="button" disabled={!outstandingCount.value} onClick={() => respondToSend(false)}>Fail send</button>
           <button type="button" disabled={!sendRequests.length} onClick={echoSend}>Echo message</button>
-          <button type="button" disabled={!sendRequests.length} onClick={startResponse}>Start response</button>
+          <button type="button" disabled={!sendRequests.length} onClick={() => startResponse()}>Start response</button>
         </> : null}
       </header>
       <ChatMain />

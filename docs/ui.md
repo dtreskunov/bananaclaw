@@ -447,12 +447,25 @@ existing client-generated message identity to reconcile the server echo without
 duplicates. An idle submission also shows **Starting response…** in the response
 status slot before the real turn exists. This display-only phase survives HTTP
 acceptance and the initial generic queued receipt, then hands the same bubble
-over to the authoritative turn's Thinking/activity status. Stop and the stopwatch
-appear only once a real turn starts. The startup marker is synthetic and does
-not contribute to the step count or enter conversation records.
+over to the authoritative turn's Thinking/activity status. Stop is visible but
+disabled during startup, and the stopwatch stays at **0:00** without a running
+clock. When the durable turn appears before its live connection state, Stop
+stays in place but remains disabled until the live ID matches the displayed turn.
+It then follows the existing permission/connection checks; the stopwatch uses
+the authoritative start time. The startup marker
+is synthetic and does not contribute to the step count or enter conversation records.
 Starting and real-turn presentations use one stable response component and shared
-trace/footer markup, so the handoff does not remount the bubble. The real-turn
-presentation receives a non-null turn; startup never needs a placeholder turn.
+trace/footer markup, so the handoff does not remount the bubble or its controls.
+If the current live turn arrives before its input association, the host anchors
+its status after the latest visible timeline entry until its own anchor is known.
+This prevents the status from briefly moving above the message history; historical
+and settled turns retain their existing placement.
+Startup uses the same controls rather than empty layout slots, keeping the
+headline aligned on desktop and coarse-pointer devices. Markdown link, image, and
+search setup and submit/bottom-follow scroll corrections run before paint;
+browsing history and completed-response anchoring keep their existing policies.
+The real-turn presentation receives a
+non-null turn; startup never needs a placeholder turn.
 Submission retention and startup visibility derive from one classifier, but
 remain separate decisions: an unconfirmed follow-up still retains its payload
 without displaying another Starting bubble.

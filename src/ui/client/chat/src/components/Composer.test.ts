@@ -3,6 +3,8 @@ import { isValidElement } from 'preact';
 import { ActivityTraceList, Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
 import { ComposerInput } from './ComposerInput';
+import { ActiveTurnStopButton } from './ActiveTurnStopButton';
+import { TurnStopButton } from './TurnStopButton';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { PendingMessageActions } from './PendingMessageActions';
 import {
@@ -24,6 +26,7 @@ import {
   pendingQuestions,
   pinnedContext,
   voiceInput,
+  scrollToBottomTick,
 } from '../state';
 import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, openPendingEditor } from '../pending-edit';
 import { pendingComposerBackups } from '../pending-composer';
@@ -70,9 +73,9 @@ vi.mock('preact/hooks', () => ({
   useEffect: (effect: () => void | (() => void)) => {
     if (hooks.capturePassive) hooks.passiveEffects.push(effect);
   },
-  useLayoutEffect: (effect: () => void | (() => void), deps: unknown[]) => {
+  useLayoutEffect: (effect: () => void | (() => void), deps?: unknown[]) => {
     const index = hooks.cursor++;
-    if (!hooks.slots[index] || deps.some((value, i) => value !== hooks.slots[index][i])) {
+    if (!deps || !hooks.slots[index] || deps.some((value, i) => value !== hooks.slots[index][i])) {
       hooks.slots[index] = deps;
       hooks.effects.push(effect);
     }
@@ -243,7 +246,42 @@ describe('main composer pending edits', () => {
     expect(sendChat).not.toHaveBeenCalled();
   });
 
-  it('uses the same response component for startup and a real turn, with no startup timer or turn controls', () => {
+  it('processes submitted Markdown before the first paint', () => {
+    applyConversationFrame(testSnapshot(), 'thread');
+    pendingWebSends.value = [testWebSubmission];
+    hooks.slots = [];
+    hooks.cursor = 0;
+    const log = findComponent(ChatMain(), 'MessageLog');
+    hooks.slots = [];
+    hooks.cursor = 0;
+    const message = findComponent(log.type(log.props), 'Message');
+    hooks.slots = [];
+    hooks.cursor = 0;
+    hooks.effects = [];
+    hooks.passiveEffects = [];
+    hooks.capturePassive = true;
+    onTestFinished(() => {
+      hooks.capturePassive = false;
+    });
+    const row = message.type(message.props);
+    const content = [row.props.children]
+      .flat(Infinity)
+      .find((child) => child?.props?.class === 'transcript-copy-content');
+    const order: string[] = [];
+    content.ref.current = {
+      set innerHTML(html: string) {
+        expect(html).toBe(content.props.dangerouslySetInnerHTML.__html);
+        order.push('markdown');
+      },
+      querySelectorAll: () => [],
+    };
+    hooks.effects.splice(0).forEach((effect) => effect());
+    order.push('paint');
+    hooks.passiveEffects.splice(0).forEach((effect) => effect());
+    expect(order).toEqual(['markdown', 'paint']);
+  });
+
+  it('preserves response controls across startup, durable turn creation, and live registration', () => {
     const previousWindow = window;
     const interval = vi.fn(() => 1);
     vi.stubGlobal('window', { ...window, setInterval: interval, clearInterval: vi.fn() });
@@ -267,8 +305,41 @@ describe('main composer pending edits', () => {
     hooks.capturePassive = false;
     expect(interval).not.toHaveBeenCalled();
     expect(row.props['data-response-start']).toBe(`submission:${testWebSubmission.messageId}`);
-    expect(findComponent(row, 'TurnElapsed')).toBeUndefined();
-    expect(findComponent(row, 'ActiveTurnStopButton')).toBeUndefined();
+    const elapsed = findComponent(row, 'TurnElapsed');
+    expect(elapsed.props.elapsedMs).toBe(0);
+    expect(elapsed.type(elapsed.props).props.children).toBe('0:00');
+    expect(elapsed.type(elapsed.props).props.role).toBeUndefined();
+    const stop = findComponent(row, 'ActiveTurnStopButton');
+    const control = stop.type(stop.props);
+    const button = control.type(control.props);
+    expect(control.props.turn).toBeNull();
+    expect(button.props.disabled).toBe(true);
+    expect(button.props.onClick).toBeUndefined();
+    applyConversationFrame(
+      testSnapshot(
+        {
+          messages: [
+            { id: testWebSubmission.messageId, direction: 'in', text: 'Hello', timestamp: testWebSubmission.timestamp },
+          ],
+          turns: [{ ...testTurn, inputIds: [testWebSubmission.messageId] }],
+          connection: { connected: true, activeTurnId: null },
+        },
+        'durable-stream',
+      ),
+      'thread',
+    );
+    const waiting = response();
+    expect(waiting.type).toBe(starting.type);
+    expect(waiting.key).toBe(starting.key);
+    expect(waiting.props.source.kind).toBe('turn');
+    hooks.slots = [];
+    hooks.cursor = 0;
+    const waitingRow = waiting.type(waiting.props);
+    const waitingStop = findComponent(waitingRow, 'ActiveTurnStopButton');
+    expect(waitingStop).toBeDefined();
+    const waitingControl = waitingStop.type(waitingStop.props);
+    expect(waitingControl.props.turn).toBeNull();
+    expect(waitingControl.type(waitingControl.props).props.disabled).toBe(true);
     applyConversationFrame(
       testSnapshot(
         {
@@ -286,6 +357,91 @@ describe('main composer pending edits', () => {
     expect(running.type).toBe(starting.type);
     expect(running.key).toBe(starting.key);
     expect(running.props.source.kind).toBe('turn');
+    hooks.slots = [];
+    hooks.cursor = 0;
+    hooks.capturePassive = true;
+    const runningRow = running.type(running.props);
+    hooks.passiveEffects.splice(0).forEach((effect) => effect());
+    hooks.capturePassive = false;
+    expect(interval).toHaveBeenCalledOnce();
+    expect(findComponent(runningRow, 'TurnElapsed').props.live).toBe(true);
+    const liveStop = findComponent(runningRow, 'ActiveTurnStopButton');
+    const liveControl = liveStop.type(liveStop.props);
+    expect(liveControl.props.turn.id).toBe(testTurn.id);
+    expect(liveControl.type(liveControl.props).props.disabled).toBe(false);
+  });
+
+  it.each([null, 'another-turn'])('does not bind Stop for owner %s to an unrelated live turn', (turnId) => {
+    applyConversationFrame(
+      testSnapshot({
+        turns: [testTurn],
+        connection: { connected: true, activeTurnId: testTurn.id },
+      }),
+      'thread',
+    );
+    const control = ActiveTurnStopButton({ turnId });
+    expect(control).not.toBeNull();
+    expect(control!.props.turn).toBeNull();
+    const button = TurnStopButton(control!.props);
+    expect(button.props.disabled).toBe(true);
+    expect(button.props.onClick).toBeUndefined();
+  });
+
+  it('keeps the response slot below its message before and after the active turn input association arrives', () => {
+    const history: ConversationMessage = {
+      id: 'previous-reply',
+      direction: 'out',
+      text: 'Earlier reply',
+      timestamp: '2026-09-28T00:00:00Z',
+    };
+    applyConversationFrame(testSnapshot({ messages: [history] }), 'thread');
+    pendingWebSends.value = [testWebSubmission];
+    const rows = () => {
+      hooks.slots = [];
+      hooks.cursor = 0;
+      const component = findComponent(ChatMain(), 'MessageLog');
+      const log = component.type(component.props);
+      const content = [log.props.children].flat(Infinity).find((node) => node?.props?.id === 'chat-log');
+      return [content.props.children]
+        .flat(Infinity)
+        .filter(
+          (node) =>
+            isValidElement(node) &&
+            typeof node.type === 'function' &&
+            ['Message', 'ResponseStatusRow'].includes(node.type.name),
+        );
+    };
+    const starting = rows().at(-1)!;
+    expect(starting.type.name).toBe('ResponseStatusRow');
+    expect(starting.props.source.kind).toBe('starting');
+    for (const associated of [false, true]) {
+      applyConversationFrame(
+        testSnapshot(
+          {
+            messages: [
+              history,
+              {
+                id: testWebSubmission.messageId,
+                direction: 'in',
+                text: testWebSubmission.text,
+                timestamp: testWebSubmission.timestamp,
+                inputState: { messageId: testWebSubmission.messageId, status: 'processing' },
+              },
+            ],
+            turns: [{ ...testTurn, inputIds: associated ? [testWebSubmission.messageId] : [] }],
+            connection: { connected: true, activeTurnId: testTurn.id },
+          },
+          `association-${associated}`,
+        ),
+        'thread',
+      );
+      const list = rows();
+      const status = list.at(-1)!;
+      expect(list.at(-2)?.props.m.id).toBe(testWebSubmission.messageId);
+      expect(status.type).toBe(starting.type);
+      expect(status.key).toBe(starting.key);
+      expect(status.props.source.turn.id).toBe(testTurn.id);
+    }
   });
 
   it('reserves the stable response key for only one current or preparing bubble', () => {
@@ -2003,80 +2159,102 @@ describe('main composer pending edits', () => {
     },
   );
 
-  it('cancels pending bottom-follow when revealing the top of a completed response', () => {
-    const savedGlobals = {
-      window,
-      requestAnimationFrame: globalThis.requestAnimationFrame,
-      cancelAnimationFrame: globalThis.cancelAnimationFrame,
-      CSS: globalThis.CSS,
-    };
-    const frames = new Map<number, FrameRequestCallback>();
-    let nextFrame = 0;
-    const cancel = vi.fn((id: number) => frames.delete(id));
-    class Viewport extends EventTarget {
-      scrollTop = 1470;
-      scrollHeight = 2000;
-      clientHeight = 500;
-      clientTop = 0;
-      ownerDocument = new EventTarget();
-      getBoundingClientRect() {
-        return { top: 50 };
+  it.each(['submission', 'following', 'completion'] as const)(
+    'positions %s rows before paint without stale bottom-follow',
+    (phase) => {
+      const savedGlobals = {
+        window,
+        requestAnimationFrame: globalThis.requestAnimationFrame,
+        cancelAnimationFrame: globalThis.cancelAnimationFrame,
+        CSS: globalThis.CSS,
+      };
+      const frames = new Map<number, FrameRequestCallback>();
+      let nextFrame = 0;
+      const cancel = vi.fn((id: number) => frames.delete(id));
+      class Viewport extends EventTarget {
+        top = 1470;
+        scrollHeight = 2000;
+        clientHeight = 500;
+        clientTop = 0;
+        ownerDocument = new EventTarget();
+        get scrollTop() {
+          return this.top;
+        }
+        set scrollTop(value: number) {
+          this.top = Math.max(0, Math.min(this.scrollHeight - this.clientHeight, value));
+        }
+        getBoundingClientRect() {
+          return { top: 50 };
+        }
+        querySelectorAll() {
+          return [];
+        }
+        querySelector() {
+          return { getBoundingClientRect: () => ({ top: 50 + 1400 - this.scrollTop }) };
+        }
       }
-      querySelectorAll() {
-        return [];
+      const viewport = new Viewport();
+      const disposers: (() => void)[] = [];
+      try {
+        vi.stubGlobal(
+          'window',
+          Object.assign(new EventTarget(), {
+            nanoclawAppearance: { beforeDensityChange: () => () => {} },
+          }),
+        );
+        vi.stubGlobal('CSS', { escape: (id: string) => id });
+        vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+          frames.set(++nextFrame, callback);
+          return nextFrame;
+        });
+        vi.stubGlobal('cancelAnimationFrame', cancel);
+        hooks.cursor = 0;
+        const log = findComponent(ChatMain(), 'MessageLog');
+        hooks.slots = [];
+        hooks.effects = [];
+        hooks.cursor = 0;
+        hooks.capturePassive = true;
+        const view = log.type(log.props);
+        view.props.children[0].ref.current = viewport;
+        for (const effect of hooks.effects.splice(0)) {
+          const dispose = effect();
+          if (dispose) disposers.push(dispose);
+        }
+        expect(viewport.scrollTop).toBe(viewport.scrollHeight - viewport.clientHeight);
+        for (const effect of hooks.passiveEffects.splice(0)) {
+          const dispose = effect();
+          if (dispose) disposers.push(dispose);
+        }
+        const pendingTail = nextFrame;
+        viewport.scrollHeight = 4500;
+        if (phase === 'completion') {
+          completedResponse.value = 'response';
+          chatMessages.value = [{ id: 'response', direction: 'out', text: 'Long reply', ts: '2', files: null }];
+        } else {
+          pendingWebSends.value = [testWebSubmission];
+          if (phase === 'submission') scrollToBottomTick.value++;
+        }
+        hooks.cursor = 0;
+        log.type(log.props);
+        for (const effect of hooks.effects.splice(0)) effect();
+        if (phase !== 'completion') {
+          expect(viewport.scrollTop).toBe(viewport.scrollHeight - viewport.clientHeight);
+          return;
+        }
+        expect(cancel).toHaveBeenCalledWith(pendingTail);
+        for (const [id, callback] of [...frames]) {
+          frames.delete(id);
+          callback(0);
+        }
+        expect(viewport.scrollTop).toBe(1400);
+        expect(viewport.querySelector().getBoundingClientRect().top).toBe(50);
+      } finally {
+        disposers.forEach((dispose) => dispose());
+        hooks.capturePassive = false;
+        for (const [key, value] of Object.entries(savedGlobals)) vi.stubGlobal(key, value);
       }
-      querySelector() {
-        return { getBoundingClientRect: () => ({ top: 50 + 1400 - this.scrollTop }) };
-      }
-    }
-    const viewport = new Viewport();
-    const disposers: (() => void)[] = [];
-    try {
-      vi.stubGlobal(
-        'window',
-        Object.assign(new EventTarget(), {
-          nanoclawAppearance: { beforeDensityChange: () => () => {} },
-        }),
-      );
-      vi.stubGlobal('CSS', { escape: (id: string) => id });
-      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-        frames.set(++nextFrame, callback);
-        return nextFrame;
-      });
-      vi.stubGlobal('cancelAnimationFrame', cancel);
-      hooks.cursor = 0;
-      const log = findComponent(ChatMain(), 'MessageLog');
-      hooks.slots = [];
-      hooks.effects = [];
-      hooks.cursor = 0;
-      hooks.capturePassive = true;
-      const view = log.type(log.props);
-      view.props.children[0].ref.current = viewport;
-      for (const effect of [...hooks.effects.splice(0), ...hooks.passiveEffects.splice(0)]) {
-        const dispose = effect();
-        if (dispose) disposers.push(dispose);
-      }
-      const pendingTail = nextFrame;
-      viewport.scrollHeight = 4500;
-      completedResponse.value = 'response';
-      chatMessages.value = [{ id: 'response', direction: 'out', text: 'Long reply', ts: '2', files: null }];
-      hooks.cursor = 0;
-      log.type(log.props);
-      for (const effect of hooks.effects.splice(0)) effect();
-      hooks.passiveEffects.splice(0).at(-1)?.();
-      expect(cancel).toHaveBeenCalledWith(pendingTail);
-      for (const [id, callback] of [...frames]) {
-        frames.delete(id);
-        callback(0);
-      }
-      expect(viewport.scrollTop).toBe(1400);
-      expect(viewport.querySelector().getBoundingClientRect().top).toBe(50);
-    } finally {
-      disposers.forEach((dispose) => dispose());
-      hooks.capturePassive = false;
-      for (const [key, value] of Object.entries(savedGlobals)) vi.stubGlobal(key, value);
-    }
-  });
+    },
+  );
 });
 
 describe('inline activity metrics', () => {

@@ -617,7 +617,7 @@ function Message(
   if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
   const md = renderMarkdown(m.text, groupId.value);
   const q = searchQuery.value;
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Reset markdown DOM before re-processing (handles search query changes).
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
     if (md != null && mdRef.current && groupId.value) {
@@ -1175,7 +1175,10 @@ function startingResponsePresentation(submission: PendingWebSend) {
   return {
     ownerId, status: true, busy: true, traceLive: true, traceNow: null,
     attributes: { 'data-response-start': ownerId },
-    technicalTurn: undefined, stopControl: null, elapsedControl: null, tone: '',
+    technicalTurn: undefined,
+    stopControl: <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton turnId={null} /></span>,
+    elapsedControl: <TurnElapsed elapsedMs={0} />,
+    tone: '',
     activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
     lines: [{ ts: '', text: JSON.stringify({
       kind: 'notification', id: `ui:current:${submission.messageId}`,
@@ -1203,8 +1206,8 @@ function turnResponsePresentation(
     traceNow: turn.endedAt ? Date.parse(turn.endedAt) : now,
     attributes: { 'data-turn-id': status ? turn.id : undefined },
     technicalTurn: status ? turn : undefined,
-    stopControl: live && activeTurn.value?.id === turn.id
-      ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton /></span> : null,
+    stopControl: live
+      ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton turnId={turn.id} /></span> : null,
     elapsedControl: live ? <TurnElapsed elapsedMs={view.elapsedMs} live /> : null,
     tone, activity, lines: activity?.lines ?? lines,
   };
@@ -1383,6 +1386,15 @@ function MessageLog() {
   }, [activeThreadId]);
 
   useLayoutEffect(() => {
+    prevMsgCountRef.current = 0;
+    prevLayoutRef.current = '';
+    atBottomRef.current = true;
+    followingBottomRef.current = true;
+    leavingBottomRef.current = false;
+    setNewMessageBelow(false);
+  }, [activeThreadId]);
+
+  useLayoutEffect(() => {
     if (!responseId) {
       revealedResponse.current = null;
       return;
@@ -1448,16 +1460,7 @@ function MessageLog() {
     return () => observer.disconnect();
   }, [activeTurnId, activeThreadId]);
 
-  useEffect(() => {
-    prevMsgCountRef.current = 0;
-    prevLayoutRef.current = '';
-    atBottomRef.current = true;
-    followingBottomRef.current = true;
-    leavingBottomRef.current = false;
-    setNewMessageBelow(false);
-  }, [activeThreadId]);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ref.current) return;
     if (densityReflowRef.current) return;
     // Check for explicit scroll-to-bottom request (e.g. user sent a message)

@@ -3,11 +3,17 @@ import { StopIcon } from './ActionIcons';
 import { TurnStopButton } from './TurnStopButton';
 
 function button(
-  options: { status?: 'running' | 'stopping'; busy?: boolean; connected?: boolean; error?: string } = {},
+  options: {
+    status?: 'running' | 'stopping';
+    busy?: boolean;
+    connected?: boolean;
+    error?: string;
+    starting?: boolean;
+  } = {},
 ) {
   const onStop = vi.fn();
   const view = TurnStopButton({
-    turn: { id: 'immutable-turn', status: options.status ?? 'running' },
+    turn: options.starting ? null : { id: 'immutable-turn', status: options.status ?? 'running' },
     connected: options.connected ?? true,
     busy: options.busy ?? false,
     error: options.error ?? '',
@@ -24,6 +30,7 @@ describe('activity bubble Stop control', () => {
       { status: 'stopping' as const },
       { error: 'Retry' },
       { connected: false },
+      { starting: true },
     ]) {
       const { view } = button(options);
       expect(view.props.class).toBe('msg-action-btn turn-stop');
@@ -39,6 +46,16 @@ describe('activity bubble Stop control', () => {
     expect(view.props.title).toContain('Queued follow-ups will still run');
     view.props.onClick();
     expect(onStop).toHaveBeenCalledWith('immutable-turn');
+  });
+
+  it('shows a disabled startup control without a fabricated turn or click handler', () => {
+    const { view, onStop } = button({ starting: true });
+    expect(view.props.disabled).toBe(true);
+    expect(view.props['aria-label']).toBe('Stop response');
+    expect(view.props['aria-busy']).toBe(false);
+    expect(view.props.title).toBe('Available once the response starts.');
+    expect(view.props.onClick).toBeUndefined();
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it('disables the control while awaiting acceptance or cancellation', () => {
