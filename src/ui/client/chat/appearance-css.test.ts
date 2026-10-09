@@ -102,6 +102,28 @@ describe('theme CSS contract', () => {
     expect(css.match(/max\(16px, calc\(\(100% - var\(--chat-max\)\)/g)).toHaveLength(1);
   });
 
+  it('uses always-on CSS transcript fades with one line of matching space at both ends', () => {
+    const css = read('./components/ChatMain.css');
+    const column = css.match(/\.chat-main \{([^}]+)\}/)?.[1];
+    expect(column).toContain('--transcript-fade-height: calc(var(--font-base) * var(--line-height-ui))');
+    const mobileColumn = css.match(/@media \(max-width: 720px\) \{\s*\.chat-main \{([^}]+)\}/)?.[1];
+    expect(mobileColumn).toContain('--transcript-fade-height: calc(var(--font-lg) * var(--line-height-ui))');
+    const log = css.match(/\.chat-main \.log \{([^}]+)\}/)?.[1];
+    expect(log).toContain('--fade-top: var(--transcript-fade-height)');
+    expect(log).toContain('--fade-bottom: var(--transcript-fade-height)');
+    expect(log).toContain('padding-block: 0');
+    expect(css).not.toContain('.log.scroll-fade-');
+    const edgeSpace = css.match(/\.chat-main \.log::before,\s*\.chat-main \.log::after \{([^}]+)\}/)?.[1];
+    expect(edgeSpace).toContain("content: ''");
+    expect(edgeSpace).toContain('flex: 0 0 calc(var(--transcript-fade-height) - var(--message-gap))');
+    expect(css).not.toContain('.log-viewport::after');
+    const component = read('./components/ChatMain.tsx');
+    expect(component).toContain('class="log scroll-edge-fade"');
+    expect(component).not.toContain('attachScrollEdges(ref.current');
+    const composer = css.match(/\.chat-main form \{([^}]+)\}/)?.[1];
+    expect(composer).not.toContain('border-top');
+  });
+
   it('keeps pending controls visible and status captions consistent with delivery labels', () => {
     const css = read('./components/ChatMain.css');
     const pending = css.match(/\.chat-main \.msg \.msg-inline-actions\.pending-input-actions \{([^}]+)\}/)?.[1];

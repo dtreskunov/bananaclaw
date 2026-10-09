@@ -19784,7 +19784,10 @@ async function deleteThread(thread, cascade = false) {
       if (!r4.ok) {
         if (r4.status === 409) {
           const error = await r4.json();
-          showToast(error.detail ?? "Delete blocked: confirm cancellation of outstanding approvals before deleting.", "err");
+          showToast(
+            error.detail ?? "Delete blocked: confirm cancellation of outstanding approvals before deleting.",
+            "err"
+          );
         } else {
           showToast("Delete failed (HTTP " + r4.status + ")", "err");
         }
@@ -24870,7 +24873,7 @@ function MessageLog() {
     }
   }
   return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
-    /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
+    /* @__PURE__ */ u4("div", { class: "log scroll-edge-fade", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
       chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
         const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
         const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswerBubble, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(

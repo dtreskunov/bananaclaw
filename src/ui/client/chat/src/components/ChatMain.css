@@ -57,6 +57,7 @@
   min-width: 0;
   min-height: 0;
   position: relative;
+  --transcript-fade-height: calc(var(--font-base) * var(--line-height-ui));
   /* Full-width column so the scrollbar sits at the far right (right
      next to the FILES pane). Inner rows constrain their own content
      to --chat-max via padding-inline so the readable column stays
@@ -80,10 +81,21 @@
 .chat-main > .status { grid-row: 3; }
 .chat-main > .readonly-banner { grid-row: 4; }
 .chat-main > .input-dock { grid-row: 5; }
-.chat-main .log { width: 100%; height: 100%; overflow: auto; padding-block: 12px 0; display: flex; flex-direction: column; gap: var(--message-gap); }
-/* A flex item keeps trailing space in Chromium's scrollable overflow; with the
-  preceding flex gap this leaves two density gaps before the composer. */
-.chat-main .log::after { content: ''; flex: 0 0 var(--message-gap); }
+.chat-main .log {
+  --fade-top: var(--transcript-fade-height);
+  --fade-bottom: var(--transcript-fade-height);
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding-block: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--message-gap);
+}
+/* Flex items preserve edge scroll space in Chromium. Subtract the adjacent
+   gap so the total clearance at each edge matches the fade height. */
+.chat-main .log::before,
+.chat-main .log::after { content: ''; flex: 0 0 calc(var(--transcript-fade-height) - var(--message-gap)); }
 .chat-main .scroll-jump {
   position: absolute;
   z-index: 2;
@@ -486,7 +498,7 @@
 .chat-main .pending { display: flex; flex-wrap: wrap; gap: 4px; padding-block: 4px; font-size: var(--font-xs); color: var(--muted); }
 .chat-main .pending .item { display: inline-flex; align-items: center; gap: 4px; background: var(--wash-strong); padding: 2px 6px; border-radius: var(--radius-pill); }
 .chat-main .pending .item button { padding: 0 4px; border: 0; background: transparent; cursor: pointer; color: inherit; font-size: var(--font-lg); line-height: 1; }
-.chat-main form { display: flex; gap: 6px; padding-block: 8px; border-top: 1px solid var(--border); min-height: var(--bottom-row-h); align-items: flex-end; }
+.chat-main form { display: flex; gap: 6px; padding-block: 8px; min-height: var(--bottom-row-h); align-items: flex-end; }
 .chat-main form > button { height: 32px; flex-shrink: 0; }
 /* Textarea reserves left room for the +-menu trigger and right room for
    the mic + Send buttons that sit inside the wrap as absolute overlays.
@@ -648,6 +660,7 @@
 }
 
 @media (max-width: 720px) {
+  .chat-main { --transcript-fade-height: calc(var(--font-lg) * var(--line-height-ui)); }
   .image-viewer-dialog { height: 100%; }
   .chat-main .msg { font-size: var(--font-lg); }
   .chat-main .msg .msg-inline-actions { display: none; }

@@ -1511,7 +1511,7 @@ function MessageLog() {
   }
   return (
     <div class="log-viewport">
-      <div class="log" id="chat-log" ref={ref} tabIndex={-1} onClick={onLogClick} onScroll={onLogScroll} onLoadCapture={measureScroll}>
+      <div class="log scroll-edge-fade" id="chat-log" ref={ref} tabIndex={-1} onClick={onLogClick} onScroll={onLogScroll} onLoadCapture={measureScroll}>
         {chatLoading.value
           ? null
           : !threadId.value
