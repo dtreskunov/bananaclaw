@@ -218,13 +218,17 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
         </div>
       )}
       {error && (
-        <p class="voice-error" role="alert">
+        <p class="inline-error voice-error" role="alert">
           {error}
         </p>
       )}
       {active && voiceState.error && (
-        <p class="voice-error" role="alert">
-          {voiceState.error} Nothing is sent automatically.
+        <p class="inline-error voice-error" role="alert">
+          <span class="inline-error-copy">
+            <strong>Dictation stopped</strong>
+            <span>{voiceState.error}</span>
+            <span class="inline-error-guidance">Your answer was not sent. Review it before sending.</span>
+          </span>
         </p>
       )}
     </section>

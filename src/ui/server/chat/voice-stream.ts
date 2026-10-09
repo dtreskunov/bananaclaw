@@ -15,6 +15,7 @@ const SAMPLE_RATE = 16_000;
 const BYTES_PER_SECOND = SAMPLE_RATE * 2;
 const MAX_FRAME_BYTES = 32_768;
 const MAX_BUFFER_BYTES = BYTES_PER_SECOND * 4;
+const MAX_BURST_BYTES = MAX_BUFFER_BYTES;
 const MAX_SESSION_MS = 5 * 60_000;
 const FINALIZE_TIMEOUT_MS = 10_000;
 const MAX_SESSIONS = 8;
@@ -193,7 +194,7 @@ export function attachVoiceStream(
   let inputBytes = 0;
   let peakPcm = 0;
   let lastInput = Date.now();
-  let allowance = BYTES_PER_SECOND * 2;
+  let allowance = MAX_BURST_BYTES;
   let allowanceAt = Date.now();
   let finalizingTimer: ReturnType<typeof setTimeout> | undefined;
   const audio = new ReadableStream<Uint8Array>(
@@ -266,10 +267,14 @@ export function attachVoiceStream(
       if (inputEnded) return fail('audio_after_finish', 'Audio arrived after the voice session finished.');
       if (data.byteLength === 0 || data.byteLength % 2 !== 0) return fail('invalid_audio', 'Invalid PCM audio frame.');
       const now = Date.now();
-      allowance = Math.min(BYTES_PER_SECOND * 2, allowance + ((now - allowanceAt) * BYTES_PER_SECOND) / 1000);
+      allowance = Math.min(MAX_BURST_BYTES, allowance + ((now - allowanceAt) * BYTES_PER_SECOND) / 1000);
       allowanceAt = now;
       allowance -= data.byteLength;
-      if (allowance < 0) return fail('audio_rate_limit', 'Audio arrived faster than real time.');
+      if (allowance < 0)
+        return fail(
+          'audio_rate_limit',
+          'Audio upload stayed ahead of real time. Your text is kept; press the microphone to try again.',
+        );
       inputBytes += data.byteLength;
       for (let offset = 0; offset < data.byteLength; offset += 2) {
         peakPcm = Math.max(peakPcm, Math.abs(data.readInt16LE(offset)));

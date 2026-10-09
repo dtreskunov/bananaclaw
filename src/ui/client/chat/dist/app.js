@@ -22294,7 +22294,7 @@ function PendingMessageActions({ message: message2, thread, gid, children }) {
       ),
       children
     ] }),
-    cancelState?.error && /* @__PURE__ */ u4("span", { class: "pending-input-error", role: "alert", children: cancelState.error })
+    cancelState?.error && /* @__PURE__ */ u4("span", { class: "inline-error pending-input-error", role: "alert", children: cancelState.error })
   ] });
 }
 
@@ -22982,11 +22982,12 @@ function QuestionPrompt({ question: q5 }) {
           }
         ),
         (busy || waiting || disconnected) && /* @__PURE__ */ u4("div", { class: "question-prompt-status", role: "status", children: disconnected ? "Reconnecting\u2026" : busy ? "Submitting response\u2026" : skipped ? "Waiting for skip confirmation\u2026" : "Waiting for answer confirmation\u2026" }),
-        error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: error }),
-        active && voiceState.error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: [
-          voiceState.error,
-          " Nothing is sent automatically."
-        ] })
+        error && /* @__PURE__ */ u4("p", { class: "inline-error voice-error", role: "alert", children: error }),
+        active && voiceState.error && /* @__PURE__ */ u4("p", { class: "inline-error voice-error", role: "alert", children: /* @__PURE__ */ u4("span", { class: "inline-error-copy", children: [
+          /* @__PURE__ */ u4("strong", { children: "Dictation stopped" }),
+          /* @__PURE__ */ u4("span", { children: voiceState.error }),
+          /* @__PURE__ */ u4("span", { class: "inline-error-guidance", children: "Your answer was not sent. Review it before sending." })
+        ] }) })
       ]
     }
   );
@@ -24141,7 +24142,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           }
         ) }) : null,
         m6.reactions && m6.reactions.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: m6.reactions.map((r4, i5) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${r4.emoji}`, children: r4.emoji }, i5)) }) : null,
-        submission?.status === "failed" ? /* @__PURE__ */ u4("div", { class: "message-send-error", role: "alert", children: [
+        submission?.status === "failed" ? /* @__PURE__ */ u4("div", { class: "inline-error message-send-error", role: "alert", children: [
           /* @__PURE__ */ u4("span", { children: [
             "Send failed: ",
             submission.error,
@@ -25140,15 +25141,16 @@ function Composer() {
               }
             }
           ),
-          edit.editing && edit.error && /* @__PURE__ */ u4("p", { class: "pending-input-error", role: "alert", children: edit.error }),
+          edit.editing && edit.error && /* @__PURE__ */ u4("p", { class: "inline-error pending-input-error", role: "alert", children: edit.error }),
           edit.editing && (edit.state?.busy || edit.state?.unresolved) && /* @__PURE__ */ u4("p", { class: "composer-edit-notice", role: "status", children: "This save may still apply. Exit edit only closes the editor; retry checks the same request." })
         ]
       }
     ),
-    activeVoice && voiceState.error && /* @__PURE__ */ u4("p", { class: "voice-error", role: "alert", children: [
-      voiceState.error,
-      " Nothing is sent automatically."
-    ] }),
+    activeVoice && voiceState.error && /* @__PURE__ */ u4("p", { class: "inline-error voice-error", role: "alert", children: /* @__PURE__ */ u4("span", { class: "inline-error-copy", children: [
+      /* @__PURE__ */ u4("strong", { children: "Dictation stopped" }),
+      /* @__PURE__ */ u4("span", { children: voiceState.error }),
+      /* @__PURE__ */ u4("span", { class: "inline-error-guidance", children: "Your draft was not sent. Review it before sending." })
+    ] }) }),
     quickCapture && !hasQuestion ? /* @__PURE__ */ u4(
       QuickCapture,
       {

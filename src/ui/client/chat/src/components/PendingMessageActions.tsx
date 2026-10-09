@@ -42,6 +42,6 @@ export function PendingMessageActions({ message, thread, gid, children }: {
         }}><TrashIcon /></button>}
       {children}
     </span>
-    {cancelState?.error && <span class="pending-input-error" role="alert">{cancelState.error}</span>}
+    {cancelState?.error && <span class="inline-error pending-input-error" role="alert">{cancelState.error}</span>}
   </>;
 }

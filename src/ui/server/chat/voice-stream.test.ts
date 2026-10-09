@@ -318,11 +318,17 @@ describe('voice stream lifecycle', () => {
     expect(ws.sent.some((event) => event.type === 'finished')).toBe(false);
   });
 
-  it('rejects audio faster than realtime instead of unbounded buffering', () => {
+  it('allows a bounded burst of buffered browser audio', () => {
     const { ws } = connect(pendingTranscription);
     ws.receive(Buffer.alloc(32_000));
     ws.receive(Buffer.alloc(32_000));
     ws.receive(Buffer.alloc(32_000));
+    expect(ws.sent.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('rejects sustained audio faster than realtime instead of unbounded buffering', () => {
+    const { ws } = connect(pendingTranscription);
+    for (let second = 0; second < 5; second++) ws.receive(Buffer.alloc(32_000));
     expect(ws.sent.at(-1)).toMatchObject({ type: 'error', code: 'audio_rate_limit' });
   });
 

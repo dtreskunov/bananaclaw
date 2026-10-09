@@ -757,7 +757,7 @@ function Message(
           </div>
         )
         : null}
-      {submission?.status === 'failed' ? <div class="message-send-error" role="alert">
+      {submission?.status === 'failed' ? <div class="inline-error message-send-error" role="alert">
         <span>Send failed: {submission.error}<br />
           Use Retry to resend this message; Send creates a new one.
         </span>
@@ -1802,12 +1802,18 @@ export function Composer() {
             icon: edit.editing ? '\u2713' : '\u2191',
           }}
         />
-      {edit.editing && edit.error && <p class="pending-input-error" role="alert">{edit.error}</p>}
+      {edit.editing && edit.error && <p class="inline-error pending-input-error" role="alert">{edit.error}</p>}
       {edit.editing && (edit.state?.busy || edit.state?.unresolved) && <p class="composer-edit-notice" role="status">
         This save may still apply. Exit edit only closes the editor; retry checks the same request.
       </p>}
     </form>
-    {activeVoice && voiceState.error && <p class="voice-error" role="alert">{voiceState.error} Nothing is sent automatically.</p>}
+    {activeVoice && voiceState.error && <p class="inline-error voice-error" role="alert">
+      <span class="inline-error-copy">
+        <strong>Dictation stopped</strong>
+        <span>{voiceState.error}</span>
+        <span class="inline-error-guidance">Your draft was not sent. Review it before sending.</span>
+      </span>
+    </p>}
     {quickCapture && !hasQuestion ? (
       <QuickCapture
         onCapture={(file) => { setQuickCapture(false); addFiles([file]); }}
