@@ -47,6 +47,7 @@ export class VoiceTranscriptNormalizer {
   private readonly segments = new Map<string, VoiceTranscript>();
   private currentAnonymousId = 0;
   private sequence = 0;
+  private lastFinalText: string | undefined;
 
   accept(part: TranscriptionStreamPart): VoiceTranscript | undefined {
     if (part.type !== 'transcript-delta' && part.type !== 'transcript-partial' && part.type !== 'transcript-final') {
@@ -56,6 +57,11 @@ export class VoiceTranscriptNormalizer {
     const prior = this.segments.get(key);
     if (prior?.final) return undefined;
     const text = part.type === 'transcript-delta' ? (prior?.text ?? '') + part.delta : part.text;
+    const normalizedText = text.replace(/\s+/g, ' ').trim();
+    if (part.type === 'transcript-final' && !prior && normalizedText && normalizedText === this.lastFinalText) {
+      return undefined;
+    }
+    this.lastFinalText = part.type === 'transcript-final' ? normalizedText : undefined;
     const next: VoiceTranscript = {
       type: 'transcript',
       id: prior?.id ?? `segment-${this.segments.size}`,

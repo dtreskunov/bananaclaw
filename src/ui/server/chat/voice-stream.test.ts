@@ -116,6 +116,20 @@ describe('voice transcript normalization', () => {
     expect(transcript.accept({ type: 'transcript-partial', id: 'two', text: 'late' })).toBeUndefined();
   });
 
+  it('drops an adjacent duplicate final with a new provider ID but preserves a newly started repetition', () => {
+    const transcript = new VoiceTranscriptNormalizer();
+    const first = transcript.accept({ type: 'transcript-final', id: 'one', text: 'Repeat me.' });
+    expect(first).toBeDefined();
+    expect(transcript.accept({ type: 'transcript-final', id: 'two', text: 'Repeat me.' })).toBeUndefined();
+    const repeated = transcript.accept({ type: 'transcript-partial', id: 'three', text: 'Repeat me' });
+    expect(repeated).toBeDefined();
+    expect(transcript.accept({ type: 'transcript-final', id: 'three', text: 'Repeat me.' })).toMatchObject({
+      id: repeated?.id,
+      text: 'Repeat me.',
+      final: true,
+    });
+  });
+
   it('accumulates deltas, accepts replacement finals, and assigns anonymous segments', () => {
     const transcript = new VoiceTranscriptNormalizer();
     transcript.accept({ type: 'transcript-delta', delta: 'hel' });
