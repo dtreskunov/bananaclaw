@@ -80,11 +80,22 @@ export class VoiceTranscriptNormalizer {
 
   finalizeProvisionalText(): VoiceTranscript[] {
     const finalized: VoiceTranscript[] = [];
+    let previousFinalText: string | undefined;
     for (const [key, segment] of this.segments) {
-      if (segment.final || segment.text.trim().length === 0) continue;
+      const normalizedText = segment.text.replace(/\s+/g, ' ').trim();
+      if (segment.final) {
+        previousFinalText = normalizedText || previousFinalText;
+        continue;
+      }
+      if (!normalizedText) continue;
+      if (normalizedText === previousFinalText) {
+        this.segments.set(key, { ...segment, final: true });
+        continue;
+      }
       const next = { ...segment, sequence: ++this.sequence, final: true };
       this.segments.set(key, next);
       finalized.push(next);
+      previousFinalText = normalizedText;
     }
     return finalized;
   }

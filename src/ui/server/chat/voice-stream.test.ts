@@ -104,16 +104,17 @@ describe('voice transcript normalization', () => {
     expect(transcript.finalizeProvisionalText()).toEqual([]);
   });
 
-  it('only promotes nonempty provisional segments, keeping their IDs and genuine repeated speech', () => {
+  it('promotes nonempty provisional segments while dropping an adjacent copy of the last final', () => {
     const transcript = new VoiceTranscriptNormalizer();
     const first = transcript.accept({ type: 'transcript-final', id: 'one', text: 'Hello.' });
-    const repeated = transcript.accept({ type: 'transcript-partial', id: 'two', text: 'Hello.' });
-    transcript.accept({ type: 'transcript-partial', id: 'three', text: '   ' });
-    expect(first?.id).not.toBe(repeated?.id);
-    expect(transcript.finalizeProvisionalText()).toEqual([{ ...repeated, sequence: 4, final: true }]);
+    transcript.accept({ type: 'transcript-partial', id: 'two', text: 'Hello.' });
+    const next = transcript.accept({ type: 'transcript-partial', id: 'three', text: 'Next thought' });
+    transcript.accept({ type: 'transcript-partial', id: 'four', text: '   ' });
+    expect(transcript.finalizeProvisionalText()).toEqual([{ ...next, sequence: 5, final: true }]);
     expect(transcript.hasProvisionalText()).toBe(false);
     expect(transcript.finalizeProvisionalText()).toEqual([]);
     expect(transcript.accept({ type: 'transcript-partial', id: 'two', text: 'late' })).toBeUndefined();
+    expect(first).toBeDefined();
   });
 
   it('drops an adjacent duplicate final with a new provider ID but preserves a newly started repetition', () => {
