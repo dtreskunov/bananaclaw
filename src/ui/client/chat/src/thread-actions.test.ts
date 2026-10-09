@@ -44,7 +44,14 @@ describe('loadThreads', () => {
 
 describe('deleteThread', () => {
   it('includes channel context when deleting a non-web thread', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ cancelledApprovals: 0 }),
+      } as Response),
+    );
     groupId.value = 'agent';
     threads.value = [
       {
@@ -59,14 +66,21 @@ describe('deleteThread', () => {
     await deleteThread(threads.value[0]!);
 
     expect(fetch).toHaveBeenCalledWith(
-      'api/groups/agent/chat/resend%3Aagent%40example.com%3Aperson%40example.net%3Aroot?channel=resend&mg=mailbox',
+      'api/groups/agent/chat/resend%3Aagent%40example.com%3Aperson%40example.net%3Aroot?channel=resend&mg=mailbox&cancelApprovals=1',
       { method: 'DELETE', credentials: 'same-origin' },
     );
     expect(threads.value).toEqual([]);
   });
 
-  it('keeps the existing URL for web threads', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response));
+  it('includes cancellation consent without channel overrides for web threads', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ cancelledApprovals: 0 }),
+      } as Response),
+    );
     groupId.value = 'agent';
     const thread = {
       threadId: 'web-thread',
@@ -78,7 +92,7 @@ describe('deleteThread', () => {
 
     await deleteThread(thread);
 
-    expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/web-thread', {
+    expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/web-thread?cancelApprovals=1', {
       method: 'DELETE',
       credentials: 'same-origin',
     });
@@ -156,5 +170,56 @@ describe('deleteThread', () => {
 
     expect(toastMessage.value).toMatchObject({ text: 'Delete failed (HTTP 500)', kind: 'err' });
     expect(threads.value).toEqual([thread]);
+  });
+
+  it('sends explicit cancellation consent and reports cancelled approvals', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ cancelledApprovals: 2 }),
+      } as Response),
+    );
+    groupId.value = 'agent';
+    const thread = { threadId: 'web-thread', sessionId: 'web-session', channelType: 'web' } as Thread;
+    threads.value = [thread];
+
+    await deleteThread(thread, true);
+
+    expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/web-thread?cascade=1&cancelApprovals=1', {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    expect(threads.value).toEqual([]);
+    expect(toastMessage.value).toMatchObject({
+      text: 'Deleted thread; cancelled 2 outstanding approval requests.',
+      kind: 'ok',
+    });
+  });
+
+  it.each([
+    'Deleting this thread requires confirmation to cancel its outstanding approvals.',
+    'An approval is being processed for this thread. Wait for it to finish before deleting.',
+  ])('preserves the thread and displays the server conflict: %s', async (detail) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({ detail }),
+      } as Response),
+    );
+    groupId.value = 'agent';
+    const thread = { threadId: 'web-thread', sessionId: 'web-session', channelType: 'web' } as Thread;
+    threads.value = [thread];
+
+    await deleteThread(thread);
+
+    expect(threads.value).toEqual([thread]);
+    expect(toastMessage.value).toMatchObject({
+      text: detail,
+      kind: 'err',
+    });
   });
 });

@@ -189,6 +189,20 @@ CREATE INDEX idx_sessions_lookup     ON sessions(messaging_group_id, thread_id);
 
 - **Resolved by:** `resolveSession()` in `src/session-manager.ts`.
 - Creating a session also provisions the session folder and both session DBs via `initSessionFolder()` — see [db-session.md](db-session.md).
+- Deleting a session removes its durable questions in the same transaction.
+  Session-bound approval requests require explicit cancellation consent: the chat
+  delete dialogs explain this, and `DELETE /api/groups/:id/chat/:threadId` requires
+  `cancelApprovals=1` when such requests exist (otherwise `409
+  approval_cancellation_required`, with no deletion side effects). Cascading
+  deletes apply consent to all removed branches; cleanup of central rows is atomic.
+  Confirmed requests are cancelled by removing their outstanding approval rows, so
+  later card clicks cannot execute them. The response reports `cancelledApprovals`,
+  and cancellations are logged and shown in a toast. Unrelated requests, including
+  sessionless OneCLI approvals, remain untouched; already applied actions are not undone.
+  Approvals being processed hold a process-local session guard through their
+  handler, resolution callbacks, and container wake. Deletion returns `409
+  approval_in_progress` until processing finishes, even with cancellation consent.
+  The guard releases on success or failure and adds no persistent status or schema.
 
 ### 1.9 `questions`
 

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
 import { createAgentGroup } from '../../db/agent-groups.js';
-import { createSession, createPendingApproval, getPendingApproval } from '../../db/sessions.js';
+import { createSession, createPendingApproval, deleteSession, getPendingApproval } from '../../db/sessions.js';
 import { upsertUser } from '../permissions/db/users.js';
 import { grantRole } from '../permissions/db/user-roles.js';
 
@@ -55,6 +55,38 @@ afterEach(() => {
 });
 
 describe('approval response authorization', () => {
+  it('cannot execute an approval cancelled by confirmed session deletion', async () => {
+    upsertUser({ id: 'telegram:owner', kind: 'telegram', display_name: 'Owner', created_at: now() });
+    grantRole({ user_id: 'telegram:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
+    const { registerApprovalHandler } = await import('./primitive.js');
+    const { handleApprovalsResponse } = await import('./response-handler.js');
+    const handler = vi.fn().mockResolvedValue(undefined);
+    registerApprovalHandler('cancelled_install', handler);
+    createPendingApproval({
+      approval_id: 'appr-cancelled',
+      session_id: 'sess-1',
+      request_id: 'appr-cancelled',
+      action: 'cancelled_install',
+      payload: '{}',
+      created_at: now(),
+      title: 'Install packages',
+      options_json: '[]',
+    });
+
+    expect(deleteSession('sess-1', true)).toBe(1);
+    expect(
+      await handleApprovalsResponse({
+        questionId: 'appr-cancelled',
+        value: 'approve',
+        userId: 'owner',
+        channelType: 'telegram',
+        platformId: 'dm-owner',
+        threadId: null,
+      }),
+    ).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('ignores a valid approval id clicked by a non-admin user', async () => {
     const { registerApprovalHandler } = await import('./primitive.js');
     const { handleApprovalsResponse } = await import('./response-handler.js');

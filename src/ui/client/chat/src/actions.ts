@@ -175,6 +175,7 @@ export async function deleteThread(
       params.set('mg', thread.messagingGroupId);
     }
     if (cascade) params.set('cascade', '1');
+    params.set('cancelApprovals', '1');
     const query = params.toString();
     try {
       const r = await fetch(
@@ -185,8 +186,21 @@ export async function deleteThread(
         },
       );
       if (!r.ok) {
-        showToast('Delete failed (HTTP ' + r.status + ')', 'err');
+        if (r.status === 409) {
+          const error: { detail?: string } = await r.json();
+          showToast(
+            error.detail ?? 'Delete blocked: confirm cancellation of outstanding approvals before deleting.',
+            'err',
+          );
+        } else {
+          showToast('Delete failed (HTTP ' + r.status + ')', 'err');
+        }
         return;
+      }
+      const result: { cancelledApprovals?: number } = await r.json();
+      if (result.cancelledApprovals && result.cancelledApprovals > 0) {
+        const n = result.cancelledApprovals;
+        showToast(`Deleted thread; cancelled ${n} outstanding approval ${n === 1 ? 'request' : 'requests'}.`);
       }
     } catch (err) {
       console.error('delete failed', err);

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import {
   initTestDb,
+  getDb,
   closeDb,
   runMigrations,
   createAgentGroup,
@@ -32,6 +33,7 @@ import {
   getQuestion,
   answerQuestion,
   createPendingApproval,
+  getPendingApproval,
 } from './index.js';
 import { getAskQuestionRender } from './sessions.js';
 
@@ -367,6 +369,65 @@ describe('sessions', () => {
   it('should delete', () => {
     createSession(sess());
     deleteSession('sess-1');
+    expect(getSession('sess-1')).toBeUndefined();
+  });
+
+  function seedDeletionDependents(): void {
+    getDb()
+      .prepare(
+        `INSERT INTO questions
+        (question_id, session_id, message_out_id, question_text, response_mode, options_json, created_at)
+       VALUES ('q-delete', 'sess-1', 'msg-delete', 'Continue?', 'choice', '[]', ?)`,
+      )
+      .run(now());
+    createPendingApproval({
+      approval_id: 'appr-delete',
+      session_id: 'sess-1',
+      request_id: 'req-delete',
+      action: 'install_packages',
+      payload: '{}',
+      created_at: now(),
+      title: 'Install packages',
+      options_json: '[]',
+    });
+  }
+
+  it('requires explicit consent before cancelling session approvals', () => {
+    createSession(sess());
+    seedDeletionDependents();
+
+    expect(() => deleteSession('sess-1')).toThrow('requires confirmation');
+    expect(getSession('sess-1')).toBeDefined();
+    expect(getQuestion('q-delete')).toBeDefined();
+    expect(getPendingApproval('appr-delete')).toBeDefined();
+
+    expect(deleteSession('sess-1', true)).toBe(1);
+    expect(getSession('sess-1')).toBeUndefined();
+    expect(getQuestion('q-delete')).toBeUndefined();
+    expect(getPendingApproval('appr-delete')).toBeUndefined();
+  });
+
+  it('rolls back dependent cleanup when session deletion fails', () => {
+    createSession(sess());
+    seedDeletionDependents();
+    getDb().exec(`
+      CREATE TRIGGER block_session_delete BEFORE DELETE ON sessions
+      BEGIN SELECT RAISE(ABORT, 'blocked deletion'); END;
+    `);
+
+    expect(() => deleteSession('sess-1', true)).toThrow('blocked deletion');
+    expect(getSession('sess-1')).toBeDefined();
+    expect(getQuestion('q-delete')).toBeDefined();
+    expect(getPendingApproval('appr-delete')).toBeDefined();
+  });
+
+  it('deletes questions even when the optional approvals table is absent', () => {
+    createSession(sess());
+    seedDeletionDependents();
+    getDb().exec('DROP TABLE pending_approvals');
+
+    expect(deleteSession('sess-1')).toBe(0);
+    expect(getQuestion('q-delete')).toBeUndefined();
     expect(getSession('sess-1')).toBeUndefined();
   });
 });

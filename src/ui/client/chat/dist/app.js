@@ -19771,6 +19771,7 @@ async function deleteThread(thread, cascade = false) {
       params.set("mg", thread.messagingGroupId);
     }
     if (cascade) params.set("cascade", "1");
+    params.set("cancelApprovals", "1");
     const query = params.toString();
     try {
       const r4 = await fetch(
@@ -19781,8 +19782,18 @@ async function deleteThread(thread, cascade = false) {
         }
       );
       if (!r4.ok) {
-        showToast("Delete failed (HTTP " + r4.status + ")", "err");
+        if (r4.status === 409) {
+          const error = await r4.json();
+          showToast(error.detail ?? "Delete blocked: confirm cancellation of outstanding approvals before deleting.", "err");
+        } else {
+          showToast("Delete failed (HTTP " + r4.status + ")", "err");
+        }
         return;
+      }
+      const result = await r4.json();
+      if (result.cancelledApprovals && result.cancelledApprovals > 0) {
+        const n3 = result.cancelledApprovals;
+        showToast(`Deleted thread; cancelled ${n3} outstanding approval ${n3 === 1 ? "request" : "requests"}.`);
       }
     } catch (err) {
       console.error("delete failed", err);
@@ -21550,7 +21561,9 @@ function ThreadRow({ t: t4 }) {
         title: "Delete thread",
         message: `"${t4.title}"
 
-${branches} ${plural} ${wasWere} started from this thread. They are independent copies \u2014 they keep working whether or not this thread survives.`,
+${branches} ${plural} ${wasWere} started from this thread. They are independent copies \u2014 they keep working whether or not this thread survives.
+
+Deleting a thread also cancels its outstanding approval requests. Already applied changes are not undone.`,
         options: [
           { value: "cancel", label: "Cancel" },
           { value: "one", label: "Delete just this thread", tone: "danger" },
@@ -21565,7 +21578,9 @@ ${branches} ${plural} ${wasWere} started from this thread. They are independent 
       title: "Delete thread",
       message: `Delete this thread?
 
-"${t4.title}"`,
+"${t4.title}"
+
+This also cancels its outstanding approval requests. Already applied changes are not undone.`,
       okLabel: "Delete",
       danger: true
     });

@@ -13,7 +13,13 @@
  * core iterates handlers and the first one to return `true` claims the response.
  */
 import { wakeContainer } from '../../container-runner.js';
-import { deletePendingApproval, getPendingApproval, getSession } from '../../db/sessions.js';
+import {
+  beginApprovalExecution,
+  deletePendingApproval,
+  endApprovalExecution,
+  getPendingApproval,
+  getSession,
+} from '../../db/sessions.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
@@ -47,7 +53,15 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
     return true;
   }
 
-  await handleRegisteredApproval(approval, payload.value, namespacedUserId(payload) ?? '');
+  if (!beginApprovalExecution(approval)) {
+    log.info('Ignoring duplicate response to an approval being processed', { approvalId: approval.approval_id });
+    return true;
+  }
+  try {
+    await handleRegisteredApproval(approval, payload.value, namespacedUserId(payload) ?? '');
+  } finally {
+    endApprovalExecution(approval.approval_id);
+  }
   return true;
 }
 

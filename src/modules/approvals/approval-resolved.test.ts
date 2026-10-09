@@ -13,7 +13,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
 import { createAgentGroup } from '../../db/agent-groups.js';
-import { createSession, createPendingApproval } from '../../db/sessions.js';
+import {
+  createSession,
+  createPendingApproval,
+  deleteSession,
+  SessionApprovalInProgressError,
+} from '../../db/sessions.js';
 import { upsertUser } from '../permissions/db/users.js';
 import { grantRole } from '../permissions/db/user-roles.js';
 import { initSessionFolder } from '../../session-manager.js';
@@ -82,6 +87,7 @@ describe('approval-resolved callbacks', () => {
   it('fires registered callbacks on reject with the approval, session, and outcome', async () => {
     const events: ApprovalResolvedEvent[] = [];
     registerApprovalResolvedHandler((event) => {
+      expect(() => deleteSession(event.session.id, true)).toThrow(SessionApprovalInProgressError);
       events.push(event);
     });
 

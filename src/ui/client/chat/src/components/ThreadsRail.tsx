@@ -65,7 +65,8 @@ function ThreadRow({ t }: { t: Thread }) {
         message:
           `"${t.title}"\n\n` +
           `${branches} ${plural} ${wasWere} started from this thread. They are independent copies — ` +
-          'they keep working whether or not this thread survives.',
+          'they keep working whether or not this thread survives.\n\n' +
+          'Deleting a thread also cancels its outstanding approval requests. Already applied changes are not undone.',
         options: [
           { value: 'cancel', label: 'Cancel' },
           { value: 'one', label: 'Delete just this thread', tone: 'danger' },
@@ -78,7 +79,8 @@ function ThreadRow({ t }: { t: Thread }) {
     }
     const ok = await requestConfirm({
       title: 'Delete thread',
-      message: `Delete this thread?\n\n"${t.title}"`,
+      message: `Delete this thread?\n\n"${t.title}"\n\n` +
+        'This also cancels its outstanding approval requests. Already applied changes are not undone.',
       okLabel: 'Delete',
       danger: true,
     });

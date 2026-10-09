@@ -92,8 +92,45 @@ export function updateSession(
     .run(values);
 }
 
-export function deleteSession(id: string): void {
-  getDb().prepare('DELETE FROM sessions WHERE id = ?').run(id);
+export class SessionApprovalCancellationRequiredError extends Error {
+  constructor() {
+    super('Deleting this thread requires confirmation to cancel its outstanding approvals.');
+  }
+}
+
+export class SessionApprovalInProgressError extends Error {
+  constructor() {
+    super('An approval is being processed for this thread. Wait for it to finish before deleting.');
+  }
+}
+
+// Execution is process-local; keep the session guarded through callbacks and wake.
+const executingApprovals = new Map<string, string>();
+
+export function beginApprovalExecution(approval: PendingApproval): boolean {
+  if (executingApprovals.has(approval.approval_id)) return false;
+  if (approval.session_id) executingApprovals.set(approval.approval_id, approval.session_id);
+  return true;
+}
+
+export function endApprovalExecution(approvalId: string): void {
+  executingApprovals.delete(approvalId);
+}
+
+export function deleteSession(id: string, cancelApprovals = false): number {
+  if ([...executingApprovals.values()].includes(id)) throw new SessionApprovalInProgressError();
+  const db = getDb();
+  return db.transaction(() => {
+    let cancelledApprovals = 0;
+    if (hasTable(db, 'pending_approvals')) {
+      const approval = db.prepare('SELECT 1 FROM pending_approvals WHERE session_id = ? LIMIT 1').get(id);
+      if (approval && !cancelApprovals) throw new SessionApprovalCancellationRequiredError();
+      cancelledApprovals = db.prepare('DELETE FROM pending_approvals WHERE session_id = ?').run(id).changes;
+    }
+    db.prepare('DELETE FROM questions WHERE session_id = ?').run(id);
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+    return cancelledApprovals;
+  })();
 }
 
 // ── Durable Questions ──

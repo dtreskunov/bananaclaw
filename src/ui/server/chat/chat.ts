@@ -25,7 +25,13 @@ import {
   getMessagingGroupAgentByPair,
   getMessagingGroupByPlatform,
 } from '../../../db/messaging-groups.js';
-import { deleteSession, findSessionByAgentGroup, findSessionForAgent } from '../../../db/sessions.js';
+import {
+  deleteSession,
+  findSessionByAgentGroup,
+  findSessionForAgent,
+  SessionApprovalCancellationRequiredError,
+  SessionApprovalInProgressError,
+} from '../../../db/sessions.js';
 import {
   getSessionActiveTurn,
   isSessionTurnId,
@@ -727,10 +733,25 @@ export async function handleChatRequest(
       return true;
     }
     try {
-      const cascade = new URLSearchParams((req.url || '').split('?')[1] || '').get('cascade') === '1';
-      const removed = deleteChatThread(userId, m.groupId, m.threadId, taskOverride(req), cascade);
-      writeJson(res, removed > 0 ? 200 : 404, { ok: removed > 0, removed });
+      const params = new URLSearchParams((req.url || '').split('?')[1] || '');
+      const result = deleteChatThread(
+        userId,
+        m.groupId,
+        m.threadId,
+        taskOverride(req),
+        params.get('cascade') === '1',
+        params.get('cancelApprovals') === '1',
+      );
+      writeJson(res, result.removed > 0 ? 200 : 404, { ok: result.removed > 0, ...result });
     } catch (err) {
+      if (err instanceof SessionApprovalInProgressError) {
+        writeJson(res, 409, { error: 'approval_in_progress', detail: err.message });
+        return true;
+      }
+      if (err instanceof SessionApprovalCancellationRequiredError) {
+        writeJson(res, 409, { error: 'approval_cancellation_required', detail: err.message });
+        return true;
+      }
       log.warn('web chat thread delete failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
       writeJson(res, 500, { error: 'delete_failed' });
     }
@@ -3160,9 +3181,9 @@ function forkChatThread(
 
 /**
  * Delete a chat thread: drop its session row, its search-index rows, and its
- * on-disk session directory. Returns the number of threads removed.
+ * on-disk session directory. Returns thread and cancelled-approval counts.
  *
- * Kills the running container first so the agent-runner doesn't poll a
+ * Kills the running container before removing files so the agent-runner doesn't poll a
  * nuked inbound.db forever (which used to spam `unable to open database
  * file` until the host sweeper noticed — and even then the sweeper only
  * acts on heartbeat staleness, not on missing files).
@@ -3177,28 +3198,41 @@ function deleteChatThread(
   threadId: string,
   override: { channelType: string; messagingGroupId: string } | undefined,
   cascade = false,
-): number {
+  cancelApprovals = false,
+): { removed: number; cancelledApprovals: number } {
   const target = resolveTargetMessagingGroup(userId, groupId, override, true);
-  if (!target) return 0;
+  if (!target) return { removed: 0, cancelledApprovals: 0 };
   const session = findSessionForAgent(groupId, target.messagingGroupId, threadId);
-  if (!session) return 0;
+  if (!session) return { removed: 0, cancelledApprovals: 0 };
 
   const targets = [threadId];
   if (cascade) {
     for (const d of getThreadForkDescendants(groupId, target.messagingGroupId, threadId)) targets.push(d.thread_id);
   }
 
-  let removed = 0;
-  const doomed = new Set(targets);
-  for (const id of targets) {
+  const sessions = targets.flatMap((id) => {
     const s = id === threadId ? session : findSessionForAgent(groupId, target.messagingGroupId, id);
-    // Only the thread's own lineage row goes. Rows naming it as parent stay,
-    // so a surviving branch can still say where it came from.
-    deleteThreadFork(groupId, target.messagingGroupId, id);
-    if (!s) continue;
+    return s ? [{ threadId: id, session: s }] : [];
+  });
+  const cancelledApprovals = getDb().transaction(() => {
+    let cancelled = 0;
+    for (const { session: s } of sessions) cancelled += deleteSession(s.id, cancelApprovals);
+    // Surviving branches retain their lineage to the deleted parent.
+    for (const id of targets) deleteThreadFork(groupId, target.messagingGroupId, id);
+    return cancelled;
+  })();
+  if (cancelledApprovals > 0) {
+    log.info('Outstanding approvals cancelled by thread deletion', {
+      userId,
+      groupId,
+      threadId,
+      cancelledApprovals,
+    });
+  }
+  const doomed = new Set(targets);
+  for (const { threadId: id, session: s } of sessions) {
     const dir = sessionDir(groupId, s.id);
     killContainer(s.id, 'thread-deleted');
-    deleteSession(s.id);
     handoffIndexedMessages(groupId, target.messagingGroupId, id, s.id, doomed);
     deleteSessionFromIndex(s.id);
     try {
@@ -3206,9 +3240,8 @@ function deleteChatThread(
     } catch (err) {
       log.warn('failed to rm session dir', { dir, err });
     }
-    removed++;
   }
-  return removed;
+  return { removed: sessions.length, cancelledApprovals };
 }
 
 /**
