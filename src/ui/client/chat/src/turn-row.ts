@@ -86,6 +86,12 @@ export interface TurnRowView {
   usage: ConversationTurn['usage'];
 }
 
+export function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
+  return (
+    view.usage.length > 0 || (turn.phase === 'settled' ? view.elapsedMs !== null || !!view.model : !!turn.liveUsage)
+  );
+}
+
 export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
   const settled = turn.phase === 'settled';
   const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : NaN;

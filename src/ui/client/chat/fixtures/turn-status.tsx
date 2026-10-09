@@ -659,7 +659,7 @@ function Fixture() {
         <button type="button" disabled={!fixtureTraceOwner()} onClick={() => {
           const owner = fixtureTraceOwner();
           if (!owner) throw new Error('Fixture has no activity trace');
-          toggleActivityTrace(owner, true);
+          toggleActivityTrace(owner);
         }}>
           Toggle activity
         </button>

@@ -33,15 +33,15 @@ import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
 import { clearPinnedContext, removePending, respondQuestion, retryChatSend, sendChat, skipQuestion } from '../actions';
 import type { ActivityLine, ChatMessage, PendingQuestionDto, Thread } from '../types';
-import type { ConversationMessage } from '../../../../shared/conversation';
-import { applyConversationFrame, completedResponse, resetConversation } from '../conversation-state';
+import type { ConversationMessage, ConversationTurn } from '../../../../shared/conversation';
+import { applyConversationFrame, completedResponse, conversationState, resetConversation } from '../conversation-state';
 import { testSnapshot, testTurn, testWebSubmission } from '../conversation-test-fixtures';
 import { appearance } from '../appearance-state';
 import { DEFAULT_APPEARANCE } from '../appearance';
 import { isSystemNotice } from '../chat-protocol';
 import { voice } from '../voice-audio';
 import * as turnRow from '../turn-row';
-import { activityMetricsExpanded } from '../activity-trace-state';
+import { activityMetricsExpanded, activityTraceExpanded, resetActivityTraceView } from '../activity-trace-state';
 
 // Exercise the real Composer's refs, layout transitions, handlers and rendered
 // controls without adding a browser-DOM dependency to the repository.
@@ -2258,39 +2258,181 @@ describe('main composer pending edits', () => {
 });
 
 describe('inline activity metrics', () => {
-  it.each([false, true])('pins completed-turn metrics but follows metrics opened on a live turn (live=%s)', (live) => {
+  it('keeps previous panels through submission and new data until the user opens replacements', () => {
     appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
-    const turn = {
+    const previous: ConversationTurn = {
+      ...testTurn,
+      phase: 'settled',
+      outcome: 'replied',
+      outputIds: ['previous-reply'],
+      startedAt: '2026-09-28T00:00:00Z',
+      endedAt: '2026-09-28T00:00:10Z',
+      usage: [{ id: 'previous-usage', value: { cost_usd: 0.01 } }],
+    };
+    const reply: ConversationMessage = {
+      id: 'previous-reply',
+      direction: 'out',
+      turnId: previous.id,
+      text: 'Done',
+      timestamp: '2026-09-28T00:00:10Z',
+    };
+    let generation = 0;
+    const publish = (turns: ConversationTurn[], echoed = false) => {
+      applyConversationFrame(
+        testSnapshot(
+          {
+            messages: [
+              reply,
+              ...(echoed
+                ? [
+                    {
+                      id: testWebSubmission.messageId,
+                      direction: 'in' as const,
+                      text: testWebSubmission.text,
+                      timestamp: testWebSubmission.timestamp,
+                      inputState: { messageId: testWebSubmission.messageId, status: 'queued' as const },
+                    },
+                  ]
+                : []),
+            ],
+            turns,
+            connection: { connected: true, activeTurnId: turns.length > 1 ? turns[1].id : null },
+          },
+          `render-stage-${++generation}`,
+        ),
+        'thread',
+      );
+    };
+    const previousDetails = () => {
+      resetMount();
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      const message = findComponent(log.type(log.props), 'Message');
+      resetMount();
+      return renderTechnicalDetails(message.type(message.props));
+    };
+    const previousPanel = () => findComponent(previousDetails(), 'ActivityTracePanel');
+    publish([previous]);
+    const info = findComponent(previousDetails(), 'TurnTechnicalInfo');
+    const controls = info.type(info.props);
+    findComponent(controls, 'ActivityTraceToggle').props.onToggle();
+    const usage = findComponent(controls, 'UsageMeta');
+    find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+    const expectPreviousContent = () => {
+      const panel = previousPanel();
+      expect(panel.props.expanded).toBe(true);
+      expect(panel.props.metrics.props.ownerId).toBe(`turn:${previous.id}`);
+      expect(panel.props.metrics.props.records[0].id).toBe('previous-usage');
+      expect(findComponent(panel.type(panel.props), 'ActivityTraceList')).toBeDefined();
+    };
+    pendingWebSends.value = [testWebSubmission];
+    expectPreviousContent();
+    publish([previous], true);
+    expectPreviousContent();
+    const next = { ...testTurn, id: 'new-turn', activity: [], inputIds: [testWebSubmission.messageId] };
+    publish([previous, next], true);
+    expectPreviousContent();
+    const withSteps = { ...next, activity: testTurn.activity };
+    publish([previous, withSteps], true);
+    expectPreviousContent();
+    let current = findComponent(renderTechnicalDetails(renderResponseStatusRow()), 'ActivityTracePanel');
+    expect(current.props.expanded).toBe(false);
+    expect(current.props.metrics).toBeNull();
+    publish([previous, { ...withSteps, usage: [{ id: 'new-usage', value: { cost_usd: 0.002 } }] }], true);
+    expectPreviousContent();
+    const currentDetails = renderTechnicalDetails(renderResponseStatusRow());
+    const currentInfo = findComponent(currentDetails, 'TurnTechnicalInfo');
+    const currentControls = currentInfo.type(currentInfo.props);
+    const currentUsage = findComponent(currentControls, 'UsageMeta');
+    expect(currentUsage.type(currentUsage.props).props['aria-expanded']).toBe(false);
+    findComponent(currentControls, 'ActivityTraceToggle').props.onToggle();
+    current = findComponent(renderTechnicalDetails(renderResponseStatusRow()), 'ActivityTracePanel');
+    expect(current.props.expanded).toBe(true);
+    expect(current.props.metrics).toBeNull();
+    expect(previousPanel().props.expanded).toBe(false);
+    expect(previousPanel().props.metrics.props.records[0].id).toBe('previous-usage');
+    find(currentUsage.type(currentUsage.props), 'button').props.onClick({ stopPropagation() {} });
+    const oldPanel = previousPanel();
+    expect(oldPanel.type(oldPanel.props)).toBeNull();
+    current = findComponent(renderTechnicalDetails(renderResponseStatusRow()), 'ActivityTracePanel');
+    expect(current.props.expanded).toBe(true);
+    expect(current.props.metrics.props.ownerId).toBe(`turn:${next.id}`);
+    expect(current.props.metrics.props.records[0].id).toBe('new-usage');
+  });
+
+  it.each(
+    (['live', 'settled', 'reply', 'history', 'history-reply'] as const).flatMap((scene) =>
+      (['closed', 'steps', 'stats', 'both'] as const).map((panels) => ({ scene, panels })),
+    ),
+  )('leaves explicit disclosures on their original turn (scene=$scene, panels=$panels)', ({ scene, panels }) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    const live = scene === 'live';
+    const historical = scene.startsWith('history');
+    const reply = scene.endsWith('reply');
+    const turn: ConversationTurn = {
       ...testTurn,
       phase: live ? ('running' as const) : ('settled' as const),
-      outcome: live ? ('pending' as const) : ('silent' as const),
+      outcome: 'silent',
+      outputIds: reply ? ['reply'] : [],
       usage: [{ id: 'usage', value: { cost_usd: 0.01 } }],
     };
+    if (live) turn.outcome = 'pending';
+    else if (reply) turn.outcome = 'replied';
+    const newer = { ...turn, id: 'newer-history', outputIds: [] };
+    const messages: ConversationMessage[] = reply
+      ? [{ id: 'reply', direction: 'out', turnId: turn.id, text: 'Done', timestamp: '2026-09-29T00:00:01Z' }]
+      : [];
+    const turns = historical ? [turn, newer] : [turn];
     applyConversationFrame(
       testSnapshot({
-        turns: [turn],
+        messages,
+        turns,
         connection: { connected: true, activeTurnId: live ? turn.id : null },
       }),
       'thread',
     );
-    const row = renderResponseStatusRow();
+    resetActivityTraceView();
+    let row;
+    if (reply) {
+      resetMount();
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      const message = findComponent(log.type(log.props), 'Message');
+      resetMount();
+      row = message.type(message.props);
+    } else row = renderResponseStatusRow();
     const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
-    const usage = findComponent(info.type(info.props), 'UsageMeta');
-    expect(usage.props.live).toBe(live);
-    find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
-    const next = { ...testTurn, id: 'turn:next' };
+    const controls = info.type(info.props);
+    const steps = panels === 'steps' || panels === 'both';
+    const stats = panels === 'stats' || panels === 'both';
+    if (steps) findComponent(controls, 'ActivityTraceToggle').props.onToggle();
+    if (stats) {
+      const usage = findComponent(controls, 'UsageMeta');
+      find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+    }
+    expect(activityTraceExpanded(`turn:${turn.id}`)).toBe(steps);
+    expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(stats);
+    const next = { ...testTurn, id: 'turn:next', usage: [{ id: 'new-usage', value: { cost_usd: 0.002 } }] };
     applyConversationFrame(
       testSnapshot(
         {
-          turns: [{ ...turn, phase: 'settled', outcome: 'silent' }, next],
+          messages,
+          turns: [...turns.map((value) => ({ ...value, phase: 'settled' as const })), next],
           connection: { connected: true, activeTurnId: next.id },
         },
         'next-turn',
       ),
       'thread',
     );
-    expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(!live);
-    expect(activityMetricsExpanded(`turn:${next.id}`)).toBe(live);
+    expect(activityTraceExpanded(`turn:${turn.id}`)).toBe(steps);
+    expect(activityTraceExpanded(`turn:${next.id}`)).toBe(false);
+    expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(stats);
+    expect(activityMetricsExpanded(`turn:${next.id}`)).toBe(false);
+    applyConversationFrame(testSnapshot(conversationState.peek()!.conversation, 'reconnect'), 'thread');
+    expect(activityTraceExpanded(`turn:${turn.id}`)).toBe(steps);
+    expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(stats);
+    expect(activityTraceExpanded(`turn:${next.id}`)).toBe(false);
+    expect(activityMetricsExpanded(`turn:${next.id}`)).toBe(false);
   });
 
   it.each([
@@ -2428,6 +2570,46 @@ describe('inline activity metrics', () => {
 });
 
 describe('activity trace completion', () => {
+  it.each(['count', 'summary'] as const)('opens the newest chapter through the %s toggle', (control) => {
+    const turn = {
+      ...testTurn,
+      activity: [0, 1].map((ordinal) => ({
+        ordinal,
+        ts: '1000',
+        timelinePosition: 100 + ordinal,
+        text: JSON.stringify({
+          kind: 'tool',
+          tool: 'bash',
+          id: `step-${ordinal}`,
+          status: 'running',
+          detail: 'echo test',
+        }),
+      })),
+    };
+    applyConversationFrame(
+      testSnapshot({
+        turns: [turn],
+        connection: { connected: true, activeTurnId: turn.id },
+      }),
+      'thread',
+    );
+    resetActivityTraceView();
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    const row = renderResponseStatusRow();
+    if (control === 'count') {
+      const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+      findComponent(info.type(info.props), 'ActivityTraceToggle').props.onToggle();
+    } else find(row, 'button', 'Show latest activity').props.onClick();
+    const panel = findComponent(renderTechnicalDetails(renderResponseStatusRow()), 'ActivityTracePanel');
+    const list = findComponent(panel.type(panel.props), 'ActivityTraceList');
+    resetMount();
+    const chapter = ActivityTraceList(list.props).props.children[0];
+    expect(chapter.props.children[0].props['aria-expanded']).toBe(true);
+    expect(
+      chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
+    ).toBe(true);
+  });
+
   it('keeps the same trace and followed chapter open through outputless settlement', () => {
     appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
     const turn = {
@@ -2460,8 +2642,10 @@ describe('activity trace completion', () => {
       testSnapshot({ turns: [turn], connection: { connected: true, activeTurnId: turn.id } }),
       'thread',
     );
+    const info = findComponent(renderDetails(), 'TurnTechnicalInfo');
+    findComponent(info.type(info.props), 'ActivityTraceToggle').props.onToggle();
     const live = findComponent(renderDetails(), 'ActivityTracePanel');
-    expect(live.props).toMatchObject({ expanded: true, following: true, live: true });
+    expect(live.props).toMatchObject({ expanded: true, live: true });
     const liveList = findComponent(live.type(live.props), 'ActivityTraceList');
     applyConversationFrame(
       testSnapshot(
@@ -2474,7 +2658,7 @@ describe('activity trace completion', () => {
       'thread',
     );
     const completed = findComponent(renderDetails(), 'ActivityTracePanel');
-    expect(completed.props).toMatchObject({ expanded: true, following: true, live: false });
+    expect(completed.props).toMatchObject({ expanded: true, live: false });
     const list = findComponent(completed.type(completed.props), 'ActivityTraceList');
     expect(list.key).toBe(liveList.key);
     resetMount();
@@ -2492,20 +2676,14 @@ describe('activity trace chapter following', () => {
     ts: '1000',
     text: JSON.stringify({ kind: 'tool', id, status, tool, detail: `${tool}-${id}` }),
   });
-  let following: boolean;
-  const browse = vi.fn((follow: boolean) => {
-    following = follow;
-  });
   function renderTrace(lines: ActivityLine[]) {
     hooks.cursor = 0;
-    const list = ActivityTraceList({ lines, live: true, following, onBrowse: browse });
+    const list = ActivityTraceList({ lines, live: true });
     hooks.effects.splice(0).forEach((effect) => effect());
     return list;
   }
   beforeEach(() => {
     resetMount();
-    following = true;
-    browse.mockClear();
   });
 
   it('follows singleton and chapter headers without automatically expanding step details', () => {
@@ -2540,8 +2718,9 @@ describe('activity trace chapter following', () => {
     const commands = [line('one', 'completed'), line('two', 'running')];
     let list = renderTrace(commands);
     list.props.children[0].props.children[1].props.children[1].props.onToggle();
-    expect(browse).toHaveBeenLastCalledWith(true);
     list = renderTrace(commands);
+    expect(list.props.children[0].props.children[1].props.children[1].props.open).toBe(true);
+    list = renderTrace([commands[0], line('two', 'completed')]);
     expect(list.props.children[0].props.children[1].props.children[1].props.open).toBe(true);
     list = renderTrace([...commands, line('three', 'running')]);
     expect(
@@ -2551,14 +2730,37 @@ describe('activity trace chapter following', () => {
     ).toBe(true);
   });
 
-  it('preserves count-only expansion and manual browsing instead of forcing the latest chapter open', () => {
-    following = false;
+  it('respects manual chapter collapse until the next step arrives', () => {
     const commands = [line('one', 'completed'), line('two', 'running')];
     let list = renderTrace(commands);
-    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
-    list.props.children[0].props.children[0].props.onClick();
-    list = renderTrace([...commands, line('read-one', 'running', 'read')]);
     expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
-    expect(browse).toHaveBeenLastCalledWith(false);
+    list.props.children[0].props.children[0].props.onClick();
+    list = renderTrace(commands);
+    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    list = renderTrace([...commands, line('three', 'running')]);
+    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+  });
+
+  it('respects older chapter and detail selection until a new step advances the latest chapter', () => {
+    const commands = [line('one', 'completed'), line('two', 'completed')];
+    const lines = [...commands, line('read-one', 'completed', 'read'), line('read-two', 'running', 'read')];
+    let list = renderTrace(lines);
+    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(list.props.children[1].props.children[0].props['aria-expanded']).toBe(true);
+    list.props.children[0].props.children[0].props.onClick();
+    list = renderTrace(lines);
+    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(list.props.children[1].props.children[0].props['aria-expanded']).toBe(false);
+    list.props.children[0].props.children[1].props.children[0].props.onToggle();
+    list = renderTrace(lines);
+    expect(list.props.children[0].props.children[1].props.children[0].props.open).toBe(true);
+    list = renderTrace([...lines, line('read-three', 'running', 'read')]);
+    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(list.props.children[1].props.children[0].props['aria-expanded']).toBe(true);
+    expect(
+      list.props.children[1].props.children[1].props.children.every(
+        (entry: { props: { open: boolean } }) => !entry.props.open,
+      ),
+    ).toBe(true);
   });
 });

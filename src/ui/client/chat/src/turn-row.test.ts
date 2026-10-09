@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage, ConversationTurn } from '../../../shared/conversation';
 import { testSnapshot, testTurn } from './conversation-test-fixtures';
-import { activeTurnNotices, currentActivityHeadline, liveTurnActivity, turnRowView } from './turn-row';
+import { activeTurnNotices, currentActivityHeadline, hasTurnStats, liveTurnActivity, turnRowView } from './turn-row';
 import {
   activityChapters,
   parseStep,
@@ -25,6 +25,43 @@ const settled = (partial: Partial<ConversationTurn> = {}): ConversationTurn => (
   endedAt: '2026-09-29T00:00:05Z',
   metadata: { status: 'final', durationMs: 5000, model: 'm' },
   ...partial,
+});
+
+describe('Stats availability', () => {
+  it.each([
+    {
+      phase: 'running' as const,
+      metadata: { status: 'provisional' as const, model: 'model', durationMs: null },
+      expected: false,
+    },
+    { phase: 'running' as const, usage: [{ id: 'zero', value: { cost_usd: 0 } }], expected: true },
+    {
+      phase: 'running' as const,
+      liveUsage: {
+        cost_usd: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: 'model',
+      },
+      expected: true,
+    },
+    { phase: 'settled' as const, metadata: { status: 'final' as const, model: null, durationMs: 0 }, expected: true },
+    {
+      phase: 'settled' as const,
+      metadata: { status: 'partial' as const, model: 'model', durationMs: null },
+      expected: true,
+    },
+    {
+      phase: 'settled' as const,
+      metadata: { status: 'unavailable' as const, model: null, durationMs: null },
+      expected: false,
+    },
+  ])('offers reportable Stats without rejecting zero totals (%j)', ({ expected, ...partial }) => {
+    const turn = { ...testTurn, startedAt: null, endedAt: null, ...partial };
+    expect(hasTurnStats(turn, turnRowView(turn, start))).toBe(expected);
+  });
 });
 
 describe('current activity headline', () => {

@@ -38,11 +38,11 @@ import {
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
 import { STARTING_RESPONSE_TEXT, submissionPresentation } from '../web-submissions';
 import {
-  activityTraceOwner, activityTraceView, activityTraceFollowing, followActivityTrace, pauseActivityTrace, toggleActivityTrace,
+  activityTraceOwner, activityTraceExpanded, toggleActivityTrace,
   activityMetricsExpanded, toggleActivityMetrics,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
-import { activeTurnNotices, liveTurnActivity, turnRowView, type TurnRowView } from '../turn-row';
+import { activeTurnNotices, hasTurnStats, liveTurnActivity, turnRowView } from '../turn-row';
 import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, latestContextUsage, selectContextUsage, technicalSummary, type KnownContext } from '../technical-summary';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
@@ -212,9 +212,9 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
   );
 }
 
-type ActivityTraceTarget = { kind: 'chapter' | 'entry'; id: string } | null;
+type ActivityTraceTarget = { latest: string | null; chapter: string | null; entry: string | null } | null;
 
-export function ActivityTraceList({ lines, live = false, now = null, following = false, onBrowse }: { lines: ActivityLine[]; live?: boolean; now?: number | null; following?: boolean; onBrowse?: (follow: boolean) => void }) {
+export function ActivityTraceList({ lines, live = false, now = null }: { lines: ActivityLine[]; live?: boolean; now?: number | null }) {
   const listRef = useRef<HTMLUListElement | null>(null);
   const [target, setTarget] = useState<ActivityTraceTarget>(null);
   useEffect(() => {
@@ -225,41 +225,28 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
   // Outcome summaries do not advance chapter following.
   const latestChapter = [...chapters].reverse().find(chapter => chapter.entries.some(entry => !isOutcomeTraceStep(entry.step)));
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
-  const sel = target?.kind === 'entry' && (!following || target.id === latestEntryId) ? target.id : null;
-  const openChapter = following
-    ? latestChapter && latestChapter.entries.length > 1
-      ? latestChapter.id
-      : null
-    : target?.kind === 'chapter'
-      ? target.id
-      : target?.kind === 'entry'
-        ? chapters.find(chapter => chapter.entries.some(entry => entry.id === target.id))?.id ?? null
-        : null;
+  const selection = target?.latest === latestEntryId ? target : null;
+  const sel = selection?.entry ?? null;
+  const openChapter = selection ? selection.chapter : latestChapter?.id ?? null;
+  const following = !selection || sel === latestEntryId;
   useLayoutEffect(() => {
     if (!listRef.current || !lines.length) return;
     if (!revealed.current || (live && following)) revealLatestActivity(listRef.current, live && following && sel === latestEntryId);
     revealed.current = true;
   }, [lines, live, following, sel, openChapter]);
-  const toggle = (id: string) => {
+  const toggle = (chapterId: string, id: string) => {
     const opening = sel !== id;
-    const chapter = chapters.find(candidate => candidate.entries.some(entry => entry.id === id));
-    onBrowse?.(opening && id === latestEntryId);
-    setTarget(opening
-      ? { kind: 'entry', id }
-      : chapter && chapter.entries.length > 1
-        ? { kind: 'chapter', id: chapter.id }
-        : null);
+    setTarget({ latest: latestEntryId, chapter: chapterId, entry: opening ? id : null });
   };
   const toggleChapter = (id: string) => {
-    onBrowse?.(false);
-    setTarget(openChapter === id ? null : { kind: 'chapter', id });
+    setTarget({ latest: latestEntryId, chapter: openChapter === id ? null : id, entry: null });
   };
   return (
     <ul class="activity-trace scroll-edge-fade" tabIndex={0} aria-label="Activity steps" ref={listRef}>
       {chapters.map(chapter => {
         if (chapter.entries.length === 1) {
           const { line, id } = chapter.entries[0];
-          return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(id)} />;
+          return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(chapter.id, id)} />;
         }
         const open = openChapter === chapter.id;
         return <li key={chapter.id} class={`trace-chapter trace-status-${chapter.status}${open ? ' open' : ''}`}>
@@ -277,7 +264,7 @@ export function ActivityTraceList({ lines, live = false, now = null, following =
           </button>
           {open ? <ul class="trace-children">
             {chapter.entries.map(({ line, id }) => <ActivityTraceRow key={id} line={line} open={id === sel}
-              live={live} now={now} onToggle={() => toggle(id)} child />)}
+              live={live} now={now} onToggle={() => toggle(chapter.id, id)} child />)}
           </ul> : null}
         </li>;
       })}
@@ -310,7 +297,6 @@ function ActivityTracePanel({
   live = false,
   now = null,
   ownerId,
-  following = false,
   metrics = null,
 }: {
   lines: ActivityLine[];
@@ -318,7 +304,6 @@ function ActivityTracePanel({
   live?: boolean;
   now?: number | null;
   ownerId: string;
-  following?: boolean;
   metrics?: JSX.Element | null;
 }) {
   const showTrace = lines.length > 0 && expanded;
@@ -326,8 +311,7 @@ function ActivityTracePanel({
   return (
     <div class="msg-activity expanded">
       {metrics}
-      {showTrace ? <ActivityTraceList key={ownerId} lines={lines} live={live} now={now}
-        following={following} onBrowse={(follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)} /> : null}
+      {showTrace ? <ActivityTraceList key={ownerId} lines={lines} live={live} now={now} /> : null}
     </div>
   );
 }
@@ -358,7 +342,7 @@ type UsageProps = {
   live: boolean; partial: boolean; wallElapsedMs: number | null; modelElapsedMs: number | null;
 };
 
-function UsageMeta({ summary, ownerId, live }: Pick<UsageProps, 'summary' | 'ownerId' | 'live'>) {
+function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>) {
   const expanded = activityMetricsExpanded(ownerId);
   const short = summary || 'Usage details';
   return (
@@ -369,7 +353,7 @@ function UsageMeta({ summary, ownerId, live }: Pick<UsageProps, 'summary' | 'own
       aria-controls={`turn-usage-${ownerId}`}
       aria-label={`${short}. ${expanded ? 'Hide' : 'Show'} usage details`}
       title={expanded ? 'Hide usage details' : 'Show usage details'}
-      onClick={(e) => { e.stopPropagation(); toggleActivityMetrics(ownerId, live); }}
+      onClick={(e) => { e.stopPropagation(); toggleActivityMetrics(ownerId); }}
       onKeyDown={(e) => { if (e.key === 'Escape' && expanded) toggleActivityMetrics(ownerId); }}
     >
       <span class={`chevron${expanded ? ' open' : ''}`} aria-hidden="true">{'\u203A'}</span>
@@ -1096,12 +1080,6 @@ function TaskIndicator() {
   );
 }
 
-function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
-  return view.usage.length > 0 || (turn.phase === 'settled'
-    ? view.elapsedMs !== null || !!view.model
-    : !!turn.liveUsage);
-}
-
 function turnUsage(turn: ConversationTurn, ownerId: string, now: number): UsageProps | null {
   const view = turnRowView(turn, now);
   if (!hasTurnStats(turn, view)) return null;
@@ -1127,7 +1105,7 @@ function TurnTechnicalInfo({
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
       <ActivityTraceToggle count={count} hasOutcome={hasOutcome} expanded={expanded} onToggle={onToggle} />
-      {usage ? <UsageMeta summary={usage.summary} ownerId={usage.ownerId} live={usage.live} /> : null}
+      {usage ? <UsageMeta summary={usage.summary} ownerId={usage.ownerId} /> : null}
     </div>
   );
 }
@@ -1141,19 +1119,19 @@ function TurnTechnicalDetails({
   live?: boolean;
   now?: number | null;
 }) {
-  const traceView = activityTraceView(ownerId, live);
+  const expanded = activityTraceExpanded(ownerId);
   const metricsExpanded = activityMetricsExpanded(ownerId);
   const usage = turn ? turnUsage(turn, ownerId, now ?? Date.now()) : null;
   const count = activityStepCount(lines);
   const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
   if (!lines.length && !usage) return null;
-  if (!turn && !count && !hasOutcome && !traceView.expanded) return null;
+  if (!turn && !count && !hasOutcome && !expanded) return null;
   return (
     <div class="turn-technical-details">
       <TurnTechnicalInfo usage={usage} count={count} hasOutcome={hasOutcome}
-        expanded={traceView.expanded} onToggle={() => toggleActivityTrace(ownerId)} />
-      <ActivityTracePanel lines={lines} expanded={traceView.expanded} live={live} now={now}
-        ownerId={ownerId} following={activityTraceFollowing(ownerId)}
+        expanded={expanded} onToggle={() => toggleActivityTrace(ownerId)} />
+      <ActivityTracePanel lines={lines} expanded={expanded} live={live} now={now}
+        ownerId={ownerId}
         metrics={metricsExpanded && usage ? <UsageDetails {...usage} /> : null} />
     </div>
   );
@@ -1231,7 +1209,7 @@ function ResponseStatusRow({ source }: {
     ? startingResponsePresentation(source.submission)
     : turnResponsePresentation(source, now);
   const { ownerId, status, busy, lines, activity } = presentation;
-  const traceView = activityTraceView(ownerId, presentation.traceLive);
+  const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;
   if (!lines.length && !status) return null;
@@ -1239,12 +1217,9 @@ function ResponseStatusRow({ source }: {
   const hasTechnicalInformation = showTechnicalStatus && (lines.length > 0 ||
     (!!presentation.technicalTurn && hasTurnStats(presentation.technicalTurn, turnRowView(presentation.technicalTurn, now))));
   if (!busy && !presentation.stopControl && !hasTechnicalInformation) return null;
-  const toggleFromPreview = () => {
-    toggleActivityTrace(ownerId, true);
-  };
   return (
     <div
-      class={`typing turn-system${status ? ' turn-status' : ''}${busy ? ' turn-live' : ''}${traceView.expanded ? ' expanded' : ''}${presentation.tone}`}
+      class={`typing turn-system${status ? ' turn-status' : ''}${busy ? ' turn-live' : ''}${expanded ? ' expanded' : ''}${presentation.tone}`}
       {...presentation.attributes}
       aria-live={busy ? 'polite' : 'off'}
     >
@@ -1269,10 +1244,10 @@ function ResponseStatusRow({ source }: {
           ? <button
               type="button"
               class="hint trace-preview"
-              aria-expanded={traceView.expanded}
-              aria-label={traceView.expanded ? 'Hide activity' : 'Show latest activity'}
-              title={traceView.expanded ? 'Hide activity' : 'Show latest activity'}
-              onClick={toggleFromPreview}
+              aria-expanded={expanded}
+              aria-label={expanded ? 'Hide activity' : 'Show latest activity'}
+              title={expanded ? 'Hide activity' : 'Show latest activity'}
+              onClick={() => toggleActivityTrace(ownerId)}
             ><StepHeadlineContent headline={headline} /></button>
           : headline ? <span class="hint"><StepHeadlineContent headline={headline} /></span> : null}
       </div>

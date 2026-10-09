@@ -1,22 +1,15 @@
 import { signal } from '@preact/signals';
 import type { ChatMessage } from './types';
 
-export type ActivityPanelMode = 'open' | 'follow';
-export interface ActivityPanelIntent {
-  ownerId: string;
-  mode: ActivityPanelMode;
-}
-
-const intent = signal<ActivityPanelIntent | null>(null);
-const metricsIntent = signal<ActivityPanelIntent | null>(null);
+const traceOwner = signal<string | null>(null);
+const metricsOwner = signal<string | null>(null);
 
 export function activityMetricsExpanded(ownerId: string): boolean {
-  return metricsIntent.value?.ownerId === ownerId;
+  return metricsOwner.value === ownerId;
 }
 
-export function toggleActivityMetrics(ownerId: string, follow = false): void {
-  const current = metricsIntent.peek();
-  metricsIntent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? 'follow' : 'open' };
+export function toggleActivityMetrics(ownerId: string): void {
+  metricsOwner.value = metricsOwner.peek() === ownerId ? null : ownerId;
 }
 
 export function activityTraceOwner(message: ChatMessage): string {
@@ -28,39 +21,15 @@ export function activityTraceOwner(message: ChatMessage): string {
   return `message:${message.id}`;
 }
 
-export function activityTraceView(ownerId: string, live = false): { expanded: boolean; following: boolean } {
-  const current = intent.value;
-  const expanded = current?.ownerId === ownerId;
-  return { expanded, following: expanded && current.mode === 'follow' && live };
+export function activityTraceExpanded(ownerId: string): boolean {
+  return traceOwner.value === ownerId;
 }
 
-export function activityTraceFollowing(ownerId: string): boolean {
-  const current = intent.value;
-  return current?.ownerId === ownerId && current.mode === 'follow';
-}
-
-export function toggleActivityTrace(ownerId: string, follow = false): void {
-  const current = intent.peek();
-  intent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? 'follow' : 'open' };
-}
-
-export function pauseActivityTrace(ownerId: string): void {
-  if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: 'open' };
-}
-
-export function followActivityTrace(ownerId: string): void {
-  if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: 'follow' };
-}
-
-export function inheritActivityPanels(ownerId: string, openInitialTrace = false): void {
-  if (openInitialTrace && !intent.peek()) intent.value = { ownerId, mode: 'follow' };
-  for (const panel of [intent, metricsIntent]) {
-    const current = panel.peek();
-    if (current?.mode === 'follow' && current.ownerId !== ownerId) panel.value = { ...current, ownerId };
-  }
+export function toggleActivityTrace(ownerId: string): void {
+  traceOwner.value = traceOwner.peek() === ownerId ? null : ownerId;
 }
 
 export function resetActivityTraceView(): void {
-  intent.value = null;
-  metricsIntent.value = null;
+  traceOwner.value = null;
+  metricsOwner.value = null;
 }

@@ -156,34 +156,31 @@ Activity uses expandable **chapters** of consecutive related steps, without
 reordering or omitting activities. Chapter headers have filled dots on a
 continuous rail; child steps are indented with smaller hollow dots and branches.
 Singleton steps stay directly on the rail. Only one chapter can be expanded at
-a time. Opening via **N steps** leaves every group and step collapsed until
-the user expands one, and scrolls to the latest visible group/step header.
-Opening via the live activity summary expands the latest step's chapter, but
-leaves step details collapsed. Follow mode keeps that chapter open when its
+a time. Opening via either **N steps** or the live activity summary expands the
+latest step's chapter, scrolls to its header, and leaves step details collapsed.
+The latest chapter stays open when its
 latest step completes and when another related step is appended; it switches
 only when the next entry belongs to a different chapter. Subsequent steps'
 details never open automatically. At most one chapter and one step's details
 are open within a trace. Explicitly opened latest details remain open while
-that step updates, but collapse when the next step arrives in follow mode.
+that step updates, but collapse when the next step arrives.
 Reveal operations scroll only the trace viewport: short details are shown
 fully, while oversized details align at their beginning so the header remains
-visible. Expanding the latest step's details enables following, whether the
-step is grouped or standalone. Selecting earlier steps, browsing chapters or
-closing the latest details pauses following; scrolling does not.
-Collapse the trace and reopen it via the live summary to resume. The **N
-steps** disclosure opens every group collapsed and does not enable following.
-Only one activity trace can be expanded across the transcript. Its global
-state stores only the owning row and whether live activity is being followed;
-the selected group and step are local to the mounted trace.
-When technical information is enabled, opening a conversation with a live turn
-initially opens its trace in follow mode. Subsequent new turns inherit panels
-in follow mode, closing those panels on their previous owner. Manually opened or
-browsed traces and metrics opened on completed turns remain pinned to their
-selected turn instead of closing or transferring automatically. Following traces transfer even before the
-new turn's first activity arrives. A collapsed disclosure stays collapsed.
-Completing the turn does not close its panels or its followed chapter. Updates and same-turn reconnect
-snapshots preserve manual browsing and collapse; conversation navigation resets
-both disclosures.
+visible. Selecting steps, browsing chapters or collapsing the latest chapter
+is respected until a new step arrives; then its chapter expands automatically,
+with details collapsed. Scrolling does not change expansion.
+Only one Steps section and one Stats section can be expanded across the
+transcript. Each stores just its open owner ID or null; chapter and step
+selection are local to the mounted trace.
+Both sections start closed, even when technical information is enabled or a
+conversation opens with a live turn. Only user toggles change their expansion:
+opening a section on another turn closes its previous instance, independently
+of the other section. New turns, activity, accounting and terminal outcomes do
+not open, close or transfer panels. Open panels remain attached to their original
+turn until explicitly closed or replaced by another user selection.
+Completing the turn does not close its panels or its expanded chapter.
+Same-step status/accounting updates and same-turn reconnect snapshots preserve
+local selections; conversation navigation resets both disclosures.
 Each logical turn has one complete activity trace. Steering, questions, and
 intermediate assistant outputs never split it. While running, a synthetic
 bubble below the turn's latest conversation content carries the trace and

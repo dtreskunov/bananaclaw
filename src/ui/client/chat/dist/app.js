@@ -15903,9 +15903,9 @@ var VoiceController = class {
           this.fail("No complete transcript was received. Review current text before using it.");
           return;
         }
-        const intent2 = this.intent;
+        const intent = this.intent;
         this.release();
-        if (intent2 === "send") void this.sendDraft();
+        if (intent === "send") void this.sendDraft();
         else this.detach();
       } else if (message2.type === "error") {
         this.fail(
@@ -15946,9 +15946,9 @@ var VoiceController = class {
       if (this.current(generation2)) this.update({ sending: false });
     }
   }
-  finalize(intent2) {
+  finalize(intent) {
     if (this.state.value.phase !== "listening") return;
-    this.intent = intent2;
+    this.intent = intent;
     this.update({ phase: "finalizing" });
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
@@ -19239,14 +19239,13 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 // src/activity-trace-state.ts
-var intent = y3(null);
-var metricsIntent = y3(null);
+var traceOwner = y3(null);
+var metricsOwner = y3(null);
 function activityMetricsExpanded(ownerId) {
-  return metricsIntent.value?.ownerId === ownerId;
+  return metricsOwner.value === ownerId;
 }
-function toggleActivityMetrics(ownerId, follow = false) {
-  const current = metricsIntent.peek();
-  metricsIntent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? "follow" : "open" };
+function toggleActivityMetrics(ownerId) {
+  metricsOwner.value = metricsOwner.peek() === ownerId ? null : ownerId;
 }
 function activityTraceOwner(message2) {
   if (message2.turnTraceOwner) {
@@ -19256,230 +19255,15 @@ function activityTraceOwner(message2) {
   if (!message2.id) throw new Error("Activity trace message is missing its authoritative ID");
   return `message:${message2.id}`;
 }
-function activityTraceView(ownerId, live = false) {
-  const current = intent.value;
-  const expanded = current?.ownerId === ownerId;
-  return { expanded, following: expanded && current.mode === "follow" && live };
+function activityTraceExpanded(ownerId) {
+  return traceOwner.value === ownerId;
 }
-function activityTraceFollowing(ownerId) {
-  const current = intent.value;
-  return current?.ownerId === ownerId && current.mode === "follow";
-}
-function toggleActivityTrace(ownerId, follow = false) {
-  const current = intent.peek();
-  intent.value = current?.ownerId === ownerId ? null : { ownerId, mode: follow ? "follow" : "open" };
-}
-function pauseActivityTrace(ownerId) {
-  if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: "open" };
-}
-function followActivityTrace(ownerId) {
-  if (intent.peek()?.ownerId === ownerId) intent.value = { ownerId, mode: "follow" };
-}
-function inheritActivityPanels(ownerId, openInitialTrace = false) {
-  if (openInitialTrace && !intent.peek()) intent.value = { ownerId, mode: "follow" };
-  for (const panel of [intent, metricsIntent]) {
-    const current = panel.peek();
-    if (current?.mode === "follow" && current.ownerId !== ownerId) panel.value = { ...current, ownerId };
-  }
+function toggleActivityTrace(ownerId) {
+  traceOwner.value = traceOwner.peek() === ownerId ? null : ownerId;
 }
 function resetActivityTraceView() {
-  intent.value = null;
-  metricsIntent.value = null;
-}
-
-// src/appearance.ts
-var THEMES = [
-  { id: "default", name: "Default", description: "The original look" },
-  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
-];
-var APPEARANCE_MODES = [
-  { id: "system", name: "System" },
-  { id: "light", name: "Light" },
-  { id: "dark", name: "Dark" }
-];
-var TEXT_DENSITIES = [
-  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
-  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
-];
-var APPEARANCE_KEY = "nanoclaw:appearance";
-var DEFAULT_APPEARANCE = {
-  version: 3,
-  theme: "default",
-  mode: "system",
-  density: "compact",
-  showTechnicalStatus: false
-};
-var InvalidAppearanceError = class extends Error {
-};
-function parseAppearance(raw) {
-  if (raw === null) return { ...DEFAULT_APPEARANCE };
-  const value = JSON.parse(raw);
-  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
-  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
-    throw new InvalidAppearanceError("Invalid appearance preferences");
-  }
-  return {
-    version: 3,
-    theme: value.theme,
-    mode: value.mode,
-    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
-    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
-  };
-}
-function isThemeId(value) {
-  return THEMES.some((theme) => theme.id === value);
-}
-function isAppearanceMode(value) {
-  return APPEARANCE_MODES.some((mode) => mode.id === value);
-}
-function isTextDensity(value) {
-  return TEXT_DENSITIES.some((density) => density.id === value);
-}
-function isStorageError(cause) {
-  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
-}
-function resolveMode(mode, systemDark) {
-  return mode === "system" ? systemDark ? "dark" : "light" : mode;
-}
-function createAppearanceController(win, doc) {
-  const media = win.matchMedia("(prefers-color-scheme: dark)");
-  const listeners = /* @__PURE__ */ new Set();
-  const densityListeners = /* @__PURE__ */ new Set();
-  let preferences = { ...DEFAULT_APPEARANCE };
-  let error = null;
-  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
-  function report(message2, cause) {
-    console.warn(message2, cause);
-    error = message2;
-  }
-  function read(raw, persistMigration = false) {
-    try {
-      preferences = parseAppearance(raw);
-    } catch (cause) {
-      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
-      preferences = { ...DEFAULT_APPEARANCE };
-      report("Saved appearance was invalid and has been reset to the defaults.", cause);
-      try {
-        win.localStorage.removeItem(APPEARANCE_KEY);
-      } catch (storageError) {
-        if (!isStorageError(storageError)) throw storageError;
-        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
-      }
-      return;
-    }
-    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report(
-          "Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.",
-          cause
-        );
-      }
-    }
-  }
-  try {
-    read(win.localStorage.getItem(APPEARANCE_KEY), true);
-  } catch (cause) {
-    if (!isStorageError(cause)) throw cause;
-    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
-  }
-  function getSnapshot() {
-    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
-  }
-  function updateBrowserColor() {
-    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
-    const next = color || brandedBrowserColor;
-    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
-  }
-  function apply2() {
-    const snapshot = getSnapshot();
-    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
-    doc.documentElement.dataset.theme = preferences.theme;
-    doc.documentElement.dataset.mode = snapshot.resolvedMode;
-    doc.documentElement.dataset.density = preferences.density;
-    updateBrowserColor();
-    for (const restore of restoreDensity) restore();
-    for (const listener of listeners) listener(snapshot);
-  }
-  function onStorage(event) {
-    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
-    try {
-      if (event.storageArea !== win.localStorage) return;
-    } catch (cause) {
-      if (!isStorageError(cause)) throw cause;
-      report("Appearance could not be synchronized with another tab.", cause);
-      apply2();
-      return;
-    }
-    error = null;
-    read(event.key === null ? null : event.newValue);
-    apply2();
-  }
-  function onSystemChange() {
-    if (preferences.mode === "system") apply2();
-  }
-  apply2();
-  media.addEventListener("change", onSystemChange);
-  win.addEventListener("storage", onStorage);
-  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
-  return {
-    getSnapshot,
-    setPreferences(next) {
-      preferences = parseAppearance(JSON.stringify(next));
-      error = null;
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
-      }
-      apply2();
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    beforeDensityChange(listener) {
-      densityListeners.add(listener);
-      return () => {
-        densityListeners.delete(listener);
-      };
-    },
-    dispose() {
-      listeners.clear();
-      densityListeners.clear();
-      media.removeEventListener("change", onSystemChange);
-      win.removeEventListener("storage", onStorage);
-      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
-    }
-  };
-}
-function getAppearanceController() {
-  return window.nanoclawAppearance ??= createAppearanceController(window, document);
-}
-
-// src/appearance-state.ts
-var appearance = y3({
-  preferences: { ...DEFAULT_APPEARANCE },
-  resolvedMode: "light",
-  error: null
-});
-function initAppearance(onError) {
-  const controller = getAppearanceController();
-  const update = (snapshot) => {
-    const previousError = appearance.value.error;
-    appearance.value = snapshot;
-    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
-  };
-  update(controller.getSnapshot());
-  return controller.subscribe(update);
-}
-function setAppearance(preferences) {
-  getAppearanceController().setPreferences(preferences);
+  traceOwner.value = null;
+  metricsOwner.value = null;
 }
 
 // src/turn-completion.ts
@@ -19644,11 +19428,6 @@ function applyConversationFrame(raw, expectedThreadId) {
       if (message2.inputState?.status === "cancelled") confirmCancelledInput(message2.id);
     }
     if (changedConversation) resetActivityTraceView();
-    if (current && current.phase !== "settled" && current.id !== previous?.conversation.connection.activeTurnId)
-      inheritActivityPanels(
-        `turn:${current.id}`,
-        changedConversation && appearance.peek().preferences.showTechnicalStatus
-      );
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === "update") {
@@ -22116,6 +21895,201 @@ function ThreadsRail() {
   );
 }
 
+// src/appearance.ts
+var THEMES = [
+  { id: "default", name: "Default", description: "The original look" },
+  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
+];
+var APPEARANCE_MODES = [
+  { id: "system", name: "System" },
+  { id: "light", name: "Light" },
+  { id: "dark", name: "Dark" }
+];
+var TEXT_DENSITIES = [
+  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
+  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
+];
+var APPEARANCE_KEY = "nanoclaw:appearance";
+var DEFAULT_APPEARANCE = {
+  version: 3,
+  theme: "default",
+  mode: "system",
+  density: "compact",
+  showTechnicalStatus: false
+};
+var InvalidAppearanceError = class extends Error {
+};
+function parseAppearance(raw) {
+  if (raw === null) return { ...DEFAULT_APPEARANCE };
+  const value = JSON.parse(raw);
+  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
+  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
+    throw new InvalidAppearanceError("Invalid appearance preferences");
+  }
+  return {
+    version: 3,
+    theme: value.theme,
+    mode: value.mode,
+    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
+    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
+  };
+}
+function isThemeId(value) {
+  return THEMES.some((theme) => theme.id === value);
+}
+function isAppearanceMode(value) {
+  return APPEARANCE_MODES.some((mode) => mode.id === value);
+}
+function isTextDensity(value) {
+  return TEXT_DENSITIES.some((density) => density.id === value);
+}
+function isStorageError(cause) {
+  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
+}
+function resolveMode(mode, systemDark) {
+  return mode === "system" ? systemDark ? "dark" : "light" : mode;
+}
+function createAppearanceController(win, doc) {
+  const media = win.matchMedia("(prefers-color-scheme: dark)");
+  const listeners = /* @__PURE__ */ new Set();
+  const densityListeners = /* @__PURE__ */ new Set();
+  let preferences = { ...DEFAULT_APPEARANCE };
+  let error = null;
+  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
+  function report(message2, cause) {
+    console.warn(message2, cause);
+    error = message2;
+  }
+  function read(raw, persistMigration = false) {
+    try {
+      preferences = parseAppearance(raw);
+    } catch (cause) {
+      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
+      preferences = { ...DEFAULT_APPEARANCE };
+      report("Saved appearance was invalid and has been reset to the defaults.", cause);
+      try {
+        win.localStorage.removeItem(APPEARANCE_KEY);
+      } catch (storageError) {
+        if (!isStorageError(storageError)) throw storageError;
+        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
+      }
+      return;
+    }
+    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report(
+          "Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.",
+          cause
+        );
+      }
+    }
+  }
+  try {
+    read(win.localStorage.getItem(APPEARANCE_KEY), true);
+  } catch (cause) {
+    if (!isStorageError(cause)) throw cause;
+    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
+  }
+  function getSnapshot() {
+    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
+  }
+  function updateBrowserColor() {
+    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
+    const next = color || brandedBrowserColor;
+    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
+  }
+  function apply2() {
+    const snapshot = getSnapshot();
+    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
+    doc.documentElement.dataset.theme = preferences.theme;
+    doc.documentElement.dataset.mode = snapshot.resolvedMode;
+    doc.documentElement.dataset.density = preferences.density;
+    updateBrowserColor();
+    for (const restore of restoreDensity) restore();
+    for (const listener of listeners) listener(snapshot);
+  }
+  function onStorage(event) {
+    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
+    try {
+      if (event.storageArea !== win.localStorage) return;
+    } catch (cause) {
+      if (!isStorageError(cause)) throw cause;
+      report("Appearance could not be synchronized with another tab.", cause);
+      apply2();
+      return;
+    }
+    error = null;
+    read(event.key === null ? null : event.newValue);
+    apply2();
+  }
+  function onSystemChange() {
+    if (preferences.mode === "system") apply2();
+  }
+  apply2();
+  media.addEventListener("change", onSystemChange);
+  win.addEventListener("storage", onStorage);
+  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
+  return {
+    getSnapshot,
+    setPreferences(next) {
+      preferences = parseAppearance(JSON.stringify(next));
+      error = null;
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
+      }
+      apply2();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    beforeDensityChange(listener) {
+      densityListeners.add(listener);
+      return () => {
+        densityListeners.delete(listener);
+      };
+    },
+    dispose() {
+      listeners.clear();
+      densityListeners.clear();
+      media.removeEventListener("change", onSystemChange);
+      win.removeEventListener("storage", onStorage);
+      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
+    }
+  };
+}
+function getAppearanceController() {
+  return window.nanoclawAppearance ??= createAppearanceController(window, document);
+}
+
+// src/appearance-state.ts
+var appearance = y3({
+  preferences: { ...DEFAULT_APPEARANCE },
+  resolvedMode: "light",
+  error: null
+});
+function initAppearance(onError) {
+  const controller = getAppearanceController();
+  const update = (snapshot) => {
+    const previousError = appearance.value.error;
+    appearance.value = snapshot;
+    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
+  };
+  update(controller.getSnapshot());
+  return controller.subscribe(update);
+}
+function setAppearance(preferences) {
+  getAppearanceController().setPreferences(preferences);
+}
+
 // src/components/VoiceButton.tsx
 function VoiceButton({ target, controller, onStart, configured, unavailable, disabled, id: id2, className = "" }) {
   const state = controller.state.value;
@@ -22476,6 +22450,9 @@ function activeTurnNotices(turn2, connected, stop) {
   if (turn2.status === "stopping") notices.push({ text: "Stopping\u2026", error: false });
   if (!connected && !error) notices.push({ text: "Runner disconnected", error: false });
   return notices;
+}
+function hasTurnStats(turn2, view) {
+  return view.usage.length > 0 || (turn2.phase === "settled" ? view.elapsedMs !== null || !!view.model : !!turn2.liveUsage);
 }
 function turnRowView(turn2, now) {
   const settled = turn2.phase === "settled";
@@ -23632,7 +23609,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
     open && todos && step.error ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: step.error }) }) : null
   ] });
 }
-function ActivityTraceList({ lines, live = false, now = null, following = false, onBrowse }) {
+function ActivityTraceList({ lines, live = false, now = null }) {
   const listRef = A2(null);
   const [target, setTarget] = h2(null);
   y2(() => {
@@ -23642,27 +23619,26 @@ function ActivityTraceList({ lines, live = false, now = null, following = false,
   const chapters = activityChapters(lines, live);
   const latestChapter = [...chapters].reverse().find((chapter) => chapter.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
-  const sel = target?.kind === "entry" && (!following || target.id === latestEntryId) ? target.id : null;
-  const openChapter = following ? latestChapter && latestChapter.entries.length > 1 ? latestChapter.id : null : target?.kind === "chapter" ? target.id : target?.kind === "entry" ? chapters.find((chapter) => chapter.entries.some((entry) => entry.id === target.id))?.id ?? null : null;
+  const selection = target?.latest === latestEntryId ? target : null;
+  const sel = selection?.entry ?? null;
+  const openChapter = selection ? selection.chapter : latestChapter?.id ?? null;
+  const following = !selection || sel === latestEntryId;
   _2(() => {
     if (!listRef.current || !lines.length) return;
     if (!revealed.current || live && following) revealLatestActivity(listRef.current, live && following && sel === latestEntryId);
     revealed.current = true;
   }, [lines, live, following, sel, openChapter]);
-  const toggle = (id2) => {
+  const toggle = (chapterId, id2) => {
     const opening = sel !== id2;
-    const chapter = chapters.find((candidate) => candidate.entries.some((entry) => entry.id === id2));
-    onBrowse?.(opening && id2 === latestEntryId);
-    setTarget(opening ? { kind: "entry", id: id2 } : chapter && chapter.entries.length > 1 ? { kind: "chapter", id: chapter.id } : null);
+    setTarget({ latest: latestEntryId, chapter: chapterId, entry: opening ? id2 : null });
   };
   const toggleChapter = (id2) => {
-    onBrowse?.(false);
-    setTarget(openChapter === id2 ? null : { kind: "chapter", id: id2 });
+    setTarget({ latest: latestEntryId, chapter: openChapter === id2 ? null : id2, entry: null });
   };
   return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, children: chapters.map((chapter) => {
     if (chapter.entries.length === 1) {
       const { line, id: id2 } = chapter.entries[0];
-      return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, onToggle: () => toggle(id2) }, chapter.id);
+      return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, onToggle: () => toggle(chapter.id, id2) }, chapter.id);
     }
     const open = openChapter === chapter.id;
     return /* @__PURE__ */ u4("li", { class: `trace-chapter trace-status-${chapter.status}${open ? " open" : ""}`, children: [
@@ -23694,7 +23670,7 @@ function ActivityTraceList({ lines, live = false, now = null, following = false,
           open: id2 === sel,
           live,
           now,
-          onToggle: () => toggle(id2),
+          onToggle: () => toggle(chapter.id, id2),
           child: true
         },
         id2
@@ -23726,24 +23702,13 @@ function ActivityTracePanel({
   live = false,
   now = null,
   ownerId,
-  following = false,
   metrics = null
 }) {
   const showTrace = lines.length > 0 && expanded;
   if (!showTrace && !metrics) return null;
   return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: [
     metrics,
-    showTrace ? /* @__PURE__ */ u4(
-      ActivityTraceList,
-      {
-        lines,
-        live,
-        now,
-        following,
-        onBrowse: (follow) => follow ? followActivityTrace(ownerId) : pauseActivityTrace(ownerId)
-      },
-      ownerId
-    ) : null
+    showTrace ? /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now }, ownerId) : null
   ] });
 }
 function shortModel(model) {
@@ -23761,7 +23726,7 @@ function fmtContextLimit(tokens) {
   if (tokens < 1e6) return fmtTok(tokens);
   return (tokens / 1e6).toFixed(2).replace(/\.0+$|0+$/, "") + "M";
 }
-function UsageMeta({ summary, ownerId, live }) {
+function UsageMeta({ summary, ownerId }) {
   const expanded = activityMetricsExpanded(ownerId);
   const short = summary || "Usage details";
   return /* @__PURE__ */ u4(
@@ -23775,7 +23740,7 @@ function UsageMeta({ summary, ownerId, live }) {
       title: expanded ? "Hide usage details" : "Show usage details",
       onClick: (e4) => {
         e4.stopPropagation();
-        toggleActivityMetrics(ownerId, live);
+        toggleActivityMetrics(ownerId);
       },
       onKeyDown: (e4) => {
         if (e4.key === "Escape" && expanded) toggleActivityMetrics(ownerId);
@@ -24021,7 +23986,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
   const mdRef = A2(null);
   const [continueState, setContinueState] = h2("idle");
-  const traceOwner = activityTraceOwner(m6);
+  const traceOwner2 = activityTraceOwner(m6);
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -24117,7 +24082,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           {
             turn: m6.direction === "out" ? m6.statsTurn : void 0,
             lines: activity,
-            ownerId: traceOwner,
+            ownerId: traceOwner2,
             live: m6.turnTraceLive
           }
         ) : null,
@@ -24218,7 +24183,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   );
 }
 function DisplayCardMessage({ message: message2, card }) {
-  const traceOwner = activityTraceOwner(message2);
+  const traceOwner2 = activityTraceOwner(message2);
   const activity = message2.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message2.id, children: [
@@ -24227,7 +24192,7 @@ function DisplayCardMessage({ message: message2, card }) {
       {
         turn: message2.statsTurn,
         lines: activity,
-        ownerId: traceOwner,
+        ownerId: traceOwner2,
         live: message2.turnTraceLive
       }
     ) : null,
@@ -24460,9 +24425,6 @@ function TaskIndicator() {
     );
   }) });
 }
-function hasTurnStats(turn2, view) {
-  return view.usage.length > 0 || (turn2.phase === "settled" ? view.elapsedMs !== null || !!view.model : !!turn2.liveUsage);
-}
 function turnUsage(turn2, ownerId, now) {
   const view = turnRowView(turn2, now);
   if (!hasTurnStats(turn2, view)) return null;
@@ -24493,7 +24455,7 @@ function TurnTechnicalInfo({
   if (!usage2 && !count && !hasOutcome) return null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
     /* @__PURE__ */ u4(ActivityTraceToggle, { count, hasOutcome, expanded, onToggle }),
-    usage2 ? /* @__PURE__ */ u4(UsageMeta, { summary: usage2.summary, ownerId: usage2.ownerId, live: usage2.live }) : null
+    usage2 ? /* @__PURE__ */ u4(UsageMeta, { summary: usage2.summary, ownerId: usage2.ownerId }) : null
   ] });
 }
 function TurnTechnicalDetails({
@@ -24503,13 +24465,13 @@ function TurnTechnicalDetails({
   live = false,
   now = null
 }) {
-  const traceView = activityTraceView(ownerId, live);
+  const expanded = activityTraceExpanded(ownerId);
   const metricsExpanded = activityMetricsExpanded(ownerId);
   const usage2 = turn2 ? turnUsage(turn2, ownerId, now ?? Date.now()) : null;
   const count = activityStepCount(lines);
   const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
   if (!lines.length && !usage2) return null;
-  if (!turn2 && !count && !hasOutcome && !traceView.expanded) return null;
+  if (!turn2 && !count && !hasOutcome && !expanded) return null;
   return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
     /* @__PURE__ */ u4(
       TurnTechnicalInfo,
@@ -24517,7 +24479,7 @@ function TurnTechnicalDetails({
         usage: usage2,
         count,
         hasOutcome,
-        expanded: traceView.expanded,
+        expanded,
         onToggle: () => toggleActivityTrace(ownerId)
       }
     ),
@@ -24525,11 +24487,10 @@ function TurnTechnicalDetails({
       ActivityTracePanel,
       {
         lines,
-        expanded: traceView.expanded,
+        expanded,
         live,
         now,
         ownerId,
-        following: activityTraceFollowing(ownerId),
         metrics: metricsExpanded && usage2 ? /* @__PURE__ */ u4(UsageDetails, { ...usage2 }) : null
       }
     )
@@ -24604,20 +24565,17 @@ function ResponseStatusRow({ source }) {
   }, [clock.startedAt, clock.live]);
   const presentation = source.kind === "starting" ? startingResponsePresentation(source.submission) : turnResponsePresentation(source, now);
   const { ownerId, status, busy, lines, activity } = presentation;
-  const traceView = activityTraceView(ownerId, presentation.traceLive);
+  const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;
   if (!lines.length && !status) return null;
   if (!status && !showTechnicalStatus) return null;
   const hasTechnicalInformation = showTechnicalStatus && (lines.length > 0 || !!presentation.technicalTurn && hasTurnStats(presentation.technicalTurn, turnRowView(presentation.technicalTurn, now)));
   if (!busy && !presentation.stopControl && !hasTechnicalInformation) return null;
-  const toggleFromPreview = () => {
-    toggleActivityTrace(ownerId, true);
-  };
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: `typing turn-system${status ? " turn-status" : ""}${busy ? " turn-live" : ""}${traceView.expanded ? " expanded" : ""}${presentation.tone}`,
+      class: `typing turn-system${status ? " turn-status" : ""}${busy ? " turn-live" : ""}${expanded ? " expanded" : ""}${presentation.tone}`,
       ...presentation.attributes,
       "aria-live": busy ? "polite" : "off",
       children: [
@@ -24652,10 +24610,10 @@ function ResponseStatusRow({ source }) {
             {
               type: "button",
               class: "hint trace-preview",
-              "aria-expanded": traceView.expanded,
-              "aria-label": traceView.expanded ? "Hide activity" : "Show latest activity",
-              title: traceView.expanded ? "Hide activity" : "Show latest activity",
-              onClick: toggleFromPreview,
+              "aria-expanded": expanded,
+              "aria-label": expanded ? "Hide activity" : "Show latest activity",
+              title: expanded ? "Hide activity" : "Show latest activity",
+              onClick: () => toggleActivityTrace(ownerId),
               children: /* @__PURE__ */ u4(StepHeadlineContent, { headline })
             }
           ) : headline ? /* @__PURE__ */ u4("span", { class: "hint", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }) : null
