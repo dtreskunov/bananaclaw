@@ -186,7 +186,10 @@ function flushHostEvents(sessionId: string, entry: SessionSignalServer): void {
     connection.write(encoded);
     entry.hostInFlight = { eventId: pending.event_id, sequence: pending.sequence };
     entry.hostAckTimer = setTimeout(() => {
-      if (entry.connection === connection && entry.hostInFlight?.eventId === pending.event_id) connection.destroy();
+      if (entry.connection === connection && entry.hostInFlight?.eventId === pending.event_id) {
+        log.warn('Session link host ACK timed out', { sessionId, sequence: pending.sequence });
+        connection.destroy();
+      }
     }, HOST_ACK_TIMEOUT_MS);
     entry.hostAckTimer.unref?.();
   } catch (err) {
@@ -589,13 +592,17 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
 function handleConnection(sessionId: string, entry: SessionSignalServer, connection: net.Socket): void {
   const state = stateFor(sessionId);
   const connectedAt = Date.now();
+  const disconnect = (reason: string): void => {
+    log.warn('Session link transport rejected', { sessionId, reason });
+    connection.destroy();
+  };
   if (connectedAt - state.connectionWindowStartedAt >= 1_000) {
     state.connectionWindowStartedAt = connectedAt;
     state.connectionsThisWindow = 0;
   }
   state.connectionsThisWindow++;
   if (state.connectionsThisWindow > MAX_CONNECTIONS_PER_SECOND) {
-    connection.destroy();
+    disconnect('connection-rate-limit');
     suspendSessionSignalServer(sessionId, entry);
     return;
   }
@@ -619,7 +626,7 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
       if (Buffer.byteLength(line) > MAX_FRAME_BYTES) {
-        connection.destroy();
+        disconnect('frame-size-limit');
         return;
       }
       const now = Date.now();
@@ -643,14 +650,14 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
         globalFramesThisWindow > MAX_GLOBAL_FRAMES_PER_SECOND ||
         globalFrameBytesThisWindow > MAX_GLOBAL_FRAME_BYTES_PER_SECOND
       ) {
-        connection.destroy();
+        disconnect('frame-rate-limit');
         return;
       }
       let parsed: Record<string, unknown> | null = null;
       try {
         parsed = JSON.parse(line) as Record<string, unknown>;
         if (parsed.type !== 'durable' && Buffer.byteLength(line) > MAX_LIVE_FRAME_BYTES) {
-          connection.destroy();
+          disconnect('live-frame-size-limit');
           return;
         }
         if (!applyFrame(sessionId, entry, parsed)) {
@@ -685,7 +692,7 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
         return;
       }
     }
-    if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) connection.destroy();
+    if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) disconnect('buffer-size-limit');
   });
   connection.on('close', () => {
     if (entry.connection !== connection) return;
@@ -696,6 +703,7 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
     state.connected = false;
     state.turnStateReady = false;
     entry.stopRequest = null;
+    log.debug('Session link transport disconnected', { sessionId, durationMs: Date.now() - connectedAt });
     emit(sessionId, 'disconnected');
   });
   connection.on('error', () => {

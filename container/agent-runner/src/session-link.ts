@@ -124,6 +124,9 @@ export function waitForHostEvent(sinceGeneration: number, timeoutMs?: number, si
 
 export class SessionSignalClient {
   private socket: net.Socket | null = null;
+  private connectionStartedAt = 0;
+  private lastHostProgressAt = 0;
+  private hostReady = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectMs = INITIAL_RECONNECT_MS;
   private pumpTimer: ReturnType<typeof setInterval> | null = null;
@@ -166,6 +169,7 @@ export class SessionSignalClient {
     this.pumpTimer = null;
     const socket = this.socket;
     this.socket = null;
+    this.hostReady = false;
     socket?.destroy();
     this.sentAt.clear();
   }
@@ -236,7 +240,9 @@ export class SessionSignalClient {
   private connect(): void {
     if (!this.running || this.socket) return;
     const socket = net.createConnection(this.socketPath);
-    const connectionStartedAt = Date.now();
+    this.connectionStartedAt = Date.now();
+    this.lastHostProgressAt = this.connectionStartedAt;
+    this.hostReady = false;
     this.socket = socket;
     socket.once('connect', () => {
       if (this.socket !== socket) return;
@@ -247,6 +253,7 @@ export class SessionSignalClient {
     let buffer = '';
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
+      if (this.socket !== socket) return;
       buffer += chunk;
       let newline: number;
       while ((newline = buffer.indexOf('\n')) >= 0) {
@@ -272,6 +279,8 @@ export class SessionSignalClient {
           ) {
             requestTurnStop(frame.turnId);
           } else if (frame.type === 'host.ready' && Object.keys(frame).every((key) => ['v', 'type'].includes(key))) {
+            this.hostReady = true;
+            this.lastHostProgressAt = Date.now();
             this.resolveReady?.();
             this.resolveReady = null;
           } else if (
@@ -297,6 +306,7 @@ export class SessionSignalClient {
               event: { type: event.type, payload: event.payload },
             });
             socket.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'host.ack', eventId: frame.eventId })}\n`);
+            this.lastHostProgressAt = Date.now();
             if (applied) emitHostEvent();
           } else if (
             typeof frame.eventId === 'string' &&
@@ -304,6 +314,7 @@ export class SessionSignalClient {
             Object.keys(frame).every((key) => ['v', 'type', 'eventId'].includes(key))
           ) {
             acknowledgeRunnerEvent(getOutboundDb(), frame.eventId);
+            this.lastHostProgressAt = Date.now();
             this.sentAt.delete(frame.eventId);
             this.flushDurable();
           } else if (
@@ -346,18 +357,27 @@ export class SessionSignalClient {
       }
       if (Buffer.byteLength(buffer) > MAX_DURABLE_FRAME_BYTES) socket.destroy();
     });
-    socket.once('error', () => socket.destroy());
-    socket.once('close', () => {
-      if (this.socket === socket) this.socket = null;
-      if (!this.running) return;
-      if (Date.now() - connectionStartedAt >= 10_000) this.reconnectMs = INITIAL_RECONNECT_MS;
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectTimer = null;
-        this.connect();
-      }, this.reconnectMs);
-      this.reconnectTimer.unref?.();
-      this.reconnectMs = Math.min(MAX_RECONNECT_MS, this.reconnectMs * 2);
-    });
+    socket.once('error', () => this.disconnect(socket, 'socket-error'));
+    socket.once('end', () => this.disconnect(socket, 'peer-ended'));
+    socket.once('close', () => this.disconnect(socket, 'socket-closed'));
+  }
+
+  private disconnect(socket: net.Socket, reason: string): void {
+    if (this.socket !== socket) return;
+    this.socket = null;
+    this.hostReady = false;
+    this.sentAt.clear();
+    socket.destroy();
+    if (!this.running) return;
+    if (Date.now() - this.connectionStartedAt >= DURABLE_ACK_TIMEOUT_MS) this.reconnectMs = INITIAL_RECONNECT_MS;
+    const delay = this.reconnectMs;
+    console.error(`[session-link] ${reason}; reconnecting in ${delay}ms`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+    this.reconnectTimer.unref?.();
+    this.reconnectMs = Math.min(MAX_RECONNECT_MS, this.reconnectMs * 2);
   }
 
   private replaySnapshot(): void {
@@ -370,7 +390,7 @@ export class SessionSignalClient {
   }
 
   private send(frame: SignalFrame): void {
-    if (!this.socket?.writable || this.socket.connecting) return;
+    if (!this.socket?.writable || this.socket.destroyed || this.socket.connecting) return;
     const encoded = this.encode(frame);
     if (encoded) this.socket.write(encoded);
   }
@@ -381,11 +401,26 @@ export class SessionSignalClient {
   }
 
   private flushDurable(): void {
-    if (this.durableBlocked || !this.socket?.writable || this.socket.connecting) return;
+    if (!this.running || this.durableBlocked) return;
+    const socket = this.socket;
+    if (!socket) {
+      if (!this.reconnectTimer) this.connect();
+      return;
+    }
     const now = Date.now();
+    if (socket.destroyed || (!socket.connecting && !socket.writable)) {
+      this.disconnect(socket, 'socket-unusable');
+      return;
+    }
+    const waitingSince = socket.connecting ? this.connectionStartedAt : this.lastHostProgressAt;
+    if (!this.hostReady && now - waitingSince >= DURABLE_ACK_TIMEOUT_MS) {
+      this.disconnect(socket, socket.connecting ? 'connect-timeout' : 'host-ready-timeout');
+      return;
+    }
+    if (!socket.writable || socket.connecting) return;
     if (this.sentAt.size > 0) {
       const oldestSentAt = Math.min(...this.sentAt.values());
-      if (now - oldestSentAt >= DURABLE_ACK_TIMEOUT_MS) this.socket.destroy();
+      if (now - oldestSentAt >= DURABLE_ACK_TIMEOUT_MS) this.disconnect(socket, 'runner-ack-timeout');
       return;
     }
     for (const pending of listPendingRunnerEvents(getOutboundDb(), 1)) {
@@ -421,7 +456,7 @@ export class SessionSignalClient {
         this.blockDurable(pending.sequence, 'event exceeds wire limit');
         return;
       }
-      this.socket.write(encoded);
+      socket.write(encoded);
       this.sentAt.set(pending.event_id, now);
     }
   }

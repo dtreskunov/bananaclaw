@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -12,7 +12,29 @@ const sockets: net.Socket[] = [];
 const servers: net.Server[] = [];
 const roots: string[] = [];
 
-async function listen(socketPath: string, lines: string[], acknowledge = false): Promise<net.Server> {
+type TestFrame = { type: string; eventId?: string };
+
+function createSocketPath(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
+  roots.push(root);
+  return path.join(root, 'runner.sock');
+}
+
+function pendingEventCount(): number {
+  return (getOutboundDb().prepare('SELECT count(*) AS n FROM pending_runner_events').get() as { n: number }).n;
+}
+
+function acknowledge(socket: net.Socket, frame: TestFrame): void {
+  if (frame.type === 'durable' && frame.eventId) {
+    socket.write(`${JSON.stringify({ v: 5, type: 'ack', eventId: frame.eventId })}\n`);
+  }
+}
+
+async function listen(
+  socketPath: string,
+  lines: string[],
+  onFrame?: (socket: net.Socket, frame: TestFrame) => void,
+): Promise<net.Server> {
   const server = net.createServer((socket) => {
     sockets.push(socket);
     let buffer = '';
@@ -21,13 +43,9 @@ async function listen(socketPath: string, lines: string[], acknowledge = false):
       buffer += chunk;
       let newline: number;
       while ((newline = buffer.indexOf('\n')) >= 0) {
-        lines.push(buffer.slice(0, newline));
-        if (acknowledge) {
-          const frame = JSON.parse(lines.at(-1)!) as { type?: string; eventId?: string };
-          if (frame.type === 'durable' && frame.eventId) {
-            socket.write(`${JSON.stringify({ v: 5, type: 'ack', eventId: frame.eventId })}\n`);
-          }
-        }
+        const line = buffer.slice(0, newline);
+        lines.push(line);
+        onFrame?.(socket, JSON.parse(line) as TestFrame);
         buffer = buffer.slice(newline + 1);
       }
     });
@@ -40,8 +58,9 @@ async function listen(socketPath: string, lines: string[], acknowledge = false):
   return server;
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+async function waitFor(predicate: () => boolean, timeoutMs = 500): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -56,6 +75,191 @@ afterEach(async () => {
 });
 
 describe('SessionSignalClient', () => {
+  it('recovers a dead socket without its close callback and drains the queued report', async () => {
+    initTestSessionDb();
+    const socketPath = createSocketPath();
+    const lines: string[] = [];
+    await listen(socketPath, lines, acknowledge);
+    const createConnection = net.createConnection.bind(net);
+    let transport: net.Socket | undefined;
+    const connectSpy = spyOn(net, 'createConnection').mockImplementation(
+      (...args: Parameters<typeof net.createConnection>) => {
+        transport = createConnection(...args);
+        return transport;
+      },
+    );
+    const client = new SessionSignalClient(socketPath);
+    try {
+      void client.start();
+      await waitFor(() => lines.some((line) => JSON.parse(line).type === 'turn.state'));
+      const dead = transport!;
+      // A lost lifecycle notification must not leave the pump pinned to a dead transport.
+      dead.removeAllListeners('end');
+      dead.removeAllListeners('close');
+      sockets[0].end();
+      await waitFor(() => dead.destroyed);
+      writeMessageOut({ id: 'recovered-report', kind: 'chat', content: '{"text":"Recovered final report."}' });
+      await waitFor(() => pendingEventCount() === 0, 2000);
+      await client.drain();
+      expect(sockets.length).toBe(2);
+      expect(transport).not.toBe(dead);
+      expect(lines.map((line) => JSON.parse(line)).filter((frame) => frame.type === 'durable')).toHaveLength(1);
+    } finally {
+      client.stop();
+      connectSpy.mockRestore();
+    }
+  });
+
+  it('reconnects when the host never completes readiness, even with an empty runner journal', async () => {
+    initTestSessionDb();
+    const socketPath = createSocketPath();
+    const lines: string[] = [];
+    const server = await listen(socketPath, lines);
+    server.on('connection', (socket) => {
+      if (sockets.length > 1) socket.write('{"v":5,"type":"host.ready"}\n');
+    });
+    const epoch = Date.now();
+    const now = spyOn(Date, 'now').mockReturnValue(epoch);
+    const client = new SessionSignalClient(socketPath);
+    try {
+      const ready = client.start();
+      await waitFor(() => lines.some((line) => JSON.parse(line).type === 'turn.state'));
+      now.mockReturnValue(epoch + 9999);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(sockets).toHaveLength(1);
+      expect(sockets[0].destroyed).toBe(false);
+      now.mockReturnValue(epoch + 10_000);
+      await waitFor(() => sockets.length === 2);
+      await ready;
+      expect(pendingEventCount()).toBe(0);
+    } finally {
+      client.stop();
+      now.mockRestore();
+    }
+  });
+
+  it('keeps a productive initial host sync connected when it takes longer than the readiness timeout', async () => {
+    initTestSessionDb();
+    const socketPath = createSocketPath();
+    const lines: string[] = [];
+    await listen(socketPath, lines);
+    const epoch = Date.now();
+    const now = spyOn(Date, 'now').mockReturnValue(epoch);
+    const client = new SessionSignalClient(socketPath);
+    const acknowledged = () => lines.map((line) => JSON.parse(line)).filter((frame) => frame.type === 'host.ack');
+    try {
+      const ready = client.start();
+      await waitFor(() => sockets.length === 1);
+      for (let sequence = 1; sequence <= 3; sequence++) {
+        now.mockReturnValue(epoch + sequence * 4000);
+        sockets[0].write(
+          `${JSON.stringify({
+            v: 5,
+            type: 'host.event',
+            eventId: `sync-${sequence}`,
+            sequence,
+            event: { type: 'sequence.floor', payload: { seq: sequence * 2 } },
+          })}\n`,
+        );
+        await waitFor(() => acknowledged().length === sequence);
+      }
+      now.mockReturnValue(epoch + 21_999);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(sockets).toHaveLength(1);
+      expect(acknowledged().map((frame) => frame.eventId)).toEqual(['sync-1', 'sync-2', 'sync-3']);
+      sockets[0].write('{"v":5,"type":"host.ready"}\n');
+      await ready;
+    } finally {
+      client.stop();
+      now.mockRestore();
+    }
+  });
+
+  it('does not let a delayed close from a stopped generation schedule retries after restart', async () => {
+    initTestSessionDb();
+    const socketPath = createSocketPath();
+    const lines: string[] = [];
+    const server = await listen(socketPath, lines, acknowledge);
+    server.on('connection', (socket) => socket.write('{"v":5,"type":"host.ready"}\n'));
+    const client = new SessionSignalClient(socketPath);
+    try {
+      await client.start();
+      client.stop();
+      await client.start();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(sockets.length).toBe(2);
+      client.heartbeat();
+      await waitFor(
+        () => lines.map((line) => JSON.parse(line)).filter((frame) => frame.type === 'heartbeat').length >= 3,
+      );
+    } finally {
+      client.stop();
+    }
+  });
+
+  it('reconnects and drains after the host half-closes with an unacknowledged journal head', async () => {
+    initTestSessionDb();
+    writeMessageOut({ id: 'saved-report', kind: 'chat', content: '{"text":"Report preserved."}' });
+    const socketPath = createSocketPath();
+    const lines: string[] = [];
+    const seen: string[] = [];
+    await listen(socketPath, lines, (socket, frame) => {
+      if (frame.type !== 'durable' || !frame.eventId) return;
+      seen.push(frame.eventId);
+      if (socket === sockets[0]) socket.end();
+      else {
+        acknowledge(socket, frame);
+        socket.write('{"v":5,"type":"host.ready"}\n');
+      }
+    });
+    const client = new SessionSignalClient(socketPath);
+    try {
+      await client.start();
+      await client.drain();
+      expect(sockets).toHaveLength(2);
+      expect(seen).toHaveLength(2);
+      expect(seen[0]).toBe(seen[1]);
+      expect(pendingEventCount()).toBe(0);
+    } finally {
+      client.stop();
+    }
+  });
+
+  it('reconnects after a lost durable ACK and drains the same journal head', async () => {
+    initTestSessionDb();
+    writeMessageOut({ id: 'ack-lost', kind: 'chat', content: '{"text":"Saved reply."}' });
+    const socketPath = createSocketPath();
+    const lines: string[] = [];
+    const seen: string[] = [];
+    const server = await listen(socketPath, lines, (socket, frame) => {
+      if (frame.type !== 'durable' || !frame.eventId) return;
+      seen.push(frame.eventId);
+      if (socket !== sockets[0]) acknowledge(socket, frame);
+    });
+    server.on('connection', (socket) => socket.write('{"v":5,"type":"host.ready"}\n'));
+    const epoch = Date.now();
+    const now = spyOn(Date, 'now').mockReturnValue(epoch);
+    const client = new SessionSignalClient(socketPath);
+    try {
+      await client.start();
+      await waitFor(() => seen.length === 1);
+      now.mockReturnValue(epoch + 9999);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(sockets).toHaveLength(1);
+      expect(sockets[0].destroyed).toBe(false);
+      expect(seen).toHaveLength(1);
+      now.mockReturnValue(epoch + 10_000);
+      await waitFor(() => seen.length === 2);
+      await client.drain();
+      expect(sockets).toHaveLength(2);
+      expect(seen[0]).toBe(seen[1]);
+      expect(pendingEventCount()).toBe(0);
+    } finally {
+      client.stop();
+      now.mockRestore();
+    }
+  });
+
   it('only advertises safely addressable turns without inventing routing for background inputs', () => {
     const turn = {
       id: 'f90c3a48-713b-4852-96e0-494d8279d87c',
@@ -74,26 +278,14 @@ describe('SessionSignalClient', () => {
 
   it('commits host events before ACK and waits for host.ready at startup', async () => {
     initTestSessionDb();
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
-    roots.push(root);
-    const socketPath = path.join(root, 'runner.sock');
-    const acknowledgements: Array<Record<string, unknown>> = [];
-    const server = net.createServer((socket) => {
-      sockets.push(socket);
-      socket.setEncoding('utf8');
-      let buffer = '';
-      socket.on('data', (chunk) => {
-        buffer += chunk;
-        let newline: number;
-        while ((newline = buffer.indexOf('\n')) >= 0) {
-          const frame = JSON.parse(buffer.slice(0, newline)) as Record<string, unknown>;
-          buffer = buffer.slice(newline + 1);
-          if (frame.type === 'host.ack') {
-            acknowledgements.push(frame);
-            socket.write(`${JSON.stringify({ v: 5, type: 'host.ready' })}\n`);
-          }
-        }
-      });
+    const socketPath = createSocketPath();
+    const acknowledgements: TestFrame[] = [];
+    const server = await listen(socketPath, [], (socket, frame) => {
+      if (frame.type !== 'host.ack') return;
+      acknowledgements.push(frame);
+      socket.write('{"v":5,"type":"host.ready"}\n');
+    });
+    server.on('connection', (socket) => {
       socket.write(
         `${JSON.stringify({
           v: 5,
@@ -126,12 +318,6 @@ describe('SessionSignalClient', () => {
         })}\n`,
       );
     });
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(socketPath, resolve);
-    });
-    servers.push(server);
-
     const client = new SessionSignalClient(socketPath);
     await client.start();
 
@@ -144,9 +330,7 @@ describe('SessionSignalClient', () => {
   });
 
   it('sends live signals and replays the bounded current snapshot after reconnect', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
-    roots.push(root);
-    const socketPath = path.join(root, 'runner.sock');
+    const socketPath = createSocketPath();
     const firstLines: string[] = [];
     const firstServer = await listen(socketPath, firstLines);
     const client = new SessionSignalClient(socketPath);
@@ -189,11 +373,9 @@ describe('SessionSignalClient', () => {
 
   it('accepts exact stop frames and drains committed cancellation before clearing state', async () => {
     initTestSessionDb();
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-stop-link-'));
-    roots.push(root);
+    const socketPath = createSocketPath();
     const lines: string[] = [];
-    const socketPath = path.join(root, 'runner.sock');
-    await listen(socketPath, lines, true);
+    await listen(socketPath, lines, acknowledge);
     const client = new SessionSignalClient(socketPath);
     const ids: string[] = [];
     const unsubscribe = onTurnStop((id) => ids.push(id));
@@ -205,26 +387,25 @@ describe('SessionSignalClient', () => {
       expect(ids).toEqual(['active']);
       writeMessageOut({ id: 'stopped', kind: 'chat', content: '{"text":"Stopped by user."}' });
       await client.drain();
-      expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM pending_runner_events').get()).toEqual({ n: 0 });
-    } finally { unsubscribe(); client.stop(); }
+      expect(pendingEventCount()).toBe(0);
+    } finally {
+      unsubscribe();
+      client.stop();
+    }
   });
 
   it('replays a trigger-journaled durable row until the host acknowledges it', async () => {
     initTestSessionDb();
     writeMessageOut({ id: 'out-1', kind: 'chat', content: '{"text":"hello"}' });
-    expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM pending_runner_events').get()).toEqual({ n: 1 });
+    expect(pendingEventCount()).toBe(1);
 
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
-    roots.push(root);
-    const socketPath = path.join(root, 'runner.sock');
+    const socketPath = createSocketPath();
     const lines: string[] = [];
-    await listen(socketPath, lines, true);
+    await listen(socketPath, lines, acknowledge);
     const client = new SessionSignalClient(socketPath);
     client.start();
 
-    await waitFor(
-      () => (getOutboundDb().prepare('SELECT COUNT(*) AS n FROM pending_runner_events').get() as { n: number }).n === 0,
-    );
+    await waitFor(() => pendingEventCount() === 0);
     const durable = lines.map((line) => JSON.parse(line)).find((frame) => frame.type === 'durable');
     expect(durable).toMatchObject({
       v: 5,
@@ -240,7 +421,8 @@ describe('SessionSignalClient', () => {
       },
     });
     expect(JSON.parse(Buffer.from(durable.event.payload.content_base64, 'base64').toString())).toMatchObject({
-      text: 'hello', timelinePosition: expect.any(Number),
+      text: 'hello',
+      timelinePosition: expect.any(Number),
     });
     client.stop();
   });
@@ -250,9 +432,7 @@ describe('SessionSignalClient', () => {
     writeMessageOut({ id: 'out-1', kind: 'chat', content: '{"text":"first"}' });
     writeMessageOut({ id: 'out-2', kind: 'chat', content: '{"text":"second"}' });
 
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
-    roots.push(root);
-    const socketPath = path.join(root, 'runner.sock');
+    const socketPath = createSocketPath();
     const lines: string[] = [];
     await listen(socketPath, lines);
     const client = new SessionSignalClient(socketPath);
@@ -278,11 +458,9 @@ describe('SessionSignalClient', () => {
     ).run();
     writeMessageOut({ id: 'out-2', kind: 'chat', content: '{"text":"later"}' });
 
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
-    roots.push(root);
-    const socketPath = path.join(root, 'runner.sock');
+    const socketPath = createSocketPath();
     const lines: string[] = [];
-    await listen(socketPath, lines, true);
+    await listen(socketPath, lines, acknowledge);
     const failures: string[] = [];
     const client = new SessionSignalClient(socketPath, (message) => failures.push(message));
     client.start();
@@ -290,9 +468,7 @@ describe('SessionSignalClient', () => {
 
     expect(failures[0]).toContain('durable event 1 blocked');
     expect(lines.some((line) => JSON.parse(line).type === 'durable')).toBe(false);
-    expect((db.prepare('SELECT COUNT(*) AS count FROM pending_runner_events').get() as { count: number }).count).toBe(
-      2,
-    );
+    expect(pendingEventCount()).toBe(2);
     client.stop();
   });
 
@@ -300,40 +476,22 @@ describe('SessionSignalClient', () => {
     initTestSessionDb();
     writeMessageOut({ id: 'out-1', kind: 'chat', content: '{"text":"hello"}' });
 
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
-    roots.push(root);
-    const socketPath = path.join(root, 'runner.sock');
+    const socketPath = createSocketPath();
     let durableFrames = 0;
-    const server = net.createServer((socket) => {
-      sockets.push(socket);
-      let buffer = '';
-      socket.setEncoding('utf8');
-      socket.on('data', (chunk) => {
-        buffer += chunk;
-        let newline: number;
-        while ((newline = buffer.indexOf('\n')) >= 0) {
-          const frame = JSON.parse(buffer.slice(0, newline)) as { type?: string; eventId?: string };
-          buffer = buffer.slice(newline + 1);
-          if (frame.type !== 'durable' || !frame.eventId) continue;
-          durableFrames++;
-          socket.write(
-            `${JSON.stringify({
-              v: 5,
-              type: 'nack',
-              eventId: frame.eventId,
-              fatal: true,
-              code: 'durable_rejected',
-              error: 'invalid state value',
-            })}\n`,
-          );
-        }
-      });
+    await listen(socketPath, [], (socket, frame) => {
+      if (frame.type !== 'durable' || !frame.eventId) return;
+      durableFrames++;
+      socket.write(
+        `${JSON.stringify({
+          v: 5,
+          type: 'nack',
+          eventId: frame.eventId,
+          fatal: true,
+          code: 'durable_rejected',
+          error: 'invalid state value',
+        })}\n`,
+      );
     });
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(socketPath, resolve);
-    });
-    servers.push(server);
 
     const failures: string[] = [];
     const client = new SessionSignalClient(socketPath, (message) => failures.push(message));
@@ -343,27 +501,26 @@ describe('SessionSignalClient', () => {
 
     expect(failures[0]).toContain('host rejected event: invalid state value');
     expect(durableFrames).toBe(1);
-    expect(
-      (getOutboundDb().prepare('SELECT COUNT(*) AS count FROM pending_runner_events').get() as { count: number }).count,
-    ).toBe(1);
+    expect(pendingEventCount()).toBe(1);
     client.stop();
   });
 
   it('does not retain an oversized activity frame that would poison reconnect replay', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-link-client-'));
-    roots.push(root);
-    const socketPath = path.join(root, 'runner.sock');
+    const socketPath = createSocketPath();
     const firstLines: string[] = [];
     const firstServer = await listen(socketPath, firstLines);
     const client = new SessionSignalClient(socketPath);
     client.start();
     await waitFor(() => firstLines.length >= 4);
 
-    client.appendActivity({
-      kind: 'patch',
-      id: 'oversized',
-      files: Array.from({ length: 100 }, (_, index) => `${index}-${'x'.repeat(200)}`),
-    }, 100);
+    client.appendActivity(
+      {
+        kind: 'patch',
+        id: 'oversized',
+        files: Array.from({ length: 100 }, (_, index) => `${index}-${'x'.repeat(200)}`),
+      },
+      100,
+    );
     client.updateUsage({
       cost_usd: 0.1,
       input_tokens: 100,

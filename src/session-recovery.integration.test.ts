@@ -12,6 +12,7 @@ import { putTurn } from './db/turns.js';
 import { initSessionFolder, openInboundDb, openOutboundDbRw } from './session-manager.js';
 import {
   onSessionTurnChange,
+  getSessionActiveTurn,
   sessionLinkSocketPath,
   startSessionSignalServer,
   stopAllSessionSignalServers,
@@ -85,4 +86,50 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
       db.close();
     }
   },
+);
+
+it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
+  'recovers the final report and settlement from a 91-event backlog after a lost socket close notification',
+  async () => {
+    initSessionFolder('recovery-group', 'recovery-session');
+    await startSessionSignalServer('recovery-session', 'recovery-group');
+    const db = openOutboundDbRw('recovery-group', 'recovery-session');
+    const changes: string[] = [];
+    const unsubscribe = onSessionTurnChange((_sessionId, change) => {
+      if (change.settledTurnId) changes.push(change.settledTurnId);
+    });
+    let stderr = '';
+    try {
+      child = spawn(
+        'bun',
+        ['src/test-fixtures/disconnected-report-runner.mjs', sessionLinkSocketPath('recovery-session')],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      child.stderr?.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+      const code = await new Promise<number | null>((resolve, reject) => {
+        child!.once('close', resolve);
+        child!.once('error', reject);
+      });
+      expect(code, stderr).toBe(0);
+      expect(stderr).toContain('socket-unusable; reconnecting');
+      expect(db.prepare('SELECT phase,outcome FROM turns WHERE id=?').get('saved-turn')).toEqual({
+        phase: 'settled',
+        outcome: 'replied',
+      });
+      expect(
+        db.prepare("SELECT json_extract(content,'$.text') AS text FROM messages_out WHERE id='saved-report'").get(),
+      ).toEqual({ text: 'Preserved final report' });
+      expect(db.prepare('SELECT count(*) AS n FROM applied_runner_events').get()).toEqual({ n: 92 });
+      expect(changes).toEqual(['saved-turn']);
+      expect(getSessionActiveTurn('recovery-session').turn).toBeNull();
+    } finally {
+      unsubscribe();
+      db.close();
+    }
+  },
+  10_000,
 );

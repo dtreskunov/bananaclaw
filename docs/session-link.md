@@ -407,6 +407,25 @@ mount only their writable projection directory (`runner-state/`, containing
 `runner-state.db` and its rollback journal), a read-only inbox, a writable
 outbox, and provider-specific state directories.
 
+The runner detaches failed sockets before scheduling a retry; stale callbacks
+from earlier connections cannot affect a replacement connection. Its 50 ms
+journal pump also detects destroyed or unwritable sockets independently of
+`end`/`close` notifications, so a missing notification cannot leave a completed
+report waiting indefinitely on a dead transport. Disconnects clear only
+in-flight bookkeeping, never pending journal events.
+
+Connection establishment, initial `host.ready`, and durable ACKs have 10-second
+inactivity bounds. Valid committed host events and runner ACKs refresh readiness
+progress, allowing a productive initial synchronization to take longer than
+10 seconds overall. A stalled handshake or missing ACK triggers reconnect and
+ordered replay, even when the runner journal is empty. Retries back off from
+100 ms to at most 5 seconds. Fatal event rejections remain fail-closed.
+
+Runner retries log fixed disconnect reasons and retry delays. Host ACK timeouts
+log session identity and journal sequence; resource-limit closures log a fixed
+reason, and debug-level disconnect records include connection duration. These
+diagnostics do not include frame contents or chat/report payloads.
+
 ### Coordinated host/runner rollout
 
 Runner source is bind-mounted at `/app/src`, not baked into the image. Newly
