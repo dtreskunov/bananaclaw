@@ -325,6 +325,7 @@ describe('session link frame acceptance', () => {
     ['turn.state string supportsSteering', turnState({ ...TURN, supportsSteering: 'yes' })],
     ['turn.state numeric supportsInputEditing', turnState({ ...TURN, supportsInputEditing: 1 })],
     ['turn.state null supportsInputCancellation', turnState({ ...TURN, supportsInputCancellation: null })],
+    ['turn.state non-boolean supportsToolCancellation', turnState({ ...TURN, supportsToolCancellation: 'yes' })],
     ['activity extra key', activity(TOOL, { extra: 1 })],
     ['activity missing ordinal', activity(TOOL, { ordinal: undefined })],
     ['activity missing position', activity(TOOL, { timelinePosition: undefined })],

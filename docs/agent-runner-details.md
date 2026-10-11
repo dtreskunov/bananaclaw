@@ -54,6 +54,9 @@ interface McpServerConfig {
 }
 
 interface AgentQuery {
+  /** Optional per-call cancellation, advertised via supportsToolCancellation. */
+  stopTool?(toolCallId: string): boolean;
+
   /** Push a follow-up message into the active query */
   push(message: string): void;
 
@@ -530,6 +533,22 @@ are loaded on demand (`native/tool-search.ts`):
 ```bash
 ncl groups config set-param --id <group> --key mcp_tool_search --value always
 ```
+
+### Native Provider: Stopping one tool
+
+Native queries advertise `supportsToolCancellation` and implement
+`stopTool(toolCallId)`. The turn journal gives each announced/executing call its
+own abort controller, combined with the query's signal. Stopping one call
+aborts only that controller, including a request arriving just before execution.
+Shell tools terminate their own process group; MCP clients cancel only the
+corresponding request without closing the shared server connection.
+
+An interrupted call is persisted as a valid tool-call/error-result pair and
+reported to the model as an unknown outcome with a warning about possible
+external side effects. The model continues within the same turn; other calls,
+steering and queued inputs are untouched. Calls already completed cannot be
+cancelled. Tools that complete despite cancellation retain their actual result.
+Whole-query `abort('user')` and status-row Stop retain whole-turn cancellation.
 
 ### Native Provider: Final Message
 

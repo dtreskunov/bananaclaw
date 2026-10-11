@@ -410,7 +410,7 @@
 .chat-main .meta .trace-toggle .chevron { display: inline-block; font-size: 1.3em; line-height: 1; transition: transform 0.15s ease; }
 .chat-main .meta .trace-toggle .chevron.open { transform: rotate(90deg); }
 .chat-main .meta .trace-count { white-space: nowrap; }
-.chat-main .msg-activity .activity-trace { --trace-child-indent: 20px; --trace-row-height: 28px; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; width: 100%; max-height: 30vh; overflow: auto; font-size: var(--font-2xs); scrollbar-width: thin; }
+.chat-main .msg-activity .activity-trace { --trace-child-indent: 20px; --trace-row-height: 28px; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; width: 100%; max-height: 30vh; overflow-x: hidden; overflow-y: auto; font-size: var(--font-2xs); scrollbar-width: thin; }
 .chat-main .msg.markdown .msg-activity .activity-trace { padding-left: 0; }
 .chat-main .msg-activity .activity-trace li { flex: none; min-width: 0; }
 .chat-main .activity-trace:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; border-radius: var(--radius-sm); }
@@ -420,9 +420,12 @@
 .chat-main .activity-trace > .trace-row:first-child::before { top: calc(var(--trace-row-height) / 2); }
 .chat-main .activity-trace > .trace-row:last-child::before,
 .chat-main .activity-trace > .trace-chapter:last-child .trace-children > .trace-row:last-child::before { bottom: calc(100% - var(--trace-row-height) / 2); }
+.chat-main .activity-trace .trace-row-header { display: flex; align-items: center; gap: 6px; min-width: 0; height: var(--trace-row-height); }
 .chat-main .activity-trace .trace-row-toggle,
-.chat-main .activity-trace .trace-chapter-toggle { display: flex; align-items: center; gap: 6px; width: max-content; min-width: 100%; padding: 0; border: none; background: none; text-align: left; cursor: pointer; font-size: inherit; color: var(--trace-status-color, var(--muted)); font-family: var(--font-ui); opacity: 0.85; }
-.chat-main .activity-trace .trace-row-toggle { height: var(--trace-row-height); }
+.chat-main .activity-trace .trace-chapter-toggle { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 0; border: none; background: none; text-align: left; cursor: pointer; font-size: inherit; color: var(--trace-status-color, var(--muted)); font-family: var(--font-ui); opacity: 0.85; }
+.chat-main .activity-trace .trace-row-toggle { flex: 1; height: var(--trace-row-height); }
+.chat-main .activity-trace .trace-controls { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--trace-status-color, var(--muted)); }
+.chat-main .activity-trace .trace-controls:empty { display: none; }
 .chat-main .activity-trace .trace-marker { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 9px; height: 9px; }
 .chat-main .activity-trace .trace-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--trace-status-color, var(--muted)); }
 .chat-main .activity-trace .trace-child::before { left: calc(4px - var(--trace-child-indent)); }
@@ -444,19 +447,20 @@
 .chat-main .activity-trace > .trace-chapter:first-child { --chapter-rail-start: calc(var(--trace-row-height) / 2); }
 .chat-main .activity-trace > .trace-chapter:last-child:not(.open) { --chapter-rail-end: calc(var(--trace-row-height) / 2); }
 .chat-main .activity-trace .trace-chapter-toggle { height: var(--trace-row-height); }
-.chat-main .activity-trace .trace-chapter-label { flex: 1; min-width: 0; }
+.chat-main .activity-trace .trace-chapter-label,
+.chat-main .activity-trace .trace-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
 .chat-main .activity-trace .trace-chapter-heading { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
 .chat-main .activity-trace .trace-chapter-title { display: block; white-space: nowrap; }
 .chat-main .activity-trace .trace-chapter-notice { color: var(--muted); }
 .chat-main .activity-trace .trace-chapter-failures { color: var(--activity-status-failed); }
 .chat-main .activity-trace ul.trace-children { list-style: none; margin: 0 0 0 var(--trace-child-indent); padding: 0; }
-.chat-main .activity-trace .trace-text { flex: 1; min-width: 0; white-space: nowrap; }
-.chat-main .activity-trace .trace-duration { flex: none; font-variant-numeric: tabular-nums; }
+.chat-main .activity-trace .trace-duration { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chat-main .typing .hint code.trace-subject,
 .chat-main .activity-trace code.trace-subject { padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); font-family: var(--font-mono, monospace); font-size: inherit; }
 .chat-main .activity-trace .trace-meta,
 .chat-main .activity-trace .trace-note { margin: 0 0 0 17px; color: var(--muted); font-family: var(--font-mono, monospace); font-size: inherit; opacity: 0.8; }
-.chat-main .activity-trace .trace-meta { white-space: nowrap; }
+.chat-main .activity-trace .trace-meta { white-space: normal; overflow-wrap: anywhere; }
+.chat-main .activity-trace .trace-note.turn-stop-error { color: var(--danger); white-space: normal; overflow-wrap: anywhere; }
 .chat-main .activity-trace .trace-prefix { flex: 1; min-width: 0; color: var(--fg); white-space: normal; overflow-wrap: anywhere; word-break: break-word; opacity: 0.95; }
 .chat-main .activity-trace .trace-prefix .trace-tool { font-family: var(--font-mono, monospace); font-size: inherit; padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); }
 .chat-main .activity-trace pre.trace-code { margin: 2px 0 4px 17px; padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: inherit; color: var(--fg); background: var(--wash); border-radius: var(--radius-md); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }

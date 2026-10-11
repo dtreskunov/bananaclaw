@@ -243,10 +243,19 @@ theme-aware colors, interrupted states use warning colors, and unknown outcomes
 are muted. Accessible labels and expanded metadata convey status without
 relying on color. Historical unfinished steps become **Outcome unknown**, not
 successful or still-running steps.
-The activity viewport scrolls vertically and horizontally instead of clipping
-long labels. Hidden edges use the same 12 px transparency fades as tables,
-including top and bottom fades. Expanded command bodies wrap within the
-viewport and share its scrolling, without a second nested scrollbar.
+The activity viewport scrolls vertically. Long row and chapter labels fade over
+their final 24 px within the transcript width, before the fixed row controls.
+Running steps show a **Stop tool** button followed by an elapsed activity
+stopwatch, including while their details are expanded. It cancels only that
+tool call; the turn, other tools, queued inputs and response continue normally.
+The separate **Stop response** control in the status row still cancels the
+entire turn. Per-tool Stop currently requires the native provider's live
+`supportsToolCancellation` capability; unsupported providers show a disabled
+tool control rather than falling back to turn cancellation. Recorded durations remain visible after
+completion. Full labels remain available through accessible labels and expanded
+details. Hidden vertical edges use the same 12 px transparency fades as tables.
+Expanded command bodies and metadata wrap within the viewport and share its
+scrolling, without a second nested scrollbar.
 
 Every registered `nanoclaw.*` builtin has action-specific trace wording across
 queued, running, completed, failed and uncertain states. For example, a completed
@@ -672,6 +681,19 @@ preserves stale targets for safe follow-up handling. A `clientMessageId` remains
 stable across retries after ambiguous network/server failures.
 
 ### Stopping a response
+
+Trace-row **Stop tool** and status-row **Stop response** are separate actions.
+Per-tool requests include both the authoritative turn ID and tool call ID; stale
+or finished targets cannot stop a different call or the entire turn. HTTP
+acceptance means the active provider accepted a per-call cancellation request.
+The tool button remains pending until authoritative activity reports the tool's
+outcome. Errors, lost connections and unconfirmed cancellation are shown on
+that row and can be retried without cancelling the response.
+
+Both actions share HTTP request and error parsing in
+`src/ui/client/chat/src/stop-request.ts`. Their state lifecycles remain separate:
+tool cancellation has a confirmation timeout, while an accepted turn Stop waits
+for durable settlement without timing out.
 
 The live activity ("thinking") bubble has a small square **Stop** icon at the
 right end of its metadata footer, matching the branch button on completed

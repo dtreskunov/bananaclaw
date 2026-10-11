@@ -50,7 +50,7 @@ import {
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange, ProviderReply } from './providers/types.js';
 import { processPendingInputEdits, startInputProcessing, writeInputState } from './steering.js';
-import { getHostEventGeneration, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
+import { getHostEventGeneration, onToolStop, onTurnStop, signalTurnState, signalHeartbeat, waitForHostEvent } from './session-link.js';
 import { TurnAccounting, resetLiveTurnState } from './query/accounting.js';
 import { FollowUpWatcher } from './query/follow-up-watcher.js';
 import { finalizeStoppedTurn, writeResponseRow, writeTurnNotice } from './query/notices.js';
@@ -1114,6 +1114,11 @@ export async function processQuery(
     publishTurn();
     query.abort('user');
   });
+  const unsubscribeToolStop = onToolStop((requestedId, toolCallId) => {
+    if (requestedId !== turnId || !turnActive || userStopped || done) return 'not_active';
+    if (provider.supportsToolCancellation !== true || !query.stopTool) return 'unsupported';
+    return query.stopTool(toolCallId) ? 'accepted' : 'not_running';
+  });
   publishTurn();
 
   // Keep the heartbeat warm for as long as a turn is actually in flight.
@@ -1335,6 +1340,7 @@ export async function processQuery(
     done = true;
     steering.releaseUnapplied();
     unsubscribeStop();
+    unsubscribeToolStop();
     watcher.stop();
     clearInterval(liveHandle);
     completeOrphanedBatches(consumedIds, turnBatchQueue);

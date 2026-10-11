@@ -228,6 +228,24 @@ describe('NativeMcpManager', () => {
     expect(pending).rejects.toThrow();
   });
 
+  it('cancels only one MCP request and keeps its sibling and shared connection usable', async () => {
+    const fixture = path.join(import.meta.dir, 'test-fixtures', 'stdio-mcp.ts');
+    const bun = Bun.which('bun');
+    if (!bun) throw new Error('bun executable not found');
+    const manager = new NativeMcpManager({ Fixture: { command: bun, args: ['run', fixture], timeout: 5000 } }, process.cwd());
+    managers.push(manager);
+    const tools = await manager.tools();
+    const controller = new AbortController();
+    const target = Promise.resolve(execute(tools, 'mcp__Fixture__wait', { ms: 1000 }, controller.signal))
+      .catch((error: unknown) => error);
+    const sibling = execute(tools, 'mcp__Fixture__wait', { ms: 20 });
+    controller.abort(new Error('Stop only this tool'));
+    expect(await target).toBeInstanceOf(Error);
+    expect(await sibling).toEqual({ content: [{ type: 'text', text: 'waited' }] });
+    expect(await execute(tools, 'mcp__Fixture__echo_value', { value: 'still connected' }))
+      .toEqual({ content: [{ type: 'text', text: 'echo:still connected' }] });
+  });
+
   it('aborts MCP discovery without retaining a late connection', async () => {
     const hanging = Bun.serve({
       port: 0,

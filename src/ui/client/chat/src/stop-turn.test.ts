@@ -111,6 +111,21 @@ describe('turn-scoped Stop', () => {
     expect(stopRequest.value?.busy).toBe(true);
   });
 
+  it.each(['<html>Proxy error</html>', '{"error":42}', 'null'])(
+    'reports a safe HTTP failure for an unusable turn-stop error body: %s',
+    async (body) => {
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(body, { status: 502 }));
+      await stopActiveTurn('turn-1');
+      expect(stopRequest.value).toEqual({
+        turnId: 'turn-1',
+        busy: false,
+        error: 'Stop request failed (HTTP 502).',
+      });
+      expect(console.error).toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it('waits for durable settlement without a confirmation timeout', async () => {
     await stopActiveTurn('turn-1');
     applyTurnState({ id: 'turn-1', status: 'stopping' }, true);

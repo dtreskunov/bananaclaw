@@ -25,6 +25,8 @@ import { isRecording, recordingDuration, startRecording, stopRecording, cancelRe
 import { voice, voiceBrowserReason } from '../voice-audio';
 import { ComposerInput, useComposerTextarea } from './ComposerInput';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
+import { ToolStopButton } from './ToolStopButton';
+import { toolStopRequest } from '../stop-tool';
 import { PendingMessageActions } from './PendingMessageActions';
 import { canEditMessageInBranch, composerSendInFlight, currentPendingEditor } from '../pending-edit';
 import { usePendingComposer } from '../pending-composer';
@@ -159,7 +161,7 @@ function formatElapsedDuration(ms: number): string {
   return `${ms < 0 ? '-' : ''}${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
 
-function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void; child?: boolean }) {
+function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turnId = null }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void; child?: boolean; turnId?: string | null }) {
   const step = displayStep(line, live);
   const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
   const known = !!(described.action || described.subject);
@@ -175,21 +177,32 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
   const meta = open ? [timestamp, statusText].filter(Boolean).join(' · ') : '';
   const duration = running ? elapsedMs : step.durationMs;
   const todos = open ? todoItems(step) : null;
+  const stoppableId = running && step.id ? step.id : null;
+  const stopError = stoppableId && turnId ? toolStopRequest(turnId, stoppableId)?.error : '';
   return (
     <li class={`trace-row ${traceStatusClass(step)}${open ? ' open' : ''}${child ? ' trace-child' : ''}`}>
-      <button
-        type="button"
-        class="trace-row-toggle"
-        aria-expanded={open}
-        title={open ? 'Collapse step' : `${summary}${statusText ? ` · ${statusText}` : ''}`}
-        aria-label={`${summary}${statusText ? ` · ${statusText}` : ''}`}
-        onClick={onToggle}
-      >
-        <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
-        <span class="trace-text"><StepHeadlineContent headline={headline} /></span>
-        {!open && typeof duration === 'number' && (duration >= 2000 || running || step.status === 'error')
-          ? <span class="trace-duration">{formatDuration(duration)}</span> : null}
-      </button>
+      <div class="trace-row-header">
+        <button
+          type="button"
+          class="trace-row-toggle"
+          aria-expanded={open}
+          title={open ? 'Collapse step' : `${summary}${statusText ? ` · ${statusText}` : ''}`}
+          aria-label={`${summary}${statusText ? ` · ${statusText}` : ''}`}
+          onClick={onToggle}
+        >
+          <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
+          <span class="trace-text"><StepHeadlineContent headline={headline} /></span>
+        </button>
+        <span class="trace-controls">
+          {stoppableId && turnId ? <ToolStopButton turnId={turnId} toolCallId={stoppableId} /> : null}
+          {typeof duration === 'number' && (duration >= 2000 || running || step.status === 'error')
+            ? <span class="trace-duration" role={running ? 'timer' : undefined}
+                aria-live={running ? 'off' : undefined} aria-label="Elapsed activity time">
+                {running ? formatElapsedDuration(duration) : formatDuration(duration)}
+              </span> : null}
+        </span>
+      </div>
+      {stopError ? <div class="trace-note turn-stop-error" role="alert">{stopError}</div> : null}
       {meta ? <div class="trace-meta">{meta}</div> : null}
       {open && isTitleStep(step) && !step.detail ? <div class="trace-note">The title was not recorded for this activity.</div> : null}
       {todos ? <ul class="trace-todos">
@@ -214,11 +227,11 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }: { 
 
 type ActivityTraceTarget = { latest: string | null; chapter: string | null; entry: string | null } | null;
 
-export function ActivityTraceList({ lines, live = false, now = null }: { lines: ActivityLine[]; live?: boolean; now?: number | null }) {
+export function ActivityTraceList({ lines, live = false, now = null, turnId = null }: { lines: ActivityLine[]; live?: boolean; now?: number | null; turnId?: string | null }) {
   const listRef = useRef<HTMLUListElement | null>(null);
   const [target, setTarget] = useState<ActivityTraceTarget>(null);
   useEffect(() => {
-    if (listRef.current) return attachScrollEdges(listRef.current);
+    if (listRef.current) return attachScrollEdges(listRef.current, { horizontal: false });
   }, []);
   const revealed = useRef(false);
   const chapters = activityChapters(lines, live);
@@ -246,7 +259,7 @@ export function ActivityTraceList({ lines, live = false, now = null }: { lines: 
       {chapters.map(chapter => {
         if (chapter.entries.length === 1) {
           const { line, id } = chapter.entries[0];
-          return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} onToggle={() => toggle(chapter.id, id)} />;
+          return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} />;
         }
         const open = openChapter === chapter.id;
         return <li key={chapter.id} class={`trace-chapter trace-status-${chapter.status}${open ? ' open' : ''}`}>
@@ -264,7 +277,7 @@ export function ActivityTraceList({ lines, live = false, now = null }: { lines: 
           </button>
           {open ? <ul class="trace-children">
             {chapter.entries.map(({ line, id }) => <ActivityTraceRow key={id} line={line} open={id === sel}
-              live={live} now={now} onToggle={() => toggle(chapter.id, id)} child />)}
+              live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} child />)}
           </ul> : null}
         </li>;
       })}
@@ -297,6 +310,7 @@ function ActivityTracePanel({
   live = false,
   now = null,
   ownerId,
+  turnId = null,
   metrics = null,
 }: {
   lines: ActivityLine[];
@@ -304,6 +318,7 @@ function ActivityTracePanel({
   live?: boolean;
   now?: number | null;
   ownerId: string;
+  turnId?: string | null;
   metrics?: JSX.Element | null;
 }) {
   const showTrace = lines.length > 0 && expanded;
@@ -311,7 +326,7 @@ function ActivityTracePanel({
   return (
     <div class="msg-activity expanded">
       {metrics}
-      {showTrace ? <ActivityTraceList key={ownerId} lines={lines} live={live} now={now} /> : null}
+      {showTrace ? <ActivityTraceList key={ownerId} lines={lines} live={live} now={now} turnId={turnId} /> : null}
     </div>
   );
 }
@@ -1131,7 +1146,7 @@ function TurnTechnicalDetails({
       <TurnTechnicalInfo usage={usage} count={count} hasOutcome={hasOutcome}
         expanded={expanded} onToggle={() => toggleActivityTrace(ownerId)} />
       <ActivityTracePanel lines={lines} expanded={expanded} live={live} now={now}
-        ownerId={ownerId}
+        ownerId={ownerId} turnId={live && turn ? turn.id : null}
         metrics={metricsExpanded && usage ? <UsageDetails {...usage} /> : null} />
     </div>
   );

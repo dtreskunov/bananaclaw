@@ -30,10 +30,14 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 let queries = 0;
 const provider = {
   supportsNativeSlashCommands: false,
+  supportsToolCancellation: true,
   isSessionInvalid: () => false,
   query(input) {
     const queryNumber = ++queries;
     const first = queryNumber === 1;
+    let releaseTool;
+    let toolStopped = false;
+    const toolSettlement = new Promise((resolve) => { releaseTool = resolve; });
     let settleAnswer;
     const answerSettlement = new Promise((resolve) => {
       settleAnswer = resolve;
@@ -41,7 +45,15 @@ const provider = {
     return {
       push: () => false,
       end() {},
+      stopTool(toolCallId) {
+        if (!first || toolCallId !== 'tool-inflight' || toolStopped) return false;
+        toolStopped = true;
+        report({ kind: 'tool-stopped', toolCallId });
+        releaseTool();
+        return true;
+      },
       abort() {
+        releaseTool();
         report({ kind: 'aborted', queryNumber, pending: getPendingMessages().map((row) => row.id) });
         if (queryNumber > 2) settleAnswer();
       },
@@ -74,6 +86,11 @@ const provider = {
             cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: 0.001 },
         };
         yield { type: 'progress', step: { kind: 'tool', id: 'tool-inflight', tool: 'write', status: 'running' } };
+        await toolSettlement;
+        if (toolStopped) yield { type: 'progress', step: {
+          kind: 'tool', id: 'tool-inflight', tool: 'write', status: 'interrupted',
+          error: 'Interrupted; outcome unknown. External side effects may have occurred.',
+        } };
         await settlement;
         report({ kind: 'settled' });
         yield { type: 'result', text: 'This aborted response must not be delivered' };

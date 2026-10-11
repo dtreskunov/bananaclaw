@@ -5,6 +5,7 @@ import { QuestionPrompt } from './QuestionPrompt';
 import { ComposerInput } from './ComposerInput';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
 import { TurnStopButton } from './TurnStopButton';
+import { ToolStopButton } from './ToolStopButton';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { PendingMessageActions } from './PendingMessageActions';
 import {
@@ -2645,7 +2646,7 @@ describe('activity trace completion', () => {
     const info = findComponent(renderDetails(), 'TurnTechnicalInfo');
     findComponent(info.type(info.props), 'ActivityTraceToggle').props.onToggle();
     const live = findComponent(renderDetails(), 'ActivityTracePanel');
-    expect(live.props).toMatchObject({ expanded: true, live: true });
+    expect(live.props).toMatchObject({ expanded: true, live: true, turnId: turn.id });
     const liveList = findComponent(live.type(live.props), 'ActivityTraceList');
     applyConversationFrame(
       testSnapshot(
@@ -2658,7 +2659,7 @@ describe('activity trace completion', () => {
       'thread',
     );
     const completed = findComponent(renderDetails(), 'ActivityTracePanel');
-    expect(completed.props).toMatchObject({ expanded: true, live: false });
+    expect(completed.props).toMatchObject({ expanded: true, live: false, turnId: null });
     const list = findComponent(completed.type(completed.props), 'ActivityTraceList');
     expect(list.key).toBe(liveList.key);
     resetMount();
@@ -2684,6 +2685,75 @@ describe('activity trace chapter following', () => {
   }
   beforeEach(() => {
     resetMount();
+  });
+
+  it('places Stop before the live stopwatch outside the disclosure button, even with details open', () => {
+    const list = ActivityTraceList({ lines: [line('one', 'running')], live: true, now: 65_000, turnId: 'owning-turn' });
+    const row = findComponent(list, 'ActivityTraceRow');
+    expect(row.props.turnId).toBe('owning-turn');
+    for (const open of [false, true]) {
+      const view = row.type({ ...row.props, open });
+      const [header] = view.props.children;
+      const [toggle, controls] = header.props.children;
+      expect(toggle.props.class).toBe('trace-row-toggle');
+      expect(toggle.props['aria-expanded']).toBe(open);
+      expect(findComponent(toggle, 'ToolStopButton')).toBeUndefined();
+      const [stop, timer] = controls.props.children;
+      expect(stop.type).toBe(ToolStopButton);
+      expect(stop.props.turnId).toBe('owning-turn');
+      expect(stop.props.toolCallId).toBe('one');
+      expect(timer.props).toMatchObject({
+        class: 'trace-duration',
+        role: 'timer',
+        'aria-live': 'off',
+        'aria-label': 'Elapsed activity time',
+        children: '1:04',
+      });
+    }
+    const updated = row.type({ ...row.props, now: 66_000 });
+    expect(updated.props.children[0].props.children[1].props.children[1].props.children).toBe('1:05');
+  });
+
+  it('passes the authoritative response ID to every chapter child', () => {
+    const list = ActivityTraceList({
+      lines: [line('one', 'completed'), line('two', 'running')],
+      live: true,
+      now: 65_000,
+      turnId: 'owning-turn',
+    });
+    const children = list.props.children[0].props.children[1].props.children;
+    expect(children).toHaveLength(2);
+    for (const child of children) expect(child.props.turnId).toBe('owning-turn');
+  });
+
+  it('keeps recorded durations on expanded completed rows without Stop or a live timer', () => {
+    const completed = {
+      ts: '1000',
+      text: JSON.stringify({
+        kind: 'tool',
+        id: 'one',
+        tool: 'bash',
+        status: 'completed',
+        durationMs: 2200,
+        detail: 'echo done',
+      }),
+    };
+    const list = ActivityTraceList({ lines: [completed], live: false, now: 65_000, turnId: 'old-turn' });
+    const row = findComponent(list, 'ActivityTraceRow');
+    const view = row.type({ ...row.props, open: true });
+    expect(findComponent(view, 'ToolStopButton')).toBeUndefined();
+    const timer = view.props.children[0].props.children[1].props.children[1];
+    expect(timer.props.children).toBe('2.2s');
+    expect(timer.props.role).toBeUndefined();
+  });
+
+  it('does not invent a live duration or a stoppable turn for legacy unfinished activity', () => {
+    const unfinished = { ...line('one', 'running'), ts: '' };
+    const list = ActivityTraceList({ lines: [unfinished], live: true, now: 65_000 });
+    const row = findComponent(list, 'ActivityTraceRow');
+    const view = row.type(row.props);
+    expect(findComponent(view, 'ToolStopButton')).toBeUndefined();
+    expect(view.props.children[0].props.children[1].props.children).toEqual([null, null]);
   });
 
   it('follows singleton and chapter headers without automatically expanding step details', () => {

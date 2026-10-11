@@ -187,7 +187,14 @@ const timelineRow: Check = (v) =>
   shape({ kind: oneOf('question'), questionId: id, trace: optional(tracePlacement) })(v) ||
   shape({ kind: oneOf('turn'), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v);
 const connection = shape({ connected: bool, activeTurnId: nullable(id) });
-const capabilities = shape({ canSend: bool, stop: bool, steer: bool, editInput: bool, cancelInput: bool });
+const capabilities = shape({
+  canSend: bool,
+  stop: bool,
+  stopTool: optional(bool),
+  steer: bool,
+  editInput: bool,
+  cancelInput: bool,
+});
 const conversation = shape({
   threadId: id,
   messages: array(message),

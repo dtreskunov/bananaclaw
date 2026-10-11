@@ -42,6 +42,7 @@ export interface ActiveTurn {
   supportsSteering?: boolean;
   supportsInputEditing?: boolean;
   supportsInputCancellation?: boolean;
+  supportsToolCancellation?: boolean;
 }
 
 export function isAddressableTurn(turn: ActiveTurn): boolean {
@@ -63,6 +64,21 @@ export function onTurnStop(listener: (turnId: string) => void): () => void {
 
 export function requestTurnStop(turnId: string): void {
   for (const listener of stopListeners) listener(turnId);
+}
+
+export type ToolStopResult = 'accepted' | 'not_active' | 'not_running' | 'unsupported' | 'failed';
+const toolStopListeners = new Set<(turnId: string, toolCallId: string) => ToolStopResult>();
+export function onToolStop(listener: (turnId: string, toolCallId: string) => ToolStopResult): () => void {
+  toolStopListeners.add(listener);
+  return () => toolStopListeners.delete(listener);
+}
+
+export function requestToolStop(turnId: string, toolCallId: string): ToolStopResult {
+  for (const listener of toolStopListeners) {
+    const result = listener(turnId, toolCallId);
+    if (result !== 'not_active') return result;
+  }
+  return 'not_active';
 }
 
 interface DurableFrame {
@@ -278,6 +294,22 @@ export class SessionSignalClient {
             Object.keys(frame).every((key) => ['v', 'type', 'turnId'].includes(key))
           ) {
             requestTurnStop(frame.turnId);
+          } else if (
+            frame.type === 'tool.stop' &&
+            typeof frame.requestId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(frame.requestId) &&
+            typeof frame.turnId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(frame.turnId) &&
+            typeof frame.toolCallId === 'string' && frame.toolCallId.length > 0 && frame.toolCallId.length <= 256 &&
+            !/[\u0000-\u001f\u007f]/.test(frame.toolCallId) &&
+            Object.keys(frame).every((key) => ['v', 'type', 'requestId', 'turnId', 'toolCallId'].includes(key))
+          ) {
+            let result: ToolStopResult;
+            try {
+              result = requestToolStop(frame.turnId, frame.toolCallId);
+            } catch (error) {
+              console.error('[session-link] Tool stop failed', error);
+              result = 'failed';
+            }
+            socket.write(`${JSON.stringify({ v: PROTOCOL_VERSION, type: 'tool.stop.result', requestId: frame.requestId, result })}\n`);
           } else if (frame.type === 'host.ready' && Object.keys(frame).every((key) => ['v', 'type'].includes(key))) {
             this.hostReady = true;
             this.lastHostProgressAt = Date.now();

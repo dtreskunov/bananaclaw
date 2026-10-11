@@ -60,6 +60,26 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('authoritative conversation projection', () => {
+  it('gates per-tool cancellation on the route-matched live capability, not saved provider configuration', () => {
+    const capable = {
+      ...signals,
+      active: { connected: true, turn: { ...signals.active.turn, supportsToolCancellation: true } },
+    };
+    const readSignals = (current: typeof capable) => projectConversation(db, context, 't', 'g', [], [], current);
+    expect(readSignals(capable).capabilities.stopTool).toBe(true);
+    expect(readSignals({ ...capable, active: { ...capable.active, connected: false } }).capabilities.stopTool).toBe(
+      false,
+    );
+    expect(
+      readSignals({
+        ...capable,
+        active: { ...capable.active, turn: { ...capable.active.turn, threadId: 'other-thread' } },
+      }).capabilities.stopTool,
+    ).toBe(false);
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'silent', ended_at: '2026-09-29T00:00:01Z' });
+    expect(readSignals(capable).capabilities.stopTool).toBe(false);
+  });
+
   it('projects independently measured model timing and validates its wire shape', () => {
     db.prepare('INSERT INTO turn_usage (id, turn_id, duration_ms, duration_api_ms) VALUES (?, ?, ?, ?)').run(
       'timing',
@@ -384,7 +404,14 @@ describe('authoritative conversation projection', () => {
     const before = read([output, { ...output, id: 'update', deliveryOrigin: 'send_message' }]);
     expect(before.messages.map((m) => m.id)).toEqual(['update']);
     expect(before.turns[0].activity).toEqual([{ ordinal: 1, ts: '1', text: 'work', timelinePosition: 100 }]);
-    expect(before.capabilities).toEqual({ canSend: true, stop: true, steer: true, editInput: true, cancelInput: true });
+    expect(before.capabilities).toEqual({
+      canSend: true,
+      stop: true,
+      stopTool: false,
+      steer: true,
+      editInput: true,
+      cancelInput: true,
+    });
     db.prepare(
       'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
     ).run('out', 1, '1', 'durable', 'turn');

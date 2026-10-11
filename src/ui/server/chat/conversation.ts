@@ -258,6 +258,7 @@ export function projectConversation(
     capabilities: {
       canSend: context.canSend,
       stop: actionable,
+      stopTool: actionable && active?.status === 'running' && active.supportsToolCancellation === true,
       steer: actionable && active?.supportsSteering === true,
       editInput: actionable && active?.supportsInputEditing === true,
       cancelInput: actionable && active?.supportsInputCancellation === true,

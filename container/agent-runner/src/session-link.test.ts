@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from './db/connection.js';
 import { writeMessageOut } from './db/messages-out.js';
-import { isAddressableTurn, onTurnStop, SessionSignalClient } from './session-link.js';
+import { isAddressableTurn, onToolStop, onTurnStop, SessionSignalClient } from './session-link.js';
 
 const sockets: net.Socket[] = [];
 const servers: net.Server[] = [];
@@ -75,6 +75,38 @@ afterEach(async () => {
 });
 
 describe('SessionSignalClient', () => {
+  it('acknowledges tool stops separately from whole-turn controls without replaying them', async () => {
+    initTestSessionDb();
+    const socketPath = createSocketPath();
+    const lines: string[] = [];
+    await listen(socketPath, lines);
+    const calls: string[] = [];
+    const turnStops: string[] = [];
+    const offTool = onToolStop((turnId, toolCallId) => {
+      calls.push(`${turnId}/${toolCallId}`);
+      return toolCallId === 'running' ? 'accepted' : 'not_running';
+    });
+    const offTurn = onTurnStop((turnId) => turnStops.push(turnId));
+    const client = new SessionSignalClient(socketPath);
+    try {
+      void client.start();
+      await waitFor(() => sockets.length === 1 && lines.length > 0);
+      for (const toolCallId of ['running', 'completed']) sockets[0].write(`${JSON.stringify({
+        v: 5, type: 'tool.stop', requestId: toolCallId, turnId: 'turn', toolCallId,
+      })}\n`);
+      await waitFor(() => lines.filter((line) => JSON.parse(line).type === 'tool.stop.result').length === 2);
+      expect(lines.map((line) => JSON.parse(line)).filter((frame) => frame.type === 'tool.stop.result')).toEqual([
+        { v: 5, type: 'tool.stop.result', requestId: 'running', result: 'accepted' },
+        { v: 5, type: 'tool.stop.result', requestId: 'completed', result: 'not_running' },
+      ]);
+      expect(calls).toEqual(['turn/running', 'turn/completed']);
+      expect(turnStops).toEqual([]);
+    } finally {
+      client.stop();
+      offTool();
+      offTurn();
+    }
+  });
   it('recovers a dead socket without its close callback and drains the queued report', async () => {
     initTestSessionDb();
     const socketPath = createSocketPath();

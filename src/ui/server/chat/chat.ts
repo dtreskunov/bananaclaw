@@ -37,8 +37,10 @@ import {
   isSessionTurnId,
   notifySessionHostState,
   requestSessionTurnStop,
+  requestSessionToolStop,
   type SessionActiveTurn,
 } from '../../../session-link.js';
+import { isToolCallId } from '../../../session-link-validate.js';
 import { openInboundDb, openOutboundDb, sessionDir, writeSessionMessage } from '../../../session-manager.js';
 import { killContainer } from '../../../container-runner.js';
 import {
@@ -159,6 +161,7 @@ export function matchChatPath(pathname: string):
   | { kind: 'start'; groupId: string }
   | { kind: 'send'; groupId: string; threadId: string }
   | { kind: 'stop'; groupId: string; threadId: string }
+  | { kind: 'stop-tool'; groupId: string; threadId: string }
   | { kind: 'edit-input'; groupId: string; threadId: string; messageId: string }
   | { kind: 'threads'; groupId: string }
   | { kind: 'search'; groupId: string }
@@ -193,6 +196,9 @@ export function matchChatPath(pathname: string):
   if (send) return { kind: 'send', groupId: decodeURIComponent(send[1]), threadId: decodeURIComponent(send[2]) };
   const stop = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/stop$/);
   if (stop) return { kind: 'stop', groupId: decodeURIComponent(stop[1]), threadId: decodeURIComponent(stop[2]) };
+  const stopTool = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/stop-tool$/);
+  if (stopTool)
+    return { kind: 'stop-tool', groupId: decodeURIComponent(stopTool[1]), threadId: decodeURIComponent(stopTool[2]) };
   const editInput = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/messages\/([^/]+)$/);
   if (editInput)
     return {
@@ -465,7 +471,7 @@ export async function handleChatRequest(
     return true;
   }
 
-  if (m.kind === 'stop') {
+  if (m.kind === 'stop' || m.kind === 'stop-tool') {
     if (req.method !== 'POST') {
       writeJson(res, 405, { error: 'method_not_allowed' });
       return true;
@@ -481,11 +487,16 @@ export async function handleChatRequest(
       !body ||
       typeof body !== 'object' ||
       Array.isArray(body) ||
-      Object.keys(body).length !== 1 ||
+      !Object.keys(body).every((key) => key === 'turnId' || (m.kind === 'stop-tool' && key === 'toolCallId')) ||
       !('turnId' in body) ||
       !isSessionTurnId(body.turnId)
     ) {
       writeJson(res, 400, { error: 'invalid_turn_id' });
+      return true;
+    }
+    const toolCallId = 'toolCallId' in body && isToolCallId(body.toolCallId) ? body.toolCallId : null;
+    if (m.kind === 'stop-tool' && toolCallId === null) {
+      writeJson(res, 400, { error: 'invalid_tool_call' });
       return true;
     }
     const query = new URLSearchParams((req.url || '').split('?')[1] || '');
@@ -511,14 +522,28 @@ export async function handleChatRequest(
       writeJson(res, 409, { error: 'not_active' });
       return true;
     }
-    const result = await requestSessionTurnStop(context.sessionId, body.turnId);
+    const result = toolCallId
+      ? { kind: 'tool' as const, ...(await requestSessionToolStop(context.sessionId, body.turnId, toolCallId)) }
+      : { kind: 'turn' as const, ...(await requestSessionTurnStop(context.sessionId, body.turnId)) };
     if (!result.accepted) {
-      writeJson(res, result.error === 'disconnected' ? 503 : result.error === 'invalid_turn_id' ? 400 : 409, {
-        error: result.error,
-      });
+      const status = {
+        disconnected: 503,
+        timeout: 503,
+        invalid_tool_call: 400,
+        invalid_turn_id: 400,
+        failed: 500,
+        not_active: 409,
+        not_running: 409,
+        unsupported: 409,
+      }[result.error];
+      writeJson(res, status, { error: result.error });
       return true;
     }
-    writeJson(res, 202, { activeTurn: publicActiveTurn(result.turn), connected: true });
+    writeJson(
+      res,
+      202,
+      result.kind === 'turn' ? { activeTurn: publicActiveTurn(result.turn), connected: true } : { accepted: true },
+    );
     return true;
   }
 

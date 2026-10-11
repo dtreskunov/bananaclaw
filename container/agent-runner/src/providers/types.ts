@@ -16,6 +16,7 @@ export interface AgentProvider {
   readonly supportsSteering?: boolean;
   readonly supportsInputEditing?: boolean;
   readonly supportsInputCancellation?: boolean;
+  readonly supportsToolCancellation?: boolean;
 
   /** IDs durably incorporated into this continuation, for runner ack recovery. */
   appliedSteering?(continuation: string, ids: string[]): string[];
@@ -225,6 +226,8 @@ export interface AgentQuery {
   replaceSteering?(input: SteeringInput): boolean;
   /** Remove buffered guidance; false once preparation or consumption begins. */
   cancelSteering?(id: string): boolean;
+  /** Cancel only a currently executing tool. Never abort the query or its siblings. */
+  stopTool?(toolCallId: string): boolean;
 
   /** Push a follow-up message into the active query. */
   push(

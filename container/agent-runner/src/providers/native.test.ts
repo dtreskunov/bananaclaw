@@ -1387,6 +1387,7 @@ describe('NativeProvider', () => {
           return new Promise<string>((_resolve, reject) => {
             options.abortSignal!.addEventListener('abort', () => reject(new Error('stopped')), { once: true });
           });
+
         },
       }),
     });
@@ -1403,6 +1404,79 @@ describe('NativeProvider', () => {
       expect(requests).toHaveLength(1);
       const continuation = events.find((event) => event.type === 'init')!.continuation;
       expect(provider.appliedSteering(continuation, ['pending'])).toEqual([]);
+    } finally {
+      query.abort();
+      await consume;
+      toolSpy.mockRestore();
+    }
+  });
+
+  it('stops one native tool, returns its interruption to the model, and continues to a reply', async () => {
+    slowToolMode = true;
+    const toolSpy = spyOn(nativeTools, 'createNativeTools').mockReturnValue({
+      bash: tool({
+        inputSchema: jsonSchema({ type: 'object' }),
+        execute: async (_args, options) => new Promise<string>((_resolve, reject) => {
+          options.abortSignal!.addEventListener('abort', () => reject(new Error('cancelled tool')), { once: true });
+        }),
+      }),
+    });
+    const provider = new NativeProvider({ model: 'local/test-model' });
+    const query = provider.query({ prompt: 'Run a tool then reply', cwd: root });
+    const events: ProviderEvent[] = [];
+    try {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'progress' && event.step.kind === 'tool' && event.step.status === 'running') {
+          expect(query.stopTool!('stale-call')).toBe(false);
+          expect(query.stopTool!(event.step.id)).toBe(true);
+        }
+        if (event.type === 'result' || event.type === 'error') query.end();
+      }
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[1].messages)).toContain('Interrupted; outcome unknown');
+      expect(events.some((event) => event.type === 'progress' && event.step.kind === 'tool' &&
+        event.step.status === 'interrupted')).toBe(true);
+      expect(replyTexts(events)).toEqual([['hello from stub']]);
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(query.stopTool!('call_1')).toBe(false);
+    } finally {
+      query.abort();
+      toolSpy.mockRestore();
+    }
+  });
+
+  it('cancels an already-executing tool and still completes the same model turn', async () => {
+    slowToolMode = true;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => { started = resolve; });
+    const toolSpy = spyOn(nativeTools, 'createNativeTools').mockReturnValue({
+      bash: tool({
+        inputSchema: jsonSchema({ type: 'object' }),
+        execute: async (_args, options) => {
+          started();
+          return new Promise<string>((_resolve, reject) => {
+            options.abortSignal!.addEventListener('abort', () => reject(new Error('tool stopped')), { once: true });
+          });
+        },
+      }),
+    });
+    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'Do work and reply', cwd: root });
+    const events: ProviderEvent[] = [];
+    const consume = (async () => {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type === 'result' || event.type === 'error') query.end();
+      }
+    })();
+    try {
+      await running;
+      expect(query.stopTool!('call_1')).toBe(true);
+      await consume;
+      expect(requests).toHaveLength(2);
+      expect(replyTexts(events)).toEqual([['hello from stub']]);
+      expect(JSON.stringify(requests[1].messages)).toContain('Interrupted; outcome unknown');
+      expect(events.some((event) => event.type === 'error')).toBe(false);
     } finally {
       query.abort();
       await consume;

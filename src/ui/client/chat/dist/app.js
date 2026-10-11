@@ -18342,7 +18342,14 @@ var question = shape({
 var tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
 var timelineRow = (v5) => shape({ kind: oneOf("message"), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v5) || shape({ kind: oneOf("question"), questionId: id, trace: optional(tracePlacement) })(v5) || shape({ kind: oneOf("turn"), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v5);
 var connection = shape({ connected: bool, activeTurnId: nullable(id) });
-var capabilities = shape({ canSend: bool, stop: bool, steer: bool, editInput: bool, cancelInput: bool });
+var capabilities = shape({
+  canSend: bool,
+  stop: bool,
+  stopTool: optional(bool),
+  steer: bool,
+  editInput: bool,
+  cancelInput: bool
+});
 var conversation = shape({
   threadId: id,
   messages: array(message),
@@ -18465,6 +18472,109 @@ function reduceConversation(state, frame) {
   return next;
 }
 
+// src/stop-request.ts
+var TOOL_STOP_ERRORS = {
+  not_running: "This tool is no longer running. Waiting for its latest state.",
+  not_active: "This response is no longer active.",
+  unsupported: "This provider cannot stop individual tools.",
+  disconnected: "Runner disconnected. Reconnect to check this tool.",
+  timeout: "The runner did not confirm the tool stop request. Try again."
+};
+async function sendStopRequest(groupId2, threadId2, target, signal) {
+  const tool = target.toolCallId !== void 0;
+  let url = `api/groups/${encodeURIComponent(groupId2)}/chat/${encodeURIComponent(threadId2)}/${tool ? "stop-tool" : "stop"}`;
+  if (channelType.value !== "web" && messagingGroupId.value) {
+    url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
+  }
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(target),
+    signal
+  });
+  if (response.ok) return;
+  let message2 = `${tool ? "Tool stop" : "Stop"} request failed (HTTP ${response.status}).`;
+  const detail = await response.text();
+  try {
+    const body = JSON.parse(detail);
+    if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+      message2 = tool && TOOL_STOP_ERRORS[body.error] || body.error;
+    }
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+  }
+  throw new Error(message2);
+}
+
+// src/stop-tool.ts
+var requests = y3({});
+var pending2 = /* @__PURE__ */ new Map();
+var runningTools = /* @__PURE__ */ new Set();
+var keyFor = (turnId, toolCallId) => JSON.stringify([turnId, toolCallId]);
+function toolStopRequest(turnId, toolCallId) {
+  return requests.value[keyFor(turnId, toolCallId)];
+}
+function clearPending(key) {
+  const request = pending2.get(key);
+  if (request) {
+    clearTimeout(request.timer);
+    request.controller.abort();
+    pending2.delete(key);
+  }
+}
+function resetToolStops() {
+  for (const key of pending2.keys()) clearPending(key);
+  requests.value = {};
+  runningTools.clear();
+}
+function applyToolStopState(view) {
+  const current = view.turns.find((turn2) => turn2.id === view.connection.activeTurnId && turn2.phase === "running");
+  runningTools = new Set(
+    current?.activity.flatMap((line) => {
+      const step = parseStep(line.text);
+      return step.kind === "tool" && step.status === "running" && step.id ? [keyFor(current.id, step.id)] : [];
+    }) ?? []
+  );
+  const next = {};
+  for (const [key, request] of Object.entries(requests.peek())) {
+    if (!runningTools.has(key)) clearPending(key);
+    else if (!view.connection.connected && request.busy) {
+      clearPending(key);
+      next[key] = {
+        busy: false,
+        error: "Connection lost before tool cancellation was confirmed. Reconnect to check this tool."
+      };
+    } else next[key] = request;
+  }
+  requests.value = next;
+}
+async function stopActiveTool(turnId, toolCallId) {
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const key = keyFor(turnId, toolCallId);
+  if (!gid || !tid || !canSend.value || !turnConnected.value || activeTurn.value?.id !== turnId || activeTurn.value.status !== "running" || activeTurn.value.supportsToolCancellation !== true || !runningTools.has(key) || requests.peek()[key]?.busy)
+    return;
+  const generation2 = refs.chatGeneration;
+  const isCurrent = () => generation2 === refs.chatGeneration && groupId.value === gid && threadId.value === tid && activeTurn.value?.id === turnId && runningTools.has(key);
+  clearPending(key);
+  requests.value = { ...requests.peek(), [key]: { busy: true, error: "" } };
+  const controller = new AbortController();
+  const fail = (message2) => {
+    clearPending(key);
+    if (isCurrent()) requests.value = { ...requests.peek(), [key]: { busy: false, error: message2 } };
+  };
+  const timer2 = setTimeout(() => fail("Tool cancellation was not confirmed. Check its state or try again."), 3e4);
+  pending2.set(key, { controller, timer: timer2 });
+  try {
+    await sendStopRequest(gid, tid, { turnId, toolCallId }, controller.signal);
+  } catch (error) {
+    if (!isCurrent() || controller.signal.aborted) return;
+    console.error("Tool stop request failed", error);
+    fail(error instanceof Error ? error.message : "Tool stop request failed. Try again.");
+  }
+}
+
 // src/stop-turn.ts
 var STOP_REQUEST_TIMEOUT_MS = 3e4;
 var requestTimer = null;
@@ -18506,6 +18616,7 @@ function applyTurnState(turn2, connected) {
   });
 }
 function resetTurnState() {
+  resetToolStops();
   clearPendingStop();
   n2(() => {
     activeTurn.value = null;
@@ -18525,30 +18636,8 @@ async function stopActiveTurn(turnId) {
   const controller = new AbortController();
   requestController = controller;
   boundRequest(turnId);
-  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/stop`;
-  if (channelType.value !== "web" && messagingGroupId.value) {
-    url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
-  }
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ turnId }),
-      signal: controller.signal
-    });
-    if (!isCurrent()) return;
-    if (!response.ok) {
-      const detail = await response.text();
-      let message2 = `Stop request failed (HTTP ${response.status}).`;
-      try {
-        const body = JSON.parse(detail);
-        if (body && typeof body === "object" && "error" in body && typeof body.error === "string") message2 = body.error;
-      } catch (error) {
-        if (!(error instanceof SyntaxError)) throw error;
-      }
-      throw new Error(message2);
-    }
+    await sendStopRequest(gid, tid, { turnId }, controller.signal);
   } catch (error) {
     if (!isCurrent() || controller.signal.aborted) return;
     clearPendingStop();
@@ -18879,7 +18968,7 @@ function u4(e4, t4, n3, o4, i5, u5) {
 // src/components/Toast.tsx
 var nextId = 1;
 var hideTimer = null;
-var pending2 = [];
+var pending3 = [];
 function displayToast(message2, ms) {
   if (hideTimer) {
     clearTimeout(hideTimer);
@@ -18897,7 +18986,7 @@ function enqueueToast(message2, ms = 1800) {
   if (message2.action && message2.action === current?.action && message2.actionLabel === current.actionLabel) {
     displayToast(message2, ms);
   } else if (current?.kind === "err" || current?.actionLabel) {
-    pending2.push({ message: message2, ms });
+    pending3.push({ message: message2, ms });
   } else {
     displayToast(message2, ms);
   }
@@ -18913,7 +19002,7 @@ function dismissToast() {
     clearTimeout(hideTimer);
     hideTimer = null;
   }
-  const next = pending2.shift();
+  const next = pending3.shift();
   if (next) displayToast(next.message, next.ms);
   else toastMessage.value = null;
 }
@@ -19354,6 +19443,7 @@ var conversationState = y3(null);
 var completedResponse = y3(null);
 var chatTranscript = y3([]);
 function resetConversation() {
+  resetToolStops();
   chatReloadRequired.value = false;
   conversationState.value = null;
   completedResponse.value = null;
@@ -19444,10 +19534,12 @@ function applyConversationFrame(raw, expectedThreadId) {
         status: current.phase === "stopping" ? "stopping" : "running",
         supportsSteering: caps.steer,
         supportsInputEditing: caps.editInput,
-        supportsInputCancellation: caps.cancelInput
+        supportsInputCancellation: caps.cancelInput,
+        supportsToolCancellation: caps.stopTool === true
       } : null,
       view.connection.connected
     );
+    applyToolStopState(view);
     chatLoading.value = false;
     chatReady.value = true;
     chatReloadRequired.value = false;
@@ -22262,6 +22354,37 @@ function ActiveTurnStopButton({ turnId }) {
   );
 }
 
+// src/components/ToolStopButton.tsx
+function ToolStopButton({ turnId, toolCallId }) {
+  if (!canSend.value) return null;
+  const turn2 = activeTurn.value;
+  const request = toolStopRequest(turnId, toolCallId);
+  const supported = turn2?.id === turnId && turn2.supportsToolCancellation === true;
+  let label = "Stop tool";
+  if (request?.busy) label = "Stopping tool";
+  else if (request?.error) label = "Retry stopping tool";
+  let title = "Stop only this tool call. The response and other tools will continue; completed side effects are not undone.";
+  if (!supported) title = "This provider cannot stop individual tools.";
+  else if (!turnConnected.value) title = "Reconnect to stop this tool.";
+  else if (request?.error) title = request.error;
+  else if (request?.busy) title = "Stopping this tool call. The response and other tools will continue.";
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg-action-btn tool-stop",
+      "aria-label": label,
+      "aria-busy": request?.busy ?? false,
+      title,
+      disabled: !supported || !turnConnected.value || turn2?.status !== "running" || !!request?.busy,
+      onClick: () => {
+        void stopActiveTool(turnId, toolCallId);
+      },
+      children: /* @__PURE__ */ u4(StopIcon, {})
+    }
+  );
+}
+
 // src/components/PendingMessageActions.tsx
 function PendingMessageActions({ message: message2, thread, gid, children }) {
   if (!gid || !thread || !message2.id || message2.direction !== "in")
@@ -23574,7 +23697,7 @@ function formatElapsedDuration(ms) {
   const minutes = Math.floor(seconds / 60);
   return `${ms < 0 ? "-" : ""}${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
-function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
+function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turnId = null }) {
   const step = displayStep(line, live);
   const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
   const known = !!(described.action || described.subject);
@@ -23590,23 +23713,40 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
   const meta = open ? [timestamp, statusText].filter(Boolean).join(" \xB7 ") : "";
   const duration = running ? elapsedMs : step.durationMs;
   const todos = open ? todoItems(step) : null;
+  const stoppableId = running && step.id ? step.id : null;
+  const stopError = stoppableId && turnId ? toolStopRequest(turnId, stoppableId)?.error : "";
   return /* @__PURE__ */ u4("li", { class: `trace-row ${traceStatusClass(step)}${open ? " open" : ""}${child ? " trace-child" : ""}`, children: [
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "trace-row-toggle",
-        "aria-expanded": open,
-        title: open ? "Collapse step" : `${summary}${statusText ? ` \xB7 ${statusText}` : ""}`,
-        "aria-label": `${summary}${statusText ? ` \xB7 ${statusText}` : ""}`,
-        onClick: onToggle,
-        children: [
-          /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
-          /* @__PURE__ */ u4("span", { class: "trace-text", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }),
-          !open && typeof duration === "number" && (duration >= 2e3 || running || step.status === "error") ? /* @__PURE__ */ u4("span", { class: "trace-duration", children: formatDuration2(duration) }) : null
-        ]
-      }
-    ),
+    /* @__PURE__ */ u4("div", { class: "trace-row-header", children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "trace-row-toggle",
+          "aria-expanded": open,
+          title: open ? "Collapse step" : `${summary}${statusText ? ` \xB7 ${statusText}` : ""}`,
+          "aria-label": `${summary}${statusText ? ` \xB7 ${statusText}` : ""}`,
+          onClick: onToggle,
+          children: [
+            /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
+            /* @__PURE__ */ u4("span", { class: "trace-text", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) })
+          ]
+        }
+      ),
+      /* @__PURE__ */ u4("span", { class: "trace-controls", children: [
+        stoppableId && turnId ? /* @__PURE__ */ u4(ToolStopButton, { turnId, toolCallId: stoppableId }) : null,
+        typeof duration === "number" && (duration >= 2e3 || running || step.status === "error") ? /* @__PURE__ */ u4(
+          "span",
+          {
+            class: "trace-duration",
+            role: running ? "timer" : void 0,
+            "aria-live": running ? "off" : void 0,
+            "aria-label": "Elapsed activity time",
+            children: running ? formatElapsedDuration(duration) : formatDuration2(duration)
+          }
+        ) : null
+      ] })
+    ] }),
+    stopError ? /* @__PURE__ */ u4("div", { class: "trace-note turn-stop-error", role: "alert", children: stopError }) : null,
     meta ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: meta }) : null,
     open && isTitleStep(step) && !step.detail ? /* @__PURE__ */ u4("div", { class: "trace-note", children: "The title was not recorded for this activity." }) : null,
     todos ? /* @__PURE__ */ u4("ul", { class: "trace-todos", children: todos.map((todo, index) => {
@@ -23628,11 +23768,11 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false }) {
     open && todos && step.error ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: step.error }) }) : null
   ] });
 }
-function ActivityTraceList({ lines, live = false, now = null }) {
+function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
   const listRef = A2(null);
   const [target, setTarget] = h2(null);
   y2(() => {
-    if (listRef.current) return attachScrollEdges(listRef.current);
+    if (listRef.current) return attachScrollEdges(listRef.current, { horizontal: false });
   }, []);
   const revealed = A2(false);
   const chapters = activityChapters(lines, live);
@@ -23657,7 +23797,7 @@ function ActivityTraceList({ lines, live = false, now = null }) {
   return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, children: chapters.map((chapter) => {
     if (chapter.entries.length === 1) {
       const { line, id: id2 } = chapter.entries[0];
-      return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, onToggle: () => toggle(chapter.id, id2) }, chapter.id);
+      return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, turnId, onToggle: () => toggle(chapter.id, id2) }, chapter.id);
     }
     const open = openChapter === chapter.id;
     return /* @__PURE__ */ u4("li", { class: `trace-chapter trace-status-${chapter.status}${open ? " open" : ""}`, children: [
@@ -23689,6 +23829,7 @@ function ActivityTraceList({ lines, live = false, now = null }) {
           open: id2 === sel,
           live,
           now,
+          turnId,
           onToggle: () => toggle(chapter.id, id2),
           child: true
         },
@@ -23721,13 +23862,14 @@ function ActivityTracePanel({
   live = false,
   now = null,
   ownerId,
+  turnId = null,
   metrics = null
 }) {
   const showTrace = lines.length > 0 && expanded;
   if (!showTrace && !metrics) return null;
   return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: [
     metrics,
-    showTrace ? /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now }, ownerId) : null
+    showTrace ? /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now, turnId }, ownerId) : null
   ] });
 }
 function shortModel(model) {
@@ -24510,6 +24652,7 @@ function TurnTechnicalDetails({
         live,
         now,
         ownerId,
+        turnId: live && turn2 ? turn2.id : null,
         metrics: metricsExpanded && usage2 ? /* @__PURE__ */ u4(UsageDetails, { ...usage2 }) : null
       }
     )
@@ -30616,7 +30759,7 @@ function SkillDirectoryResults({
 }) {
   const [expanded, setExpanded] = h2(/* @__PURE__ */ new Set());
   const [previews, setPreviews] = h2({});
-  const requests = A2({});
+  const requests2 = A2({});
   const latest = A2({ discover, refreshState });
   latest.current = { discover, refreshState };
   function versionFor(source) {
@@ -30624,9 +30767,9 @@ function SkillDirectoryResults({
     return id2 ? latest.current.refreshState.versions[id2] ?? 0 : 0;
   }
   async function loadPreview(source, version) {
-    const request = (requests.current[source] ?? 0) + 1;
-    requests.current[source] = request;
-    const current = () => requests.current[source] === request && versionFor(source) === version;
+    const request = (requests2.current[source] ?? 0) + 1;
+    requests2.current[source] = request;
+    const current = () => requests2.current[source] === request && versionFor(source) === version;
     setPreviews((prev) => ({ ...prev, [source]: { version, value: "loading" } }));
     try {
       const r4 = await call(
@@ -30662,7 +30805,7 @@ function SkillDirectoryResults({
     }
   }, [discover, expanded, previews, refreshState]);
   y2(() => () => {
-    requests.current = {};
+    requests2.current = {};
   }, []);
   const sources = discover.sources.map((entry) => ({ ...entry, skills: entry.skills.filter((skill) => !installedSlugs.has(skill.slug)) })).filter((entry) => entry.skills.length > 0);
   async function toggle(source) {
@@ -31577,13 +31720,13 @@ function SettingsTab({
     }
     return out;
   }
-  const pending3 = changedFields();
-  const changed = pending3.size > 0;
-  const voiceOnlyChange = pending3.size > 0 && [...pending3].every((field) => field === "voice_input_backend" || field === "voice_input_enabled");
-  const needsRestart = [...pending3].some((f5) => RESTART_REQUIRING_FIELDS.has(f5));
-  const imageRebuildNeeded = pending3.has("image_tag") && draft.image_tag != null && !!images && !images.images.some((i5) => i5.value === draft.image_tag);
-  const packagesChanged = pending3.has("packages_apt") || pending3.has("packages_npm") || pending3.has("packages_pip");
-  const providerChangedWithCustomImage = pending3.has("provider") && draft.image_tag != null;
+  const pending4 = changedFields();
+  const changed = pending4.size > 0;
+  const voiceOnlyChange = pending4.size > 0 && [...pending4].every((field) => field === "voice_input_backend" || field === "voice_input_enabled");
+  const needsRestart = [...pending4].some((f5) => RESTART_REQUIRING_FIELDS.has(f5));
+  const imageRebuildNeeded = pending4.has("image_tag") && draft.image_tag != null && !!images && !images.images.some((i5) => i5.value === draft.image_tag);
+  const packagesChanged = pending4.has("packages_apt") || pending4.has("packages_npm") || pending4.has("packages_pip");
+  const providerChangedWithCustomImage = pending4.has("provider") && draft.image_tag != null;
   const needsRebuild = imageRebuildNeeded || packagesChanged || providerChangedWithCustomImage;
   const [confirmOpen, setConfirmOpen] = h2(false);
   const [restartChecked, setRestartChecked] = h2(false);
@@ -31617,53 +31760,53 @@ function SettingsTab({
         "packages_npm",
         "packages_pip"
       ]);
-      const settingsChanged = [...pending3].some((f5) => !JSON_FIELDS.has(f5));
+      const settingsChanged = [...pending4].some((f5) => !JSON_FIELDS.has(f5));
       if (settingsChanged) {
         const body = voiceOnlyChange ? { voice_input_backend: draft.voice_input_backend, voice_input_enabled: draft.voice_input_enabled } : { ...draft };
         if (data && draftName.trim() !== data.name) body.name = draftName.trim();
-        if (pending3.has("site_enabled")) body.site_enabled = siteEnabled;
-        if (pending3.has("site_slug")) body.site_slug = siteSlug.trim() || null;
-        if (pending3.has("email_enabled")) body.email_enabled = emailEnabled;
-        if (pending3.has("email_slug")) body.email_slug = emailSlug.trim() || null;
+        if (pending4.has("site_enabled")) body.site_enabled = siteEnabled;
+        if (pending4.has("site_slug")) body.site_slug = siteSlug.trim() || null;
+        if (pending4.has("email_enabled")) body.email_enabled = emailEnabled;
+        if (pending4.has("email_slug")) body.email_slug = emailSlug.trim() || null;
         const r4 = await call(apiPath(gid, "/settings"), "PATCH", body);
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending3.has("model_params")) {
+      if (pending4.has("model_params")) {
         const r4 = await call(apiPath(gid, "/model-params"), "PATCH", { params: draftModelParams });
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending3.has("packages_apt") || pending3.has("packages_npm") || pending3.has("packages_pip")) {
+      if (pending4.has("packages_apt") || pending4.has("packages_npm") || pending4.has("packages_pip")) {
         const body = {};
-        if (pending3.has("packages_apt")) body.apt = draftPackages.apt;
-        if (pending3.has("packages_npm")) body.npm = draftPackages.npm;
-        if (pending3.has("packages_pip")) body.pip = draftPackages.pip;
+        if (pending4.has("packages_apt")) body.apt = draftPackages.apt;
+        if (pending4.has("packages_npm")) body.npm = draftPackages.npm;
+        if (pending4.has("packages_pip")) body.pip = draftPackages.pip;
         const r4 = await call(apiPath(gid, "/packages"), "PATCH", body);
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending3.has("mcp_servers")) {
+      if (pending4.has("mcp_servers")) {
         const r4 = await call(apiPath(gid, "/mcp-servers"), "PATCH", { servers: draftMcpServers });
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending3.has("skills")) {
+      if (pending4.has("skills")) {
         const r4 = await call(apiPath(gid, "/skills"), "PATCH", { skills: draftSkills });
         if (!r4.ok) {
           showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
           return;
         }
       }
-      if (pending3.has("disabled_skills")) {
+      if (pending4.has("disabled_skills")) {
         const r4 = await call(apiPath(gid, "/disabled-skills"), "PATCH", {
           disabledSkills: draftDisabledSkills
         });
@@ -32085,7 +32228,7 @@ function SettingsTab({
         onCatalogChanged: refreshAvailableSkills
       }
     ) : null,
-    /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending3.size} unsaved change${pending3.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),
+    /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending4.size} unsaved change${pending4.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),
     confirmOpen ? /* @__PURE__ */ u4(
       MobileDialog,
       {
@@ -32097,12 +32240,12 @@ function SettingsTab({
         children: [
           /* @__PURE__ */ u4("div", { class: "settings-body", children: [
             /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
-              pending3.size,
+              pending4.size,
               " setting",
-              pending3.size === 1 ? "" : "s",
+              pending4.size === 1 ? "" : "s",
               " will be saved:",
               " ",
-              /* @__PURE__ */ u4("code", { children: [...pending3].join(", ") })
+              /* @__PURE__ */ u4("code", { children: [...pending4].join(", ") })
             ] }),
             /* @__PURE__ */ u4("div", { class: "ga-confirm-options", children: [
               /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [

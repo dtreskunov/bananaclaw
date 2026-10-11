@@ -6,6 +6,69 @@ import { INTERRUPTED_TOOL, NativeTurnJournal } from './turn-journal.js';
 const options = (toolCallId: string): ToolExecutionOptions => ({ toolCallId, messages: [] });
 
 describe('incremental native turn journal', () => {
+  it('cancels only one of two parallel calls, journals its result, and leaves the query usable', async () => {
+    const store = new NativeStore(':memory:');
+    const turnController = new AbortController();
+    try {
+      const conversation = store.createConversation();
+      const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'Run parallel tools' });
+      let release!: (value: string) => void;
+      let siblingSignal: AbortSignal | undefined;
+      const tools = journal.wrap({
+        bash: tool({
+          inputSchema: jsonSchema({ type: 'object' }),
+          execute: async (_input, options) => {
+            if (options.toolCallId === 'target')
+              return new Promise<string>((_resolve, reject) => {
+                options.abortSignal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+              });
+            siblingSignal = options.abortSignal;
+            return new Promise<string>((resolve) => { release = resolve; });
+          },
+        }),
+      }, turnController.signal);
+      const target = Promise.resolve(tools.bash.execute!({}, options('target'))).catch((error: unknown) => error);
+      const sibling = tools.bash.execute!({}, options('sibling'));
+      expect(journal.stopTool('missing')).toBe(false);
+      expect(journal.stopTool('target')).toBe(true);
+      expect(journal.stopTool('target')).toBe(true);
+      expect(await target).toEqual(new Error(INTERRUPTED_TOOL));
+      expect(turnController.signal.aborted).toBe(false);
+      expect(siblingSignal!.aborted).toBe(false);
+      expect(journal.stopTool('target')).toBe(false);
+      release('Sibling completed');
+      expect(await sibling).toBe('Sibling completed');
+      await journal.settle();
+      expect(journal.activity()).toEqual([
+        { kind: 'tool', id: 'target', tool: 'bash', status: 'interrupted', error: INTERRUPTED_TOOL },
+        { kind: 'tool', id: 'sibling', tool: 'bash', status: 'completed' },
+      ]);
+      const history = JSON.stringify(store.messages(conversation));
+      expect(history).toContain(INTERRUPTED_TOOL);
+      expect(history).toContain('Sibling completed');
+      expect(history).not.toContain('The user stopped this turn');
+    } finally { store.close(); }
+  });
+  it('cancels a just-announced call before execution, but refuses a call already completed', async () => {
+    const store = new NativeStore(':memory:');
+    try {
+      const conversation = store.createConversation();
+      const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'Do not start the stopped call' });
+      let executions = 0;
+      const tools = journal.wrap({
+        read: tool({ inputSchema: jsonSchema({ type: 'object' }), execute: async () => { executions++; return 'done'; } }),
+      }, new AbortController().signal);
+      journal.announceTool('before-start');
+      expect(journal.stopTool('before-start')).toBe(true);
+      await expect(tools.read.execute!({}, options('before-start'))).rejects.toThrow(INTERRUPTED_TOOL);
+      expect(executions).toBe(0);
+      await tools.read.execute!({}, options('completed'));
+      journal.announceTool('completed');
+      expect(journal.stopTool('completed')).toBe(false);
+      expect(executions).toBe(1);
+    } finally { store.close(); }
+  });
+
   it('persists async multimodal conversion once across incremental saves, stops and forks', async () => {
     const store = new NativeStore(':memory:');
     try {

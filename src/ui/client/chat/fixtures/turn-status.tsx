@@ -92,7 +92,7 @@ const scene = signal<Scene>('initial');
 const fixtureTurnId = 'fixture-status-turn';
 const fixtureThreadId = 'fixture-status-thread';
 const fixtureGroupId = 'fixture-status-group';
-const requests: { url: string; turnId: string }[] = [];
+const requests: { url: string; turnId: string; toolCallId?: string }[] = [];
 const stopFailure = 'Simulated Stop failure. Try again.';
 let generation = 0;
 interface SendRequest {
@@ -187,7 +187,7 @@ function startResponse(activate = true): void {
     }
   }
   next.connection.activeTurnId = activate ? turn.id : null;
-  next.capabilities = { ...next.capabilities, stop: activate, steer: activate };
+  next.capabilities = { ...next.capabilities, stop: activate, stopTool: activate, steer: activate };
   publish(next);
 }
 
@@ -411,7 +411,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
     turns: [turn],
     questions: [],
     connection: { connected: nextScene !== 'disconnected', activeTurnId: settled ? null : fixtureTurnId },
-    capabilities: { canSend: true, stop: !settled, steer: nextScene === 'busy-send',
+    capabilities: { canSend: true, stop: !settled, stopTool: !settled, steer: nextScene === 'busy-send',
       editInput: pendingInput, cancelInput: pendingInput },
   };
   return { ...view, timeline: conversationTimeline(view) };
@@ -565,13 +565,29 @@ globalThis.fetch = async (input, init) => {
       outstandingCount.value = outstanding.length;
     });
   }
-  if (url !== `api/groups/${fixtureGroupId}/chat/${fixtureThreadId}/stop` || init?.method !== 'POST')
+  const toolStop = url === `api/groups/${fixtureGroupId}/chat/${fixtureThreadId}/stop-tool`;
+  if ((!toolStop && url !== `api/groups/${fixtureGroupId}/chat/${fixtureThreadId}/stop`) || init?.method !== 'POST')
     throw new Error(`Fixture blocked network request: ${url}`);
   if (typeof init.body !== 'string') throw new Error('Fixture stop request body is missing');
   const body: unknown = JSON.parse(init.body);
   const activeId = conversationState.peek()?.conversation.connection.activeTurnId;
   if (!body || typeof body !== 'object' || !('turnId' in body) || typeof body.turnId !== 'string' || body.turnId !== activeId)
     throw new Error('Fixture received an invalid stop target');
+  if (toolStop) {
+    if (!('toolCallId' in body) || typeof body.toolCallId !== 'string') throw new Error('Fixture tool call ID is missing');
+    const next = currentConversation();
+    const turn = next.turns.find((value) => value.id === body.turnId);
+    const activity = turn?.activity.find((line) => JSON.parse(line.text).id === body.toolCallId);
+    if (!activity || !turn) throw new Error('Fixture tool call is missing');
+    const step = JSON.parse(activity.text);
+    if (step.kind !== 'tool' || step.status !== 'running') return Response.json({ error: 'not_running' }, { status: 409 });
+    requests.push({ url, turnId: body.turnId, toolCallId: body.toolCallId });
+    activity.text = JSON.stringify({ ...step, status: 'interrupted',
+      durationMs: Math.max(0, Date.now() - Number(activity.ts)),
+      error: 'Interrupted; outcome unknown. External side effects may have occurred. Do not retry without checking.' });
+    publish(next);
+    return Response.json({ accepted: true }, { status: 202 });
+  }
   requests.push({ url, turnId: body.turnId });
   if (scene.peek() === 'stop-error')
     return new Response(JSON.stringify({ error: stopFailure }), {
@@ -598,7 +614,7 @@ interface FixtureApi {
   failSend: () => void;
   echoSend: typeof echoSend;
   startResponse: typeof startResponse;
-  inspect: () => { scene: Scene; requests: { url: string; turnId: string }[]; sendRequests: SendRequest[];
+  inspect: () => { scene: Scene; requests: { url: string; turnId: string; toolCallId?: string }[]; sendRequests: SendRequest[];
     submissions: { messageId: string; text: string; status: string }[]; conversation: Conversation };
 }
 declare global {

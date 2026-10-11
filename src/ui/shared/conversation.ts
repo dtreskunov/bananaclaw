@@ -110,6 +110,7 @@ export interface ConversationTurn {
 export interface ConversationCapabilities {
   canSend: boolean;
   stop: boolean;
+  stopTool?: boolean;
   steer: boolean;
   editInput: boolean;
   cancelInput: boolean;

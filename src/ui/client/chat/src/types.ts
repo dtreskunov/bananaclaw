@@ -400,6 +400,7 @@ export interface ActiveTurn {
   supportsSteering?: boolean;
   supportsInputEditing?: boolean;
   supportsInputCancellation?: boolean;
+  supportsToolCancellation?: boolean;
 }
 
 export interface VoiceInputCapability {

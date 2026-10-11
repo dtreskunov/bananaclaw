@@ -301,12 +301,25 @@ describe('theme CSS contract', () => {
     expect(css).toContain('top: calc(var(--trace-row-height) / 2)');
   });
 
-  it('shares table transparency fades with the scrollable activity viewport', () => {
+  it('fades trace labels before fixed controls and shares vertical table fades', () => {
     const css = read('./components/ChatMain.css');
     const trace = css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1];
-    expect(trace).toContain('overflow: auto');
-    expect(css).toMatch(/\.trace-meta \{ white-space: nowrap/);
-    expect(css).toContain('width: max-content; min-width: 100%');
+    expect(trace).toContain('overflow-x: hidden');
+    expect(trace).toContain('overflow-y: auto');
+    expect(css).toMatch(/\.trace-meta \{ white-space: normal; overflow-wrap: anywhere/);
+    const toggle = css.match(
+      /\.trace-row-toggle,\s*\.chat-main \.activity-trace \.trace-chapter-toggle \{([^}]+)\}/,
+    )?.[1];
+    expect(toggle).toContain('width: 100%; min-width: 0');
+    const text = css.match(/\.trace-chapter-label,\s*\.chat-main \.activity-trace \.trace-text \{([^}]+)\}/)?.[1];
+    expect(text).toContain('overflow: hidden');
+    expect(text).toContain('mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent)');
+    const controls = css.match(/\.trace-controls \{([^}]+)\}/)?.[1];
+    expect(controls).toContain('display: inline-flex');
+    expect(controls).toContain('flex: none');
+    expect(controls).not.toContain('mask');
+    const duration = css.match(/\.trace-duration \{([^}]+)\}/)?.[1];
+    expect(duration).toContain('white-space: nowrap');
     const global = read('./styles/global.css');
     expect(global).toContain('mask-composite: intersect');
     for (const edge of ['top', 'right', 'bottom'])

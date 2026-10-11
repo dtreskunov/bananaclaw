@@ -79,6 +79,10 @@ export function isSessionTurnId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
 
+export function isToolCallId(value: unknown): value is string {
+  return isTurnRoutingText(value) && value.length <= 256;
+}
+
 export const isTurnIdOrNull: Check = (value) => value === null || isSessionTurnId(value);
 
 function isTurnRoutingText(value: unknown): value is string {
@@ -157,6 +161,7 @@ const TURN_FIELDS: readonly FieldSpec[] = [
   optional('supportsSteering', isBoolean),
   optional('supportsInputEditing', isBoolean),
   optional('supportsInputCancellation', isBoolean),
+  optional('supportsToolCancellation', isBoolean),
 ];
 
 /** A `turn.state` payload: the active turn, null for idle, or false if invalid. */

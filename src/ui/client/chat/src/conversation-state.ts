@@ -21,6 +21,7 @@ import {
   refs,
 } from './state';
 import { applyTurnState } from './stop-turn';
+import { applyToolStopState, resetToolStops } from './stop-tool';
 import { confirmCancelledInput } from './pending-cancel';
 import { playCompletionChime, playProgressTick } from './sound';
 import { maybeNotify } from './notify';
@@ -33,6 +34,7 @@ export const conversationState = signal<ConversationSnapshot | null>(null);
 export const completedResponse = signal<string | null>(null);
 export const chatTranscript = signal<TranscriptRow[]>([]);
 export function resetConversation(): void {
+  resetToolStops();
   chatReloadRequired.value = false;
   conversationState.value = null;
   completedResponse.value = null;
@@ -129,10 +131,12 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
             supportsSteering: caps.steer,
             supportsInputEditing: caps.editInput,
             supportsInputCancellation: caps.cancelInput,
+            supportsToolCancellation: caps.stopTool === true,
           }
         : null,
       view.connection.connected,
     );
+    applyToolStopState(view);
     chatLoading.value = false;
     chatReady.value = true;
     chatReloadRequired.value = false;

@@ -25,7 +25,7 @@ export { prepareNativeUserMessage as userMessage } from './native/attachments.js
 import { loadNativeInstructions, nativeMediaInstructions } from './native/instructions.js';
 import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
-import { NativeTurnJournal } from './native/turn-journal.js';
+import { INTERRUPTED_TOOL, NativeTurnJournal } from './native/turn-journal.js';
 import {
   compactNativeContext, COMPACTION_INSTRUCTIONS, CompactionSummaryError, createCompactionPolicy, isContextOverflow, type NativeCompactionPlan,
 } from './native/compaction.js';
@@ -258,6 +258,7 @@ export class NativeProvider implements AgentProvider {
   readonly supportsSteering = true;
   readonly supportsInputEditing = true;
   readonly supportsInputCancellation = true;
+  readonly supportsToolCancellation = true;
   readonly structuredReplies = true;
   private readonly options: ProviderOptions;
   private readonly store: NativeStore;
@@ -287,6 +288,7 @@ export class NativeProvider implements AgentProvider {
     let ended = false;
     let stoppedByUser = false;
     let active = false;
+    let journal: NativeTurnJournal | undefined;
     const steering: SteeringInput[] = [];
     const acceptedSteering = new Set<string>();
     const preparingSteering = new Set<string>();
@@ -325,7 +327,6 @@ export class NativeProvider implements AgentProvider {
             const startedAt = Date.now();
             let modelCallMs = 0;
             let compactionCalls = 0;
-            let journal: NativeTurnJournal | undefined;
             const callUsages: CallUsage[] = [];
             function* flushCallUsage(): Generator<ProviderEvent> {
               for (const data of callUsages.splice(0)) yield { type: 'usage_call', data };
@@ -561,13 +562,19 @@ export class NativeProvider implements AgentProvider {
                     if (part.toolName === NO_REPLY_TOOL) continue;
                     if (part.type === 'tool-call') {
                       const toolInputFingerprint = fingerprintToolInput(part.input);
+                      const step = formatNativeToolStep(part, 'running');
+                      journal.announceTool(step.id);
                       yield {
                         type: 'progress',
-                        step: formatNativeToolStep(part, 'running'),
+                        step,
                         ...(toolInputFingerprint ? { toolInputFingerprint } : {}),
                       };
                     } else if (part.type === 'tool-result') yield { type: 'progress', step: formatNativeToolStep(part, 'completed') };
-                    else if (part.type === 'tool-error') yield { type: 'progress', step: formatNativeToolStep(part, 'error') };
+                    else if (part.type === 'tool-error') {
+                      const step = formatNativeToolStep(part, 'error');
+                      yield { type: 'progress', step: errorMessage(part.error) === INTERRUPTED_TOOL
+                        ? { ...step, status: 'interrupted', error: INTERRUPTED_TOOL } : step };
+                    }
                     else if (part.type === 'error') throw part.error;
                     else if (part.type === 'text-delta') journal.appendText(String(part.text ?? ''));
                     else if (part.type === 'finish-step') {
@@ -696,6 +703,7 @@ export class NativeProvider implements AgentProvider {
               };
             } finally {
               active = false;
+              journal = undefined;
               steering.length = 0;
               acceptedSteering.clear();
               preparingSteering.clear();
@@ -709,6 +717,9 @@ export class NativeProvider implements AgentProvider {
     };
 
     return {
+      stopTool(toolCallId: string): boolean {
+        return active && !ended && !abortController.signal.aborted && (journal?.stopTool(toolCallId) ?? false);
+      },
       cancelSteering(id: string): boolean {
         if (!active || ended || abortController.signal.aborted || preparingSteering.has(id)) return false;
         const index = steering.findIndex((input) => input.id === id);

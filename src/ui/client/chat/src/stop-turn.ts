@@ -1,16 +1,8 @@
 import { batch } from '@preact/signals';
-import {
-  activeTurn,
-  canSend,
-  channelType,
-  groupId,
-  messagingGroupId,
-  refs,
-  stopRequest,
-  threadId,
-  turnConnected,
-} from './state';
+import { activeTurn, canSend, groupId, refs, stopRequest, threadId, turnConnected } from './state';
 import type { ActiveTurn } from './types';
+import { resetToolStops } from './stop-tool';
+import { sendStopRequest } from './stop-request';
 
 const STOP_REQUEST_TIMEOUT_MS = 30_000;
 let requestTimer: ReturnType<typeof setTimeout> | null = null;
@@ -56,6 +48,7 @@ export function applyTurnState(turn: ActiveTurn | null, connected: boolean): voi
 }
 
 export function resetTurnState(): void {
+  resetToolStops();
   clearPendingStop();
   batch(() => {
     activeTurn.value = null;
@@ -87,31 +80,8 @@ export async function stopActiveTurn(turnId: string): Promise<void> {
   const controller = new AbortController();
   requestController = controller;
   boundRequest(turnId);
-  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/stop`;
-  if (channelType.value !== 'web' && messagingGroupId.value) {
-    url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
-  }
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ turnId }),
-      signal: controller.signal,
-    });
-    if (!isCurrent()) return;
-    if (!response.ok) {
-      const detail = await response.text();
-      let message = `Stop request failed (HTTP ${response.status}).`;
-      try {
-        const body: unknown = JSON.parse(detail);
-        if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') message = body.error;
-      } catch (error) {
-        if (!(error instanceof SyntaxError)) throw error;
-        // Non-JSON error pages are not safe or useful UI messages.
-      }
-      throw new Error(message);
-    }
+    await sendStopRequest(gid, tid, { turnId }, controller.signal);
     // HTTP acceptance is not cancellation acknowledgement; wait for turn state.
   } catch (error) {
     if (!isCurrent() || controller.signal.aborted) return;

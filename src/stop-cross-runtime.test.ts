@@ -31,6 +31,7 @@ import {
   notifySessionHostState,
   onSessionSignal,
   requestSessionTurnStop,
+  requestSessionToolStop,
   sessionLinkSocketPath,
   startSessionSignalServer,
   stopAllSessionSignalServers,
@@ -139,6 +140,12 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     const questionId = JSON.parse(original!.content).questionId as string;
     expect(JSON.parse(original!.content)).not.toHaveProperty('turn_id');
     expect(getQuestion(questionId)?.status).toBe('pending');
+    expect(await requestSessionToolStop(session.id, turnId, 'tool-inflight')).toEqual({ accepted: true });
+    await wait(() => expect(events.some((event) => event.kind === 'tool-stopped')).toBe(true));
+    expect(getSessionActiveTurn(session.id).turn).toMatchObject({ id: turnId, status: 'running' });
+    expect(events.some((event) => event.kind === 'aborted')).toBe(false);
+    expect(getQuestion(questionId)?.status).toBe('pending');
+    expect(outDb.prepare('SELECT id,seq,content FROM messages_out WHERE id=?').get(original!.id)).toEqual(original);
     writeInput('queued-input', 'queued follow-up');
     notifySessionHostState(session.id);
     await wait(() => {
@@ -231,13 +238,19 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     expect(JSON.parse(stopRow.content)).toMatchObject({ turn_id: turnId, stopped: true });
     expect(JSON.parse(stopRow.content)).not.toHaveProperty('cancelled_question_ids');
     const stats = JSON.parse(
-      (outDb.prepare('SELECT value FROM session_state WHERE key = ?').get(`turn-metadata:${turnId}`) as { value: string })
-        .value,
+      (
+        outDb.prepare('SELECT value FROM session_state WHERE key = ?').get(`turn-metadata:${turnId}`) as {
+          value: string;
+        }
+      ).value,
     );
     expect(stats.model).toBe('fixture-model');
     expect(stats.durationMs).toBeGreaterThan(0);
     expect(outDb.prepare('SELECT * FROM turn_usage WHERE message_out_id=?').get(stopRow.id)).toMatchObject({
-      model: 'fixture-model', input_tokens: 11, output_tokens: 2, duration_ms: stats.durationMs,
+      model: 'fixture-model',
+      input_tokens: 11,
+      output_tokens: 2,
+      duration_ms: stats.durationMs,
     });
   },
   30_000,

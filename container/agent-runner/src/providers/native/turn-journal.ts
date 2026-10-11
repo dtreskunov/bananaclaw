@@ -21,6 +21,7 @@ interface JournalToolCall {
 export class NativeTurnJournal {
   private readonly calls = new Map<string, JournalToolCall>();
   private readonly executions = new Set<Promise<unknown>>();
+  private readonly toolControllers = new Map<string, AbortController>();
   private readonly completedActivity: ActivityStep[] = [];
   private text = '';
   private anchor: string;
@@ -40,6 +41,26 @@ export class NativeTurnJournal {
     return this.protectedInputs;
   }
 
+  stopTool(toolCallId: string): boolean {
+    const controller = this.toolControllers.get(toolCallId);
+    if (!controller) return false;
+    controller.abort(new Error(INTERRUPTED_TOOL));
+    return true;
+  }
+
+  announceTool(toolCallId: string): void {
+    if (!this.calls.has(toolCallId)) this.registerTool(toolCallId);
+  }
+
+  private registerTool(toolCallId: string): AbortController {
+    let controller = this.toolControllers.get(toolCallId);
+    if (!controller) {
+      controller = new AbortController();
+      this.toolControllers.set(toolCallId, controller);
+    }
+    return controller;
+  }
+
   wrap(tools: ToolSet, signal: AbortSignal): ToolSet {
     return Object.fromEntries(
       Object.entries(tools).map(([name, definition]) => {
@@ -57,20 +78,25 @@ export class NativeTurnJournal {
             execute: (input: unknown, options: Parameters<NonNullable<typeof execute>>[1]) => {
               signal.throwIfAborted();
               const call: JournalToolCall = { name, input, output: INTERRUPTED_TOOL, failed: true };
+              const controller = this.registerTool(options.toolCallId);
+              const toolSignal = AbortSignal.any([signal, controller.signal]);
               this.calls.set(options.toolCallId, call);
               this.save();
               const execution = (async () => {
                 try {
-                  const result = await execute(input, { ...options, abortSignal: signal });
+                  toolSignal.throwIfAborted();
+                  const result = await execute(input, { ...options, abortSignal: toolSignal });
                   call.output = result;
                   if (toModelOutput)
                     call.modelOutput = await toModelOutput({ toolCallId: options.toolCallId, input, output: result });
                   call.failed = false;
                   return result;
                 } catch (error) {
-                  call.output = signal.aborted ? INTERRUPTED_TOOL : String(error);
+                  call.output = toolSignal.aborted ? INTERRUPTED_TOOL : String(error);
+                  if (controller.signal.aborted && !signal.aborted) throw new Error(INTERRUPTED_TOOL);
                   throw error;
                 } finally {
+                  this.toolControllers.delete(options.toolCallId);
                   this.save();
                 }
               })();
@@ -156,6 +182,7 @@ export class NativeTurnJournal {
     this.finish(messages);
     this.completedActivity.splice(0, this.completedActivity.length, ...this.activity());
     this.calls.clear();
+    this.toolControllers.clear();
     this.text = '';
     this.anchor = this.checkpoint;
     return this.checkpoint;

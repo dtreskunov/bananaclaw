@@ -161,6 +161,17 @@ A disconnected or unconfirmed stop is reported to the UI rather than treated
 as success; the user can retry the same turn ID. Durable conversation mutations
 continue to use the journal/acknowledgement protocol below.
 
+Per-tool cancellation is a separate `tool.stop` live control containing
+`requestId`, `turnId` and `toolCallId`. Only an active query advertising
+`supportsToolCancellation` (currently native) can accept it. The runner replies
+with a correlated `tool.stop.result` (`accepted`, `not_active`, `not_running`,
+`unsupported` or `failed`); a successful socket write alone is not acceptance.
+The host waits up to five seconds for this acknowledgement. Timeout never kills
+the socket, container or turn. Acceptance cancels only that call's signal; its
+final activity/result still travels through the durable journal. Neither peer
+marks the turn stopping, discards inputs or stops other tools. Status-row
+`turn.stop` retains the whole-turn semantics above.
+
 ### Steering (native provider)
 
 Native conversational turns advertise `supportsSteering: true` on `turn.state`.

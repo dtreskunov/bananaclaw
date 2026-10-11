@@ -17,6 +17,7 @@ import {
   isRecordValue,
   isSafeInteger,
   isSessionTurnId,
+  isToolCallId,
   isString,
   isTimestamp,
   isTrue,
@@ -55,11 +56,19 @@ export interface SessionActiveTurn {
   supportsSteering?: boolean;
   supportsInputEditing?: boolean;
   supportsInputCancellation?: boolean;
+  supportsToolCancellation?: boolean;
 }
 
 export type SessionTurnStopResult =
   | { accepted: true; turn: SessionActiveTurn }
   | { accepted: false; error: 'invalid_turn_id' | 'not_active' | 'disconnected' };
+
+export type SessionToolStopResult =
+  | { accepted: true }
+  | {
+      accepted: false;
+      error: 'invalid_tool_call' | 'not_active' | 'not_running' | 'unsupported' | 'failed' | 'disconnected' | 'timeout';
+    };
 
 export { isSessionTurnId };
 
@@ -91,6 +100,7 @@ interface SessionSignalServer {
   hostAckTimer: NodeJS.Timeout | null;
   hostReadySent: boolean;
   stopRequest: { turnId: string; promise: Promise<SessionTurnStopResult> } | null;
+  toolStopRequests: Map<string, (result: SessionToolStopResult) => void>;
 }
 
 type SignalListener = (sessionId: string, kind: SignalKind) => void;
@@ -488,6 +498,24 @@ function frameSpec(fields: readonly FieldSpec[], apply: FrameHandler): FrameSpec
 }
 
 const FRAME_SPECS = new Map<string, FrameSpec>([
+  [
+    'tool.stop.result',
+    frameSpec(
+      [
+        required('requestId', isSessionTurnId),
+        required('result', (value) =>
+          ['accepted', 'not_active', 'not_running', 'unsupported', 'failed'].includes(String(value)),
+        ),
+      ],
+      (frame, { entry }) => {
+        const result = frame.result as 'accepted' | 'not_active' | 'not_running' | 'unsupported' | 'failed';
+        entry.toolStopRequests.get(String(frame.requestId))?.(
+          result === 'accepted' ? { accepted: true } : { accepted: false, error: result },
+        );
+        return true;
+      },
+    ),
+  ],
   ['host.ack', frameSpec([required('eventId', isString)], applyHostAck)],
   [
     'host.nack',
@@ -614,6 +642,7 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
   state.connected = true;
   state.turnStateReady = false;
   entry.stopRequest = null;
+  for (const finish of entry.toolStopRequests.values()) finish({ accepted: false, error: 'disconnected' });
   entry.hostReadySent = false;
   flushHostEvents(sessionId, entry);
 
@@ -703,6 +732,7 @@ function handleConnection(sessionId: string, entry: SessionSignalServer, connect
     state.connected = false;
     state.turnStateReady = false;
     entry.stopRequest = null;
+    for (const finish of entry.toolStopRequests.values()) finish({ accepted: false, error: 'disconnected' });
     log.debug('Session link transport disconnected', { sessionId, durationMs: Date.now() - connectedAt });
     emit(sessionId, 'disconnected');
   });
@@ -773,6 +803,7 @@ export async function startSessionSignalServer(sessionId: string, agentGroupId: 
     hostAckTimer: null,
     hostReadySent: false,
     stopRequest: null,
+    toolStopRequests: new Map(),
   };
   entry.server.on('connection', (connection) => handleConnection(sessionId, entry, connection));
   await listen(entry, socketPath);
@@ -787,6 +818,7 @@ export async function stopSessionSignalServer(sessionId: string, clearState = fa
     return;
   }
   servers.delete(sessionId);
+  for (const finish of entry.toolStopRequests.values()) finish({ accepted: false, error: 'disconnected' });
   if (entry.relistenTimer) clearTimeout(entry.relistenTimer);
   if (entry.hostAckTimer) clearTimeout(entry.hostAckTimer);
   entry.connection?.destroy();
@@ -886,4 +918,46 @@ export function requestSessionTurnStop(sessionId: string, turnId: string): Promi
   });
   entry.stopRequest = { turnId, promise };
   return promise;
+}
+
+/** Only the query owning this exact call can acknowledge cancellation. Never mark the turn stopping. */
+export function requestSessionToolStop(
+  sessionId: string,
+  turnId: string,
+  toolCallId: string,
+): Promise<SessionToolStopResult> {
+  if (!isSessionTurnId(turnId) || !isToolCallId(toolCallId))
+    return Promise.resolve({ accepted: false, error: 'invalid_tool_call' });
+  const current = getSessionActiveTurn(sessionId);
+  if (!current.connected) return Promise.resolve({ accepted: false, error: 'disconnected' });
+  if (current.turn?.id !== turnId || current.turn.status !== 'running')
+    return Promise.resolve({ accepted: false, error: 'not_active' });
+  if (current.turn.supportsToolCancellation !== true) return Promise.resolve({ accepted: false, error: 'unsupported' });
+  const entry = servers.get(sessionId)!;
+  const connection = entry.connection!;
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const finish = (result: SessionToolStopResult): void => {
+      clearTimeout(timer);
+      entry.toolStopRequests.delete(requestId);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      log.warn('Tool stop acknowledgement timed out', { sessionId, turnId, toolCallId });
+      finish({ accepted: false, error: 'timeout' });
+    }, 5_000);
+    timer.unref?.();
+    entry.toolStopRequests.set(requestId, finish);
+    try {
+      connection.write(
+        `${JSON.stringify({ v: PROTOCOL_VERSION, type: 'tool.stop', requestId, turnId, toolCallId })}\n`,
+        (error) => {
+          if (error) finish({ accepted: false, error: 'disconnected' });
+        },
+      );
+    } catch (error) {
+      log.warn('Tool stop transport failed', { sessionId, turnId, toolCallId, error });
+      finish({ accepted: false, error: 'disconnected' });
+    }
+  });
 }

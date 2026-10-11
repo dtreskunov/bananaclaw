@@ -35,6 +35,66 @@ function insert(id: string) {
   link.emitHostEventForTesting();
 }
 
+it('keeps the same runner turn and input alive after stopping one tool, then delivers its reply', async () => {
+  const controller = new AbortController();
+  let active: link.ActiveTurn | null = null;
+  const states: Array<link.ActiveTurn | null> = [];
+  const publish = spyOn(link, 'signalTurnState').mockImplementation((state) => { active = state; states.push(state); });
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => { release = resolve; });
+  let aborts = 0;
+  const stopped: string[] = [];
+  const provider: AgentProvider = {
+    supportsNativeSlashCommands: false,
+    supportsToolCancellation: true,
+    structuredReplies: true,
+    isSessionInvalid: () => false,
+    query: () => ({
+      push: () => false, end() {}, abort() { aborts++; release(); },
+      stopTool(toolCallId) {
+        if (toolCallId !== 'target') return false;
+        stopped.push(toolCallId);
+        release();
+        return true;
+      },
+      events: (async function* (): AsyncGenerator<ProviderEvent> {
+        yield { type: 'init', continuation: 'same-continuation' };
+        yield { type: 'progress', step: { kind: 'tool', id: 'target', tool: 'bash', status: 'running' } };
+        await waiting;
+        yield { type: 'progress', step: { kind: 'tool', id: 'target', tool: 'bash', status: 'interrupted', error: 'Stopped tool' } };
+        yield { type: 'progress', step: { kind: 'tool', id: 'sibling', tool: 'read', status: 'completed' } };
+        yield { type: 'result', result: 'Still finished the response', replies: [{ text: 'Still finished the response' }] };
+      })(),
+    }),
+  };
+  insert('tool-stop-input');
+  const loop = runPollLoop({ provider, providerName: 'tool-stop-test', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => active?.supportsToolCancellation === true);
+    const turnId = active!.id;
+    expect(link.requestToolStop('old-turn', 'target')).toBe('not_active');
+    expect(link.requestToolStop(turnId, 'missing')).toBe('not_running');
+    expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('tool-stop-input')).toMatchObject({ status: 'processing' });
+    expect(link.requestToolStop(turnId, 'target')).toBe('accepted');
+    expect(active!.status).toBe('running');
+    await until(() => active === null);
+    expect(stopped).toEqual(['target']);
+    expect(aborts).toBe(0);
+    expect(states.filter(Boolean).every((state) => state!.id === turnId && state!.status === 'running')).toBe(true);
+    expect(getOutboundDb().prepare('SELECT phase, outcome FROM turns WHERE id = ?').get(turnId))
+      .toMatchObject({ phase: 'settled', outcome: 'replied' });
+    expect(getOutboundDb().prepare('SELECT content FROM messages_out WHERE turn_id = ? AND kind = ?').get(turnId, 'chat'))
+      .toMatchObject({ content: expect.stringContaining('Still finished the response') });
+    expect(getOutboundDb().prepare('SELECT status FROM processing_ack WHERE message_id = ?').get('tool-stop-input')).toMatchObject({ status: 'completed' });
+    expect(link.requestToolStop(turnId, 'target')).toBe('not_active');
+  } finally {
+    release();
+    controller.abort();
+    await loop;
+    publish.mockRestore();
+  }
+});
+
 it.each(['none', 'calls', 'final', 'recovery'] as const)('persists elapsed time, model and truthful %s usage on Stop', async (usageMode) => {
   const config = loadConfig();
   setConfigForTest({ model: 'configured-model' });

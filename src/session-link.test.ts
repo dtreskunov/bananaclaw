@@ -21,6 +21,7 @@ import {
   notifySessionHostState,
   getSessionActiveTurn,
   requestSessionTurnStop,
+  requestSessionToolStop,
   onSessionSignal,
   onSessionTurnChange,
   confirmSessionRunnerExit,
@@ -81,6 +82,89 @@ const ACTIVE_TURN = {
 };
 
 describe('current turn control', () => {
+  it('requires an acknowledgement for the exact tool request without marking the turn stopping', async () => {
+    const socket = await connect();
+    const turn = { ...ACTIVE_TURN, supportsToolCancellation: true };
+    let received = '';
+    socket.on('data', (chunk) => {
+      received += String(chunk);
+    });
+    socket.write(`${JSON.stringify({ v: 5, type: 'turn.state', turn })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).connected);
+    let settled = false;
+    const request = requestSessionToolStop(SESSION_ID, turn.id, 'tool/one').then((result) => {
+      settled = true;
+      return result;
+    });
+    await waitFor(() => received.includes('"type":"tool.stop"'));
+    const frame = parsedFrames(received).find((frame) => frame.type === 'tool.stop')!;
+    expect(frame).toMatchObject({ v: 5, type: 'tool.stop', turnId: turn.id, toolCallId: 'tool/one' });
+    expect(settled).toBe(false);
+    expect(getSessionActiveTurn(SESSION_ID).turn).toEqual(turn);
+    socket.write(`${JSON.stringify({ v: 5, type: 'tool.stop.result', requestId: 'unrelated', result: 'accepted' })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    socket.write(
+      `${JSON.stringify({ v: 5, type: 'tool.stop.result', requestId: frame.requestId, result: 'accepted' })}\n`,
+    );
+    expect(await request).toEqual({ accepted: true });
+    expect(getSessionActiveTurn(SESSION_ID).turn).toEqual(turn);
+    expect(parsedFrames(received).some((frame) => frame.type === 'turn.stop')).toBe(false);
+    socket.destroy();
+  });
+
+  it('rejects unsupported/stale tool targets and reports runner refusal and disconnection', async () => {
+    const socket = await connect();
+    let received = '';
+    socket.on('data', (chunk) => {
+      received += String(chunk);
+    });
+    socket.write(`${JSON.stringify({ v: 5, type: 'turn.state', turn: ACTIVE_TURN })}\n`);
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).connected);
+    expect(await requestSessionToolStop(SESSION_ID, ACTIVE_TURN.id, 'tool')).toEqual({
+      accepted: false,
+      error: 'unsupported',
+    });
+    expect(await requestSessionToolStop(SESSION_ID, 'old-turn', 'tool')).toEqual({
+      accepted: false,
+      error: 'not_active',
+    });
+    for (const id of ['', 'x'.repeat(257), 'tool\nid'])
+      expect(await requestSessionToolStop(SESSION_ID, ACTIVE_TURN.id, id)).toEqual({
+        accepted: false,
+        error: 'invalid_tool_call',
+      });
+    socket.write(
+      `${JSON.stringify({ v: 5, type: 'turn.state', turn: { ...ACTIVE_TURN, supportsToolCancellation: true } })}\n`,
+    );
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).turn?.supportsToolCancellation === true);
+    const rejected = requestSessionToolStop(SESSION_ID, ACTIVE_TURN.id, 'completed');
+    await waitFor(() => received.includes('"type":"tool.stop"'));
+    const frame = parsedFrames(received).find((frame) => frame.type === 'tool.stop')!;
+    socket.write(
+      `${JSON.stringify({ v: 5, type: 'tool.stop.result', requestId: frame.requestId, result: 'not_running' })}\n`,
+    );
+    expect(await rejected).toEqual({ accepted: false, error: 'not_running' });
+    const disconnected = requestSessionToolStop(SESSION_ID, ACTIVE_TURN.id, 'running');
+    socket.destroy();
+    expect(await disconnected).toEqual({ accepted: false, error: 'disconnected' });
+  });
+
+  it('does not kill the turn or connection when the tool-stop acknowledgement times out', async () => {
+    const socket = await connect();
+    socket.write(
+      `${JSON.stringify({ v: 5, type: 'turn.state', turn: { ...ACTIVE_TURN, supportsToolCancellation: true } })}\n`,
+    );
+    await waitFor(() => getSessionActiveTurn(SESSION_ID).connected);
+    expect(await requestSessionToolStop(SESSION_ID, ACTIVE_TURN.id, 'tool')).toEqual({
+      accepted: false,
+      error: 'timeout',
+    });
+    expect(getSessionActiveTurn(SESSION_ID).connected).toBe(true);
+    expect(getSessionActiveTurn(SESSION_ID).turn?.status).toBe('running');
+    socket.destroy();
+  }, 10_000);
+
   it('notifies turn observers only after committing a new mutation, not on replay', async () => {
     const observed: string[] = [];
     const unsubscribe = onSessionTurnChange((_id, change) => {

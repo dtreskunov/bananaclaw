@@ -47,6 +47,7 @@ export class SteeringSession {
       ...(this.supported && provider.supportsInputCancellation === true && query.cancelSteering
         ? { supportsInputCancellation: true }
         : {}),
+      ...(provider.supportsToolCancellation === true && query.stopTool ? { supportsToolCancellation: true } : {}),
     });
   }
 

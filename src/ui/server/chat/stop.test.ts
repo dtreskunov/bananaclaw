@@ -17,10 +17,12 @@ const signal = vi.hoisted(() => ({
     supportsSteering?: boolean;
     supportsInputEditing?: boolean;
     supportsInputCancellation?: boolean;
+    supportsToolCancellation?: boolean;
   },
   connected: true,
   listeners: new Set<(sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat' | 'input.state') => void>(),
   stop: vi.fn(),
+  stopTool: vi.fn(),
   submit: vi.fn(),
 }));
 vi.mock('../../../session-link.js', async (importOriginal) => ({
@@ -32,6 +34,7 @@ vi.mock('../../../session-link.js', async (importOriginal) => ({
     usage: null,
   })),
   requestSessionTurnStop: signal.stop,
+  requestSessionToolStop: signal.stopTool,
   onSessionSignal: (
     listener: (sessionId: string, kind: 'turn.state' | 'disconnected' | 'heartbeat' | 'input.state') => void,
   ) => {
@@ -164,6 +167,7 @@ beforeEach(() => {
     if (signal.turn?.id !== turnId) return { accepted: false, error: 'not_active' };
     return { accepted: true, turn: { ...signal.turn, status: 'stopping' } };
   });
+  signal.stopTool.mockReset().mockResolvedValue({ accepted: true });
 });
 
 afterEach(() => {
@@ -180,7 +184,7 @@ async function stop(
     query?: string;
     user?: string;
     method?: string;
-    kind?: 'send' | 'stop' | 'messages/pending';
+    kind?: 'send' | 'stop' | 'stop-tool' | 'messages/pending';
     multipart?: string;
   } = {},
 ) {
@@ -206,6 +210,57 @@ async function stop(
   await handleChatRequest(req, res, pathname, options.user ?? 'web:member');
   return { status, body: JSON.parse(Buffer.concat(chunks).toString()) };
 }
+
+describe('tool-scoped Stop endpoint', () => {
+  it('routes the exact turn and call to the runner without invoking whole-turn Stop', async () => {
+    const result = await stop({ kind: 'stop-tool', body: { turnId: TURN.id, toolCallId: 'call/1' } });
+    expect(result).toEqual({ status: 202, body: { accepted: true } });
+    expect(signal.stopTool).toHaveBeenCalledWith('session-1', TURN.id, 'call/1');
+    expect(signal.stop).not.toHaveBeenCalled();
+    expect(signal.turn?.status).toBe('running');
+    expect(matchChatPath('/api/groups/agent/chat/thread-1/stop-tool')).toEqual({
+      kind: 'stop-tool',
+      groupId: 'agent',
+      threadId: 'thread-1',
+    });
+  });
+
+  it('rejects malformed tool IDs, route overrides, unauthorized users and cross-thread requests', async () => {
+    for (const toolCallId of [undefined, '', 1, 'x'.repeat(257), 'tool\nid'])
+      expect((await stop({ kind: 'stop-tool', body: { turnId: TURN.id, toolCallId } })).status).toBe(400);
+    expect(
+      (await stop({ kind: 'stop-tool', body: { turnId: TURN.id, toolCallId: 'call', sessionId: 'session-1' } })).status,
+    ).toBe(400);
+    expect(
+      (await stop({ kind: 'stop-tool', body: { turnId: TURN.id, toolCallId: 'call' }, query: '?sessionId=session-1' }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await stop({ kind: 'stop-tool', body: { turnId: TURN.id, toolCallId: 'call' }, user: 'web:outsider' })).status,
+    ).toBe(403);
+    expect(
+      (await stop({ kind: 'stop-tool', body: { turnId: TURN.id, toolCallId: 'call' }, thread: 'other-thread' })).status,
+    ).toBe(409);
+    expect(signal.stopTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unsupported', 409],
+    ['not_active', 409],
+    ['not_running', 409],
+    ['timeout', 503],
+    ['disconnected', 503],
+    ['failed', 500],
+    ['invalid_tool_call', 400],
+  ])('surfaces runner %s without falling back to turn Stop', async (error, status) => {
+    signal.stopTool.mockResolvedValue({ accepted: false, error });
+    expect(await stop({ kind: 'stop-tool', body: { turnId: TURN.id, toolCallId: 'call' } })).toEqual({
+      status,
+      body: { error },
+    });
+    expect(signal.stop).not.toHaveBeenCalled();
+  });
+});
 
 describe('native steering submissions', () => {
   it.each(['text', 'skipped'] as const)(

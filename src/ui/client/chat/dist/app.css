@@ -3027,7 +3027,8 @@ nav.tab-bar-strip.group-strip {
   gap: 0;
   width: 100%;
   max-height: 30vh;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-size: var(--font-2xs);
   scrollbar-width: thin;
 }
@@ -3063,13 +3064,20 @@ nav.tab-bar-strip.group-strip {
 .chat-main .activity-trace > .trace-chapter:last-child .trace-children > .trace-row:last-child::before {
   bottom: calc(100% - var(--trace-row-height) / 2);
 }
+.chat-main .activity-trace .trace-row-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: var(--trace-row-height);
+}
 .chat-main .activity-trace .trace-row-toggle,
 .chat-main .activity-trace .trace-chapter-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  min-width: 0;
   padding: 0;
   border: none;
   background: none;
@@ -3081,7 +3089,18 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.85;
 }
 .chat-main .activity-trace .trace-row-toggle {
+  flex: 1;
   height: var(--trace-row-height);
+}
+.chat-main .activity-trace .trace-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--trace-status-color, var(--muted));
+}
+.chat-main .activity-trace .trace-controls:empty {
+  display: none;
 }
 .chat-main .activity-trace .trace-marker {
   position: relative;
@@ -3166,9 +3185,17 @@ nav.tab-bar-strip.group-strip {
 .chat-main .activity-trace .trace-chapter-toggle {
   height: var(--trace-row-height);
 }
-.chat-main .activity-trace .trace-chapter-label {
+.chat-main .activity-trace .trace-chapter-label,
+.chat-main .activity-trace .trace-text {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image:
+    linear-gradient(
+      to right,
+      #000 calc(100% - 24px),
+      transparent);
 }
 .chat-main .activity-trace .trace-chapter-heading {
   display: flex;
@@ -3191,14 +3218,10 @@ nav.tab-bar-strip.group-strip {
   margin: 0 0 0 var(--trace-child-indent);
   padding: 0;
 }
-.chat-main .activity-trace .trace-text {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-}
 .chat-main .activity-trace .trace-duration {
   flex: none;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .chat-main .typing .hint code.trace-subject,
 .chat-main .activity-trace code.trace-subject {
@@ -3217,7 +3240,13 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.8;
 }
 .chat-main .activity-trace .trace-meta {
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.chat-main .activity-trace .trace-note.turn-stop-error {
+  color: var(--danger);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .chat-main .activity-trace .trace-prefix {
   flex: 1;
