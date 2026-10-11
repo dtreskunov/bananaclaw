@@ -121,6 +121,11 @@ or replace it before use; do not silently create overlapping credentials.
 - Every page operation requires its active explicit `target_id`; never substitute
   another group's target. `list_browser_targets.shared_tabs` lists all shared
   handles for the device; the old single `target_id` describes only the first.
+- If a shared handle for the intended tab is already active, reuse it rather
+  than requesting another sharing prompt. For a smoke test on a logged-in page,
+  use one focused snapshot/targeted read. Do not click, type, navigate or clear
+  overlays solely to prove that mutating capabilities work on the user's account.
+  Report untested operations as untested, not broken or verified.
 - Every page operation includes a non-sensitive `description` accurately explaining
   the action. The user can **Approve**, **Decline**, or choose **Allow all while
   sharing** for that client/tab. This does not grant browser-wide APIs, protected
@@ -131,6 +136,33 @@ or replace it before use; do not silently create overlapping credentials.
   `ref` and `document`; do not also pass `selector`. A fresh snapshot invalidates
   earlier refs. `ELEMENT_STALE` or `TARGET_STALE` requires fresh inspection,
   not a blind repeat of a mutation. Snapshot field values are redacted.
+- Keep tool output focused. Start with one compact `get_page_snapshot`, then
+  `get_text` only for a relevant selector/ref; do not dump `body`, run several
+  overlapping whole-page reads or return full DOM/HTML from scripts.
+  Updated servers enforce a **16 KiB default** and **64 KiB hard maximum** per
+  serialized text tool result (UTF-8, including the MCP content wrapper).
+  Snapshots/text default to **4000 characters**, element lists to **50 entries**.
+  Check `truncated`, `text_truncated`, and `elements_truncated`; never claim a
+  full page/tree when any is true. A truncated snapshot does not enumerate every
+  actionable element. With the updated extension, focus snapshots using
+  `selector`, then request only the necessary `max_text_chars` (0..16000),
+  `max_elements` (1..100) or `max_output_bytes` (1024..65536).
+  Narrow the scope before raising limits. Fresh/scoped snapshots invalidate old
+  refs. Do not fetch every omitted section merely to reconstruct a full dump.
+  Screenshots are separate explicit image requests with their own larger limits;
+  textual output caps do not constrain images or the total of many tool calls.
+- `evaluate_script` evaluates source/expression, not a function body. Use
+  `document.title` or `(() => document.title)()`, never bare
+  `return document.title;`. Return a small JSON object/scalar, not `outerHTML`,
+  whole-page text or a large array. `RESULT_TOO_LARGE` rejects the value instead
+  of returning partial JSON; narrow the script, do not blindly increase limits.
+  `SCRIPT_SYNTAX_ERROR` requires correcting the source; `SCRIPT_RUNTIME_ERROR`
+  means page evaluation failed; `SCRIPT_SERIALIZATION_ERROR` means the value
+  is not JSON-returnable. `SCRIPT_POLICY_BLOCKED` means the page refused eval:
+  use snapshots/targeted text, do not bypass CSP or repeat the same script.
+  `SCRIPT_EXECUTION_UNAVAILABLE` means browser injection failed. Older extensions
+  still report generic `CAPABILITY_UNAVAILABLE`; the presence of a capability
+  does not guarantee that every page allows it.
 - Supported actions can wait up to `timeout_ms` (0..10000) for readiness.
   Multiple selector matches fail with `ELEMENT_AMBIGUOUS`; controls may report
   disabled, readonly, invisible or obscured state. Remove the actual obstruction
@@ -149,14 +181,23 @@ or replace it before use; do not silently create overlapping credentials.
   capabilities. Seeing `evaluate_script` or `get_screenshot` there proves neither
   browser support nor local approval. Inspect the active target's `capabilities`
   and keep missing capabilities explicit.
+  The 17-tool catalogue includes three management/handoff tools and 14 page
+  operations. A Firefox grant with 13 page operations is not missing four
+  usable page tools: screenshots may be unavailable, and the management tools
+  are not entries in that grant array. Successful text extraction does not
+  establish that script evaluation is allowed on the same page.
 - An `offline` device is registered but has no authenticated extension connection.
   Ask the user to open the installed extension and choose **Try again** or its
   saved connection. `/join/<tenant>` is installation/setup help, not a webpage
   that remotely reconnects the extension. After connection, request access and
   have the user choose **Share this tab** locally.
 - The authenticated extension connection remains online without any shared tab.
-  `approval_required` means connected and waiting for local control approval;
-  sharing is not required to keep WSS alive, and permission is not window-scoped.
+  Prefer the updated `connection_state`, `sharing_state`, and
+  `pending_request_id` fields. A null pending ID means there is no current
+  sharing request; do not tell the user to approve a nonexistent prompt.
+  Legacy `approval_required` means connected but not sharing, not that a request
+  is awaiting approval.
+  Sharing is not required to keep WSS alive, and permission is not window-scoped.
   Repeated offline/online flips require connection diagnostics, not racing access
   requests, guessing debug endpoints, or telling the user to share before a request.
 - `ELEMENT_NOT_FOUND` is a CSS miss; `INVALID_SELECTOR` is malformed CSS.
@@ -170,7 +211,9 @@ or replace it before use; do not silently create overlapping credentials.
   Never type/read passwords or ask for them in chat. Done is a human confirmation,
   not proof the site accepted the action; inspect the resulting page if needed.
 - The user can interact and navigate while sharing. Ordinary navigation does not
-  require another grant. Old-document queued actions may become `TARGET_STALE`;
+  require another grant or inherently trigger `HANDOFF_REQUIRED`. That error
+  denotes a protected destination or unsupported operation, not all navigation.
+  Old-document queued actions may become `TARGET_STALE`;
   request new actions only against current state, without automatically retrying
   uncertain side effects.
 - `ACTION_DECLINED`, `COMMAND_CANCELLED`, and `COMMAND_EXPIRED` before execution
