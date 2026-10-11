@@ -139,6 +139,18 @@ or replace it before use; do not silently create overlapping credentials.
   `ref` and `document`; do not also pass `selector`. A fresh snapshot invalidates
   earlier refs. `ELEMENT_STALE` or `TARGET_STALE` requires fresh inspection,
   not a blind repeat of a mutation. Snapshot field values are redacted.
+- New extensions offer `inspect_element`, a non-mutating diagnostic with a
+  4 KiB maximum result. Use a selector or document/ref to inspect ZERO_SIZE,
+  CSS_HIDDEN, OFF_SCREEN, DISABLED, READONLY or OBSCURED state. It does not
+  focus, scroll or expose field values. If responsive UI collapses a control,
+  inspect readiness, reveal the appropriate UI, refresh snapshot refs, then
+  act and verify. Snapshots include viewport dimensions.
+- Extension-generated approval summaries show actual operation, target,
+  page and navigation destination separately from your unverified explanation.
+  Values/source are hidden by default. A resolved target is bound to that
+  exact element/document; replacement can require fresh inspection and a new
+  action, never silent retargeting. This is not a 40-character description
+  safety rule: provide useful intent, but length alone does not establish consent.
 - Keep tool output focused. Start with one compact `get_page_snapshot`, then
   `get_text` only for a relevant selector/ref; do not dump `body`, run several
   overlapping whole-page reads or return full DOM/HTML from scripts.
@@ -201,9 +213,10 @@ or replace it before use; do not silently create overlapping credentials.
   capabilities. Seeing `evaluate_script` or `get_screenshot` there proves neither
   browser support nor local approval. Inspect the active target's `capabilities`
   and keep missing capabilities explicit.
-  The 17-tool catalogue includes three management/handoff tools and 14 page
-  operations. A Firefox grant with 13 page operations is not missing four
-  usable page tools: screenshots may be unavailable, and the management tools
+  The catalogue includes three management/handoff tools plus page operations
+  (18 total once inspect_element is installed). A Firefox grant is not missing
+  usable tools merely because its count differs from the catalogue:
+  screenshots may be unavailable, and the management tools
   are not entries in that grant array. Successful text extraction does not
   establish that script evaluation is allowed on the same page.
 - An `offline` device is registered but has no authenticated extension connection.
@@ -241,6 +254,14 @@ or replace it before use; do not silently create overlapping credentials.
   the expected response. Browser-refused response documents can return
   `PAGE_UNAVAILABLE` and end sharing; do not bypass inspection or repeat the
   POST. DomAgent leaves the user's tab open and does not navigate it back.
+  Compare the document ID as well as URL when verifying navigation. Captured
+  FormData is not evidence that any server received a POST. Do not install
+  preventDefault submit listeners or clone/replace a user form merely to
+  inspect its payload: that changes the workflow and may erase listeners/state.
+  Use the control state and actual response. For JSON/PDF/browser-generated
+  pages, injection may be refused; do not bypass the browser's renderer or
+  replay the submission. A failed possibly mutating script may already have
+  effects; inspect state instead of blindly running it again.
   `select_option` is for a real select, not radios/checkboxes; attribute selectors
   are supported. `press_key` requires an explicit target, not the currently
   focused element. Short pages can correctly return unchanged scroll offsets.
