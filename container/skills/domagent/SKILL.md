@@ -121,6 +121,9 @@ or replace it before use; do not silently create overlapping credentials.
 - Every page operation requires its active explicit `target_id`; never substitute
   another group's target. `list_browser_targets.shared_tabs` lists all shared
   handles for the device; the old single `target_id` describes only the first.
+  Pass the returned opaque handle unchanged. Updated servers reject malformed
+  target handles with `INVALID_ARGUMENTS`; valid-shaped unknown/ended/foreign
+  handles deliberately remain `NOT_AUTHORIZED` rather than revealing ownership.
 - If a shared handle for the intended tab is already active, reuse it rather
   than requesting another sharing prompt. For a smoke test on a logged-in page,
   use one focused snapshot/targeted read. Do not click, type, navigate or clear
@@ -167,6 +170,12 @@ or replace it before use; do not silently create overlapping credentials.
   Multiple selector matches fail with `ELEMENT_AMBIGUOUS`; controls may report
   disabled, readonly, invisible or obscured state. Remove the actual obstruction
   or complete prerequisites instead of injecting a click to bypass checks.
+  Element waits default to 3000 ms; use `timeout_ms:0` for immediate selector
+  probes. A positive exhausted wait intentionally returns `WAIT_TIMEOUT`;
+  updated errors include `last_error` and `timeout_ms` to identify missing,
+  disabled, readonly, invisible, obscured or absent-option conditions. Do not
+  assume timeout means network failure or automatically retry the mutation.
+  `wait_timeout_seconds` is the separate human approval budget.
 - New extensions may advertise `select_option`, `set_checked`, `press_key`,
   `scroll`, and `wait_for_page`. Input is DOM-based; `press_key` does not perform
   native default actions or browser shortcuts. Prefer click/fill/select/check
@@ -177,6 +186,17 @@ or replace it before use; do not silently create overlapping credentials.
 - Browser capabilities remain real platform limits. Firefox screenshots may be
   unavailable; ordinary page scripts may fail CSP. No privileged workaround or
   visible-tab substitution is allowed. There is no capability selection dialogue.
+- Legacy geometry coordinates are viewport-relative, not document coordinates.
+  A negative `y` is off-screen, not evidence of a hidden element. Use
+  `in_viewport`, `disabled`, `readonly`, and `editable` fields; listed controls
+  are not guaranteed actionable. Hidden inputs are excluded. Prefer snapshot
+  refs, which let the action scroll into view and perform actual readiness checks.
+- `get_text` reads rendered text, not hidden script/style/raw DOM contents.
+  Updated extensions return HTML `head > title` as bounded
+  `text_source:"document_title"` metadata. Other non-rendered targets return
+  `rendered:false` and `empty_reason:"NOT_RENDERED"`, not proof they contain no
+  data. CSS `title` may match SVG titles too; prefer snapshot `title` or the
+  qualified HTML selector.
 - `tools/list` is the service's generic catalogue, not the current browser's
   capabilities. Seeing `evaluate_script` or `get_screenshot` there proves neither
   browser support nor local approval. Inspect the active target's `capabilities`
@@ -216,6 +236,15 @@ or replace it before use; do not silently create overlapping credentials.
   Old-document queued actions may become `TARGET_STALE`;
   request new actions only against current state, without automatically retrying
   uncertain side effects.
+  A successful click is not proof of a form POST or business outcome. Read back
+  field/checked state before submitting, then use `wait_for_page` and inspect
+  the expected response. Browser-refused response documents can return
+  `PAGE_UNAVAILABLE` and end sharing; do not bypass inspection or repeat the
+  POST. DomAgent leaves the user's tab open and does not navigate it back.
+  `select_option` is for a real select, not radios/checkboxes; attribute selectors
+  are supported. `press_key` requires an explicit target, not the currently
+  focused element. Short pages can correctly return unchanged scroll offsets.
+  Re-test version-dependent findings and label unverified capabilities honestly.
 - `ACTION_DECLINED`, `COMMAND_CANCELLED`, and `COMMAND_EXPIRED` before execution
   mean the request ended; do not spam a replacement prompt. `OUTCOME_UNKNOWN`
   after execution may already have effects.
