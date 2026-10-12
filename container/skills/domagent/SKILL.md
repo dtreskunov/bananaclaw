@@ -8,8 +8,9 @@ description: Use a user's independently approved browser connection when a websi
 DomAgent is an independent service. It does not know about BananaClaw or OneCLI.
 Your MCP credential belongs to this agent group, not just the current conversation.
 Browser pairing permits requests; local approval is still required before sharing.
-The collaborative protocol is version 3: users choose existing/new tabs and
-supervise actions, not a capability checklist or exclusive automation session.
+The workspace protocol is version 4: the selected actual tab moves into a
+dedicated normal window with native side-panel consent. Stop closes that tab and
+loses unsaved state. Normal logins/cookies are reused, not isolated.
 Do not promise to bypass bot protection, solve CAPTCHA, or extract credentials.
 
 ## Check before requesting setup
@@ -37,7 +38,7 @@ configuration or keep using them as an unapproved substitute.
 2. Check `GET https://<domain>/.well-known/domagent` with normal TLS verification,
    bounded time/size limits, and the host's outbound-request policy. Do not probe
    loopback, link-local/cloud metadata, or private destinations without operator
-   authorization. Require `service: domagent` and `protocol_version: 3`.
+   authorization. Require `service: domagent` and `protocol_version: 4`.
 3. After confirming the intended domain, send `POST /api/setup-requests` with
    `agent_name` (at most 80 characters) and `request_description` (at most 500).
    Describe the user's task briefly without chat transcripts, sensitive page
@@ -115,9 +116,14 @@ or replace it before use; do not silently create overlapping credentials.
 - `request_browser_access` takes `device_id`, a plain-language `description`, and
   optional `wait_timeout_seconds`. It now waits for explicit user tab sharing and
   returns `target_id`/`tab_handle`; configure the transport timeout first.
-  A request opens a small extension window. The user navigates to the tab they
-  want and chooses **Share this tab** in the extension. Don't automatically adopt
+  A request notifies the toolbar; the user opens its native panel and chooses
+  **Share this tab**, or clicks the toolbar to share an unambiguous linked client.
+  This moves the actual tab, preserving its current document. Don't automatically adopt
   the active tab or repeatedly create requests while one is pending.
+  Each handle is bound to one tab/window. Extra tabs, popups or moving the tab
+  revoke sharing; never use them as a route to other tabs. All positive consent
+  (Approve, Allow all, Done) comes from trusted extension UI, never webpage DOM.
+  Arbitrary page JavaScript remains covered by explicit Allow all.
 - Every page operation requires its active explicit `target_id`; never substitute
   another group's target. `list_browser_targets.shared_tabs` lists all shared
   handles for the device; the old single `target_id` describes only the first.
@@ -275,4 +281,11 @@ or replace it before use; do not silently create overlapping credentials.
 Shared tabs use the user's website sign-ins. Page-readable secrets, text, scripts,
 and screenshots may enter BananaClaw history; private-network sites may be
 reachable. Pause stops new commands but cannot undo prior effects or scheduled
-JavaScript. The page border is a helpful visual cue, not a trusted security boundary.
+JavaScript. Stop/explicit Disconnect closes owned tabs; unexpected failures leave
+the response available for inspection and manual closure. Closing cannot undo
+sent requests/account changes or site background workers. Same-origin/opener
+relationships persist, so a dedicated window is not a security sandbox.
+The private local history is a bounded commands/observed-events log, not a complete
+audit of JavaScript effects; it is not exposed to MCP. The page border is cosmetic.
+Require matched v4 server/extension versions; prior v3 extensions cannot connect.
+Update in place without resetting pairing keys or credentials, then share again.
