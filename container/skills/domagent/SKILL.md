@@ -11,6 +11,9 @@ Browser pairing permits requests; local approval is still required before sharin
 The workspace protocol is version 4: the selected actual tab moves into a
 dedicated normal window with native side-panel consent. Stop closes that tab and
 loses unsaved state. Normal logins/cookies are reused, not isolated.
+The reliability release is service **4.3.0-beta.2** / extension **4.3.1**.
+Update the browser extension in place for navigation/label improvements; keep
+pairing keys and credentials. Description minimum40 is enforced by the server.
 Do not promise to bypass bot protection, solve CAPTCHA, or extract credentials.
 
 ## Check before requesting setup
@@ -124,6 +127,11 @@ or replace it before use; do not silently create overlapping credentials.
   revoke sharing; never use them as a route to other tabs. All positive consent
   (Approve, Allow all, Done) comes from trusted extension UI, never webpage DOM.
   Arbitrary page JavaScript remains covered by explicit Allow all.
+  Supply at least 40 trimmed description characters (maximum 500) to meet updated
+  validation, even if an older server accepts shorter explanations. Prefer useful
+  task intent, not filler. Re-sharing an existing exact handle needs a fresh local
+  approval but should preserve its connection and pending work; normally reuse
+  the active handle instead of requesting another share.
 - Every page operation requires its active explicit `target_id`; never substitute
   another group's target. `list_browser_targets.shared_tabs` lists all shared
   handles for the device; the old single `target_id` describes only the first.
@@ -151,12 +159,19 @@ or replace it before use; do not silently create overlapping credentials.
   focus, scroll or expose field values. If responsive UI collapses a control,
   inspect readiness, reveal the appropriate UI, refresh snapshot refs, then
   act and verify. Snapshots include viewport dimensions.
+  Do not pass `timeout_ms` to `inspect_element`: element diagnosis is immediate
+  after approval, not an element-readiness polling tool. Where reported,
+  `hidden_by` identifies the hiding ancestor, `reveal_controls` lists bounded
+  visible/enabled candidates with explicit `aria-controls`, and `activation`
+  identifies an associated label for a styled checkbox/radio. They are metadata,
+  not authority to blindly click a suggested control.
 - Extension-generated approval summaries show actual operation, target,
   page and navigation destination separately from your unverified explanation.
   Values/source are hidden by default. A resolved target is bound to that
   exact element/document; replacement can require fresh inspection and a new
-  action, never silent retargeting. This is not a 40-character description
-  safety rule: provide useful intent, but length alone does not establish consent.
+  action, never silent retargeting. Updated schemas require at least 40 characters
+  after trimming and maximum 500 for sharing, handoff and page actions.
+  Explain useful intent rather than padding; length alone does not establish consent.
 - Keep tool output focused. Start with one compact `get_page_snapshot`, then
   `get_text` only for a relevant selector/ref; do not dump `body`, run several
   overlapping whole-page reads or return full DOM/HTML from scripts.
@@ -201,6 +216,9 @@ or replace it before use; do not silently create overlapping credentials.
   observes the loaded URL/document, not completion of a website transaction.
   Top-level pages and open shadow roots are supported; iframe/closed-shadow-root
   access is not. Always check the actual grant capabilities before using new tools.
+  Styled checkbox/radio inputs may use their exact visible associated label.
+  This does not bypass disabled state, hidden ancestors, site overlays or
+  replacement checks. Use normal `set_checked`/label `click`, then verify state.
 - Browser capabilities remain real platform limits. Firefox screenshots may be
   unavailable; ordinary page scripts may fail CSP. No privileged workaround or
   visible-tab substitution is allowed. There is no capability selection dialogue.
@@ -243,6 +261,13 @@ or replace it before use; do not silently create overlapping credentials.
   Implicit button submit behavior is not a `[type="submit"]` attribute.
 - `TARGET_STALE` is a document race, not a selector miss. Do not automatically
   retry a mutation. `OUTCOME_UNKNOWN` may mean it already happened.
+  Updated inspection waits briefly for a settled document before producing a
+  preview. A document-unbound read that has not yet been approved can refresh its
+  preview across navigation; already approved work and explicit refs/documents
+  never silently rebind. After `navigate`, prefer `wait_for_page` then a fresh
+  snapshot. Where present, `inspection_stage` distinguishes tab_status,
+  document_state, document_changed and document_injection; allowlisted
+  `last_error`/`timeout_ms` explains an exhausted inspection wait.
 - `PAGE_UNAVAILABLE` ends control. Ask the user to inspect/navigate the retained
   tab and approve again. Old target IDs cannot restore access.
 - Use `request_handoff({target_id,description})` for login, CAPTCHA, permission
