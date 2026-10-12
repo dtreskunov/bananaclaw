@@ -11,9 +11,12 @@ Browser pairing permits requests; local approval is still required before sharin
 The workspace protocol is version 4: the selected actual tab moves into a
 dedicated normal window with native side-panel consent. Stop closes that tab and
 loses unsaved state. Normal logins/cookies are reused, not isolated.
-The reliability release is service **4.3.0-beta.2** / extension **4.3.1**.
+The current diagnostic release is service **4.3.0-beta.3** / extension **4.3.3**.
 Update the browser extension in place for navigation/label improvements; keep
 pairing keys and credentials. Description minimum40 is enforced by the server.
+Use connected target `browser_info` to record extension and Firefox versions
+where available. Metadata is self-reported, not trusted package provenance; null
+means unavailable/offline/older peer, not proof the browser has the latest code.
 Do not promise to bypass bot protection, solve CAPTCHA, or extract credentials.
 
 ## Check before requesting setup
@@ -268,6 +271,12 @@ or replace it before use; do not silently create overlapping credentials.
   snapshot. Where present, `inspection_stage` distinguishes tab_status,
   document_state, document_changed and document_injection; allowlisted
   `last_error`/`timeout_ms` explains an exhausted inspection wait.
+  `injection_reason` distinguishes permission_denied, browser_restricted,
+  frame_unavailable, helper_execution_failed, empty_result or unknown. Report
+  only these safe codes; do not print raw browser exception text. Persistent
+  refusal remains fail-closed; no repeat POST or privileged renderer workaround.
+  JSON content type alone does not establish a cause. A form field readback
+  and click acknowledgement do not prove which URL received or accepted a POST.
 - `PAGE_UNAVAILABLE` ends control. Ask the user to inspect/navigate the retained
   tab and approve again. Old target IDs cannot restore access.
 - Use `request_handoff({target_id,description})` for login, CAPTCHA, permission
