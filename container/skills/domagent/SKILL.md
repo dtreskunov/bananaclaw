@@ -6,7 +6,7 @@ description: Use a user's locally activated DomAgent tab-group workspace for rea
 # DomAgent v5 workspaces
 
 DomAgent is independent of BananaClaw and OneCLI. Current matched release:
-service5.0.0-beta.5 / extension5.0.3 / browser wire5. It replaces per-action
+service5.0.0-beta.6 / extension5.0.4 / browser wire5. It replaces per-action
 approval and one-tab windows with locally activated native-sidebar/group scope.
 Old browser proofs/tools cannot authorize v5.
 
@@ -101,13 +101,18 @@ disabling signing checks. Updating in place should preserve device keys.
   NOT_AUTHORIZED for an old unknown handle is not proof pairing broke.
   Updated extensions can republish inactive empty summaries with SERVICE_RESTARTED/
   CONNECTION_LOST; last_session_end is extension-reported context, not authority.
-  Ask for local Start/Resume, not re-pairing. Multiple retained same-named groups
-  are organization only; the user can explicitly select the intended native group.
+  Ask for local Start/Continue, not re-pairing. Continue can repair transport and
+  activate the selected actual group in one deliberate local click; reconnect
+  alone never restores control. Multiple retained same-named groups are
+  organization only; the user selects by native-group tab count/title previews.
+  Raw group IDs and historical failures are in the overflow menu's Diagnostics.
+  Starting means the fresh activation still awaits acknowledgement, not Ready.
   GROUP_UNAVAILABLE means the tracked group no longer exists in that window.
   The extension retires its stale local record and leaves tabs/pairing intact.
   An inactive empty sidebar still offers explicit existing-group selection or
-  Start a new task group. End releases local tracking without closing the group;
-  Pause retains a valid group for Resume. Do not re-pair or silently adopt tabs
+  New task group followed by Start. End is in Task actions and releases local
+  tracking without closing the group; Pause retains a valid group for Continue.
+  Do not re-pair or silently adopt tabs
   to escape a stale reference. A resolved red warning is not proof an earlier
   uncertain mutation did not occur; its diagnostic history remains.
 
