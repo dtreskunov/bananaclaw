@@ -84,6 +84,12 @@ System preserves the original appearance, including the black dark-mode
 background. Autumn uses parchment and copper in light mode, and walnut and
 amber in dark mode.
 
+The message composer and question-answer input share a rounded, theme-colored
+outline: subtle at rest, stronger on hover with a mouse, and full-strength while
+the text input or any control inside has focus. Outline changes do not shift
+the layout. Keyboard-focused buttons retain their individual focus indicators,
+and reduced-motion preferences disable the outline transition.
+
 **Text density**, below Mode, offers **Comfortable** (larger text and more
 breathing room) and **Compact** (smaller text and tighter spacing). Both use
 locally bundled Figtree at weight 300 with 0.015em letter spacing. Compact is

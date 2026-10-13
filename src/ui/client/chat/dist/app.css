@@ -3492,6 +3492,26 @@ nav.tab-bar-strip.group-strip {
   position: relative;
   display: flex;
   align-items: stretch;
+  border-radius: var(--radius-md);
+  outline: 2px solid color-mix(in srgb, var(--focus-ring) 30%, transparent);
+  outline-offset: 2px;
+  transition: outline-color 0.15s;
+}
+@media (hover: hover) {
+  .chat-main .composer-input-wrap:hover {
+    outline-color: color-mix(in srgb, var(--focus-ring) 55%, transparent);
+  }
+}
+.chat-main .composer-input-wrap:focus-within {
+  outline-color: var(--focus-ring);
+}
+:root[data-theme] .chat-main .composer-input-wrap textarea:focus-visible {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-main .composer-input-wrap {
+    transition: none;
+  }
 }
 .chat-main #chat-send,
 .chat-main .question-response-send {

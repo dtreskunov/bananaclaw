@@ -137,6 +137,28 @@ describe('theme CSS contract', () => {
     expect(labels).not.toMatch(/color:|opacity:/);
   });
 
+  it('frames shared composers with stable idle, hover and whole-composer focus outlines', () => {
+    const css = read('./components/ChatMain.css');
+    const wrapper = css.match(/\.chat-main \.composer-input-wrap \{([^}]+)\}/)?.[1];
+    expect(wrapper).toContain('border-radius: var(--radius-md)');
+    expect(wrapper).toContain('outline: 2px solid color-mix(in srgb, var(--focus-ring) 30%, transparent)');
+    expect(wrapper).toContain('outline-offset: 2px');
+    expect(wrapper).toContain('transition: outline-color 0.15s');
+    expect(wrapper).not.toMatch(/(?:^|\s)(?:border|padding|margin):/);
+    expect(css).toMatch(
+      /@media \(hover: hover\) \{\s*\.chat-main \.composer-input-wrap:hover \{\s*outline-color: color-mix\(in srgb, var\(--focus-ring\) 55%, transparent\);/,
+    );
+    const focused = css.match(/\.chat-main \.composer-input-wrap:focus-within \{([^}]+)\}/)?.[1];
+    expect(focused).toContain('outline-color: var(--focus-ring)');
+    expect(css.indexOf('.composer-input-wrap:focus-within')).toBeGreaterThan(css.indexOf('.composer-input-wrap:hover'));
+    expect(css).toMatch(
+      /:root\[data-theme\] \.chat-main \.composer-input-wrap textarea:focus-visible \{\s*outline: none;/,
+    );
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.chat-main \.composer-input-wrap \{ transition: none; \}/,
+    );
+  });
+
   it('keeps metadata on one row and uses shared disclosure styling for inline metrics', () => {
     const css = read('./components/ChatMain.css');
     const meta = css.match(/\.chat-main \.msg \.meta, \.chat-main \.typing \.meta \{([^}]+)\}/)?.[1];
