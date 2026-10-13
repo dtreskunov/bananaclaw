@@ -6,7 +6,7 @@ description: Use a user's locally activated DomAgent tab-group workspace for rea
 # DomAgent v5 workspaces
 
 DomAgent is independent of BananaClaw and OneCLI. Current matched release:
-service5.0.0-beta.7 / extension5.0.5 / browser wire5. Explicit Run and actual
+service5.0.0-beta.8 / extension5.0.6 / browser wire5. Explicit Run and actual
 native group membership define scope; the sidebar is an optional dashboard.
 Old browser proofs/tools cannot authorize v5.
 
@@ -162,6 +162,10 @@ USER_SCRIPT shares DOM but isolates globals, has its own script-world CSP and no
 privileged extension APIs/messaging. MAIN exposes the page JS environment.
 Firefox153+ MV3 browser-compiles source; Chrome MAIN uses a constrained debugger,
 USER_SCRIPT requires Allow user scripts in browser settings. Don't invent fields
+Firefox requires userScripts to be requested alone. In5.0.6, Continue requests
+the missing category within the local click; fresh setup needing both grants
+uses two separate clicks. No task or pairing confirmation starts after only
+the first grant. Permission errors do not justify re-pairing or resetting keys. Don't invent fields
 if the native provider's tool schema is cached: restart/rediscover first.
 UPGRADE_REQUIRED means update the extension, not replace credentials.
 SCRIPT_POLICY_BLOCKED can still mean page-context dynamic eval is forbidden:
