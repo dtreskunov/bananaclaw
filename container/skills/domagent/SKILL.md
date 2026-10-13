@@ -6,7 +6,7 @@ description: Use a user's locally activated DomAgent tab-group workspace for rea
 # DomAgent v5 workspaces
 
 DomAgent is independent of BananaClaw and OneCLI. Current matched release:
-service5.0.0-beta.1 / extension5.0.0 / browser wire5. It replaces per-action
+service5.0.0-beta.2 / extension5.0.0 / browser wire5. It replaces per-action
 approval and one-tab windows with locally activated native-sidebar/group scope.
 Old browser proofs/tools cannot authorize v5.
 
