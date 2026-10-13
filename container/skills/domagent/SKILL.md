@@ -6,7 +6,7 @@ description: Use a user's locally activated DomAgent tab-group workspace for rea
 # DomAgent v5 workspaces
 
 DomAgent is independent of BananaClaw and OneCLI. Current matched release:
-service5.0.0-beta.2 / extension5.0.0 / browser wire5. It replaces per-action
+service5.0.0-beta.3 / extension5.0.1 / browser wire5. It replaces per-action
 approval and one-tab windows with locally activated native-sidebar/group scope.
 Old browser proofs/tools cannot authorize v5.
 
@@ -96,10 +96,19 @@ disabling signing checks. Updating in place should preserve device keys.
 - Pause/End/sidebar close/reconnect invalidates runtime authority; tabs remain
   open. New mutations must not accumulate to fire on Resume. WORKSPACE_PAUSED/
   INACTIVE requires local user action, not an agent workaround.
+  Compare service_epoch/connection_id and end_reason before diagnosing lost
+  credentials. A service restart destroys active handles and in-memory tombstones;
+  NOT_AUTHORIZED for an old unknown handle is not proof pairing broke.
+  Updated extensions can republish inactive empty summaries with SERVICE_RESTARTED/
+  CONNECTION_LOST; last_session_end is extension-reported context, not authority.
+  Ask for local Start/Resume, not re-pairing. Multiple retained same-named groups
+  are organization only; the user can explicitly select the intended native group.
 
 Descriptions require at least40 trimmed Unicode code points, maximum500 raw
 code points. Supply useful nonsensitive intent, not filler; this is activity
 context, not proof of informed consent. They are not durable audit content.
+The metadata path is exactly `/.well-known/domagent` (no `.json` suffix);
+`/health` is service health, not a tenant MCP health path.
 
 ## Safe reading and page actions
 
@@ -129,6 +138,10 @@ merely to inspect payloads. Mutation acknowledgement and DOM outcome are separat
 an IIFE is valid, top-level return is not. Use focused JSON only, not full DOM.
 SCRIPT_POLICY_BLOCKED is not permission to bypass CSP. Syntax/runtime/serialization/
 injection failures are distinct; a failed script may already have side effects.
+An interrupted evaluate_script cannot be proven read-only from its apparent source:
+getters, network requests and delayed effects remain possible. Preserve uncertainty
+and inspect state rather than automatically retrying. A runner interruption notice
+is not by itself proof of a DomAgent permission failure or external mutation.
 RESULT_TOO_LARGE means narrow output, not silently accept partial JSON.
 
 New Tab or a refused viewer can be navigation-only: ordinary allowed website
