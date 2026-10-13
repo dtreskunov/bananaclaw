@@ -6,8 +6,8 @@ description: Use a user's locally activated DomAgent tab-group workspace for rea
 # DomAgent v5 workspaces
 
 DomAgent is independent of BananaClaw and OneCLI. Current matched release:
-service5.0.0-beta.6 / extension5.0.4 / browser wire5. It replaces per-action
-approval and one-tab windows with locally activated native-sidebar/group scope.
+service5.0.0-beta.7 / extension5.0.5 / browser wire5. Explicit Run and actual
+native group membership define scope; the sidebar is an optional dashboard.
 Old browser proofs/tools cannot authorize v5.
 
 ## Verify the configured MCP path
@@ -67,7 +67,7 @@ The short code is intentionally shareable once, not a durable secret.
 The extension shows the proposed application and user confirms
 **Connect and start workspace**. Application labels are not verified human
 identities. Pairing alone does not grant tab control; workspace activation and
-native sidebar/group membership are required. Unknown/expired/cancelled codes
+explicit Run/group membership are required. Unknown/expired/cancelled codes
 fail generically; no retry spam or forced re-enrollment.
 
 Existing v4 identities and credentials are migrated explicitly, not reset.
@@ -93,7 +93,9 @@ disabling signing checks. Updating in place should preserve device keys.
 - Adding/removing group tabs is local consent. Removed/re-added tabs and fresh
   session activations issue fresh authority. Website popups are excluded until
   deliberately added; group name alone is not permission.
-- Pause/End/sidebar close/reconnect invalidates runtime authority; tabs remain
+- Closing/minimizing the dashboard does not stop Run. Toolbar popup offers
+  Pause all tasks and Open dashboard; opening either UI alone grants nothing.
+- Pause/End/disconnect/restart/revocation invalidates runtime authority; tabs remain
   open. New mutations must not accumulate to fire on Resume. WORKSPACE_PAUSED/
   INACTIVE requires local user action, not an agent workaround.
   Compare service_epoch/connection_id and end_reason before diagnosing lost
@@ -146,9 +148,25 @@ document identity and small readback; a click or FormData is not proof of receip
 Never intercept submit handlers, preventDefault user forms or clone/replace them
 merely to inspect payloads. Mutation acknowledgement and DOM outcome are separate.
 
+`wait_for_page` loaded is document readiness only. Use optional content_selector
+for a visible content OR explicit empty-state marker within one shared timeout.
+Rich-text typing is DOM editing with bounded readback, not native keys or proof
+of saving/delivery. INPUT_REJECTED/INPUT_NOT_APPLIED require inspection, not retries.
+
 `evaluate_script` takes source/expression, not a function body; document.title or
-an IIFE is valid, top-level return is not. Use focused JSON only, not full DOM.
-SCRIPT_POLICY_BLOCKED is not permission to bypass CSP. Syntax/runtime/serialization/
+an IIFE is valid, top-level return is not. Source max65536 UTF-16 units. Use focused
+JSON only, not full DOM. Optional world is MAIN (compatibility default) or
+USER_SCRIPT. Prefer existing tools, then USER_SCRIPT for standard DOM work;
+choose MAIN only for a concrete page-global/editor/framework dependency.
+USER_SCRIPT shares DOM but isolates globals, has its own script-world CSP and no
+privileged extension APIs/messaging. MAIN exposes the page JS environment.
+Firefox153+ MV3 browser-compiles source; Chrome MAIN uses a constrained debugger,
+USER_SCRIPT requires Allow user scripts in browser settings. Don't invent fields
+if the native provider's tool schema is cached: restart/rediscover first.
+UPGRADE_REQUIRED means update the extension, not replace credentials.
+SCRIPT_POLICY_BLOCKED can still mean page-context dynamic eval is forbidden:
+do not change site headers or switch/retry worlds after uncertain effects.
+Syntax/runtime/serialization/
 injection failures are distinct; a failed script may already have side effects.
 An interrupted evaluate_script cannot be proven read-only from its apparent source:
 getters, network requests and delayed effects remain possible. Preserve uncertainty
@@ -159,8 +177,11 @@ RESULT_TOO_LARGE means narrow output, not silently accept partial JSON.
 New Tab or a refused viewer can be navigation-only: ordinary allowed website
 navigation does not need injection into the current document. DOM calls may
 return DOCUMENT_NOT_CONTROLLABLE, with fixed inspection_stage/injection_reason/
-last_error/timeout_ms. Record actual versions and safe diagnostics; no raw exception
-text, security-setting changes, renderer bypass, POST replay or new auto-grant.
+last_error/timeout_ms. Available sanitized exceptions, stacks, causes, layer/phase/
+world and validation field/size details reach the authenticated caller; preserve
+them in safe evidence without credentials/cookies/headers/URL secrets. isError:true
+is not a successful no-op; not_dispatched is explicit, not inferred from a code.
+No privilege escalation, viewer/renderer bypass, POST replay or new auto-grant.
 Protected management origins and invalid navigation destinations remain blocked.
 This is not a universal JSON/PDF/image interoperability promise.
 
@@ -175,6 +196,8 @@ Use `request_handoff` for login, CAPTCHA or human work. Never type/read password
 or solicit credentials. It blocks that tab, not all workspace tasks.
 The extension posts a generic system notification and browser-wide pending badge;
 clicking focuses the bound task, **not** Done. The human explicitly uses Done/Cancel.
+Optional suggested_text is separately copyable for intended nonsensitive input.
+Copy neither sends nor means Done; don't put secrets or source dumps in it.
 NOTIFICATION_UNAVAILABLE means API delivery failed; OS DND may still suppress
 successful creation. Do not claim a person saw or completed the task without
 evidence. Report stale/cancelled requests rather than sending repeated prompts.
