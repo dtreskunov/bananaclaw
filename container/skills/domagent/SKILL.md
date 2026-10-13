@@ -6,7 +6,7 @@ description: Use a user's locally activated DomAgent tab-group workspace for rea
 # DomAgent v5 workspaces
 
 DomAgent is independent of BananaClaw and OneCLI. Current matched release:
-service5.0.0-beta.3 / extension5.0.1 / browser wire5. It replaces per-action
+service5.0.0-beta.4 / extension5.0.2 / browser wire5. It replaces per-action
 approval and one-tab windows with locally activated native-sidebar/group scope.
 Old browser proofs/tools cannot authorize v5.
 
@@ -103,6 +103,9 @@ disabling signing checks. Updating in place should preserve device keys.
   CONNECTION_LOST; last_session_end is extension-reported context, not authority.
   Ask for local Start/Resume, not re-pairing. Multiple retained same-named groups
   are organization only; the user can explicitly select the intended native group.
+  GROUP_UNAVAILABLE means the tracked group no longer exists in that window.
+  The extension retires its stale local record, leaving all tabs/pairing intact.
+  Let the user choose an existing group or Start a new task, not re-pair again.
 
 Descriptions require at least40 trimmed Unicode code points, maximum500 raw
 code points. Supply useful nonsensitive intent, not filler; this is activity
