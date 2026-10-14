@@ -6,7 +6,7 @@ description: Use a user's locally activated DomAgent tab-group workspace for rea
 # DomAgent v5 workspaces
 
 DomAgent is independent of BananaClaw and OneCLI. Current matched release:
-service5.0.0-beta.8 / extension5.0.6 / browser wire5. Explicit Run and actual
+service5.0.0-beta.9 / extension5.0.7 / browser wire5. Explicit Run and actual
 native group membership define scope; the sidebar is an optional dashboard.
 Old browser proofs/tools cannot authorize v5.
 
@@ -78,9 +78,15 @@ disabling signing checks. Updating in place should preserve device keys.
 
 - `list_browser_workspaces()` lists eligible device/workspace state and bounded
   self-reported browser_info. Multiple browsers require user identification.
-- `wait_for_workspace({device_id,description,timeout_seconds?})` waits passively
-  for explicit user activation; immediate when active. It cannot open the sidebar,
-  resume user pause or produce another approval per routine action.
+- If no workspace is active, choose the intended bound device and call
+  `wait_for_workspace({device_id,description,timeout_seconds?})` instead of merely
+  telling the user to find a sharing control. Extension5.0.7 receives a server
+  request and shows a native notification/pending badge/local control card.
+  The user reviews Task tabs and Continue/Start or Decline. Notification click
+  opens controls only: it cannot override Pause, grant permissions or start Run.
+  Immediate when already active; no routine per-action approval. Offline bound
+  browsers are notified after reconnect. Older inactive peers need an extension
+  update, not re-pairing. Respect decline/cancellation; don't repeat prompts.
 - `list_workspace_tabs({workspace_id})` gives explicit opaque handles and effective
   capabilities for active grouped tabs only. Never enumerate unshared tabs.
 - `create_workspace_tab({workspace_id,url?,description})` creates a fresh background
