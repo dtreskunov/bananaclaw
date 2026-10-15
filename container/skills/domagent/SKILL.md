@@ -5,8 +5,8 @@ description: Work in the user's real browser through DomAgent v6 sessions (appro
 
 # DomAgent v6 browser sessions
 
-DomAgent is independent of BananaClaw and OneCLI. Service 6.0.0-beta.2 /
-extension 6.0.1 / wire v6. The user runs a small DomAgent window in their
+DomAgent is independent of BananaClaw and OneCLI. Service 6.0.0-beta.3 /
+extension 6.0.2 / wire v6. The user runs a small DomAgent window in their
 browser; while it is open you can ask to open **sessions**. A session is a
 native tab group the user approves, and every tab in that group is in scope.
 
