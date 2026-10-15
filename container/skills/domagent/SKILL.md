@@ -5,8 +5,8 @@ description: Work in the user's real browser through DomAgent v6 sessions (appro
 
 # DomAgent v6 browser sessions
 
-DomAgent is independent of BananaClaw and OneCLI. Service 6.0.0-beta.1 /
-extension 6.0.0 / wire v6. The user runs a small DomAgent window in their
+DomAgent is independent of BananaClaw and OneCLI. Service 6.0.0-beta.2 /
+extension 6.0.1 / wire v6. The user runs a small DomAgent window in their
 browser; while it is open you can ask to open **sessions**. A session is a
 native tab group the user approves, and every tab in that group is in scope.
 
@@ -77,7 +77,7 @@ retry.** `BROWSER_OFFLINE` → the window closed mid-task; tell the user.
 
 ## Human help
 
-Use `request_handoff({tab_id, instructions, suggested_text?})` for logins,
+Use `request_handoff({tab_id, instructions})` for logins,
 CAPTCHAs, payments or review. Never type or read passwords or ask for
 credentials. The user gets a notification, the tab group flashes, and they click
 **Done** or **Cancel** in the DomAgent window. Only that tab waits; others can
