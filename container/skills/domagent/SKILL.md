@@ -5,8 +5,9 @@ description: Work in the user's real browser through DomAgent v6 sessions (appro
 
 # DomAgent v6 browser sessions
 
-DomAgent is independent of BananaClaw and OneCLI. Service 6.1.0-beta.3 /
-extension 6.1.1 / wire v6. Artifacts need extension 6.1.0; an older one answers
+DomAgent is independent of BananaClaw and OneCLI. Service 6.1.0-beta.4 /
+extension 6.1.2 / wire v6. Artifacts need extension 6.1.0 and closing tabs needs
+6.1.2; an older one answers
 `CAPABILITY_UNAVAILABLE` with `required_extension_version`: ask the user to
 update the extension. The user runs a small DomAgent window in their
 browser; while it is open you can ask to open **sessions**. A session is a
@@ -53,9 +54,15 @@ not a credential.
 - A session ends when the user closes or ungroups its tab group
   (`SESSION_ENDED`, `NOT_FOUND`). Don't re-request unprompted; ask.
 - `end_session({session_id})` when done: tabs are ungrouped and stay open.
+  Pass `close_tabs: true` to close the tabs instead when they are only
+  scratch pages you opened (browser must be online). Ending a session can't be
+  undone: request a new one for later work.
 - `list_tabs({session_id})`: all tabs in the group, including ones the user
   dragged in or a site opened. `create_tab({session_id, url?, description})`
-  adds a background tab (max 8). `TAB_NOT_IN_SESSION` means the user removed it.
+  adds a background tab (max 8). `close_tab({tab_id, description})` closes one
+  you no longer need; closing the last tab ends the session
+  (`session_ended: true`). `TAB_NOT_IN_SESSION` means the tab was closed or the
+  user removed it.
 - `report_progress({session_id, message})` posts a short update to the user's
   activity feed. Use it for milestones, not every step.
 
