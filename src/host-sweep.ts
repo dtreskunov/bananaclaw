@@ -56,7 +56,6 @@ import { onSessionDurableProcessing } from './session-link.js';
 import { MAX_DECLARED_TOOL_TIMEOUT_MS } from './session-link-durable.js';
 import { isContainerRunning, killContainer, recoverStoppedSession, wakeContainer } from './container-runner.js';
 import { needsStoppedRunnerRecovery } from './session-recovery.js';
-import { publishTaskRun } from './task-events.js';
 import type { Session } from './types.js';
 
 /**
@@ -206,70 +205,6 @@ async function sweep(): Promise<void> {
   setTimeout(sweep, SWEEP_INTERVAL_MS);
 }
 
-/**
- * Publish "scheduled task ran" notices for task rows among the ids that just
- * transitioned to completed. Channel adapters subscribe via `onTaskRun` and
- * decide whether/how to surface the firing; this stays channel-agnostic.
- */
-function emitTaskRuns(inDb: Database.Database, outDb: Database.Database | null, completedIds: string[]): void {
-  try {
-    const placeholders = completedIds.map(() => '?').join(',');
-    const rows = inDb
-      .prepare(
-        `SELECT id, process_after, content, recurrence, series_id, platform_id, channel_type, thread_id
-           FROM messages_in
-          WHERE kind = 'task' AND id IN (${placeholders})`,
-      )
-      .all(...completedIds) as Array<{
-      id: string;
-      process_after: string;
-      content: string;
-      recurrence: string | null;
-      series_id: string | null;
-      platform_id: string;
-      channel_type: string;
-      thread_id: string | null;
-    }>;
-    for (const r of rows) {
-      let attempt: { status: string; trigger_source: string; error: string | null } | undefined;
-      try {
-        attempt = outDb
-          ? (outDb
-              .prepare(`SELECT status, trigger_source, error FROM task_attempts WHERE task_message_id = ?`)
-              .get(r.id) as typeof attempt)
-          : undefined;
-      } catch {
-        attempt = undefined;
-      }
-      let autoPaused = false;
-      try {
-        autoPaused = JSON.parse(r.content)?.autoPaused === true;
-      } catch {
-        /* malformed legacy task content */
-      }
-      publishTaskRun({
-        channelType: r.channel_type,
-        platformId: r.platform_id,
-        threadId: r.thread_id,
-        id: r.id,
-        // Place the firing at the time it was due to run (process_after),
-        // matching the socket-snapshot event bubble.
-        timestamp: r.process_after,
-        content: r.content,
-        recurrence: r.recurrence,
-        seriesId: r.series_id,
-        status:
-          (attempt?.status as 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed') ?? 'completed',
-        triggerSource: attempt?.trigger_source === 'manual' ? 'manual' : 'scheduled',
-        error: attempt?.error ?? null,
-        autoPaused,
-      });
-    }
-  } catch (err) {
-    log.warn('emitTaskRuns failed', { err });
-  }
-}
-
 async function sweepSession(session: Session): Promise<void> {
   const agentGroup = getAgentGroup(session.agent_group_id);
   if (!agentGroup) return;
@@ -294,10 +229,9 @@ async function sweepSession(session: Session): Promise<void> {
     if (!isContainerRunning(session.id) && needsStoppedRunnerRecovery(session)) {
       if (!(await recoverStoppedSession(session))) return;
     }
-    let justCompleted: string[] = [];
     // 1. Sync processing_ack → messages_in status
     if (outDb) {
-      justCompleted = syncProcessingAcks(inDb, outDb);
+      syncProcessingAcks(inDb, outDb);
     }
 
     // 2. Wake a container if work is due and nothing is running. Ordered
@@ -340,12 +274,6 @@ async function sweepSession(session: Session): Promise<void> {
     const { handleRecurrence } = await import('./modules/scheduling/recurrence.js');
     await handleRecurrence(inDb, session, outDb);
     // MODULE-HOOK:scheduling-recurrence:end
-
-    // Publish after recurrence handling so the notice includes policy results
-    // such as an automatic pause. History backfills the same event on reload.
-    if (justCompleted.length > 0) {
-      emitTaskRuns(inDb, outDb, justCompleted);
-    }
   } finally {
     inDb.close();
     outDb?.close();

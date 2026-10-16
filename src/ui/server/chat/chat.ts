@@ -1168,10 +1168,10 @@ export function readChatHistory(
       );
       // Router namespaces ids as `<rawId>:<agentGroupId>` when writing
       // into per-agent session DBs (router.ts messageIdForAgent), but the
-      // live WS echo from submitWebInbound sends the raw `<rawId>`. If we
+      // send response from submitWebInbound returns the raw `<rawId>`. If we
       // leak the namespaced form to the client the dedup key (direction:id)
       // mismatches and the user's own message paints twice on visibility
-      // resume. Strip the suffix here so history matches the echo.
+      // resume. Strip the suffix here so history matches the send id.
       for (const r of rows) {
         const cancelled = inputStates.get(r.id)?.status === 'cancelled' || isCancelledInputContent(r.content);
         if (cancelled) {
