@@ -1,5 +1,6 @@
 // Shared types used across the chat UI client.
 import type { InputHandling, InputState } from '../../../shared/input-state';
+import type { ModelTime } from '../../../shared/activity-presentation';
 export type { InputHandling, InputState } from '../../../shared/input-state';
 
 export type ChannelType =
@@ -252,6 +253,7 @@ export interface ActivityLine {
   ordinal?: number;
   ts: string;
   text: string;
+  modelTime?: ModelTime;
 }
 
 export interface SearchResult {

@@ -836,7 +836,7 @@ export interface ForkQueryOptions {
 }
 
 /** Provider events still processed after the user stopped the turn. */
-const STOPPED_TURN_EVENTS = new Set(['init', 'progress', 'usage', 'usage_call', 'checkpoint', 'steering_applied']);
+const STOPPED_TURN_EVENTS = new Set(['init', 'progress', 'usage_call', 'checkpoint', 'steering_applied']);
 
 export async function processQuery(
   query: AgentQuery,
@@ -1188,12 +1188,14 @@ export async function processQuery(
         // notifies them; the next message starts a fresh query.
         endStream();
         break;
-      case 'usage':
-        accounting.onUsage(event.data);
+      case 'usage_call': {
+        const ms = event.data.duration_api_ms;
+        // A corrected report of a call keeps its original model step.
+        if (accounting.onUsageCall(event.data) && typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) {
+          appendActivity({ kind: 'model', id: `model:${generateId()}`, durationMs: Math.round(ms) });
+        }
         break;
-      case 'usage_call':
-        accounting.onUsageCall(event.data);
-        break;
+      }
       case 'checkpoint':
         accounting.checkpoint = event.ref;
         break;

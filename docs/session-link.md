@@ -261,9 +261,11 @@ record (`turnId`, `durationMs`, `model`, `usageId`, `status`, `final`). Status i
 `final` for completed reported totals, or `unavailable` when no usage was
 reported. `final=true` means the metadata is settled, not that token coverage
 is complete. Missing reports never create zero-token usage rows.
-One stable usage row (`tu-<turn ID>`) is overwritten with the accumulated
-reported billing across attempts; aggregate reports replace the current
-attempt's call deltas, not add them again. Provider durations never reset the
+One stable usage row (`tu-<turn ID>`) is overwritten with the sum of every
+model call reported across attempts. Providers report only per-call usage; a
+re-report of the same call ID (OpenCode's final refresh, Claude's result
+reconciliation of cost and side-call tokens onto the last call) replaces the
+earlier report instead of adding to it. Provider durations never reset the
 logical turn's walltime. Usage timestamps and IDs survive re-linking.
 Model-call durations (`duration_api_ms`) are rounded to integer milliseconds
 before new native runner reports are emitted. For older runners and already

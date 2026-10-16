@@ -8,7 +8,6 @@ import { audioReferencePrompt, isAudioAttachment } from './attachment-routing.js
 import type { ActivityStep, AgentProvider, AgentQuery, CallUsage, FileAttachment, ForkContinuationInput, ModelLimits, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions, TurnUsage } from './types.js';
 import { fingerprintToolInput } from './types.js';
 import { toolActivityFields } from './tool-activity.js';
-import { accumulateCallUsage } from './usage.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { createModelCatalog, type RawLimits } from './model-catalog.js';
 import { parseAssistantOutput } from '../formatter.js';
@@ -198,24 +197,11 @@ export function isEventForSession(eventSessionId: string | undefined, activeSess
   return eventSessionId === activeSessionId;
 }
 
-/**
- * A turn is one prompt but many assistant messages — every tool-calling step
- * bills separately. Recording only the final one drops the (usually largest)
- * tool-calling steps, so the sum is what reaches the DB. Exported for tests.
- */
-export function sumOpenCodeUsage(perMessage: Array<CallUsage | undefined>): TurnUsage | null {
-  let total: TurnUsage | null = null;
-  for (const usage of perMessage) {
-    if (!usage) continue;
-    total = accumulateCallUsage(total, { ...usage, model: usage.model || total?.model || '' });
-  }
-  return total;
-}
-
 type OpenCodeUsageInfo = {
   cost?: number;
   tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } };
   modelID?: string;
+  time?: { created?: number; completed?: number };
 };
 
 /** Normalize one assistant message's reported usage into a single call.
@@ -228,6 +214,8 @@ export function callUsageFromInfo(info: OpenCodeUsageInfo | undefined): CallUsag
   const cacheWrite = info.tokens?.cache?.write ?? 0;
   // Occupancy for this round trip: the whole prompt it resent plus its reply.
   const resident = input + cacheRead + cacheWrite + output;
+  const { created, completed } = info.time ?? {};
+  const durationMs = typeof created === 'number' && typeof completed === 'number' ? completed - created : NaN;
   return {
     cost_usd: info.cost ?? 0,
     input_tokens: input,
@@ -237,6 +225,7 @@ export function callUsageFromInfo(info: OpenCodeUsageInfo | undefined): CallUsag
     reasoning_tokens: info.tokens?.reasoning,
     model: info.modelID ?? '',
     ...(resident > 0 ? { context_tokens: resident } : {}),
+    ...(Number.isFinite(durationMs) && durationMs >= 0 ? { duration_api_ms: durationMs } : {}),
   };
 }
 
@@ -1028,6 +1017,7 @@ export class OpenCodeProvider implements AgentProvider {
                   providerID?: string;
                   modelID?: string;
                   finish?: string;
+                  time?: { created?: number; completed?: number };
                 } | undefined;
                 if (!isEventForSession(info?.sessionID, sessionId)) break;
                 if (info?.id && info?.role) {
@@ -1044,9 +1034,11 @@ export class OpenCodeProvider implements AgentProvider {
                     lastAssistantProviderID = info.providerID;
                     lastAssistantModelID = info.modelID;
                   }
+                  // Each assistant message is one billed call; later updates
+                  // re-send its id so the runner replaces the earlier report.
+                  const usage = usageByMessageId.get(info.id);
+                  if (usage && finishByMessageId.has(info.id)) yield { type: 'usage_call', data: { ...usage, id: info.id } };
                   if (firstFinish && info.role === 'assistant') {
-                    const usage = usageByMessageId.get(info.id);
-                    if (usage) yield { type: 'usage_call', data: usage };
                     // One step of the prompt loop just closed. The runner
                     // counts these to bound text-only runaways.
                     yield { type: 'assistant_message' };
@@ -1173,8 +1165,10 @@ export class OpenCodeProvider implements AgentProvider {
               } catch { /* The fallback may have killed the runtime; streamed history remains durable. */ }
               yield { type: 'checkpoint', ref: lastId };
             }
-            const usage = sumOpenCodeUsage(assistantIds.map((id) => usageByMessageId.get(id)));
-            if (usage) yield { type: 'usage', data: usage };
+            for (const id of assistantIds) {
+              const usage = usageByMessageId.get(id);
+              if (usage) yield { type: 'usage_call', data: { ...usage, id } };
+            }
           }
         }
 
@@ -1264,13 +1258,20 @@ export class OpenCodeProvider implements AgentProvider {
         if (lastAssistantId) {
           yield { type: 'checkpoint', ref: lastAssistantId };
         }
-        const turnUsage = sumOpenCodeUsage(assistantMessageIds.map((id) => usageByMessageId.get(id)));
-        if (turnUsage) {
+        // Final reports replace streamed ones (the trailing message's usage
+        // is refreshed above; unfinished messages were never reported).
+        let reported = false;
+        for (const id of assistantMessageIds) {
+          const usage = usageByMessageId.get(id);
+          if (!usage) continue;
+          reported = true;
+          yield { type: 'usage_call', data: { ...usage, id } };
+        }
+        if (reported) {
           self.lastAssistantModel = {
             providerID: lastAssistantProviderID,
             modelID: lastAssistantModelID,
           };
-          yield { type: 'usage', data: turnUsage };
         }
         // Empty text + non-stop finish = silent drop. Convert to an error so
         // the poll-loop's unsurfacedError path tells the user what happened

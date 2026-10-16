@@ -101,15 +101,6 @@ function timedCallUsageFor(model: NativeModel, raw: unknown, responseTimeMs: num
   return { ...callUsageFor(model, raw), duration_api_ms: Math.round(responseTimeMs) };
 }
 
-function addUsage(total: TurnUsage, data: CallUsage): void {
-  total.cost_usd += data.cost_usd;
-  total.input_tokens += data.input_tokens;
-  total.output_tokens += data.output_tokens;
-  total.cache_read_tokens += data.cache_read_tokens;
-  total.cache_write_tokens += data.cache_write_tokens;
-  total.reasoning_tokens = (total.reasoning_tokens ?? 0) + (data.reasoning_tokens ?? 0);
-}
-
 function patchTargets(input: Record<string, unknown> | undefined): string | undefined {
   if (typeof input?.patch !== 'string') return undefined;
   const files = [...new Set(
@@ -326,8 +317,6 @@ export class NativeProvider implements AgentProvider {
             const turn = pending.shift()!;
             active = true;
             const startedAt = Date.now();
-            let modelCallMs = 0;
-            let compactionCalls = 0;
             const callUsages: CallUsage[] = [];
             function* flushCallUsage(): Generator<ProviderEvent> {
               for (const data of callUsages.splice(0)) yield { type: 'usage_call', data };
@@ -370,16 +359,11 @@ export class NativeProvider implements AgentProvider {
               let silence: string | null = null;
               let checkpoint = journal.checkpoint;
               const appliedSteeringIds: string[] = [];
-              const totalUsage: TurnUsage = callUsageFor(resolved, {});
               function recordCall({ usage, performance }: LanguageModelCallEndEvent, summary = false): void {
                 const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
-                modelCallMs += data.duration_api_ms;
-                if (summary) {
-                  data.context_tokens = undefined;
-                  compactionCalls++;
-                }
-                if (summary || usage.inputTokens !== undefined || usage.outputTokens !== undefined) callUsages.push(data);
-                addUsage(totalUsage, data);
+                // A summary call's prompt is the old history, not the conversation's context.
+                if (summary) data.context_tokens = undefined;
+                callUsages.push(data);
               }
               // One-off instruction for the next step; never persisted.
               let nudge: string | null = null;
@@ -601,8 +585,7 @@ export class NativeProvider implements AgentProvider {
                 messages.push(...responseMessages);
                 const steps = await result.steps;
                 stepsCompleted += steps.length;
-                totalUsage.context_tokens = callUsageFor(resolved, steps.at(-1)?.usage).context_tokens;
-                compactionPolicy.observe(totalUsage.context_tokens);
+                compactionPolicy.observe(callUsageFor(resolved, steps.at(-1)?.usage).context_tokens);
                 const stepText = (await result.text).trim() || null;
                 finishReason = String(await result.finishReason);
                 const step = steps.at(-1);
@@ -673,11 +656,6 @@ export class NativeProvider implements AgentProvider {
               // No await or yield between closing acceptance and deciding the
               // final result; guidance arriving after this belongs to a later turn.
               active = false;
-              yield {
-                type: 'usage',
-                data: { ...totalUsage, duration_ms: Date.now() - startedAt, duration_api_ms: modelCallMs,
-                  num_turns: stepsCompleted + compactionCalls },
-              };
               yield { type: 'checkpoint', ref: checkpoint };
               yield {
                 type: 'result',

@@ -35,8 +35,10 @@ import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import {
   activityChapters, activityStepCount, chapterEntryHeadline, displayStep, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep, stepHeadline, stepBody,
-  todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, type StepHeadline, type TraceStep,
+  todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, TRACE_STEP_THRESHOLD_MS,
+  type ModelTime, type StepHeadline, type TraceEntry, type TraceStatus, type TraceStep,
 } from '../../../../shared/activity-presentation';
+import { formatStopwatch } from '../duration-format';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
 import { STARTING_RESPONSE_TEXT, submissionPresentation } from '../web-submissions';
 import {
@@ -45,7 +47,7 @@ import {
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
 import { activeTurnNotices, hasTurnStats, liveTurnActivity, turnRowView } from '../turn-row';
-import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, latestContextUsage, selectContextUsage, technicalSummary, type KnownContext } from '../technical-summary';
+import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, latestContextUsage, technicalSummary, type KnownContext } from '../technical-summary';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -141,18 +143,8 @@ function stepMeta(s: TraceStep, elapsedMs: number | null): string | null {
   if (s.kind !== 'tool') return null;
   const status = TRACE_STATUS_LABELS[traceStatus(s)];
   const duration = s.status === 'running' ? elapsedMs : s.durationMs;
-  const formattedDuration = typeof duration !== 'number'
-    ? ''
-    : s.status === 'running'
-      ? `${Math.floor(duration / 1000)}s`
-      : formatDuration(duration);
+  const formattedDuration = typeof duration !== 'number' ? '' : formatStopwatch(duration, s.status !== 'running');
   return `${status}${formattedDuration ? ` · ${formattedDuration}` : ''}`;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 1000)}s`;
 }
 
 function formatElapsedDuration(ms: number): string {
@@ -161,13 +153,83 @@ function formatElapsedDuration(ms: number): string {
   return `${ms < 0 ? '-' : ''}${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
 
+/** Self-ticking stopwatch: tenths below 10s, then whole seconds. */
+function LiveDuration({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  const elapsed = Math.max(0, now - since);
+  const tick = elapsed < 10_000 ? 100 : 1000;
+  useEffect(() => {
+    const timer = window.setTimeout(() => setNow(Date.now()), tick);
+    return () => window.clearTimeout(timer);
+  }, [now, tick]);
+  return <>{formatStopwatch(elapsed)}</>;
+}
+
+/** A finished duration, or the start of a live one. */
+type ChipTime = { ms: number } | { since: number };
+const TIME_KINDS = {
+  cpu: { label: 'CPU', hint: 'Execution time' },
+  ai: { label: 'AI', hint: 'Model time' },
+};
+
+/** Right-aligned slot so each time kind stays vertically aligned across rows; `lead` sits just before the time. */
+function TimeChip({ kind, time, status, lead = null }: { kind: 'cpu' | 'ai'; time: ChipTime | null; status: TraceStatus; lead?: JSX.Element | null }) {
+  const live = !!time && 'since' in time;
+  const { label, hint } = TIME_KINDS[kind];
+  return (
+    <span class={`trace-time trace-time-${kind}`}>
+      {lead}
+      {time ? <span class={`trace-time-value trace-status-${status}`} role={live ? 'timer' : undefined}
+          aria-live={live ? 'off' : undefined} title={hint}>
+          <span class="trace-time-label">{label}</span>
+          <span class="trace-time-num">{'since' in time ? <LiveDuration since={time.since} /> : formatStopwatch(time.ms)}</span>
+        </span> : null}
+    </span>
+  );
+}
+
+/** Finished steps without attributed model time still show zero; a live tail ticks on top of the finished time. */
+function modelChipTime(modelTime: ModelTime | undefined, active: boolean): ChipTime | null {
+  if (!modelTime) return active ? null : { ms: 0 };
+  return modelTime.since !== undefined ? { since: modelTime.since - modelTime.ms } : { ms: modelTime.ms };
+}
+
+function isTimedStep(step: TraceStep): boolean {
+  return step.kind === 'tool' || step.kind === 'compaction';
+}
+
+/** Chapter totals; a live part ticks from its start, offset by the finished total. */
+function chapterTimes(entries: TraceEntry[], live: boolean) {
+  let exec = 0;
+  let execSince: number | null = null;
+  let timed = false;
+  let model = 0;
+  let modelSince: number | null = null;
+  for (const { line, step } of entries) {
+    if (isTimedStep(step)) {
+      timed = true;
+      const startedAt = Number(line.ts);
+      if (live && step.status === 'running' && line.ts && Number.isFinite(startedAt))
+        execSince = Math.min(execSince ?? startedAt, startedAt);
+      else exec += step.durationMs ?? 0;
+    }
+    if (!line.modelTime) continue;
+    model += line.modelTime.ms;
+    if (line.modelTime.since !== undefined) modelSince = line.modelTime.since;
+  }
+  return {
+    exec: !timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec },
+    model: modelSince !== null ? { since: modelSince - model } : { ms: model },
+  };
+}
+
 function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turnId = null }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void; child?: boolean; turnId?: string | null }) {
   const step = displayStep(line, live);
   const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
   const known = !!(described.action || described.subject);
   const headline = known ? described : { action: line.text };
   const summary = headlineSummary(headline);
-  const running = live && step.kind === 'tool' && step.status === 'running';
+  const running = live && isTimedStep(step) && step.status === 'running';
   const startedAt = Number(line.ts);
   const hasStartedAt = !!line.ts && Number.isFinite(startedAt);
   const code = open ? (known ? stepBody(step) : line.text) : null;
@@ -175,9 +237,13 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : '';
   const meta = open ? [timestamp, statusText].filter(Boolean).join(' · ') : '';
-  const duration = running ? elapsedMs : step.durationMs;
+  const execTime: ChipTime | null = running
+    ? hasStartedAt ? { since: startedAt } : null
+    : isTimedStep(step) && typeof step.durationMs === 'number' ? { ms: step.durationMs } : null;
   const todos = open ? todoItems(step) : null;
-  const stoppableId = running && step.id ? step.id : null;
+  // Stop appears once a running tool passes the threshold.
+  const stoppable = elapsedMs !== null && elapsedMs >= TRACE_STEP_THRESHOLD_MS;
+  const stoppableId = stoppable && step.kind === 'tool' && step.id ? step.id : null;
   const stopError = stoppableId && turnId ? toolStopRequest(turnId, stoppableId)?.error : '';
   return (
     <li class={`trace-row ${traceStatusClass(step)}${open ? ' open' : ''}${child ? ' trace-child' : ''}`}>
@@ -194,12 +260,10 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
           <span class="trace-text"><StepHeadlineContent headline={headline} /></span>
         </button>
         <span class="trace-controls">
-          {stoppableId && turnId ? <ToolStopButton turnId={turnId} toolCallId={stoppableId} /> : null}
-          {typeof duration === 'number' && (duration >= 2000 || running || step.status === 'error')
-            ? <span class="trace-duration" role={running ? 'timer' : undefined}
-                aria-live={running ? 'off' : undefined} aria-label="Elapsed activity time">
-                {running ? formatElapsedDuration(duration) : formatDuration(duration)}
-              </span> : null}
+          <TimeChip kind="cpu" time={execTime} status={traceStatus(step)}
+            lead={stoppableId && turnId ? <ToolStopButton turnId={turnId} toolCallId={stoppableId} /> : null} />
+          <TimeChip kind="ai" time={modelChipTime(line.modelTime, live && (step.status === 'running' || step.status === 'pending'))}
+            status={line.modelTime?.since !== undefined ? 'running' : 'completed'} />
         </span>
       </div>
       {stopError ? <div class="trace-note turn-stop-error" role="alert">{stopError}</div> : null}
@@ -262,7 +326,9 @@ export function ActivityTraceList({ lines, live = false, now = null, turnId = nu
           return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} />;
         }
         const open = openChapter === chapter.id;
+        const times = chapterTimes(chapter.entries, live);
         return <li key={chapter.id} class={`trace-chapter trace-status-${chapter.status}${open ? ' open' : ''}`}>
+          <div class="trace-row-header">
           <button type="button" class="trace-chapter-toggle" aria-expanded={open}
             aria-label={`${chapter.title} · ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` · ${chapter.failures} failed` : ''}`}
             onClick={() => toggleChapter(chapter.id)}>
@@ -275,6 +341,11 @@ export function ActivityTraceList({ lines, live = false, now = null, turnId = nu
               </span>
             </span>
           </button>
+          <span class="trace-controls">
+            <TimeChip kind="cpu" time={times.exec} status={chapter.status} />
+            <TimeChip kind="ai" time={times.model} status={'since' in times.model ? 'running' : 'completed'} />
+          </span>
+          </div>
           {open ? <ul class="trace-children">
             {chapter.entries.map(({ line, id }) => <ActivityTraceRow key={id} line={line} open={id === sel}
               live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} child />)}
@@ -353,8 +424,7 @@ function fmtContextLimit(tokens: number): string {
 
 type UsageProps = {
   ownerId: string; summary: string; records: ConversationTurn['usage']; model: string | null;
-  context: KnownContext | null;
-  live: boolean; partial: boolean; wallElapsedMs: number | null; modelElapsedMs: number | null;
+  live: boolean; partial: boolean; wallElapsedMs: number | null; modelElapsedMs: number | null; toolElapsedMs: number;
 };
 
 function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>) {
@@ -377,31 +447,41 @@ function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>
   );
 }
 
-function UsageDetails({ ownerId, records, context, model, live, partial, wallElapsedMs, modelElapsedMs }: Omit<UsageProps, 'summary'>) {
-  const grid = useRef<HTMLDivElement>(null);
+const fmtTokUnit = (n: number) => `${fmtTok(n)} tok`;
+const fmtTime = (ms: number | null) => (ms === null ? 'Unavailable' : formatStopwatch(ms));
+
+function UsageRow({ label, value, title }: { label: string; value: string; title?: string }) {
+  return <span class="usage-row" title={title}><span>{label}</span><strong>{value}</strong></span>;
+}
+
+function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, modelElapsedMs, toolElapsedMs }: Omit<UsageProps, 'summary'>) {
   const reports = records.length ? records : [{ id: 'usage', value: {} }];
-  const showLiveContext = live && context != null;
-  useLayoutEffect(() => {
-    const element = grid.current;
-    if (!element) return;
-    const cells = element.querySelectorAll('.usage-row, .usage-report > strong').length;
-    // Fill the two rows preceding the last timing cell before allowing trailing blanks.
-    element.style.setProperty('--usage-pair-limit', String(Math.max(1, Math.floor((cells - 1) / 2))));
-  }, [records, context, model, live]);
+  const otherMs = wallElapsedMs !== null && modelElapsedMs !== null
+    ? Math.max(0, wallElapsedMs - toolElapsedMs - modelElapsedMs) : null;
+  const heading = (index: number) => reports.length > 1 ? <strong class="usage-subheading">Usage report {index + 1}</strong> : null;
   return (
     <div class="usage-details" id={`turn-usage-${ownerId}`} role="group" aria-label="Turn usage details">
-      <div class="usage-grid" ref={grid}>
-        {partial ? <span class="usage-notice">Partial usage report; final totals may be higher.</span> : null}
-        <span class="usage-time-breakdown" role="group" aria-label="Response time breakdown">
-          <span class="usage-row"><span>Total time</span><strong>{wallElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs)}</strong></span>
-          <span class="usage-row"><span>Model time</span><strong>{modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(modelElapsedMs)}</strong></span>
-          <span class="usage-row" title="Total time minus cumulative model-call time"><span>Other time</span><strong>{wallElapsedMs === null || modelElapsedMs === null ? 'Unavailable' : formatElapsedDuration(wallElapsedMs - modelElapsedMs)}</strong></span>
-        </span>
-        {showLiveContext ? <UsageContext context={context} live /> : null}
-        {reports.map((record, index) => <div class="usage-report" key={record.id}>
-          {reports.length > 1 ? <strong>Usage report {index + 1}</strong> : null}
-          <UsageReport u={record.value} model={model} live={live} partial={partial} showContext={!showLiveContext} />
-        </div>)}
+      {partial ? <span class="usage-notice">Partial usage report; final totals may be higher.</span> : null}
+      <div class="usage-columns">
+        <section class="usage-column" aria-label="Timing">
+          <UsageRow label="Total" value={fmtTime(wallElapsedMs)} />
+          <UsageRow label="Model" value={fmtTime(modelElapsedMs)} title="Sum of reported model-call times" />
+          <UsageRow label="Tools" value={fmtTime(toolElapsedMs)} title="Time with at least one tool running" />
+          <UsageRow label="Other" value={fmtTime(otherMs)}
+            title="Total minus model and tool time: container startup, prompt assembly, history loading, message delivery, etc." />
+        </section>
+        <section class="usage-column" aria-label="Tokens">
+          {reports.map((record, index) => <div class="usage-report" key={record.id}>
+            {heading(index)}
+            <UsageTokens u={record.value} live={live} />
+          </div>)}
+        </section>
+        <section class="usage-column" aria-label="Model">
+          {reports.map((record, index) => <div class="usage-report" key={record.id}>
+            {heading(index)}
+            <UsageModel u={record.value} model={model} live={live} partial={partial} />
+          </div>)}
+        </section>
       </div>
     </div>
   );
@@ -413,26 +493,30 @@ function UsageContext({ context, partialTokens, live }: {
   const contextTokens = context ? context.context_tokens
     : partialTokens !== undefined && Number.isFinite(partialTokens) && partialTokens >= 0 ? partialTokens : undefined;
   if (contextTokens === undefined) return null;
-  const detail = `${fmtTok(contextTokens)}${context
-    ? ` / ${fmtContextLimit(context.context_window)} (${fmtPct(contextTokens, context.context_window)})` : ''}`;
-  return <span class="usage-row"><span>{live ? 'Latest known context' : 'Context at end'}</span><strong>{detail}</strong></span>;
+  const detail = `${fmtTokUnit(contextTokens)}${context
+    ? ` / ${fmtContextLimit(context.context_window)} tok (${fmtPct(contextTokens, context.context_window)})` : ''}`;
+  return <UsageRow label={live ? 'Context now' : 'Context at end'} value={detail} />;
 }
 
-function UsageReport({ u, model, live, partial, showContext = true }: {
-  u: Partial<TurnUsage>; model?: string | null; live: boolean; partial: boolean;
-  showContext?: boolean;
-}) {
+function UsageTokens({ u, live }: { u: Partial<TurnUsage>; live: boolean }) {
+  const count = (n: number | undefined) => (n !== undefined ? fmtTokUnit(n) : 'unavailable');
+  return <>
+    <UsageRow label={live ? 'Processing so far' : 'Turn processing'}
+      value={`${count(u.input_tokens)} in \u00b7 ${count(u.output_tokens)} out`} />
+    {u.reasoning_tokens ? <UsageRow label="Reasoning" value={fmtTokUnit(u.reasoning_tokens)} /> : null}
+    {u.cache_read_tokens ? <UsageRow label="Cache read" value={fmtTokUnit(u.cache_read_tokens)} /> : null}
+    {u.cache_write_tokens ? <UsageRow label="Cache write" value={fmtTokUnit(u.cache_write_tokens)} /> : null}
+    <UsageContext context={latestContextUsage([u])}
+      partialTokens={u.context_window === undefined ? u.context_tokens : undefined} live={live} />
+  </>;
+}
+
+function UsageModel({ u, model, live, partial }: { u: Partial<TurnUsage>; model?: string | null; live: boolean; partial: boolean }) {
   const reportedModel = u.model || model;
   return <>
-    <span class="usage-row"><span>{partial ? 'Reported cost' : 'Estimated cost'}</span><strong>{u.cost_usd !== undefined ? fmtCost(u.cost_usd) : 'Cost unavailable'}</strong></span>
     {reportedModel ? <span class="usage-row"><span>Model</span><strong title={reportedModel}>{shortModel(reportedModel)}</strong></span> : null}
-    {showContext ? <UsageContext context={latestContextUsage([u])}
-      partialTokens={u.context_window === undefined ? u.context_tokens : undefined} live={live} /> : null}
-    <span class="usage-row"><span>{live ? 'Processing so far' : 'Turn processing'}</span><strong>{u.input_tokens !== undefined ? fmtTok(u.input_tokens) : 'unavailable'} input {'\u00b7'} {u.output_tokens !== undefined ? fmtTok(u.output_tokens) : 'unavailable'} output</strong></span>
-    {u.num_turns ? <span class="usage-row"><span>{live ? 'Model calls so far' : 'Model calls'}</span><strong>{u.num_turns}</strong></span> : null}
-    {u.cache_read_tokens !== undefined && u.cache_read_tokens > 0 ? <span class="usage-row"><span>Cache read</span><strong>{fmtTok(u.cache_read_tokens)}</strong></span> : null}
-    {u.cache_write_tokens !== undefined && u.cache_write_tokens > 0 ? <span class="usage-row"><span>Cache write</span><strong>{fmtTok(u.cache_write_tokens)}</strong></span> : null}
-    {u.reasoning_tokens ? <span class="usage-row"><span>Reasoning</span><strong>{fmtTok(u.reasoning_tokens)}</strong></span> : null}
+    {u.num_turns ? <UsageRow label={live ? 'Model calls so far' : 'Model calls'} value={String(u.num_turns)} /> : null}
+    {u.cost_usd ? <UsageRow label={partial ? 'Reported cost' : 'Estimated cost'} value={fmtCost(u.cost_usd)} /> : null}
   </>;
 }
 
@@ -1102,11 +1186,10 @@ function turnUsage(turn: ConversationTurn, ownerId: string, now: number): UsageP
   const liveUsage = live ? turn.liveUsage : null;
   const records = liveUsage && !view.usage.length ? [{ id: 'live', value: liveUsage }] : view.usage;
   const usage = records.map(record => record.value);
-  const context = selectContextUsage(usage, liveUsage);
   return {
-    ownerId, records, context, model: view.model,
-    summary: technicalSummary({ elapsedMs: live ? null : view.elapsedMs, usage, context }),
-    wallElapsedMs: view.elapsedMs, modelElapsedMs: view.modelCallMs, live,
+    ownerId, records, model: view.model,
+    summary: technicalSummary({ elapsedMs: live ? null : view.elapsedMs, usage }),
+    wallElapsedMs: view.elapsedMs, modelElapsedMs: view.modelCallMs, toolElapsedMs: view.toolCallMs, live,
     partial: turn.metadata.status === 'partial',
   };
 }
@@ -1152,13 +1235,13 @@ function TurnTechnicalDetails({
   );
 }
 
-function TurnElapsed({ elapsedMs, live = false }: { elapsedMs: number | null; live?: boolean }) {
-  if (elapsedMs === null) return null;
+function TurnElapsed({ startedAt }: { startedAt: number | null }) {
   return (
-    <span class="turn-elapsed" role={live ? 'timer' : undefined} aria-live={live ? 'off' : undefined}
+    <span class={`turn-elapsed${startedAt === null ? '' : ' live'}`}
+      role={startedAt === null ? undefined : 'timer'} aria-live={startedAt === null ? undefined : 'off'}
       aria-label="Elapsed response time"
       title="Response time, including tools and waiting for replies">
-      {formatElapsedDuration(elapsedMs)}
+      {startedAt === null ? formatStopwatch(0) : <LiveDuration since={startedAt} />}
     </span>
   );
 }
@@ -1170,7 +1253,7 @@ function startingResponsePresentation(submission: PendingWebSend) {
     attributes: { 'data-response-start': ownerId },
     technicalTurn: undefined,
     stopControl: <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton turnId={null} /></span>,
-    elapsedControl: <TurnElapsed elapsedMs={0} />,
+    elapsedControl: <TurnElapsed startedAt={null} />,
     tone: '',
     activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
     lines: [{ ts: '', text: JSON.stringify({
@@ -1187,7 +1270,6 @@ function turnResponsePresentation(
   const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
   const settled = turn.phase === 'settled';
   const live = status && !settled;
-  const view = turnRowView(turn, now);
   const activity = live ? liveTurnActivity(turn, lines, turnConnected.value, stop) : null;
   const tone = stop?.error || (settled && turn.outcome === 'failed')
     ? ' provenance-error'
@@ -1201,7 +1283,7 @@ function turnResponsePresentation(
     technicalTurn: status ? turn : undefined,
     stopControl: live
       ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton turnId={turn.id} /></span> : null,
-    elapsedControl: live ? <TurnElapsed elapsedMs={view.elapsedMs} live /> : null,
+    elapsedControl: live && turn.startedAt ? <TurnElapsed startedAt={Date.parse(turn.startedAt)} /> : null,
     tone, activity, lines: activity?.lines ?? lines,
   };
 }
@@ -1255,6 +1337,8 @@ function ResponseStatusRow({ source }: {
           ? <span class={`hint${activity.error ? ' turn-stop-error' : ''}`}
               role={activity.error ? 'alert' : 'status'} title={headlineSummary(headline)}
             ><StepHeadlineContent headline={headline} /></span>
+          : headline && showTechnicalStatus && expanded
+          ? null
           : headline && showTechnicalStatus
           ? <button
               type="button"

@@ -253,9 +253,8 @@ export interface SteeringInput {
 }
 
 /**
- * Per-turn provider usage snapshot. Provider-agnostic — both Claude and
- * OpenCode (and future providers) emit the same shape. Values are
- * per-turn deltas, not session-cumulative.
+ * Per-turn usage snapshot: the runner's sum of a turn's `usage_call`
+ * reports. Values are per-turn deltas, not session-cumulative.
  */
 export interface TurnUsage {
   cost_usd: number;
@@ -283,8 +282,8 @@ export interface TurnUsage {
 
 /** Usage for one completed model call. The runner accumulates these into a
  * TurnUsage snapshot so lossy host polling never has to reconstruct totals
- * from individual events. */
-export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms'>;
+ * from individual events. Calls without an `id` are always distinct. */
+export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms'> & { id?: string };
 
 /**
  * One step of a turn's activity trace, in structured form. Providers emit
@@ -308,7 +307,9 @@ export type ActivityStep =
   | { kind: 'retry'; id: string; attempt: number; error?: string }
   | { kind: 'compaction'; id: string; auto?: boolean; status?: 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; error?: string; durationMs?: number }
   | { kind: 'subtask'; id: string; agent?: string; description?: string }
-  | { kind: 'notification'; id: string; text: string; detail?: string };
+  | { kind: 'notification'; id: string; text: string; detail?: string }
+  // One finished model call, recorded at its end; hidden from the trace, used for timing.
+  | { kind: 'model'; id: string; durationMs: number };
 
 // Priority-ordered keys we consider the "primary argument" of a tool call.
 // Covers both provider naming conventions (opencode `filePath`, Claude
@@ -440,14 +441,9 @@ export type ProviderEvent =
    * no per-step message boundary omit it.
    */
   | { type: 'assistant_message' }
-  /**
-   * Per-turn usage data emitted just before the corresponding `result`
-   * event. The poll-loop stashes this and writes it to `turn_usage` in
-   * outbound.db once the result row is created.
-   */
-  | { type: 'usage'; data: TurnUsage }
-  /** Usage for one completed model call. The runner accumulates these into
-   * replacement snapshots for live presentation. */
+  /** Usage for one completed model call, the only usage report. The runner
+   * sums these into the turn's `turn_usage`; re-sending a call's `id` replaces
+   * its earlier report (e.g. cost finalized after the call ended). */
   | { type: 'usage_call'; data: CallUsage }
   /**
    * Provider-private handle for the turn just finished, emitted just before

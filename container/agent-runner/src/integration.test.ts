@@ -2331,7 +2331,7 @@ class ScriptedProvider {
       if (turn.error) {
         yield { type: 'error', ...turn.error, retryable: false };
       }
-      if (turn.usage) yield { type: 'usage', data: turn.usage };
+      if (turn.usage) yield { type: 'usage_call', data: turn.usage };
       yield {
         type: 'result',
         text: turn.text || null,

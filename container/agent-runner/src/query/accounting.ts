@@ -7,9 +7,8 @@
 import { getOutboundDb } from '../db/connection.js';
 import { clearActivity, clearUsageProgress, writeUsageProgress } from '../db/session-state.js';
 import { writeTurnCheckpoint } from '../db/turn-checkpoints.js';
-import type { AgentProvider, CallUsage, TurnUsage } from '../providers/types.js';
-import { accumulateTurnUsage } from '../providers/usage.js';
-import { persistTurnMetadata, recordTurnUsage, turnUsage, type TurnExecution } from '../turn-execution.js';
+import type { AgentProvider, CallUsage } from '../providers/types.js';
+import { completeUsageAttempt, recordCallUsage, turnUsage, type TurnExecution } from '../turn-execution.js';
 
 function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
@@ -30,29 +29,20 @@ export function resetLiveTurnState(): void {
 }
 
 export class TurnAccounting {
-  // Accumulated from `usage` events; flushed at the result boundary.
-  private pendingUsage: TurnUsage | null = null;
   // Captured from the provider's `checkpoint` event; flushed with the usage.
   checkpoint: string | null = null;
 
   constructor(private readonly execution: { current: TurnExecution }) {}
 
-  onUsage(data: TurnUsage): void {
-    // Provider reports an attempt aggregate, replacing its live call deltas.
-    // Accumulated, not replaced: a turn that retried, or that errored and
-    // was re-prompted, emits one event per attempt and every attempt was
-    // billed. Non-additive fields take the latest attempt's value.
-    this.pendingUsage = accumulateTurnUsage(this.pendingUsage, data);
-    recordTurnUsage(this.execution.current, data, true);
-  }
-
-  onUsageCall(data: CallUsage): void {
-    recordTurnUsage(this.execution.current, data, false);
+  /** Returns false when the call replaced an earlier report of the same call. */
+  onUsageCall(data: CallUsage): boolean {
+    const added = recordCallUsage(this.execution.current, data);
     try {
       writeUsageProgress(turnUsage(this.execution.current)!);
     } catch {
       /* best-effort */
     }
+    return added;
   }
 
   /**
@@ -73,33 +63,22 @@ export class TurnAccounting {
           .prepare('SELECT id FROM messages_out WHERE seq > ? AND turn_id = ? ORDER BY seq DESC LIMIT 1')
           .get(opts.since, opts.turnId) as { id: string } | undefined
       )?.id ?? '';
-    const pending = this.pendingUsage;
-    if (pending) {
+    const execution = this.execution.current;
+    if (execution.unreported) {
       // Providers that resolve limits from a remote catalog fill them in
       // here rather than mid-turn, so enrichment is uniform and a slow
       // catalog can never stall the reply. Gaps only: a provider whose
-      // SDK already reported limits keeps its own numbers.
-      try {
-        const limits = await opts.provider.modelLimits?.(pending);
-        if (pending.context_window === undefined && limits?.context_window !== undefined) {
-          pending.context_window = limits.context_window;
+      // calls already reported limits keeps its own numbers.
+      let limits: TurnExecution['limits'] = {};
+      const usage = turnUsage(execution);
+      if (usage && (usage.context_window === undefined || usage.max_output_tokens === undefined)) {
+        try {
+          limits = (await opts.provider.modelLimits?.(usage)) ?? {};
+        } catch (e) {
+          log(`Failed to resolve model limits: ${e instanceof Error ? e.message : String(e)}`);
         }
-        if (pending.max_output_tokens === undefined && limits?.max_output_tokens !== undefined) {
-          pending.max_output_tokens = limits.max_output_tokens;
-        }
-      } catch (e) {
-        log(`Failed to resolve model limits: ${e instanceof Error ? e.message : String(e)}`);
       }
-      const execution = this.execution.current;
-      if (execution.reportedUsage) {
-        execution.reportedUsage = {
-          ...execution.reportedUsage,
-          context_window: pending.context_window,
-          max_output_tokens: pending.max_output_tokens,
-        };
-      }
-      persistTurnMetadata(execution, false);
-      this.pendingUsage = null;
+      completeUsageAttempt(execution, limits);
     }
     if (this.checkpoint && lastOutId && opts.continuation) {
       try {

@@ -219,8 +219,10 @@ tool call; question cards do not synthesize a second action in the trace.
 **Thinking…** appears only in the status line while no activity is active, never
 as a trace entry. Current tool captions also remain in the status line instead
 of duplicating recorded entries as standalone rows after their chapters.
-Settled traces contain only recorded activities, with no synthetic **Done**
-entry. Completion and notable outcomes remain in the regular status footer;
+Every trace with a known turn start opens with a display-only **Starting
+response…** row (**Started response** once later work or settlement closes it).
+It counts as a step and is not stored. Settled traces otherwise contain only
+recorded activities, with no synthetic **Done** entry. Completion and notable outcomes remain in the regular status footer;
 completion does not imply that the requested work succeeded. Transient notices
 do not count as activity steps or enter the runner journal, stored activity or
 usage accounting. The step-count disclosure is hidden when there are no recorded steps.
@@ -232,8 +234,26 @@ Headers show the group heading and outcome notices. Recorded file targets and
 arguments shared by every entry can appear in the heading; a differing last
 argument is not presented as the whole group's target. Child labels omit the parent's repeated verb.
 Exact timestamps, status and duration share one line with dot separators when
-a step is expanded; full arguments and errors appear beneath. Slow or failed
-steps retain a compact duration beside the label.
+a step is expanded; full arguments and errors appear beneath.
+
+Each row ends with two right-aligned plain-text times in fixed columns, so each
+kind lines up across rows and chapter headers. Each time carries a subtle
+label, with the full name as a hover hint. **CPU** (execution time) shows tool
+and compaction time, live from the moment a step starts, and stays on completed
+rows. **AI** (model time) shows the model calls that the row's step prompted.
+The runner records a hidden `model` activity step for each finished model call
+that reports its duration (`duration_api_ms`). A call is attributed to the step that most recently
+finished before it started, or to the start row if none had; several calls can
+share one row, so the number of rows with AI time can be lower than **Model
+calls**. After the last call, the time since the latest step or call ends is shown
+live on that step's row until the next step or the reply. Turns recorded
+before model steps existed show no AI time. Runner overhead between calls is not AI time; the usage
+details count it as **Other**. Finished steps with no attributed time show
+**0.0s**. No time is hidden for being short. Times use the
+trace status colors, blue while live and green once complete; **AI** uses a
+softer shade of the same color. Live times tick themselves and show tenths
+below 10 s, then whole seconds. Chapter headers show the sums of their
+children.
 
 Chapter wording follows its latest step: **Editing files / Edited files**
 and **Running command / Ran command**. Repeated groups append **· N times**;
@@ -251,8 +271,9 @@ relying on color. Historical unfinished steps become **Outcome unknown**, not
 successful or still-running steps.
 The activity viewport scrolls vertically. Long row and chapter labels fade over
 their final 24 px within the transcript width, before the fixed row controls.
-Running steps show a **Stop tool** button followed by an elapsed activity
-stopwatch, including while their details are expanded. It cancels only that
+A running step's **Stop tool** button appears once it has run for one second,
+including while its details are expanded. The plain stop icon sits just before
+the **CPU** time. It cancels only that
 tool call; the turn, other tools, queued inputs and response continue normally.
 The separate **Stop response** control in the status row still cancels the
 entire turn. Per-tool Stop currently requires the native provider's live
@@ -391,22 +412,22 @@ trace entries, not model requests or exclusively tool calls; display-only marker
 are excluded. The count does not repeat in its adjacent summary, which shows
 available fields in the order `15s · $2.09 · 35% ctx`. Elapsed time appears here
 only after the turn settles; running, stopping, and settling turns retain timing
-in the live stopwatch and inline usage details, not the trace status summary. Elapsed time of at least a
-minute uses minutes and seconds (`710s` becomes `11m 50s`), reusing the task
-panel's duration formatter (milliseconds below one second, rounded seconds otherwise). Missing fields and zero
+in the live stopwatch and inline usage details, not the trace status summary.
+Elapsed time uses the trace time format (tenths below 10 s, then floored
+seconds, `11m 50s`, `1h 1m`), so it always equals the details' **Total**. Missing fields and zero
 cost are omitted from the summary; a reported zero cost remains in the details. Total cost is
 shown only when every usage report includes cost; context is the latest reported
-valid context/window pair, not cumulative billed tokens. For running, stopping,
-and settling turns, newer live context takes precedence over checkpointed usage;
-incomplete or invalid live context retains the latest known valid measurement.
-Model-call counts prevent an older live snapshot from replacing newer recorded context.
-The client selects and validates that context once, then shares it with the
-summary and details without reusing its billing fields. Partial accounting
-reports can still display a known token count when the context window is unknown.
-Settled turns use their recorded context. Live context is displayed separately
-from accounting reports in the inline details, so neither cost nor billed tokens
-are counted twice. The inline details retain
-model, tokens, model/other timing, and individual accounting reports.
+valid context/window pair, not cumulative billed tokens. Context is read from
+the same usage record as the token and model-call counts, which the runner
+rewrites after every model call, so it updates live with them (**Context now**
+while running, **Context at end** once settled). An incomplete or invalid
+report retains the latest known valid measurement, and a report without a
+context window still displays its token count. The inline details show three unlabeled columns (timing,
+tokens and model) side by side on one row, inside a single outline sized to
+their content; a narrow screen scrolls them horizontally. Values are
+left-aligned. Token counts use the `tok` unit; with several
+accounting reports, the token and model columns show a **Usage report N**
+subheading for each.
 The summary is a chevron toggle styled like the adjacent **trace** disclosure,
 retaining its duration/cost/context label. It opens detailed metrics inline at
 the top of the activity panel, not in a pop-up. Metrics and trace expand
@@ -450,7 +471,8 @@ assistant bubble and does not change the failed outcome. Historical
 failure-explanation attempts are not inferred or backfilled.
 Live rows order the bouncing dots, Stop, stopwatch, and current
 activity text. Only pending or running activities drive that text; when none
-remain, it returns to **Thinking…**, including before recorded activity arrives.
+remain, it returns to **Thinking…**. Before any recorded activity arrives it
+shows the open start row, **Starting response…**.
 An activity finishing does not mask another activity that is still running.
 Completed, failed and interrupted entries stay in the trace, not in the live
 status text.
@@ -460,7 +482,7 @@ duplicates. An idle submission also shows **Starting response…** in the respon
 status slot before the real turn exists. This display-only phase survives HTTP
 acceptance and the initial generic queued receipt, then hands the same bubble
 over to the authoritative turn's Thinking/activity status. Stop is visible but
-disabled during startup, and the stopwatch stays at **0:00** without a running
+disabled during startup, and the stopwatch stays at **0.0s** without a running
 clock. When the durable turn appears before its live connection state, Stop
 stays in place but remains disabled until the live ID matches the displayed turn.
 It then follows the existing permission/connection checks; the stopwatch uses
@@ -510,20 +532,28 @@ Stopping/disconnect notices and Stop errors occupy the same footer text slot,
 not separate transcript rows. Errors retain their alert role and retry control.
 Current activity remains visible with technical information hidden. The toggle
 does not change status font size or the font used for inline-code subjects.
-The stopwatch uses minutes and seconds and remains in the regular footer while
-the turn is live, as a plain duration with no label, whether technical
-information is on or off. The technical summary omits inline timing.
-The inline usage details show **Total time** with
-**Model time** and **Other time** beneath it in the same column, without indents.
-Model time is cumulative time requesting and
-streaming model responses, excluding tool execution and waits for user input;
-other time is total time minus model time. Total time uses the authoritative logical turn,
-not the provider attempt's duration. Native measures model responses using the
-SDK's model-call performance callback, including compaction calls; Claude
-reports API time. Other providers and older records without isolated timing
-explicitly show **unavailable** for model and other time, never substitute wall
-time or zero. The subtraction is signed, not clamped: cumulative overlapping
-calls or inconsistent historical clocks can produce a negative difference.
+The stopwatch uses the trace time format (tenths below 10 s, then
+seconds and minutes) and remains in the regular footer while the turn is live,
+whether technical information is on or off. While the trace is expanded, the
+footer omits the current activity text that the trace already shows. The technical summary omits inline timing.
+The timing column lists **Total**, **Model**, **Tools** and **Other**, all in
+the trace time format. Tools is the time with at
+least one tool running (overlapping tools count once; live tools count to now).
+Model is the cumulative time requesting and streaming model responses,
+excluding tool execution and waits for user input. Native measures it with the
+SDK's model-call performance callback, including compaction calls; OpenCode uses
+each assistant message's created/completed times. The Claude SDK reports no
+per-call timing, so the runner times each call from when its prompt went out
+(the user's message or the previous tool results) to when its message arrived.
+Other is Total minus tool and model time, clamped at zero, and covers runner
+overhead such as container startup, prompt assembly, history loading and
+message delivery (listed in its hover hint). Total uses the authoritative logical turn,
+not the provider attempt's duration. Providers and older records without
+isolated timing explicitly show **unavailable** for model and other time, never
+substituting wall time or zero.
+The tokens column shows input and output processing (`55.0k tok in · 485 tok out`), then reasoning, cache
+read and cache write when non-zero, then context (`55.4k tok / 1M tok (6%)`).
+The model column shows the model, the model-call count, and cost when reported.
 Live model timing reflects reported calls so far, not a second running stopwatch.
 Stopped/failed calls retain reported timing alongside partial usage; unfinished
 calls without a usage report cannot provide a complete model-time total.
@@ -890,7 +920,8 @@ The host publishes an explicit `timeline` of message references, question
 references, and typed turn trace/status rows. The host selects the final response
 or the synthetic bubble beneath the latest associated conversation content as
 the sole trace host. Recorded logical-clock positions order the turn's activities.
-The browser resolves those references and adds display-only live notice markers;
+The browser resolves those references, adds display-only live notice markers
+and the start row, and attributes model-call steps to trace rows.
 Thinking, current tool captions and completion stay in the status line.
 It does not infer activity segments
 from timestamps or invent messages, message IDs, or insertion positions for

@@ -1,6 +1,6 @@
 import { batch, signal } from '@preact/signals';
-import type { Conversation, ConversationTrace } from '../../../shared/conversation';
-import { conversationActivity } from '../../../shared/conversation-activity';
+import type { Conversation, ConversationTrace, ConversationTurn } from '../../../shared/conversation';
+import { conversationActivity, turnModelTime, withModelTime } from '../../../shared/conversation-activity';
 import {
   ConversationProtocolError,
   parseConversationFrame,
@@ -49,12 +49,19 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     .filter((message) => message.inputState?.status !== 'cancelled')
     .map(({ timestamp, ...message }) => ({ ...message, files: message.files ?? null, ts: timestamp }));
   const byId = new Map(messages.map((message) => [message.id, message]));
+  const modelTimes = new Map(view.turns.map((turn) => [turn.id, turnModelTime(turn)]));
   const traceLines = (trace: ConversationTrace) => {
     const turn = turns.get(trace.turnId);
     if (!turn) throw new ConversationProtocolError('invalid_frame');
     const ordinals = new Set(trace.ordinals);
     const activity = turn.activity.filter((line) => ordinals.has(line.ordinal));
-    return trace.ownsTurn ? conversationActivity(turn, activity) : activity;
+    const first = turn.activity.reduce<ConversationTurn['activity'][number] | null>(
+      (earliest, line) => (!earliest || line.timelinePosition < earliest.timelinePosition ? line : earliest),
+      null,
+    );
+    const hostsStart = first ? ordinals.has(first.ordinal) : trace.ownsTurn && turn.phase !== 'settled';
+    const lines = trace.ownsTurn ? conversationActivity(turn, activity) : activity;
+    return withModelTime(turn, lines, modelTimes.get(turn.id)!, hostsStart);
   };
   const transcript = view.timeline.flatMap((row): TranscriptRow[] => {
     const turn = row.trace ? turns.get(row.trace.turnId) : undefined;

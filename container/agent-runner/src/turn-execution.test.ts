@@ -3,7 +3,7 @@ import { initTestSessionDb, getInboundDb, getOutboundDb, closeSessionDb } from '
 import { appendActivity, getContinuation, setContinuation } from './db/session-state.js';
 import { getTurn } from './db/turns.js';
 import { getTurnContext } from './current-batch.js';
-import { beginTurn, finishUsageAttempt, recordTurnUsage, settleTurn } from './turn-execution.js';
+import { beginTurn, completeUsageAttempt, finishUsageAttempt, recordCallUsage, settleTurn } from './turn-execution.js';
 import { runPollLoop } from './poll-loop.js';
 import { requestTurnStop, resetHostEventsForTesting } from './session-link.js';
 import { invokeRegisteredTool, registerTools } from './mcp-tools/tool-registry.js';
@@ -55,23 +55,24 @@ function expectOutputBeforeSettlement(): void {
     .every((event) => event.sequence < settled.sequence)).toBe(true);
 }
 
-it('persists model time across retries and replaces call checkpoints with attempt totals', async () => {
+it('persists every call\'s model time across retries', async () => {
   const turn = beginTurn(route, []);
-  recordTurnUsage(turn, { ...usage, duration_api_ms: 100 }, false);
+  recordCallUsage(turn, { ...usage, duration_api_ms: 100 });
   finishUsageAttempt(turn);
-  recordTurnUsage(turn, { ...usage, duration_api_ms: 200 }, false);
-  recordTurnUsage(turn, { ...usage, duration_api_ms: 300, duration_ms: 999999 }, true);
+  recordCallUsage(turn, { ...usage, duration_api_ms: 200 });
+  recordCallUsage(turn, { ...usage, duration_api_ms: 300 });
+  completeUsageAttempt(turn);
   await settleTurn(turn, 'silent');
-  expect(getOutboundDb().prepare('SELECT duration_api_ms FROM turn_usage WHERE turn_id = ?').get(turn.turnId))
-    .toEqual({ duration_api_ms: 400 });
-  expect(metadata(turn.turnId).durationMs).toBeLessThan(999999);
+  expect(getOutboundDb().prepare('SELECT duration_api_ms, num_turns FROM turn_usage WHERE turn_id = ?').get(turn.turnId))
+    .toEqual({ duration_api_ms: 600, num_turns: 3 });
+  expect(metadata(turn.turnId)).toMatchObject({ status: 'partial', final: true });
 });
 
 it('preserves main-model occupancy and billed summary calls in failed-turn partial accounting', async () => {
   const turn = beginTurn(route, []);
-  recordTurnUsage(turn, { ...usage, context_tokens: 786_376, context_window: 1_000_000, duration_api_ms: 100 }, false);
-  recordTurnUsage(turn, { ...usage, input_tokens: 900_000, context_tokens: undefined,
-    context_window: 1_000_000, duration_api_ms: 200 }, false);
+  recordCallUsage(turn, { ...usage, context_tokens: 786_376, context_window: 1_000_000, duration_api_ms: 100 });
+  recordCallUsage(turn, { ...usage, input_tokens: 900_000, context_tokens: undefined,
+    context_window: 1_000_000, duration_api_ms: 200 });
   finishUsageAttempt(turn);
   await settleTurn(turn, 'failed');
   expect(getOutboundDb().prepare(
@@ -159,7 +160,7 @@ it('records a model-handled failure on the original turn without losing activity
       throw new Error('provider rejected the request');
     }
     yield { type: 'init', continuation: 'explanation-session' };
-    yield { type: 'usage', data: usage };
+    yield { type: 'usage_call', data: usage };
     yield { type: 'result', text: '<message to="web">The provider rejected your request.</message>' };
   });
   const query = p.query.bind(p);
@@ -301,7 +302,7 @@ it('does not turn an idle warm transport error into a second answer or mutate se
   input();
   let ended = false;
   const p = provider(async function* () {
-    yield { type: 'usage', data: usage };
+    yield { type: 'usage_call', data: usage };
     yield { type: 'result', text: '<message to="web">answer</message>' };
     ended = true;
     throw new Error('idle transport closed');
@@ -317,7 +318,29 @@ it('does not turn an idle warm transport error into a second answer or mutate se
   } finally { controller.abort(); await loop; }
 });
 
-it('retains one usage ID and full walltime across a stale retry, without double counting call summaries', async () => {
+it('records a hidden model step for each timed model call', async () => {
+  input();
+  const p = provider(async function* () {
+    yield { type: 'usage_call', data: { ...usage, duration_api_ms: 1200 } };
+    yield { type: 'usage_call', data: usage };
+    yield { type: 'usage_call', data: { ...usage, id: 'replayed', duration_api_ms: 500 } };
+    yield { type: 'usage_call', data: { ...usage, id: 'replayed', duration_api_ms: 700 } };
+    yield { type: 'result', text: '<message to="web">answer</message>' };
+  });
+  const controller = new AbortController();
+  const loop = runPollLoop({ provider: p, providerName: 'test', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE phase='settled'").get());
+    expect(activitySteps()).toEqual([
+      { kind: 'model', id: expect.stringMatching(/^model:/), durationMs: 1200 },
+      { kind: 'model', id: expect.stringMatching(/^model:/), durationMs: 500 },
+    ]);
+    expect(getOutboundDb().prepare('SELECT duration_api_ms, num_turns FROM turn_usage').get())
+      .toEqual({ duration_api_ms: null, num_turns: 3 });
+  } finally { controller.abort(); await loop; }
+});
+
+it('retains one usage ID and full walltime across a stale retry, counting each attempt\'s calls once', async () => {
   input();
   setContinuation('test', 'stale');
   let attempt = 0;
@@ -330,7 +353,6 @@ it('retains one usage ID and full walltime across a stale retry, without double 
       await Bun.sleep(30);
       throw new Error('stale');
     }
-    yield { type: 'usage', data: { ...usage, duration_ms: 1 } };
     yield { type: 'result', text: '<message to="web">answer</message>' };
   });
   p.isSessionInvalid = () => true;
@@ -390,11 +412,12 @@ it('waits for captured asynchronous tool output before durable settlement', asyn
   expect(JSON.parse(events.at(-1)!.payload).outcome).toBe('replied');
 });
 
-it('final aggregate replaces live deltas, preserves the accounting ID/time and survives output relinking', async () => {
+it('a re-reported call replaces its earlier report, preserves the accounting ID/time and survives output relinking', async () => {
   const turn = beginTurn(route, []);
-  recordTurnUsage(turn, usage, false);
+  recordCallUsage(turn, { ...usage, id: 'call', cost_usd: 0 });
   const before = getOutboundDb().prepare('SELECT id, timestamp FROM turn_usage').get();
-  recordTurnUsage(turn, usage, true);
+  recordCallUsage(turn, { ...usage, id: 'call' });
+  completeUsageAttempt(turn);
   writeMessageOut({ id: 'final-output', kind: 'chat', content: '{"text":"answer"}' });
   await settleTurn(turn, 'replied');
   expect(getOutboundDb().prepare('SELECT id, timestamp FROM turn_usage').get()).toEqual(before);
@@ -417,7 +440,7 @@ it('does not publish settlement when its durable metadata commit fails', async (
 
 it('a replacement runner interrupts abandoned outputless turns without dropping reported usage', async () => {
   const prior = beginTurn(route, []);
-  recordTurnUsage(prior, usage, false);
+  recordCallUsage(prior, usage);
   appendActivity({ kind: 'notification', id: 'prior', text: 'working' });
   const controller = new AbortController();
   const loop = runPollLoop({ provider: provider(async function* () {}), providerName: 'test', cwd: process.cwd(), signal: controller.signal });

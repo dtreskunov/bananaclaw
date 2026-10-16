@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectContextUsage, technicalSummary } from './technical-summary';
+import { technicalSummary } from './technical-summary';
 
 describe('compact technical summary', () => {
   it('matches the requested shape without model, token or model-call counts', () => {
@@ -28,7 +28,7 @@ describe('compact technical summary', () => {
     {
       elapsedMs: 0,
       usage: [{ cost_usd: 0, context_tokens: 0, context_window: 200 }],
-      expected: '0ms · 0% ctx',
+      expected: '0.0s · 0% ctx',
     },
     { elapsedMs: null, usage: [{ cost_usd: 2.09 }], expected: '$2.09' },
     { elapsedMs: null, usage: [{ context_tokens: 1, context_window: 1000 }], expected: '<1% ctx' },
@@ -37,13 +37,13 @@ describe('compact technical summary', () => {
   });
 
   it.each([
-    { elapsedMs: 500, expected: '500ms' },
-    { elapsedMs: 59_000, expected: '59s' },
-    { elapsedMs: 59_999, expected: '1m 0s' },
+    { elapsedMs: 500, expected: '0.5s' },
+    { elapsedMs: 9_999, expected: '9.9s' },
+    { elapsedMs: 21_546, expected: '21s' },
+    { elapsedMs: 59_999, expected: '59s' },
     { elapsedMs: 60_000, expected: '1m 0s' },
-    { elapsedMs: 710_000, expected: '11m 50s' },
-    { elapsedMs: 710_999, expected: '11m 51s' },
-    { elapsedMs: 3_661_000, expected: '61m 1s' },
+    { elapsedMs: 710_999, expected: '11m 50s' },
+    { elapsedMs: 3_661_000, expected: '1h 1m' },
   ])('formats elapsed time as $expected', ({ elapsedMs, expected }) => {
     expect(technicalSummary({ elapsedMs, usage: [] })).toBe(expected);
   });
@@ -74,15 +74,10 @@ describe('compact technical summary', () => {
     { context_tokens: 40, context_window: 1000, expected: '4%' },
     { context_tokens: 40, context_window: 100, expected: '40%' },
     { context_tokens: 0, context_window: 1000, expected: '0%' },
-  ])('uses newer context independently of billing ($expected)', ({ expected, ...latest }) => {
-    const recorded = { cost_usd: 2.09, context_tokens: 120, context_window: 1000 };
-    expect(
-      technicalSummary({
-        elapsedMs: null,
-        usage: [recorded],
-        context: selectContextUsage([recorded], { ...latest, cost_usd: 99, input_tokens: 999_999 }),
-      }),
-    ).toBe(`$2.09 · ${expected} ctx`);
+  ])('formats context occupancy against the window ($expected)', ({ expected, ...context }) => {
+    expect(technicalSummary({ elapsedMs: null, usage: [{ cost_usd: 2.09, ...context }] })).toBe(
+      `$2.09 · ${expected} ctx`,
+    );
   });
 
   it.each([
@@ -93,36 +88,9 @@ describe('compact technical summary', () => {
     { context_tokens: 800, context_window: 0 },
     { context_tokens: NaN, context_window: 1000 },
     { context_tokens: Infinity, context_window: Infinity },
-  ])('retains the latest known valid context when newer telemetry is incomplete or invalid (%s)', (latest) => {
+  ])('retains the latest known valid context when a newer report is incomplete or invalid (%s)', (latest) => {
     const recorded = { context_tokens: 120, context_window: 1000 };
-    expect(
-      technicalSummary({
-        elapsedMs: null,
-        usage: [recorded],
-        context: selectContextUsage([recorded], latest),
-      }),
-    ).toBe('12% ctx');
-  });
-
-  it.each([
-    { recordedCalls: 10, liveCalls: 9, expected: 'recorded' },
-    { recordedCalls: 10, liveCalls: 10, expected: 'live' },
-    { recordedCalls: 10, liveCalls: 11, expected: 'live' },
-    { recordedCalls: undefined, liveCalls: 9, expected: 'live' },
-    { recordedCalls: 10, liveCalls: undefined, expected: 'live' },
-  ])(
-    'selects $expected context with recorded=$recordedCalls and live=$liveCalls',
-    ({ recordedCalls, liveCalls, expected }) => {
-      const recorded = { context_tokens: 120, context_window: 1000, num_turns: recordedCalls };
-      const live = { context_tokens: 800, context_window: 1000, num_turns: liveCalls };
-      expect(selectContextUsage([recorded], live)).toBe(expected === 'live' ? live : recorded);
-    },
-  );
-
-  it('returns no context without valid sources and preserves recorded context without live data', () => {
-    expect(selectContextUsage([])).toBeNull();
-    const recorded = { context_tokens: 120, context_window: 1000 };
-    expect(selectContextUsage([recorded])).toBe(recorded);
+    expect(technicalSummary({ elapsedMs: null, usage: [recorded, latest] })).toBe('12% ctx');
   });
 
   it.each([

@@ -121,6 +121,7 @@ const ACTIVITY_STEP_FIELDS = new Map<string, readonly FieldSpec[]>(
       optional('durationMs', isNonNegativeNumber),
     ],
     subtask: [optional('agent', optionalText), optional('description', optionalText)],
+    model: [required('durationMs', isNonNegativeNumber)],
   }).map(([kind, fields]) => [kind, [...STEP_HEAD, ...fields]]),
 );
 

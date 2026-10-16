@@ -7,6 +7,7 @@ export function accumulateTurnUsage(total: TurnUsage | null, next: TurnUsage): T
   if (!total) return { ...next };
   return {
     ...next,
+    model: next.model || total.model,
     cost_usd: total.cost_usd + next.cost_usd,
     input_tokens: total.input_tokens + next.input_tokens,
     output_tokens: total.output_tokens + next.output_tokens,

@@ -9,7 +9,8 @@ export type ActivityStep =
   | { kind: 'retry'; id: string; attempt: number; error?: string }
   | { kind: 'compaction'; id: string; auto?: boolean; status?: 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; error?: string; durationMs?: number }
   | { kind: 'subtask'; id: string; agent?: string; description?: string }
-  | { kind: 'notification'; id: string; text: string; detail?: string };
+  | { kind: 'notification'; id: string; text: string; detail?: string }
+  | { kind: 'model'; id: string; durationMs: number };
 
 export interface ReducedActivityLine extends ActivityLine {
   step: ActivityStep;
@@ -19,7 +20,7 @@ function parseStep(text: string): ActivityStep | null {
   try {
     const value = JSON.parse(text) as Partial<ActivityStep>;
     if (!value || typeof value.kind !== 'string' || typeof value.id !== 'string' || !value.id) return null;
-    if (!['tool', 'internal', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification'].includes(value.kind)) return null;
+    if (!['tool', 'internal', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification', 'model'].includes(value.kind)) return null;
     return value as ActivityStep;
   } catch {
     return null;

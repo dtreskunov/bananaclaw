@@ -13,8 +13,16 @@ import * as nativeAudio from './native/audio.js';
 import * as nativeTools from './native/tools.js';
 import * as nativeAttachments from './native/attachments.js';
 import { NativeStore } from './native/store.js';
-import { fingerprintToolInput, type ProviderEvent } from './types.js';
+import { fingerprintToolInput, type ProviderEvent, type TurnUsage } from './types.js';
 import { COMPACTION_INSTRUCTIONS } from './native/compaction.js';
+import { accumulateCallUsage } from './usage.js';
+
+/** The runner's fold of a turn's per-call reports. */
+function turnTotal(events: ProviderEvent[]): TurnUsage | null {
+  let total: TurnUsage | null = null;
+  for (const event of events) if (event.type === 'usage_call') total = accumulateCallUsage(total, event.data);
+  return total;
+}
 
 let root: string;
 let server: ReturnType<typeof Bun.serve>;
@@ -775,7 +783,7 @@ describe('NativeProvider', () => {
       const calls = events.filter((event) => event.type === 'usage_call');
       expect(calls).toHaveLength(3);
       expect(calls.filter((event) => event.type === 'usage_call' && event.data.reasoning_tokens === 16_000)).toHaveLength(1);
-      const total = events.find((event) => event.type === 'usage');
+      const total = { data: turnTotal(events) };
       expect(total).toMatchObject({ data: { input_tokens: 12, reasoning_tokens: 16_000, num_turns: 3,
         output_tokens: protocol === 'anthropic-messages' ? 16_008 : 16_006,
         context_tokens: protocol === 'anthropic-messages' ? 32 : 7 } });
@@ -869,12 +877,10 @@ describe('NativeProvider', () => {
       const summaries = calls.filter((event) => event.type === 'usage_call' && event.data.input_tokens === 900_000);
       expect(summaries).toHaveLength(1);
       expect(summaries.every((event) => event.type === 'usage_call' && event.data.context_tokens === undefined)).toBe(true);
-      const total = events.find((event) => event.type === 'usage');
+      const total = { data: turnTotal(events) };
       expect(total).toMatchObject({ data: protocol === 'anthropic-messages'
         ? { input_tokens: 1_650_006, output_tokens: 20, cache_read_tokens: 40, cache_write_tokens: 6, context_tokens: 32, num_turns: 4 }
         : { input_tokens: 1_650_013, output_tokens: 10, cache_read_tokens: 0, cache_write_tokens: 0, context_tokens: 7, num_turns: 4 } });
-      expect(calls.reduce((sum, event) => sum + (event.type === 'usage_call' ? event.data.input_tokens : 0), 0))
-        .toBe(total?.type === 'usage' ? total.data.input_tokens : -1);
       const resumed = await collect(provider, continuation);
       expect(compactions(resumed, 'running')).toHaveLength(0);
     },
@@ -1234,15 +1240,9 @@ describe('NativeProvider', () => {
       expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
       expect(events.filter((event) => event.type === 'steering_applied')).toEqual([{ type: 'steering_applied', id: 's1' }]);
       expect(events.filter((event) => event.type === 'usage_call')).toHaveLength(2);
-      expect(events.find((event) => event.type === 'usage')).toMatchObject({
-        data: { input_tokens: 15, output_tokens: 5, num_turns: 2, context_tokens: 7 },
-      });
-      const usage = events.find((event) => event.type === 'usage')!.data;
+      expect(turnTotal(events)).toMatchObject({ input_tokens: 15, output_tokens: 5, num_turns: 2, context_tokens: 7 });
       const calls = events.filter((event) => event.type === 'usage_call');
       expect(calls.every((event) => Number.isSafeInteger(event.data.duration_api_ms))).toBe(true);
-      expect(Number.isSafeInteger(usage.duration_api_ms)).toBe(true);
-      expect(usage.duration_api_ms).toBeCloseTo(calls.reduce((total, event) => total + event.data.duration_api_ms!, 0), 6);
-      expect(usage.duration_ms! - usage.duration_api_ms!).toBeGreaterThanOrEqual(90);
       expect(query.steer!({ id: 'late', prompt: 'too late' })).toBe(false);
       const continuation = events.find((event) => event.type === 'init')!.continuation;
       expect(provider.appliedSteering(continuation, ['s1', 'late'])).toEqual(['s1']);
@@ -1287,8 +1287,8 @@ describe('NativeProvider', () => {
     }
     expect(events.filter((event) => event.type === 'steering_applied').map((event) => event.id)).toEqual(['one', 'two', 'three']);
     expect(events.filter((event) => event.type === 'result')).toHaveLength(2);
-    expect(events.filter((event) => event.type === 'usage')[0]).toMatchObject({
-      data: { input_tokens: 12, output_tokens: 9, num_turns: 3 },
+    expect(turnTotal(events.slice(0, events.findIndex((event) => event.type === 'result')))).toMatchObject({
+      input_tokens: 12, output_tokens: 9, num_turns: 3,
     });
   });
 
@@ -1333,8 +1333,7 @@ describe('NativeProvider', () => {
     expect(requests).toHaveLength(MAX_STEPS);
     expect(events.filter((event) => event.type === 'steering_applied')).toHaveLength(MAX_STEPS - 1);
     expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
-    expect(events.find((event) => event.type === 'usage'))
-      .toMatchObject({ data: { num_turns: MAX_STEPS, input_tokens: 4 * MAX_STEPS } });
+    expect(turnTotal(events)).toMatchObject({ num_turns: MAX_STEPS, input_tokens: 4 * MAX_STEPS });
     const continuation = events.find((event) => event.type === 'init')!.continuation;
     expect(provider.appliedSteering(continuation, [`s${MAX_STEPS - 1}`, `s${MAX_STEPS}`])).toEqual([`s${MAX_STEPS - 1}`]);
   }, 10_000);
@@ -1813,7 +1812,7 @@ describe('NativeProvider', () => {
     const first = await collect(provider);
     const continuation = (first.find((event) => event.type === 'init') as { continuation: string }).continuation;
     expect(replyTexts(first)).toEqual([['hello from stub']]);
-    expect(first.some((event) => event.type === 'usage')).toBe(true);
+    expect(first.some((event) => event.type === 'usage_call')).toBe(true);
     expect(first.some((event) => event.type === 'checkpoint')).toBe(true);
 
     const restartedProvider = new NativeProvider({ model: 'local/test-model' });
@@ -1847,12 +1846,6 @@ describe('NativeProvider', () => {
         data: expect.objectContaining({ input_tokens: 4, output_tokens: 3, context_tokens: 7 }),
       }),
     ]);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'usage',
-        data: expect.objectContaining({ input_tokens: 15, output_tokens: 5, context_tokens: 7, num_turns: 2 }),
-      }),
-    );
   });
 
   it('discovers and executes a configured external MCP tool', async () => {
@@ -2013,8 +2006,6 @@ describe('NativeProvider', () => {
     expect(query.push('without tools', undefined, { tools: 'disabled' })).toBe(true);
     query.end();
     for await (const _event of query.events) {
-    expect(JSON.stringify(requests[0]?.messages)).toContain('## Turn budget');
-    expect(JSON.stringify(requests[1]?.messages)).not.toContain('## Turn budget');
       // Drain both queued turns.
     }
 
@@ -2022,6 +2013,8 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests[0]?.messages)).toContain('## In-turn todos');
     expect(requests[1]?.tools).toBeUndefined();
     expect(JSON.stringify(requests[1]?.messages)).not.toContain('## In-turn todos');
+    expect(JSON.stringify(requests[0]?.messages)).toContain('## Turn budget');
+    expect(JSON.stringify(requests[1]?.messages)).not.toContain('## Turn budget');
   });
 
   it('requires todo initialization for explicitly multi-step work', async () => {
@@ -2197,7 +2190,7 @@ describe('NativeProvider', () => {
     });
     try {
       const events = await collect(new NativeProvider({ model: 'minimax/MiniMax-M3', modelParams: { max_tokens: 8192 } }));
-      const usage = events.find((event) => event.type === 'usage') as { data: Record<string, number> };
+      const usage = { data: turnTotal(events)! };
       expect(usage.data).toMatchObject({
         input_tokens: 4,
         cache_read_tokens: 20,
@@ -2268,6 +2261,13 @@ describe('NativeProvider', () => {
     expect(JSON.parse(row.content).text).toBe('hello from direct tool');
     expect(requests).toHaveLength(2);
     expect(JSON.stringify(requests[1]?.messages)).toContain('tool_result');
+  });
+});
+
+describe('final message', () => {
+  const sendCall = (text: string): [string, string] => ['mcp__nanoclaw__send_message', JSON.stringify({ text })];
+  const lastUserText = (request: Record<string, unknown>) =>
+    JSON.stringify((request.messages as Array<{ role: string }>).filter((message) => message.role === 'user').at(-1));
   const systemText = (request: Record<string, unknown>) =>
     JSON.stringify(request.system ?? (request.messages as Array<{ role: string }>).filter((message) => message.role === 'system'));
 
@@ -2295,13 +2295,6 @@ describe('NativeProvider', () => {
       expect(JSON.stringify(store.contextMessages(init.continuation))).not.toContain('Step budget:');
     } finally { store.close(); }
   });
-  });
-});
-
-describe('final message', () => {
-  const sendCall = (text: string): [string, string] => ['mcp__nanoclaw__send_message', JSON.stringify({ text })];
-  const lastUserText = (request: Record<string, unknown>) =>
-    JSON.stringify((request.messages as Array<{ role: string }>).filter((message) => message.role === 'user').at(-1));
 
   it('delivers the final message but not text written alongside tool calls', async () => {
     scriptedToolCalls = [sendCall('mid-turn update')];
@@ -2337,6 +2330,13 @@ describe('final message', () => {
 
   it('asks for a final message without tools once the step limit is reached', async () => {
     scriptedToolCalls = Array.from({ length: MAX_STEPS }, (_, index) => sendCall(`update ${index}`));
+    scriptedTexts = ['Progress so far.'];
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }));
+
+    expect(requests).toHaveLength(MAX_STEPS + 1);
+    expect(requests[MAX_STEPS - 1]?.tools).toBeDefined();
+    expect(requests[MAX_STEPS]?.tools).toBeUndefined();
+    expect(lastUserText(requests[MAX_STEPS]!)).toContain('step limit');
     for (let completed = 0; completed <= MAX_STEPS; completed++) {
       const system = systemText(requests[completed]);
       expect(system).toContain(
@@ -2345,13 +2345,6 @@ describe('final message', () => {
       expect(system.includes('Stop expanding scope')).toBe(completed >= MAX_STEPS - 10 && completed < MAX_STEPS);
     }
     expect(systemText(requests[MAX_STEPS])).toContain('Tools are now disabled');
-    scriptedTexts = ['Progress so far.'];
-    const events = await collect(new NativeProvider({ model: 'local/test-model' }));
-
-    expect(requests).toHaveLength(MAX_STEPS + 1);
-    expect(requests[MAX_STEPS - 1]?.tools).toBeDefined();
-    expect(requests[MAX_STEPS]?.tools).toBeUndefined();
-    expect(lastUserText(requests[MAX_STEPS]!)).toContain('step limit');
     expect(replyTexts(events)).toEqual([['Progress so far.']]);
   }, 10_000);
 

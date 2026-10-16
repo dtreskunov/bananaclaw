@@ -4,16 +4,20 @@ import { getTurn, linkTurnInput, putTurn, type TurnOutcome, type TurnRow } from 
 import { setTurnContext, waitForTurnTools, type TurnContext } from './current-batch.js';
 import type { RoutingContext } from './formatter.js';
 import type { CallUsage, TurnUsage } from './providers/types.js';
-import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage.js';
+import { accumulateCallUsage } from './providers/usage.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import type { Database } from 'bun:sqlite';
 import { allocateTimelinePosition } from './db/timeline.js';
 
 export interface TurnExecution extends TurnContext {
   routing: RoutingContext;
-  reportedUsage: TurnUsage | null;
-  callUsage: TurnUsage | null;
-  partialUsage: TurnUsage | null;
+  /** Every reported model call of the turn, keyed by call id. */
+  calls: Map<string, CallUsage>;
+  /** Calls reported since the provider's last result. */
+  unreported: boolean;
+  /** A provider attempt failed with unreported calls, so an in-flight call may be missing. */
+  incomplete: boolean;
+  limits: Pick<TurnUsage, 'context_window' | 'max_output_tokens'>;
   usageId: string;
   inputIds: string[];
   settled: boolean;
@@ -28,9 +32,10 @@ export function beginTurn(routing: RoutingContext, ids: string[], consumed = tru
     inReplyTo: routing.inReplyTo,
     startedAt: new Date().toISOString(),
     routing,
-    reportedUsage: null,
-    callUsage: null,
-    partialUsage: null,
+    calls: new Map(),
+    unreported: false,
+    incomplete: false,
+    limits: {},
     usageId: '',
     inputIds: [],
     settled: false,
@@ -67,28 +72,39 @@ export function turnDuration(context: TurnContext): number {
   return Math.max(0, end - Date.parse(context.startedAt));
 }
 
-function sum(a: TurnUsage | null, b: TurnUsage | null): TurnUsage | null {
-  return b ? accumulateTurnUsage(a, b) : a;
-}
-
 export function turnUsage(context: TurnExecution): TurnUsage | null {
-  return sum(sum(context.partialUsage, context.reportedUsage), context.callUsage);
+  let total: TurnUsage | null = null;
+  for (const { id: _id, ...call } of context.calls.values()) total = accumulateCallUsage(total, call);
+  if (!total) return null;
+  total.context_window ??= context.limits.context_window;
+  total.max_output_tokens ??= context.limits.max_output_tokens;
+  return total;
 }
 
-export function recordTurnUsage(context: TurnExecution, data: TurnUsage | CallUsage, complete: boolean): void {
-  if (complete) {
-    context.reportedUsage = accumulateTurnUsage(context.reportedUsage, data);
-    context.callUsage = null;
-  } else {
-    context.callUsage = accumulateCallUsage(context.callUsage, data);
-  }
+/** Record one model call; returns false when it replaced an earlier report of the same call. */
+export function recordCallUsage(context: TurnExecution, data: CallUsage): boolean {
+  const id = data.id ?? randomUUID();
+  const added = !context.calls.has(id);
+  context.calls.set(id, data);
+  context.unreported = true;
+  persistTurnMetadata(context, false);
+  return added;
+}
+
+/** The provider reached a result: every call of the attempt has been reported. */
+export function completeUsageAttempt(context: TurnExecution, limits: TurnExecution['limits'] = {}): void {
+  context.unreported = false;
+  context.limits = {
+    context_window: limits.context_window ?? context.limits.context_window,
+    max_output_tokens: limits.max_output_tokens ?? context.limits.max_output_tokens,
+  };
   persistTurnMetadata(context, false);
 }
 
-/** Preserve billed partial calls when a failed provider attempt is retried. */
+/** A failed provider attempt keeps its billed calls but may have lost an in-flight one. */
 export function finishUsageAttempt(context: TurnExecution): void {
-  context.partialUsage = sum(context.partialUsage, context.callUsage);
-  context.callUsage = null;
+  context.incomplete ||= context.unreported;
+  context.unreported = false;
 }
 
 export function persistTurnMetadata(context: TurnExecution, final: boolean): void {
@@ -108,7 +124,7 @@ export function persistTurnMetadata(context: TurnExecution, final: boolean): voi
     model: usage?.model ?? null,
     usageId: usage ? context.usageId : null,
     status: final
-      ? usage ? (context.partialUsage || context.callUsage ? 'partial' : 'final') : 'unavailable'
+      ? usage ? (context.incomplete || context.unreported ? 'partial' : 'final') : 'unavailable'
       : usage ? 'partial' : 'provisional',
     final,
   };

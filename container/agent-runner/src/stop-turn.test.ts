@@ -119,8 +119,8 @@ it.each(['none', 'calls', 'final', 'recovery'] as const)('persists elapsed time,
           yield { type: 'usage_call', data };
           yield { type: 'usage_call', data };
         } else if (usageMode === 'final' || usageMode === 'recovery') {
-          yield { type: 'usage_call', data };
-          yield { type: 'usage', data: { ...data, duration_ms: 999999 } };
+          yield { type: 'usage_call', data: { ...data, id: 'call', cost_usd: 0 } };
+          yield { type: 'usage_call', data: { ...data, id: 'call' } };
           if (usageMode === 'recovery') yield { type: 'usage_call', data };
         }
       })(),

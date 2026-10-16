@@ -1,7 +1,10 @@
-import { parseStep, type TraceLine, type TraceStep } from './activity-presentation.js';
+import { parseStep, type ModelTime, type TraceLine, type TraceStep } from './activity-presentation.js';
 import type { ConversationTurn } from './conversation.js';
 
 export const THINKING_TEXT = 'Thinking\u2026';
+export const STARTING_TURN_TEXT = 'Starting response\u2026';
+export const STARTED_TURN_TEXT = 'Started response';
+const TURN_START = -1;
 
 const TERMINAL_OUTCOMES: Partial<Record<ConversationTurn['outcome'], string>> = {
   stopped: 'Stopped by user',
@@ -42,4 +45,84 @@ export function conversationActivity(turn: ConversationTurn, activity = turn.act
       text: JSON.stringify(outcome),
     },
   ];
+}
+
+// Reported call starts are derived from end minus duration, so allow a little clock skew.
+const CALL_START_SLACK_MS = 250;
+
+/**
+ * Model time per trace row, keyed by ordinal (or the turn start). Each reported
+ * model call is attributed to the step whose end preceded the call's start,
+ * i.e. the step that prompted it. While live and no step is running, the time
+ * since the latest step or call ended ticks on its owner.
+ */
+export function turnModelTime(turn: ConversationTurn): Map<number, ModelTime> {
+  const times = new Map<number, ModelTime>();
+  const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
+  if (!Number.isFinite(startedAt)) return times;
+  const live = turn.phase !== 'settled';
+  const entries = turn.activity
+    .map((line) => ({ ordinal: line.ordinal, at: Number(line.ts), step: parseStep(line.text) }))
+    .filter(({ at }) => Number.isFinite(at))
+    .sort((a, b) => a.at - b.at);
+  const calls = entries.filter(({ step }) => step.kind === 'model');
+  const steps = entries
+    .filter(({ step }) => step.kind !== 'model')
+    .map(({ ordinal, at, step }) => {
+      const open =
+        live &&
+        (step.kind === 'tool' || step.kind === 'compaction') &&
+        (step.status === 'running' || step.status === 'pending');
+      // Steps recorded before the turn start still end no earlier than it.
+      return { ordinal, at, end: open ? Infinity : Math.max(startedAt, at + (step.durationMs ?? 0)) };
+    });
+  const add = (owner: number, ms: number, since?: number) => {
+    const prior = times.get(owner);
+    times.set(owner, {
+      ms: (prior?.ms ?? 0) + ms,
+      ...(since !== undefined ? { since } : {}),
+    });
+  };
+  /** The step that last finished by `at`; later-recorded steps win ties. */
+  const ownerAt = (at: number) =>
+    steps.reduce<{ ordinal: number; end: number } | null>(
+      (best, step) => (step.end <= at && (!best || step.end >= best.end) ? step : best),
+      null,
+    )?.ordinal ?? TURN_START;
+  for (const { at, step } of calls)
+    add(ownerAt(at - (step.durationMs ?? 0) + CALL_START_SLACK_MS), step.durationMs ?? 0);
+  if (live && !steps.some(({ end }) => end === Infinity)) {
+    const lastStep = Math.max(startedAt, ...steps.map(({ end }) => end));
+    add(ownerAt(lastStep), 0, Math.max(lastStep, ...calls.map(({ at }) => at)));
+  }
+  return times;
+}
+
+/**
+ * Attaches model time to a trace segment and drops the hidden model-call rows;
+ * the segment holding the turn start gets a synthetic first row.
+ */
+export function withModelTime(
+  turn: ConversationTurn,
+  lines: TraceLine[],
+  times: Map<number, ModelTime>,
+  hostsStart: boolean,
+): TraceLine[] {
+  const timed = lines
+    .filter((line) => parseStep(line.text).kind !== 'model')
+    .map((line) => {
+      const modelTime = line.ordinal === undefined ? undefined : times.get(line.ordinal);
+      return modelTime ? { ...line, modelTime } : line;
+    });
+  const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
+  if (!hostsStart || !Number.isFinite(startedAt)) return timed;
+  const modelTime = times.get(TURN_START);
+  const open = modelTime?.since !== undefined;
+  const step: TraceStep = {
+    kind: 'notification',
+    id: `ui:start:${turn.id}`,
+    text: open ? STARTING_TURN_TEXT : STARTED_TURN_TEXT,
+    status: open ? 'running' : 'completed',
+  };
+  return [{ ts: String(startedAt), text: JSON.stringify(step), ...(modelTime ? { modelTime } : {}) }, ...timed];
 }

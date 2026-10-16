@@ -169,34 +169,29 @@ describe('theme CSS contract', () => {
     expect(toggle).toContain('display: inline-flex');
     expect(toggle).toContain('font: inherit');
     const details = css.match(/\.chat-main \.usage-details \{([^}]+)\}/)?.[1];
-    expect(details).toContain('width: 100%');
+    expect(details).toContain('width: max-content');
+    expect(details).toContain('border: 1px solid var(--border)');
     expect(details).toContain('font-size: var(--font-2xs)');
     expect(details).not.toMatch(/position:|z-index:|box-shadow:/);
     expect(css).not.toMatch(/usage-popover|usage-backdrop/);
   });
 
-  it('shares responsive column tracks across every metrics row and report', () => {
+  it('lays out usage as one row of content-sized, unoutlined columns whose rows share label and value tracks', () => {
     const css = read('./components/ChatMain.css');
-    const groups = css.match(/\.chat-main \.usage-time-breakdown,\s*\.chat-main \.usage-report \{([^}]+)\}/)?.[1];
-    expect(groups).toContain('display: contents');
-    const grid = css.match(/\.chat-main \.usage-grid \{([^}]+)\}/)?.[1];
-    expect(grid).toContain('--usage-pairs: 1');
-    expect(grid).toContain(
-      'repeat(min(var(--usage-pairs), var(--usage-pair-limit, 1)), max-content minmax(max-content, 1fr))',
-    );
-    expect(grid).toContain('grid-auto-flow: row dense');
-    expect(css).toContain('@container turn-usage (min-width: 464px)');
-    expect(css).toContain('.chat-main .usage-grid { --usage-pairs: 2; }');
-    expect(css).toContain('@container turn-usage (min-width: 708px)');
-    expect(css).toContain('.chat-main .usage-grid { --usage-pairs: 3; }');
+    expect(css).toContain('.chat-main .usage-columns { display: flex; flex-wrap: nowrap;');
+    const column = css.match(/\.chat-main \.usage-column \{([^}]+)\}/)?.[1];
+    expect(column).toContain('flex: none');
+    expect(column).toContain('grid-template-columns: max-content max-content');
+    expect(column).not.toMatch(/border/);
     const row = css.match(/\.chat-main \.usage-row \{([^}]+)\}/)?.[1];
-    expect(row).toContain('grid-column: span 2');
+    expect(row).toContain('grid-column: 1 / -1');
     expect(row).toContain('grid-template-columns: subgrid');
     expect(row).not.toContain('flex:');
     expect(css).toContain('.chat-main .msg:has(.usage-details) { width: 100%; }');
-    expect(css).toContain('.chat-main .usage-time-breakdown > .usage-row { grid-column: 1 / span 2; }');
-    expect(css).toContain('.chat-main .usage-report > strong { grid-column: span 2;');
-    expect(css).not.toContain('usage-time-part');
+    expect(css).toContain('.chat-main .usage-report { display: contents; }');
+    expect(css).not.toMatch(/usage-total|usage-heading/);
+    expect(css).toMatch(/\.chat-main \.usage-row > strong \{[^}]*text-align: left/);
+    expect(css).not.toMatch(/usage-grid|usage-pair|usage-time-breakdown/);
   });
 
   it('keeps labels and values non-breaking without clipping oversized metrics', () => {
@@ -207,7 +202,6 @@ describe('theme CSS contract', () => {
     expect(row).toContain('overflow-wrap: normal');
     const details = css.match(/\.chat-main \.usage-details \{([^}]+)\}/)?.[1];
     expect(details).toContain('overflow-x: auto');
-    expect(details).toContain('container: turn-usage / inline-size');
     expect(css).not.toMatch(/\.usage-row > (?:span|strong) \{[^}]*overflow-wrap: anywhere/);
   });
 
@@ -340,8 +334,14 @@ describe('theme CSS contract', () => {
     expect(controls).toContain('display: inline-flex');
     expect(controls).toContain('flex: none');
     expect(controls).not.toContain('mask');
-    const duration = css.match(/\.trace-duration \{([^}]+)\}/)?.[1];
-    expect(duration).toContain('white-space: nowrap');
+    const value = css.match(/\.trace-time-value \{([^}]+)\}/)?.[1];
+    expect(value).toContain('white-space: nowrap');
+    expect(value).not.toContain('background');
+    expect(value).not.toContain('border-radius');
+    expect(css.match(/\.trace-time-num \{([^}]+)\}/)?.[1]).toContain('font-variant-numeric: tabular-nums');
+    const slot = css.match(/\.trace-time \{([^}]+)\}/)?.[1];
+    expect(slot).toContain('min-width: 64px');
+    expect(slot).toContain('justify-content: flex-end');
     const global = read('./styles/global.css');
     expect(global).toContain('mask-composite: intersect');
     for (const edge of ['top', 'right', 'bottom'])

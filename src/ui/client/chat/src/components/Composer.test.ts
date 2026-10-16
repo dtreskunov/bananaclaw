@@ -119,6 +119,18 @@ function findComponent(node: any, name: string): any {
     }
   }
 }
+/** The value of a rendered `UsageRow`, expanding nested usage components. */
+function usageRow(node: any, label: string): string | undefined {
+  if (!node || typeof node !== 'object') return undefined;
+  if (typeof node.type === 'function') {
+    if (node.type.name === 'UsageRow') return node.props.label === label ? node.props.value : undefined;
+    if (node.type.name.startsWith('Usage')) return usageRow(node.type(node.props), label);
+  }
+  for (const child of [node.props?.children].flat(Infinity)) {
+    const value = usageRow(child, label);
+    if (value !== undefined) return value;
+  }
+}
 function renderTechnicalDetails(node: unknown) {
   const details = findComponent(node, 'TurnTechnicalDetails');
   return details?.type(details.props);
@@ -307,8 +319,8 @@ describe('main composer pending edits', () => {
     expect(interval).not.toHaveBeenCalled();
     expect(row.props['data-response-start']).toBe(`submission:${testWebSubmission.messageId}`);
     const elapsed = findComponent(row, 'TurnElapsed');
-    expect(elapsed.props.elapsedMs).toBe(0);
-    expect(elapsed.type(elapsed.props).props.children).toBe('0:00');
+    expect(elapsed.props.startedAt).toBeNull();
+    expect(elapsed.type(elapsed.props).props.children).toBe('0.0s');
     expect(elapsed.type(elapsed.props).props.role).toBeUndefined();
     const stop = findComponent(row, 'ActiveTurnStopButton');
     const control = stop.type(stop.props);
@@ -365,7 +377,7 @@ describe('main composer pending edits', () => {
     hooks.passiveEffects.splice(0).forEach((effect) => effect());
     hooks.capturePassive = false;
     expect(interval).toHaveBeenCalledOnce();
-    expect(findComponent(runningRow, 'TurnElapsed').props.live).toBe(true);
+    expect(findComponent(runningRow, 'TurnElapsed').props.startedAt).toEqual(expect.any(Number));
     const liveStop = findComponent(runningRow, 'ActiveTurnStopButton');
     const liveControl = liveStop.type(liveStop.props);
     expect(liveControl.props.turn.id).toBe(testTurn.id);
@@ -1147,7 +1159,7 @@ describe('main composer pending edits', () => {
   });
 
   it.each([false, true])(
-    'shows initial Thinking with a bottom stopwatch but no empty usage disclosure (%s)',
+    'shows the counted start row with a bottom stopwatch but no empty usage disclosure (%s)',
     (technical) => {
       appearance.value = {
         ...appearance.peek(),
@@ -1173,11 +1185,13 @@ describe('main composer pending edits', () => {
       expect(!!header).toBe(technical);
       if (technical) {
         expect(header.type.name).toBe('TurnTechnicalDetails');
-        expect(renderTechnicalDetails(row)).toBeNull();
+        const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+        expect(info.props.count).toBe(1);
+        expect(findComponent(info.type(info.props), 'UsageMeta')).toBeUndefined();
       }
-      expect(findComponent(footer, 'TurnElapsed').props.live).toBe(true);
+      expect(findComponent(footer, 'TurnElapsed').props.startedAt).toEqual(expect.any(Number));
       const headline = footer.props.children.filter(Boolean).at(-1).props.children;
-      expect(headline.type(headline.props).props.children).toContain('Thinking…');
+      expect(headline.type(headline.props).props.children).toContain('Starting response…');
     },
   );
 
@@ -1224,7 +1238,7 @@ describe('main composer pending edits', () => {
       const status = findComponent(log.type(log.props), 'ResponseStatusRow');
       resetMount();
       const row = status.type(status.props);
-      expect(findComponent(row.props.children.at(-1), 'TurnElapsed').props.live).toBe(true);
+      expect(findComponent(row.props.children.at(-1), 'TurnElapsed').props.startedAt).toEqual(expect.any(Number));
       const details = renderTechnicalDetails(row);
       const info = findComponent(details, 'TurnTechnicalInfo');
       const header = info?.type(info.props);
@@ -1284,17 +1298,19 @@ describe('main composer pending edits', () => {
       expect(headline.type(headline.props).props.children).toContain(expected);
       if (technical) {
         const details = renderTechnicalDetails(row);
-        expect(findComponent(details, 'TurnTechnicalInfo').props.count).toBe(1);
+        expect(findComponent(details, 'TurnTechnicalInfo').props.count).toBe(2);
         const panel = findComponent(details, 'ActivityTracePanel');
+        expect(JSON.parse(panel.props.lines[0].text).text).toBe('Started response');
         if (phase === 'stopping') {
           expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(expected);
-          expect(panel.props.lines).toHaveLength(2);
+          expect(panel.props.lines).toHaveLength(3);
         } else {
-          expect(panel.props.lines).toEqual(activity);
+          expect(panel.props.lines.slice(1)).toMatchObject(activity);
+          expect(panel.props.lines[1].modelTime).toEqual({ ms: 0, since: Date.parse(testTurn.startedAt!) });
         }
       }
       expect(turnRow.props.source.turn.activity).toEqual(activity);
-      expect(turnRow.props.source.activity).toHaveLength(1);
+      expect(turnRow.props.source.activity).toHaveLength(2);
     }
   });
 
@@ -1333,9 +1349,9 @@ describe('main composer pending edits', () => {
       if (technical) {
         const details = renderTechnicalDetails(row);
         const info = findComponent(details, 'TurnTechnicalInfo');
-        expect(info.props.count).toBe(0);
-        expect(info.type(info.props)).toBeNull();
+        expect(info.props.count).toBe(1);
         const panel = findComponent(details, 'ActivityTracePanel');
+        expect(JSON.parse(panel.props.lines[0].text).text).toBe('Starting response…');
         expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(notice.text);
       }
     }
@@ -1393,7 +1409,7 @@ describe('main composer pending edits', () => {
         const [info, panel] = details.props.children;
         expect(info.type.name).toBe('TurnTechnicalInfo');
         expect(panel.type.name).toBe('ActivityTracePanel');
-        expect(info.props.count).toBe(recorded ? 1 : 0);
+        expect(info.props.count).toBe(recorded ? 2 : 0);
         const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
         expect(!!toggle.type(toggle.props)).toBe(recorded);
         expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
@@ -1447,11 +1463,11 @@ describe('main composer pending edits', () => {
       const summary = record.type(record.props);
       const button = find(summary, 'button');
       expect(find(summary, 'span', 'Tokens unavailable')).toBeUndefined();
-      expect(find(summary, 'span', model ? '7s · $0.010' : '7s')).toBeDefined();
+      expect(find(summary, 'span', model ? '6.5s · $0.010' : '6.5s')).toBeDefined();
       button.props.onClick({ stopPropagation() {} });
       const inline = renderUsageDetails(row);
       expect(inline.props.role).toBe('group');
-      expect(find(inline, 'span', 'Total time')).toBeDefined();
+      expect(usageRow(inline, 'Total')).toBe('6.5s');
     }
   });
 
@@ -1532,9 +1548,10 @@ describe('main composer pending edits', () => {
         return;
       }
       const panel = findComponent(details, 'ActivityTracePanel');
-      expect(panel.props.lines).toEqual(activity);
+      expect(JSON.parse(panel.props.lines[0].text).id).toBe(`ui:start:${testTurn.id}`);
+      expect(panel.props.lines.slice(1)).toEqual(activity);
       const header = findComponent(details, 'TurnTechnicalInfo');
-      expect(header.props.count).toBe(3);
+      expect(header.props.count).toBe(4);
     },
   );
 
@@ -1620,7 +1637,7 @@ describe('main composer pending edits', () => {
       expect(bubble.props.children[0]).toBe(details);
       expect(details.props.turn.id).toBe(testTurn.id);
       expect(details.props.ownerId).toBe(`turn:${testTurn.id}`);
-      expect(details.props.lines).toHaveLength(2);
+      expect(details.props.lines).toHaveLength(3);
     }
   });
 
@@ -1675,35 +1692,28 @@ describe('main composer pending edits', () => {
       expect(usage.props.summary).toBe('$0.012 · 35% ctx');
       expect(info.props.usage.wallElapsedMs).toBe(7000);
       const stopwatch = findComponent(row.props.children.at(-1), 'TurnElapsed');
-      expect(stopwatch.props.elapsedMs).toBe(7000);
-      expect(stopwatch.props.live).toBe(true);
+      expect(stopwatch.props.startedAt).toBe(Date.parse(testTurn.startedAt!));
       resetMount();
       hooks.cursor = 0;
       find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
       const inline = renderUsageDetails(row);
-      expect(find(inline, 'span', 'Total time')).toBeDefined();
-      expect(find(inline, 'strong', '0:07')).toBeDefined();
-      expect(find(inline, 'strong', '0:02')).toBeDefined();
+      expect(usageRow(inline, 'Total')).toBe('7.0s');
+      expect(usageRow(inline, 'Model')).toBe('2.0s');
       expect(find(inline, 'span', 'Usage reported so far; awaiting final totals.')).toBeUndefined();
     },
   );
 
   it.each([
-    { phase: 'running', context: 16_000, window: 20_000, liveCalls: 11, expected: '80%' },
-    { phase: 'stopping', context: 16_000, window: 20_000, liveCalls: 11, expected: '80%' },
-    { phase: 'settling', context: 16_000, window: 20_000, liveCalls: 11, expected: '80%' },
-    { phase: 'running', context: 1000, window: 20_000, liveCalls: 11, expected: '5%' },
-    { phase: 'running', context: undefined, window: 20_000, liveCalls: 11, expected: '12%' },
-    { phase: 'running', context: 16_000, window: 20_000, liveCalls: 9, expected: '12%' },
-    { phase: 'settled', context: 16_000, window: 20_000, liveCalls: 11, expected: '12%' },
-    { phase: 'running', context: 16_000, window: undefined, liveCalls: 11, expected: '' },
+    { phase: 'running', window: 20_000, expected: '80%', label: 'Context now' },
+    { phase: 'settled', window: 20_000, expected: '80%', label: 'Context at end' },
+    { phase: 'running', window: undefined, expected: '', label: 'Context now' },
   ] as const)(
-    'uses latest known context without replacing billing ($phase, $context)',
-    ({ phase, context, window, liveCalls, expected }) => {
+    'reads context from the same usage record as tokens ($phase, $window)',
+    ({ phase, window, expected, label }) => {
       appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
       const recorded = {
         cost_usd: 0.0123,
-        context_tokens: 2400,
+        context_tokens: 16_000,
         context_window: window,
         input_tokens: 100,
         output_tokens: 0,
@@ -1720,13 +1730,7 @@ describe('main composer pending edits', () => {
               phase,
               outcome: phase === 'settled' ? 'silent' : 'pending',
               usage: [{ id: 'recorded', value: recorded }],
-              liveUsage: {
-                ...recorded,
-                cost_usd: 99,
-                input_tokens: 999_999,
-                context_tokens: context,
-                num_turns: liveCalls,
-              },
+              liveUsage: phase === 'settled' ? null : { ...recorded, cost_usd: 99, context_tokens: 1000 },
             },
           ],
           connection: { connected: true, activeTurnId: phase === 'settled' ? null : testTurn.id },
@@ -1739,35 +1743,23 @@ describe('main composer pending edits', () => {
       const status = findComponent(log.type(log.props), 'ResponseStatusRow');
       resetMount();
       const row = status.type(status.props);
-      const details = renderTechnicalDetails(row);
-      const info = findComponent(details, 'TurnTechnicalInfo');
+      const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
       const usage = findComponent(info.type(info.props), 'UsageMeta');
-      expect(usage.props.summary).toContain(expected ? `$0.012 · ${expected} ctx` : '$0.012');
-      expect(info.props.usage.records).toHaveLength(1);
-      expect(info.props.usage.records[0].value.cost_usd).toBe(0.0123);
-      expect(info.props.usage.records[0].value.input_tokens).toBe(100);
-      expect(status.props.source.turn.usage[0].value.context_tokens).toBe(2400);
+      expect(usage.props.summary).toBe(expected ? `$0.012 · ${expected} ctx` : '$0.012');
       expect(info.props.usage.live).toBe(phase !== 'settled');
       resetMount();
       hooks.cursor = 0;
       find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
       const inline = renderUsageDetails(row);
-      const report = findComponent(inline, 'UsageReport');
-      const contextRow = findComponent(
-        phase === 'settled' || !expected ? report.type(report.props) : inline,
-        'UsageContext',
-      );
-      const contextTree = contextRow.type(contextRow.props);
-      expect(find(contextTree, 'span', phase === 'settled' ? 'Context at end' : 'Latest known context')).toBeDefined();
-      expect(contextTree.props.children[1].props.children).toContain(expected ? `(${expected})` : '2.4k');
+      expect(usageRow(inline, label)).toContain(expected ? `(${expected})` : '16.0k tok');
     },
   );
 
   it.each([
-    { modelMs: 3500, extraMs: 1000, modelText: '0:04', otherText: '0:02' },
-    { modelMs: 0, extraMs: 0, modelText: '0:00', otherText: '0:06' },
+    { modelMs: 3500, extraMs: 1000, modelText: '4.5s', otherText: '2.0s' },
+    { modelMs: 0, extraMs: 0, modelText: '0.0s', otherText: '6.5s' },
     { modelMs: undefined, extraMs: 1000, modelText: 'Unavailable', otherText: 'Unavailable' },
-    { modelMs: 8500, extraMs: 0, modelText: '0:08', otherText: '-0:02' },
+    { modelMs: 8500, extraMs: 0, modelText: '8.5s', otherText: '0.0s' },
   ])(
     'keeps total, model and other timing inline but not in the technical line (%s)',
     ({ modelMs, extraMs, modelText, otherText }) => {
@@ -1807,13 +1799,10 @@ describe('main composer pending edits', () => {
       const summary = usage.type(usage.props);
       find(summary, 'button').props.onClick({ stopPropagation() {} });
       const inline = renderUsageDetails(row);
-      expect(find(inline, 'span', 'Total time')).toBeDefined();
-      expect(find(inline, 'strong', '0:06')).toBeDefined();
-      expect(find(inline, 'span', 'Model time')).toBeDefined();
-      expect(find(inline, 'strong', modelText)).toBeDefined();
-      expect(find(inline, 'strong', '166:39')).toBeUndefined();
-      expect(find(inline, 'span', 'Other time')).toBeDefined();
-      expect(find(inline, 'strong', otherText)).toBeDefined();
+      expect(usageRow(inline, 'Total')).toBe('6.5s');
+      expect(usageRow(inline, 'Model')).toBe(modelText);
+      expect(usageRow(inline, 'Tools')).toBe('0.0s');
+      expect(usageRow(inline, 'Other')).toBe(otherText);
     },
   );
 
@@ -1871,10 +1860,10 @@ describe('main composer pending edits', () => {
         const [header, trace] = details.props.children;
         expect(header.type.name).toBe('TurnTechnicalInfo');
         expect(trace.type.name).toBe('ActivityTracePanel');
-        expect(header.props.count).toBe(recorded ? 1 : 0);
+        expect(header.props.count).toBe(recorded ? 2 : 0);
         const toggle = findComponent(header.type(header.props), 'ActivityTraceToggle');
         expect(!!toggle.type(toggle.props)).toBe(recorded);
-        expect(trace.props.lines).toEqual(recorded ? testTurn.activity : []);
+        expect(trace.props.lines.slice(recorded ? 1 : 0)).toEqual(recorded ? testTurn.activity : []);
         expect(findComponent(header.type(header.props), 'TurnElapsed')).toBeUndefined();
         expect(find(header.type(header.props), 'span', 'Model-call time')).toBeUndefined();
       }
@@ -1938,11 +1927,11 @@ describe('main composer pending edits', () => {
       if (technical) {
         const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
         const panel = findComponent(renderTechnicalDetails(row), 'ActivityTracePanel');
-        expect(info.props.count).toBe(1);
+        expect(info.props.count).toBe(2);
         const toggle = findComponent(info.type(info.props), 'ActivityTraceToggle');
-        expect(find(toggle.type(toggle.props), 'span', '1 trace')).toBeTruthy();
+        expect(find(toggle.type(toggle.props), 'span', '2 traces')).toBeTruthy();
         expect(findComponent(info.type(info.props), 'UsageMeta').props.summary).not.toContain('call');
-        expect(panel.props.lines).toHaveLength(note ? 2 : 1);
+        expect(panel.props.lines).toHaveLength(note ? 3 : 2);
         if (note) expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(note);
         expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
         expect(find(info.type(info.props), 'span', 'Model-call time')).toBeUndefined();
@@ -2047,9 +2036,10 @@ describe('main composer pending edits', () => {
       expect(controls[0].props['aria-hidden']).toBe('true');
       expect(findComponent(controls[1], 'ActiveTurnStopButton')).toBeTruthy();
       expect(controls[2].type.name).toBe('TurnElapsed');
-      expect(controls[2].props.elapsedMs).toBeGreaterThanOrEqual(7000);
+      expect(controls[2].props.startedAt).toBeLessThanOrEqual(Date.now() - 7000);
       const stopwatch = controls[2].type(controls[2].props);
-      expect(stopwatch.props.children).toBe('0:07');
+      expect(stopwatch.props.class).toBe('turn-elapsed live');
+      expect(stopwatch.props.children.props).toEqual({ since: controls[2].props.startedAt });
       expect(stopwatch.props['aria-live']).toBe('off');
       expect(controls[3].type).toBe(technical ? 'button' : 'span');
       expect(findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo') !== undefined).toBe(technical);
@@ -2436,14 +2426,15 @@ describe('inline activity metrics', () => {
     expect(activityMetricsExpanded(`turn:${next.id}`)).toBe(false);
   });
 
-  it.each([
-    [5, 2],
-    [6, 2],
-    [7, 3],
-    [8, 3],
-    [9, 4],
-  ])('sets the pair limit for %s rendered cells to %s', (cells, limit) => {
+  it('groups usage into outlined timing, token and model columns', () => {
     appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    const t0 = Date.parse(testTurn.startedAt!);
+    const tool = (id: string, at: number, durationMs: number, ordinal: number) => ({
+      ordinal,
+      ts: String(t0 + at),
+      timelinePosition: 100 + ordinal,
+      text: JSON.stringify({ kind: 'tool', id, tool: 'bash', status: 'completed', durationMs }),
+    });
     applyConversationFrame(
       testSnapshot({
         turns: [
@@ -2451,7 +2442,27 @@ describe('inline activity metrics', () => {
             ...testTurn,
             phase: 'settled',
             outcome: 'silent',
-            metadata: { status: 'final', durationMs: 9000, model: null },
+            // Parallel tools 1–3s and 2–4s cover 3s once.
+            activity: [tool('a', 1000, 2000, 0), tool('b', 2000, 2000, 1)],
+            metadata: { status: 'final', durationMs: 14_000, model: 'provider/MiniMax-M3' },
+            usage: [
+              {
+                id: 'usage',
+                value: {
+                  cost_usd: 0,
+                  input_tokens: 55_000,
+                  output_tokens: 485,
+                  reasoning_tokens: 50,
+                  cache_read_tokens: 109_400,
+                  cache_write_tokens: 0,
+                  context_tokens: 55_400,
+                  context_window: 1_000_000,
+                  num_turns: 3,
+                  duration_api_ms: 9000,
+                  model: 'provider/MiniMax-M3',
+                },
+              },
+            ],
           },
         ],
       }),
@@ -2460,15 +2471,25 @@ describe('inline activity metrics', () => {
     const row = renderResponseStatusRow();
     const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
     const usage = findComponent(info.type(info.props), 'UsageMeta');
+    expect(usage.props.summary).toBe('14s · 6% ctx');
     find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
     const inline = renderUsageDetails(row);
-    const grid = inline.props.children;
-    const querySelectorAll = vi.fn(() => ({ length: cells }));
-    const setProperty = vi.fn();
-    grid.ref.current = { querySelectorAll, style: { setProperty } };
-    hooks.effects.splice(0).forEach((effect) => effect());
-    expect(querySelectorAll).toHaveBeenCalledWith('.usage-row, .usage-report > strong');
-    expect(setProperty).toHaveBeenCalledWith('--usage-pair-limit', String(limit));
+    const columns = inline.props.children[1].props.children;
+    expect(columns.map((column: any) => column.props['aria-label'])).toEqual(['Timing', 'Tokens', 'Model']);
+    expect(columns.every((column: any) => column.props.class === 'usage-column')).toBe(true);
+    expect(['Total', 'Model', 'Tools', 'Other'].map((label) => usageRow(columns[0], label))).toEqual([
+      '14s',
+      '9.0s',
+      '3.0s',
+      '2.0s',
+    ]);
+    expect(usageRow(columns[1], 'Turn processing')).toBe('55.0k tok in \u00b7 485 tok out');
+    expect(usageRow(columns[1], 'Reasoning')).toBe('50 tok');
+    expect(usageRow(columns[1], 'Cache read')).toBe('109.4k tok');
+    expect(usageRow(columns[1], 'Cache write')).toBeUndefined();
+    expect(usageRow(columns[1], 'Context at end')).toBe('55.4k tok / 1M tok (6%)');
+    expect(usageRow(columns[2], 'Model calls')).toBe('3');
+    expect(usageRow(columns[2], 'Estimated cost')).toBeUndefined();
   });
 
   it.each(['provisional', 'partial'] as const)('only retains the partial warning for %s accounting', (accounting) => {
@@ -2543,7 +2564,7 @@ describe('inline activity metrics', () => {
     expect(current.trace.props['aria-expanded']).toBe(false);
     expect(current.usage.props['aria-expanded']).toBe(false);
     expect(current.usage.props.class).toBe('trace-toggle usage');
-    expect(find(current.usage, 'span', '9s · 3% ctx')).toBeDefined();
+    expect(find(current.usage, 'span', '9.0s · 3% ctx')).toBeDefined();
     expect(current.panel.type(current.panel.props)).toBeNull();
 
     current.usage.props.onClick({ stopPropagation() {} });
@@ -2604,8 +2625,9 @@ describe('activity trace completion', () => {
     const panel = findComponent(renderTechnicalDetails(renderResponseStatusRow()), 'ActivityTracePanel');
     const list = findComponent(panel.type(panel.props), 'ActivityTraceList');
     resetMount();
-    const chapter = ActivityTraceList(list.props).props.children[0];
-    expect(chapter.props.children[0].props['aria-expanded']).toBe(true);
+    const [start, chapter] = ActivityTraceList(list.props).props.children;
+    expect(start.props.line.text).toContain('ui:start:');
+    expect(chapter.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
     ).toBe(true);
@@ -2664,8 +2686,9 @@ describe('activity trace completion', () => {
     expect(list.key).toBe(liveList.key);
     resetMount();
     hooks.cursor = 0;
-    const chapter = ActivityTraceList(list.props).props.children[0];
-    expect(chapter.props.children[0].props['aria-expanded']).toBe(true);
+    const [start, chapter] = ActivityTraceList(list.props).props.children;
+    expect(start.props.line.text).toContain('ui:start:');
+    expect(chapter.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
     ).toBe(true);
@@ -2698,20 +2721,53 @@ describe('activity trace chapter following', () => {
       expect(toggle.props.class).toBe('trace-row-toggle');
       expect(toggle.props['aria-expanded']).toBe(open);
       expect(findComponent(toggle, 'ToolStopButton')).toBeUndefined();
-      const [stop, timer] = controls.props.children;
+      const [exec, model] = controls.props.children;
+      const stop = exec.props.lead;
       expect(stop.type).toBe(ToolStopButton);
       expect(stop.props.turnId).toBe('owning-turn');
       expect(stop.props.toolCallId).toBe('one');
-      expect(timer.props).toMatchObject({
-        class: 'trace-duration',
+      expect(exec.props).toMatchObject({ kind: 'cpu', status: 'running', time: { since: 1000 } });
+      const [lead, value] = exec.type(exec.props).props.children;
+      expect(lead).toBe(stop);
+      expect(value.props).toMatchObject({
+        class: 'trace-time-value trace-status-running',
         role: 'timer',
         'aria-live': 'off',
-        'aria-label': 'Elapsed activity time',
-        children: '1:04',
+        title: 'Execution time',
       });
+      const [label, num] = value.props.children;
+      expect(label.props).toMatchObject({ class: 'trace-time-label', children: 'CPU' });
+      expect(num.props.children.props).toEqual({ since: 1000 });
+      expect(model.props.time).toBeNull();
     }
-    const updated = row.type({ ...row.props, now: 66_000 });
-    expect(updated.props.children[0].props.children[1].props.children[1].props.children).toBe('1:05');
+  });
+
+  it('shows the live stopwatch at once but hides Stop until a running step passes one second', () => {
+    const list = ActivityTraceList({ lines: [line('one', 'running')], live: true, now: 1900, turnId: 'owning-turn' });
+    const row = findComponent(list, 'ActivityTraceRow');
+    const controls = row.type(row.props).props.children[0].props.children[1];
+    expect(findComponent(controls, 'ToolStopButton')).toBeUndefined();
+    expect(controls.props.children[0].props).toMatchObject({ time: { since: 1000 }, lead: null });
+  });
+
+  it('shows every model time, including sub-second and zero gaps on finished steps', () => {
+    const row = (modelTime: ActivityLine['modelTime']) => {
+      const list = ActivityTraceList({ lines: [{ ...line('one', 'completed'), modelTime }], live: true });
+      const found = findComponent(list, 'ActivityTraceRow');
+      return found.type(found.props).props.children[0].props.children[1].props.children[1];
+    };
+    const live = row({ ms: 2000, since: 5000 });
+    expect(live.props).toMatchObject({ kind: 'ai', status: 'running', time: { since: 3000 } });
+    const liveValue = live.type(live.props).props.children[1];
+    expect(liveValue.props.title).toBe('Model time');
+    expect(liveValue.props.children[0].props.children).toBe('AI');
+    expect(row({ ms: 900 }).props.time).toEqual({ ms: 900 });
+    expect(row(undefined).props.time).toEqual({ ms: 0 });
+    const done = row({ ms: 12_500 });
+    expect(done.props).toMatchObject({ status: 'completed', time: { ms: 12_500 } });
+    const doneValue = done.type(done.props).props.children[1];
+    expect(doneValue.props.title).toBe('Model time');
+    expect(doneValue.props.children[1].props.children).toBe('12s');
   });
 
   it('passes the authoritative response ID to every chapter child', () => {
@@ -2742,8 +2798,10 @@ describe('activity trace chapter following', () => {
     const row = findComponent(list, 'ActivityTraceRow');
     const view = row.type({ ...row.props, open: true });
     expect(findComponent(view, 'ToolStopButton')).toBeUndefined();
-    const timer = view.props.children[0].props.children[1].props.children[1];
-    expect(timer.props.children).toBe('2.2s');
+    const exec = view.props.children[0].props.children[1].props.children[0];
+    const timer = exec.type(exec.props).props.children[1];
+    expect(timer.props.children[1].props.children).toBe('2.2s');
+    expect(timer.props.class).toBe('trace-time-value trace-status-completed');
     expect(timer.props.role).toBeUndefined();
   });
 
@@ -2753,14 +2811,15 @@ describe('activity trace chapter following', () => {
     const row = findComponent(list, 'ActivityTraceRow');
     const view = row.type(row.props);
     expect(findComponent(view, 'ToolStopButton')).toBeUndefined();
-    expect(view.props.children[0].props.children[1].props.children).toEqual([null, null]);
+    const [exec] = view.props.children[0].props.children[1].props.children;
+    expect(exec.props).toMatchObject({ time: null, lead: null });
   });
 
   it('follows singleton and chapter headers without automatically expanding step details', () => {
     const singleton = renderTrace([line('one', 'running')]);
     expect(findComponent(singleton, 'ActivityTraceRow').props.open).toBe(false);
     const chapter = renderTrace([line('one', 'completed'), line('two', 'running')]).props.children[0];
-    expect(chapter.props.children[0].props['aria-expanded']).toBe(true);
+    expect(chapter.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
     ).toBe(true);
@@ -2770,18 +2829,18 @@ describe('activity trace chapter following', () => {
     const initial = renderTrace([line('one', 'completed'), line('two', 'running')]).props.children[0];
     const completed = renderTrace([line('one', 'completed'), line('two', 'completed')]).props.children[0];
     expect(completed.key).toBe(initial.key);
-    expect(completed.props.children[0].props['aria-expanded']).toBe(true);
+    expect(completed.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
     const commands = [line('one', 'completed'), line('two', 'completed'), line('three', 'running')];
     const continued = renderTrace(commands).props.children[0];
     expect(continued.key).toBe(initial.key);
-    expect(continued.props.children[0].props['aria-expanded']).toBe(true);
+    expect(continued.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
     expect(continued.props.children[1].props.children).toHaveLength(3);
     const switched = renderTrace([...commands, line('read-one', 'running', 'read')]);
-    expect(switched.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(switched.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
     expect(findComponent(switched.props.children[1], 'ActivityTraceRow').props.open).toBe(false);
     const next = renderTrace([...commands, line('read-one', 'completed', 'read'), line('read-two', 'running', 'read')]);
-    expect(next.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
-    expect(next.props.children[1].props.children[0].props['aria-expanded']).toBe(true);
+    expect(next.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(next.props.children[1].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
   });
 
   it('allows explicitly opening latest details but does not expand the next step automatically', () => {
@@ -2803,30 +2862,30 @@ describe('activity trace chapter following', () => {
   it('respects manual chapter collapse until the next step arrives', () => {
     const commands = [line('one', 'completed'), line('two', 'running')];
     let list = renderTrace(commands);
-    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
-    list.props.children[0].props.children[0].props.onClick();
+    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    list.props.children[0].props.children[0].props.children[0].props.onClick();
     list = renderTrace(commands);
-    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
     list = renderTrace([...commands, line('three', 'running')]);
-    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
   });
 
   it('respects older chapter and detail selection until a new step advances the latest chapter', () => {
     const commands = [line('one', 'completed'), line('two', 'completed')];
     const lines = [...commands, line('read-one', 'completed', 'read'), line('read-two', 'running', 'read')];
     let list = renderTrace(lines);
-    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
-    expect(list.props.children[1].props.children[0].props['aria-expanded']).toBe(true);
-    list.props.children[0].props.children[0].props.onClick();
+    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(list.props.children[1].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    list.props.children[0].props.children[0].props.children[0].props.onClick();
     list = renderTrace(lines);
-    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
-    expect(list.props.children[1].props.children[0].props['aria-expanded']).toBe(false);
+    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(list.props.children[1].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
     list.props.children[0].props.children[1].props.children[0].props.onToggle();
     list = renderTrace(lines);
     expect(list.props.children[0].props.children[1].props.children[0].props.open).toBe(true);
     list = renderTrace([...lines, line('read-three', 'running', 'read')]);
-    expect(list.props.children[0].props.children[0].props['aria-expanded']).toBe(false);
-    expect(list.props.children[1].props.children[0].props['aria-expanded']).toBe(true);
+    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(list.props.children[1].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
     expect(
       list.props.children[1].props.children[1].props.children.every(
         (entry: { props: { open: boolean } }) => !entry.props.open,

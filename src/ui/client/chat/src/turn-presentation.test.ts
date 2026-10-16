@@ -172,7 +172,7 @@ describe('authoritative turn presentation', () => {
     expect(chatTranscript.value.find((row) => row.kind === 'turn')).toMatchObject({
       traceOwner: traceId,
       afterId: reply.id,
-      activity: [...testTurn.activity],
+      activity: [expect.objectContaining({ text: expect.stringContaining('"ui:start:turn-1"') }), ...testTurn.activity],
     });
     expect(activityTraceExpanded(traceId)).toBe(true);
 
@@ -366,7 +366,7 @@ describe('authoritative turn presentation', () => {
       const projection = conversationPresentation(view);
       expect(dockQuestions(view.questions, view.messages, 'group', 'thread')).toEqual([question]);
       const steps = projection.messages[0].activity!.map((line) => JSON.parse(line.text));
-      expect(steps.map((step) => step.id)).toEqual(recorded ? ['question-call'] : []);
+      expect(steps.map((step) => step.id)).toEqual(recorded ? ['ui:start:turn-1', 'question-call'] : []);
       expect(projection.messages[0].turnTraceOwner).toBe(true);
     },
   );
@@ -671,7 +671,8 @@ describe('authoritative turn presentation', () => {
       });
       const row = chatTranscript.value[0];
       if (row.kind !== 'turn') throw new Error('Expected a turn trace');
-      expect(row.activity.slice(0, testTurn.activity.length)).toEqual(testTurn.activity);
+      expect(parseStep(row.activity[0].text)).toMatchObject({ id: 'ui:start:turn-1', text: 'Started response' });
+      expect(row.activity.slice(1, testTurn.activity.length + 1)).toEqual(testTurn.activity);
       expect(row.activity.filter((line) => isOutcomeTraceStep(parseStep(line.text)))).toHaveLength(
         outcome === 'failed' ? 0 : 1,
       );

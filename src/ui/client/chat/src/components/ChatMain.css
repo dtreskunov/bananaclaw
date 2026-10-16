@@ -310,9 +310,13 @@
 .chat-main .msg.in .meta { text-align: right; justify-content: flex-end; }
 .chat-main .msg:has(.usage-details) { width: 100%; }
 .chat-main .usage-details {
-  container: turn-usage / inline-size;
-  width: 100%;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
+  box-sizing: border-box;
+  padding-inline: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   overflow-x: auto;
   scrollbar-width: thin;
   padding-block: 6px;
@@ -322,41 +326,34 @@
   text-align: left;
   white-space: normal;
 }
-.chat-main .usage-grid {
-  --usage-pairs: 1;
+.chat-main .usage-notice { display: block; margin-bottom: 6px; }
+.chat-main .usage-columns { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 28px; width: max-content; }
+.chat-main .usage-column {
+  flex: none;
   display: grid;
-  grid-template-columns: repeat(min(var(--usage-pairs), var(--usage-pair-limit, 1)), max-content minmax(max-content, 1fr));
-  grid-auto-flow: row dense;
-  gap: 5px 24px;
+  grid-template-columns: max-content max-content;
+  align-content: start;
+  gap: 4px 16px;
 }
-@container turn-usage (min-width: 464px) {
-  .chat-main .usage-grid { --usage-pairs: 2; }
-}
-@container turn-usage (min-width: 708px) {
-  .chat-main .usage-grid { --usage-pairs: 3; }
-}
+.chat-main .usage-report { display: contents; }
+.chat-main .usage-subheading { grid-column: 1 / -1; border-bottom: 1px solid var(--border); }
 .chat-main .usage-row {
   display: grid;
-  grid-column: span 2;
+  grid-column: 1 / -1;
   grid-template-columns: subgrid;
-  column-gap: 16px;
   align-items: baseline;
   white-space: nowrap;
   overflow-wrap: normal;
 }
 .chat-main .usage-row > span { color: var(--muted); }
-.chat-main .usage-time-breakdown,
-.chat-main .usage-report { display: contents; }
-.chat-main .usage-time-breakdown > .usage-row { grid-column: 1 / span 2; }
-.chat-main .usage-notice { grid-column: 1 / -1; }
-.chat-main .usage-report > strong { grid-column: span 2; border-bottom: 1px solid var(--border); }
-.chat-main .usage-row > strong { font-weight: 600; text-align: right; }
+.chat-main .usage-row > strong { font-weight: 600; text-align: left; font-variant-numeric: tabular-nums; }
 .chat-main .turn-technical-details { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; max-width: 100%; }
 .chat-main .msg:not(.display-card) > .turn-technical-details { margin-bottom: var(--text-block-gap); }
 .chat-main .turn-technical-details > .meta.turn-tech-info { margin: 0; min-height: 0; flex-wrap: wrap; row-gap: 2px; }
 .chat-main .turn-technical-details > .msg-activity { margin-top: 0; }
 .chat-main .turn-tech-info .usage-summary { white-space: normal; }
-.chat-main .turn-elapsed { flex: none; color: var(--muted); font-size: var(--font-2xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chat-main .turn-elapsed { flex: none; font-size: var(--font-2xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chat-main .turn-elapsed.live { color: var(--activity-status-running); }
 .chat-main .msg.markdown { white-space: normal; }
 .chat-main .msg.markdown > :first-child { margin-top: 0; }
 .chat-main .msg.markdown > :last-child { margin-bottom: 0; }
@@ -446,7 +443,7 @@
 .chat-main .activity-trace .trace-chapter::before { content: ''; position: absolute; left: 4px; top: var(--chapter-rail-start, 0px); height: calc(var(--chapter-rail-end, var(--trace-row-height)) - var(--chapter-rail-start, 0px)); border-left: 1px solid var(--border-strong); pointer-events: none; }
 .chat-main .activity-trace > .trace-chapter:first-child { --chapter-rail-start: calc(var(--trace-row-height) / 2); }
 .chat-main .activity-trace > .trace-chapter:last-child:not(.open) { --chapter-rail-end: calc(var(--trace-row-height) / 2); }
-.chat-main .activity-trace .trace-chapter-toggle { height: var(--trace-row-height); }
+.chat-main .activity-trace .trace-chapter-toggle { flex: 1; height: var(--trace-row-height); }
 .chat-main .activity-trace .trace-chapter-label,
 .chat-main .activity-trace .trace-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
 .chat-main .activity-trace .trace-chapter-heading { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
@@ -454,7 +451,12 @@
 .chat-main .activity-trace .trace-chapter-notice { color: var(--muted); }
 .chat-main .activity-trace .trace-chapter-failures { color: var(--activity-status-failed); }
 .chat-main .activity-trace ul.trace-children { list-style: none; margin: 0 0 0 var(--trace-child-indent); padding: 0; }
-.chat-main .activity-trace .trace-duration { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Fixed slots keep execution and model chips in their own columns. */
+.chat-main .activity-trace .trace-time { display: inline-flex; flex: none; align-items: center; justify-content: flex-end; gap: 6px; min-width: 64px; }
+.chat-main .activity-trace .trace-time-value { display: inline-flex; align-items: baseline; gap: 3px; color: var(--trace-status-color, var(--muted)); white-space: nowrap; }
+.chat-main .activity-trace .trace-time-ai .trace-time-value { color: color-mix(in srgb, var(--trace-status-color, var(--muted)) 55%, var(--muted)); }
+.chat-main .activity-trace .trace-time-label { font-size: 0.8em; letter-spacing: 0.04em; opacity: 0.55; }
+.chat-main .activity-trace .trace-time-num { min-width: 4.5ch; text-align: right; font-variant-numeric: tabular-nums; }
 .chat-main .typing .hint code.trace-subject,
 .chat-main .activity-trace code.trace-subject { padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); font-family: var(--font-mono, monospace); font-size: inherit; }
 .chat-main .activity-trace .trace-meta,

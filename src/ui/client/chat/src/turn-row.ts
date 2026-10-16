@@ -81,7 +81,8 @@ export interface TurnRowView {
   status: string | null;
   elapsedMs: number | null;
   modelCallMs: number | null;
-  nonModelMs: number | null;
+  /** Time with at least one tool running; parallel tools count once. */
+  toolCallMs: number;
   model: string | null;
   usage: ConversationTurn['usage'];
 }
@@ -90,6 +91,27 @@ export function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean
   return (
     view.usage.length > 0 || (turn.phase === 'settled' ? view.elapsedMs !== null || !!view.model : !!turn.liveUsage)
   );
+}
+
+function toolCallMs(turn: ConversationTurn, now: number): number {
+  const live = turn.phase !== 'settled';
+  const spans = turn.activity
+    .flatMap(({ ts, text }): Array<[number, number]> => {
+      const step = parseStep(text);
+      const at = Number(ts);
+      if (step.kind !== 'tool' || !Number.isFinite(at)) return [];
+      if (step.status === 'running') return live ? [[at, Math.max(at, now)]] : [];
+      return step.durationMs !== undefined ? [[at, at + step.durationMs]] : [];
+    })
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let covered = -Infinity;
+  for (const [from, to] of spans) {
+    if (to <= covered) continue;
+    total += to - Math.max(from, covered);
+    covered = to;
+  }
+  return total;
 }
 
 export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
@@ -118,7 +140,7 @@ export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
     status: !settled && turn.phase === 'running' ? THINKING_TEXT : null,
     elapsedMs,
     modelCallMs,
-    nonModelMs: elapsedMs !== null && modelCallMs !== null ? elapsedMs - modelCallMs : null,
+    toolCallMs: toolCallMs(turn, now),
     model,
     // While running, the live line owns elapsed time and model; checkpointed values would be stale.
     usage: settled

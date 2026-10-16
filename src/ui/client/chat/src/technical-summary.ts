@@ -1,5 +1,5 @@
 import type { ConversationUsage } from '../../../shared/conversation';
-import { formatDuration } from './duration-format';
+import { formatStopwatch } from './duration-format';
 
 export function formatUsageCost(usd: number): string {
   if (usd >= 1) return '$' + usd.toFixed(2);
@@ -16,7 +16,6 @@ export function formatContextPercent(used: number, limit: number): string {
 export interface KnownContext {
   context_tokens: number;
   context_window: number;
-  num_turns?: number;
 }
 
 export function latestContextUsage(usage: readonly Partial<ConversationUsage>[]): KnownContext | null {
@@ -36,18 +35,6 @@ export function latestContextUsage(usage: readonly Partial<ConversationUsage>[])
   );
 }
 
-export function selectContextUsage(
-  usage: readonly Partial<ConversationUsage>[],
-  liveUsage: Partial<ConversationUsage> | null = null,
-): KnownContext | null {
-  const recorded = latestContextUsage(usage);
-  const live = liveUsage ? latestContextUsage([liveUsage]) : null;
-  return live &&
-    (live.num_turns === undefined || recorded?.num_turns === undefined || live.num_turns >= recorded.num_turns)
-    ? live
-    : recorded;
-}
-
 export function technicalSummary({
   elapsedMs,
   usage,
@@ -63,7 +50,7 @@ export function technicalSummary({
       ? costs.reduce((total, value) => total + value, 0)
       : null;
   return [
-    formatDuration(elapsedMs),
+    elapsedMs === null ? '' : formatStopwatch(elapsedMs),
     cost !== null && cost !== 0 ? formatUsageCost(cost) : '',
     context ? `${formatContextPercent(context.context_tokens, context.context_window)} ctx` : '',
   ]

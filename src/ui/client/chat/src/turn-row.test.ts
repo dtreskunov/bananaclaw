@@ -146,7 +146,7 @@ describe('model time versus wall time', () => {
         { id: 'other', value: { ...usage.value, duration_api_ms: 2000 } },
       ],
     });
-    expect(turnRowView(turn, start)).toMatchObject({ elapsedMs: 5000, modelCallMs: 3000, nonModelMs: 2000 });
+    expect(turnRowView(turn, start)).toMatchObject({ elapsedMs: 5000, modelCallMs: 3000 });
   });
   it('uses live timing checkpoints and preserves measured zero', () => {
     expect(
@@ -164,12 +164,18 @@ describe('model time versus wall time', () => {
       ],
     });
     expect(turnRowView(turn, start).modelCallMs).toBeNull();
-    expect(turnRowView(turn, start).nonModelMs).toBeNull();
     expect(turnRowView(testTurn, start).modelCallMs).toBeNull();
   });
-  it('preserves the signed difference when cumulative calls exceed wall time', () => {
-    const turn = settled({ usage: [{ ...usage, value: { ...usage.value, duration_api_ms: 7000 } }] });
-    expect(turnRowView(turn, start).nonModelMs).toBe(-2000);
+  it('counts overlapping tool time once and live tools up to now', () => {
+    const tool = (id: string, at: number, status: string, durationMs?: number) => ({
+      ordinal: at,
+      ts: String(start + at),
+      timelinePosition: at,
+      text: JSON.stringify({ kind: 'tool', id, tool: 'bash', status, durationMs }),
+    });
+    const activity = [tool('a', 0, 'completed', 2000), tool('b', 1000, 'completed', 500), tool('c', 3000, 'running')];
+    expect(turnRowView(settled({ activity }), start + 5000).toolCallMs).toBe(2000);
+    expect(turnRowView({ ...testTurn, activity }, start + 5000).toolCallMs).toBe(4000);
   });
 });
 
@@ -351,7 +357,7 @@ describe('turn row placement', () => {
     const view = testSnapshot({ messages, turns: [turn] }).conversation;
     expect(conversationMessages(view).map((m) => [m.id, m.activity?.length])).toEqual([
       ['ask', undefined],
-      ['reply', 1],
+      ['reply', 2],
     ]);
   });
 });
@@ -409,7 +415,7 @@ describe('turn activity placement', () => {
     expect(rows(testSnapshot({ messages, turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
       { id: 'steer', lines: undefined, status: false, stats: undefined },
-      { id: 'reply', lines: ['step 0', 'step 1'], status: false, stats: 's' },
+      { id: 'reply', lines: ['Started response', 'step 0', 'step 1'], status: false, stats: 's' },
     ]);
   });
 
@@ -445,7 +451,7 @@ describe('turn activity placement', () => {
     expect(rows(testSnapshot({ messages, turns: [running] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
       { id: 'update', lines: undefined, status: false, stats: undefined },
-      { id: 'trace:m:after:update', lines: ['step 0', 'step 1'], status: true, stats: undefined },
+      { id: 'trace:m:after:update', lines: ['Started response', 'step 0', 'step 1'], status: true, stats: undefined },
     ]);
   });
 
@@ -453,7 +459,7 @@ describe('turn activity placement', () => {
     const turn = settled({ id: 'q', outcome: 'silent', inputIds: ['ask'], activity: [step(0, 1000)] });
     expect(rows(testSnapshot({ messages: [message('ask', 'in', -1)], turns: [turn] }).conversation)).toEqual([
       { id: 'ask', lines: undefined, status: false, stats: undefined },
-      { id: 'trace:q:after:ask', lines: ['step 0', 'No reply'], status: true, stats: undefined },
+      { id: 'trace:q:after:ask', lines: ['Started response', 'step 0', 'No reply'], status: true, stats: undefined },
     ]);
   });
 

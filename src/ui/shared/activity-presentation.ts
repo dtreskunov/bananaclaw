@@ -1,5 +1,5 @@
 export interface TraceStep {
-  kind?: 'tool' | 'internal' | 'file' | 'patch' | 'retry' | 'compaction' | 'subtask' | 'notification';
+  kind?: 'tool' | 'internal' | 'file' | 'patch' | 'retry' | 'compaction' | 'subtask' | 'notification' | 'model';
   id?: string;
   tool?: string;
   status?: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
@@ -33,11 +33,22 @@ export const TRACE_STATUS_LABELS: Record<TraceStatus, string> = {
   unknown: 'Outcome unknown',
   neutral: 'Activity',
 };
+/**
+ * Model time attributed to a trace row: finished `ms`, plus a live tail ticking
+ * from `since`.
+ */
+export interface ModelTime {
+  ms: number;
+  since?: number;
+}
 export interface TraceLine {
   ts: string;
   text: string;
   ordinal?: number;
+  modelTime?: ModelTime;
 }
+/** A live trace row shows its Stop control only after running this long. */
+export const TRACE_STEP_THRESHOLD_MS = 1000;
 export interface TraceEntry {
   id: string;
   line: TraceLine;
@@ -69,7 +80,9 @@ function isStep(value: unknown): value is TraceStep {
   if (
     value.kind !== undefined &&
     (typeof value.kind !== 'string' ||
-      !['tool', 'internal', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification'].includes(value.kind))
+      !['tool', 'internal', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification', 'model'].includes(
+        value.kind,
+      ))
   )
     return false;
   if (

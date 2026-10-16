@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -8,7 +9,7 @@ import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/conn
 import { appendActivity } from '../db/session-state.js';
 import { registerProvider } from './provider-registry.js';
 import { audioReferencePrompt } from './attachment-routing.js';
-import type { ActivityStep, AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import type { ActivityStep, AgentProvider, AgentQuery, CallUsage, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import { fingerprintToolInput } from './types.js';
 import { builtinToolResultError, toolActivityFields } from './tool-activity.js';
 
@@ -276,6 +277,36 @@ export interface ClaudeMessageUsage {
   output_tokens?: number;
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
+}
+
+interface ClaudeCall {
+  id: string;
+  model: string;
+  usage: ClaudeMessageUsage;
+  startedAt?: number;
+  endedAt?: number;
+  costUsd?: number;
+  /** Measured from the message itself; settled usage includes side calls. */
+  contextTokens?: number;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+}
+
+function claudeCallUsage(call: ClaudeCall): CallUsage {
+  return {
+    id: call.id,
+    model: call.model,
+    cost_usd: call.costUsd ?? 0,
+    input_tokens: call.usage.input_tokens ?? 0,
+    output_tokens: call.usage.output_tokens ?? 0,
+    cache_read_tokens: call.usage.cache_read_input_tokens ?? 0,
+    cache_write_tokens: call.usage.cache_creation_input_tokens ?? 0,
+    duration_api_ms: call.startedAt !== undefined && call.endedAt !== undefined
+      ? Math.max(0, call.endedAt - call.startedAt) : undefined,
+    context_tokens: call.contextTokens,
+    context_window: call.contextWindow,
+    max_output_tokens: call.maxOutputTokens,
+  };
 }
 
 /** Context resident for ONE assistant message: its whole prompt (uncached,
@@ -556,6 +587,8 @@ export class ClaudeProvider implements AgentProvider {
     let ended = false;
     let closeTimer: ReturnType<typeof setTimeout> | undefined;
 
+    let promptAt: number | undefined = Date.now();
+
     async function* translateEvents(): AsyncGenerator<ProviderEvent> {
       let messageCount = 0;
       // SDK result fields are session-cumulative. Track previous values
@@ -565,9 +598,15 @@ export class ClaudeProvider implements AgentProvider {
       let prevOutput = 0;
       let prevCacheRead = 0;
       let prevCacheWrite = 0;
-      // The result event's totals are cumulative across every round trip; only
-      // an individual assistant message reports one request's own context.
-      let lastContextTokens: number | undefined;
+      // Main-thread model calls since the last result. The SDK reports no
+      // per-call timing, so a call is timed from when its prompt went out
+      // (the push or the previous tool results) until its message arrived.
+      let calls: ClaudeCall[] = [];
+      const sent = new Set<string>();
+      function* report(call: ClaudeCall): Generator<ProviderEvent> {
+        sent.add(call.id);
+        yield { type: 'usage_call', data: claudeCallUsage(call) };
+      }
       for await (const message of sdkResult) {
         messageCount++;
 
@@ -576,11 +615,28 @@ export class ClaudeProvider implements AgentProvider {
 
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };
+        } else if (message.type === 'user') {
+          if ((message as { parent_tool_use_id?: string | null }).parent_tool_use_id == null) promptAt = Date.now();
         } else if (message.type === 'assistant') {
-          const resident = claudeContextTokens((message as {
-            message?: { usage?: ClaudeMessageUsage };
-          }).message?.usage);
-          if (resident !== undefined) lastContextTokens = resident;
+          const { parent_tool_use_id: parent, message: msg } = message as {
+            parent_tool_use_id?: string | null;
+            message?: { id?: string; model?: string; usage?: ClaudeMessageUsage; content?: unknown };
+          };
+          if (parent == null && msg?.id && msg.model !== '<synthetic>') {
+            const now = Date.now();
+            let call = calls.find((c) => c.id === msg.id);
+            if (!call) {
+              const startedAt = Math.max(promptAt ?? now, calls.at(-1)?.endedAt ?? 0);
+              call = { id: msg.id, model: msg.model ?? '', usage: {}, startedAt, endedAt: now };
+              calls.push(call);
+            }
+            call.usage = msg.usage ?? call.usage;
+            call.contextTokens = claudeContextTokens(msg.usage) ?? call.contextTokens;
+            call.endedAt = now;
+            // Report before the tool's progress so its model step comes first.
+            const usesTool = Array.isArray(msg.content) && msg.content.some((b) => (b as { type?: string }).type === 'tool_use');
+            if (usesTool && !sent.has(call.id)) yield* report(call);
+          }
           // Surface identified tool calls. Private thinking is intentionally
           // omitted from user-visible activity.
           const blocks = (message as { message?: { content?: unknown } }).message?.content;
@@ -631,29 +687,33 @@ export class ClaudeProvider implements AgentProvider {
               }
               model = best;
             }
-            yield {
-              type: 'usage',
-              data: {
-                cost_usd: Math.max(0, curCost - prevCost),
-                input_tokens: Math.max(0, curInput - prevInput),
-                output_tokens: Math.max(0, curOutput - prevOutput),
-                cache_read_tokens: Math.max(0, curCacheRead - prevCacheRead),
-                cache_write_tokens: Math.max(0, curCacheWrite - prevCacheWrite),
-                num_turns: r.num_turns,
-                duration_ms: r.duration_ms,
-                duration_api_ms: r.duration_api_ms,
-                model,
-                context_window: contextWindow,
-                max_output_tokens: maxOutputTokens,
-                context_tokens: lastContextTokens,
-              },
+            // Per-message usage misses side calls (subagents, compaction) and
+            // carries no cost, so the last call absorbs the result's remainder.
+            const last: ClaudeCall = calls.at(-1) ?? { id: `result-${randomUUID()}`, model, usage: {} };
+            const sum = (field: keyof ClaudeMessageUsage) =>
+              calls.reduce((total, call) => total + (call.usage[field] ?? 0), 0);
+            const settle = (field: keyof ClaudeMessageUsage, delta: number) =>
+              Math.max(0, (last.usage[field] ?? 0) + Math.max(0, delta) - sum(field));
+            last.usage = {
+              input_tokens: settle('input_tokens', curInput - prevInput),
+              output_tokens: settle('output_tokens', curOutput - prevOutput),
+              cache_read_input_tokens: settle('cache_read_input_tokens', curCacheRead - prevCacheRead),
+              cache_creation_input_tokens: settle('cache_creation_input_tokens', curCacheWrite - prevCacheWrite),
             };
+            last.costUsd = Math.max(0, curCost - prevCost);
+            last.contextWindow = contextWindow;
+            last.maxOutputTokens = maxOutputTokens;
+            const billed = last.costUsd > 0 || Object.values(last.usage).some((n) => n > 0);
+            if (!calls.includes(last) && billed) calls.push(last);
+            for (const call of calls) if (call === last || !sent.has(call.id)) yield* report(call);
             prevCost = curCost;
             prevInput = curInput;
             prevOutput = curOutput;
             prevCacheRead = curCacheRead;
             prevCacheWrite = curCacheWrite;
           }
+          calls = [];
+          promptAt = undefined;
 
           if (m.is_error || (m.subtype && m.subtype !== 'success')) {
             const lower = (text || m.subtype || 'unknown error').toLowerCase();
@@ -691,6 +751,7 @@ export class ClaudeProvider implements AgentProvider {
     return {
       push: (msg, files, options) => {
         if (ended || aborted || options?.tools === 'disabled') return false;
+        promptAt ??= Date.now();
         stream.push(audioReferencePrompt(msg, files, 'adapter-does-not-support-audio'));
         return true;
       },

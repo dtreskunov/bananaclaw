@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 
-import { callUsageFromInfo, sumOpenCodeUsage } from './providers/opencode';
+import { callUsageFromInfo } from './providers/opencode';
+import type { CallUsage, TurnUsage } from './providers/types';
 import { lookupLimits } from './providers/model-catalog';
 import { accumulateCallUsage, accumulateTurnUsage } from './providers/usage';
 
@@ -67,11 +68,18 @@ describe('lookupLimits', () => {
   });
 });
 
-describe('sumOpenCodeUsage', () => {
+// The runner folds a turn's per-call reports into its turn usage.
+function foldCalls(calls: Array<CallUsage | null | undefined>): TurnUsage | null {
+  let total: TurnUsage | null = null;
+  for (const call of calls) if (call) total = accumulateCallUsage(total, call);
+  return total;
+}
+
+describe('per-call usage folding', () => {
   // The bug this replaced: only the final assistant message was recorded, so a
   // tool-calling turn reported ~18% of what it actually cost.
   it('sums every assistant message in the turn', () => {
-    const total = sumOpenCodeUsage([
+    const total = foldCalls([
       { cost_usd: 0.005775, input_tokens: 18626, output_tokens: 60, cache_read_tokens: 1920, cache_write_tokens: 0, model: 'MiniMax-M3' },
       { cost_usd: 0.00126138, input_tokens: 23, output_tokens: 15, cache_read_tokens: 20608, cache_write_tokens: 0, model: 'MiniMax-M3' },
     ]);
@@ -85,7 +93,7 @@ describe('sumOpenCodeUsage', () => {
   });
 
   it('skips messages with no usage snapshot', () => {
-    const total = sumOpenCodeUsage([
+    const total = foldCalls([
       undefined,
       { cost_usd: 1, input_tokens: 2, output_tokens: 3, cache_read_tokens: 4, cache_write_tokens: 5, reasoning_tokens: 6, model: 'm' },
     ]);
@@ -94,14 +102,14 @@ describe('sumOpenCodeUsage', () => {
   });
 
   it('returns null when the turn produced no usage at all', () => {
-    expect(sumOpenCodeUsage([])).toBeNull();
-    expect(sumOpenCodeUsage([undefined, undefined])).toBeNull();
+    expect(foldCalls([])).toBeNull();
+    expect(foldCalls([undefined, undefined])).toBeNull();
   });
 
   // Every round trip resends the conversation, so the summed counts run far
   // past the window. Occupancy is the last round trip on its own.
   it('reports context occupancy from the last round trip, not the sum', () => {
-    const total = sumOpenCodeUsage([
+    const total = foldCalls([
       callUsageFromInfo({ cost: 0, tokens: { input: 18626, output: 60, cache: { read: 1920, write: 0 } }, modelID: 'm' }),
       callUsageFromInfo({ cost: 0, tokens: { input: 23, output: 15, cache: { read: 20608, write: 0 } }, modelID: 'm' }),
     ]);
