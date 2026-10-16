@@ -5,9 +5,9 @@ description: Work in the user's real browser through DomAgent v6 sessions (appro
 
 # DomAgent v6 browser sessions
 
-DomAgent is independent of BananaClaw and OneCLI. Service 6.1.0-beta.4 /
-extension 6.1.2 / wire v6. Artifacts need extension 6.1.0 and closing tabs needs
-6.1.2; an older one answers
+DomAgent is independent of BananaClaw and OneCLI. Service 6.1.0-beta.5 /
+extension 6.1.3 / wire v6. Artifacts need extension 6.1.0 and closing tabs needs
+6.1.3; an older one answers
 `CAPABILITY_UNAVAILABLE` with `required_extension_version`: ask the user to
 update the extension. The user runs a small DomAgent window in their
 browser; while it is open you can ask to open **sessions**. A session is a
@@ -54,13 +54,20 @@ not a credential.
 - A session ends when the user closes or ungroups its tab group
   (`SESSION_ENDED`, `NOT_FOUND`). Don't re-request unprompted; ask.
 - `end_session({session_id})` when done: tabs are ungrouped and stay open.
-  Pass `close_tabs: true` to close the tabs instead when they are only
-  scratch pages you opened (browser must be online). Ending a session can't be
-  undone: request a new one for later work.
+  This is the default; ending a session can't be undone, so request a new one
+  for later work.
+- **Closing tabs always asks the user.** Tabs may hold unsaved work or evidence,
+  so prefer leaving them open. Only for scratch pages you opened, call
+  `end_session({session_id, close_tabs: true, description})` or
+  `close_tab({tab_id, description})`. `description` says why, in plain
+  language. The user gets a notification and chooses **Close** or **Keep open**
+  in their window; the call waits (`timeout_seconds`, default 300, ≤ 540).
+  `ACTION_DECLINED` (or a timeout): the tabs stay open. Accept that, continue,
+  and don't ask again. The browser must be online.
 - `list_tabs({session_id})`: all tabs in the group, including ones the user
   dragged in or a site opened. `create_tab({session_id, url?, description})`
-  adds a background tab (max 8). `close_tab({tab_id, description})` closes one
-  you no longer need; closing the last tab ends the session
+  adds a background tab (max 8). `close_tab` (above) closes one
+  tab after approval; closing the last tab ends the session
   (`session_ended: true`). `TAB_NOT_IN_SESSION` means the tab was closed or the
   user removed it.
 - `report_progress({session_id, message})` posts a short update to the user's
