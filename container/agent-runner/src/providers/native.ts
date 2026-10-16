@@ -38,6 +38,7 @@ import {
   NO_REPLY_TOOLS,
   noReplyReason,
   STEP_LIMIT_PROMPT,
+  stepBudgetInstructions,
 } from './native/reply.js';
 import {
   DeferredMcpTools,
@@ -509,12 +510,15 @@ export class NativeProvider implements AgentProvider {
                 const tools = wrappingUp ? {} : stepTools();
                 const result = streamText({
                   model,
-                  system: loadNativeInstructions(
-                    input.systemContext?.instructions,
-                    [skills.instructions(), mcpCatalog].filter(Boolean).join('\n\n') || null,
-                    turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
-                    nativeMediaInstructions(tools),
-                  ),
+                  system: [
+                    loadNativeInstructions(
+                      input.systemContext?.instructions,
+                      [skills.instructions(), mcpCatalog].filter(Boolean).join('\n\n') || null,
+                      turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
+                      nativeMediaInstructions(tools),
+                    ),
+                    turn.toolsDisabled ? null : stepBudgetInstructions(MAX_STEPS, stepsCompleted),
+                  ].filter(Boolean).join('\n\n'),
                   messages: stepNudge ? [...messages, { role: 'user', content: stepNudge }] : messages,
                   tools: journal.wrap(tools, abortController.signal),
                   ...(deferredMcp ? { repairToolCall: deferredMcp.repairToolCall } : {}),

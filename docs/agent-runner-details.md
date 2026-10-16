@@ -602,6 +602,17 @@ Everything below is handled by the agent-runner, not the provider.
 │     AND (process_after IS NULL          │
 │          OR process_after <= now())     │
 │                                         │
+  Each normal step's system prompt includes budgeting guidance and a live
+  used/remaining counter derived from `MAX_STEPS` and `stepsCompleted`. Steps
+  count model rounds, not individual tool calls; a round can call multiple
+  tools. The guidance recommends batching safe repetitive work, changing
+  unproductive strategies, and reserving the last 10 steps for saving,
+  verification, and a clear handoff. At 10 or fewer remaining steps, it
+  explicitly tells the model to stop expanding scope; the final tools-disabled
+  step reports zero remaining and asks for verified progress and next steps.
+  The counter is not persisted in conversation history, survives compaction
+  and steering without resetting, and resets for the next turn. Turns whose
+  tools were disabled up front do not advertise this tool-use budget.
 │  2. If rows found:                      │
 │     a. Set status = 'processing'        │
 │     b. Format messages by kind          │

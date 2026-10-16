@@ -6,6 +6,23 @@ export const NO_REPLY_TOOL = 'no_reply';
 export const STEP_LIMIT_PROMPT =
   '<system>You have reached the step limit for this turn, so no more tools can run. Write your final message now: what you found or finished, what is still undone, and how to continue.</system>';
 
+export function stepBudgetInstructions(maxSteps: number, stepsCompleted: number): string {
+  const remaining = maxSteps - stepsCompleted;
+  const budget = `Step budget: ${stepsCompleted} of ${maxSteps} steps used; ${remaining} remain before tools are disabled.`;
+  if (remaining === 0) {
+    return `## Turn budget\n\n${budget}\n\nTools are now disabled. Write your final message using only verified results: what you found or finished, what is still undone, and the concrete next step.`;
+  }
+  return `## Turn budget
+
+You have at most ${maxSteps} model steps for this turn. A step may contain multiple tool calls. This is a hard ceiling, not a target. At the ceiling, tools are disabled and you get one final step to report progress.
+
+Work toward a useful, verified result well before the ceiling. Batch repetitive reads or collection operations when safe, and avoid repeatedly checking unchanged state. If an approach makes little progress, change strategy rather than continuing the same loop.
+
+Reserve the last 10 steps for saving durable results, validating them, and preparing a clear handoff. If the full request cannot fit, complete a coherent portion and report what is verified, what remains, and the concrete next step. Do not claim completion without verification.
+
+${budget}${remaining <= 10 ? '\n\nOnly a few steps remain. Stop expanding scope; prioritize saving and verifying the current portion, then give a clear handoff.' : ''}`;
+}
+
 const POINTER_MAX_CHARS = 300;
 const POINTER_MIN_UNDELIVERED_CHARS = 400;
 const POINTER_PATTERN = /\b(?:above|earlier|previous (?:message|response|reply))\b/i;

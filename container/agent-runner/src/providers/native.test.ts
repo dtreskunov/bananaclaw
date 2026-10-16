@@ -1280,6 +1280,11 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests[1].messages)).not.toContain('queued normal message');
     expect(JSON.stringify(requests[2].messages)).toContain('third guidance');
     expect(JSON.stringify(requests[3].messages)).toContain('queued normal message');
+    for (const [index, completed] of [0, 1, 2, 0].entries()) {
+      expect(JSON.stringify(requests[index].messages)).toContain(
+        `Step budget: ${completed} of ${MAX_STEPS} steps used; ${MAX_STEPS - completed} remain`,
+      );
+    }
     expect(events.filter((event) => event.type === 'steering_applied').map((event) => event.id)).toEqual(['one', 'two', 'three']);
     expect(events.filter((event) => event.type === 'result')).toHaveLength(2);
     expect(events.filter((event) => event.type === 'usage')[0]).toMatchObject({
@@ -2008,6 +2013,8 @@ describe('NativeProvider', () => {
     expect(query.push('without tools', undefined, { tools: 'disabled' })).toBe(true);
     query.end();
     for await (const _event of query.events) {
+    expect(JSON.stringify(requests[0]?.messages)).toContain('## Turn budget');
+    expect(JSON.stringify(requests[1]?.messages)).not.toContain('## Turn budget');
       // Drain both queued turns.
     }
 
@@ -2261,6 +2268,33 @@ describe('NativeProvider', () => {
     expect(JSON.parse(row.content).text).toBe('hello from direct tool');
     expect(requests).toHaveLength(2);
     expect(JSON.stringify(requests[1]?.messages)).toContain('tool_result');
+  const systemText = (request: Record<string, unknown>) =>
+    JSON.stringify(request.system ?? (request.messages as Array<{ role: string }>).filter((message) => message.role === 'system'));
+
+  it.each(['openai-chat', 'anthropic-messages'])('reports the live step budget without persisting it (%s)', async (protocol) => {
+    process.env.NATIVE_PROTOCOL = protocol;
+    scriptedToolCalls = [sendCall('first update'), sendCall('second update')];
+    const first = await collect(new NativeProvider({ model: 'local/test-model' }));
+    const init = first.find((event) => event.type === 'init');
+    if (!init) throw new Error('Missing native continuation');
+
+    expect(requests).toHaveLength(3);
+    for (let completed = 0; completed < requests.length; completed++) {
+      const system = systemText(requests[completed]);
+      expect(system).toContain(`at most ${MAX_STEPS} model steps`);
+      expect(system).toContain('A step may contain multiple tool calls');
+      expect(system).toContain('Reserve the last 10 steps');
+      expect(system).toContain(
+        `Step budget: ${completed} of ${MAX_STEPS} steps used; ${MAX_STEPS - completed} remain`,
+      );
+    }
+    await collect(new NativeProvider({ model: 'local/test-model' }), init.continuation);
+    expect(systemText(requests[3])).toContain(`Step budget: 0 of ${MAX_STEPS} steps used; ${MAX_STEPS} remain`);
+    const store = new NativeStore();
+    try {
+      expect(JSON.stringify(store.contextMessages(init.continuation))).not.toContain('Step budget:');
+    } finally { store.close(); }
+  });
   });
 });
 
@@ -2303,6 +2337,14 @@ describe('final message', () => {
 
   it('asks for a final message without tools once the step limit is reached', async () => {
     scriptedToolCalls = Array.from({ length: MAX_STEPS }, (_, index) => sendCall(`update ${index}`));
+    for (let completed = 0; completed <= MAX_STEPS; completed++) {
+      const system = systemText(requests[completed]);
+      expect(system).toContain(
+        `Step budget: ${completed} of ${MAX_STEPS} steps used; ${MAX_STEPS - completed} remain`,
+      );
+      expect(system.includes('Stop expanding scope')).toBe(completed >= MAX_STEPS - 10 && completed < MAX_STEPS);
+    }
+    expect(systemText(requests[MAX_STEPS])).toContain('Tools are now disabled');
     scriptedTexts = ['Progress so far.'];
     const events = await collect(new NativeProvider({ model: 'local/test-model' }));
 
