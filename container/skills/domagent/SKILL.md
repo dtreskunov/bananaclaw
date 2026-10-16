@@ -5,8 +5,8 @@ description: Work in the user's real browser through DomAgent v6 sessions (appro
 
 # DomAgent v6 browser sessions
 
-DomAgent is independent of BananaClaw and OneCLI. Service 6.1.0-beta.1 /
-extension 6.1.0 / wire v6. Artifacts need extension 6.1.0; an older one answers
+DomAgent is independent of BananaClaw and OneCLI. Service 6.1.0-beta.3 /
+extension 6.1.1 / wire v6. Artifacts need extension 6.1.0; an older one answers
 `CAPABILITY_UNAVAILABLE` with `required_extension_version`: ask the user to
 update the extension. The user runs a small DomAgent window in their
 browser; while it is open you can ask to open **sessions**. A session is a
@@ -34,8 +34,13 @@ not a credential.
 
 ## Sessions
 
-- `list_browsers()` shows `online`. Offline means the user's DomAgent window is
-  closed: ask them to open it, or use another online browser.
+- `list_browsers()` shows `online`, `last_seen` and `paired_at`. Offline means
+  the user's DomAgent window is closed: ask them to open it, or use another
+  online browser.
+- Reinstalling the extension creates a new browser; the new one is renamed
+  `name (2)` if you already have one with that name. Remove the long-offline
+  duplicate with `unpair_browser({browser_id})` (only your own pairing; ends
+  your sessions there). Browsers offline for 30 days are removed automatically.
 - `request_session({browser_id, purpose, urls?, title?})`: plain-language
   purpose, up to 8 starting URLs. Fails immediately with `BROWSER_OFFLINE` when
   offline. The user approves or declines in their window and gets a system
