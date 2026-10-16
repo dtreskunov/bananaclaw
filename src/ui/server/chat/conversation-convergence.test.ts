@@ -367,7 +367,6 @@ describe('host projector → ordered stream → browser reducer convergence', ()
       outcome: 'silent',
       outputIds: [],
       usage: [],
-      liveUsage: null,
     });
   });
 

@@ -5,7 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 
 import { reduceActivityLines } from './activity.js';
-import type { ActivityLine, UsageSnapshot } from './channels/adapter.js';
+import type { ActivityLine } from './channels/adapter.js';
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
 import { invalidateConversation } from './conversation-events.js';
@@ -26,7 +26,6 @@ import {
   required,
   sanitizeActivityStep,
   sanitizeFields,
-  sanitizeUsage,
   type FieldSpec,
 } from './session-link-validate.js';
 import { getSession } from './db/sessions.js';
@@ -45,7 +44,7 @@ const MAX_CONNECTIONS_PER_SECOND = 32;
 const MAX_ACTIVITY_LINES = 128;
 const HOST_ACK_TIMEOUT_MS = 10_000;
 
-type SignalKind = 'disconnected' | 'heartbeat' | 'activity' | 'usage' | 'turn.end' | 'turn.state' | 'input.state';
+type SignalKind = 'disconnected' | 'heartbeat' | 'activity' | 'turn.end' | 'turn.state' | 'input.state';
 
 export interface SessionActiveTurn {
   id: string;
@@ -82,9 +81,6 @@ interface SessionSignalState {
   connectionWindowStartedAt: number;
   connectionsThisWindow: number;
   activity: Array<ActivityLine & { turnId: string | null; ordinal: number; timelinePosition: number }>;
-  usageTurnId: string | null;
-  usage: UsageSnapshot | null;
-  usageUpdatedAt: number;
   turnEndedAt: number;
   activeTurn: SessionActiveTurn | null;
   turnStateReady: boolean;
@@ -359,9 +355,6 @@ function emptyState(): SessionSignalState {
     connectionWindowStartedAt: 0,
     connectionsThisWindow: 0,
     activity: [],
-    usageTurnId: null,
-    usage: null,
-    usageUpdatedAt: 0,
     turnEndedAt: 0,
     activeTurn: null,
     turnStateReady: false,
@@ -478,15 +471,6 @@ function applyActivity(frame: Record<string, unknown>, { state }: FrameContext):
   return 'activity';
 }
 
-function applyUsage(frame: Record<string, unknown>, { state }: FrameContext): SignalKind | false {
-  const usage = sanitizeUsage(frame.usage);
-  if (!usage) return false;
-  state.usage = usage;
-  state.usageUpdatedAt = Number(frame.ts);
-  state.usageTurnId = frame.turnId as string | null;
-  return 'usage';
-}
-
 interface FrameSpec {
   fields: readonly FieldSpec[];
   apply: FrameHandler;
@@ -543,13 +527,6 @@ const FRAME_SPECS = new Map<string, FrameSpec>([
     ),
   ],
   [
-    'usage',
-    frameSpec(
-      [required('usage', isAny), required('turnId', isTurnIdOrNull), required('ts', isTimestamp)],
-      live(applyUsage),
-    ),
-  ],
-  [
     'heartbeat',
     frameSpec(
       [],
@@ -563,17 +540,6 @@ const FRAME_SPECS = new Map<string, FrameSpec>([
       live((_frame, { state }) => {
         state.activity = [];
         return 'activity';
-      }),
-    ),
-  ],
-  [
-    'usage.clear',
-    frameSpec(
-      [],
-      live((_frame, { state }) => {
-        state.usage = null;
-        state.usageUpdatedAt = 0;
-        return 'usage';
       }),
     ),
   ],
@@ -606,7 +572,7 @@ function applyFrame(sessionId: string, entry: SessionSignalServer, raw: unknown)
   const valid =
     Boolean(sanitizeFields(raw, spec.fields)) &&
     spec.apply(raw, { sessionId, entry, state: stateFor(sessionId), now: Date.now() });
-  if (!valid && (raw.type === 'usage' || raw.type === 'activity')) {
+  if (!valid && raw.type === 'activity') {
     log.warn('Skipped invalid optional live telemetry', {
       sessionId,
       type: raw.type,
@@ -846,23 +812,15 @@ export function getSessionSignalActivity(sessionId: string, sinceMs?: number): A
   return reduceActivityLines(sinceMs === undefined ? lines : lines.filter((line) => Number(line.ts) >= sinceMs));
 }
 
-export function getSessionSignalUsage(sessionId: string, sinceMs?: number): UsageSnapshot | null {
-  const state = states.get(sessionId);
-  if (!state?.usage || (sinceMs !== undefined && state.usageUpdatedAt < sinceMs)) return null;
-  return { ...state.usage };
-}
-
 /** Identity-preserving live input for the later authoritative conversation projector. */
 export function getSessionTurnSignals(sessionId: string): {
   active: ReturnType<typeof getSessionActiveTurn>;
   activity: Array<ActivityLine & { turnId: string | null; ordinal: number; timelinePosition: number }>;
-  usage: { turnId: string | null; ts: number; value: UsageSnapshot } | null;
 } {
   const state = states.get(sessionId);
   return {
     active: getSessionActiveTurn(sessionId),
     activity: state?.activity.map((line) => ({ ...line })) ?? [],
-    usage: state?.usage ? { turnId: state.usageTurnId, ts: state.usageUpdatedAt, value: { ...state.usage } } : null,
   };
 }
 

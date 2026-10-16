@@ -451,7 +451,6 @@ describe('authoritative conversation projection', () => {
         phase: 'settled',
         outputIds: [],
         usage: [],
-        liveUsage: null,
         metadata: { status: 'unavailable' },
       });
     },

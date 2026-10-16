@@ -13,7 +13,6 @@ import {
   getSessionSignalActivity,
   getSessionSignalLastSeenAt,
   getSessionSignalTurnEndedAt,
-  getSessionSignalUsage,
   sessionLinkSocketPath,
   startSessionSignalServer,
   stopAllSessionSignalServers,
@@ -452,34 +451,17 @@ describe('session signal link', () => {
         step: { kind: 'tool', id: 'read-1', tool: 'read', status: 'running', detail: 'src/index.ts' },
       })}\n`,
     );
-    socket.write(
-      `${JSON.stringify({
-        v: 5,
-        type: 'usage',
-        turnId: null,
-        ts: String(Date.now()),
-        usage: {
-          cost_usd: 0.1,
-          input_tokens: 100,
-          output_tokens: 20,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          model: 'test/model',
-        },
-      })}\n`,
-    );
     socket.write(`${JSON.stringify({ v: 5, type: 'turn.end' })}\n`);
 
     await waitFor(() => getSessionSignalTurnEndedAt(SESSION_ID) > 0);
     expect(getSessionSignalActivity(SESSION_ID)).toEqual([
       expect.objectContaining({ text: expect.stringContaining('src/index.ts') }),
     ]);
-    expect(getSessionSignalUsage(SESSION_ID)).toMatchObject({ input_tokens: 100, model: 'test/model' });
     expect(getSessionSignalLastSeenAt(SESSION_ID)).toBeGreaterThan(0);
     socket.destroy();
   });
 
-  it('accepts every declared live activity and usage field', async () => {
+  it('accepts every declared live activity field', async () => {
     const socket = await connect();
     socket.write(
       `${JSON.stringify({
@@ -500,25 +482,8 @@ describe('session signal link', () => {
         },
       })}\n`,
     );
-    socket.write(
-      `${JSON.stringify({
-        v: 5,
-        type: 'usage',
-        turnId: null,
-        ts: String(Date.now()),
-        usage: {
-          cost_usd: 0.1,
-          input_tokens: 100,
-          output_tokens: 20,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          duration_api_ms: 3328.568369,
-          model: 'test/model',
-        },
-      })}\n`,
-    );
 
-    await waitFor(() => getSessionSignalUsage(SESSION_ID)?.duration_api_ms === 3329);
+    await waitFor(() => getSessionSignalActivity(SESSION_ID).length > 0);
     expect(JSON.parse(getSessionSignalActivity(SESSION_ID)[0].text)).toMatchObject({
       rejectedBeforeExecution: true,
       description: 'Subject: <literal>\nSecond line',
@@ -615,40 +580,6 @@ describe('session signal link', () => {
         socket.destroy();
       }
       await waitFor(() => !getSessionActiveTurn(SESSION_ID).connected);
-    }
-  });
-
-  it.each([
-    ['negative token count', { cost_usd: 0, input_tokens: -1 }],
-    ['pathological numeric values', { cost_usd: 1e308, input_tokens: Number.MAX_SAFE_INTEGER + 1 }],
-  ] as const)('ignores %s without disconnecting or applying usage', async (_label, invalid) => {
-    const socket = await connect();
-    let beats = 0;
-    const unsubscribe = onSessionSignal((_id, kind) => {
-      if (kind === 'heartbeat') beats++;
-    });
-    try {
-      socket.write(
-        `${JSON.stringify({
-          v: 5,
-          type: 'usage',
-          turnId: null,
-          ts: String(Date.now()),
-          usage: {
-            ...invalid,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            model: 'bad',
-          },
-        })}\n${JSON.stringify({ v: 5, type: 'heartbeat' })}\n`,
-      );
-      await waitFor(() => beats === 1);
-      expect(socket.destroyed).toBe(false);
-      expect(getSessionSignalUsage(SESSION_ID)).toBeNull();
-    } finally {
-      unsubscribe();
-      socket.destroy();
     }
   });
 
@@ -875,22 +806,13 @@ describe('session signal link', () => {
       socket.write(
         JSON.stringify({
           v: 5,
-          type: 'usage',
-          usage: {},
+          type: 'activity',
+          step: null,
           turnId: turn.id,
           ts: '1790000000000',
-        }) +
-          '\n' +
-          JSON.stringify({
-            v: 5,
-            type: 'activity',
-            step: null,
-            turnId: turn.id,
-            ts: '1790000000000',
-            ordinal: 0,
-            timelinePosition: 1,
-          }) +
-          '\n',
+          ordinal: 0,
+          timelinePosition: 1,
+        }) + '\n',
       );
       socket.write(
         events

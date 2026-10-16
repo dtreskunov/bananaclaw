@@ -9,7 +9,6 @@
  */
 import fs from 'fs';
 import Database from 'better-sqlite3';
-import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,13 +20,12 @@ vi.mock('./config.js', async () => {
 import {
   initSessionFolder,
   outboundDbPath,
-  readSessionUsageProgress,
   writeOutboundDirect,
   seedRunnerState,
   runnerStateDbPath,
 } from './session-manager.js';
 import { putTurn } from './db/turns.js';
-import { sessionLinkSocketPath, startSessionSignalServer, stopSessionSignalServer } from './session-link.js';
+import { stopSessionSignalServer } from './session-link.js';
 
 const TEST_DIR = '.test-write-outbound';
 const AG = 'ag-test';
@@ -57,16 +55,6 @@ afterEach(async () => {
   await stopSessionSignalServer(SESS, true);
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
 });
-
-async function sendSignal(frame: unknown): Promise<void> {
-  await startSessionSignalServer(SESS);
-  await new Promise<void>((resolve, reject) => {
-    const socket = net.createConnection(sessionLinkSocketPath(SESS));
-    socket.once('error', reject);
-    socket.once('connect', () => socket.end(`${JSON.stringify(frame)}\n`));
-    socket.once('close', () => resolve());
-  });
-}
 
 describe('writeOutboundDirect', () => {
   it('opens a fresh host-projection seed in the real Bun runner without replaying copied history', () => {
@@ -169,26 +157,5 @@ describe('writeOutboundDirect', () => {
     const rows = readMessagesOut();
     expect(rows.map((r) => r.id)).toEqual(['denial-1', 'denial-2']);
     expect(rows.map((r) => r.seq)).toEqual([2, 4]);
-  });
-});
-
-describe('readSessionUsageProgress', () => {
-  it('returns a fresh valid snapshot received over the session link', async () => {
-    const usage = {
-      cost_usd: 0.25,
-      input_tokens: 1200,
-      output_tokens: 30,
-      cache_read_tokens: 1000,
-      cache_write_tokens: 0,
-      num_turns: 2,
-      model: 'minimax/MiniMax-M3',
-      context_tokens: 1230,
-      context_window: 1_048_576,
-    };
-    const before = Date.now();
-    await sendSignal({ v: 5, type: 'usage', usage, turnId: null, ts: String(Date.now()) });
-    expect(readSessionUsageProgress(AG, SESS)).toEqual(usage);
-    expect(readSessionUsageProgress(AG, SESS, before)).toEqual(usage);
-    expect(readSessionUsageProgress(AG, SESS, Date.now() + 1)).toBeNull();
   });
 });

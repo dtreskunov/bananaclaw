@@ -1183,8 +1183,7 @@ function turnUsage(turn: ConversationTurn, ownerId: string, now: number): UsageP
   const view = turnRowView(turn, now);
   if (!hasTurnStats(turn, view)) return null;
   const live = turn.phase !== 'settled';
-  const liveUsage = live ? turn.liveUsage : null;
-  const records = liveUsage && !view.usage.length ? [{ id: 'live', value: liveUsage }] : view.usage;
+  const records = view.usage;
   const usage = records.map(record => record.value);
   return {
     ownerId, records, model: view.model,

@@ -35,18 +35,6 @@ describe('Stats availability', () => {
       expected: false,
     },
     { phase: 'running' as const, usage: [{ id: 'zero', value: { cost_usd: 0 } }], expected: true },
-    {
-      phase: 'running' as const,
-      liveUsage: {
-        cost_usd: 0,
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        model: 'model',
-      },
-      expected: true,
-    },
     { phase: 'settled' as const, metadata: { status: 'final' as const, model: null, durationMs: 0 }, expected: true },
     {
       phase: 'settled' as const,
@@ -148,12 +136,9 @@ describe('model time versus wall time', () => {
     });
     expect(turnRowView(turn, start)).toMatchObject({ elapsedMs: 5000, modelCallMs: 3000 });
   });
-  it('uses live timing checkpoints and preserves measured zero', () => {
+  it('uses live usage records and preserves measured zero', () => {
     expect(
-      turnRowView(
-        { ...testTurn, liveUsage: { ...usage.value, cache_read_tokens: 0, cache_write_tokens: 0, duration_api_ms: 0 } },
-        start,
-      ),
+      turnRowView({ ...testTurn, usage: [{ id: 'live', value: { ...usage.value, duration_api_ms: 0 } }] }, start),
     ).toMatchObject({ modelCallMs: 0 });
   });
   it('does not invent model timing when any record is missing it', () => {

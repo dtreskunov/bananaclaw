@@ -36,8 +36,8 @@ no image rebuild is needed because fresh runner source is mounted.
 authorized channel/platform/thread from host-owned state. Messages, input
 dispositions, explicit turns, questions and action capabilities are read
 synchronously. Final response rows remain staged until their turn's durable
-`settled` barrier; outputless turns remain visible. Live trace and usage are
-joined by turn ID, never by the next response or a typing timeout. Billing
+`settled` barrier; outputless turns remain visible. Live trace and durable
+per-call usage are joined by turn ID, never by the next response or a typing timeout. Billing
 records retain their accounting IDs even when a turn has multiple outputs.
 
 `onConversationChange` is an invalidation bus, not a delivery protocol. Host
@@ -49,7 +49,7 @@ invalidate but cannot publish new state. Projection failures are explicit,
 not successful empty histories. Unknown imported origins expose only sidecars
 anchored to visible messages; off-route sends never expose the source trace.
 
-The browser protocol is separately versioned (`protocolVersion: 2`). A
+The browser protocol is separately versioned (`protocolVersion: 5`). A
 subscription starts with `{kind:"snapshot", streamId, revision, conversation}`.
 Each atomic `update` names `baseRevision` and the next `revision`, with entity
 upserts, removals, an explicit typed presentation timeline, connection state
@@ -90,8 +90,8 @@ each payload before updating memory. The frame budget belongs to the session,
 not the connection, so reconnecting cannot reset it.
 
 On the host, `FRAME_SPECS` in `src/session-link.ts` maps each runner frame type
-to its closed field list and handler. Nested records (activity steps, usage,
-turns, durable events) are checked by the declarative field specs in
+to its closed field list and handler. Nested records (activity steps, turns,
+durable events) are checked by the declarative field specs in
 `src/session-link-validate.ts`: unknown keys, missing required fields, and
 failed checks reject the frame, and the sanitized copy is rebuilt in spec order.
 `src/session-link-frames.test.ts` is the accept/reject matrix for every frame
@@ -101,7 +101,6 @@ Supported live runner signals:
 
 - `heartbeat`
 - `activity.clear` and `activity`
-- `usage.clear` and `usage`
 - `turn.resume` and `turn.end`
 - `turn.state`, carrying the immutable active turn ID, `running`/`stopping`
   status and originating channel/platform/thread, or `null` after settlement
@@ -121,13 +120,12 @@ Notification activities may include an optional `detail` string of at most
 2,000 characters, including steering text; whitespace and literal markup are
 preserved. Both initial delivery and reconnect replay accept this field.
 Invalid frame schemas are logged before the socket closes, without logging
-the activity text. Usage
-numbers must be finite and non-negative. Live state is best-effort: the runner
+the activity text. Live state is best-effort: the runner
 keeps its current snapshot in memory and replays it after reconnect, but the
 socket does not acknowledge or journal these signals.
 
 Activity carries `turnId`, its original emit-time `ts`, a turn-local
-`ordinal`, and a required positive `timelinePosition`; usage carries `turnId` and emit-time `ts`. Reconnect replays these
+`ordinal`, and a required positive `timelinePosition`. Reconnect replays these
 unchanged, rather than inventing a new time or a successor's identity.
 
 The runner creates a durable logical turn before invoking the provider.
@@ -286,15 +284,17 @@ Warnings identify the session, event, sequence, type and validation reason
 without logging the payload. Database errors, invalid envelopes, ordering
 conflicts, unknown event types and all delivery, identity, input-receipt,
 continuation and task state remain fatal rather than being skipped.
-Invalid live `usage` and `activity` snapshots also warn and are ignored without
+Invalid live `activity` snapshots also warn and are ignored without
 closing the socket, so replayed snapshots cannot block the durable journal.
 Valid protocol versions, frame-size/rate limits and critical live control frames
 remain mandatory.
 
 `onSessionTurnChange` notifies host consumers after durable commits, with
 changed turn IDs and an optional settled ID; identical replays do not produce
-new mutations. `getSessionTurnSignals` preserves live turn IDs, activity
-ordinals/times and usage time for a later projector. `readTurnMetadata` exposes
+new mutations. Each per-call `usage.persist` commit therefore refreshes live
+usage in the browser; there is no separate live usage signal.
+`getSessionTurnSignals` preserves live turn IDs and activity ordinals/times for
+a later projector. `readTurnMetadata` exposes
 the durable metadata contract. These hooks do not implement browser projection.
 
 A lost socket is not completion: the host retains the last matching turn.

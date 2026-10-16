@@ -450,9 +450,9 @@ end of the grid. Sparse reports use fewer columns to avoid interior gaps.
 Labels and values each stay on one line. Oversized values scroll horizontally
 within the metrics panel rather than wrapping or being clipped. Individual report
 headings occupy a metric cell so multiple reports can share the compact layout.
-Live usage does not add an awaiting-final-totals notice; partial reports still
-retain their warning.
-Live turns without recorded or live usage hide the usage disclosure; their
+Usage on a running turn does not add an awaiting-final-totals notice; partial
+reports still retain their warning.
+Live turns without a recorded model call hide the usage disclosure; their
 stopwatch and any activity trace remain available until accounting arrives.
 Missing token accounting does not add a "Tokens unavailable" label to the
 transcript. Partial records show only reported values; a record with no summary
@@ -931,7 +931,7 @@ once, offline, using saved output associations and ordinals. These assigned
 positions encode canonical presentation order, not recovered execution timing.
 There are no runtime missing-position or saved-association placement fallbacks.
 
-The browser protocol is version 2 and validates `protocolVersion`, `streamId`,
+The browser protocol is version 5 and validates `protocolVersion`, `streamId`,
 revisions, entity shapes, timeline references, and unique activity placement.
 Gaps or unknown streams show a synchronization error and reconnect for a fresh
 snapshot; incompatible protocols explicitly ask for a page reload. Progress is

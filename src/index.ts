@@ -161,7 +161,7 @@ async function main(): Promise<void> {
   // 4. Delivery adapter bridge — dispatches to channel adapters by EXACT
   // registry key (instance ?? channelType): a named instance with an
   // offline adapter is never rerouted through a sibling bot. Also splits
-  // multi-file messages and forwards typing hints / clearTyping.
+  // multi-file messages and forwards typing indicators.
   const deliveryAdapter = createDeliveryBridge({ getChannelAdapter: getChannelAdapterExact });
   setDeliveryAdapter(deliveryAdapter);
 

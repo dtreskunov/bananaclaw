@@ -88,9 +88,7 @@ export interface TurnRowView {
 }
 
 export function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
-  return (
-    view.usage.length > 0 || (turn.phase === 'settled' ? view.elapsedMs !== null || !!view.model : !!turn.liveUsage)
-  );
+  return view.usage.length > 0 || (turn.phase === 'settled' && (view.elapsedMs !== null || !!view.model));
 }
 
 function toolCallMs(turn: ConversationTurn, now: number): number {
@@ -125,11 +123,7 @@ export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
       ? Math.max(0, now - startedAt)
       : null;
   const model = turn.metadata.model;
-  const timings = turn.usage.length
-    ? turn.usage.map(({ value }) => value.duration_api_ms)
-    : turn.liveUsage
-      ? [turn.liveUsage.duration_api_ms]
-      : [];
+  const timings = turn.usage.map(({ value }) => value.duration_api_ms);
   const modelCallMs =
     timings.length && timings.every((value) => value !== undefined)
       ? timings.reduce((total, value) => total + value, 0)

@@ -20,7 +20,7 @@ import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessi
 import { extractOutboundText, indexMessage } from './search-index.js';
 import { setTypingAdapter } from './modules/typing/index.js';
 import { publishTitlesForDeliveredReplies } from './modules/thread-titles/db.js';
-import type { ActivityLine, DeliveryContext, OutboundFile, TypingMetadata } from './channels/adapter.js';
+import type { DeliveryContext, OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 import { notifySessionHostState, onSessionDurableMessage } from './session-link.js';
 
@@ -69,16 +69,7 @@ export interface ChannelDeliveryAdapter {
     instance?: string,
     context?: DeliveryContext,
   ): Promise<string | undefined>;
-  setTyping?(
-    channelType: string,
-    platformId: string,
-    threadId: string | null,
-    hint?: string,
-    instance?: string,
-    items?: ActivityLine[],
-    metadata?: TypingMetadata,
-  ): Promise<void>;
-  clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
+  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;

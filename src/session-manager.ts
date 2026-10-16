@@ -11,8 +11,7 @@ import path from 'path';
 
 import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
-import { activityHint } from './activity.js';
-import type { ActivityLine, OutboundFile, UsageSnapshot } from './channels/adapter.js';
+import type { ActivityLine, OutboundFile } from './channels/adapter.js';
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
@@ -34,9 +33,7 @@ import {
 import { log } from './log.js';
 import { extractInboundText, indexMessage } from './search-index.js';
 import {
-  getSessionSignalActivity,
   getSessionSignalTurnEndedAt,
-  getSessionSignalUsage,
   notifySessionHostState,
 } from './session-link.js';
 import type { Session } from './types.js';
@@ -474,31 +471,6 @@ export function writeOutboundDirect(
  * callers that only touch session-manager.
  */
 export type { ActivityLine };
-
-/**
- * Read the latest runner activity as a one-line typing hint. Live state is
- * received over the per-session Unix socket and never read from the session
- * filesystem.
- */
-export function readSessionProgress(_agentGroupId: string, sessionId: string, sinceMs?: number): string | null {
-  return activityHint(getSessionSignalActivity(sessionId, sinceMs));
-}
-
-/**
- * Read the current runner activity trace received over the session link.
- */
-export function readSessionActivity(_agentGroupId: string, sessionId: string, sinceMs?: number): ActivityLine[] {
-  return getSessionSignalActivity(sessionId, sinceMs);
-}
-
-/** Read the latest in-flight usage snapshot written by the container. */
-export function readSessionUsageProgress(
-  _agentGroupId: string,
-  sessionId: string,
-  sinceMs?: number,
-): UsageSnapshot | null {
-  return getSessionSignalUsage(sessionId, sinceMs);
-}
 
 /**
  * Read the latest turn-ended marker received over the session link.

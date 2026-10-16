@@ -389,7 +389,7 @@ describe('authoritative turn presentation', () => {
     update({ ...initial, turns: [previousTurn], connection: { connected: true, activeTurnId: null } });
     toggleActivityTrace('turn:turn-1');
     toggleActivityMetrics('turn:turn-1');
-    const nextTurn = { ...testTurn, id: 'turn-2', activity: [], usage: [], liveUsage: null };
+    const nextTurn = { ...testTurn, id: 'turn-2', activity: [], usage: [] };
     const view: Conversation = {
       ...initial,
       turns: [previousTurn, nextTurn],
@@ -401,17 +401,22 @@ describe('authoritative turn presentation', () => {
     expect(activityMetricsExpanded('turn:turn-1')).toBe(true);
     expect(activityTraceExpanded('turn:turn-2')).toBe(false);
     expect(activityMetricsExpanded('turn:turn-2')).toBe(false);
-    const liveUsage = {
-      cost_usd: 0.002,
-      input_tokens: 100,
-      output_tokens: 0,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
-      model: 'model',
-    };
+    const usage = [
+      {
+        id: 'usage',
+        value: {
+          cost_usd: 0.002,
+          input_tokens: 100,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          model: 'model',
+        },
+      },
+    ];
     const ready = {
       ...nextTurn,
-      ...(first === 'steps' ? { activity: testTurn.activity } : { liveUsage }),
+      ...(first === 'steps' ? { activity: testTurn.activity } : { usage }),
     };
     update({ ...view, turns: [previousTurn, ready] });
     expect(conversationState.peek()!.conversation.turns[1]).toMatchObject(ready);
@@ -419,7 +424,7 @@ describe('authoritative turn presentation', () => {
     expect(activityMetricsExpanded('turn:turn-1')).toBe(true);
     expect(activityTraceExpanded('turn:turn-2')).toBe(false);
     expect(activityMetricsExpanded('turn:turn-2')).toBe(false);
-    update({ ...view, turns: [previousTurn, { ...ready, activity: testTurn.activity, liveUsage }] });
+    update({ ...view, turns: [previousTurn, { ...ready, activity: testTurn.activity, usage }] });
     receive(testSnapshot(conversationState.peek()!.conversation, 'reconnect-ready'));
     expect(activityTraceExpanded('turn:turn-1')).toBe(true);
     expect(activityMetricsExpanded('turn:turn-1')).toBe(true);
@@ -519,7 +524,7 @@ describe('authoritative turn presentation', () => {
         turns: [{ ...testTurn, phase: 'settled', outcome: 'silent' }],
         connection: { connected: true, activeTurnId: null },
       };
-      const next = { ...testTurn, id: 'turn-2', activity: [], usage: [], liveUsage: null };
+      const next = { ...testTurn, id: 'turn-2', activity: [], usage: [] };
       const view = {
         ...settled,
         turns: [...settled.turns, next],

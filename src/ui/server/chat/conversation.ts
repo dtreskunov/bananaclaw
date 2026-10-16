@@ -179,8 +179,6 @@ export function projectConversation(
       .filter((row) => owned || visibleOutputIds.has(String(row.message_out_id)))
       .map((row) => ({ id: String(row.id), value: usageValue(row) }));
     const metadata = owned ? readTurnMetadata(outDb!, turn.id) : undefined;
-    const liveUsage =
-      owned && turn.phase !== 'settled' && signals.usage?.turnId === turn.id ? signals.usage.value : null;
     turns.push({
       id: turn.id,
       phase: turn.phase,
@@ -202,7 +200,7 @@ export function projectConversation(
               : usage.length
                 ? 'partial'
                 : 'unavailable',
-        model: metadata?.model ?? usage.at(-1)?.value.model ?? liveUsage?.model ?? null,
+        model: metadata?.model ?? usage.at(-1)?.value.model ?? null,
         // Without final metadata, native turns use their terminal timestamps rather than a stale checkpoint.
         durationMs:
           turn.phase !== 'settled'
@@ -213,7 +211,6 @@ export function projectConversation(
                 ? null
                 : (usage.at(-1)?.value.duration_ms ?? null),
       },
-      liveUsage,
     });
   }
   const turnIds = new Set(turns.map((turn) => turn.id));

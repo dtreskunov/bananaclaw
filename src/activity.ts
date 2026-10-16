@@ -1,5 +1,4 @@
 import type { ActivityLine } from './channels/adapter.js';
-import { stepSummary } from './ui/shared/activity-presentation.js';
 
 export type ActivityStep =
   | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; description?: string; title?: string; error?: string; durationMs?: number; rejectedBeforeExecution?: boolean }
@@ -59,20 +58,4 @@ export function reduceActivityLines(lines: ActivityLine[]): ActivityLine[] {
   }
 
   return reduced.map(({ ts, step }) => ({ ts, text: JSON.stringify(step) }));
-}
-
-export function activityHint(lines: ActivityLine[]): string | null {
-  const reduced = reduceActivityLines(lines);
-  for (let i = reduced.length - 1; i >= 0; i--) {
-    const step = parseStep(reduced[i].text);
-    if (!step) continue;
-    const label = activityLabel(step);
-    if (label) return label;
-  }
-  return null;
-}
-
-/** Canonical plain-text primary label used by typing hints. */
-export function activityLabel(step: ActivityStep): string {
-  return stepSummary(step);
 }

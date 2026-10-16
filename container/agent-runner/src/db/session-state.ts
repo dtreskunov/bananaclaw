@@ -115,12 +115,10 @@ export function clearFailedTurn(): void {
   deleteValue(FAILED_TURN_KEY);
 }
 
-import type { ActivityStep, TurnUsage } from '../providers/types.js';
+import type { ActivityStep } from '../providers/types.js';
 import {
   clearActivitySignal,
-  clearUsageSignal,
   emitActivitySignal,
-  emitUsageSignal,
   endTurnSignal,
   resumeTurnSignal,
 } from '../session-link.js';
@@ -142,8 +140,7 @@ export interface ActivityLine {
 const ACTIVITY_MAX_CHARS = 2000;
 
 /** Append and journal one structured step to the per-turn activity trace. The host
- *  forwards the full ordered list to the web UI (and derives the single
- *  latest typing hint from the last line), so the user can see every tool
+ *  forwards the full ordered list to the web UI, so the user can see every tool
  *  call / progress step as it happens. Durable write failures must propagate.
  *
  *  The step is JSON-encoded into the line's `text`; because JSON escapes
@@ -221,14 +218,6 @@ export function clearActivity(): void {
   _lastActivity = '';
   _activityBuffer = [];
   clearActivitySignal();
-}
-
-export function writeUsageProgress(usage: TurnUsage): void {
-  emitUsageSignal(usage, getTurnContext()?.turnId ?? null);
-}
-
-export function clearUsageProgress(): void {
-  clearUsageSignal();
 }
 
 /** Mark that the SDK turn just ended (result/error event). The host

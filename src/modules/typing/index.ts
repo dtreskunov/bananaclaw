@@ -8,8 +8,9 @@
  * on fresh session-link signals after an initial grace period.
  *
  * Shutdown signal: the container sends `turn.end` on the SDK's `result` /
- * `error` event. The session-link listener drops the indicator immediately;
- * the active delivery loop keeps a compatibility check on every tick.
+ * `error` event. The session-link listener stops refreshing immediately (the
+ * platform indicator then expires on its own); each refresh tick
+ * re-checks it as a fallback.
  *
  * Default module status:
  *   - Lives in src/modules/ for signaling (not really core), but ships
@@ -17,22 +18,11 @@
  *   - Removing requires editing src/router.ts, src/delivery.ts, and
  *     src/container-runner.ts to drop the calls.
  */
-import { configFromDb } from '../../container-config.js';
-import { getAgentGroup } from '../../db/agent-groups.js';
-import { getContainerConfig } from '../../db/container-configs.js';
 import { getRunningSessions } from '../../db/sessions.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { log } from '../../log.js';
-import {
-  isSessionProcessing,
-  readSessionActivity,
-  readSessionProgress,
-  readSessionUsageProgress,
-  readSessionTurnEndedAt,
-  type ActivityLine,
-} from '../../session-manager.js';
+import { isSessionProcessing, readSessionTurnEndedAt } from '../../session-manager.js';
 import { getSessionSignalLastSeenAt, onSessionSignal } from '../../session-link.js';
-import type { TypingMetadata } from '../../channels/adapter.js';
 
 const TYPING_REFRESH_MS = 4000;
 /**
@@ -51,16 +41,7 @@ const TYPING_GRACE_MS = 15000;
 const HEARTBEAT_FRESH_MS = 6000;
 
 interface TypingAdapter {
-  setTyping?(
-    channelType: string,
-    platformId: string,
-    threadId: string | null,
-    hint?: string,
-    instance?: string,
-    items?: ActivityLine[],
-    metadata?: TypingMetadata,
-  ): Promise<void>;
-  clearTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
+  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
 }
 
 interface TypingTarget {
@@ -72,17 +53,11 @@ interface TypingTarget {
   instance?: string;
   interval: NodeJS.Timeout;
   startedAt: number;
-  model?: string;
   paused: boolean;
 }
 
 let adapter: TypingAdapter | null = null;
 const typingRefreshers = new Map<string, TypingTarget>();
-
-// Last reduced snapshot sent per session. Typing refreshes still run for
-// platform expiry, but unchanged web trace payloads are omitted.
-const activitySnapshotHashes = new Map<string, string>();
-const signalFlushTimers = new Map<string, NodeJS.Timeout>();
 
 /**
  * Bind the typing module to the channel delivery adapter so it can
@@ -95,56 +70,12 @@ export function setTypingAdapter(a: TypingAdapter): void {
   adapter = a;
 }
 
-async function triggerTyping(
-  sessionId: string,
-  agentGroupId: string,
-  channelType: string,
-  platformId: string,
-  threadId: string | null,
-  startedAt: number,
-  model?: string,
-  instance?: string,
-): Promise<void> {
-  // Gate the hint on this turn's start time so a stale snapshot from the
-  // previous turn cannot surface before the runner clears or updates it.
-  const hint = readSessionProgress(agentGroupId, sessionId, startedAt) ?? undefined;
-  const snapshot = readSessionActivity(agentGroupId, sessionId, startedAt);
-  const hash = JSON.stringify(snapshot);
-  const items = activitySnapshotHashes.get(sessionId) === hash ? undefined : snapshot;
-  activitySnapshotHashes.set(sessionId, hash);
-  const usage = readSessionUsageProgress(agentGroupId, sessionId, startedAt);
-  try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, hint, instance, items, {
-      startedAt,
-      model,
-      ...(usage ? { usage } : {}),
-    });
-  } catch {
-    // Typing is best-effort — don't let it fail delivery or routing.
-  }
+function triggerTyping(entry: Pick<TypingTarget, 'channelType' | 'platformId' | 'threadId' | 'instance'>): void {
+  // Typing is best-effort — don't let it fail delivery or routing.
+  adapter?.setTyping?.(entry.channelType, entry.platformId, entry.threadId, entry.instance).catch(() => {});
 }
 
-function configuredModel(agentGroupId: string): string | undefined {
-  try {
-    const group = getAgentGroup(agentGroupId);
-    const config = getContainerConfig(agentGroupId);
-    if (!group || !config) return undefined;
-    return configFromDb(config, group).model;
-  } catch {
-    return undefined;
-  }
-}
-
-async function triggerClearTyping(channelType: string, platformId: string, threadId: string | null): Promise<void> {
-  try {
-    await adapter?.clearTyping?.(channelType, platformId, threadId);
-  } catch {
-    // Best-effort — same as triggerTyping.
-  }
-}
-
-function isHeartbeatFresh(agentGroupId: string, sessionId: string): boolean {
-  void agentGroupId;
+function isHeartbeatFresh(sessionId: string): boolean {
   const lastSeenAt = getSessionSignalLastSeenAt(sessionId);
   return lastSeenAt > 0 && Date.now() - lastSeenAt < HEARTBEAT_FRESH_MS;
 }
@@ -160,9 +91,8 @@ export function startTypingRefresh(
   const existing = typingRefreshers.get(sessionId);
   if (existing) {
     // Already refreshing means this input joined the in-flight turn (for
-    // example, steering). Preserve the turn boundary: activity and usage
-    // readers filter by startedAt, so resetting it would make the work
-    // already performed by this turn disappear from live clients.
+    // example, steering). Preserve the turn boundary (startedAt) so the
+    // turn-end check still compares against the turn's real start.
     existing.paused = false;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
     // a different chat address (agent-shared sessions span messaging
@@ -170,35 +100,16 @@ export function startTypingRefresh(
     // fields and the owning instance must move together — a torn entry
     // (old address + new instance) would hand e.g. a telegram platformId
     // to a Slack instance's setTyping on the next interval tick.
-    if (
-      existing.channelType !== channelType ||
-      existing.platformId !== platformId ||
-      existing.threadId !== threadId ||
-      existing.instance !== instance
-    )
-      activitySnapshotHashes.delete(sessionId);
     existing.channelType = channelType;
     existing.platformId = platformId;
     existing.threadId = threadId;
     existing.instance = instance;
-    triggerTyping(
-      sessionId,
-      agentGroupId,
-      channelType,
-      platformId,
-      threadId,
-      existing.startedAt,
-      existing.model,
-      instance,
-    ).catch(() => {});
+    triggerTyping(existing);
     return;
   }
 
-  activitySnapshotHashes.delete(sessionId);
   // Immediate tick + periodic refresh.
   const startedAt = Date.now();
-  const model = configuredModel(agentGroupId);
-  triggerTyping(sessionId, agentGroupId, channelType, platformId, threadId, startedAt, model, instance).catch(() => {});
   const interval = setInterval(() => {
     const entry = typingRefreshers.get(sessionId);
     if (!entry) return; // stopped externally since this tick was scheduled
@@ -208,32 +119,21 @@ export function startTypingRefresh(
     if (stopIfTurnEnded(sessionId, entry)) return;
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
-    if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
+    if (withinGrace || isHeartbeatFresh(sessionId)) {
       entry.paused = false;
-      triggerTyping(
-        sessionId,
-        entry.agentGroupId,
-        entry.channelType,
-        entry.platformId,
-        entry.threadId,
-        entry.startedAt,
-        entry.model,
-        entry.instance,
-      ).catch(() => {});
+      triggerTyping(entry);
       return;
     }
 
-    // Out of grace AND heartbeat stale — hide typing, but keep the refresher
-    // paused so a transient provider/event-loop stall can recover without a
-    // new inbound message. Container exit and turn-end paths still remove it.
-    if (!entry.paused) {
-      entry.paused = true;
-      triggerClearTyping(entry.channelType, entry.platformId, entry.threadId).catch(() => {});
-    }
+    // Out of grace AND heartbeat stale — stop re-firing so the platform
+    // indicator expires, but keep the refresher paused so a transient
+    // provider/event-loop stall can recover without a new inbound message.
+    // Container exit and turn-end paths still remove it.
+    entry.paused = true;
   }, TYPING_REFRESH_MS);
   // unref so a stale refresher can't hold the event loop alive.
   interval.unref();
-  typingRefreshers.set(sessionId, {
+  const entry: TypingTarget = {
     agentGroupId,
     channelType,
     platformId,
@@ -241,55 +141,16 @@ export function startTypingRefresh(
     instance,
     interval,
     startedAt,
-    model,
     paused: false,
-  });
-}
-
-/**
- * Drop the typing indicator if the container has marked the current
- * turn as ended (final result delivered, or follow-up question asked
- * and now waiting on the user). Called once per active delivery tick
- * (~1s) so the dots disappear within a second of the agent finishing
- * — much faster than waiting for the next 4s refresh tick or for the
- * heartbeat to age out. Returns true if the refresher was stopped.
- */
-export function checkTurnEndedAndStop(sessionId: string): boolean {
-  const entry = typingRefreshers.get(sessionId);
-  if (!entry) return false;
-  return stopIfTurnEnded(sessionId, entry);
-}
-
-/**
- * Forward changed reduced activity snapshots at the ~1s active delivery
- * cadence instead of waiting for the 4s typing refresh tick. Only the web
- * UI renders the trace, so this is a no-op for other channels to avoid
- * hammering their typing APIs.
- */
-export function flushActivity(sessionId: string): void {
-  const entry = typingRefreshers.get(sessionId);
-  if (!entry || entry.channelType !== 'web') return;
-  const hash = JSON.stringify(readSessionActivity(entry.agentGroupId, sessionId, entry.startedAt));
-  if (hash === activitySnapshotHashes.get(sessionId)) return;
-  triggerTyping(
-    sessionId,
-    entry.agentGroupId,
-    entry.channelType,
-    entry.platformId,
-    entry.threadId,
-    entry.startedAt,
-    entry.model,
-    entry.instance,
-  ).catch(() => {});
+  };
+  typingRefreshers.set(sessionId, entry);
+  triggerTyping(entry);
 }
 
 function stopIfTurnEnded(sessionId: string, entry: TypingTarget): boolean {
   const turnEndedAt = readSessionTurnEndedAt(entry.agentGroupId, sessionId);
   if (turnEndedAt <= entry.startedAt) return false;
-  clearInterval(entry.interval);
-  typingRefreshers.delete(sessionId);
-  activitySnapshotHashes.delete(sessionId);
-  triggerClearTyping(entry.channelType, entry.platformId, entry.threadId).catch(() => {});
+  stopTypingRefresh(sessionId);
   return true;
 }
 
@@ -298,11 +159,6 @@ export function stopTypingRefresh(sessionId: string): void {
   if (!entry) return;
   clearInterval(entry.interval);
   typingRefreshers.delete(sessionId);
-  activitySnapshotHashes.delete(sessionId);
-  const signalFlush = signalFlushTimers.get(sessionId);
-  if (signalFlush) clearTimeout(signalFlush);
-  signalFlushTimers.delete(sessionId);
-  triggerClearTyping(entry.channelType, entry.platformId, entry.threadId).catch(() => {});
 }
 
 onSessionSignal((sessionId, kind) => {
@@ -314,37 +170,8 @@ onSessionSignal((sessionId, kind) => {
   }
   if (kind === 'heartbeat' && entry.paused) {
     entry.paused = false;
-    triggerTyping(
-      sessionId,
-      entry.agentGroupId,
-      entry.channelType,
-      entry.platformId,
-      entry.threadId,
-      entry.startedAt,
-      entry.model,
-      entry.instance,
-    ).catch(() => {});
-    return;
+    triggerTyping(entry);
   }
-  if (entry.channelType !== 'web' || (kind !== 'activity' && kind !== 'usage')) return;
-  if (signalFlushTimers.has(sessionId)) return;
-  const timer = setTimeout(() => {
-    signalFlushTimers.delete(sessionId);
-    const current = typingRefreshers.get(sessionId);
-    if (!current) return;
-    triggerTyping(
-      sessionId,
-      current.agentGroupId,
-      current.channelType,
-      current.platformId,
-      current.threadId,
-      current.startedAt,
-      current.model,
-      current.instance,
-    ).catch(() => {});
-  }, 50);
-  timer.unref?.();
-  signalFlushTimers.set(sessionId, timer);
 });
 
 /**

@@ -1,6 +1,6 @@
 import type { Conversation, ConversationMessage, ConversationQuestion, ConversationTurn } from './conversation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 4;
+export const CONVERSATION_PROTOCOL_VERSION = 5;
 export interface EntityChanges<T> {
   upserts: T[];
   removeIds: string[];
@@ -86,7 +86,6 @@ const usageFields = {
   duration_ms: optional(number),
   duration_api_ms: optional(number),
 };
-const usage = shape(usageFields);
 const reportedUsage = shape(
   Object.fromEntries(Object.entries(usageFields).map(([key, check]) => [key, optional(check)])),
 );
@@ -162,7 +161,6 @@ const turn = shape({
     model: nullable(text),
     durationMs: nullable(number),
   }),
-  liveUsage: nullable(usage),
 });
 const question = shape({
   questionId: id,

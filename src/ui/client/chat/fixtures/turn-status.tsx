@@ -173,7 +173,6 @@ function startResponse(activate = true): void {
       turn = makeConversation('initial', new Date().toISOString()).turns[0];
       turn.id = 'fixture-submitted-turn';
       turn.inputIds = [request.messageId];
-      turn.liveUsage = null;
       turn.metadata.model = null;
       next.turns.push(turn);
       const input = next.messages.find((message) => message.id === request.messageId);
@@ -334,20 +333,22 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
             },
           },
         ]
-      : [],
-    liveUsage: settled || nextScene === 'initial'
-      ? null
-      : {
-          cost_usd: 0.004,
-          duration_api_ms: 3000,
-          model: 'fixture-model',
-          input_tokens: 2100,
-          output_tokens: 0,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          context_tokens: 7500,
-          context_window: 200_000,
-        },
+      : nextScene === 'initial'
+      ? []
+      : [{
+          id: 'fixture-live-usage',
+          value: {
+            cost_usd: 0.004,
+            duration_api_ms: 3000,
+            model: 'fixture-model',
+            input_tokens: 2100,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            context_tokens: 7500,
+            context_window: 200_000,
+          },
+        }],
     metadata: {
       status: outcomeOnly ? 'unavailable' : failed ? 'partial' : settled ? 'final' : 'provisional',
       model: missingAccounting || outcomeOnly ? null : 'fixture-model',
@@ -446,7 +447,6 @@ function advance(nextScene: Scene): void {
     const settled = makeConversation('reply').turns[0];
     turn.metadata = settled.metadata;
     turn.usage = settled.usage;
-    turn.liveUsage = null;
     turn.outputIds = [turn.id === 'fixture-submitted-turn' ? 'fixture-submitted-reply' : `${turn.id}:reply`];
     next.messages.push({ id: turn.outputIds[0], direction: 'out', turnId: turn.id,
       text: 'The **submitted response** is complete.', timestamp: turn.endedAt,

@@ -30,7 +30,6 @@ export const testTurn: ConversationTurn = {
   activity: [{ ordinal: 0, ts: '1000', text: 'work', timelinePosition: 100 }],
   usage: [],
   metadata: { status: 'provisional', durationMs: null, model: 'model' },
-  liveUsage: null,
 };
 export function testSnapshot(partial: Partial<Conversation> = {}, streamId = 'test-stream'): ConversationSnapshot {
   return {

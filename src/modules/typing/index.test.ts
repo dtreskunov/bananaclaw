@@ -16,31 +16,35 @@ vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
   return { ...actual, DATA_DIR: '.test-typing' };
 });
-vi.mock('../../container-config.js', () => ({ configFromDb: () => ({ model: 'openrouter/minimax/minimax-m3' }) }));
-vi.mock('../../db/agent-groups.js', () => ({ getAgentGroup: () => ({ id: 'ag-1' }) }));
-vi.mock('../../db/container-configs.js', () => ({ getContainerConfig: () => ({ agent_group_id: 'ag-1' }) }));
 
 import { setTypingAdapter, startTypingRefresh, stopTypingRefresh } from './index.js';
 import { sessionLinkSocketPath, startSessionSignalServer, stopSessionSignalServer } from '../../session-link.js';
-import type { ActivityLine, TypingMetadata } from '../../channels/adapter.js';
 
 type Call = {
   channelType: string;
   platformId: string;
   threadId: string | null;
   instance?: string;
-  metadata?: TypingMetadata;
-  items?: ActivityLine[];
 };
 
 function captureAdapter() {
   const calls: Call[] = [];
   setTypingAdapter({
-    async setTyping(channelType, platformId, threadId, _hint, instance, items, metadata) {
-      calls.push({ channelType, platformId, threadId, instance, metadata, ...(items?.length ? { items } : {}) });
+    async setTyping(channelType, platformId, threadId, instance) {
+      calls.push({ channelType, platformId, threadId, instance });
     },
   });
   return calls;
+}
+
+async function connectSignal(): Promise<net.Socket> {
+  await startSessionSignalServer('sess-1');
+  const socket = net.createConnection(sessionLinkSocketPath('sess-1'));
+  await new Promise<void>((resolve, reject) => {
+    socket.once('connect', resolve);
+    socket.once('error', reject);
+  });
+  return socket;
 }
 
 beforeEach(() => {
@@ -65,7 +69,6 @@ describe('startTypingRefresh — instance forwarding', () => {
       platformId: 'slack:C1',
       threadId: null,
       instance: 'slack-tester',
-      metadata: { startedAt: expect.any(Number), model: 'openrouter/minimax/minimax-m3' },
     });
   });
 
@@ -73,7 +76,6 @@ describe('startTypingRefresh — instance forwarding', () => {
     const calls = captureAdapter();
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', 'T1', 'slack-tester');
     await vi.advanceTimersByTimeAsync(0);
-    const startedAt = calls[0].metadata?.startedAt;
     calls.length = 0;
 
     // Two 4s ticks — well inside the 15s grace window, so they fire
@@ -83,15 +85,13 @@ describe('startTypingRefresh — instance forwarding', () => {
     for (const c of calls) {
       expect(c.instance).toBe('slack-tester');
       expect(c.threadId).toBe('T1');
-      expect(c.metadata?.startedAt).toBe(startedAt);
     }
   });
 
-  it('re-trigger on an active turn changes routing without resetting its metadata boundary', async () => {
+  it('re-trigger on an active turn moves routing for subsequent ticks', async () => {
     const calls = captureAdapter();
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-tester');
     await vi.advanceTimersByTimeAsync(0);
-    const firstStartedAt = calls[0].metadata?.startedAt;
     calls.length = 0;
     await vi.advanceTimersByTimeAsync(100);
 
@@ -100,14 +100,12 @@ describe('startTypingRefresh — instance forwarding', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toHaveLength(1);
     expect(calls[0].instance).toBe('slack-worker');
-    expect(calls[0].metadata?.startedAt).toBe(firstStartedAt);
 
-    // The stored route moves, but subsequent ticks retain the same turn.
+    // The stored route moves for subsequent ticks.
     calls.length = 0;
     await vi.advanceTimersByTimeAsync(4_500);
     expect(calls.length).toBeGreaterThanOrEqual(1);
     expect(calls[calls.length - 1].instance).toBe('slack-worker');
-    expect(calls[calls.length - 1].metadata?.startedAt).toBe(firstStartedAt);
   });
 
   it('re-trigger with a changed address updates the whole entry — interval ticks stay self-consistent', async () => {
@@ -128,7 +126,6 @@ describe('startTypingRefresh — instance forwarding', () => {
       platformId: 'tg:99',
       threadId: null,
       instance: 'telegram',
-      metadata: { startedAt: expect.any(Number), model: 'openrouter/minimax/minimax-m3' },
     });
 
     // Interval ticks fire from the stored entry — all four fields must
@@ -142,117 +139,40 @@ describe('startTypingRefresh — instance forwarding', () => {
         platformId: 'tg:99',
         threadId: null,
         instance: 'telegram',
-        metadata: { startedAt: expect.any(Number), model: 'openrouter/minimax/minimax-m3' },
       });
     }
   });
-
-  it('forwards a fresh in-flight usage snapshot', async () => {
-    const calls = captureAdapter();
-    startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-tester');
-    await vi.advanceTimersByTimeAsync(0);
-    calls.length = 0;
-
-    await startSessionSignalServer('sess-1');
-    const socket = net.createConnection(sessionLinkSocketPath('sess-1'));
-    await new Promise<void>((resolve, reject) => {
-      socket.once('connect', resolve);
-      socket.once('error', reject);
-    });
-    socket.write(
-      `${JSON.stringify({
-        v: 5,
-        type: 'activity',
-        turnId: null,
-        ts: String(Date.now()),
-        ordinal: 0,
-        timelinePosition: 100,
-        step: { kind: 'tool', id: 'lookup', tool: 'budget', status: 'completed' },
-      })}\n`,
-    );
-    socket.write(
-      `${JSON.stringify({
-        v: 5,
-        type: 'usage',
-        turnId: null,
-        ts: String(Date.now()),
-        usage: {
-          cost_usd: 0.25,
-          input_tokens: 1200,
-          output_tokens: 30,
-          cache_read_tokens: 1000,
-          cache_write_tokens: 0,
-          num_turns: 2,
-          model: 'minimax/MiniMax-M3',
-        },
-      })}\n`,
-    );
-    await vi.advanceTimersByTimeAsync(100);
-
-    await vi.advanceTimersByTimeAsync(4_500);
-    expect(calls.at(-1)?.metadata?.usage).toEqual(
-      expect.objectContaining({
-        input_tokens: 1200,
-        output_tokens: 30,
-        num_turns: 2,
-      }),
-    );
-    const turnStartedAt = calls.at(-1)?.metadata?.startedAt;
-    const items = calls.at(-1)?.items;
-    expect(items).toHaveLength(1);
-    calls.length = 0;
-    startTypingRefresh('sess-1', 'ag-1', 'web', 'web-1', 'thread-1', 'web');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(calls.at(-1)?.metadata).toEqual(
-      expect.objectContaining({
-        startedAt: turnStartedAt,
-        usage: expect.objectContaining({
-          input_tokens: 1200,
-          output_tokens: 30,
-          num_turns: 2,
-        }),
-      }),
-    );
-    expect(calls.at(-1)?.items).toEqual(items);
-    for (const [platform, thread, instance] of [
-      ['web-2', 'thread-1', 'web'],
-      ['web-2', 'thread-2', 'web'],
-      ['web-2', 'thread-2', 'web-alt'],
-    ]) {
-      startTypingRefresh('sess-1', 'ag-1', 'web', platform, thread, instance);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(calls.at(-1)?.items).toEqual(items);
-      expect(calls.at(-1)?.metadata?.startedAt).toBe(turnStartedAt);
-      startTypingRefresh('sess-1', 'ag-1', 'web', platform, thread, instance);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(calls.at(-1)?.items).toBeUndefined();
-    }
-    socket.destroy();
-  });
 });
 
-describe('startTypingRefresh — transient heartbeat stalls', () => {
-  it('re-arms typing when a stale session link receives a heartbeat', async () => {
-    const setTyping = vi.fn(async () => {});
-    const clearTyping = vi.fn(async () => {});
-    setTypingAdapter({ setTyping, clearTyping });
+describe('startTypingRefresh — runner signals', () => {
+  it('pauses on a stale session link and re-arms on a heartbeat', async () => {
+    const calls = captureAdapter();
     startTypingRefresh('sess-1', 'ag-1', 'web', 'web-1', 'thread-1', 'web');
     await vi.advanceTimersByTimeAsync(16_000);
+    calls.length = 0;
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(calls).toHaveLength(0);
 
-    expect(clearTyping).toHaveBeenCalledTimes(1);
-    const callsBeforeRecovery = setTyping.mock.calls.length;
-
-    await startSessionSignalServer('sess-1');
-    const socket = net.createConnection(sessionLinkSocketPath('sess-1'));
-    await new Promise<void>((resolve, reject) => {
-      socket.once('connect', resolve);
-      socket.once('error', reject);
-    });
+    const socket = await connectSignal();
     socket.write(`${JSON.stringify({ v: 5, type: 'heartbeat' })}\n`);
     await vi.advanceTimersByTimeAsync(100);
     await vi.advanceTimersByTimeAsync(4_000);
 
-    expect(setTyping.mock.calls.length).toBeGreaterThan(callsBeforeRecovery);
+    expect(calls.length).toBeGreaterThan(0);
+    socket.destroy();
+  });
+
+  it('stops refreshing when the runner ends the turn', async () => {
+    const calls = captureAdapter();
+    startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-tester');
+    await vi.advanceTimersByTimeAsync(100);
+    const socket = await connectSignal();
+    socket.write(`${JSON.stringify({ v: 5, type: 'turn.end' })}\n`);
+    await vi.advanceTimersByTimeAsync(100);
+    calls.length = 0;
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(calls).toHaveLength(0);
     socket.destroy();
   });
 });

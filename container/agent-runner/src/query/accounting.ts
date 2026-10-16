@@ -5,7 +5,7 @@
  * later fork can branch at exactly that message.
  */
 import { getOutboundDb } from '../db/connection.js';
-import { clearActivity, clearUsageProgress, writeUsageProgress } from '../db/session-state.js';
+import { clearActivity } from '../db/session-state.js';
 import { writeTurnCheckpoint } from '../db/turn-checkpoints.js';
 import type { AgentProvider, CallUsage } from '../providers/types.js';
 import { completeUsageAttempt, recordCallUsage, turnUsage, type TurnExecution } from '../turn-execution.js';
@@ -14,15 +14,10 @@ function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
 }
 
-/** Clear the live activity trace and usage progress for a fresh turn. Best-effort. */
+/** Clear the live activity trace for a fresh turn. Best-effort. */
 export function resetLiveTurnState(): void {
   try {
     clearActivity();
-  } catch {
-    /* best-effort */
-  }
-  try {
-    clearUsageProgress();
   } catch {
     /* best-effort */
   }
@@ -36,13 +31,7 @@ export class TurnAccounting {
 
   /** Returns false when the call replaced an earlier report of the same call. */
   onUsageCall(data: CallUsage): boolean {
-    const added = recordCallUsage(this.execution.current, data);
-    try {
-      writeUsageProgress(turnUsage(this.execution.current)!);
-    } catch {
-      /* best-effort */
-    }
-    return added;
+    return recordCallUsage(this.execution.current, data);
   }
 
   /**

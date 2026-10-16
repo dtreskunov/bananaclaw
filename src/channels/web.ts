@@ -17,14 +17,7 @@
  * only enabled when the UI is mounted. Messaging-group rows are
  * auto-provisioned on first use by the chat route handler.
  */
-import type {
-  ActivityLine,
-  ChannelAdapter,
-  ChannelSetup,
-  InboundEvent,
-  OutboundMessage,
-  TypingMetadata,
-} from './adapter.js';
+import type { ChannelAdapter, ChannelSetup, InboundEvent, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { log } from '../log.js';
 import { sendToUser as sendPushToUser } from '../modules/push/sender.js';
@@ -65,11 +58,6 @@ export interface WebSubscriber {
     files?: { filename: string; size: number }[],
     inputHandling?: InputHandling,
   ): void;
-  /** Called when the typing indicator should turn on or off. The web channel
-   *  uses explicit start/stop signals (no client-side timeout). `hint` is
-   *  an optional one-line progress string from the container. When present,
-   *  `items` is the complete host-reduced activity snapshot for this turn. */
-  onTyping?(on: boolean, hint?: string, items?: ActivityLine[], metadata?: TypingMetadata): void;
   /** Called when a scheduled task fires (a task row transitions to
    *  `completed`), so the client can drop a timeline event without a reload. */
   onTaskRun?(event: WebTaskRunEvent): void;
@@ -281,30 +269,6 @@ export function createWebAdapter(): ChannelAdapter {
         }
       }
       return undefined;
-    },
-
-    async setTyping(platformId, threadId, hint, items, metadata): Promise<void> {
-      const set = subscribers.get(subKey(platformId, threadId));
-      if (!set) return;
-      for (const sub of set) {
-        try {
-          sub.onTyping?.(true, hint, items, metadata);
-        } catch (err) {
-          log.warn('web subscriber onTyping threw', { err });
-        }
-      }
-    },
-
-    async clearTyping(platformId, threadId): Promise<void> {
-      const set = subscribers.get(subKey(platformId, threadId));
-      if (!set) return;
-      for (const sub of set) {
-        try {
-          sub.onTyping?.(false);
-        } catch (err) {
-          log.warn('web subscriber onTyping threw', { err });
-        }
-      }
     },
   };
   return adapter;

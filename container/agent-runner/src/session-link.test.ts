@@ -371,14 +371,6 @@ describe('SessionSignalClient', () => {
 
     client.clearActivity();
     client.appendActivity({ kind: 'tool', id: 'read-1', tool: 'read', status: 'running', detail: 'src/index.ts' }, 100);
-    client.updateUsage({
-      cost_usd: 0.1,
-      input_tokens: 100,
-      output_tokens: 20,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
-      model: 'test/model',
-    });
     client.endTurn();
     client.updateTurn({ id: 'turn-1', status: 'stopping', channelType: 'web', platformId: 'chat-1', threadId: null });
     await waitFor(() => firstLines.some((line) => line.includes('src/index.ts')));
@@ -395,7 +387,6 @@ describe('SessionSignalClient', () => {
       'heartbeat',
       'activity.clear',
       'activity',
-      'usage',
       'turn.end',
       'turn.state',
     ]);
@@ -553,14 +544,6 @@ describe('SessionSignalClient', () => {
       },
       100,
     );
-    client.updateUsage({
-      cost_usd: 0.1,
-      input_tokens: 100,
-      output_tokens: 20,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
-      model: 'test/model',
-    });
     client.endTurn();
     await waitFor(() => firstLines.some((line) => line.includes('turn.end')));
     expect(firstLines.some((line) => line.includes('oversized'))).toBe(false);
@@ -574,7 +557,7 @@ describe('SessionSignalClient', () => {
     await listen(socketPath, replayed);
     await waitFor(() => replayed.some((line) => line.includes('turn.end')));
     expect(replayed.some((line) => line.includes('oversized'))).toBe(false);
-    expect(replayed.some((line) => line.includes('test/model'))).toBe(true);
+    expect(replayed.some((line) => line.includes('turn.state'))).toBe(true);
     client.stop();
   });
 });

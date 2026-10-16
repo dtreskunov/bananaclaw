@@ -104,7 +104,6 @@ export interface ConversationTurn {
     model: string | null;
     durationMs: number | null;
   };
-  liveUsage: ConversationUsage | null;
 }
 
 export interface ConversationCapabilities {

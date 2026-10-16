@@ -17814,7 +17814,9 @@ function isStep(value) {
   for (const key of ["id", "tool", "detail", "title", "error", "text", "path", "name", "agent", "description"]) {
     if (value[key] !== void 0 && typeof value[key] !== "string") return false;
   }
-  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification", "model"].includes(value.kind)))
+  if (value.kind !== void 0 && (typeof value.kind !== "string" || !["tool", "internal", "file", "patch", "retry", "compaction", "subtask", "notification", "model"].includes(
+    value.kind
+  )))
     return false;
   if (value.status !== void 0 && (typeof value.status !== "string" || !["pending", "running", "completed", "error", "interrupted", "unknown"].includes(value.status)))
     return false;
@@ -18231,7 +18233,8 @@ function turnModelTime(turn2) {
     (best, step) => step.end <= at && (!best || step.end >= best.end) ? step : best,
     null
   )?.ordinal ?? TURN_START;
-  for (const { at, step } of calls) add(ownerAt(at - (step.durationMs ?? 0) + CALL_START_SLACK_MS), step.durationMs ?? 0);
+  for (const { at, step } of calls)
+    add(ownerAt(at - (step.durationMs ?? 0) + CALL_START_SLACK_MS), step.durationMs ?? 0);
   if (live && !steps.some(({ end }) => end === Infinity)) {
     const lastStep = Math.max(startedAt2, ...steps.map(({ end }) => end));
     add(ownerAt(lastStep), 0, Math.max(lastStep, ...calls.map(({ at }) => at)));
@@ -18257,7 +18260,7 @@ function withModelTime(turn2, lines, times, hostsStart) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 4;
+var CONVERSATION_PROTOCOL_VERSION = 5;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -18295,7 +18298,6 @@ var usageFields = {
   duration_ms: optional(number),
   duration_api_ms: optional(number)
 };
-var usage = shape(usageFields);
 var reportedUsage = shape(
   Object.fromEntries(Object.entries(usageFields).map(([key, check]) => [key, optional(check)]))
 );
@@ -18370,8 +18372,7 @@ var turn = shape({
     status: oneOf("provisional", "partial", "final", "unavailable"),
     model: nullable(text),
     durationMs: nullable(number)
-  }),
-  liveUsage: nullable(usage)
+  })
 });
 var question = shape({
   questionId: id,
@@ -22669,7 +22670,7 @@ function activeTurnNotices(turn2, connected, stop) {
   return notices;
 }
 function hasTurnStats(turn2, view) {
-  return view.usage.length > 0 || (turn2.phase === "settled" ? view.elapsedMs !== null || !!view.model : !!turn2.liveUsage);
+  return view.usage.length > 0 || turn2.phase === "settled" && (view.elapsedMs !== null || !!view.model);
 }
 function toolCallMs(turn2, now) {
   const live = turn2.phase !== "settled";
@@ -22695,7 +22696,7 @@ function turnRowView(turn2, now) {
   const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
   const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
   const model = turn2.metadata.model;
-  const timings = turn2.usage.length ? turn2.usage.map(({ value }) => value.duration_api_ms) : turn2.liveUsage ? [turn2.liveUsage.duration_api_ms] : [];
+  const timings = turn2.usage.map(({ value }) => value.duration_api_ms);
   const modelCallMs = timings.length && timings.every((value) => value !== void 0) ? timings.reduce((total, value) => total + value, 0) : null;
   const hasTiming = elapsedMs !== null || !!model;
   return {
@@ -22721,17 +22722,17 @@ function formatContextPercent(used, limit) {
   if (pct > 0 && pct < 1) return "<1%";
   return Math.min(100, Math.round(pct)) + "%";
 }
-function latestContextUsage(usage2) {
-  return [...usage2].reverse().find(
+function latestContextUsage(usage) {
+  return [...usage].reverse().find(
     (record) => record.context_tokens !== void 0 && record.context_window !== void 0 && Number.isFinite(record.context_tokens) && Number.isFinite(record.context_window) && record.context_window > 0 && record.context_tokens >= 0 && record.context_tokens <= record.context_window
   ) ?? null;
 }
 function technicalSummary({
   elapsedMs,
-  usage: usage2,
-  context = latestContextUsage(usage2)
+  usage,
+  context = latestContextUsage(usage)
 }) {
-  const costs = usage2.map((record) => record.cost_usd);
+  const costs = usage.map((record) => record.cost_usd);
   const cost = costs.length && costs.every((value) => value !== void 0) ? costs.reduce((total, value) => total + value, 0) : null;
   return [
     elapsedMs === null ? "" : formatStopwatch(elapsedMs),
@@ -24732,14 +24733,13 @@ function turnUsage(turn2, ownerId, now) {
   const view = turnRowView(turn2, now);
   if (!hasTurnStats(turn2, view)) return null;
   const live = turn2.phase !== "settled";
-  const liveUsage = live ? turn2.liveUsage : null;
-  const records = liveUsage && !view.usage.length ? [{ id: "live", value: liveUsage }] : view.usage;
-  const usage2 = records.map((record) => record.value);
+  const records = view.usage;
+  const usage = records.map((record) => record.value);
   return {
     ownerId,
     records,
     model: view.model,
-    summary: technicalSummary({ elapsedMs: live ? null : view.elapsedMs, usage: usage2 }),
+    summary: technicalSummary({ elapsedMs: live ? null : view.elapsedMs, usage }),
     wallElapsedMs: view.elapsedMs,
     modelElapsedMs: view.modelCallMs,
     toolElapsedMs: view.toolCallMs,
@@ -24748,16 +24748,16 @@ function turnUsage(turn2, ownerId, now) {
   };
 }
 function TurnTechnicalInfo({
-  usage: usage2,
+  usage,
   count,
   hasOutcome = false,
   expanded,
   onToggle
 }) {
-  if (!usage2 && !count && !hasOutcome) return null;
+  if (!usage && !count && !hasOutcome) return null;
   return /* @__PURE__ */ u4("div", { class: "meta turn-tech-info", role: "group", "aria-label": "Technical information", children: [
     /* @__PURE__ */ u4(ActivityTraceToggle, { count, hasOutcome, expanded, onToggle }),
-    usage2 ? /* @__PURE__ */ u4(UsageMeta, { summary: usage2.summary, ownerId: usage2.ownerId }) : null
+    usage ? /* @__PURE__ */ u4(UsageMeta, { summary: usage.summary, ownerId: usage.ownerId }) : null
   ] });
 }
 function TurnTechnicalDetails({
@@ -24769,16 +24769,16 @@ function TurnTechnicalDetails({
 }) {
   const expanded = activityTraceExpanded(ownerId);
   const metricsExpanded = activityMetricsExpanded(ownerId);
-  const usage2 = turn2 ? turnUsage(turn2, ownerId, now ?? Date.now()) : null;
+  const usage = turn2 ? turnUsage(turn2, ownerId, now ?? Date.now()) : null;
   const count = activityStepCount(lines);
   const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
-  if (!lines.length && !usage2) return null;
+  if (!lines.length && !usage) return null;
   if (!turn2 && !count && !hasOutcome && !expanded) return null;
   return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
     /* @__PURE__ */ u4(
       TurnTechnicalInfo,
       {
-        usage: usage2,
+        usage,
         count,
         hasOutcome,
         expanded,
@@ -24794,7 +24794,7 @@ function TurnTechnicalDetails({
         now,
         ownerId,
         turnId: live && turn2 ? turn2.id : null,
-        metrics: metricsExpanded && usage2 ? /* @__PURE__ */ u4(UsageDetails, { ...usage2 }) : null
+        metrics: metricsExpanded && usage ? /* @__PURE__ */ u4(UsageDetails, { ...usage }) : null
       }
     )
   ] });

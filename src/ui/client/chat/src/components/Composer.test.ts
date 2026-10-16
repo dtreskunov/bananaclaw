@@ -1202,19 +1202,23 @@ describe('main composer pending edits', () => {
   )('only offers $phase usage when accounting arrives (activity=$recordedActivity)', ({ phase, recordedActivity }) => {
     appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
     for (const accounting of [
-      { usage: [], liveUsage: null },
+      { usage: [] },
       {
-        usage: [],
-        liveUsage: {
-          cost_usd: 0,
-          input_tokens: 0,
-          output_tokens: 0,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          model: 'fixture-model',
-        },
+        usage: [
+          {
+            id: 'zero',
+            value: {
+              cost_usd: 0,
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_read_tokens: 0,
+              cache_write_tokens: 0,
+              model: 'fixture-model',
+            },
+          },
+        ],
       },
-      { usage: [{ id: 'timing-only', value: { duration_api_ms: 0 } }], liveUsage: null },
+      { usage: [{ id: 'timing-only', value: { duration_api_ms: 0 } }] },
     ]) {
       resetConversation();
       applyConversationFrame(
@@ -1247,7 +1251,7 @@ describe('main composer pending edits', () => {
         expect(trace.type(trace.props)).not.toBeNull();
       }
       const usage = findComponent(header, 'UsageMeta');
-      expect(!!usage).toBe(accounting.usage.length > 0 || accounting.liveUsage !== null);
+      expect(!!usage).toBe(accounting.usage.length > 0);
       if (usage) {
         resetMount();
         expect(find(usage.type(usage.props), 'span').props.children).toBe('\u203A');
@@ -1641,13 +1645,9 @@ describe('main composer pending edits', () => {
     }
   });
 
-  it.each(
-    (['running', 'stopping', 'settling'] as const).flatMap((phase) =>
-      [false, true].map((recorded) => ({ phase, recorded })),
-    ),
-  )(
-    'omits elapsed time from $phase trace status without losing inline or stopwatch timing (recorded=$recorded)',
-    ({ phase, recorded }) => {
+  it.each((['running', 'stopping', 'settling'] as const).map((phase) => ({ phase })))(
+    'omits elapsed time from $phase trace status without losing inline or stopwatch timing',
+    ({ phase }) => {
       const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-29T00:00:07Z'));
       onTestFinished(() => clock.mockRestore());
       appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
@@ -1670,8 +1670,7 @@ describe('main composer pending edits', () => {
               ...testTurn,
               phase,
               metadata: { status: 'final', model: 'fixture-model', durationMs: 999999 },
-              usage: recorded ? [{ id: 'usage', value }] : [],
-              liveUsage: recorded ? null : value,
+              usage: [{ id: 'usage', value }],
             },
           ],
           connection: { connected: true, activeTurnId: testTurn.id },
@@ -1730,7 +1729,6 @@ describe('main composer pending edits', () => {
               phase,
               outcome: phase === 'settled' ? 'silent' : 'pending',
               usage: [{ id: 'recorded', value: recorded }],
-              liveUsage: phase === 'settled' ? null : { ...recorded, cost_usd: 99, context_tokens: 1000 },
             },
           ],
           connection: { connected: true, activeTurnId: phase === 'settled' ? null : testTurn.id },
@@ -1956,7 +1954,6 @@ describe('main composer pending edits', () => {
             outcome,
             activity: [],
             usage: [],
-            liveUsage: null,
             startedAt: null,
             endedAt: null,
             metadata: { status: 'unavailable', model: null, durationMs: null },
@@ -2500,14 +2497,19 @@ describe('inline activity metrics', () => {
           {
             ...testTurn,
             metadata: { ...testTurn.metadata, status: accounting },
-            liveUsage: {
-              cost_usd: 0.01,
-              input_tokens: 100,
-              output_tokens: 10,
-              cache_read_tokens: 0,
-              cache_write_tokens: 0,
-              model: 'model',
-            },
+            usage: [
+              {
+                id: 'usage',
+                value: {
+                  cost_usd: 0.01,
+                  input_tokens: 100,
+                  output_tokens: 10,
+                  cache_read_tokens: 0,
+                  cache_write_tokens: 0,
+                  model: 'model',
+                },
+              },
+            ],
           },
         ],
         connection: { connected: true, activeTurnId: testTurn.id },

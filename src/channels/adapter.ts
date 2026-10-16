@@ -13,31 +13,6 @@ export interface ActivityLine {
   text: string;
 }
 
-export interface UsageSnapshot {
-  cost_usd: number;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  reasoning_tokens?: number;
-  num_turns?: number;
-  duration_ms?: number;
-  duration_api_ms?: number;
-  model: string;
-  context_window?: number;
-  max_output_tokens?: number;
-  context_tokens?: number;
-}
-
-/** Stable metadata for one in-flight turn. Web clients use `startedAt` to
- * resume elapsed timing after a WebSocket reconnect; other channels may
- * ignore it. `model` is the effective configured model for the agent group. */
-export interface TypingMetadata {
-  startedAt: number;
-  model?: string;
-  usage?: UsageSnapshot;
-}
-
 /** Passed to the adapter at setup time. */
 export interface ChannelSetup {
   /** Called when an inbound message arrives from the platform. */
@@ -207,17 +182,9 @@ export interface ChannelAdapter {
   ): Promise<string | undefined>;
 
   // Optional
-  setTyping?(
-    platformId: string,
-    threadId: string | null,
-    hint?: string,
-    items?: ActivityLine[],
-    metadata?: TypingMetadata,
-  ): Promise<void>;
-  /** Explicit "stop typing" signal. Optional — most platforms expire the
-   *  indicator on their own; the web channel uses this to avoid a client-side
-   *  timeout. */
-  clearTyping?(platformId: string, threadId: string | null): Promise<void>;
+  /** Show a typing indicator. Platforms expire it on their own, so the
+   *  typing module re-fires this while the agent is working. */
+  setTyping?(platformId: string, threadId: string | null): Promise<void>;
   syncConversations?(): Promise<ConversationInfo[]>;
   resolveChannelName?(platformId: string): Promise<string | null>;
 

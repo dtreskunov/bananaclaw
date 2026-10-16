@@ -18,7 +18,6 @@ const turn: ConversationTurn = {
   inputIds: [],
   outputIds: ['question-output'],
   usage: [],
-  liveUsage: null,
   metadata: { status: 'provisional', durationMs: null, model: null },
   activity: [
     {

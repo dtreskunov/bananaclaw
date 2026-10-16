@@ -5,13 +5,11 @@
  * `JSON.stringify(step)`, so field order is part of the stored format).
  */
 import type { ActivityStep } from './activity.js';
-import type { UsageSnapshot } from './channels/adapter.js';
 import type { SessionActiveTurn } from './session-link.js';
 
 const MAX_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 2_000;
 const MAX_PATCH_FILES = 100;
-const MAX_COST_USD = 1_000_000;
 
 export type Check = (value: unknown) => boolean;
 export type FieldSpec = readonly [key: string, check: Check, presence: 'required' | 'optional'];
@@ -129,28 +127,6 @@ export function sanitizeActivityStep(value: unknown): ActivityStep | null {
   if (!isRecord(value) || typeof value.kind !== 'string') return null;
   const fields = ACTIVITY_STEP_FIELDS.get(value.kind);
   return fields ? (sanitizeFields(value, fields) as ActivityStep | null) : null;
-}
-
-const USAGE_FIELDS: readonly FieldSpec[] = [
-  required('cost_usd', (value) => isNonNegativeNumber(value) && (value as number) <= MAX_COST_USD),
-  required('input_tokens', isCount),
-  required('output_tokens', isCount),
-  required('cache_read_tokens', isCount),
-  required('cache_write_tokens', isCount),
-  required('model', text(MAX_ID_CHARS)),
-  optional('reasoning_tokens', isCount),
-  optional('num_turns', isCount),
-  optional('duration_ms', isCount),
-  optional('duration_api_ms', isModelDurationMs),
-  optional('context_window', isCount),
-  optional('max_output_tokens', isCount),
-  optional('context_tokens', isCount),
-];
-
-export function sanitizeUsage(value: unknown): UsageSnapshot | null {
-  const usage = isRecord(value) ? (sanitizeFields(value, USAGE_FIELDS) as UsageSnapshot | null) : null;
-  if (usage?.duration_api_ms !== undefined) usage.duration_api_ms = Math.round(usage.duration_api_ms);
-  return usage;
 }
 
 const TURN_FIELDS: readonly FieldSpec[] = [

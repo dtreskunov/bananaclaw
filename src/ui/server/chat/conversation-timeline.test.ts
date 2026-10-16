@@ -17,7 +17,6 @@ const turn: ConversationTurn = {
   outputIds: [],
   activity: [],
   usage: [],
-  liveUsage: null,
   metadata: { status: 'provisional', durationMs: null, model: null },
 };
 const message = (id: string, direction: 'in' | 'out', timelinePosition: number): ConversationMessage => ({

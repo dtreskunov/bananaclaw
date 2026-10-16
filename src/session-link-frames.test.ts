@@ -16,7 +16,6 @@ import { isRecord } from './session-link-validate.js';
 import {
   getSessionActiveTurn,
   getSessionSignalTurnEndedAt,
-  getSessionSignalUsage,
   getSessionTurnSignals,
   notifySessionHostState,
   onSessionSignal,
@@ -83,19 +82,6 @@ async function outcome(frame: unknown): Promise<'accepted' | 'rejected'> {
 
 function activity(step: unknown, extra: Frame = {}): Frame {
   return { v: 5, type: 'activity', step, turnId: 'turn-1', ts: TS, ordinal: 0, timelinePosition: 100, ...extra };
-}
-
-const USAGE = {
-  cost_usd: 0.25,
-  input_tokens: 10,
-  output_tokens: 20,
-  cache_read_tokens: 0,
-  cache_write_tokens: 0,
-  model: 'test/model',
-};
-
-function usage(value: unknown, extra: Frame = {}): Frame {
-  return { v: 5, type: 'usage', usage: value, turnId: 'turn-1', ts: TS, ...extra };
 }
 
 const TURN = { id: 'turn-1', status: 'running', channelType: 'web', platformId: 'group:agent-f', threadId: null };
@@ -181,7 +167,6 @@ describe('session link frame acceptance', () => {
   const accepted: Array<[string, unknown]> = [
     ['heartbeat', { v: 5, type: 'heartbeat' }],
     ['activity.clear', { v: 5, type: 'activity.clear' }],
-    ['usage.clear', { v: 5, type: 'usage.clear' }],
     ['turn.resume', { v: 5, type: 'turn.resume' }],
     ['turn.end', { v: 5, type: 'turn.end' }],
     ['turn.state null', turnState(null)],
@@ -238,25 +223,6 @@ describe('session link frame acceptance', () => {
     ['model fractional duration', activity({ kind: 'model', id: 's', durationMs: 1250.5 })],
     ['subtask minimal', activity({ kind: 'subtask', id: 's' })],
     ['subtask full', activity({ kind: 'subtask', id: 's', agent: 'a', description: '' })],
-    ['usage minimal', usage(USAGE)],
-    ['usage null turn', usage(USAGE, { turnId: null })],
-    ['usage fractional model time from an older runner', usage({ ...USAGE, duration_api_ms: 3328.568369 })],
-    ['usage zero model time', usage({ ...USAGE, duration_api_ms: 0 })],
-    ['usage maximum model time', usage({ ...USAGE, duration_api_ms: Number.MAX_SAFE_INTEGER })],
-    [
-      'usage full',
-      usage({
-        ...USAGE,
-        cost_usd: 1_000_000,
-        reasoning_tokens: 1,
-        num_turns: 2,
-        duration_ms: 3,
-        duration_api_ms: 4,
-        context_window: 5,
-        max_output_tokens: 6,
-        context_tokens: Number.MAX_SAFE_INTEGER,
-      }),
-    ],
   ];
 
   it.each(accepted)('accepts %s', async (_name, frame) => {
@@ -280,7 +246,7 @@ describe('session link frame acceptance', () => {
     ['prototype type constructor', { v: 5, type: 'constructor' }],
     ['prototype type __proto__', { v: 5, type: '__proto__' }],
     ['prototype type hasOwnProperty', { v: 5, type: 'hasOwnProperty' }],
-    ...(['heartbeat', 'activity.clear', 'usage.clear', 'turn.resume', 'turn.end'].map((type) => [
+    ...(['heartbeat', 'activity.clear', 'turn.resume', 'turn.end'].map((type) => [
       `${type} extra key`,
       { v: 5, type, extra: 1 },
     ]) as Array<[string, unknown]>),
@@ -414,40 +380,14 @@ describe('session link frame acceptance', () => {
     ['subtask numeric agent', activity({ kind: 'subtask', id: 's', agent: 1 })],
     ['subtask 2001-char description', activity({ kind: 'subtask', id: 's', description: LONG_TEXT })],
     ['subtask extra key', activity({ kind: 'subtask', id: 's', extra: 1 })],
-    ['usage frame extra key', usage(USAGE, { extra: 1 })],
-    ['usage bad ts', usage(USAGE, { ts: 'x' })],
-    ['usage bad turnId', usage(USAGE, { turnId: 'bad id' })],
-    ['usage missing turnId', usage(USAGE, { turnId: undefined })],
-    ['usage null value', usage(null)],
-    ['usage extra key', usage({ ...USAGE, extra: 1 })],
-    ['usage negative cost', usage({ ...USAGE, cost_usd: -1 })],
-    ['usage huge cost', usage({ ...USAGE, cost_usd: 1_000_001 })],
-    ['usage string cost', usage({ ...USAGE, cost_usd: '0' })],
-    ['usage missing cost', usage({ ...USAGE, cost_usd: undefined })],
-    ['usage missing input_tokens', usage({ ...USAGE, input_tokens: undefined })],
-    ['usage fractional output_tokens', usage({ ...USAGE, output_tokens: 1.5 })],
-    ['usage negative cache_read_tokens', usage({ ...USAGE, cache_read_tokens: -1 })],
-    ['usage unsafe cache_write_tokens', usage({ ...USAGE, cache_write_tokens: Number.MAX_SAFE_INTEGER + 1 })],
-    ['usage empty model', usage({ ...USAGE, model: '' })],
-    ['usage 257-char model', usage({ ...USAGE, model: LONG_ID })],
-    ['usage missing model', usage({ ...USAGE, model: undefined })],
-    ['usage negative reasoning_tokens', usage({ ...USAGE, reasoning_tokens: -1 })],
-    ['usage string context_tokens', usage({ ...USAGE, context_tokens: '5' })],
-    ['usage null num_turns', usage({ ...USAGE, num_turns: null })],
-    ['usage negative model time', usage({ ...USAGE, duration_api_ms: -0.1 })],
-    ['usage string model time', usage({ ...USAGE, duration_api_ms: '3328.568369' })],
-    ['usage null model time', usage({ ...USAGE, duration_api_ms: null })],
-    ['usage non-finite model time', usage({ ...USAGE, duration_api_ms: Infinity })],
-    ['usage unsafe model time', usage({ ...USAGE, duration_api_ms: Number.MAX_SAFE_INTEGER + 1 })],
   ];
 
   const optionalTelemetry = rejected.filter(
-    ([, frame]) => isRecord(frame) && frame.v === 5 && (frame.type === 'usage' || frame.type === 'activity'),
+    ([, frame]) => isRecord(frame) && frame.v === 5 && frame.type === 'activity',
   );
   it.each(optionalTelemetry)('warns and ignores %s without disconnecting', async (_name, frame) => {
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
     expect(await outcome(frame)).toBe('accepted');
-    expect(getSessionTurnSignals(SESSION_ID).usage).toBeNull();
     expect(getSessionTurnSignals(SESSION_ID).activity).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
@@ -542,51 +482,6 @@ describe('session link live state', () => {
       socket.write(line({ v: 5, type: 'activity.clear' }));
       await waitFor(() => getSessionTurnSignals(SESSION_ID).activity.length === 0);
     } finally {
-      socket.destroy();
-    }
-  });
-
-  it('records usage with its turn and clears it on usage.clear', async () => {
-    const kinds: string[] = [];
-    const unsubscribe = onSessionSignal((_id, kind) => kinds.push(kind));
-    const socket = await connect();
-    try {
-      socket.write(
-        line(
-          usage({
-            model: 'm',
-            cache_write_tokens: 4,
-            cache_read_tokens: 3,
-            output_tokens: 2,
-            input_tokens: 1,
-            cost_usd: 0.5,
-            context_tokens: 9,
-          }),
-        ),
-      );
-      await waitFor(() => getSessionSignalUsage(SESSION_ID) !== null);
-      expect(JSON.stringify(getSessionTurnSignals(SESSION_ID).usage)).toBe(
-        JSON.stringify({
-          turnId: 'turn-1',
-          ts: Number(TS),
-          value: {
-            cost_usd: 0.5,
-            input_tokens: 1,
-            output_tokens: 2,
-            cache_read_tokens: 3,
-            cache_write_tokens: 4,
-            model: 'm',
-            context_tokens: 9,
-          },
-        }),
-      );
-      socket.write(line({ v: 5, type: 'usage.clear' }));
-      await waitFor(() => getSessionSignalUsage(SESSION_ID) === null);
-      expect(getSessionTurnSignals(SESSION_ID).usage).toBeNull();
-      expect(kinds.filter((kind) => kind === 'usage')).toHaveLength(2);
-      expect(socket.destroyed).toBe(false);
-    } finally {
-      unsubscribe();
       socket.destroy();
     }
   });
