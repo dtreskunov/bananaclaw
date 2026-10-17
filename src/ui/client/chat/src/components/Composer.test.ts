@@ -33,7 +33,15 @@ import {
 import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, openPendingEditor } from '../pending-edit';
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
-import { clearPinnedContext, removePending, respondQuestion, retryChatSend, sendChat, skipQuestion } from '../actions';
+import {
+  clearPinnedContext,
+  removePending,
+  respondQuestion,
+  retryChatSend,
+  sendChat,
+  skipQuestion,
+  warmChat,
+} from '../actions';
 import type { ActivityLine, ChatMessage, PendingQuestionDto, Thread } from '../types';
 import type { ConversationMessage, ConversationTurn } from '../../../../shared/conversation';
 import { applyConversationFrame, completedResponse, conversationState, resetConversation } from '../conversation-state';
@@ -42,6 +50,7 @@ import { appearance } from '../appearance-state';
 import { DEFAULT_APPEARANCE } from '../appearance';
 import { isSystemNotice } from '../chat-protocol';
 import { voice } from '../voice-audio';
+import * as recorder from '../recorder';
 import * as turnRow from '../turn-row';
 import {
   activityMetricsExpanded,
@@ -95,6 +104,7 @@ vi.mock('preact/hooks', () => ({
 vi.mock('../actions', () => ({
   sendChat: vi.fn(),
   retryChatSend: vi.fn(),
+  warmChat: vi.fn().mockResolvedValue(undefined),
   clearPinnedContext: vi.fn(),
   addPendingFiles: vi.fn(),
   removePending: vi.fn(),
@@ -237,6 +247,7 @@ beforeEach(() => {
       .mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, id: 'message', text: 'Revision' }) }),
   );
   vi.mocked(sendChat).mockReset();
+  vi.mocked(warmChat).mockClear();
   vi.mocked(clearPinnedContext).mockImplementation(() => {
     pinnedContext.value = [];
   });
@@ -247,6 +258,53 @@ beforeEach(() => {
 });
 
 describe('main composer pending edits', () => {
+  it('warms on non-empty composition, but not mount, focus, whitespace, or pending edits', () => {
+    const compose = (text: string) => {
+      input.value = text;
+      findComponent(tree, 'ComposerInput').props.textarea.onInput({ currentTarget: input });
+      render();
+    };
+    expect(warmChat).not.toHaveBeenCalled();
+    const textarea = find(tree, 'textarea');
+    textarea.props.onFocus?.();
+    expect(warmChat).not.toHaveBeenCalled();
+    compose('   ');
+    expect(warmChat).not.toHaveBeenCalled();
+    compose('Draft');
+    expect(warmChat).toHaveBeenCalledOnce();
+    vi.mocked(warmChat).mockClear();
+    open();
+    compose('Edited pending message');
+    expect(warmChat).not.toHaveBeenCalled();
+  });
+
+  it('warms when starting live dictation', () => {
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn() } });
+    vi.stubGlobal('AudioContext', vi.fn());
+    vi.stubGlobal('AudioWorkletNode', vi.fn());
+    const config = voiceInput.value;
+    voiceInput.value = { ...config, ready: true };
+    const start = vi.spyOn(voice, 'start').mockImplementation(() => {});
+    onTestFinished(() => {
+      start.mockRestore();
+      voiceInput.value = config;
+      vi.unstubAllGlobals();
+      vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    });
+    render();
+    findComponent(tree, 'VoiceButton').props.onStart();
+    expect(start).toHaveBeenCalledOnce();
+    expect(warmChat).toHaveBeenCalledOnce();
+  });
+
+  it('warms when audio attachment recording starts', async () => {
+    const start = vi.spyOn(recorder, 'startRecording').mockResolvedValue(true);
+    onTestFinished(() => start.mockRestore());
+    findComponent(tree, 'ComposerPlusMenu').props.onRecordAudio();
+    await vi.waitFor(() => expect(warmChat).toHaveBeenCalledOnce());
+    expect(start).toHaveBeenCalledOnce();
+  });
+
   it('explains explicit Retry versus a new Send and retries the failed bubble identity', () => {
     applyConversationFrame(testSnapshot(), 'thread');
     pendingWebSends.value = [{ ...testWebSubmission, status: 'failed', error: 'Network error' }];
@@ -291,9 +349,8 @@ describe('main composer pending edits', () => {
       hooks.capturePassive = false;
     });
     const row = message.type(message.props);
-    const content = [row.props.children]
-      .flat(Infinity)
-      .find((child) => child?.props?.class === 'transcript-copy-content');
+    const text = findComponent(row, 'MessageText');
+    const content = text.type(text.props);
     const order: string[] = [];
     content.ref.current = {
       set innerHTML(html: string) {
@@ -794,7 +851,7 @@ describe('main composer pending edits', () => {
           files: null,
         },
       });
-      expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toBe(
+      expect(bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html).toBe(
         '<blockquote>\n<p>Choose?</p>\n</blockquote>\n<p>Question skipped</p>\n',
       );
       expect(bubble.props['data-msg-id']).toBe('question-response:q');
@@ -1881,7 +1938,8 @@ describe('main composer pending edits', () => {
       hooks.cursor = 0;
       const cardNode = messageNode.type(messageNode.props);
       const row = cardNode.type(cardNode.props);
-      const [technicalBlock, title] = row.props.children;
+      const [technicalBlock, preview] = row.props.children;
+      const title = preview.props.children[0];
       expect(!!technicalBlock).toBe(technical);
       if (technical) {
         expect(technicalBlock.type.name).toBe('TurnTechnicalDetails');

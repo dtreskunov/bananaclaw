@@ -16,7 +16,7 @@ import {
 } from '../state';
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
 import {
-  sendChat, retryChatSend, addPendingFiles, removePending,
+  sendChat, retryChatSend, warmChat, addPendingFiles, removePending,
   navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval,
   openChat, openTaskPanel, reconnectChatNow, forkThreadAt, editMessageInBranch,
 } from '../actions';
@@ -1819,6 +1819,7 @@ export function Composer() {
   const startVoice = (): void => {
     if (currentPendingEditor()) return;
     if (!gid || !tid || unavailable || composerDisabled || isRecording.value) return;
+    void warmChat();
     const el = inputRef.current;
     voice.start({
       key: target, groupId: gid, threadId: tid,
@@ -1833,6 +1834,7 @@ export function Composer() {
     if (currentPendingEditor()) return;
     if (isRecording.value || voice.state.value.sending || !['idle', 'error'].includes(voice.state.value.phase)) return;
     const ok = await startRecording();
+    if (ok && groupId.value === gid && threadId.value === tid) void warmChat();
     if (!ok) {
       showToast('Microphone unavailable', 'err');
     }
@@ -1896,7 +1898,11 @@ export function Composer() {
             id: 'chat-input',
             placeholder: edit.editing ? 'Edit pending message\u2026' : chatReloadRequired.value ? 'Reload to continue\u2026' : wsDown ? 'Reconnecting\u2026' : `Message ${groupName}\u2026`,
             'aria-label': edit.editing ? 'Pending message text' : 'Message',
-            onInput: (event) => { edit.input(event.currentTarget.value); autosize(); },
+            onInput: (event) => {
+              edit.input(event.currentTarget.value);
+              if (!edit.editing && event.currentTarget.value.trim()) void warmChat();
+              autosize();
+            },
             onPaste,
             autocomplete: 'off',
             disabled: !edit.editing && hasQuestion,

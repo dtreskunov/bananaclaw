@@ -65,6 +65,31 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+it('deduplicates warmup and Send wakes and allows retry after admission deferral', async () => {
+  const session: Session = {
+    id: 'warmup-send-race',
+    agent_group_id: 'warmup-group',
+    messaging_group_id: 'warmup-web',
+    thread_id: 'warmup-thread',
+    agent_provider: null,
+    status: 'active',
+    container_status: 'stopped',
+    last_active: null,
+    created_at: '2026-10-17T22:41:22.527Z',
+  };
+  admission.memoryBudgetMb.mockReturnValue(100);
+  admission.decideAdmission.mockReturnValue({ action: 'reject', reason: 'busy' });
+  const warming = wakeContainer(session);
+  expect(wakeContainer(session)).toBe(warming);
+  expect(await warming).toBe(false);
+  expect(admission.snapshotRunning).toHaveBeenCalledTimes(1);
+  const retry = wakeContainer(session);
+  expect(retry).not.toBe(warming);
+  expect(await retry).toBe(false);
+  expect(admission.snapshotRunning).toHaveBeenCalledTimes(2);
+  expect(spawn).not.toHaveBeenCalled();
+});
+
 it('runs recovery with only the provided mounts, no networking, and no gateway credentials', async () => {
   const group: AgentGroup = {
     id: 'recovery-group',

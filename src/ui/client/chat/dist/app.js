@@ -20160,13 +20160,43 @@ function focusBranchComposerSoon(expected, draft) {
 function requestScrollToBottom() {
   scrollToBottomTick.value++;
 }
+var chatWarmups = /* @__PURE__ */ new Map();
+function warmChat() {
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const thread = threads.value.find((entry) => entry.threadId === tid);
+  if (!gid || !tid || !canSend.value || !chatReady.value || chatReloadRequired.value || channelType.value && channelType.value !== "web" || thread?.messageCount !== 0) return Promise.resolve();
+  const key = `${gid}:${tid}`;
+  const existing = chatWarmups.get(key);
+  if (existing) return existing;
+  const request = (async () => {
+    const result = await postJson(
+      `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/warmup`
+    );
+    if (typeof result.data.sessionId === "string" && groupId.value === gid) {
+      threads.value = threads.value.map(
+        (entry) => entry.threadId === tid ? { ...entry, sessionId: result.data.sessionId } : entry
+      );
+    }
+    if (!result.ok || !result.data.sessionId) throw new Error(result.data.error || `HTTP ${result.status}`);
+  })().catch((err) => {
+    console.warn("Chat warmup failed; Send will use normal startup", { groupId: gid, threadId: tid, err });
+  });
+  chatWarmups.set(key, request);
+  return request;
+}
 async function loadThreads(_gid) {
   return runSync({ forceRefresh: true });
 }
 async function deleteThread(thread, cascade = false) {
-  if (!groupId.value) return;
+  const gid = groupId.value;
+  if (!gid) return;
   const tid = thread.threadId;
-  if (thread.sessionId != null) {
+  const warmupKey = `${gid}:${tid}`;
+  const warmup = chatWarmups.get(warmupKey);
+  if (warmup) await warmup;
+  if (groupId.value !== gid) return;
+  if (thread.sessionId != null || warmup) {
     const params = new URLSearchParams();
     if (thread.channelType && thread.channelType !== "web" && thread.messagingGroupId) {
       params.set("channel", thread.channelType);
@@ -20183,7 +20213,7 @@ async function deleteThread(thread, cascade = false) {
           credentials: "same-origin"
         }
       );
-      if (!r4.ok) {
+      if (!r4.ok && !(warmup && r4.status === 404)) {
         if (r4.status === 409) {
           const error = await r4.json();
           showToast(
@@ -20195,11 +20225,12 @@ async function deleteThread(thread, cascade = false) {
         }
         return;
       }
-      const result = await r4.json();
+      const result = r4.ok ? await r4.json() : {};
       if (result.cancelledApprovals && result.cancelledApprovals > 0) {
         const n3 = result.cancelledApprovals;
         showToast(`Deleted thread; cancelled ${n3} outstanding approval ${n3 === 1 ? "request" : "requests"}.`);
       }
+      chatWarmups.delete(warmupKey);
     } catch (err) {
       console.error("delete failed", err);
       const m6 = err instanceof Error ? err.message : "network error";
@@ -21239,6 +21270,7 @@ function reconnectChatNow() {
 function addPendingFiles(fileList, max, maxSize, maxTotal) {
   if (!fileList || fileList.length === 0) return;
   const next = pending.value.slice();
+  const previousCount = next.length;
   let totalBytes = next.reduce((n3, f5) => n3 + f5.size, 0);
   let validationError = "";
   for (const f5 of Array.from(fileList)) {
@@ -21258,6 +21290,7 @@ function addPendingFiles(fileList, max, maxSize, maxTotal) {
     totalBytes += f5.size;
   }
   pending.value = next;
+  if (next.length > previousCount) void warmChat();
   if (validationError) showToast(validationError, "err");
 }
 function removePending(i5) {
@@ -25352,6 +25385,7 @@ function Composer() {
   const startVoice = () => {
     if (currentPendingEditor()) return;
     if (!gid || !tid || unavailable || composerDisabled || isRecording.value) return;
+    void warmChat();
     const el = inputRef.current;
     voice.start({
       key: target,
@@ -25372,6 +25406,7 @@ function Composer() {
     if (currentPendingEditor()) return;
     if (isRecording.value || voice.state.value.sending || !["idle", "error"].includes(voice.state.value.phase)) return;
     const ok = await startRecording();
+    if (ok && groupId.value === gid && threadId.value === tid) void warmChat();
     if (!ok) {
       showToast("Microphone unavailable", "err");
     }
@@ -25442,6 +25477,7 @@ function Composer() {
                 "aria-label": edit.editing ? "Pending message text" : "Message",
                 onInput: (event) => {
                   edit.input(event.currentTarget.value);
+                  if (!edit.editing && event.currentTarget.value.trim()) void warmChat();
                   autosize();
                 },
                 onPaste,

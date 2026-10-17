@@ -155,6 +155,42 @@ export function requestScrollToBottom(): void {
 }
 
 // ── threads ─────────────────────────────────────────────────────────
+const chatWarmups = new Map<string, Promise<void>>();
+
+export function warmChat(): Promise<void> {
+  const gid = groupId.value;
+  const tid = threadId.value;
+  const thread = threads.value.find((entry) => entry.threadId === tid);
+  if (
+    !gid ||
+    !tid ||
+    !canSend.value ||
+    !chatReady.value ||
+    chatReloadRequired.value ||
+    (channelType.value && channelType.value !== 'web') ||
+    thread?.messageCount !== 0
+  )
+    return Promise.resolve();
+  const key = `${gid}:${tid}`;
+  const existing = chatWarmups.get(key);
+  if (existing) return existing;
+  const request = (async () => {
+    const result = await postJson<{ sessionId?: string; error?: string }>(
+      `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/warmup`,
+    );
+    if (typeof result.data.sessionId === 'string' && groupId.value === gid) {
+      threads.value = threads.value.map((entry) =>
+        entry.threadId === tid ? { ...entry, sessionId: result.data.sessionId } : entry,
+      );
+    }
+    if (!result.ok || !result.data.sessionId) throw new Error(result.data.error || `HTTP ${result.status}`);
+  })().catch((err: unknown) => {
+    console.warn('Chat warmup failed; Send will use normal startup', { groupId: gid, threadId: tid, err });
+  });
+  chatWarmups.set(key, request);
+  return request;
+}
+
 // Threads are part of the unified /api/sync response and live in the
 // `threads` signal. Callers that just want a fresh snapshot before
 // rendering can await this; everything else gets updated by the ticker.
@@ -167,9 +203,14 @@ export async function deleteThread(
   thread: Pick<Thread, 'threadId' | 'sessionId' | 'channelType' | 'messagingGroupId'>,
   cascade = false,
 ): Promise<void> {
-  if (!groupId.value) return;
+  const gid = groupId.value;
+  if (!gid) return;
   const tid = thread.threadId;
-  if (thread.sessionId != null) {
+  const warmupKey = `${gid}:${tid}`;
+  const warmup = chatWarmups.get(warmupKey);
+  if (warmup) await warmup;
+  if (groupId.value !== gid) return;
+  if (thread.sessionId != null || warmup) {
     const params = new URLSearchParams();
     if (thread.channelType && thread.channelType !== 'web' && thread.messagingGroupId) {
       params.set('channel', thread.channelType);
@@ -186,7 +227,7 @@ export async function deleteThread(
           credentials: 'same-origin',
         },
       );
-      if (!r.ok) {
+      if (!r.ok && !(warmup && r.status === 404)) {
         if (r.status === 409) {
           const error: { detail?: string } = await r.json();
           showToast(
@@ -198,11 +239,12 @@ export async function deleteThread(
         }
         return;
       }
-      const result: { cancelledApprovals?: number } = await r.json();
+      const result: { cancelledApprovals?: number } = r.ok ? await r.json() : {};
       if (result.cancelledApprovals && result.cancelledApprovals > 0) {
         const n = result.cancelledApprovals;
         showToast(`Deleted thread; cancelled ${n} outstanding approval ${n === 1 ? 'request' : 'requests'}.`);
       }
+      chatWarmups.delete(warmupKey);
     } catch (err) {
       console.error('delete failed', err);
       const m = err instanceof Error ? err.message : 'network error';
@@ -511,7 +553,7 @@ export async function runSync(
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
     threadsApplied = true;
     // Preserve any client-only "(new thread)" entries — they have no
-    // server session yet (no inbound message has been sent), so they
+    // server session yet (neither warmup nor a send has created one), so they
     // won't appear in res.threads. Without this, sync would silently
     // drop the user's just-created blank thread and a subsequent
     // "New thread" click would mint yet another UUID instead of
@@ -1498,6 +1540,7 @@ export function addPendingFiles(
 ): void {
   if (!fileList || fileList.length === 0) return;
   const next: PendingFile[] = pending.value.slice();
+  const previousCount = next.length;
   let totalBytes = next.reduce((n, f) => n + f.size, 0);
   let validationError = '';
   for (const f of Array.from(fileList)) {
@@ -1517,6 +1560,7 @@ export function addPendingFiles(
     totalBytes += f.size;
   }
   pending.value = next;
+  if (next.length > previousCount) void warmChat();
   if (validationError) showToast(validationError, 'err');
 }
 

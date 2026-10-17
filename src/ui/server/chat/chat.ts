@@ -29,6 +29,7 @@ import {
   deleteSession,
   findSessionByAgentGroup,
   findSessionForAgent,
+  getSession,
   getSessionsByAgentGroup,
   SessionApprovalCancellationRequiredError,
   SessionApprovalInProgressError,
@@ -42,8 +43,14 @@ import {
   type SessionActiveTurn,
 } from '../../../session-link.js';
 import { isToolCallId } from '../../../session-link-validate.js';
-import { openInboundDb, openOutboundDb, sessionDir, writeSessionMessage } from '../../../session-manager.js';
-import { killContainer } from '../../../container-runner.js';
+import {
+  openInboundDb,
+  openOutboundDb,
+  resolveSession,
+  sessionDir,
+  writeSessionMessage,
+} from '../../../session-manager.js';
+import { killContainer, wakeContainer } from '../../../container-runner.js';
 import {
   cancelTask,
   pauseTask,
@@ -162,6 +169,7 @@ interface ChatContext {
  */
 export function matchChatPath(pathname: string):
   | { kind: 'start'; groupId: string }
+  | { kind: 'warmup'; groupId: string; threadId: string }
   | { kind: 'send'; groupId: string; threadId: string }
   | { kind: 'stop'; groupId: string; threadId: string }
   | { kind: 'stop-tool'; groupId: string; threadId: string }
@@ -197,6 +205,9 @@ export function matchChatPath(pathname: string):
     };
   const send = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/send$/);
   if (send) return { kind: 'send', groupId: decodeURIComponent(send[1]), threadId: decodeURIComponent(send[2]) };
+  const warmup = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/warmup$/);
+  if (warmup)
+    return { kind: 'warmup', groupId: decodeURIComponent(warmup[1]), threadId: decodeURIComponent(warmup[2]) };
   const stop = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/stop$/);
   if (stop) return { kind: 'stop', groupId: decodeURIComponent(stop[1]), threadId: decodeURIComponent(stop[2]) };
   const stopTool = pathname.match(/^\/api\/groups\/([^/]+)\/chat\/([^/]+)\/stop-tool$/);
@@ -394,6 +405,45 @@ export async function handleChatRequest(
     const messagingGroupId = ensureWebMessagingGroup(m.groupId);
     const threadId = crypto.randomUUID();
     writeJson(res, 200, { threadId, messagingGroupId, platformId: platformIdFor(m.groupId) });
+    return true;
+  }
+
+  if (m.kind === 'warmup') {
+    if (req.method !== 'POST') {
+      writeJson(res, 405, { error: 'method_not_allowed' });
+      return true;
+    }
+    if (!m.threadId || m.threadId.length > 256 || /[\0/]/.test(m.threadId) || m.threadId.startsWith('__dm:')) {
+      writeJson(res, 400, { error: 'invalid_thread_id' });
+      return true;
+    }
+    if (new URLSearchParams((req.url || '').split('?')[1] || '').size > 0) {
+      writeJson(res, 400, { error: 'invalid_context' });
+      return true;
+    }
+    const messagingGroupId = ensureWebMessagingGroup(m.groupId);
+    const context = resolveTurnContext(userId, m.groupId, m.threadId);
+    if (!context?.canSend || context.channelType !== WEB_CHANNEL_TYPE) {
+      writeJson(res, 403, { error: 'forbidden' });
+      return true;
+    }
+    const wiring = getMessagingGroupAgentByPair(messagingGroupId, m.groupId);
+    const { session } = resolveSession(
+      m.groupId,
+      messagingGroupId,
+      m.threadId,
+      wiring?.session_mode === 'agent-shared' ? 'agent-shared' : 'per-thread',
+    );
+    const started = await wakeContainer(session);
+    if (!getSession(session.id)) {
+      killContainer(session.id, 'thread-deleted');
+      writeJson(res, 409, { error: 'thread_deleted' });
+      return true;
+    }
+    writeJson(res, started ? 200 : 503, {
+      sessionId: session.id,
+      ...(!started ? { error: 'warmup_deferred' } : {}),
+    });
     return true;
   }
 

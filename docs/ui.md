@@ -64,6 +64,29 @@ After redeem the browser lands on `/ui/chat/`. Log out via the button in the hea
 
 In-browser chat + read-only browser for the per-agent-group filesystem at `groups/<folder>/`.
 
+#### Intent-triggered thread warmup
+
+Opening a new thread only allocates its ID and messaging-group context. The
+first non-empty composer edit (including pasted text), accepted attachment
+(upload, paste, drop, or capture), or voice recording starts the session's
+container in the background. Focus alone and editing an already-submitted
+message do not warm a thread. This applies only to empty web threads.
+
+The client sends one `POST /api/groups/<groupId>/chat/<threadId>/warmup` per
+thread during the page's lifetime. The endpoint checks normal web-send
+permissions, resolves the same session used by submission, and invokes the
+existing container wake path. It creates no message, title request, model
+call, or conversation turn. Send never waits for the warmup HTTP request:
+concurrent wakes share the existing startup promise, and failed or deferred
+warmups leave normal submission unchanged. Warmup failures are logged rather
+than interrupting composition.
+
+Navigating away does not cancel startup. The empty session remains listed as
+`(new thread)` and is reused on return; New thread also reuses an existing empty
+entry. Ordinary admission, idle eviction, and idle cleanup govern its container.
+No lease, special promotion, or speculative worker pool is involved. Deleting
+a thread waits for its outstanding warmup before deleting the persisted session.
+
 #### Thread-list scanning
 
 Thread-list statistics are read by one lazy, persistent Node worker, not on the
