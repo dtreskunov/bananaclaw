@@ -97,7 +97,8 @@ import { mountHandler } from '../webhook-server.js';
 import type { ChannelAdapter, ChannelSetup, InboundEvent, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
-export const HA_CHANNEL_TYPE = 'homeassistant';
+import { extractDisplayQuery, HA_CHANNEL_TYPE } from './homeassistant-text.js';
+export { extractDisplayQuery, HA_CHANNEL_TYPE } from './homeassistant-text.js';
 const WEBHOOK_PATH = '/webhook/homeassistant';
 const DEFAULT_TIMEOUT_MS = 295_000;
 const DEFAULT_OUTPUT_FIELD = 'output';
@@ -313,13 +314,6 @@ export function buildTurn(payload: HaPayload): { text: string } {
  * rows. Returns the trimmed remainder, or the original text unchanged if no
  * markers are found.
  */
-export function extractDisplayQuery(text: string): string {
-  let s = text;
-  s = s.replace(/\[Conversation so far\][\s\S]*?\[End conversation so far\]\n*/g, '');
-  s = s.replace(/\[Tool Result(?::[^\]\n]*)?\][\s\S]*?\[End Tool Result\]\n*/g, '');
-  return s.trim();
-}
-
 /**
  * Render a chat-sdk `ask_question` payload as plain text.
  *

@@ -43,8 +43,7 @@ import { compareEntriesByDate, searchFilesByName } from './file-search.js';
 import {
   handleChatRequest,
   handleChatUpgrade,
-  listAllThreadsForAgentGroup,
-  listAllThreadsForUser,
+  listThreadsForViewer,
   readChatHistory,
   resolveTurnContext,
   viewerHasContent,
@@ -623,18 +622,18 @@ interface SyncResponse {
   voiceInput?: ReturnType<typeof resolveVoiceInputConfig>;
 }
 
-function handleSync(ctx: Ctx, userId: string): void {
+async function handleSync(ctx: Ctx, userId: string): Promise<void> {
   const out: SyncResponse = { approvals: listApprovalsForUser(userId) };
   const gid = ctx.url.searchParams.get('gid') || '';
   if (gid && canAccessAgentGroup(userId, gid).allowed && getAgentGroup(gid)) {
     out.voiceInput = resolveVoiceInputConfig(gid);
     // Elevated users also see every non-web thread. Shared web threads are
-    // already visible to every member through listAllThreadsForUser.
-    const elevated = isOwner(userId) || isGlobalAdmin(userId);
+    // already visible to every member through listThreadsForViewer.
     try {
-      out.threads = elevated ? listAllThreadsForAgentGroup(gid) : listAllThreadsForUser(userId, gid);
+      out.threads = await listThreadsForViewer(userId, gid);
     } catch (err) {
       log.warn('sync threads list failed', { userId, gid, err });
+      return json(ctx, 503, { error: 'Thread list unavailable; retry the request' });
     }
     const tid = ctx.url.searchParams.get('tid') || '';
     const channel = ctx.url.searchParams.get('channel') || '';
@@ -1180,7 +1179,7 @@ async function handlePushUnsubscribe(ctx: Ctx, userId: string): Promise<void> {
   json(ctx, 200, { ok: true });
 }
 
-function handlePushNotification(ctx: Ctx, userId: string): void {
+async function handlePushNotification(ctx: Ctx, userId: string): Promise<void> {
   const groupId = ctx.url.searchParams.get('groupId') || '';
   const threadId = ctx.url.searchParams.get('threadId') || '';
   const msgId = ctx.url.searchParams.get('msgId') || '';
@@ -1201,12 +1200,12 @@ function handlePushNotification(ctx: Ctx, userId: string): void {
   // accessible thread list and only runs on push delivery (rare).
   let threadTitle = '';
   try {
-    const elevated = isOwner(userId) || isGlobalAdmin(userId);
-    const threads = elevated ? listAllThreadsForAgentGroup(groupId) : listAllThreadsForUser(userId, groupId);
+    const threads = await listThreadsForViewer(userId, groupId);
     threadTitle = threads.find((t) => t.threadId === threadId)?.title || '';
-  } catch {
-    /* fall back to group name only */
+  } catch (err) {
+    log.warn('Push notification thread title unavailable', { groupId, threadId, err });
   }
+  if (!canAccessAgentGroup(userId, groupId).allowed) return json(ctx, 403, { error: 'forbidden' });
   // System tray clips long titles; keep room for both parts.
   const truncatedThread = threadTitle.length > 40 ? threadTitle.slice(0, 39) + '…' : threadTitle;
   const title = truncatedThread ? `${truncatedThread} · ${groupName}` : groupName;

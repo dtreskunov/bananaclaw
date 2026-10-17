@@ -13,6 +13,7 @@
 import type Database from 'better-sqlite3';
 
 import { nextEvenSeq } from '../../db/session-db.js';
+import { invalidateSessionDatabase } from '../../conversation-events.js';
 
 export const DEFAULT_TASK_SCRIPT_TIMEOUT_MS = 10 * 60_000;
 export const MIN_TASK_SCRIPT_TIMEOUT_MS = 1_000;
@@ -39,6 +40,7 @@ export function insertTask(
     ...task,
     seq: nextEvenSeq(db),
   });
+  invalidateSessionDatabase(db.name);
 }
 
 export function cancelTask(db: Database.Database, taskId: string): void {
@@ -47,6 +49,7 @@ export function cancelTask(db: Database.Database, taskId: string): void {
       WHERE (id = ? OR series_id = ?) AND kind = 'task'
         AND status IN ('pending', 'paused') AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
+  invalidateSessionDatabase(db.name);
 }
 
 export function pauseTask(db: Database.Database, taskId: string): void {
@@ -55,6 +58,7 @@ export function pauseTask(db: Database.Database, taskId: string): void {
       WHERE (id = ? OR series_id = ?) AND kind = 'task'
         AND status = 'pending' AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
+  invalidateSessionDatabase(db.name);
 }
 
 export function resumeTask(db: Database.Database, taskId: string): void {
@@ -63,6 +67,7 @@ export function resumeTask(db: Database.Database, taskId: string): void {
       WHERE (id = ? OR series_id = ?) AND kind = 'task'
         AND status = 'paused' AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
+  invalidateSessionDatabase(db.name);
 }
 
 export interface TaskUpdate {
@@ -121,6 +126,7 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
     }
   });
   tx();
+  invalidateSessionDatabase(db.name);
   return rows.length;
 }
 
@@ -165,6 +171,7 @@ export function runTaskNow(db: Database.Database, taskId: string, processAfter: 
     JSON.stringify(parsed),
     row.series_id,
   );
+  invalidateSessionDatabase(db.name);
   return id;
 }
 
@@ -207,8 +214,10 @@ export function insertRecurrence(
     msg.content,
     msg.series_id,
   );
+  invalidateSessionDatabase(db.name);
 }
 
 export function clearRecurrence(db: Database.Database, messageId: string): void {
   db.prepare('UPDATE messages_in SET recurrence = NULL WHERE id = ?').run(messageId);
+  invalidateSessionDatabase(db.name);
 }
