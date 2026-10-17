@@ -59,7 +59,8 @@ import { QuestionPrompt } from './QuestionPrompt';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { dockQuestions } from '../question-dock';
 import { RelativeTime } from './RelativeTime';
-import { MobileDialog } from './MobileDialog';
+import { ModalDialog } from './ModalDialog';
+import { MessagePreview } from './MessagePreview';
 import { ZoomableImage } from './ZoomableImage';
 import { BranchIcon, EditIcon } from './ActionIcons';
 import { CopyTranscriptButton } from './CopyTranscriptButton';
@@ -88,20 +89,10 @@ function imageFileName(src: string): string {
 
 function ImageViewer() {
   const image = imageViewer.value;
-
-  useEffect(() => {
-    if (!image) return undefined;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') imageViewer.value = null;
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [image?.src]);
-
   if (!image) return null;
 
   return (
-    <MobileDialog
+    <ModalDialog
       title={image.name}
       onClose={() => { imageViewer.value = null; }}
       className="image-viewer-dialog"
@@ -109,7 +100,7 @@ function ImageViewer() {
       maxWidth="calc(100vw - 32px)"
     >
         <ZoomableImage src={image.src} alt={image.alt} className="image-viewer-stage" autoFocus />
-    </MobileDialog>
+    </ModalDialog>
   );
 }
 
@@ -684,12 +675,61 @@ function openThreadAt(targetThreadId: string, messageId: string): void {
   openChat(groupId.value, targetThreadId, null).catch(console.error);
 }
 
+function MessageText({ text, md }: { text: string; md: string | null }) {
+  const mdRef = useRef<HTMLDivElement | null>(null);
+  const q = searchQuery.value;
+  const gid = groupId.value;
+  useLayoutEffect(() => {
+    // Reset markdown DOM before re-processing (handles search query changes).
+    if (md != null && mdRef.current) mdRef.current.innerHTML = md;
+    if (md != null && mdRef.current && gid) {
+      rewriteFileLinks(mdRef.current, gid, (entry) => navFile(entry).catch(console.error));
+      for (const img of mdRef.current.querySelectorAll<HTMLImageElement>('img[src]')) {
+        img.tabIndex = 0;
+        img.setAttribute('role', 'button');
+        img.setAttribute('aria-label', img.alt ? `View ${img.alt}` : 'View image');
+        const openImage = (): void => {
+          const src = img.currentSrc || img.src;
+          imageViewer.value = { src, alt: img.alt || '', name: imageFileName(src) };
+        };
+        img.addEventListener('click', openImage);
+        img.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openImage();
+          }
+        });
+      }
+      // Handle [[msg:id|threadId]] reference link clicks.
+      for (const a of mdRef.current.querySelectorAll<HTMLAnchorElement>('a.msg-ref')) {
+        a.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          const tid = a.dataset.threadId;
+          const msgId = a.dataset.msgId;
+          if (tid && gid) {
+            highlightMessageId.value = msgId || null;
+            if (threadId.value === tid) {
+              setTimeout(() => { highlightMessageId.value = msgId || null; }, 50);
+            } else {
+              openChat(gid, tid, null).catch(console.error);
+            }
+          }
+        });
+      }
+    }
+    // Highlight search query terms in the rendered message.
+    if (q && mdRef.current) highlightTextNodes(mdRef.current, q);
+  }, [text, md, q, gid]);
+  return md != null
+    ? <div class="transcript-copy-content" ref={mdRef} dangerouslySetInnerHTML={{ __html: md }} />
+    : <div class="transcript-copy-content" ref={mdRef}>{text || ''}</div>;
+}
+
 function Message(
   { m, allowContinue = false, isLatest = false }:
   { m: ChatMessage; allowContinue?: boolean; isLatest?: boolean },
 ) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const mdRef = useRef<HTMLDivElement | null>(null);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const traceOwner = activityTraceOwner(m);
   if (m.direction === 'event') {
@@ -714,48 +754,6 @@ function Message(
   }
   if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
   const md = renderMarkdown(m.text, groupId.value);
-  const q = searchQuery.value;
-  useLayoutEffect(() => {
-    // Reset markdown DOM before re-processing (handles search query changes).
-    if (md != null && mdRef.current) mdRef.current.innerHTML = md;
-    if (md != null && mdRef.current && groupId.value) {
-      rewriteFileLinks(mdRef.current, groupId.value, (entry) => navFile(entry).catch(console.error));
-      for (const img of mdRef.current.querySelectorAll<HTMLImageElement>('img[src]')) {
-        img.tabIndex = 0;
-        img.setAttribute('role', 'button');
-        img.setAttribute('aria-label', img.alt ? `View ${img.alt}` : 'View image');
-        const openImage = (): void => {
-          const src = img.currentSrc || img.src;
-          imageViewer.value = { src, alt: img.alt || '', name: imageFileName(src) };
-        };
-        img.addEventListener('click', openImage);
-        img.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            openImage();
-          }
-        });
-      }
-      // Handle [[msg:id|threadId]] reference link clicks.
-      for (const a of mdRef.current.querySelectorAll<HTMLAnchorElement>('a.msg-ref')) {
-        a.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          const tid = a.dataset.threadId;
-          const msgId = a.dataset.msgId;
-          if (tid && groupId.value) {
-            highlightMessageId.value = msgId || null;
-            if (threadId.value === tid) {
-              setTimeout(() => { highlightMessageId.value = msgId || null; }, 50);
-            } else {
-              openChat(groupId.value, tid, null).catch(console.error);
-            }
-          }
-        });
-      }
-    }
-    // Highlight search query terms in the rendered message.
-    if (q && ref.current) highlightTextNodes(ref.current, q);
-  }, [m.text, md != null, q]);
   const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
   const systemNotice = isSystemNotice(m.direction, m.systemGenerated, m.suggestedAction);
   const systemNoticeTone = systemNotice && m.statsTurn?.outcome === 'failed'
@@ -799,9 +797,8 @@ function Message(
       {m.direction === 'in' && m.author && m.author.userId !== currentUserId.value
         ? <div class="message-author">{m.author.displayName}</div>
         : null}
-      {md != null
-        ? <div class="transcript-copy-content" ref={mdRef} dangerouslySetInnerHTML={{ __html: md }} />
-        : <div class="transcript-copy-content" ref={mdRef}>{m.text || ''}</div>}
+      <MessagePreview reveal={highlightMessageId.value === m.id && !!searchQuery.value}>
+      <MessageText text={m.text} md={md} />
       {singleFile && singleMediaKind
         ? (
           <div class="inline-media">
@@ -839,6 +836,7 @@ function Message(
           </div>
         )
         : null}
+      </MessagePreview>
       {showContinue
         ? (
           <div class="message-actions">
@@ -894,7 +892,7 @@ function Message(
         <PendingMessageActions message={m} thread={activeThread() ?? null} gid={m.submission ? null : groupId.value}>
           {!m.submission ? <EditMessageButton m={m} /> : null}
           {!m.submission ? <ForkButton m={m} isLatest={isLatest} /> : null}
-          <CopyTranscriptButton getContent={() => mdRef.current} />
+          <CopyTranscriptButton getContent={() => ref.current?.querySelector<HTMLElement>('.transcript-copy-content') ?? null} />
         </PendingMessageActions>
       </div> : null}
     </div>
@@ -911,6 +909,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
         ? <TurnTechnicalDetails turn={message.statsTurn} lines={activity}
             ownerId={traceOwner} live={message.turnTraceLive} />
         : null}
+      <MessagePreview reveal={highlightMessageId.value === message.id && !!searchQuery.value}>
       {card.title ? <div class="display-card-title">{card.title}</div> : null}
       {card.description ? <div class="display-card-description">{card.description}</div> : null}
       {card.children.length > 0 ? (
@@ -931,6 +930,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
+      </MessagePreview>
       {message.reactions?.length ? (
         <div class="reactions">
           {message.reactions.map((reaction, index) => (

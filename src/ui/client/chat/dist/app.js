@@ -19900,8 +19900,8 @@ function MobileDialog(props) {
         {
           class: `mobile-dialog${className ? ` ${className}` : ""}`,
           role,
-          "aria-modal": "true",
-          "aria-label": ariaLabel ?? title,
+          "aria-modal": role === "presentation" ? void 0 : "true",
+          "aria-label": role === "presentation" ? void 0 : ariaLabel ?? title,
           style: maxWidth ? `max-width:${maxWidth}` : void 0,
           children: [
             /* @__PURE__ */ u4("header", { class: "mobile-dialog-head", children: [
@@ -23309,13 +23309,300 @@ function formatQuestionResponse(question2, response) {
 ${response}`;
 }
 
+// src/density-reflow.ts
+function captureReadingPosition(viewport, followingBottom) {
+  const top = () => viewport.getBoundingClientRect().top + viewport.clientTop;
+  const viewportTop = top();
+  const anchor = Array.from(viewport.children).find((child) => {
+    const rect = child.getBoundingClientRect();
+    return rect.bottom > viewportTop && rect.top < viewportTop + viewport.clientHeight;
+  });
+  const offset = anchor ? anchor.getBoundingClientRect().top - viewportTop : 0;
+  const originalTop = viewport.scrollTop;
+  return () => {
+    const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const next = followingBottom ? maximum : anchor && Array.from(viewport.children).includes(anchor) ? viewport.scrollTop + anchor.getBoundingClientRect().top - top() - offset : originalTop;
+    viewport.scrollTop = Math.max(0, Math.min(maximum, next));
+  };
+}
+function attachDensityReflow(controller, viewport, options) {
+  let frame = null;
+  const finish = () => {
+    if (frame === null) return;
+    cancelAnimationFrame(frame);
+    frame = null;
+    options.afterReflow();
+  };
+  const unsubscribe = controller.beforeDensityChange(() => {
+    finish();
+    const restore = captureReadingPosition(viewport, options.followingBottom());
+    options.beforeReflow();
+    return () => {
+      restore();
+      frame = requestAnimationFrame(() => {
+        restore();
+        frame = null;
+        options.afterReflow();
+      });
+    };
+  });
+  const inputs = ["wheel", "touchmove", "pointerdown", "keydown"];
+  for (const name of inputs) viewport.addEventListener(name, finish, { passive: true });
+  return () => {
+    unsubscribe();
+    finish();
+    for (const name of inputs) viewport.removeEventListener(name, finish);
+  };
+}
+
+// src/message-preview.ts
+function messagePreviewLayout(contentHeight, availableHeight, chromeHeight, controlHeight) {
+  const truncated = availableHeight > 0 && contentHeight + chromeHeight > availableHeight + 0.5;
+  return {
+    truncated,
+    height: truncated ? Math.max(0, availableHeight - chromeHeight - controlHeight) : contentHeight
+  };
+}
+function observeMessagePreview(preview, update) {
+  const viewport = preview.closest(".log");
+  const bubble = preview.closest(".msg");
+  const content = preview.querySelector(".message-preview-content");
+  const clip = preview.querySelector(".message-preview-clip");
+  const control = preview.querySelector(".message-preview-control");
+  if (!viewport || !bubble || !content || !clip || !control) {
+    throw new Error("Message preview is missing its transcript, bubble, or content.");
+  }
+  const measure = () => {
+    const style = getComputedStyle(viewport);
+    const edgeSpace = parseFloat(getComputedStyle(viewport, "::before").height) + parseFloat(style.rowGap);
+    const available = viewport.getBoundingClientRect().height - 2 * edgeSpace - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    const controlHeight = control.getBoundingClientRect().height;
+    const chrome = bubble.getBoundingClientRect().height - clip.getBoundingClientRect().height - controlHeight;
+    update(messagePreviewLayout(content.getBoundingClientRect().height, available, chrome, controlHeight));
+  };
+  const observer = new ResizeObserver(measure);
+  for (const element of [viewport, bubble, content, control]) observer.observe(element);
+  measure();
+  return () => observer.disconnect();
+}
+
+// src/transcript-clipboard.ts
+function transcriptClipboardPayload(element) {
+  return {
+    html: `<div>${element.innerHTML}</div>`,
+    text: element.innerText || element.textContent || ""
+  };
+}
+async function copyTranscriptContent(element) {
+  const payload = transcriptClipboardPayload(element);
+  const clipboard = navigator.clipboard;
+  if (!clipboard) throw new Error("Clipboard access is unavailable in this browser.");
+  if (typeof ClipboardItem !== "undefined" && typeof clipboard.write === "function") {
+    try {
+      await clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([payload.html], { type: "text/html" }),
+          "text/plain": new Blob([payload.text], { type: "text/plain" })
+        })
+      ]);
+      return "rich";
+    } catch (richError) {
+      if (typeof clipboard.writeText !== "function") throw richError;
+      try {
+        await clipboard.writeText(payload.text);
+        return "plain";
+      } catch (plainError) {
+        throw new AggregateError([richError, plainError], "Rich and plain-text clipboard writes failed.");
+      }
+    }
+  }
+  if (typeof clipboard.writeText !== "function") {
+    throw new Error("Clipboard writing is unavailable in this browser.");
+  }
+  await clipboard.writeText(payload.text);
+  return "plain";
+}
+
+// src/components/CopyTranscriptButton.tsx
+function CopyTranscriptButton({ getContent, label, onFeedback }) {
+  const feedback = onFeedback ?? showToast;
+  const copy = async () => {
+    const content = getContent();
+    if (!content) {
+      console.error("Failed to copy transcript message: message content is unavailable.");
+      feedback("Could not copy message");
+      return;
+    }
+    try {
+      await copyTranscriptContent(content);
+      feedback("Copied message");
+    } catch (error) {
+      console.error("Failed to copy transcript message:", error);
+      feedback("Could not copy message");
+    }
+  };
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg-action-btn msg-copy-btn",
+      title: label ?? "Copy this message",
+      "aria-label": label ?? "Copy this message",
+      onClick: copy,
+      children: [
+        /* @__PURE__ */ u4(CopyIcon, {}),
+        label ? /* @__PURE__ */ u4("span", { children: label }) : null
+      ]
+    }
+  );
+}
+
+// src/components/ModalDialog.tsx
+function ModalDialog({ initialFocus, returnFocus, onAfterClose, ...props }) {
+  const ref = A2(null);
+  _2(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    const previousFocus = returnFocus ?? document.activeElement;
+    dialog.showModal();
+    if (initialFocus) dialog.querySelector(initialFocus)?.focus({ preventScroll: true });
+    return () => {
+      dialog.close();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+        previousFocus.focus({ preventScroll: true });
+        if (document.activeElement !== previousFocus) {
+          previousFocus.parentElement?.closest("[tabindex]")?.focus({ preventScroll: true });
+        }
+      }
+      onAfterClose?.();
+    };
+  }, []);
+  return /* @__PURE__ */ u4(
+    "dialog",
+    {
+      ref,
+      class: "modal-dialog-host chat-main",
+      "aria-label": props.ariaLabel ?? props.title,
+      onClick: (event) => event.stopPropagation(),
+      onKeyDown: (event) => event.stopPropagation(),
+      onWheel: (event) => event.stopPropagation(),
+      onTouchMove: (event) => event.stopPropagation(),
+      onPointerDown: (event) => event.stopPropagation(),
+      onCancel: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!props.closeDisabled) props.onClose();
+      },
+      children: /* @__PURE__ */ u4(MobileDialog, { ...props, role: "presentation" })
+    }
+  );
+}
+
+// src/components/MessagePreview.tsx
+function MessageReader({
+  children,
+  bubbleClass,
+  opener,
+  onClose,
+  onNavigate,
+  onAfterClose
+}) {
+  const bodyRef = A2(null);
+  const [feedback, setFeedback] = h2("");
+  _2(() => {
+    const body = bodyRef.current;
+    const match2 = body?.querySelector(".search-hl");
+    if (body && match2) {
+      body.scrollTop += match2.getBoundingClientRect().top - body.getBoundingClientRect().top - body.clientHeight / 2;
+    }
+  }, []);
+  const onClick = (event) => {
+    if (!(event.target instanceof Element)) return;
+    if (event.defaultPrevented && event.target.closest("a") || event.target.closest("button.file-chip")) onNavigate();
+  };
+  return /* @__PURE__ */ u4(
+    ModalDialog,
+    {
+      title: "Message",
+      ariaLabel: "Full message",
+      className: "message-reader-dialog",
+      backdropClassName: "message-reader-backdrop",
+      maxWidth: "min(960px, 100%)",
+      initialFocus: ".message-reader-body",
+      returnFocus: opener,
+      onClose,
+      onAfterClose,
+      actions: /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("span", { class: "message-reader-feedback", role: "status", children: feedback }),
+        /* @__PURE__ */ u4(
+          CopyTranscriptButton,
+          {
+            label: "Copy message",
+            onFeedback: setFeedback,
+            getContent: () => bodyRef.current?.querySelector(".transcript-copy-content") ?? bodyRef.current
+          }
+        )
+      ] }),
+      children: /* @__PURE__ */ u4("div", { class: "message-reader-body", ref: bodyRef, tabIndex: 0, onClick, children: /* @__PURE__ */ u4("div", { class: `${bubbleClass} message-reader-message`, children }) })
+    }
+  );
+}
+function MessagePreview({ children, reveal = false }) {
+  const ref = A2(null);
+  const buttonRef = A2(null);
+  const restoreRef = A2(() => {
+  });
+  const autoOpenedRef = A2(false);
+  const [layout, setLayout] = h2({ truncated: false, height: 0 });
+  const [open, setOpen] = h2(false);
+  _2(() => {
+    if (!ref.current) return;
+    return observeMessagePreview(ref.current, (next) => {
+      setLayout(
+        (previous) => previous.truncated === next.truncated && Math.abs(previous.height - next.height) < 0.5 ? previous : next
+      );
+    });
+  }, []);
+  const openReader = () => {
+    const viewport = ref.current?.closest(".log");
+    if (viewport) restoreRef.current = captureReadingPosition(viewport, false);
+    setOpen(true);
+  };
+  y2(() => {
+    if (!reveal) autoOpenedRef.current = false;
+    else if (layout.truncated && !autoOpenedRef.current) {
+      autoOpenedRef.current = true;
+      openReader();
+    }
+  }, [reveal, layout.truncated]);
+  return /* @__PURE__ */ u4("div", { class: "message-preview", ref, "data-truncated": layout.truncated, children: [
+    /* @__PURE__ */ u4("div", { class: "message-preview-clip", style: layout.truncated ? { maxHeight: `${layout.height}px` } : void 0, children: /* @__PURE__ */ u4("div", { class: "message-preview-content", inert: layout.truncated, children }) }),
+    /* @__PURE__ */ u4("div", { class: "message-preview-control", hidden: !layout.truncated, children: /* @__PURE__ */ u4("button", { type: "button", ref: buttonRef, class: "message-preview-open", "aria-haspopup": "dialog", onClick: openReader, children: "Read full message" }) }),
+    open ? /* @__PURE__ */ u4(
+      MessageReader,
+      {
+        bubbleClass: ref.current?.closest(".msg")?.className ?? "msg",
+        opener: buttonRef.current,
+        onClose: () => setOpen(false),
+        onNavigate: () => {
+          restoreRef.current = () => {
+          };
+          setOpen(false);
+        },
+        onAfterClose: () => restoreRef.current(),
+        children
+      }
+    ) : null
+  ] });
+}
+
 // src/components/QuestionAnswerBubble.tsx
 function QuestionAnswerBubble({ question: question2, answer }) {
   const response = answer.questionResponseType === "skipped" ? "Question skipped" : question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text;
   const text2 = formatQuestionResponse(question2.question, response);
   const md = renderMarkdown(text2, groupId.value);
   return /* @__PURE__ */ u4("div", { class: `msg in${md != null ? " markdown" : ""}`, "data-msg-id": answer.id, children: [
-    md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 }),
+    /* @__PURE__ */ u4(MessagePreview, { reveal: highlightMessageId.value === answer.id && !!searchQuery.value, children: md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 }) }),
     /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answer.ts }) })
   ] });
 }
@@ -23433,73 +23720,6 @@ function ZoomableImage({ src, alt, className = "", autoFocus = false }) {
           style: { transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }
         }
       )
-    }
-  );
-}
-
-// src/transcript-clipboard.ts
-function transcriptClipboardPayload(element) {
-  return {
-    html: `<div>${element.innerHTML}</div>`,
-    text: element.innerText || element.textContent || ""
-  };
-}
-async function copyTranscriptContent(element) {
-  const payload = transcriptClipboardPayload(element);
-  const clipboard = navigator.clipboard;
-  if (!clipboard) throw new Error("Clipboard access is unavailable in this browser.");
-  if (typeof ClipboardItem !== "undefined" && typeof clipboard.write === "function") {
-    try {
-      await clipboard.write([
-        new ClipboardItem({
-          "text/html": new Blob([payload.html], { type: "text/html" }),
-          "text/plain": new Blob([payload.text], { type: "text/plain" })
-        })
-      ]);
-      return "rich";
-    } catch (richError) {
-      if (typeof clipboard.writeText !== "function") throw richError;
-      try {
-        await clipboard.writeText(payload.text);
-        return "plain";
-      } catch (plainError) {
-        throw new AggregateError([richError, plainError], "Rich and plain-text clipboard writes failed.");
-      }
-    }
-  }
-  if (typeof clipboard.writeText !== "function") {
-    throw new Error("Clipboard writing is unavailable in this browser.");
-  }
-  await clipboard.writeText(payload.text);
-  return "plain";
-}
-
-// src/components/CopyTranscriptButton.tsx
-function CopyTranscriptButton({ getContent }) {
-  const copy = async () => {
-    const content = getContent();
-    if (!content) {
-      console.error("Failed to copy transcript message: message content is unavailable.");
-      showToast("Could not copy message");
-      return;
-    }
-    try {
-      await copyTranscriptContent(content);
-      showToast("Copied message");
-    } catch (error) {
-      console.error("Failed to copy transcript message:", error);
-      showToast("Could not copy message");
-    }
-  };
-  return /* @__PURE__ */ u4(
-    "button",
-    {
-      type: "button",
-      class: "msg-action-btn msg-copy-btn",
-      title: "Copy this message",
-      "aria-label": "Copy this message",
-      onClick: copy,
-      children: /* @__PURE__ */ u4(CopyIcon, {})
     }
   );
 }
@@ -23661,52 +23881,6 @@ function attachScrollNavigation(viewport, onDirection, onUserInput, onUserScroll
   };
 }
 
-// src/density-reflow.ts
-function captureReadingPosition(viewport, followingBottom) {
-  const top = () => viewport.getBoundingClientRect().top + viewport.clientTop;
-  const viewportTop = top();
-  const anchor = Array.from(viewport.children).find((child) => {
-    const rect = child.getBoundingClientRect();
-    return rect.bottom > viewportTop && rect.top < viewportTop + viewport.clientHeight;
-  });
-  const offset = anchor ? anchor.getBoundingClientRect().top - viewportTop : 0;
-  const originalTop = viewport.scrollTop;
-  return () => {
-    const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-    const next = followingBottom ? maximum : anchor && Array.from(viewport.children).includes(anchor) ? viewport.scrollTop + anchor.getBoundingClientRect().top - top() - offset : originalTop;
-    viewport.scrollTop = Math.max(0, Math.min(maximum, next));
-  };
-}
-function attachDensityReflow(controller, viewport, options) {
-  let frame = null;
-  const finish = () => {
-    if (frame === null) return;
-    cancelAnimationFrame(frame);
-    frame = null;
-    options.afterReflow();
-  };
-  const unsubscribe = controller.beforeDensityChange(() => {
-    finish();
-    const restore = captureReadingPosition(viewport, options.followingBottom());
-    options.beforeReflow();
-    return () => {
-      restore();
-      frame = requestAnimationFrame(() => {
-        restore();
-        frame = null;
-        options.afterReflow();
-      });
-    };
-  });
-  const inputs = ["wheel", "touchmove", "pointerdown", "keydown"];
-  for (const name of inputs) viewport.addEventListener(name, finish, { passive: true });
-  return () => {
-    unsubscribe();
-    finish();
-    for (const name of inputs) viewport.removeEventListener(name, finish);
-  };
-}
-
 // src/scroll-edges.ts
 var EDGE_EPSILON = 1;
 function axisScrollEdges(offset, clientSize, scrollSize) {
@@ -23803,17 +23977,9 @@ function imageFileName(src) {
 }
 function ImageViewer() {
   const image = imageViewer.value;
-  y2(() => {
-    if (!image) return void 0;
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") imageViewer.value = null;
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [image?.src]);
   if (!image) return null;
   return /* @__PURE__ */ u4(
-    MobileDialog,
+    ModalDialog,
     {
       title: image.name,
       onClose: () => {
@@ -24353,9 +24519,54 @@ function openThreadAt(targetThreadId, messageId) {
   highlightMessageId.value = messageId;
   openChat(groupId.value, targetThreadId, null).catch(console.error);
 }
+function MessageText({ text: text2, md }) {
+  const mdRef = A2(null);
+  const q5 = searchQuery.value;
+  const gid = groupId.value;
+  _2(() => {
+    if (md != null && mdRef.current) mdRef.current.innerHTML = md;
+    if (md != null && mdRef.current && gid) {
+      rewriteFileLinks(mdRef.current, gid, (entry) => navFile(entry).catch(console.error));
+      for (const img of mdRef.current.querySelectorAll("img[src]")) {
+        img.tabIndex = 0;
+        img.setAttribute("role", "button");
+        img.setAttribute("aria-label", img.alt ? `View ${img.alt}` : "View image");
+        const openImage = () => {
+          const src = img.currentSrc || img.src;
+          imageViewer.value = { src, alt: img.alt || "", name: imageFileName(src) };
+        };
+        img.addEventListener("click", openImage);
+        img.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openImage();
+          }
+        });
+      }
+      for (const a4 of mdRef.current.querySelectorAll("a.msg-ref")) {
+        a4.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          const tid = a4.dataset.threadId;
+          const msgId = a4.dataset.msgId;
+          if (tid && gid) {
+            highlightMessageId.value = msgId || null;
+            if (threadId.value === tid) {
+              setTimeout(() => {
+                highlightMessageId.value = msgId || null;
+              }, 50);
+            } else {
+              openChat(gid, tid, null).catch(console.error);
+            }
+          }
+        });
+      }
+    }
+    if (q5 && mdRef.current) highlightTextNodes(mdRef.current, q5);
+  }, [text2, md, q5, gid]);
+  return md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, children: text2 || "" });
+}
 function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
-  const mdRef = A2(null);
   const [continueState, setContinueState] = h2("idle");
   const traceOwner = activityTraceOwner(m6);
   if (m6.direction === "event") {
@@ -24385,47 +24596,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   }
   if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card });
   const md = renderMarkdown(m6.text, groupId.value);
-  const q5 = searchQuery.value;
-  _2(() => {
-    if (md != null && mdRef.current) mdRef.current.innerHTML = md;
-    if (md != null && mdRef.current && groupId.value) {
-      rewriteFileLinks(mdRef.current, groupId.value, (entry) => navFile(entry).catch(console.error));
-      for (const img of mdRef.current.querySelectorAll("img[src]")) {
-        img.tabIndex = 0;
-        img.setAttribute("role", "button");
-        img.setAttribute("aria-label", img.alt ? `View ${img.alt}` : "View image");
-        const openImage = () => {
-          const src = img.currentSrc || img.src;
-          imageViewer.value = { src, alt: img.alt || "", name: imageFileName(src) };
-        };
-        img.addEventListener("click", openImage);
-        img.addEventListener("keydown", (event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            openImage();
-          }
-        });
-      }
-      for (const a4 of mdRef.current.querySelectorAll("a.msg-ref")) {
-        a4.addEventListener("click", (ev) => {
-          ev.preventDefault();
-          const tid = a4.dataset.threadId;
-          const msgId = a4.dataset.msgId;
-          if (tid && groupId.value) {
-            highlightMessageId.value = msgId || null;
-            if (threadId.value === tid) {
-              setTimeout(() => {
-                highlightMessageId.value = msgId || null;
-              }, 50);
-            } else {
-              openChat(groupId.value, tid, null).catch(console.error);
-            }
-          }
-        });
-      }
-    }
-    if (q5 && ref.current) highlightTextNodes(ref.current, q5);
-  }, [m6.text, md != null, q5]);
   const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
   const systemNotice = isSystemNotice(m6.direction, m6.systemGenerated, m6.suggestedAction);
   const systemNoticeTone = systemNotice && m6.statsTurn?.outcome === "failed" ? " provenance-error" : systemNotice && ["warning", "stopped", "interrupted"].includes(m6.statsTurn?.outcome ?? "") ? " provenance-warning" : "";
@@ -24459,43 +24629,45 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
         ) : null,
         m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
         m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
-        md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, children: m6.text || "" }),
-        singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
-          singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
-          /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
-        ] }) : null,
-        m6.files && m6.files.length && !singleMediaKind ? /* @__PURE__ */ u4("div", { class: "files", children: m6.files.map((f5) => f5.path ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "file-chip",
-            title: displayWorkspacePath(f5.path),
-            onClick: () => navFile({ path: f5.path, name: f5.filename, size: f5.size }).catch(console.error),
-            children: [
-              "\u{1F4CE} ",
-              f5.filename
-            ]
-          },
-          f5.path
-        ) : f5.url ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "file-chip",
-            title: `Preview ${f5.filename}`,
-            onClick: () => {
-              previewAttachment(f5).catch(console.error);
+        /* @__PURE__ */ u4(MessagePreview, { reveal: highlightMessageId.value === m6.id && !!searchQuery.value, children: [
+          /* @__PURE__ */ u4(MessageText, { text: m6.text, md }),
+          singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
+            singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
+            /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
+          ] }) : null,
+          m6.files && m6.files.length && !singleMediaKind ? /* @__PURE__ */ u4("div", { class: "files", children: m6.files.map((f5) => f5.path ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "file-chip",
+              title: displayWorkspacePath(f5.path),
+              onClick: () => navFile({ path: f5.path, name: f5.filename, size: f5.size }).catch(console.error),
+              children: [
+                "\u{1F4CE} ",
+                f5.filename
+              ]
             },
-            children: [
-              "\u{1F4CE} ",
-              f5.filename
-            ]
-          },
-          f5.url
-        ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: [
-          "\u{1F4CE} ",
-          f5.filename
-        ] }, f5.filename)) }) : null,
+            f5.path
+          ) : f5.url ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "file-chip",
+              title: `Preview ${f5.filename}`,
+              onClick: () => {
+                previewAttachment(f5).catch(console.error);
+              },
+              children: [
+                "\u{1F4CE} ",
+                f5.filename
+              ]
+            },
+            f5.url
+          ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: [
+            "\u{1F4CE} ",
+            f5.filename
+          ] }, f5.filename)) }) : null
+        ] }),
         showContinue ? /* @__PURE__ */ u4("div", { class: "message-actions", children: /* @__PURE__ */ u4(
           "button",
           {
@@ -24546,7 +24718,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: m6.submission ? null : groupId.value, children: [
             !m6.submission ? /* @__PURE__ */ u4(EditMessageButton, { m: m6 }) : null,
             !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
-            /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => mdRef.current })
+            /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => ref.current?.querySelector(".transcript-copy-content") ?? null })
           ] })
         ] }) : null
       ]
@@ -24567,26 +24739,28 @@ function DisplayCardMessage({ message: message2, card }) {
         live: message2.turnTraceLive
       }
     ) : null,
-    card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
-    card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
-    card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
-    card.actions.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-actions", children: card.actions.map((action) => /* @__PURE__ */ u4(
-      "a",
-      {
-        class: `display-card-action display-card-action-${action.style || "default"}`,
-        href: action.url,
-        target: "_blank",
-        rel: "noopener noreferrer",
-        children: [
-          action.label,
-          /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: [
-            " ",
-            "\u2197"
-          ] })
-        ]
-      },
-      `${action.label}:${action.url}`
-    )) }) : null,
+    /* @__PURE__ */ u4(MessagePreview, { reveal: highlightMessageId.value === message2.id && !!searchQuery.value, children: [
+      card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
+      card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
+      card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
+      card.actions.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-actions", children: card.actions.map((action) => /* @__PURE__ */ u4(
+        "a",
+        {
+          class: `display-card-action display-card-action-${action.style || "default"}`,
+          href: action.url,
+          target: "_blank",
+          rel: "noopener noreferrer",
+          children: [
+            action.label,
+            /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: [
+              " ",
+              "\u2197"
+            ] })
+          ]
+        },
+        `${action.label}:${action.url}`
+      )) }) : null
+    ] }),
     message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
     message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
       message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,

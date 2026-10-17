@@ -15,11 +15,13 @@ import {
   channelType,
   completionSoundMutedSig,
   groupId,
+  highlightMessageId,
   isMobile,
   pendingWebSends,
   refs,
   stopRequest,
   progressSoundMutedSig,
+  searchQuery,
   threadId,
   threads,
 } from '../src/state';
@@ -46,6 +48,7 @@ const scenes = [
   { id: 'disconnected', label: 'Disconnected' },
   { id: 'settling', label: 'Settling' },
   { id: 'reply', label: 'Settled reply' },
+  { id: 'reader', label: 'Long message reader' },
   { id: 'reply-file', label: 'Settled file-only reply' },
   { id: 'warning-reply', label: 'System warning reply' },
   { id: 'stopped-reply', label: 'System stop notice' },
@@ -208,7 +211,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
   const elapsedMs = nextScene === 'technical-summary-zero-cost' ? 710_000 : compactSummary ? 15_000 : 12_000;
   const outcomeOnly = nextScene.endsWith('-empty') || nextScene === 'card-warning';
   const noticeReply = ['warning-reply', 'stopped-reply', 'interrupted-reply'].includes(nextScene);
-  const settled = compactSummary || !!terminalOutcome || failed || ['reply', 'reply-file', 'empty-reply', 'outputless', 'card'].includes(nextScene);
+  const settled = compactSummary || !!terminalOutcome || failed || ['reply', 'reader', 'reply-file', 'empty-reply', 'outputless', 'card'].includes(nextScene);
   const phase = settled
     ? 'settled'
     : nextScene === 'stopping'
@@ -393,6 +396,8 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
               deliveryOrigin: 'response' as const,
               text: nextScene === 'failed-model-handled'
                 ? 'Your message could not be processed: the provider blocked it with its content filtering policy.'
+                : nextScene === 'reader'
+                  ? Array.from({ length: 80 }, (_, index) => `## Section ${index + 1}\n\nA long **message** with [a reference](https://example.com) and \`inline code\`.`).join('\n\n')
                 : nextScene === 'reply-file' ? ''
                 : noticeReply ? 'The runner ended this turn with a system notice.'
                 : failed ? 'The fixture response failed.' : 'The **fixture response** is complete.',
@@ -430,6 +435,8 @@ function show(nextScene: Scene): void {
   outstandingCount.value = 0;
   sendRequests.length = 0;
   pendingWebSends.value = [];
+  searchQuery.value = '';
+  highlightMessageId.value = null;
   scene.value = nextScene;
   resetConversation();
   resetTurnState();
@@ -615,6 +622,7 @@ interface FixtureApi {
   advance: typeof advance;
   nextTurn: typeof nextTurn;
   tech: typeof tech;
+  search: (query: string, messageId: string | null) => void;
   acceptSend: () => void;
   failSend: () => void;
   echoSend: typeof echoSend;
@@ -633,6 +641,10 @@ window.turnStatusFixture = {
   advance,
   nextTurn,
   tech,
+  search(query, messageId) {
+    searchQuery.value = query;
+    highlightMessageId.value = messageId;
+  },
   acceptSend: () => respondToSend(true),
   failSend: () => respondToSend(false),
   echoSend,

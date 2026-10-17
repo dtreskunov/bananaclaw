@@ -1,0 +1,30 @@
+.modal-dialog-host {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: transparent;
+  color: var(--fg);
+}
+.modal-dialog-host:not([open]) {
+  display: none;
+}
+.modal-dialog-host[open] {
+  display: block;
+}
+.modal-dialog-host::backdrop {
+  background: transparent;
+}
+.modal-dialog-host .mobile-dialog-backdrop {
+  overscroll-behavior: contain;
+}
+.modal-dialog-host.chat-main .mobile-dialog .mobile-dialog-head,
+.modal-dialog-host.chat-main .mobile-dialog .mobile-dialog-head * {
+  font-style: normal;
+}

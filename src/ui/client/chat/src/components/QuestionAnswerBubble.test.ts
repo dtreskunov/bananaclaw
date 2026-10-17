@@ -3,7 +3,12 @@ import type { ChatMessage, PendingQuestionDto } from '../types';
 import * as utils from '../utils';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 
-vi.mock('../state', () => ({ groupId: { value: 'group' }, nowTick: { value: 0 } }));
+vi.mock('../state', () => ({
+  groupId: { value: 'group' },
+  nowTick: { value: 0 },
+  highlightMessageId: { value: null },
+  searchQuery: { value: '' },
+}));
 
 const question: PendingQuestionDto = {
   questionId: 'q',
@@ -35,7 +40,7 @@ describe('answered question markdown', () => {
     const bubble = QuestionAnswerBubble({ question, answer });
     expect(renderMarkdown).toHaveBeenCalledWith('> Which **day**?\n\n**Tuesday**', 'group');
     expect(bubble.props.class).toBe('msg in markdown');
-    expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toBe(
+    expect(bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html).toBe(
       '<blockquote>\n<p>Which <strong>day</strong>?</p>\n</blockquote>\n<p><strong>Tuesday</strong></p>\n',
     );
     expect(bubble.props['data-msg-id']).toBe(answer.id);
@@ -52,7 +57,7 @@ describe('answered question markdown', () => {
       '> First line\n> \n> Second line\n> - Third line\n\nAnswer\n\n- One\n- Two',
       'group',
     );
-    const html = bubble.props.children[0].props.dangerouslySetInnerHTML.__html;
+    const html = bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html;
     expect(html).toContain('<blockquote>\n<p>First line</p>');
     expect(html).toContain('</blockquote>\n<p>Answer</p>\n<ul>\n<li>One</li>');
   });
@@ -62,14 +67,16 @@ describe('answered question markdown', () => {
       question,
       answer: { ...answer, text: '[Reference](https://example.com)\n\n```js\nconst day = "Tuesday";\n```' },
     });
-    const html = bubble.props.children[0].props.dangerouslySetInnerHTML.__html;
+    const html = bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html;
     expect(html).toContain('<a href="https://example.com" target="_blank" rel="noopener noreferrer">Reference</a>');
     expect(html).toContain('<pre><code class="language-js">');
   });
 
   it('uses the selected option label rather than its stored value', () => {
     const bubble = QuestionAnswerBubble({ question, answer: { ...answer, text: 'monday' } });
-    expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toContain('<p>Monday selected</p>');
+    expect(bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html).toContain(
+      '<p>Monday selected</p>',
+    );
   });
 
   it('retains the answer text when it is not a stored choice', () => {
@@ -77,7 +84,7 @@ describe('answered question markdown', () => {
       question,
       answer: { ...answer, text: 'Wednesday' },
     });
-    expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toContain('<p>Wednesday</p>');
+    expect(bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html).toContain('<p>Wednesday</p>');
   });
 
   it('renders an explicit skip independently of choice labels', () => {
@@ -85,7 +92,7 @@ describe('answered question markdown', () => {
       question: { ...question, options: [{ label: 'Fake', selectedLabel: 'Not skipped', value: 'Question skipped' }] },
       answer: { ...answer, questionResponseType: 'skipped', text: 'Question skipped' },
     });
-    expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toContain(
+    expect(bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html).toContain(
       '</blockquote>\n<p>Question skipped</p>',
     );
   });
@@ -94,6 +101,6 @@ describe('answered question markdown', () => {
     vi.spyOn(utils, 'renderMarkdown').mockReturnValue(null);
     const bubble = QuestionAnswerBubble({ question, answer });
     expect(bubble.props.class).toBe('msg in');
-    expect(bubble.props.children[0].props.children).toBe('> Which **day**?\n\n**Tuesday**');
+    expect(bubble.props.children[0].props.children.props.children).toBe('> Which **day**?\n\n**Tuesday**');
   });
 });

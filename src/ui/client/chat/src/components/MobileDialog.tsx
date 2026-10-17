@@ -13,7 +13,7 @@ interface MobileDialogProps {
   backdropClassName?: string;
   maxWidth?: string;
   closeDisabled?: boolean;
-  role?: 'dialog' | 'alertdialog';
+  role?: 'dialog' | 'alertdialog' | 'presentation';
   onKeyDown?: (event: JSX.TargetedKeyboardEvent<HTMLDivElement>) => void;
 }
 
@@ -36,8 +36,8 @@ export function MobileDialog(props: MobileDialogProps): JSX.Element {
       <div
         class={`mobile-dialog${className ? ` ${className}` : ''}`}
         role={role}
-        aria-modal="true"
-        aria-label={ariaLabel ?? title}
+        aria-modal={role === 'presentation' ? undefined : 'true'}
+        aria-label={role === 'presentation' ? undefined : ariaLabel ?? title}
         style={maxWidth ? `max-width:${maxWidth}` : undefined}
       >
         <header class="mobile-dialog-head">

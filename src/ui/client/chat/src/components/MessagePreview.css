@@ -1,0 +1,101 @@
+.chat-main .log .msg:has(.message-preview) {
+  flex-shrink: 0;
+}
+.message-preview {
+  min-width: 0;
+}
+.message-preview-content {
+  min-width: 0;
+}
+.display-card .message-preview-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.message-preview[data-truncated='true'] > .message-preview-clip {
+  overflow: clip;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), transparent);
+}
+.message-preview-control:not([hidden]) {
+  display: flex;
+  justify-content: center;
+  padding-top: 6px;
+}
+.message-preview-control[hidden] {
+  display: none;
+}
+.message-preview-open {
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--surface-fg);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.message-preview-open:hover {
+  background: var(--wash-strong);
+}
+.message-preview-open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.message-reader-backdrop {
+  overflow: hidden;
+}
+.message-reader-dialog {
+  height: calc(100dvh - 80px);
+  max-height: calc(100dvh - 80px);
+}
+.message-reader-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px;
+}
+.message-reader-body:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.chat-main .msg.message-reader-message {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none;
+  opacity: 1;
+}
+.message-reader-dialog .msg-copy-btn {
+  width: auto;
+  height: 32px;
+  padding: 4px 8px;
+  gap: 6px;
+  color: inherit;
+  font-size: var(--font-sm);
+}
+.message-reader-feedback {
+  font-size: var(--font-xs);
+  color: var(--muted);
+}
+@media (max-width: 720px) {
+  .message-reader-dialog {
+    height: 100%;
+    max-height: 100%;
+  }
+  .message-reader-body {
+    padding: 16px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .message-reader-dialog .msg-copy-btn {
+    min-height: 44px;
+  }
+  .message-reader-feedback:empty {
+    display: none;
+  }
+}

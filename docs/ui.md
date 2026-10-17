@@ -172,6 +172,29 @@ restores it immediately and after composer autosizing; new scrolling cancels
 the deferred restore. Density changes do not animate text or spacing.
 Shared density tokens live in `global.css`, separately from theme colors.
 
+Messages taller than the visible transcript area show a non-scrollable preview,
+a bottom fade, and **Read full message**. The preview reserves space for the
+message's metadata and actions and follows window, composer, and density changes.
+Short messages and task/branch event pills stay expanded. Text, attachments,
+display-card content, internal messages, and answered questions use the same
+preview behavior.
+
+**Read full message** opens a focused reader: a large dialog on desktop and a
+full-screen view on mobile. Its fixed header offers **Copy message** and
+**Close**; only the message body scrolls vertically. Copy includes the complete
+rendered message text, not just the preview. Clipboard success or failure is
+reported inside the reader. The reader reuses the transcript's content and
+interactions, including Markdown, file links, tables, code, and image previews.
+In-app file or message navigation closes the reader; external links open as usual.
+Search navigation automatically opens truncated messages and reveals their first
+highlighted match.
+
+The reader traps keyboard focus using a native modal dialog. Escape, Close, or
+clicking its desktop backdrop closes it and restores focus and the conversation's
+reading position. Hidden preview contents cannot receive keyboard focus; their
+complete accessible content is available through **Read full message**. Image
+previews opened from the reader stack above it and close independently.
+
 Markdown messages containing tables use the full conversation width. Tables
 retain readable, non-wrapping cells and scroll horizontally inside the message
 when their intrinsic width exceeds the viewport. Tables throughout the UI share
