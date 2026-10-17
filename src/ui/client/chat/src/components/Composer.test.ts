@@ -349,9 +349,8 @@ describe('main composer pending edits', () => {
       hooks.capturePassive = false;
     });
     const row = message.type(message.props);
-    const content = [row.props.children]
-      .flat(Infinity)
-      .find((child) => child?.props?.class === 'transcript-copy-content');
+    const text = findComponent(row, 'MessageText');
+    const content = text.type(text.props);
     const order: string[] = [];
     content.ref.current = {
       set innerHTML(html: string) {
@@ -852,7 +851,7 @@ describe('main composer pending edits', () => {
           files: null,
         },
       });
-      expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toBe(
+      expect(bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html).toBe(
         '<blockquote>\n<p>Choose?</p>\n</blockquote>\n<p>Question skipped</p>\n',
       );
       expect(bubble.props['data-msg-id']).toBe('question-response:q');
@@ -1939,7 +1938,8 @@ describe('main composer pending edits', () => {
       hooks.cursor = 0;
       const cardNode = messageNode.type(messageNode.props);
       const row = cardNode.type(cardNode.props);
-      const [technicalBlock, title] = row.props.children;
+      const [technicalBlock, preview] = row.props.children;
+      const title = preview.props.children[0];
       expect(!!technicalBlock).toBe(technical);
       if (technical) {
         expect(technicalBlock.type.name).toBe('TurnTechnicalDetails');
