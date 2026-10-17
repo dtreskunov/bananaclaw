@@ -3234,12 +3234,16 @@ nav.tab-bar-strip.group-strip {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  min-width: 64px;
+  min-width: 76px;
 }
 .chat-main .activity-trace .trace-time-value {
   display: inline-flex;
   align-items: baseline;
-  gap: 3px;
+  gap: 0.4ch;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 999px;
+  line-height: 1.5;
   color: var(--trace-status-color, var(--muted));
   white-space: nowrap;
 }
@@ -3247,9 +3251,7 @@ nav.tab-bar-strip.group-strip {
   color: color-mix(in srgb, var(--trace-status-color, var(--muted)) 55%, var(--muted));
 }
 .chat-main .activity-trace .trace-time-label {
-  font-size: 0.8em;
-  letter-spacing: 0.04em;
-  opacity: 0.55;
+  color: var(--muted);
 }
 .chat-main .activity-trace .trace-time-num {
   min-width: 4.5ch;

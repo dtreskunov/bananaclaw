@@ -170,8 +170,10 @@ describe('theme CSS contract', () => {
     expect(toggle).toContain('font: inherit');
     const details = css.match(/\.chat-main \.usage-details \{([^}]+)\}/)?.[1];
     expect(details).toContain('width: max-content');
-    expect(details).toContain('border: 1px solid var(--border)');
+    expect(details).not.toContain('border:');
     expect(details).toContain('font-size: var(--font-2xs)');
+    const outline = css.match(/\.chat-main \.msg-activity\.expanded \{([^}]+)\}/)?.[1];
+    expect(outline).toContain('border: 1px solid var(--border)');
     expect(details).not.toMatch(/position:|z-index:|box-shadow:/);
     expect(css).not.toMatch(/usage-popover|usage-backdrop/);
   });
@@ -337,10 +339,11 @@ describe('theme CSS contract', () => {
     const value = css.match(/\.trace-time-value \{([^}]+)\}/)?.[1];
     expect(value).toContain('white-space: nowrap');
     expect(value).not.toContain('background');
-    expect(value).not.toContain('border-radius');
+    expect(value).toContain('border-radius: 999px');
+    expect(css.match(/\.trace-time-label \{([^}]+)\}/)?.[1]).toContain('color: var(--muted)');
     expect(css.match(/\.trace-time-num \{([^}]+)\}/)?.[1]).toContain('font-variant-numeric: tabular-nums');
     const slot = css.match(/\.trace-time \{([^}]+)\}/)?.[1];
-    expect(slot).toContain('min-width: 64px');
+    expect(slot).toContain('min-width: 76px');
     expect(slot).toContain('justify-content: flex-end');
     const global = read('./styles/global.css');
     expect(global).toContain('mask-composite: intersect');

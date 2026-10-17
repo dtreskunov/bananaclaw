@@ -452,10 +452,10 @@
 .chat-main .activity-trace .trace-chapter-failures { color: var(--activity-status-failed); }
 .chat-main .activity-trace ul.trace-children { list-style: none; margin: 0 0 0 var(--trace-child-indent); padding: 0; }
 /* Fixed slots keep execution and model chips in their own columns. */
-.chat-main .activity-trace .trace-time { display: inline-flex; flex: none; align-items: center; justify-content: flex-end; gap: 6px; min-width: 64px; }
-.chat-main .activity-trace .trace-time-value { display: inline-flex; align-items: baseline; gap: 3px; color: var(--trace-status-color, var(--muted)); white-space: nowrap; }
+.chat-main .activity-trace .trace-time { display: inline-flex; flex: none; align-items: center; justify-content: flex-end; gap: 6px; min-width: 76px; }
+.chat-main .activity-trace .trace-time-value { display: inline-flex; align-items: baseline; gap: 0.4ch; padding: 0 6px; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: 999px; line-height: 1.5; color: var(--trace-status-color, var(--muted)); white-space: nowrap; }
 .chat-main .activity-trace .trace-time-ai .trace-time-value { color: color-mix(in srgb, var(--trace-status-color, var(--muted)) 55%, var(--muted)); }
-.chat-main .activity-trace .trace-time-label { font-size: 0.8em; letter-spacing: 0.04em; opacity: 0.55; }
+.chat-main .activity-trace .trace-time-label { color: var(--muted); }
 .chat-main .activity-trace .trace-time-num { min-width: 4.5ch; text-align: right; font-variant-numeric: tabular-nums; }
 .chat-main .typing .hint code.trace-subject,
 .chat-main .activity-trace code.trace-subject { padding: 0 4px; background: var(--chip-bg); border-radius: var(--radius-sm, 4px); font-family: var(--font-mono, monospace); font-size: inherit; }

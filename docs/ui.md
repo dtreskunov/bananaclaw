@@ -252,9 +252,11 @@ live on that step's row until the next step or the reply. Turns recorded
 before model steps existed show no AI time. Runner overhead between calls is not AI time; the usage
 details count it as **Other**. A finished time that would display as **0.0s**
 (including no attributed time) is left blank; the chip's slot keeps the columns
-aligned, and live stopwatches still count up from zero. Times use the
-trace status colors, blue while live and green once complete; **AI** uses a
-softer shade of the same color. Live times tick themselves and show tenths
+aligned, and live stopwatches still count up from zero. Each time is an
+outlined pill (`CPU 1.1s`) with its label and value inline in the same font;
+the label is muted, while the value and outline use the trace status colors,
+blue while live and green once complete; **AI** uses a softer shade of the
+same color. Live times tick themselves and show tenths
 below 10 s, then whole seconds. Chapter headers show the sums of their
 children.
 
