@@ -525,8 +525,7 @@ function UsageModel({ u, model, live, partial }: { u: Partial<TurnUsage>; model?
     {reportedModel ? <span class="usage-row"><span>Model</span><strong title={reportedModel}>{shortModel(reportedModel)}</strong></span> : null}
     {window !== null ? <UsageRow label="Context size" value={`${fmtContextLimit(window)} tok`} /> : null}
     {u.num_turns ? <UsageRow label={live ? 'Model calls so far' : 'Model calls'} value={String(u.num_turns)} /> : null}
-    <UsageRow label={partial ? 'Reported cost' : 'Estimated cost'}
-      value={u.cost_usd === undefined || !Number.isFinite(u.cost_usd) ? 'Unavailable' : fmtCost(u.cost_usd)} />
+    {u.cost_usd ? <UsageRow label={partial ? 'Reported cost' : 'Estimated cost'} value={fmtCost(u.cost_usd)} /> : null}
   </>;
 }
 

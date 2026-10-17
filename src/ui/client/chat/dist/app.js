@@ -22738,7 +22738,6 @@ function turnRowView(turn2, now) {
 
 // src/technical-summary.ts
 function formatUsageCost(usd) {
-  if (usd === 0) return "$0";
   if (usd >= 1) return "$" + usd.toFixed(2);
   if (usd >= 0.01) return "$" + usd.toFixed(3);
   return "$" + usd.toFixed(4);
@@ -24183,13 +24182,7 @@ function UsageModel({ u: u5, model, live, partial }) {
     ] }) : null,
     window2 !== null ? /* @__PURE__ */ u4(UsageRow, { label: "Context size", value: `${fmtContextLimit(window2)} tok` }) : null,
     u5.num_turns ? /* @__PURE__ */ u4(UsageRow, { label: live ? "Model calls so far" : "Model calls", value: String(u5.num_turns) }) : null,
-    /* @__PURE__ */ u4(
-      UsageRow,
-      {
-        label: partial ? "Reported cost" : "Estimated cost",
-        value: u5.cost_usd === void 0 || !Number.isFinite(u5.cost_usd) ? "Unavailable" : formatUsageCost(u5.cost_usd)
-      }
-    )
+    u5.cost_usd ? /* @__PURE__ */ u4(UsageRow, { label: partial ? "Reported cost" : "Estimated cost", value: formatUsageCost(u5.cost_usd) }) : null
   ] });
 }
 function AgentActionLabel({ label, title }) {

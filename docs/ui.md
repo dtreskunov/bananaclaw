@@ -417,7 +417,7 @@ only after the turn settles; running, stopping, and settling turns retain timing
 in the live stopwatch and inline usage details, not the trace status summary.
 Elapsed time uses the trace time format (tenths below 10 s, then floored
 seconds, `11m 50s`, `1h 1m`), so it always equals the details' **Total**. Missing fields and zero
-cost are omitted from the summary; a reported zero cost remains in the details. Total cost is
+cost are omitted from both the summary and the details. Total cost is
 shown only when every usage report includes cost; context is the latest reported
 valid context/window pair, not cumulative billed tokens. Context is read from
 the same usage record as the token and model-call counts, which the runner
@@ -558,8 +558,8 @@ substituting wall time or zero.
 The tokens column shows input and output processing (`55.0k tok in · 485 tok out`), then reasoning, cache
 read and cache write when non-zero, then context (`55.4k tok / 1M tok (6%)`).
 The model column shows the model, context size, the model-call count, and cost
-(**Estimated cost**, or **Reported cost** for partial usage). Cost is always
-listed: a reported zero shows `$0`, and a missing cost shows **Unavailable**.
+(**Estimated cost**, or **Reported cost** for partial usage) only when it is
+non-zero; zero or missing cost is omitted.
 Live model timing reflects reported calls so far, not a second running stopwatch.
 Stopped/failed calls retain reported timing alongside partial usage; unfinished
 calls without a usage report cannot provide a complete model-time total.

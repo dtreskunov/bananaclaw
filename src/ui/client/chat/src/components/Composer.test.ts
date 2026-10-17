@@ -1761,6 +1761,7 @@ describe('main composer pending edits', () => {
     const inline = renderUsageDetails(row);
     expect(usageRow(inline, 'Context utilization')).toBe(expected ? `16.0k tok \u00b7 ${expected}` : '16.0k tok');
     expect(usageRow(inline, 'Context size')).toBe(window ? '20.0k tok' : undefined);
+    expect(usageRow(inline, 'Estimated cost')).toBe('$0.012');
   });
 
   it.each([
@@ -2497,7 +2498,7 @@ describe('inline activity metrics', () => {
     expect(usageRow(columns[1], 'Context utilization')).toBe('55.4k tok \u00b7 6%');
     expect(usageRow(columns[2], 'Context size')).toBe('1M tok');
     expect(usageRow(columns[2], 'Model calls')).toBe('3');
-    expect(usageRow(columns[2], 'Estimated cost')).toBe('$0');
+    expect(usageRow(columns[2], 'Estimated cost')).toBeUndefined();
   });
 
   it.each(['provisional', 'partial'] as const)('only retains the partial warning for %s accounting', (accounting) => {
