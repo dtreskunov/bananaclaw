@@ -264,7 +264,7 @@ describe('theme CSS contract', () => {
     expect(turn).toContain(
       'padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block)',
     );
-    const timing = css.match(/\.chat-main \.typing \.typing-meta \{([^}]+)\}/)?.[1];
+    const timing = css.match(/\.chat-main \.turn-elapsed \{([^}]+)\}/)?.[1];
     expect(timing).toContain('flex: none');
     expect(timing).toContain('white-space: nowrap');
   });
@@ -286,13 +286,15 @@ describe('theme CSS contract', () => {
     const subject = css.match(/\.chat-main \.activity-trace code\.trace-subject \{([^}]+)\}/)?.[1];
     expect(subject).toContain('font-size: inherit');
     expect(subject).toContain('font-family: var(--font-mono, monospace)');
-    expect(css).toContain('.chat-main .typing .trace-preview code.trace-subject,');
+    expect(css).toContain('.chat-main .typing .hint code.trace-subject,');
     const code = css.match(/\.chat-main \.activity-trace pre\.trace-code \{([^}]+)\}/)?.[1];
     expect(code).toContain('font-size: inherit');
     const codeContent = css.match(/\.chat-main \.activity-trace pre\.trace-code code \{([^}]+)\}/)?.[1];
     expect(codeContent).toContain('font-size: inherit');
     const preview = css.match(/\.chat-main \.typing \.trace-preview \{([^}]+)\}/)?.[1];
-    expect(preview).toContain('font-size: var(--font-2xs)');
+    // The preview inherits the status line hint's size.
+    expect(preview).not.toContain('font-size');
+    expect(css.match(/\.chat-main \.typing \.hint \{([^}]+)\}/)?.[1]).toContain('font-size: var(--font-xs)');
     expect(preview).toContain('font-family: var(--font-ui)');
   });
 

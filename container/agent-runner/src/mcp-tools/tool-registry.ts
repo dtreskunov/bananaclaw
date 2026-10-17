@@ -28,6 +28,14 @@ export function registerTools(tools: McpToolDefinition[]): void {
   }
 }
 
+/** Removes a tool registered at runtime (tests share one process-wide registry). */
+export function unregisterTool(name: string): void {
+  const tool = toolMap.get(name);
+  if (!tool) return;
+  toolMap.delete(name);
+  allTools.splice(allTools.indexOf(tool), 1);
+}
+
 export function listRegisteredTools(): McpToolDefinition[] {
   return [...allTools];
 }

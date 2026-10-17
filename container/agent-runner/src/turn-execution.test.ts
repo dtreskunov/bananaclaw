@@ -6,7 +6,7 @@ import { getTurnContext } from './current-batch.js';
 import { beginTurn, completeUsageAttempt, finishUsageAttempt, recordCallUsage, settleTurn } from './turn-execution.js';
 import { runPollLoop } from './poll-loop.js';
 import { requestTurnStop, resetHostEventsForTesting } from './session-link.js';
-import { invokeRegisteredTool, registerTools } from './mcp-tools/tool-registry.js';
+import { invokeRegisteredTool, registerTools, unregisterTool } from './mcp-tools/tool-registry.js';
 import { writeMessageOut } from './db/messages-out.js';
 import type { ActivityStep, AgentProvider, ProviderEvent, QueryInput } from './providers/types.js';
 
@@ -429,7 +429,7 @@ it('waits for captured asynchronous tool output before durable settlement', asyn
   await Bun.sleep(20);
   expect(getTurn(getOutboundDb(), turn.turnId)?.phase).toBe('running');
   release();
-  await Promise.all([tool, settlement]);
+  await Promise.all([tool.finally(() => unregisterTool('settlement-late')), settlement]);
   expect(getTurn(getOutboundDb(), turn.turnId)?.phase).toBe('settled');
   const events = getOutboundDb().prepare('SELECT event_type, payload FROM pending_runner_events ORDER BY sequence').all() as
     Array<{ event_type: string; payload: string }>;

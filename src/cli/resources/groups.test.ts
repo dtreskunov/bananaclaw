@@ -101,8 +101,8 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
 
     db.prepare(
       `INSERT INTO questions
-         (question_id, session_id, message_out_id, title, question_text, response_mode, options_json, status, created_at)
-       VALUES (?, ?, 'mout-1', 'q', 'question', 'choice', '[]', 'pending', ?)`,
+         (question_id, session_id, message_out_id, question_text, response_mode, options_json, status, created_at)
+       VALUES (?, ?, 'mout-1', 'question', 'choice', '[]', 'pending', ?)`,
     ).run('q-1', SID, now());
 
     db.prepare(

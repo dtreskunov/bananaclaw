@@ -71,6 +71,7 @@ describe('thread title request', () => {
       platformId: 'group-1',
       channelType: 'web',
       threadId: 'thread-1',
+      timelinePosition: expect.any(Number),
     });
   });
 });

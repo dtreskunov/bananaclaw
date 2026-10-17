@@ -383,7 +383,6 @@
 .chat-main .typing .trace-preview { padding: 0; border: none; background: none; color: var(--muted); font-family: var(--font-ui); font-style: normal; text-align: left; cursor: pointer; opacity: 0.85; }
 .chat-main .typing .trace-preview:hover { color: var(--fg); opacity: 1; }
 .chat-main .typing .trace-preview:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; border-radius: 2px; }
-.chat-main .typing .typing-meta { flex: 0 1 auto; white-space: nowrap; font-size: var(--font-2xs); color: var(--muted); opacity: 0.7; font-variant-numeric: tabular-nums; }
 /* Expanded historical traces need room even when their summary is short. */
 .chat-main .typing.expanded { min-width: min(78%, 460px); }
 /* Synthetic turn bubble while live or when there is no final response. */

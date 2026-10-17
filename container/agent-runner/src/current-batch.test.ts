@@ -7,7 +7,7 @@ import { getOutboundDb, initTestSessionDb, closeSessionDb } from './db/connectio
 import { beginTurn } from './turn-execution.js';
 import { getTurnContext, readTurnContext, withTurnContext } from './current-batch.js';
 import { writeMessageOut, writeMessageOutWithConnections } from './db/messages-out.js';
-import { invokeRegisteredTool, registerTools } from './mcp-tools/tool-registry.js';
+import { invokeRegisteredTool, registerTools, unregisterTool } from './mcp-tools/tool-registry.js';
 
 afterEach(() => closeSessionDb());
 const routing = { channelType: 'web', platformId: 'chat', threadId: null, inReplyTo: null };
@@ -28,7 +28,7 @@ it('captures a tool invocation before its await instead of stamping the successo
   const pending = invokeRegisteredTool('late-context-test');
   const second = beginTurn(routing, []);
   release();
-  await pending;
+  await pending.finally(() => unregisterTool('late-context-test'));
   expect(getTurnContext()?.turnId).toBe(second.turnId);
   expect(getOutboundDb().prepare("SELECT turn_id FROM messages_out WHERE id='late'").get()).toEqual({ turn_id: first.turnId });
 });

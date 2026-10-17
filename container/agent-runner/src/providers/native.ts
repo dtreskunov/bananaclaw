@@ -361,6 +361,9 @@ export class NativeProvider implements AgentProvider {
               let checkpoint = journal.checkpoint;
               const appliedSteeringIds: string[] = [];
               function recordCall({ usage, performance }: LanguageModelCallEndEvent, summary = false): void {
+                // Stopping can make the SDK close a waiting stream with a synthetic, usage-less
+                // finish; that is not a report of the call.
+                if (abortController.signal.aborted && usage.inputTokens === undefined && usage.outputTokens === undefined) return;
                 const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
                 // A summary call's prompt is the old history, not the conversation's context.
                 if (summary) data.context_tokens = undefined;

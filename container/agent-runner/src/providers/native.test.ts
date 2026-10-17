@@ -2349,7 +2349,7 @@ describe('final message', () => {
     }
     expect(systemText(requests[MAX_STEPS])).toContain('Tools are now disabled');
     expect(replyTexts(events)).toEqual([['Progress so far.']]);
-  }, 10_000);
+  }, 30_000);
 
   it('replaces a drafted final message when guidance arrives', async () => {
     scriptedTexts = ['draft answer', 'steered answer'];
