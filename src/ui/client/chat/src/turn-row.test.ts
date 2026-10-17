@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage, ConversationTurn } from '../../../shared/conversation';
 import { testSnapshot, testTurn } from './conversation-test-fixtures';
-import { activeTurnNotices, currentActivityHeadline, hasTurnStats, liveTurnActivity, turnRowView } from './turn-row';
+import { activeTurnNotices, hasTurnStats, latestTraceHeadline, liveTurnActivity, turnRowView } from './turn-row';
 import {
   activityChapters,
+  displayStep,
   parseStep,
+  stepHeadline,
   traceStatusClass,
   type TraceLine,
   type TraceStep,
@@ -52,77 +54,51 @@ describe('Stats availability', () => {
   });
 });
 
-describe('current activity headline', () => {
+describe('latest trace headline', () => {
   const line = (step: TraceStep): TraceLine => ({ ts: '1000', text: JSON.stringify(step) });
   const tool: TraceStep = { kind: 'tool', id: 'call', tool: 'bash', detail: 'pnpm test' };
 
-  it.each(['completed', 'error', 'interrupted', 'unknown', undefined] as const)(
-    'returns to Thinking after a tool becomes %s without changing its trace record',
+  it('falls back to Thinking only before any activity', () => {
+    expect(latestTraceHeadline([], true)).toEqual({ headline: { action: 'Thinking…' }, repetitions: 1 });
+  });
+
+  it.each(['running', 'pending', 'completed', 'error', 'interrupted'] as const)(
+    'mirrors the latest %s entry without changing its trace record',
     (status) => {
       const lines = [line({ ...tool, status })];
       const before = JSON.stringify(lines);
-      expect(currentActivityHeadline(lines)).toEqual({ action: 'Thinking…' });
+      const { headline, repetitions } = latestTraceHeadline(lines, true);
+      expect(headline).toEqual(stepHeadline(displayStep(lines[0], true)));
+      expect(headline.subject).toContain('pnpm test');
+      expect(repetitions).toBe(1);
       expect(JSON.stringify(lines)).toBe(before);
     },
   );
 
-  it('keeps running and pending activities current', () => {
-    expect(currentActivityHeadline([line({ ...tool, status: 'running' })])).toEqual({
-      action: 'Running',
-      subject: 'pnpm test',
-      codeSubject: true,
+  it('mirrors a grouped chapter with its repetition count', () => {
+    const lines = ['a', 'b', 'c'].map((id) => line({ ...tool, id, status: 'completed' }));
+    const chapters = activityChapters(lines, true);
+    expect(chapters).toHaveLength(1);
+    expect(latestTraceHeadline(lines, true)).toEqual({ headline: chapters[0].headline, repetitions: 3 });
+  });
+
+  it('follows the trace list: the newest chapter leads, outcome rows never do', () => {
+    const lines = [
+      line({ ...tool, status: 'running' }),
+      line({ kind: 'compaction', id: 'compact', auto: true, status: 'completed' }),
+    ];
+    const chapters = activityChapters(lines, true);
+    const latest = chapters.at(-1)!;
+    expect(latestTraceHeadline(lines, true).headline).toEqual(stepHeadline(latest.entries[0].step));
+    expect(
+      latestTraceHeadline([...lines, line({ kind: 'notification', id: 'ui:outcome:t', text: 'Replied' })], true),
+    ).toEqual(latestTraceHeadline(lines, true));
+  });
+
+  it('shows legacy text entries by their text', () => {
+    expect(latestTraceHeadline([{ ts: '1000', text: 'Earlier work' }], true).headline).toEqual({
+      action: 'Earlier work',
     });
-
-    expect(currentActivityHeadline([line({ ...tool, status: 'pending' })])).toEqual({
-      action: 'Queued',
-      subject: 'pnpm test',
-      codeSubject: true,
-    });
-  });
-
-  it('keeps an earlier parallel activity current when a later activity has completed', () => {
-    expect(
-      currentActivityHeadline([
-        line({ ...tool, status: 'running' }),
-        line({ kind: 'tool', id: 'other', tool: 'read', detail: 'file.ts', status: 'completed' }),
-        line({ kind: 'notification', id: 'steering', text: 'Steering message injected' }),
-      ]),
-    ).toEqual({ action: 'Running', subject: 'pnpm test', codeSubject: true });
-  });
-
-  it.each(['completed', 'error', 'interrupted', 'unknown'] as const)(
-    'does not revive a stale running entry when the same activity is now %s',
-    (status) => {
-      expect(currentActivityHeadline([line({ ...tool, status: 'running' }), line({ ...tool, status })])).toEqual({
-        action: 'Thinking…',
-      });
-    },
-  );
-
-  it('returns to Thinking after compaction finishes', () => {
-    const compaction: TraceStep = { kind: 'compaction', id: 'compact', auto: true, status: 'running' };
-    expect(currentActivityHeadline([line(compaction)])).toEqual({ action: 'Compacting context' });
-    expect(currentActivityHeadline([line({ ...compaction, status: 'completed' })])).toEqual({ action: 'Thinking…' });
-  });
-
-  it('does not keep instantaneous notifications, retries or legacy text current indefinitely', () => {
-    expect(currentActivityHeadline([])).toEqual({ action: 'Thinking…' });
-    expect(
-      currentActivityHeadline([
-        line({ kind: 'notification', id: 'thinking', text: 'Thinking' }),
-        line({ kind: 'retry', id: 'retry', attempt: 2 }),
-        { ts: '1000', text: 'Earlier work' },
-      ]),
-    ).toEqual({ action: 'Thinking…' });
-  });
-
-  it('never treats a synthetic running Thinking marker as actual active work', () => {
-    expect(
-      currentActivityHeadline([
-        line({ ...tool, id: 'ui:current:tool', status: 'running' }),
-        line({ kind: 'notification', id: 'ui:current:turn', text: 'Thinking…', status: 'running' }),
-      ]),
-    ).toEqual({ action: 'Running', subject: 'pnpm test', codeSubject: true });
   });
 });
 
@@ -135,6 +111,13 @@ describe('model time versus wall time', () => {
       ],
     });
     expect(turnRowView(turn, start)).toMatchObject({ elapsedMs: 5000, modelCallMs: 3000 });
+  });
+  it('measures the total from submission, including the wait before the turn started', () => {
+    const requestedAt = new Date(start - 2000).toISOString();
+    expect(turnRowView(settled({ requestedAt }), start).elapsedMs).toBe(7000);
+    const live = { ...testTurn, startedAt: new Date(start).toISOString(), requestedAt };
+    expect(turnRowView(live, start + 1000).elapsedMs).toBe(3000);
+    expect(turnRowView({ ...live, requestedAt: null }, start + 1000).elapsedMs).toBe(1000);
   });
   it('uses live usage records and preserves measured zero', () => {
     expect(
@@ -178,12 +161,13 @@ describe('live status and trace notices', () => {
     expect(result.headline).toEqual({ action: 'Thinking…' });
   });
 
-  it('returns the status to Thinking… after completion without closing the recorded chapter', () => {
+  it('keeps mirroring the completed entry without closing the recorded chapter', () => {
     const lines = [...initial, finished];
     const before = JSON.stringify(lines);
     const result = liveTurnActivity(testTurn, lines, true, null)!;
     expect(result.lines).toBe(lines);
-    expect(result.headline).toEqual({ action: 'Thinking…' });
+    expect(result.headline).toEqual(latestTraceHeadline(lines, true).headline);
+    expect(result.headline.action).toBe('Ran');
     expect(liveTurnActivity(testTurn, lines, true, null)).toEqual(result);
     expect(result.lines.filter((entry) => parseStep(entry.text).text === 'Thinking…')).toHaveLength(0);
     const resumed = [...lines, running];
@@ -430,7 +414,17 @@ describe('turn activity placement', () => {
       id: 'm',
       inputIds: ['ask'],
       outputIds: ['update'],
-      activity: [step(0, 1000), step(1, 5000)],
+      activity: [
+        // The runner marks when the first model call can start; the start row then completes.
+        {
+          ordinal: 2,
+          ts: String(start + 500),
+          text: JSON.stringify({ kind: 'model', id: 'model:ready', durationMs: 0 }),
+          timelinePosition: us + 500_000,
+        },
+        step(0, 1000),
+        step(1, 5000),
+      ],
     };
     const messages = [message('ask', 'in', -1), message('update', 'out', 3000)];
     expect(rows(testSnapshot({ messages, turns: [running] }).conversation)).toEqual([

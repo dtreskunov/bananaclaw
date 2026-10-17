@@ -29,6 +29,20 @@ export function toggleActivityTrace(ownerId: string): void {
   traceOwner.value = traceOwner.peek() === ownerId ? null : ownerId;
 }
 
+export function submissionTraceOwner(messageId: string): string {
+  return `submission:${messageId}`;
+}
+
+/** A pre-turn trace or usage view stays open once the turn that claimed its submission takes over the row. */
+export function adoptSubmissionTraces(turns: readonly { id: string; inputIds: readonly string[] }[]): void {
+  for (const owner of [traceOwner, metricsOwner]) {
+    const current = owner.peek();
+    if (!current?.startsWith('submission:')) continue;
+    const turn = turns.find((candidate) => candidate.inputIds.some((id) => submissionTraceOwner(id) === current));
+    if (turn) owner.value = `turn:${turn.id}`;
+  }
+}
+
 export function resetActivityTraceView(): void {
   traceOwner.value = null;
   metricsOwner.value = null;

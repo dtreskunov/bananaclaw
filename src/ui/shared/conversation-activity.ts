@@ -2,7 +2,8 @@ import { parseStep, type ModelTime, type TraceLine, type TraceStep } from './act
 import type { ConversationTurn } from './conversation.js';
 
 export const THINKING_TEXT = 'Thinking\u2026';
-export const STARTING_TURN_TEXT = 'Starting response\u2026';
+export const QUEUED_TEXT = 'Queued\u2026';
+export const PREPARING_TEXT = 'Preparing\u2026';
 export const STARTED_TURN_TEXT = 'Started response';
 const TURN_START = -1;
 
@@ -47,14 +48,22 @@ export function conversationActivity(turn: ConversationTurn, activity = turn.act
   ];
 }
 
+/** When the turn was requested (its earliest submission), falling back to its start. */
+export function turnRequestedAt(turn: Pick<ConversationTurn, 'requestedAt' | 'startedAt'>): number {
+  const requestedAt = turn.requestedAt ? Date.parse(turn.requestedAt) : NaN;
+  if (Number.isFinite(requestedAt)) return requestedAt;
+  return turn.startedAt ? Date.parse(turn.startedAt) : NaN;
+}
+
 // Reported call starts are derived from end minus duration, so allow a little clock skew.
 const CALL_START_SLACK_MS = 250;
 
 /**
  * Model time per trace row, keyed by ordinal (or the turn start). Each reported
  * model call is attributed to the step whose end preceded the call's start,
- * i.e. the step that prompted it. While live and no step is running, the time
- * since the latest step or call ended ticks on its owner.
+ * i.e. the step that prompted it. Once the first model call can start, while
+ * live and no step is running, the time since the latest step or call ended
+ * ticks on its owner.
  */
 export function turnModelTime(turn: ConversationTurn): Map<number, ModelTime> {
   const times = new Map<number, ModelTime>();
@@ -91,7 +100,7 @@ export function turnModelTime(turn: ConversationTurn): Map<number, ModelTime> {
     )?.ordinal ?? TURN_START;
   for (const { at, step } of calls)
     add(ownerAt(at - (step.durationMs ?? 0) + CALL_START_SLACK_MS), step.durationMs ?? 0);
-  if (live && !steps.some(({ end }) => end === Infinity)) {
+  if (live && calls.length && !steps.some(({ end }) => end === Infinity)) {
     const lastStep = Math.max(startedAt, ...steps.map(({ end }) => end));
     add(ownerAt(lastStep), 0, Math.max(lastStep, ...calls.map(({ at }) => at)));
   }
@@ -100,7 +109,10 @@ export function turnModelTime(turn: ConversationTurn): Map<number, ModelTime> {
 
 /**
  * Attaches model time to a trace segment and drops the hidden model-call rows;
- * the segment holding the turn start gets a synthetic first row.
+ * the segment holding the turn start gets a synthetic first row. That row reads
+ * Preparing… from runner pickup until the first model call can start (its
+ * execution time), then Thinking… while that call's model time ticks on it.
+ * Queueing before pickup counts toward the turn total only.
  */
 export function withModelTime(
   turn: ConversationTurn,
@@ -117,12 +129,32 @@ export function withModelTime(
   const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
   if (!hostsStart || !Number.isFinite(startedAt)) return timed;
   const modelTime = times.get(TURN_START);
-  const open = modelTime?.since !== undefined;
+  // The readiness marker (or first model call) ends preparation.
+  const callStarts = turn.activity.flatMap(({ ts, text }) => {
+    const step = parseStep(text);
+    const at = Number(ts);
+    return step.kind === 'model' && Number.isFinite(at) ? [at - (step.durationMs ?? 0)] : [];
+  });
+  const prepared = callStarts.length ? { durationMs: Math.max(0, Math.min(...callStarts) - startedAt) } : {};
+  const live = turn.phase !== 'settled';
+  const text = !live
+    ? STARTED_TURN_TEXT
+    : !callStarts.length
+      ? PREPARING_TEXT
+      : modelTime?.since !== undefined
+        ? THINKING_TEXT
+        : STARTED_TURN_TEXT;
   const step: TraceStep = {
     kind: 'notification',
     id: `ui:start:${turn.id}`,
-    text: open ? STARTING_TURN_TEXT : STARTED_TURN_TEXT,
-    status: open ? 'running' : 'completed',
+    text,
+    status: text === STARTED_TURN_TEXT ? 'completed' : 'running',
+    ...prepared,
   };
   return [{ ts: String(startedAt), text: JSON.stringify(step), ...(modelTime ? { modelTime } : {}) }, ...timed];
+}
+
+/** The synthetic start row; its execution time is the wait before the first model call. */
+export function isTurnStartStep(step: TraceStep): boolean {
+  return step.kind === 'notification' && !!step.id?.startsWith('ui:start:');
 }

@@ -423,6 +423,35 @@ describe('authoritative conversation projection', () => {
     expect(after.capabilities.stop).toBe(false);
   });
 
+  it('projects when the turn was requested, never before the previous turn ended', () => {
+    const input = (id: string, timestamp: string): ConversationMessage => ({
+      id,
+      direction: 'in',
+      timestamp,
+      text: id,
+    });
+    putTurn(db, { ...turn, id: 'earlier', started_at: '2026-09-28T23:59:50Z', ended_at: '2026-09-28T23:59:58Z' });
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
+    linkTurnInput(db, { turn_id: 'turn', message_in_id: 'late', association: 'consumed' });
+    linkTurnInput(db, { turn_id: 'turn', message_in_id: 'first', association: 'consumed' });
+    const requested = (history: ConversationMessage[]) => read(history).turns.find((t) => t.id === 'turn')?.requestedAt;
+    expect(requested([input('first', '2026-09-28T23:59:59Z'), input('late', '2026-09-29T00:00:00Z')])).toBe(
+      '2026-09-28T23:59:59.000Z',
+    );
+    // Queued behind the earlier turn: the wait starts when that turn ended.
+    expect(requested([input('first', '2026-09-28T23:59:55Z')])).toBe('2026-09-28T23:59:58.000Z');
+    expect(requested([])).toBeNull();
+    const conversation = read([input('first', '2026-09-28T23:59:59Z')]);
+    const frame = {
+      kind: 'snapshot',
+      protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+      streamId: 'r',
+      revision: 0,
+      conversation,
+    };
+    expect(parseConversationFrame(frame)).toBe(frame);
+  });
+
   it('omits a running turn’s checkpointed duration so the client shows live elapsed time', () => {
     db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
       'turn-metadata:turn',

@@ -93,6 +93,8 @@ export interface ConversationTurn {
   phase: 'running' | 'stopping' | 'settling' | 'settled';
   outcome: 'pending' | 'replied' | 'warning' | 'silent' | 'stopped' | 'failed' | 'unknown' | 'interrupted';
   startedAt: string | null;
+  /** When the earliest input answered by this turn was submitted; falls back to startedAt. */
+  requestedAt?: string | null;
   endedAt: string | null;
   inputIds: string[];
   outputIds: string[];

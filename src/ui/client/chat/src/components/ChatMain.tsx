@@ -33,6 +33,7 @@ import { usePendingComposer } from '../pending-composer';
 import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
+import { isTurnStartStep, QUEUED_TEXT, turnRequestedAt } from '../../../../shared/conversation-activity';
 import {
   activityChapters, activityStepCount, chapterEntryHeadline, displayStep, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep, stepHeadline, stepBody,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, TRACE_STEP_THRESHOLD_MS,
@@ -40,9 +41,9 @@ import {
 } from '../../../../shared/activity-presentation';
 import { formatStopwatch } from '../duration-format';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
-import { STARTING_RESPONSE_TEXT, submissionPresentation } from '../web-submissions';
+import { submissionPresentation } from '../web-submissions';
 import {
-  activityTraceOwner, activityTraceExpanded, toggleActivityTrace,
+  activityTraceOwner, activityTraceExpanded, toggleActivityTrace, submissionTraceOwner,
   activityMetricsExpanded, toggleActivityMetrics,
 } from '../activity-trace-state';
 import { responseScrollTop } from '../turn-completion';
@@ -195,7 +196,12 @@ function modelChipTime(modelTime: ModelTime | undefined, active: boolean): ChipT
 }
 
 function isTimedStep(step: TraceStep): boolean {
-  return step.kind === 'tool' || step.kind === 'compaction';
+  return step.kind === 'tool' || step.kind === 'compaction' || isTurnStartStep(step);
+}
+
+/** A running timed step without a final duration; the start row keeps running after its wait ends. */
+function execRunning(step: TraceStep, live: boolean): boolean {
+  return live && isTimedStep(step) && step.status === 'running' && step.durationMs === undefined;
 }
 
 /** Chapter totals; a live part ticks from its start, offset by the finished total. */
@@ -209,7 +215,7 @@ function chapterTimes(entries: TraceEntry[], live: boolean) {
     if (isTimedStep(step)) {
       timed = true;
       const startedAt = Number(line.ts);
-      if (live && step.status === 'running' && line.ts && Number.isFinite(startedAt))
+      if (execRunning(step, live) && line.ts && Number.isFinite(startedAt))
         execSince = Math.min(execSince ?? startedAt, startedAt);
       else exec += step.durationMs ?? 0;
     }
@@ -237,7 +243,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : '';
   const meta = open ? [timestamp, statusText].filter(Boolean).join(' · ') : '';
-  const execTime: ChipTime | null = running
+  const execTime: ChipTime | null = execRunning(step, live)
     ? hasStartedAt ? { since: startedAt } : null
     : isTimedStep(step) && typeof step.durationMs === 'number' ? { ms: step.durationMs } : null;
   const todos = open ? todoItems(step) : null;
@@ -468,7 +474,7 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
           <UsageRow label="Model" value={fmtTime(modelElapsedMs)} title="Sum of reported model-call times" />
           <UsageRow label="Tools" value={fmtTime(toolElapsedMs)} title="Time with at least one tool running" />
           <UsageRow label="Other" value={fmtTime(otherMs)}
-            title="Total minus model and tool time: container startup, prompt assembly, history loading, message delivery, etc." />
+            title="Total minus model and tool time: queueing, container startup, prompt assembly, history loading, message delivery, etc." />
         </section>
         <section class="usage-column" aria-label="Tokens">
           {reports.map((record, index) => <div class="usage-report" key={record.id}>
@@ -487,15 +493,15 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
   );
 }
 
-function UsageContext({ context, partialTokens, live }: {
-  context: KnownContext | null; partialTokens?: number; live: boolean;
+function UsageContext({ context, partialTokens }: {
+  context: KnownContext | null; partialTokens?: number;
 }) {
   const contextTokens = context ? context.context_tokens
     : partialTokens !== undefined && Number.isFinite(partialTokens) && partialTokens >= 0 ? partialTokens : undefined;
   if (contextTokens === undefined) return null;
-  const detail = `${fmtTokUnit(contextTokens)}${context
-    ? ` / ${fmtContextLimit(context.context_window)} tok (${fmtPct(contextTokens, context.context_window)})` : ''}`;
-  return <UsageRow label={live ? 'Context now' : 'Context at end'} value={detail} />;
+  const detail = `${fmtTokUnit(contextTokens)}${context ? ` \u00b7 ${fmtPct(contextTokens, context.context_window)}` : ''}`;
+  return <UsageRow label="Context utilization" value={detail}
+    title="Context in use after the latest model call: its whole prompt plus its reply" />;
 }
 
 function UsageTokens({ u, live }: { u: Partial<TurnUsage>; live: boolean }) {
@@ -507,16 +513,20 @@ function UsageTokens({ u, live }: { u: Partial<TurnUsage>; live: boolean }) {
     {u.cache_read_tokens ? <UsageRow label="Cache read" value={fmtTokUnit(u.cache_read_tokens)} /> : null}
     {u.cache_write_tokens ? <UsageRow label="Cache write" value={fmtTokUnit(u.cache_write_tokens)} /> : null}
     <UsageContext context={latestContextUsage([u])}
-      partialTokens={u.context_window === undefined ? u.context_tokens : undefined} live={live} />
+      partialTokens={u.context_window === undefined ? u.context_tokens : undefined} />
   </>;
 }
 
 function UsageModel({ u, model, live, partial }: { u: Partial<TurnUsage>; model?: string | null; live: boolean; partial: boolean }) {
   const reportedModel = u.model || model;
+  const window = u.context_window !== undefined && Number.isFinite(u.context_window) && u.context_window > 0
+    ? u.context_window : null;
   return <>
     {reportedModel ? <span class="usage-row"><span>Model</span><strong title={reportedModel}>{shortModel(reportedModel)}</strong></span> : null}
+    {window !== null ? <UsageRow label="Context size" value={`${fmtContextLimit(window)} tok`} /> : null}
     {u.num_turns ? <UsageRow label={live ? 'Model calls so far' : 'Model calls'} value={String(u.num_turns)} /> : null}
-    {u.cost_usd ? <UsageRow label={partial ? 'Reported cost' : 'Estimated cost'} value={fmtCost(u.cost_usd)} /> : null}
+    <UsageRow label={partial ? 'Reported cost' : 'Estimated cost'}
+      value={u.cost_usd === undefined || !Number.isFinite(u.cost_usd) ? 'Unavailable' : fmtCost(u.cost_usd)} />
   </>;
 }
 
@@ -1234,30 +1244,34 @@ function TurnTechnicalDetails({
   );
 }
 
-function TurnElapsed({ startedAt }: { startedAt: number | null }) {
+/** The turn's Total, on the same clock as the usage summary. */
+function TurnElapsed({ ms, live }: { ms: number; live: boolean }) {
   return (
-    <span class={`turn-elapsed${startedAt === null ? '' : ' live'}`}
-      role={startedAt === null ? undefined : 'timer'} aria-live={startedAt === null ? undefined : 'off'}
+    <span class={`turn-elapsed${live ? ' live' : ''}`}
+      role={live ? 'timer' : undefined} aria-live={live ? 'off' : undefined}
       aria-label="Elapsed response time"
       title="Response time, including tools and waiting for replies">
-      {startedAt === null ? formatStopwatch(0) : <LiveDuration since={startedAt} />}
+      {formatStopwatch(ms)}
     </span>
   );
 }
 
-function startingResponsePresentation(submission: PendingWebSend) {
-  const ownerId = `submission:${submission.messageId}`;
+function startingResponsePresentation(submission: PendingWebSend, now: number) {
+  const ownerId = submissionTraceOwner(submission.messageId);
+  const submittedAt = Date.parse(submission.timestamp);
   return {
     ownerId, status: true, busy: true, traceLive: true, traceNow: null,
     attributes: { 'data-response-start': ownerId },
     technicalTurn: undefined,
     stopControl: <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton turnId={null} /></span>,
-    elapsedControl: <TurnElapsed startedAt={null} />,
+    elapsedControl: <TurnElapsed ms={Number.isFinite(submittedAt) ? Math.max(0, now - submittedAt) : 0} live />,
     tone: '',
-    activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
-    lines: [{ ts: '', text: JSON.stringify({
-      kind: 'notification', id: `ui:current:${submission.messageId}`,
-      text: STARTING_RESPONSE_TEXT, status: 'running',
+    activity: { headline: { action: QUEUED_TEXT }, repetitions: 1, notice: false, error: false },
+    // A real (counted) entry, so the trace exists from the moment of sending.
+    // Pending: queueing has no CPU chip; the turn total covers it.
+    lines: [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : '', text: JSON.stringify({
+      kind: 'notification', id: `ui:start:${submission.messageId}`,
+      text: QUEUED_TEXT, status: 'pending',
     }) }],
   };
 }
@@ -1270,6 +1284,7 @@ function turnResponsePresentation(
   const settled = turn.phase === 'settled';
   const live = status && !settled;
   const activity = live ? liveTurnActivity(turn, lines, turnConnected.value, stop) : null;
+  const elapsedMs = live ? turnRowView(turn, now).elapsedMs : null;
   const tone = stop?.error || (settled && turn.outcome === 'failed')
     ? ' provenance-error'
     : (settled && ['warning', 'stopped', 'interrupted'].includes(turn.outcome)) || (live && !turnConnected.value)
@@ -1282,7 +1297,7 @@ function turnResponsePresentation(
     technicalTurn: status ? turn : undefined,
     stopControl: live
       ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton turnId={turn.id} /></span> : null,
-    elapsedControl: live && turn.startedAt ? <TurnElapsed startedAt={Date.parse(turn.startedAt)} /> : null,
+    elapsedControl: elapsedMs !== null ? <TurnElapsed ms={elapsedMs} live /> : null,
     tone, activity, lines: activity?.lines ?? lines,
   };
 }
@@ -1291,23 +1306,28 @@ function turnResponsePresentation(
 function ResponseStatusRow({ source }: {
   source: Extract<TranscriptRow, { kind: 'starting' | 'turn' }>;
 }) {
+  // Measured from submission, so the wait before the turn starts counts.
   const clock = source.kind === 'turn'
-    ? { startedAt: source.turn.startedAt, live: source.status && source.turn.phase !== 'settled' }
-    : { startedAt: null, live: false };
+    ? { startedAt: turnRequestedAt(source.turn), live: source.status && source.turn.phase !== 'settled' }
+    : { startedAt: Date.parse(source.submission.timestamp), live: true };
   const [now, setNow] = useState(() => Date.now());
+  // One clock for the status line and the usage summary: tenths below 10s, then whole seconds.
+  const startedAt = clock.startedAt;
+  const tick = Number.isFinite(startedAt) && now - startedAt < 10_000 ? 100 : 1000;
   useEffect(() => {
-    setNow(Date.now());
     if (!clock.live) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [clock.startedAt, clock.live]);
+    const timer = window.setTimeout(() => setNow(Date.now()), tick);
+    return () => window.clearTimeout(timer);
+  }, [now, tick, clock.live]);
+  useEffect(() => setNow(Date.now()), [clock.startedAt, clock.live]);
   const presentation = source.kind === 'starting'
-    ? startingResponsePresentation(source.submission)
+    ? startingResponsePresentation(source.submission, now)
     : turnResponsePresentation(source, now);
   const { ownerId, status, busy, lines, activity } = presentation;
   const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;
+  const repetitions = activity?.repetitions ?? 1;
   if (!lines.length && !status) return null;
   if (!status && !showTechnicalStatus) return null;
   const hasTechnicalInformation = showTechnicalStatus && (lines.length > 0 ||
@@ -1334,8 +1354,8 @@ function ResponseStatusRow({ source }: {
         {presentation.elapsedControl}
         {headline && activity?.notice
           ? <span class={`hint${activity.error ? ' turn-stop-error' : ''}`}
-              role={activity.error ? 'alert' : 'status'} title={headlineSummary(headline)}
-            ><StepHeadlineContent headline={headline} /></span>
+              role={activity.error ? 'alert' : 'status'} title={headlineSummary(headline, repetitions)}
+            ><StepHeadlineContent headline={headline} repetitions={repetitions} /></span>
           : headline && showTechnicalStatus && expanded
           ? null
           : headline && showTechnicalStatus
@@ -1346,8 +1366,8 @@ function ResponseStatusRow({ source }: {
               aria-label={expanded ? 'Hide activity' : 'Show latest activity'}
               title={expanded ? 'Hide activity' : 'Show latest activity'}
               onClick={() => toggleActivityTrace(ownerId)}
-            ><StepHeadlineContent headline={headline} /></button>
-          : headline ? <span class="hint"><StepHeadlineContent headline={headline} /></span> : null}
+            ><StepHeadlineContent headline={headline} repetitions={repetitions} /></button>
+          : headline ? <span class="hint"><StepHeadlineContent headline={headline} repetitions={repetitions} /></span> : null}
       </div>
     </div>
   );

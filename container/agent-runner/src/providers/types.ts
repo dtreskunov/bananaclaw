@@ -45,6 +45,13 @@ export interface AgentProvider {
   readonly structuredReplies?: boolean;
 
   /**
+   * Optional. When true, the provider emits `model_request` immediately
+   * before each model request, so the runner marks AI time from the first
+   * real request instead of from `init` (which may precede turn setup).
+   */
+  readonly reportsModelRequests?: boolean;
+
+  /**
    * Optional. Called by the poll-loop after each completed exchange (a
    * result, a wrapping retry, or an error). Providers whose harness keeps no
    * on-disk transcript implement this to persist exchanges themselves (e.g.
@@ -407,6 +414,8 @@ export interface ProviderReply {
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   | { type: 'steering_applied'; id: string }
+  /** A model request is about to start (only from `reportsModelRequests` providers). */
+  | { type: 'model_request' }
   /**
    * Final turn output. `strippedToEmpty` marks the case where the model's
   * assistant produced recoverable output but no deliverable text (e.g. a

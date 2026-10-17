@@ -21,6 +21,8 @@ export interface TurnExecution extends TurnContext {
   usageId: string;
   inputIds: string[];
   settled: boolean;
+  /** The turn's first model call could start (its marker step was written). */
+  modelReady?: boolean;
   endedAt?: string;
   failure?: boolean;
 }

@@ -1,8 +1,6 @@
 import type { Conversation } from '../../../shared/conversation';
 import type { ChatMessage, InputState, PendingWebSend, TranscriptRow, WebSendState } from './types';
 
-export const STARTING_RESPONSE_TEXT = 'Starting response\u2026';
-
 export function withWebSendState(submission: PendingWebSend, state: WebSendState): PendingWebSend {
   const { status: _status, error: _error, ...packet } = submission;
   return { ...packet, ...state };

@@ -151,6 +151,7 @@ const turn = shape({
   phase: oneOf('running', 'stopping', 'settling', 'settled'),
   outcome: oneOf('pending', 'replied', 'warning', 'silent', 'stopped', 'failed', 'unknown', 'interrupted'),
   startedAt: nullable(text),
+  requestedAt: optional(nullable(text)),
   endedAt: nullable(text),
   inputIds: strings,
   outputIds: strings,

@@ -314,12 +314,8 @@
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding-inline: 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
   overflow-x: auto;
   scrollbar-width: thin;
-  padding-block: 6px;
   color: var(--fg);
   font-size: var(--font-2xs);
   line-height: 1.35;
@@ -401,6 +397,10 @@
 .chat-main .activity-trace li .ts { margin-right: 6px; opacity: 0.6; font-variant-numeric: tabular-nums; }
 /* Shared live and persisted activity chapters. */
 .chat-main .msg-activity { margin-top: var(--text-block-gap); display: flex; flex-direction: column; align-items: flex-start; gap: var(--text-block-gap); width: 100%; min-width: 0; max-width: 100%; }
+/* One outline around the usage summary and the trace. */
+.chat-main .msg-activity.expanded { box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.chat-main .msg-activity.expanded:not(:has(.activity-trace)) { width: max-content; }
+.chat-main .msg-activity.expanded > .usage-details + .activity-trace { border-top: 1px solid var(--border); padding-top: var(--text-block-gap); }
 .chat-main .meta .trace-toggle { display: inline-flex; flex: none; align-items: center; gap: 3px; padding: 1px 4px; border: none; background: none; color: inherit; cursor: pointer; border-radius: var(--radius-pill); font: inherit; white-space: nowrap; }
 .chat-main .meta .trace-toggle:hover { background: var(--wash); color: var(--fg); }
 .chat-main .meta .trace-toggle:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }

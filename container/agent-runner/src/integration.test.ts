@@ -471,6 +471,8 @@ describe('poll loop integration', () => {
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toBe('answer');
     expect(getActivityBuffer().map((line) => JSON.parse(line.text))).toEqual([
+      // Marks when the turn's first model call could start.
+      { kind: 'model', id: expect.stringMatching(/^model:ready:/), durationMs: 0 },
       expect.objectContaining({ kind: 'internal', text: 'thinking about this...' }),
       expect.objectContaining({ kind: 'internal', text: 'done thinking' }),
     ]);

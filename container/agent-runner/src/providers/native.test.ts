@@ -1189,6 +1189,9 @@ describe('NativeProvider', () => {
       expect(JSON.stringify(requests[1].messages)).toContain('follow the new direction');
       expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
       expect(events.filter((event) => event.type === 'usage_call')).toHaveLength(2);
+      expect(events.filter((event) => event.type === 'model_request')).toHaveLength(2);
+      expect(events.findIndex((event) => event.type === 'model_request'))
+        .toBeLessThan(events.findIndex((event) => event.type === 'usage_call'));
     } finally {
       query.abort();
       await consume;

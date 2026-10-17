@@ -83,6 +83,25 @@ function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
   return value as Partial<ConversationUsage>;
 }
 
+/** When the earliest submission answered by the turn arrived, never before the previous turn ended. */
+function turnRequestedAt(
+  turn: TurnRow,
+  previous: TurnRow | undefined,
+  inputIds: string[],
+  messages: ConversationMessage[],
+): string | null {
+  const startedAt = turn.started_at ? Date.parse(turn.started_at) : NaN;
+  if (!Number.isFinite(startedAt)) return null;
+  const submitted = messages
+    .filter((m) => m.direction === 'in' && inputIds.includes(m.id))
+    .map((m) => Date.parse(m.timestamp))
+    .filter(Number.isFinite);
+  if (!submitted.length) return null;
+  const previousEnd = previous?.ended_at ? Date.parse(previous.ended_at) : NaN;
+  const floor = Number.isFinite(previousEnd) && previousEnd <= startedAt ? previousEnd : -Infinity;
+  return new Date(Math.min(startedAt, Math.max(floor, Math.min(...submitted)))).toISOString();
+}
+
 /** Pure synchronous read of host-owned state. The host is the only writer and cannot
  * interleave commits with this read. A settled turn is the rendering barrier. */
 export function projectConversation(
@@ -132,7 +151,7 @@ export function projectConversation(
   for (const id of questionAnchors.keys()) visibleOutputIds.add(id);
   const visibleInputIds = new Set(messages.filter((m) => m.direction === 'in').map((m) => m.id));
   const turns: ConversationTurn[] = [];
-  for (const turn of records) {
+  for (const [index, turn] of records.entries()) {
     const owned = owns(turn);
     const outputs = [
       ...messages.filter((m) => m.turnId === turn.id && m.direction === 'out').map((m) => m.id),
@@ -179,15 +198,17 @@ export function projectConversation(
       .filter((row) => owned || visibleOutputIds.has(String(row.message_out_id)))
       .map((row) => ({ id: String(row.id), value: usageValue(row) }));
     const metadata = owned ? readTurnMetadata(outDb!, turn.id) : undefined;
+    const inputIds = getTurnInputs(outDb!, turn.id)
+      .map((r) => publicInboundMessageId(r.message_in_id, groupId))
+      .filter((id) => visibleInputIds.has(id));
     turns.push({
       id: turn.id,
       phase: turn.phase,
       outcome: turn.outcome,
       startedAt: turn.started_at,
+      requestedAt: turnRequestedAt(turn, records[index - 1], inputIds, messages),
       endedAt: turn.ended_at,
-      inputIds: getTurnInputs(outDb!, turn.id)
-        .map((r) => publicInboundMessageId(r.message_in_id, groupId))
-        .filter((id) => visibleInputIds.has(id)),
+      inputIds,
       outputIds: outputs,
       activity: displayActivity([...trace.values()].sort((a, b) => a.ordinal - b.ordinal)),
       usage,

@@ -216,12 +216,14 @@ back into history. Cancelling a steering/queue choice preserves the draft,
 highlight and scroll position. A rejected send retains the draft and attachments.
 Question activity comes only from the recorded `nanoclaw.ask_user_question`
 tool call; question cards do not synthesize a second action in the trace.
-**Thinking…** appears only in the status line while no activity is active, never
-as a trace entry. Current tool captions also remain in the status line instead
-of duplicating recorded entries as standalone rows after their chapters.
-Every trace with a known turn start opens with a display-only **Starting
-response…** row (**Started response** once later work or settlement closes it).
-It counts as a step and is not stored. Settled traces otherwise contain only
+Current tool captions remain in the status line instead of duplicating recorded
+entries as standalone rows after their chapters.
+Every trace opens with one display-only start row whose label follows the turn's
+startup: **Queued…** from submission until the runner picks the turn up (no
+stopwatch), **Preparing…** until the first model call can start (its CPU time),
+then **Thinking…** while that call's AI time ticks on it, and **Started
+response** once later work or settlement closes it. Queueing counts toward the
+turn total only. The row counts as a step and is not stored. Settled traces otherwise contain only
 recorded activities, with no synthetic **Done** entry. Completion and notable outcomes remain in the regular status footer;
 completion does not imply that the requested work succeeded. Transient notices
 do not count as activity steps or enter the runner journal, stored activity or
@@ -419,8 +421,10 @@ cost are omitted from the summary; a reported zero cost remains in the details. 
 shown only when every usage report includes cost; context is the latest reported
 valid context/window pair, not cumulative billed tokens. Context is read from
 the same usage record as the token and model-call counts, which the runner
-rewrites after every model call, so it updates live with them (**Context now**
-while running, **Context at end** once settled). An incomplete or invalid
+rewrites after every model call, so it updates live with them. The tokens
+column shows **Context utilization** (`54.8k tok · 5%`: the latest call's whole
+prompt plus its reply, and its share of the window); the model column shows the
+window itself as **Context size** (`1M tok`). An incomplete or invalid
 report retains the latest known valid measurement, and a report without a
 context window still displays its token count. The inline details show three unlabeled columns (timing,
 tokens and model) side by side on one row, inside a single outline sized to
@@ -472,21 +476,21 @@ failure-explanation attempts are not inferred or backfilled.
 Live rows order the bouncing dots, Stop, stopwatch, and current
 activity text. Only pending or running activities drive that text; when none
 remain, it returns to **Thinking…**. Before any recorded activity arrives it
-shows the open start row, **Starting response…**.
+mirrors the open start row (**Queued…**, **Preparing…** or **Thinking…**).
 An activity finishing does not mask another activity that is still running.
 Completed, failed and interrupted entries stay in the trace, not in the live
 status text.
 Native web-chat submissions display their user bubble immediately, using the
 existing client-generated message identity to reconcile the server echo without
-duplicates. An idle submission also shows **Starting response…** in the response
+duplicates. An idle submission also shows **Queued…** in the response
 status slot before the real turn exists. This display-only phase survives HTTP
 acceptance and the initial generic queued receipt, then hands the same bubble
-over to the authoritative turn's Thinking/activity status. Stop is visible but
-disabled during startup, and the stopwatch stays at **0.0s** without a running
-clock. When the durable turn appears before its live connection state, Stop
-stays in place but remains disabled until the live ID matches the displayed turn.
-It then follows the existing permission/connection checks; the stopwatch uses
-the authoritative start time. The startup marker
+over to the authoritative turn's start row. Stop is visible but disabled
+during startup, and the stopwatch runs from submission. When the durable turn
+appears before its live connection state, Stop stays in place but remains
+disabled until the live ID matches the displayed turn. It then follows the
+existing permission/connection checks; the stopwatch keeps measuring from the
+server's receipt of the submitted message. The startup marker
 is synthetic and does not contribute to the step count or enter conversation records.
 Starting and real-turn presentations use one stable response component and shared
 trace/footer markup, so the handoff does not remount the bubble or its controls.
@@ -553,7 +557,9 @@ isolated timing explicitly show **unavailable** for model and other time, never
 substituting wall time or zero.
 The tokens column shows input and output processing (`55.0k tok in · 485 tok out`), then reasoning, cache
 read and cache write when non-zero, then context (`55.4k tok / 1M tok (6%)`).
-The model column shows the model, the model-call count, and cost when reported.
+The model column shows the model, context size, the model-call count, and cost
+(**Estimated cost**, or **Reported cost** for partial usage). Cost is always
+listed: a reported zero shows `$0`, and a missing cost shows **Unavailable**.
 Live model timing reflects reported calls so far, not a second running stopwatch.
 Stopped/failed calls retain reported timing alongside partial usage; unfinished
 calls without a usage report cannot provide a complete model-time total.

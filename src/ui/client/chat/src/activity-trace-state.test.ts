@@ -3,7 +3,9 @@ import {
   activityTraceExpanded,
   activityTraceOwner,
   activityMetricsExpanded,
+  adoptSubmissionTraces,
   resetActivityTraceView,
+  submissionTraceOwner,
   toggleActivityTrace,
   toggleActivityMetrics,
 } from './activity-trace-state';
@@ -94,5 +96,15 @@ describe('activity panel expansion', () => {
     expect(activityMetricsExpanded('turn:first')).toBe(false);
     expect(activityTraceExpanded('turn:next')).toBe(false);
     expect(activityMetricsExpanded('turn:next')).toBe(false);
+  });
+
+  it('keeps a pre-turn trace open when its turn takes over the row', () => {
+    toggleActivityTrace(submissionTraceOwner('msg-1'));
+    toggleActivityMetrics(submissionTraceOwner('msg-1'));
+    adoptSubmissionTraces([{ id: 'other', inputIds: ['msg-0'] }]);
+    expect(activityTraceExpanded(submissionTraceOwner('msg-1'))).toBe(true);
+    adoptSubmissionTraces([{ id: 'turn-1', inputIds: ['msg-1'] }]);
+    expect(activityTraceExpanded('turn:turn-1')).toBe(true);
+    expect(activityMetricsExpanded('turn:turn-1')).toBe(true);
   });
 });

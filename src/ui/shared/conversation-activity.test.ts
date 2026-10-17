@@ -6,7 +6,7 @@ import {
   parseStep,
   stepHeadline,
 } from './activity-presentation.js';
-import { conversationActivity, turnModelTime, withModelTime } from './conversation-activity.js';
+import { conversationActivity, turnModelTime, turnRequestedAt, withModelTime } from './conversation-activity.js';
 import type { ConversationTurn } from './conversation.js';
 
 const turn: ConversationTurn = {
@@ -204,12 +204,22 @@ describe('model time', () => {
   });
   const settle = (activity: ConversationTurn['activity'], endAt: number) =>
     timed(activity, { phase: 'settled', outcome: 'replied', endedAt: new Date(t0 + endAt).toISOString() });
-  it('without reported calls, only the live tail ticks, from the step ending last', () => {
-    const times = turnModelTime(timed([tool(0, 2000, 'completed', 3000), tool(1, 9000, 'completed', 1000)]));
-    expect(Object.fromEntries(times)).toEqual({ 1: { ms: 0, since: t0 + 10_000 } });
-    expect(Object.fromEntries(turnModelTime(timed([])))).toEqual({ '-1': { ms: 0, since: t0 } });
-    const parallel = turnModelTime(timed([tool(0, 0, 'completed', 5000), tool(1, 1000, 'completed', 2000)]));
-    expect(Object.fromEntries(parallel)).toEqual({ 0: { ms: 0, since: t0 + 5000 } });
+  it('ticks nothing before the first model call can start', () => {
+    expect(Object.fromEntries(turnModelTime(timed([])))).toEqual({});
+    expect(Object.fromEntries(turnModelTime(timed([tool(0, 2000, 'completed', 3000)])))).toEqual({});
+    // The runner's zero-length model step marks when the first call can start.
+    expect(Object.fromEntries(turnModelTime(timed([call(0, 500, 0)])))).toEqual({ '-1': { ms: 0, since: t0 + 500 } });
+  });
+
+  it('once ready, only the live tail ticks, from the step ending last', () => {
+    const times = turnModelTime(
+      timed([call(2, 0, 0), tool(0, 2000, 'completed', 3000), tool(1, 9000, 'completed', 1000)]),
+    );
+    expect(Object.fromEntries(times)).toEqual({ '-1': { ms: 0 }, 1: { ms: 0, since: t0 + 10_000 } });
+    const parallel = turnModelTime(
+      timed([call(2, 0, 0), tool(0, 0, 'completed', 5000), tool(1, 1000, 'completed', 2000)]),
+    );
+    expect(Object.fromEntries(parallel)).toEqual({ '-1': { ms: 0 }, 0: { ms: 0, since: t0 + 5000 } });
   });
 
   it('attributes nothing while a tool runs or to a settled turn without reported calls', () => {
@@ -238,17 +248,32 @@ describe('model time', () => {
   it('prepends a counted start row only to the segment that hosts the turn start, hiding call rows', () => {
     const live = timed([]);
     const [start] = withModelTime(live, [], turnModelTime(live), true);
-    expect(parseStep(start.text)).toMatchObject({ id: 'ui:start:turn', text: 'Starting response…', status: 'running' });
-    expect(start.modelTime).toEqual({ ms: 0, since: t0 });
+    expect(parseStep(start.text)).toMatchObject({ id: 'ui:start:turn', text: 'Preparing…', status: 'running' });
+    expect(parseStep(start.text).durationMs).toBeUndefined();
+    expect(start.modelTime).toBeUndefined();
     expect(activityStepCount([start])).toBe(1);
-    const busy = timed([tool(0, 2000, 'completed', 1000)]);
+    const ready = timed([call(0, 500, 0)]);
+    const [first] = withModelTime(ready, ready.activity, turnModelTime(ready), true);
+    expect(parseStep(first.text)).toMatchObject({ text: 'Thinking…', status: 'running', durationMs: 500 });
+    expect(first.modelTime).toEqual({ ms: 0, since: t0 + 500 });
+    const busy = timed([call(2, 500, 0), tool(0, 2000, 'completed', 1000)]);
     const lines = withModelTime(busy, busy.activity, turnModelTime(busy), true);
-    expect(parseStep(lines[0].text)).toMatchObject({ text: 'Started response', status: 'completed' });
+    expect(parseStep(lines[0].text)).toMatchObject({ text: 'Started response', status: 'completed', durationMs: 500 });
     expect(lines[1].modelTime).toEqual({ ms: 0, since: t0 + 3000 });
     expect(withModelTime(busy, busy.activity, turnModelTime(busy), false)).toHaveLength(1);
     const reported = settle([call(0, 2000, 1500), tool(1, 1800, 'completed', 500)], 2500);
     const shown = withModelTime(reported, reported.activity, turnModelTime(reported), true);
     expect(shown.map((line) => parseStep(line.text).kind)).toEqual(['notification', 'tool']);
     expect(shown.map((line) => line.modelTime)).toEqual([{ ms: 1500 }, undefined]);
+    expect(parseStep(shown[0].text).durationMs).toBe(500);
+  });
+
+  it('times preparation from runner pickup; queueing before it counts only toward the turn total', () => {
+    const queued = timed([call(0, 1000, 0)], { requestedAt: new Date(t0 - 2000).toISOString() });
+    const [start] = withModelTime(queued, queued.activity, turnModelTime(queued), true);
+    expect(start.ts).toBe(String(t0));
+    expect(parseStep(start.text).durationMs).toBe(1000);
+    expect(turnRequestedAt(queued)).toBe(t0 - 2000);
+    expect(turnRequestedAt({ ...queued, requestedAt: null })).toBe(t0);
   });
 });

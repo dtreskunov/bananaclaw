@@ -91,6 +91,7 @@ type ProviderEvent =
 - **`result`** — emitted when the agent produces a complete response. May be emitted multiple times per query (e.g., Claude's multi-turn with subagents). The agent-runner writes each result to messages_out. Providers that declare `structuredReplies` (native) attach structured `replies` / `silence` instead of text to parse.
 - **`error`** — emitted on failure. `retryable` indicates whether the agent-runner should retry. `classification` is optional detail (e.g., 'quota', 'auth', 'transport').
 - **`progress`** — optional, for logging. The agent-runner logs these but doesn't act on them.
+- **`model_request`** — optional, emitted immediately before each model request by providers that declare `reportsModelRequests` (native). The runner records a zero-length `model:ready:<turnId>` activity step at the turn's first request, so the UI's AI stopwatch excludes queueing and turn setup. For other providers the marker is recorded at `init` and, on warm follow-up turns, at turn start.
 
 Terminal provider failures also append a notification to the current turn's
 activity trace, with the error detail. After an unrecoverable thrown query error,

@@ -180,6 +180,8 @@ it('records a model-handled failure on the original turn without losing activity
     expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM turns').get()).toEqual({ n: 1 });
     expect(getOutboundDb().prepare('SELECT SUM(cost_usd) AS cost FROM turn_usage').get()).toEqual({ cost: 0.5 });
     expect(activitySteps()).toEqual([
+      // Marks when the turn's first model call could start.
+      { kind: 'model', id: expect.stringMatching(/^model:ready:/), durationMs: 0 },
       expect.objectContaining({ kind: 'tool', id: 'original-work' }),
       expect.objectContaining({ kind: 'notification', text: 'Provider request failed', detail: 'provider rejected the request' }),
       expect.objectContaining({ kind: 'notification', text: 'Asking model to explain failure' }),
@@ -189,6 +191,29 @@ it('records a model-handled failure on the original turn without losing activity
     expect(JSON.parse(output.content)).toMatchObject({ text: 'The provider rejected your request.', delivery_origin: 'response' });
     expect(JSON.parse(output.content).system_generated).not.toBe(true);
     expectOutputBeforeSettlement();
+  } finally { controller.abort(); await loop; }
+});
+
+it('marks model readiness at the first model request for providers that report requests', async () => {
+  input();
+  const p: AgentProvider = {
+    ...provider(async function* () {
+      yield { type: 'init', continuation: 'reporting-session' };
+      appendActivity({ kind: 'tool', id: 'setup-work', tool: 'read', status: 'completed', detail: 'input.txt' });
+      yield { type: 'model_request' };
+      yield { type: 'model_request' };
+      yield { type: 'result', text: '<message to="web">done</message>' };
+    }),
+    reportsModelRequests: true,
+  };
+  const controller = new AbortController();
+  const loop = runPollLoop({ provider: p, providerName: 'test', cwd: process.cwd(), signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE outcome IS NOT NULL").get());
+    expect(activitySteps().filter((step) => step.kind !== 'notification')).toEqual([
+      expect.objectContaining({ kind: 'tool', id: 'setup-work' }),
+      { kind: 'model', id: expect.stringMatching(/^model:ready:/), durationMs: 0 },
+    ]);
   } finally { controller.abort(); await loop; }
 });
 

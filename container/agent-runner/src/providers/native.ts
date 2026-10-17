@@ -252,6 +252,7 @@ export class NativeProvider implements AgentProvider {
   readonly supportsInputCancellation = true;
   readonly supportsToolCancellation = true;
   readonly structuredReplies = true;
+  readonly reportsModelRequests = true;
   private readonly options: ProviderOptions;
   private readonly store: NativeStore;
 
@@ -492,6 +493,7 @@ export class NativeProvider implements AgentProvider {
                 const stepNudge: string | null = nudge;
                 nudge = null;
                 const tools = wrappingUp ? {} : stepTools();
+                yield { type: 'model_request' };
                 const result = streamText({
                   model,
                   system: [

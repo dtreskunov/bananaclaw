@@ -2681,12 +2681,8 @@ nav.tab-bar-strip.group-strip {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding-inline: 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
   overflow-x: auto;
   scrollbar-width: thin;
-  padding-block: 6px;
   color: var(--fg);
   font-size: var(--font-2xs);
   line-height: 1.35;
@@ -2981,6 +2977,19 @@ nav.tab-bar-strip.group-strip {
   width: 100%;
   min-width: 0;
   max-width: 100%;
+}
+.chat-main .msg-activity.expanded {
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.chat-main .msg-activity.expanded:not(:has(.activity-trace)) {
+  width: max-content;
+}
+.chat-main .msg-activity.expanded > .usage-details + .activity-trace {
+  border-top: 1px solid var(--border);
+  padding-top: var(--text-block-gap);
 }
 .chat-main .meta .trace-toggle {
   display: inline-flex;

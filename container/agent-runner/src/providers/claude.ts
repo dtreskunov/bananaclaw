@@ -614,6 +614,8 @@ export class ClaudeProvider implements AgentProvider {
         yield { type: 'activity' };
 
         if (message.type === 'system' && message.subtype === 'init') {
+          // Subprocess and MCP startup precede the first call; don't time them as model work.
+          if (promptAt !== undefined) promptAt = Math.max(promptAt, Date.now());
           yield { type: 'init', continuation: message.session_id };
         } else if (message.type === 'user') {
           if ((message as { parent_tool_use_id?: string | null }).parent_tool_use_id == null) promptAt = Date.now();

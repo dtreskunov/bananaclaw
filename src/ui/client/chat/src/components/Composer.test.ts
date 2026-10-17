@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { isValidElement } from 'preact';
 import { ActivityTraceList, Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
+import { formatStopwatch } from '../duration-format';
 import { ComposerInput } from './ComposerInput';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
 import { TurnStopButton } from './TurnStopButton';
@@ -296,8 +297,8 @@ describe('main composer pending edits', () => {
 
   it('preserves response controls across startup, durable turn creation, and live registration', () => {
     const previousWindow = window;
-    const interval = vi.fn(() => 1);
-    vi.stubGlobal('window', { ...window, setInterval: interval, clearInterval: vi.fn() });
+    const timeout = vi.fn(() => 1);
+    vi.stubGlobal('window', { ...window, setTimeout: timeout, clearTimeout: vi.fn() });
     onTestFinished(() => {
       vi.stubGlobal('window', previousWindow);
     });
@@ -316,12 +317,13 @@ describe('main composer pending edits', () => {
     const row = starting.type(starting.props);
     hooks.passiveEffects.splice(0).forEach((effect) => effect());
     hooks.capturePassive = false;
-    expect(interval).not.toHaveBeenCalled();
+    // Total runs from submission, before any turn exists.
+    expect(timeout).toHaveBeenCalledOnce();
     expect(row.props['data-response-start']).toBe(`submission:${testWebSubmission.messageId}`);
     const elapsed = findComponent(row, 'TurnElapsed');
-    expect(elapsed.props.startedAt).toBeNull();
-    expect(elapsed.type(elapsed.props).props.children).toBe('0.0s');
-    expect(elapsed.type(elapsed.props).props.role).toBeUndefined();
+    expect(elapsed.props.live).toBe(true);
+    expect(elapsed.props.ms).toBeGreaterThanOrEqual(0);
+    expect(elapsed.type(elapsed.props).props.role).toBe('timer');
     const stop = findComponent(row, 'ActiveTurnStopButton');
     const control = stop.type(stop.props);
     const button = control.type(control.props);
@@ -376,8 +378,8 @@ describe('main composer pending edits', () => {
     const runningRow = running.type(running.props);
     hooks.passiveEffects.splice(0).forEach((effect) => effect());
     hooks.capturePassive = false;
-    expect(interval).toHaveBeenCalledOnce();
-    expect(findComponent(runningRow, 'TurnElapsed').props.startedAt).toEqual(expect.any(Number));
+    expect(timeout).toHaveBeenCalledTimes(2);
+    expect(findComponent(runningRow, 'TurnElapsed').props.live).toBe(true);
     const liveStop = findComponent(runningRow, 'ActiveTurnStopButton');
     const liveControl = liveStop.type(liveStop.props);
     expect(liveControl.props.turn.id).toBe(testTurn.id);
@@ -1189,9 +1191,9 @@ describe('main composer pending edits', () => {
         expect(info.props.count).toBe(1);
         expect(findComponent(info.type(info.props), 'UsageMeta')).toBeUndefined();
       }
-      expect(findComponent(footer, 'TurnElapsed').props.startedAt).toEqual(expect.any(Number));
+      expect(findComponent(footer, 'TurnElapsed').props.ms).toEqual(expect.any(Number));
       const headline = footer.props.children.filter(Boolean).at(-1).props.children;
-      expect(headline.type(headline.props).props.children).toContain('Starting response…');
+      expect(headline.type(headline.props).props.children).toContain('Preparing…');
     },
   );
 
@@ -1242,7 +1244,7 @@ describe('main composer pending edits', () => {
       const status = findComponent(log.type(log.props), 'ResponseStatusRow');
       resetMount();
       const row = status.type(status.props);
-      expect(findComponent(row.props.children.at(-1), 'TurnElapsed').props.startedAt).toEqual(expect.any(Number));
+      expect(findComponent(row.props.children.at(-1), 'TurnElapsed').props.ms).toEqual(expect.any(Number));
       const details = renderTechnicalDetails(row);
       const info = findComponent(details, 'TurnTechnicalInfo');
       const header = info?.type(info.props);
@@ -1260,63 +1262,73 @@ describe('main composer pending edits', () => {
     }
   });
 
-  it.each([false, true])('returns to Thinking after activity finishes with technical information %s', (technical) => {
-    appearance.value = {
-      ...appearance.peek(),
-      preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
-    };
-    for (const phase of ['running', 'stopping', 'settling'] as const) {
-      resetConversation();
-      const activity = [
-        {
-          ordinal: 0,
-          timelinePosition: 100,
-          ts: '1000',
-          text: JSON.stringify({
-            kind: 'tool',
-            id: 'completed-call',
-            tool: 'bash',
-            status: 'completed',
-            detail: 'pnpm test',
+  it.each([false, true])(
+    'mirrors the finished activity in the status line with technical information %s',
+    (technical) => {
+      appearance.value = {
+        ...appearance.peek(),
+        preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: technical },
+      };
+      for (const phase of ['running', 'stopping', 'settling'] as const) {
+        resetConversation();
+        const activity = [
+          {
+            ordinal: 0,
+            timelinePosition: 100,
+            ts: '1000',
+            text: JSON.stringify({
+              kind: 'tool',
+              id: 'completed-call',
+              tool: 'bash',
+              status: 'completed',
+              detail: 'pnpm test',
+            }),
+          },
+        ];
+        // The runner's marker for when the first model call could start.
+        const ready = {
+          ordinal: 1,
+          timelinePosition: 50,
+          ts: String(Date.parse(testTurn.startedAt!)),
+          text: JSON.stringify({ kind: 'model', id: 'model:ready', durationMs: 0 }),
+        };
+        applyConversationFrame(
+          testSnapshot({
+            turns: [{ ...testTurn, phase, activity: [ready, ...activity] }],
+            connection: { connected: true, activeTurnId: testTurn.id },
           }),
-        },
-      ];
-      applyConversationFrame(
-        testSnapshot({
-          turns: [{ ...testTurn, phase, activity }],
-          connection: { connected: true, activeTurnId: testTurn.id },
-        }),
-        'thread',
-      );
-      hooks.slots = [];
-      hooks.cursor = 0;
-      const log = findComponent(ChatMain(), 'MessageLog');
-      hooks.slots = [];
-      hooks.cursor = 0;
-      const turnRow = findComponent(log.type(log.props), 'ResponseStatusRow');
-      hooks.slots = [];
-      hooks.cursor = 0;
-      const row = turnRow.type(turnRow.props);
-      const headline = row.props.children.at(-1).props.children.filter(Boolean).at(-1).props.children;
-      const expected = phase === 'stopping' ? 'Stopping…' : 'Thinking…';
-      expect(headline.type(headline.props).props.children).toContain(expected);
-      if (technical) {
-        const details = renderTechnicalDetails(row);
-        expect(findComponent(details, 'TurnTechnicalInfo').props.count).toBe(2);
-        const panel = findComponent(details, 'ActivityTracePanel');
-        expect(JSON.parse(panel.props.lines[0].text).text).toBe('Started response');
-        if (phase === 'stopping') {
-          expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(expected);
-          expect(panel.props.lines).toHaveLength(3);
-        } else {
-          expect(panel.props.lines.slice(1)).toMatchObject(activity);
-          expect(panel.props.lines[1].modelTime).toEqual({ ms: 0, since: Date.parse(testTurn.startedAt!) });
+          'thread',
+        );
+        hooks.slots = [];
+        hooks.cursor = 0;
+        const log = findComponent(ChatMain(), 'MessageLog');
+        hooks.slots = [];
+        hooks.cursor = 0;
+        const turnRow = findComponent(log.type(log.props), 'ResponseStatusRow');
+        hooks.slots = [];
+        hooks.cursor = 0;
+        const row = turnRow.type(turnRow.props);
+        const headline = row.props.children.at(-1).props.children.filter(Boolean).at(-1).props.children;
+        const expected = phase === 'stopping' ? 'Stopping…' : 'Ran';
+        expect(headline.type(headline.props).props.children).toContain(expected);
+        if (technical) {
+          const details = renderTechnicalDetails(row);
+          expect(findComponent(details, 'TurnTechnicalInfo').props.count).toBe(2);
+          const panel = findComponent(details, 'ActivityTracePanel');
+          expect(JSON.parse(panel.props.lines[0].text).text).toBe('Started response');
+          if (phase === 'stopping') {
+            expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(expected);
+            expect(panel.props.lines).toHaveLength(3);
+          } else {
+            expect(panel.props.lines.slice(1)).toMatchObject(activity);
+            expect(panel.props.lines[1].modelTime).toEqual({ ms: 0, since: Date.parse(testTurn.startedAt!) });
+          }
         }
+        expect(turnRow.props.source.turn.activity).toEqual([ready, ...activity]);
+        expect(turnRow.props.source.activity).toHaveLength(2);
       }
-      expect(turnRow.props.source.turn.activity).toEqual(activity);
-      expect(turnRow.props.source.activity).toHaveLength(2);
-    }
-  });
+    },
+  );
 
   it.each([false, true])('keeps stopping, disconnect and Stop errors inside the regular footer (%s)', (technical) => {
     appearance.value = {
@@ -1355,7 +1367,7 @@ describe('main composer pending edits', () => {
         const info = findComponent(details, 'TurnTechnicalInfo');
         expect(info.props.count).toBe(1);
         const panel = findComponent(details, 'ActivityTracePanel');
-        expect(JSON.parse(panel.props.lines[0].text).text).toBe('Starting response…');
+        expect(JSON.parse(panel.props.lines[0].text).text).toBe('Preparing…');
         expect(JSON.parse(panel.props.lines.at(-1).text).text).toBe(notice.text);
       }
     }
@@ -1691,7 +1703,7 @@ describe('main composer pending edits', () => {
       expect(usage.props.summary).toBe('$0.012 · 35% ctx');
       expect(info.props.usage.wallElapsedMs).toBe(7000);
       const stopwatch = findComponent(row.props.children.at(-1), 'TurnElapsed');
-      expect(stopwatch.props.startedAt).toBe(Date.parse(testTurn.startedAt!));
+      expect(stopwatch.props.ms).toBe(info.props.usage.wallElapsedMs);
       resetMount();
       hooks.cursor = 0;
       find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
@@ -1703,55 +1715,53 @@ describe('main composer pending edits', () => {
   );
 
   it.each([
-    { phase: 'running', window: 20_000, expected: '80%', label: 'Context now' },
-    { phase: 'settled', window: 20_000, expected: '80%', label: 'Context at end' },
-    { phase: 'running', window: undefined, expected: '', label: 'Context now' },
-  ] as const)(
-    'reads context from the same usage record as tokens ($phase, $window)',
-    ({ phase, window, expected, label }) => {
-      appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
-      const recorded = {
-        cost_usd: 0.0123,
-        context_tokens: 16_000,
-        context_window: window,
-        input_tokens: 100,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        model: 'fixture-model',
-        num_turns: 10,
-      };
-      applyConversationFrame(
-        testSnapshot({
-          turns: [
-            {
-              ...testTurn,
-              phase,
-              outcome: phase === 'settled' ? 'silent' : 'pending',
-              usage: [{ id: 'recorded', value: recorded }],
-            },
-          ],
-          connection: { connected: true, activeTurnId: phase === 'settled' ? null : testTurn.id },
-        }),
-        'thread',
-      );
-      resetMount();
-      const log = findComponent(ChatMain(), 'MessageLog');
-      resetMount();
-      const status = findComponent(log.type(log.props), 'ResponseStatusRow');
-      resetMount();
-      const row = status.type(status.props);
-      const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
-      const usage = findComponent(info.type(info.props), 'UsageMeta');
-      expect(usage.props.summary).toBe(expected ? `$0.012 · ${expected} ctx` : '$0.012');
-      expect(info.props.usage.live).toBe(phase !== 'settled');
-      resetMount();
-      hooks.cursor = 0;
-      find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
-      const inline = renderUsageDetails(row);
-      expect(usageRow(inline, label)).toContain(expected ? `(${expected})` : '16.0k tok');
-    },
-  );
+    { phase: 'running', window: 20_000, expected: '80%' },
+    { phase: 'settled', window: 20_000, expected: '80%' },
+    { phase: 'running', window: undefined, expected: '' },
+  ] as const)('reads context from the same usage record as tokens ($phase, $window)', ({ phase, window, expected }) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    const recorded = {
+      cost_usd: 0.0123,
+      context_tokens: 16_000,
+      context_window: window,
+      input_tokens: 100,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      model: 'fixture-model',
+      num_turns: 10,
+    };
+    applyConversationFrame(
+      testSnapshot({
+        turns: [
+          {
+            ...testTurn,
+            phase,
+            outcome: phase === 'settled' ? 'silent' : 'pending',
+            usage: [{ id: 'recorded', value: recorded }],
+          },
+        ],
+        connection: { connected: true, activeTurnId: phase === 'settled' ? null : testTurn.id },
+      }),
+      'thread',
+    );
+    resetMount();
+    const log = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    const status = findComponent(log.type(log.props), 'ResponseStatusRow');
+    resetMount();
+    const row = status.type(status.props);
+    const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+    const usage = findComponent(info.type(info.props), 'UsageMeta');
+    expect(usage.props.summary).toBe(expected ? `$0.012 · ${expected} ctx` : '$0.012');
+    expect(info.props.usage.live).toBe(phase !== 'settled');
+    resetMount();
+    hooks.cursor = 0;
+    find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+    const inline = renderUsageDetails(row);
+    expect(usageRow(inline, 'Context utilization')).toBe(expected ? `16.0k tok \u00b7 ${expected}` : '16.0k tok');
+    expect(usageRow(inline, 'Context size')).toBe(window ? '20.0k tok' : undefined);
+  });
 
   it.each([
     { modelMs: 3500, extraMs: 1000, modelText: '4.5s', otherText: '2.0s' },
@@ -2033,10 +2043,10 @@ describe('main composer pending edits', () => {
       expect(controls[0].props['aria-hidden']).toBe('true');
       expect(findComponent(controls[1], 'ActiveTurnStopButton')).toBeTruthy();
       expect(controls[2].type.name).toBe('TurnElapsed');
-      expect(controls[2].props.startedAt).toBeLessThanOrEqual(Date.now() - 7000);
+      expect(controls[2].props.ms).toBeGreaterThanOrEqual(7000);
       const stopwatch = controls[2].type(controls[2].props);
       expect(stopwatch.props.class).toBe('turn-elapsed live');
-      expect(stopwatch.props.children.props).toEqual({ since: controls[2].props.startedAt });
+      expect(stopwatch.props.children).toBe(formatStopwatch(controls[2].props.ms));
       expect(stopwatch.props['aria-live']).toBe('off');
       expect(controls[3].type).toBe(technical ? 'button' : 'span');
       expect(findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo') !== undefined).toBe(technical);
@@ -2484,9 +2494,10 @@ describe('inline activity metrics', () => {
     expect(usageRow(columns[1], 'Reasoning')).toBe('50 tok');
     expect(usageRow(columns[1], 'Cache read')).toBe('109.4k tok');
     expect(usageRow(columns[1], 'Cache write')).toBeUndefined();
-    expect(usageRow(columns[1], 'Context at end')).toBe('55.4k tok / 1M tok (6%)');
+    expect(usageRow(columns[1], 'Context utilization')).toBe('55.4k tok \u00b7 6%');
+    expect(usageRow(columns[2], 'Context size')).toBe('1M tok');
     expect(usageRow(columns[2], 'Model calls')).toBe('3');
-    expect(usageRow(columns[2], 'Estimated cost')).toBeUndefined();
+    expect(usageRow(columns[2], 'Estimated cost')).toBe('$0');
   });
 
   it.each(['provisional', 'partial'] as const)('only retains the partial warning for %s accounting', (accounting) => {
@@ -2633,6 +2644,27 @@ describe('activity trace completion', () => {
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
     ).toBe(true);
+  });
+
+  it('times only preparation on the start row: Queued has no stopwatch, Preparing ticks CPU', () => {
+    const chips = (text: string, status: string, extra: object = {}) => {
+      resetMount();
+      const line = {
+        ts: '1000',
+        text: JSON.stringify({ kind: 'notification', id: 'ui:start:m', text, status, ...extra }),
+      };
+      const [row] = [ActivityTraceList({ lines: [line], live: true, now: 5000 }).props.children].flat();
+      const collect = (node: any): any[] =>
+        !node || typeof node !== 'object'
+          ? []
+          : typeof node.type === 'function' && node.type.name === 'TimeChip'
+            ? [node]
+            : [node.props?.children].flat(Infinity).flatMap(collect);
+      return Object.fromEntries(collect(row.type(row.props)).map((chip) => [chip.props.kind, chip.props.time]));
+    };
+    expect(chips('Queued…', 'pending')).toEqual({ cpu: null, ai: null });
+    expect(chips('Preparing…', 'running')).toEqual({ cpu: { since: 1000 }, ai: null });
+    expect(chips('Thinking…', 'running', { durationMs: 400 })).toEqual({ cpu: { ms: 400 }, ai: null });
   });
 
   it('keeps the same trace and followed chapter open through outputless settlement', () => {

@@ -18172,7 +18172,8 @@ function activityChapters(lines, live = false) {
 
 // ../../shared/conversation-activity.ts
 var THINKING_TEXT = "Thinking\u2026";
-var STARTING_TURN_TEXT = "Starting response\u2026";
+var QUEUED_TEXT = "Queued\u2026";
+var PREPARING_TEXT = "Preparing\u2026";
 var STARTED_TURN_TEXT = "Started response";
 var TURN_START = -1;
 var TERMINAL_OUTCOMES = {
@@ -18210,6 +18211,11 @@ function conversationActivity(turn2, activity = turn2.activity) {
     }
   ];
 }
+function turnRequestedAt(turn2) {
+  const requestedAt = turn2.requestedAt ? Date.parse(turn2.requestedAt) : NaN;
+  if (Number.isFinite(requestedAt)) return requestedAt;
+  return turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
+}
 var CALL_START_SLACK_MS = 250;
 function turnModelTime(turn2) {
   const times = /* @__PURE__ */ new Map();
@@ -18235,7 +18241,7 @@ function turnModelTime(turn2) {
   )?.ordinal ?? TURN_START;
   for (const { at, step } of calls)
     add(ownerAt(at - (step.durationMs ?? 0) + CALL_START_SLACK_MS), step.durationMs ?? 0);
-  if (live && !steps.some(({ end }) => end === Infinity)) {
+  if (live && calls.length && !steps.some(({ end }) => end === Infinity)) {
     const lastStep = Math.max(startedAt2, ...steps.map(({ end }) => end));
     add(ownerAt(lastStep), 0, Math.max(lastStep, ...calls.map(({ at }) => at)));
   }
@@ -18249,14 +18255,25 @@ function withModelTime(turn2, lines, times, hostsStart) {
   const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
   if (!hostsStart || !Number.isFinite(startedAt2)) return timed;
   const modelTime = times.get(TURN_START);
-  const open = modelTime?.since !== void 0;
+  const callStarts = turn2.activity.flatMap(({ ts, text: text3 }) => {
+    const step2 = parseStep(text3);
+    const at = Number(ts);
+    return step2.kind === "model" && Number.isFinite(at) ? [at - (step2.durationMs ?? 0)] : [];
+  });
+  const prepared = callStarts.length ? { durationMs: Math.max(0, Math.min(...callStarts) - startedAt2) } : {};
+  const live = turn2.phase !== "settled";
+  const text2 = !live ? STARTED_TURN_TEXT : !callStarts.length ? PREPARING_TEXT : modelTime?.since !== void 0 ? THINKING_TEXT : STARTED_TURN_TEXT;
   const step = {
     kind: "notification",
     id: `ui:start:${turn2.id}`,
-    text: open ? STARTING_TURN_TEXT : STARTED_TURN_TEXT,
-    status: open ? "running" : "completed"
+    text: text2,
+    status: text2 === STARTED_TURN_TEXT ? "completed" : "running",
+    ...prepared
   };
   return [{ ts: String(startedAt2), text: JSON.stringify(step), ...modelTime ? { modelTime } : {} }, ...timed];
+}
+function isTurnStartStep(step) {
+  return step.kind === "notification" && !!step.id?.startsWith("ui:start:");
 }
 
 // ../../shared/conversation-protocol.ts
@@ -18363,6 +18380,7 @@ var turn = shape({
   phase: oneOf("running", "stopping", "settling", "settled"),
   outcome: oneOf("pending", "replied", "warning", "silent", "stopped", "failed", "unknown", "interrupted"),
   startedAt: nullable(text),
+  requestedAt: optional(nullable(text)),
   endedAt: nullable(text),
   inputIds: strings,
   outputIds: strings,
@@ -19402,6 +19420,17 @@ function activityTraceExpanded(ownerId) {
 function toggleActivityTrace(ownerId) {
   traceOwner.value = traceOwner.peek() === ownerId ? null : ownerId;
 }
+function submissionTraceOwner(messageId) {
+  return `submission:${messageId}`;
+}
+function adoptSubmissionTraces(turns) {
+  for (const owner of [traceOwner, metricsOwner]) {
+    const current = owner.peek();
+    if (!current?.startsWith("submission:")) continue;
+    const turn2 = turns.find((candidate) => candidate.inputIds.some((id2) => submissionTraceOwner(id2) === current));
+    if (turn2) owner.value = `turn:${turn2.id}`;
+  }
+}
 function resetActivityTraceView() {
   traceOwner.value = null;
   metricsOwner.value = null;
@@ -19419,7 +19448,6 @@ function responseScrollTop(scrollTop, responseTop, viewportTop) {
 }
 
 // src/web-submissions.ts
-var STARTING_RESPONSE_TEXT = "Starting response\u2026";
 function withWebSendState(submission, state) {
   const { status: _status, error: _error, ...packet } = submission;
   return { ...packet, ...state };
@@ -19577,6 +19605,7 @@ function applyConversationFrame(raw, expectedThreadId) {
       if (message2.inputState?.status === "cancelled") confirmCancelledInput(message2.id);
     }
     if (changedConversation) resetActivityTraceView();
+    else adoptSubmissionTraces(view.turns);
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === "update") {
@@ -22619,21 +22648,13 @@ function formatStopwatch(ms, fine = true) {
 }
 
 // src/turn-row.ts
-function currentActivityHeadline(lines) {
-  const seen = /* @__PURE__ */ new Set();
-  for (let index = lines.length - 1; index >= 0; index--) {
-    const step = parseStep(lines[index].text);
-    if (isSyntheticTraceStep(step)) continue;
-    if (step.id) {
-      const id2 = `${step.kind}:${step.id}`;
-      if (seen.has(id2)) continue;
-      seen.add(id2);
-    }
-    if (step.status !== "running" && step.status !== "pending") continue;
-    const headline = stepHeadline(step);
-    if (headline.action || headline.subject) return headline;
-  }
-  return { action: THINKING_TEXT };
+function latestTraceHeadline(lines, live) {
+  const chapter = activityChapters(lines, live).reverse().find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
+  if (!chapter) return { headline: { action: THINKING_TEXT }, repetitions: 1 };
+  if (chapter.entries.length > 1) return { headline: chapter.headline, repetitions: chapter.entries.length };
+  const { line, step } = chapter.entries[0];
+  const headline = stepHeadline(step);
+  return { headline: headline.action || headline.subject ? headline : { action: line.text }, repetitions: 1 };
 }
 function liveTurnActivity(turn2, lines, connected, stop) {
   if (turn2.phase === "settled") return null;
@@ -22645,9 +22666,9 @@ function liveTurnActivity(turn2, lines, connected, stop) {
     connected,
     stop
   );
-  const current = notices.length ? { action: notices.map((notice) => notice.text).join(" \xB7 ") } : currentActivityHeadline(lines);
   const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
-  if (!notices.length) return { lines, headline: current, ...presentation };
+  if (!notices.length) return { lines, ...latestTraceHeadline(lines, true), ...presentation };
+  const current = { action: notices.map((notice) => notice.text).join(" \xB7 ") };
   const marker = {
     kind: "notification",
     id: `ui:current:${turn2.id}`,
@@ -22657,7 +22678,8 @@ function liveTurnActivity(turn2, lines, connected, stop) {
   return {
     ...presentation,
     lines: [...lines, { ts: "", text: JSON.stringify(marker) }],
-    headline: current
+    headline: current,
+    repetitions: 1
   };
 }
 function activeTurnNotices(turn2, connected, stop) {
@@ -22694,7 +22716,10 @@ function turnRowView(turn2, now) {
   const settled = turn2.phase === "settled";
   const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
   const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
-  const elapsedMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : null;
+  const requestedAt = turnRequestedAt(turn2);
+  const waitedMs = Number.isFinite(startedAt2) && Number.isFinite(requestedAt) ? Math.max(0, startedAt2 - requestedAt) : 0;
+  const ranMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : null;
+  const elapsedMs = settled ? ranMs === null ? null : ranMs + waitedMs : Number.isFinite(requestedAt) ? Math.max(0, now - requestedAt) : null;
   const model = turn2.metadata.model;
   const timings = turn2.usage.map(({ value }) => value.duration_api_ms);
   const modelCallMs = timings.length && timings.every((value) => value !== void 0) ? timings.reduce((total, value) => total + value, 0) : null;
@@ -22713,6 +22738,7 @@ function turnRowView(turn2, now) {
 
 // src/technical-summary.ts
 function formatUsageCost(usd) {
+  if (usd === 0) return "$0";
   if (usd >= 1) return "$" + usd.toFixed(2);
   if (usd >= 0.01) return "$" + usd.toFixed(3);
   return "$" + usd.toFixed(4);
@@ -23812,7 +23838,10 @@ function modelChipTime(modelTime, active) {
   return modelTime.since !== void 0 ? { since: modelTime.since - modelTime.ms } : { ms: modelTime.ms };
 }
 function isTimedStep(step) {
-  return step.kind === "tool" || step.kind === "compaction";
+  return step.kind === "tool" || step.kind === "compaction" || isTurnStartStep(step);
+}
+function execRunning(step, live) {
+  return live && isTimedStep(step) && step.status === "running" && step.durationMs === void 0;
 }
 function chapterTimes(entries, live) {
   let exec = 0;
@@ -23824,7 +23853,7 @@ function chapterTimes(entries, live) {
     if (isTimedStep(step)) {
       timed = true;
       const startedAt2 = Number(line.ts);
-      if (live && step.status === "running" && line.ts && Number.isFinite(startedAt2))
+      if (execRunning(step, live) && line.ts && Number.isFinite(startedAt2))
         execSince = Math.min(execSince ?? startedAt2, startedAt2);
       else exec += step.durationMs ?? 0;
     }
@@ -23851,7 +23880,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : "";
   const meta = open ? [timestamp, statusText].filter(Boolean).join(" \xB7 ") : "";
-  const execTime = running ? hasStartedAt ? { since: startedAt2 } : null : isTimedStep(step) && typeof step.durationMs === "number" ? { ms: step.durationMs } : null;
+  const execTime = execRunning(step, live) ? hasStartedAt ? { since: startedAt2 } : null : isTimedStep(step) && typeof step.durationMs === "number" ? { ms: step.durationMs } : null;
   const todos = open ? todoItems(step) : null;
   const stoppable = elapsedMs !== null && elapsedMs >= TRACE_STEP_THRESHOLD_MS;
   const stoppableId = stoppable && step.kind === "tool" && step.id ? step.id : null;
@@ -24094,7 +24123,7 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
           {
             label: "Other",
             value: fmtTime(otherMs),
-            title: "Total minus model and tool time: container startup, prompt assembly, history loading, message delivery, etc."
+            title: "Total minus model and tool time: queueing, container startup, prompt assembly, history loading, message delivery, etc."
           }
         )
       ] }),
@@ -24109,11 +24138,18 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
     ] })
   ] });
 }
-function UsageContext({ context, partialTokens, live }) {
+function UsageContext({ context, partialTokens }) {
   const contextTokens = context ? context.context_tokens : partialTokens !== void 0 && Number.isFinite(partialTokens) && partialTokens >= 0 ? partialTokens : void 0;
   if (contextTokens === void 0) return null;
-  const detail = `${fmtTokUnit(contextTokens)}${context ? ` / ${fmtContextLimit(context.context_window)} tok (${formatContextPercent(contextTokens, context.context_window)})` : ""}`;
-  return /* @__PURE__ */ u4(UsageRow, { label: live ? "Context now" : "Context at end", value: detail });
+  const detail = `${fmtTokUnit(contextTokens)}${context ? ` \xB7 ${formatContextPercent(contextTokens, context.context_window)}` : ""}`;
+  return /* @__PURE__ */ u4(
+    UsageRow,
+    {
+      label: "Context utilization",
+      value: detail,
+      title: "Context in use after the latest model call: its whole prompt plus its reply"
+    }
+  );
 }
 function UsageTokens({ u: u5, live }) {
   const count = (n3) => n3 !== void 0 ? fmtTokUnit(n3) : "unavailable";
@@ -24132,21 +24168,28 @@ function UsageTokens({ u: u5, live }) {
       UsageContext,
       {
         context: latestContextUsage([u5]),
-        partialTokens: u5.context_window === void 0 ? u5.context_tokens : void 0,
-        live
+        partialTokens: u5.context_window === void 0 ? u5.context_tokens : void 0
       }
     )
   ] });
 }
 function UsageModel({ u: u5, model, live, partial }) {
   const reportedModel = u5.model || model;
+  const window2 = u5.context_window !== void 0 && Number.isFinite(u5.context_window) && u5.context_window > 0 ? u5.context_window : null;
   return /* @__PURE__ */ u4(k, { children: [
     reportedModel ? /* @__PURE__ */ u4("span", { class: "usage-row", children: [
       /* @__PURE__ */ u4("span", { children: "Model" }),
       /* @__PURE__ */ u4("strong", { title: reportedModel, children: shortModel(reportedModel) })
     ] }) : null,
+    window2 !== null ? /* @__PURE__ */ u4(UsageRow, { label: "Context size", value: `${fmtContextLimit(window2)} tok` }) : null,
     u5.num_turns ? /* @__PURE__ */ u4(UsageRow, { label: live ? "Model calls so far" : "Model calls", value: String(u5.num_turns) }) : null,
-    u5.cost_usd ? /* @__PURE__ */ u4(UsageRow, { label: partial ? "Reported cost" : "Estimated cost", value: formatUsageCost(u5.cost_usd) }) : null
+    /* @__PURE__ */ u4(
+      UsageRow,
+      {
+        label: partial ? "Reported cost" : "Estimated cost",
+        value: u5.cost_usd === void 0 || !Number.isFinite(u5.cost_usd) ? "Unavailable" : formatUsageCost(u5.cost_usd)
+      }
+    )
   ] });
 }
 function AgentActionLabel({ label, title }) {
@@ -24799,21 +24842,22 @@ function TurnTechnicalDetails({
     )
   ] });
 }
-function TurnElapsed({ startedAt: startedAt2 }) {
+function TurnElapsed({ ms, live }) {
   return /* @__PURE__ */ u4(
     "span",
     {
-      class: `turn-elapsed${startedAt2 === null ? "" : " live"}`,
-      role: startedAt2 === null ? void 0 : "timer",
-      "aria-live": startedAt2 === null ? void 0 : "off",
+      class: `turn-elapsed${live ? " live" : ""}`,
+      role: live ? "timer" : void 0,
+      "aria-live": live ? "off" : void 0,
       "aria-label": "Elapsed response time",
       title: "Response time, including tools and waiting for replies",
-      children: startedAt2 === null ? formatStopwatch(0) : /* @__PURE__ */ u4(LiveDuration, { since: startedAt2 })
+      children: formatStopwatch(ms)
     }
   );
 }
-function startingResponsePresentation(submission) {
-  const ownerId = `submission:${submission.messageId}`;
+function startingResponsePresentation(submission, now) {
+  const ownerId = submissionTraceOwner(submission.messageId);
+  const submittedAt = Date.parse(submission.timestamp);
   return {
     ownerId,
     status: true,
@@ -24823,14 +24867,16 @@ function startingResponsePresentation(submission) {
     attributes: { "data-response-start": ownerId },
     technicalTurn: void 0,
     stopControl: /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, { turnId: null }) }),
-    elapsedControl: /* @__PURE__ */ u4(TurnElapsed, { startedAt: null }),
+    elapsedControl: /* @__PURE__ */ u4(TurnElapsed, { ms: Number.isFinite(submittedAt) ? Math.max(0, now - submittedAt) : 0, live: true }),
     tone: "",
-    activity: { headline: { action: STARTING_RESPONSE_TEXT }, notice: false, error: false },
-    lines: [{ ts: "", text: JSON.stringify({
+    activity: { headline: { action: QUEUED_TEXT }, repetitions: 1, notice: false, error: false },
+    // A real (counted) entry, so the trace exists from the moment of sending.
+    // Pending: queueing has no CPU chip; the turn total covers it.
+    lines: [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : "", text: JSON.stringify({
       kind: "notification",
-      id: `ui:current:${submission.messageId}`,
-      text: STARTING_RESPONSE_TEXT,
-      status: "running"
+      id: `ui:start:${submission.messageId}`,
+      text: QUEUED_TEXT,
+      status: "pending"
     }) }]
   };
 }
@@ -24839,6 +24885,7 @@ function turnResponsePresentation({ turn: turn2, activity: lines, status, traceO
   const settled = turn2.phase === "settled";
   const live = status && !settled;
   const activity = live ? liveTurnActivity(turn2, lines, turnConnected.value, stop) : null;
+  const elapsedMs = live ? turnRowView(turn2, now).elapsedMs : null;
   const tone2 = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
   return {
     ownerId,
@@ -24849,26 +24896,29 @@ function turnResponsePresentation({ turn: turn2, activity: lines, status, traceO
     attributes: { "data-turn-id": status ? turn2.id : void 0 },
     technicalTurn: status ? turn2 : void 0,
     stopControl: live ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, { turnId: turn2.id }) }) : null,
-    elapsedControl: live && turn2.startedAt ? /* @__PURE__ */ u4(TurnElapsed, { startedAt: Date.parse(turn2.startedAt) }) : null,
+    elapsedControl: elapsedMs !== null ? /* @__PURE__ */ u4(TurnElapsed, { ms: elapsedMs, live: true }) : null,
     tone: tone2,
     activity,
     lines: activity?.lines ?? lines
   };
 }
 function ResponseStatusRow({ source }) {
-  const clock = source.kind === "turn" ? { startedAt: source.turn.startedAt, live: source.status && source.turn.phase !== "settled" } : { startedAt: null, live: false };
+  const clock = source.kind === "turn" ? { startedAt: turnRequestedAt(source.turn), live: source.status && source.turn.phase !== "settled" } : { startedAt: Date.parse(source.submission.timestamp), live: true };
   const [now, setNow] = h2(() => Date.now());
+  const startedAt2 = clock.startedAt;
+  const tick = Number.isFinite(startedAt2) && now - startedAt2 < 1e4 ? 100 : 1e3;
   y2(() => {
-    setNow(Date.now());
     if (!clock.live) return;
-    const timer2 = window.setInterval(() => setNow(Date.now()), 1e3);
-    return () => window.clearInterval(timer2);
-  }, [clock.startedAt, clock.live]);
-  const presentation = source.kind === "starting" ? startingResponsePresentation(source.submission) : turnResponsePresentation(source, now);
+    const timer2 = window.setTimeout(() => setNow(Date.now()), tick);
+    return () => window.clearTimeout(timer2);
+  }, [now, tick, clock.live]);
+  y2(() => setNow(Date.now()), [clock.startedAt, clock.live]);
+  const presentation = source.kind === "starting" ? startingResponsePresentation(source.submission, now) : turnResponsePresentation(source, now);
   const { ownerId, status, busy, lines, activity } = presentation;
   const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;
+  const repetitions = activity?.repetitions ?? 1;
   if (!lines.length && !status) return null;
   if (!status && !showTechnicalStatus) return null;
   const hasTechnicalInformation = showTechnicalStatus && (lines.length > 0 || !!presentation.technicalTurn && hasTurnStats(presentation.technicalTurn, turnRowView(presentation.technicalTurn, now)));
@@ -24903,8 +24953,8 @@ function ResponseStatusRow({ source }) {
             {
               class: `hint${activity.error ? " turn-stop-error" : ""}`,
               role: activity.error ? "alert" : "status",
-              title: headlineSummary(headline),
-              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline })
+              title: headlineSummary(headline, repetitions),
+              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline, repetitions })
             }
           ) : headline && showTechnicalStatus && expanded ? null : headline && showTechnicalStatus ? /* @__PURE__ */ u4(
             "button",
@@ -24915,9 +24965,9 @@ function ResponseStatusRow({ source }) {
               "aria-label": expanded ? "Hide activity" : "Show latest activity",
               title: expanded ? "Hide activity" : "Show latest activity",
               onClick: () => toggleActivityTrace(ownerId),
-              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline })
+              children: /* @__PURE__ */ u4(StepHeadlineContent, { headline, repetitions })
             }
-          ) : headline ? /* @__PURE__ */ u4("span", { class: "hint", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) }) : null
+          ) : headline ? /* @__PURE__ */ u4("span", { class: "hint", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline, repetitions }) }) : null
         ] })
       ]
     }

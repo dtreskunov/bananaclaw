@@ -93,6 +93,8 @@ const stopFailure = 'Simulated Stop failure. Try again.';
 let generation = 0;
 interface SendRequest {
   url: string;
+  /** When the server received it; the server stamps the stored message with this time. */
+  receivedAt: number;
   clientMessageId: string;
   messageId: string;
   text: string;
@@ -140,7 +142,7 @@ function echoSend(): void {
   if (next.messages.some((message) => message.id === request.messageId)) return;
   next.messages.push({
     id: request.messageId, direction: 'in', text: request.text, files: request.files,
-    timestamp: new Date().toISOString(), timelinePosition: Date.now() * 1000,
+    timestamp: new Date(request.receivedAt).toISOString(), timelinePosition: Date.now() * 1000,
     inputState: {
       messageId: request.messageId,
       status: request.inputHandling?.mode === 'steer' ? 'steering' : 'queued',
@@ -173,6 +175,9 @@ function startResponse(activate = true): void {
       turn = makeConversation('initial', new Date().toISOString()).turns[0];
       turn.id = 'fixture-submitted-turn';
       turn.inputIds = [request.messageId];
+      // Provider still starting: no model call can run yet.
+      turn.activity = [];
+      turn.requestedAt = next.messages.find((message) => message.id === request.messageId)?.timestamp ?? null;
       turn.metadata.model = null;
       next.turns.push(turn);
       const input = next.messages.find((message) => message.id === request.messageId);
@@ -294,12 +299,18 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
         ...(nextScene === 'parallel-completed' ? { durationMs: 1200 } : {}),
       }),
     });
+  // The runner marks when the first model call can start.
+  if (!outcomeOnly) activity.push({
+    ordinal: 100, ts: String(started + 100), timelinePosition: (started + 100) * 1000,
+    text: JSON.stringify({ kind: 'model', id: `model:ready:${fixtureTurnId}`, durationMs: 0 }),
+  });
   const hasReply = settled && nextScene !== 'outputless' && (!terminalOutcome || nextScene === 'card-warning' || noticeReply);
   const turn: ConversationTurn = {
     id: fixtureTurnId,
     phase,
     outcome: compactSummary ? 'warning' : terminalOutcome ?? (!settled ? 'pending' : failed ? 'failed' : hasReply ? 'replied' : 'silent'),
     startedAt: outcomeOnly ? null : startedAt,
+    requestedAt: outcomeOnly ? null : new Date(started - 1500).toISOString(),
     endedAt: settled && !outcomeOnly ? new Date(started + elapsedMs).toISOString() : null,
     inputIds: pendingInput ? [] : ['fixture-status-input'],
     outputIds: hasReply ? ['fixture-status-reply'] : [],
@@ -551,7 +562,7 @@ globalThis.fetch = async (input, init) => {
         throw new Error('Fixture received invalid input handling');
       inputHandling = { mode: handling.mode, turnId: handling.turnId };
     }
-    const request: SendRequest = { url, text: body.text, clientMessageId: body.clientMessageId,
+    const request: SendRequest = { url, receivedAt: Date.now(), text: body.text, clientMessageId: body.clientMessageId,
       messageId: publicWebMessageId(body.clientMessageId), files, inputHandling };
     sendRequests.push(request);
     return new Promise<Response>((resolve) => {

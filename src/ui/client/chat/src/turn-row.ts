@@ -1,30 +1,31 @@
 import type { ConversationTurn } from '../../../shared/conversation';
 import {
-  isSyntheticTraceStep,
+  activityChapters,
+  isOutcomeTraceStep,
   parseStep,
   stepHeadline,
   type StepHeadline,
   type TraceLine,
   type TraceStep,
 } from '../../../shared/activity-presentation';
-import { terminalOutcomeStep, THINKING_TEXT } from '../../../shared/conversation-activity';
+import { terminalOutcomeStep, THINKING_TEXT, turnRequestedAt } from '../../../shared/conversation-activity';
 import type { ActiveTurn } from './types';
 
-export function currentActivityHeadline(lines: readonly TraceLine[]): StepHeadline {
-  const seen = new Set<string>();
-  for (let index = lines.length - 1; index >= 0; index--) {
-    const step = parseStep(lines[index].text);
-    if (isSyntheticTraceStep(step)) continue;
-    if (step.id) {
-      const id = `${step.kind}:${step.id}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-    }
-    if (step.status !== 'running' && step.status !== 'pending') continue;
-    const headline = stepHeadline(step);
-    if (headline.action || headline.subject) return headline;
-  }
-  return { action: THINKING_TEXT };
+export interface TraceHeadline {
+  headline: StepHeadline;
+  repetitions: number;
+}
+
+/** The trace's latest row as the trace list shows it (grouped chapter or single step); outcome rows never lead. */
+export function latestTraceHeadline(lines: TraceLine[], live: boolean): TraceHeadline {
+  const chapter = activityChapters(lines, live)
+    .reverse()
+    .find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
+  if (!chapter) return { headline: { action: THINKING_TEXT }, repetitions: 1 };
+  if (chapter.entries.length > 1) return { headline: chapter.headline, repetitions: chapter.entries.length };
+  const { line, step } = chapter.entries[0];
+  const headline = stepHeadline(step);
+  return { headline: headline.action || headline.subject ? headline : { action: line.text }, repetitions: 1 };
 }
 
 export function liveTurnActivity(
@@ -32,7 +33,7 @@ export function liveTurnActivity(
   lines: TraceLine[],
   connected: boolean,
   stop: { turnId: string; error: string } | null,
-): { lines: TraceLine[]; headline: StepHeadline; notice: boolean; error: boolean } | null {
+): { lines: TraceLine[]; headline: StepHeadline; repetitions: number; notice: boolean; error: boolean } | null {
   if (turn.phase === 'settled') return null;
   const notices = activeTurnNotices(
     {
@@ -42,11 +43,9 @@ export function liveTurnActivity(
     connected,
     stop,
   );
-  const current = notices.length
-    ? { action: notices.map((notice) => notice.text).join(' \u00b7 ') }
-    : currentActivityHeadline(lines);
   const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
-  if (!notices.length) return { lines, headline: current, ...presentation };
+  if (!notices.length) return { lines, ...latestTraceHeadline(lines, true), ...presentation };
+  const current = { action: notices.map((notice) => notice.text).join(' \u00b7 ') };
   const marker: TraceStep = {
     kind: 'notification',
     id: `ui:current:${turn.id}`,
@@ -57,6 +56,7 @@ export function liveTurnActivity(
     ...presentation,
     lines: [...lines, { ts: '', text: JSON.stringify(marker) }],
     headline: current,
+    repetitions: 1,
   };
 }
 
@@ -116,11 +116,20 @@ export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
   const settled = turn.phase === 'settled';
   const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
   const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : NaN;
-  const elapsedMs = settled
+  // Total runs from submission; the wait before the turn started counts.
+  const requestedAt = turnRequestedAt(turn);
+  const waitedMs =
+    Number.isFinite(startedAt) && Number.isFinite(requestedAt) ? Math.max(0, startedAt - requestedAt) : 0;
+  const ranMs = settled
     ? (turn.metadata.durationMs ??
       (Number.isFinite(startedAt) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt) : null))
-    : Number.isFinite(startedAt)
-      ? Math.max(0, now - startedAt)
+    : null;
+  const elapsedMs = settled
+    ? ranMs === null
+      ? null
+      : ranMs + waitedMs
+    : Number.isFinite(requestedAt)
+      ? Math.max(0, now - requestedAt)
       : null;
   const model = turn.metadata.model;
   const timings = turn.usage.map(({ value }) => value.duration_api_ms);

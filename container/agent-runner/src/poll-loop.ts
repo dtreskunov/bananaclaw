@@ -857,6 +857,16 @@ export async function processQuery(
   let turnId = execution.current.turnId;
   setTurnContext(execution.current);
   let activeTurnRouting = routing;
+  // Set at init for providers that don't report model requests; their
+  // warm follow-up turns can call the model immediately.
+  let providerReady = false;
+  // A zero-length model step marks when the turn's first model call can
+  // start, so the UI's AI stopwatch excludes queueing and provider startup.
+  const markModelReady = (): void => {
+    if (execution.current.modelReady) return;
+    execution.current.modelReady = true;
+    appendActivity({ kind: 'model', id: `model:ready:${execution.current.turnId}`, durationMs: 0 });
+  };
   // Assigned from the event handler closure; the assertion keeps TypeScript
   // from narrowing it to its initial null.
   let lastProviderError = null as { message: string; classification?: string } | null;
@@ -1064,6 +1074,7 @@ export async function processQuery(
     runaway.reset();
     turnId = execution.current.turnId;
     publishTurn();
+    if (providerReady) markModelReady();
     try {
       clearTurnEnded();
     } catch {
@@ -1148,6 +1159,14 @@ export async function processQuery(
   // Provider events only the fork acts on; upstream ignores them.
   const handleForkEvent = (event: ProviderEvent): void => {
     switch (event.type) {
+      case 'init':
+        if (provider.reportsModelRequests) break;
+        providerReady = true;
+        markModelReady();
+        break;
+      case 'model_request':
+        markModelReady();
+        break;
       case 'steering_applied': {
         const { prompt: guidance, text } = steering.apply(event.id, execution.current, userStopped);
         appendActivity({
