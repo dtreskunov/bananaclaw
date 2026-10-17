@@ -64,6 +64,28 @@ After redeem the browser lands on `/ui/chat/`. Log out via the button in the hea
 
 In-browser chat + read-only browser for the per-agent-group filesystem at `groups/<folder>/`.
 
+#### Thread-list scanning
+
+Thread-list statistics are read by one lazy, persistent Node worker, not on the
+host event loop. Sync, thread listing, search scoping, and push-title lookup share
+this scanner. SQLite connections are worker-local, read-only, and closed after
+each session scan; the runner's private database is never read.
+
+Concurrent identical requests share one scan. The worker retains up to 1,024
+session/routing results and rescans sessions marked dirty by committed message,
+usage, title, or task changes. Invalidations coalesce until the next request;
+an older in-flight scan cannot clear a newer invalidation. Central session,
+wiring, identity, and fork metadata are read afresh on the host, with visibility
+rechecked after scanning. Adapter connectivity is not cached.
+
+Cached results expire after 60 seconds even when accessed repeatedly, so
+out-of-band database edits are reconciled on a subsequent refresh. No persistent
+summary table or migration is involved. Pending scans are bounded to 32 requests
+with a 30-second deadline; worker failures reject requests, and a later request
+starts a fresh worker. Thread-list/search failures return an explicit 503 rather
+than an empty successful result. Push titles log failures and retain the existing
+group-name fallback.
+
 #### Startup recovery
 
 The chat shell displays a loading screen before JavaScript or account data

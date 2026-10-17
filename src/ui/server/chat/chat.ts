@@ -29,6 +29,7 @@ import {
   deleteSession,
   findSessionByAgentGroup,
   findSessionForAgent,
+  getSessionsByAgentGroup,
   SessionApprovalCancellationRequiredError,
   SessionApprovalInProgressError,
 } from '../../../db/sessions.js';
@@ -54,6 +55,8 @@ import {
   MIN_TASK_SCRIPT_TIMEOUT_MS,
   type TaskUpdate,
 } from '../../../modules/scheduling/db.js';
+import { summarizeTaskPrompt, type ThreadScanSpec } from './thread-scan.js';
+import { threadScanner } from './thread-scanner.js';
 import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
 import { ForkError, forkThread, type ForkThreadResult } from '../../../fork-session.js';
 import {
@@ -709,13 +712,11 @@ export async function handleChatRequest(
     try {
       // Elevated users (owner/global admin) see every thread in the
       // group; everyone else sees only their own.
-      const threads = isElevated(userId)
-        ? listAllThreadsForAgentGroup(m.groupId)
-        : listAllThreadsForUser(userId, m.groupId);
+      const threads = await listThreadsForViewer(userId, m.groupId);
       writeJson(res, 200, { threads });
     } catch (err) {
       log.warn('web chat threads list failed', { userId, groupId: m.groupId, err });
-      writeJson(res, 200, { threads: [] });
+      writeJson(res, 503, { error: 'Thread list unavailable; retry the request' });
     }
     return true;
   }
@@ -732,10 +733,7 @@ export async function handleChatRequest(
       return true;
     }
     try {
-      const elevated = isElevated(userId);
-      const visibleThreads = elevated
-        ? listAllThreadsForAgentGroup(m.groupId)
-        : listAllThreadsForUser(userId, m.groupId);
+      const visibleThreads = await listThreadsForViewer(userId, m.groupId);
       const results = searchMessages(query, {
         agentGroupId: m.groupId,
         conversations: buildViewerSearchConversations(visibleThreads),
@@ -743,7 +741,7 @@ export async function handleChatRequest(
       writeJson(res, 200, { results });
     } catch (err) {
       log.warn('web chat search failed', { userId, groupId: m.groupId, query, err });
-      writeJson(res, 200, { results: [] });
+      writeJson(res, 503, { error: 'Search unavailable; retry the request' });
     }
     return true;
   }
@@ -1729,28 +1727,6 @@ function normTs(s: string): string {
   return s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
 }
 
-/**
- * Condense a scheduled-task prompt into a one-line label for the timeline
- * event bubble / thread badge. Tasks store a JSON `{ prompt, script }`
- * blob; we surface the first non-empty line of the prompt, trimmed.
- */
-function summarizeTaskPrompt(content: string): string {
-  let prompt = '';
-  try {
-    const o = JSON.parse(content);
-    if (typeof o?.prompt === 'string') prompt = o.prompt;
-    else if (typeof o === 'string') prompt = o;
-  } catch {
-    prompt = content;
-  }
-  const firstLine =
-    prompt
-      .split('\n')
-      .map((l) => l.trim())
-      .find((l) => l.length > 0) || 'Scheduled task';
-  return firstLine.length > 80 ? firstLine.slice(0, 77) + '\u2026' : firstLine;
-}
-
 function taskWasAutoPaused(content: string): boolean {
   try {
     return JSON.parse(content)?.autoPaused === true;
@@ -2419,7 +2395,7 @@ function viewerHandlesForChannel(userId: string, channelType: string): string[] 
  * this group" probe. Used by the dropdown filter so groups the viewer
  * has no actual conversations in are hidden by default. Owners/global
  * admins can still see those groups by enabling the "Show all" toggle
- * (which uses {@link listAllThreadsForAgentGroup} for spectator-mode
+ * (which uses {@link listThreadsForViewer} for spectator-mode
  * threads listing).
  *
  * "Content" means "viewer has at least one session in a messaging
@@ -2449,7 +2425,14 @@ export function viewerHasContent(userId: string, agentGroupId: string): boolean 
   }
   // Agent-shared session (no mg link) is shared by everyone with a
   // messaging context, so it also counts.
-  if (hasAgentSharedSession(agentGroupId)) return true;
+  if (
+    getDb()
+      .prepare(
+        'SELECT 1 FROM sessions WHERE agent_group_id = ? AND messaging_group_id IS NULL AND thread_id IS NULL LIMIT 1',
+      )
+      .get(agentGroupId)
+  )
+    return true;
   return false;
 }
 
@@ -2506,37 +2489,6 @@ function listUserMessagingContexts(userId: string, agentGroupId: string): UserMe
   return out;
 }
 
-/** Channel-aware title extraction from an inbound `content` JSON blob. */
-function extractTitle(channelType: string, content: string): string {
-  if (channelType === 'resend') {
-    try {
-      const o = JSON.parse(content) as {
-        subject?: unknown;
-        metadata?: { subject?: unknown };
-        headers?: { subject?: unknown };
-      };
-      const subj = o?.subject ?? o?.metadata?.subject ?? o?.headers?.subject;
-      if (typeof subj === 'string' && subj.trim()) return subj.trim();
-    } catch {
-      /* fall through */
-    }
-  }
-  const parsed = parseInboundContent(content);
-  const text = parsed?.text ?? '';
-  // HA replays the full transcript on every turn (see buildTurn); strip it
-  // so the thread title reflects the user's actual query.
-  return channelType === HA_CHANNEL_TYPE ? extractDisplayQuery(text) : text;
-}
-
-/** Strip auto-prepended context blockquote + whitespace, cap to 60 chars. */
-function finalizeTitle(raw: string): string {
-  const cleaned = raw
-    .replace(/^>\s*Context.*\n+/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned ? cleaned.slice(0, 60) : '(new thread)';
-}
-
 /**
  * List all chat threads across every messaging group the viewer is in
  * for this agent group. We dispatch based on the actual session rows
@@ -2544,9 +2496,22 @@ function finalizeTitle(raw: string): string {
  * session_mode, so the listing stays correct when mga.session_mode and
  * the session table have drifted (e.g. mode was changed mid-life).
  */
-export function listAllThreadsForUser(userId: string, agentGroupId: string): ThreadSummary[] {
-  const ctxs = listUserMessagingContexts(userId, agentGroupId);
-  return collectThreadsForContexts(userId, agentGroupId, ctxs, false);
+export async function listThreadsForViewer(userId: string, agentGroupId: string): Promise<ThreadSummary[]> {
+  const visibility = () => {
+    const spectator = isElevated(userId);
+    const contexts = spectator
+      ? listAgentMessagingContexts(agentGroupId)
+      : listUserMessagingContexts(userId, agentGroupId);
+    const handles = contexts.map((ctx) => viewerHandlesForChannel(userId, ctx.channelType));
+    return { spectator, contexts, handles };
+  };
+  if (!canAccessAgentGroup(userId, agentGroupId).allowed) throw new Error('Thread list access denied');
+  const before = visibility();
+  const threads = await collectThreadsForContexts(agentGroupId, before.contexts, before.spectator, before.handles);
+  if (!canAccessAgentGroup(userId, agentGroupId).allowed || JSON.stringify(before) !== JSON.stringify(visibility())) {
+    throw new Error('Thread visibility changed during scanning; retry the request');
+  }
+  return threads;
 }
 
 /**
@@ -2556,7 +2521,7 @@ export function listAllThreadsForUser(userId: string, agentGroupId: string): Thr
  * groups they don't actively participate in. The route handler MUST
  * gate this on `hasAdminPrivilege(userId, agentGroupId)`.
  */
-export function listAllThreadsForAgentGroup(agentGroupId: string): ThreadSummary[] {
+function listAgentMessagingContexts(agentGroupId: string): UserMessagingContext[] {
   // Enumerate every messaging group wired to this agent group, with no
   // viewer-handle filter so all conversations are visible.
   type Row = { mg_id: string; channel_type: string; platform_id: string; session_mode: string | null };
@@ -2574,36 +2539,138 @@ export function listAllThreadsForAgentGroup(agentGroupId: string): ThreadSummary
     platformId: r.platform_id,
     sessionMode: (r.session_mode || 'per-thread') as UserMessagingContext['sessionMode'],
   }));
-  return collectThreadsForContexts('', agentGroupId, ctxs, true);
+  return ctxs;
 }
 
-function collectThreadsForContexts(
-  userId: string,
+async function collectThreadsForContexts(
   agentGroupId: string,
   ctxs: UserMessagingContext[],
   spectator: boolean,
-): ThreadSummary[] {
+  handles: string[][],
+): Promise<ThreadSummary[]> {
   const out: ThreadSummary[] = [];
-
-  // Per-mg: any session with thread_id IS NOT NULL is per-thread-style;
-  // any session with thread_id IS NULL is shared-style. Either may exist.
-  const sharedCtxs: UserMessagingContext[] = [];
+  const sessions = getSessionsByAgentGroup(agentGroupId);
+  type Plan = {
+    spec: ThreadScanSpec;
+    session: Pick<(typeof sessions)[number], 'id' | 'last_active' | 'created_at'>;
+    contexts: UserMessagingContext[];
+    mode: ThreadSummary['sessionMode'];
+  };
+  const plans: Plan[] = [];
+  const sharedPlans: Plan[] = [];
   for (const ctx of ctxs) {
-    enumeratePerThread(userId, agentGroupId, ctx, out, spectator);
-    if (hasSharedSession(agentGroupId, ctx.messagingGroupId)) sharedCtxs.push(ctx);
+    const perThread = getDb()
+      .prepare(
+        `SELECT id, thread_id, last_active, created_at FROM sessions
+       WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NOT NULL`,
+      )
+      .all(agentGroupId, ctx.messagingGroupId) as Pick<
+      (typeof sessions)[number],
+      'id' | 'thread_id' | 'last_active' | 'created_at'
+    >[];
+    for (const session of perThread) {
+      if (session.thread_id === null) continue;
+      plans.push({
+        spec: {
+          agentGroupId,
+          sessionId: session.id,
+          thread: {
+            channelType: ctx.channelType,
+            platformId: ctx.platformId,
+            threadId: session.thread_id,
+          },
+        },
+        session,
+        contexts: [ctx],
+        mode: 'per-thread',
+      });
+    }
+    const session = sessions.find(
+      (s) => s.messaging_group_id === ctx.messagingGroupId && s.thread_id === null && s.status === 'active',
+    );
+    if (session)
+      sharedPlans.push({
+        spec: { agentGroupId, sessionId: session.id },
+        session,
+        contexts: [ctx],
+        mode: 'shared',
+      });
   }
-  for (const ctx of sharedCtxs) enumerateShared(agentGroupId, ctx, out);
-
-  // Threadless DMs: shared sessions where messages_in.thread_id IS NULL.
-  // These are e.g. Telegram 1:1 DMs — the channel adapter doesn't
-  // synthesize a thread id, so all messages live in a single virtual
-  // chat keyed by (mg, viewer platform id).
-  for (const ctx of sharedCtxs) enumerateThreadlessDm(userId, agentGroupId, ctx, out, spectator);
-
-  // Agent-shared session (one per agent group, no mg link in sessions).
-  if (ctxs.length > 0 && hasAgentSharedSession(agentGroupId)) {
-    enumerateAgentShared(agentGroupId, ctxs, out);
+  plans.push(...sharedPlans);
+  if (ctxs.length && sessions.some((s) => s.messaging_group_id === null && s.thread_id === null)) {
+    const session = findSessionByAgentGroup(agentGroupId);
+    if (session)
+      plans.push({
+        spec: { agentGroupId, sessionId: session.id },
+        session,
+        contexts: ctxs,
+        mode: 'agent-shared',
+      });
   }
+  // Mutation helpers defer invalidation until their outer transaction unwinds.
+  await Promise.resolve();
+  const scans = await threadScanner.scan(plans.map((plan) => plan.spec));
+  const remaining = new Set(getSessionsByAgentGroup(agentGroupId).map((session) => session.id));
+  const dmSummaries: ThreadSummary[] = [];
+  const agentSummaries: ThreadSummary[] = [];
+  for (const [index, plan] of plans.entries()) {
+    if (!remaining.has(plan.session.id)) continue;
+    const scan = scans[index];
+    const usage =
+      scan.turnCount > 0 ? { totalCost: scan.totalCost, totalTokens: scan.totalTokens, turnCount: scan.turnCount } : {};
+    for (const thread of scan.threads) {
+      const ctx = plan.contexts.find((c) => c.channelType === thread.channelType && c.platformId === thread.platformId);
+      if (!ctx) continue;
+      if (
+        plan.mode === 'per-thread' &&
+        !spectator &&
+        ctx.channelType !== WEB_CHANNEL_TYPE &&
+        !handles[ctxs.indexOf(ctx)].some((handle) => scan.owners.includes(handle))
+      )
+        continue;
+      const target = plan.mode === 'agent-shared' ? agentSummaries : out;
+      target.push({
+        ...thread,
+        sessionId: plan.session.id,
+        messagingGroupId: ctx.messagingGroupId,
+        sessionMode: plan.mode,
+        lastActivityAt:
+          thread.lastActivityAt ||
+          (plan.mode === 'per-thread'
+            ? plan.session.last_active || plan.session.created_at
+            : new Date(0).toISOString()),
+        counterparty: ctx.channelType === WEB_CHANNEL_TYPE ? undefined : thread.platformId,
+        ...usage,
+      });
+    }
+    if (plan.mode !== 'shared') continue;
+    const ctx = plan.contexts[0];
+    if (ctx.channelType === WEB_CHANNEL_TYPE) continue;
+    const owned = handles[ctxs.indexOf(ctx)];
+    const dms = scan.dms.filter(
+      (dm) => dm.channelType === ctx.channelType && (spectator || owned.includes(dm.platformId)),
+    );
+    if (!dms.length) continue;
+    const reply = scan.dmReplies.find((r) => r.channelType === ctx.channelType);
+    const times = [...dms.map((dm) => dm.lastActivityAt), reply?.lastActivityAt || '']
+      .filter(Boolean)
+      .sort((a, b) => Date.parse(normTs(b)) - Date.parse(normTs(a)));
+    const platformId = dms[dms.length - 1].platformId;
+    dmSummaries.push({
+      threadId: `__dm:${ctx.messagingGroupId}`,
+      sessionId: plan.session.id,
+      channelType: ctx.channelType,
+      messagingGroupId: ctx.messagingGroupId,
+      platformId,
+      sessionMode: 'shared',
+      title: 'Direct messages',
+      lastActivityAt: times[0] || new Date(0).toISOString(),
+      messageCount: dms.reduce((total, dm) => total + dm.messageCount, reply?.messageCount ?? 0),
+      counterparty: platformId,
+      kind: 'dm',
+    });
+  }
+  out.push(...dmSummaries, ...agentSummaries);
 
   // Stamp canSend by channel — true iff the adapter is registered and
   // connected. Web is always sendable (handled by submitWebInbound).
@@ -2702,453 +2769,6 @@ function stampForkLineage(agentGroupId: string, threads: ThreadSummary[]): boole
     if (children) t.forkChildren = children;
   }
   return resorted;
-}
-
-function hasSharedSession(agentGroupId: string, mgId: string): boolean {
-  const row = getDb()
-    .prepare(
-      'SELECT 1 AS x FROM sessions WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NULL LIMIT 1',
-    )
-    .get(agentGroupId, mgId);
-  return !!row;
-}
-
-function hasAgentSharedSession(agentGroupId: string): boolean {
-  const row = getDb()
-    .prepare(
-      'SELECT 1 AS x FROM sessions WHERE agent_group_id = ? AND messaging_group_id IS NULL AND thread_id IS NULL LIMIT 1',
-    )
-    .get(agentGroupId);
-  return !!row;
-}
-
-/**
- * Enumerate per-thread-style sessions for a (ag, mg). For non-web
- * channels, only include threads where the inbound side's `platform_id`
- * matches the viewer's handle on that channel — otherwise the rail would
- * leak other users' threads on a shared mg (e.g. an email-bot alias).
- */
-function enumeratePerThread(
-  userId: string,
-  agentGroupId: string,
-  ctx: UserMessagingContext,
-  out: ThreadSummary[],
-  spectator: boolean,
-): void {
-  type Row = { id: string; thread_id: string; last_active: string | null; created_at: string };
-  const rows = getDb()
-    .prepare(
-      `SELECT id, thread_id, last_active, created_at FROM sessions
-       WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NOT NULL`,
-    )
-    .all(agentGroupId, ctx.messagingGroupId) as Row[];
-  const isWeb = ctx.channelType === WEB_CHANNEL_TYPE;
-  const viewerHandles = isWeb || spectator ? [] : viewerHandlesForChannel(userId, ctx.channelType);
-  if (!isWeb && !spectator && viewerHandles.length === 0) return;
-  for (const r of rows) {
-    if (
-      !spectator &&
-      !isWeb &&
-      !threadBelongsToViewer(agentGroupId, r.id, ctx.channelType, r.thread_id, viewerHandles)
-    ) {
-      continue;
-    }
-    const stats = readThreadStats(agentGroupId, r.id, ctx.channelType, ctx.platformId, r.thread_id);
-    out.push({
-      threadId: r.thread_id,
-      sessionId: r.id,
-      channelType: ctx.channelType,
-      messagingGroupId: ctx.messagingGroupId,
-      platformId: ctx.platformId,
-      sessionMode: 'per-thread',
-      title: finalizeTitle(stats.title),
-      lastActivityAt: stats.maxTs || r.last_active || r.created_at,
-      messageCount: stats.count,
-      counterparty: isWeb ? undefined : ctx.platformId,
-      ...(stats.turnCount > 0
-        ? { totalCost: stats.totalCost, totalTokens: stats.totalTokens, turnCount: stats.turnCount }
-        : {}),
-      ...(stats.liveTasks ? { liveTasks: stats.liveTasks } : {}),
-    });
-  }
-}
-
-/**
- * True if some inbound message in this thread was sent by the viewer.
- * For most channels the sender lives in `content.sender` (Chat SDK
- * convention) rather than `messages_in.platform_id`, since platform_id
- * holds the *inbox* identity (e.g. the email-bot alias) for inbound
- * channels. We fall back to platform_id matching as a last resort.
- */
-function threadBelongsToViewer(
-  agentGroupId: string,
-  sessionId: string,
-  channelType: string,
-  threadId: string,
-  viewerHandles: string[],
-): boolean {
-  if (viewerHandles.length === 0) return false;
-  const handleSet = new Set(viewerHandles);
-  try {
-    const inDb = openInboundDb(agentGroupId, sessionId);
-    try {
-      const rows = inDb
-        .prepare(
-          'SELECT content, platform_id FROM messages_in WHERE channel_type = ? AND thread_id = ? ORDER BY seq LIMIT 5',
-        )
-        .all(channelType, threadId) as { content: string; platform_id: string }[];
-      for (const r of rows) {
-        if (handleSet.has(r.platform_id)) return true;
-        try {
-          const o = JSON.parse(r.content) as { sender?: unknown; from?: unknown };
-          const sender = typeof o?.sender === 'string' ? o.sender : typeof o?.from === 'string' ? o.from : null;
-          if (sender && handleSet.has(sender)) return true;
-        } catch {
-          /* not JSON */
-        }
-      }
-      return false;
-    } finally {
-      inDb.close();
-    }
-  } catch {
-    return false;
-  }
-}
-
-function enumerateShared(agentGroupId: string, ctx: UserMessagingContext, out: ThreadSummary[]): void {
-  const session = findSessionForAgent(agentGroupId, ctx.messagingGroupId, null);
-  if (!session) return;
-  collectThreadsFromSharedSession(agentGroupId, session.id, [{ ctx, mode: 'shared' }], out);
-}
-
-/**
- * Enumerate threadless DM "rooms" in a shared session — messages_in rows
- * where thread_id IS NULL, scoped to a (channel, mg) the viewer owns.
- * Yields at most one ThreadSummary per (mg, viewer platform id) and
- * tags it with `kind: 'dm'` so the rail can render these in a separate
- * area. Synthetic threadId is `__dm:<mgId>`, decoded by readChatHistory.
- */
-function enumerateThreadlessDm(
-  userId: string,
-  agentGroupId: string,
-  ctx: UserMessagingContext,
-  out: ThreadSummary[],
-  spectator: boolean,
-): void {
-  if (ctx.channelType === WEB_CHANNEL_TYPE) return;
-  const session = findSessionForAgent(agentGroupId, ctx.messagingGroupId, null);
-  if (!session) return;
-  const handles = spectator ? [] : viewerHandlesForChannel(userId, ctx.channelType);
-  if (!spectator && handles.length === 0) return;
-  let inDb: ReturnType<typeof openInboundDb>;
-  try {
-    inDb = openInboundDb(agentGroupId, session.id);
-  } catch {
-    return;
-  }
-  try {
-    type Row = { platform_id: string; max_ts: string | null; n: number };
-    let rows: Row[];
-    if (spectator) {
-      rows = inDb
-        .prepare(
-          `SELECT platform_id, MAX(timestamp) AS max_ts, COUNT(*) AS n
-             FROM messages_in
-            WHERE channel_type = ? AND thread_id IS NULL
-            GROUP BY platform_id`,
-        )
-        .all(ctx.channelType) as Row[];
-    } else {
-      const placeholders = handles.map(() => '?').join(',');
-      rows = inDb
-        .prepare(
-          `SELECT platform_id, MAX(timestamp) AS max_ts, COUNT(*) AS n
-             FROM messages_in
-            WHERE channel_type = ? AND thread_id IS NULL AND platform_id IN (${placeholders})
-            GROUP BY platform_id`,
-        )
-        .all(ctx.channelType, ...handles) as Row[];
-    }
-    if (rows.length === 0) return;
-
-    // Collapse all matched handles into a single summary per mg. (A user
-    // would only ever DM the bot from one of their handles on a given
-    // channel; aggregating is just defensive.)
-    let total = 0;
-    let maxTs = '';
-    let representativeHandle = handles[0] ?? rows[0].platform_id;
-    for (const r of rows) {
-      total += r.n;
-      if (r.max_ts && (!maxTs || Date.parse(normTs(r.max_ts)) > Date.parse(normTs(maxTs)))) maxTs = r.max_ts;
-      representativeHandle = r.platform_id;
-    }
-
-    let outCount = 0;
-    let outMaxTs: string | null = null;
-    try {
-      const outDb = openOutboundDb(agentGroupId, session.id);
-      try {
-        const c = outDb
-          .prepare(
-            "SELECT COUNT(*) AS n, MAX(timestamp) AS t FROM messages_out WHERE channel_type = ? AND thread_id IS NULL AND kind IN ('chat','text')",
-          )
-          .get(ctx.channelType) as { n: number; t: string | null };
-        outCount = c.n;
-        outMaxTs = c.t;
-      } finally {
-        outDb.close();
-      }
-    } catch {
-      /* outbound db missing */
-    }
-    if (outMaxTs && (!maxTs || Date.parse(normTs(outMaxTs)) > Date.parse(normTs(maxTs)))) maxTs = outMaxTs;
-
-    out.push({
-      threadId: `__dm:${ctx.messagingGroupId}`,
-      sessionId: session.id,
-      channelType: ctx.channelType,
-      messagingGroupId: ctx.messagingGroupId,
-      platformId: representativeHandle,
-      sessionMode: 'shared',
-      title: `Direct messages`,
-      lastActivityAt: maxTs || new Date(0).toISOString(),
-      messageCount: total + outCount,
-      counterparty: representativeHandle,
-      kind: 'dm',
-    });
-  } finally {
-    inDb.close();
-  }
-}
-
-function enumerateAgentShared(agentGroupId: string, ctxs: UserMessagingContext[], out: ThreadSummary[]): void {
-  const session = findSessionByAgentGroup(agentGroupId);
-  if (!session) return;
-  collectThreadsFromSharedSession(
-    agentGroupId,
-    session.id,
-    ctxs.map((c) => ({ ctx: c, mode: 'agent-shared' as const })),
-    out,
-  );
-}
-
-/**
- * Enumerate distinct threads inside a shared/agent-shared session DB,
- * scoping to a list of (channelType, platformId) tuples the viewer owns.
- */
-function collectThreadsFromSharedSession(
-  agentGroupId: string,
-  sessionId: string,
-  scopes: { ctx: UserMessagingContext; mode: 'shared' | 'agent-shared' }[],
-  out: ThreadSummary[],
-): void {
-  if (scopes.length === 0) return;
-  let inDb: ReturnType<typeof openInboundDb>;
-  try {
-    inDb = openInboundDb(agentGroupId, sessionId);
-  } catch {
-    return;
-  }
-  try {
-    const placeholders = scopes.map(() => '(channel_type = ? AND platform_id = ?)').join(' OR ');
-    const params: string[] = [];
-    for (const s of scopes) params.push(s.ctx.channelType, s.ctx.platformId);
-    type GroupRow = { channel_type: string; platform_id: string; thread_id: string; max_ts: string | null; n: number };
-    const groups = inDb
-      .prepare(
-        `SELECT channel_type, platform_id, thread_id, MAX(timestamp) AS max_ts, COUNT(*) AS n
-           FROM messages_in
-          WHERE thread_id IS NOT NULL AND (${placeholders})
-          GROUP BY channel_type, platform_id, thread_id`,
-      )
-      .all(...params) as GroupRow[];
-
-    const titleStmt = inDb.prepare(
-      `SELECT content FROM messages_in
-        WHERE channel_type = ? AND platform_id = ? AND thread_id = ?
-        ORDER BY seq LIMIT 1`,
-    );
-
-    let outDb: ReturnType<typeof openOutboundDb> | undefined;
-    try {
-      try {
-        outDb = openOutboundDb(agentGroupId, sessionId);
-      } catch {
-        outDb = undefined;
-      }
-      const outStmt = outDb?.prepare(
-        `SELECT COUNT(*) AS n, MAX(timestamp) AS t FROM messages_out
-          WHERE channel_type = ? AND thread_id = ? AND kind IN ('chat','text')`,
-      );
-
-      // Aggregate turn_usage per thread.
-      // Note: for shared sessions the turn_usage table covers all threads
-      // combined. This is a rough approximation; per-thread scoping would
-      // require joining through message_out_id.
-      let usageTotals: { cost: number; tokens: number; turns: number } | undefined;
-      if (outDb) {
-        usageTotals = outDb
-          .prepare(
-            `SELECT COALESCE(SUM(cost_usd), 0) AS cost,
-                    COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
-                    COUNT(*) AS turns
-             FROM turn_usage`,
-          )
-          .get() as { cost: number; tokens: number; turns: number } | undefined;
-      }
-
-      for (const g of groups) {
-        const scope = scopes.find((s) => s.ctx.channelType === g.channel_type && s.ctx.platformId === g.platform_id);
-        if (!scope) continue;
-        const first = titleStmt.get(g.channel_type, g.platform_id, g.thread_id) as { content: string } | undefined;
-        const title =
-          readPublishedThreadTitle(inDb, {
-            channelType: g.channel_type,
-            platformId: g.platform_id,
-            threadId: g.thread_id,
-          }) ?? (first ? extractTitle(g.channel_type, first.content) : '');
-        let count = g.n;
-        let maxTs = g.max_ts ?? '';
-        if (outStmt) {
-          const oc = outStmt.get(g.channel_type, g.thread_id) as { n: number; t: string | null };
-          count += oc.n;
-          if (oc.t && (!maxTs || Date.parse(normTs(oc.t)) > Date.parse(normTs(maxTs)))) maxTs = oc.t;
-        }
-        const usageProps =
-          usageTotals && usageTotals.turns > 0
-            ? { totalCost: usageTotals.cost, totalTokens: usageTotals.tokens, turnCount: usageTotals.turns }
-            : {};
-        out.push({
-          threadId: g.thread_id,
-          sessionId,
-          channelType: g.channel_type,
-          messagingGroupId: scope.ctx.messagingGroupId,
-          platformId: g.platform_id,
-          sessionMode: scope.mode,
-          title: finalizeTitle(title),
-          lastActivityAt: maxTs || new Date(0).toISOString(),
-          messageCount: count,
-          counterparty: g.channel_type !== WEB_CHANNEL_TYPE ? g.platform_id : undefined,
-          ...usageProps,
-        });
-      }
-    } finally {
-      outDb?.close();
-    }
-  } finally {
-    inDb.close();
-  }
-}
-
-/**
- * Per-thread session stats (title + count + max timestamp). Used by the
- * per-thread mode branch where each thread lives in its own session.
- */
-function readThreadStats(
-  agentGroupId: string,
-  sessionId: string,
-  channelType: string,
-  platformId: string,
-  threadId: string,
-): {
-  title: string;
-  count: number;
-  maxTs: string;
-  totalCost: number;
-  totalTokens: number;
-  turnCount: number;
-  liveTasks?: LiveTaskDto[];
-} {
-  let title = '';
-  let count = 0;
-  let maxTs = '';
-  let totalCost = 0;
-  let totalTokens = 0;
-  let turnCount = 0;
-  let liveTasks: LiveTaskDto[] | undefined;
-  try {
-    const inDb = openInboundDb(agentGroupId, sessionId);
-    try {
-      title = readPublishedThreadTitle(inDb, { channelType, platformId, threadId }) ?? '';
-      if (!title) {
-        const first = inDb
-          .prepare('SELECT content FROM messages_in WHERE channel_type = ? AND thread_id = ? ORDER BY seq LIMIT 1')
-          .get(channelType, threadId) as { content: string } | undefined;
-        if (first) title = extractTitle(channelType, first.content);
-      }
-      const c = inDb
-        .prepare('SELECT COUNT(*) AS n, MAX(timestamp) AS t FROM messages_in WHERE channel_type = ? AND thread_id = ?')
-        .get(channelType, threadId) as { n: number; t: string | null };
-      count += c.n;
-      if (c.t) maxTs = c.t;
-      // Live scheduled tasks: one row per series (the pending/paused
-      // occurrence), soonest next-run first.
-      try {
-        const taskRows = inDb
-          .prepare(
-            `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
-               FROM messages_in
-              WHERE kind = 'task' AND status IN ('pending', 'paused')
-                AND COALESCE(json_extract(content, '$.triggerSource'), 'scheduled') != 'manual'
-                AND channel_type = ? AND thread_id = ?
-              GROUP BY series_id
-              ORDER BY (process_after IS NULL) ASC, process_after ASC`,
-          )
-          .all(channelType, threadId) as {
-          id: string;
-          status: string;
-          process_after: string | null;
-          recurrence: string | null;
-          content: string;
-        }[];
-        if (taskRows.length > 0) {
-          liveTasks = taskRows.map((r) => ({
-            seriesId: r.id,
-            nextRunAt: r.process_after,
-            recurrence: r.recurrence,
-            summary: summarizeTaskPrompt(r.content),
-            paused: r.status === 'paused',
-          }));
-        }
-      } catch {
-        // messages_in may predate the task columns
-      }
-    } finally {
-      inDb.close();
-    }
-  } catch {
-    /* inbound db missing */
-  }
-  try {
-    const outDb = openOutboundDb(agentGroupId, sessionId);
-    try {
-      const c = outDb
-        .prepare(
-          "SELECT COUNT(*) AS n, MAX(timestamp) AS t FROM messages_out WHERE channel_type = ? AND thread_id = ? AND kind IN ('chat','text')",
-        )
-        .get(channelType, threadId) as { n: number; t: string | null };
-      count += c.n;
-      if (c.t && (!maxTs || Date.parse(normTs(c.t)) > Date.parse(normTs(maxTs)))) maxTs = c.t;
-      // Aggregate turn_usage stats for this thread.
-      const u = outDb
-        .prepare(
-          `SELECT COALESCE(SUM(cost_usd), 0) AS cost,
-                    COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
-                    COUNT(*) AS turns
-             FROM turn_usage`,
-        )
-        .get() as { cost: number; tokens: number; turns: number };
-      totalCost = u.cost;
-      totalTokens = u.tokens;
-      turnCount = u.turns;
-    } finally {
-      outDb.close();
-    }
-  } catch {
-    /* outbound db missing */
-  }
-  return { title, count, maxTs, totalCost, totalTokens, turnCount, ...(liveTasks ? { liveTasks } : {}) };
 }
 
 /**

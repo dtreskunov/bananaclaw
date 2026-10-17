@@ -28,9 +28,13 @@ vi.mock('../../../container-runner.js', () => ({
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
 import { getThreadFork } from '../../../db/thread-forks.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
+import { insertIdentity } from '../../../modules/permissions/db/identities.js';
+import { insertTask, pauseTask } from '../../../modules/scheduling/db.js';
+import { stageThreadTitle, publishThreadTitle } from '../../../modules/thread-titles/db.js';
 import { closeSearchDb, indexMessage, initSearchDb } from '../../../search-index.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath } from '../../../session-manager.js';
-import { handleChatRequest } from './chat.js';
+import { handleChatRequest, listThreadsForViewer } from './chat.js';
+import { threadScanner } from './thread-scanner.js';
 
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 const NOW = new Date().toISOString();
@@ -213,9 +217,144 @@ beforeEach(() => {
   grantRole({ user_id: ADMIN_ID, role: 'admin', agent_group_id: null, granted_by: ADMIN_ID, granted_at: NOW });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await threadScanner.close();
+  vi.restoreAllMocks();
   closeDb();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+});
+
+describe('asynchronous thread listing', () => {
+  it('preserves the existing ordering when threads have equal activity timestamps', async () => {
+    seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
+    seedThread();
+    getDb()
+      .prepare(
+        `INSERT INTO sessions
+       (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at)
+       VALUES ('other', ?, ?, 'thread-0', 'active', 'stopped', ?)`,
+      )
+      .run(GROUP_ID, WEB_MG, NOW);
+    initSessionFolder(GROUP_ID, 'other');
+    const inbound = new Database(inboundDbPath(GROUP_ID, 'other'));
+    try {
+      inbound
+        .prepare(
+          `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id, content)
+         VALUES ('other', 2, 'chat', '2026-01-01T00:03:00.000Z', 'web', ?, 'thread-0', '{"text":"Other"}')`,
+        )
+        .run(WEB_PLATFORM_ID);
+    } finally {
+      inbound.close();
+    }
+    expect((await listThreadsForViewer(USER_ID, GROUP_ID)).map((thread) => thread.threadId)).toEqual([
+      'thread-0',
+      THREAD,
+    ]);
+  });
+
+  it('rechecks membership after awaiting the worker', async () => {
+    seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
+    seedThread();
+    const request = listThreadsForViewer(USER_ID, GROUP_ID);
+    const rejected = expect(request).rejects.toThrow('visibility changed');
+    getDb().prepare('DELETE FROM agent_group_members WHERE user_id = ?').run(USER_ID);
+    await rejected;
+  });
+
+  it('does not publish a session deleted while the scan was in flight', async () => {
+    seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
+    seedThread();
+    const request = listThreadsForViewer(USER_ID, GROUP_ID);
+    getDb().prepare('DELETE FROM sessions WHERE id = ?').run(SESSION);
+    expect(await request).toEqual([]);
+  });
+
+  it('never reuses a spectator visibility decision for a member', async () => {
+    seedMessagingGroup(WEB_MG, 'resend', 'resend:bot@example.com', 'per-thread');
+    seedThread();
+    insertIdentity({ userId: USER_ID, channel: 'resend', handle: 'member@example.com' });
+    const inbound = new Database(inboundDbPath(GROUP_ID, SESSION));
+    try {
+      inbound
+        .prepare(
+          `UPDATE messages_in SET channel_type = 'resend', platform_id = 'resend:bot@example.com',
+         content = '{"text":"Private","sender":"other@example.com"}'`,
+        )
+        .run();
+    } finally {
+      inbound.close();
+    }
+    expect(await listThreadsForViewer(ADMIN_ID, GROUP_ID)).toHaveLength(1);
+    expect(await listThreadsForViewer(USER_ID, GROUP_ID)).toEqual([]);
+    insertIdentity({ userId: USER_ID, channel: 'resend', handle: 'other@example.com' });
+    expect(await listThreadsForViewer(USER_ID, GROUP_ID)).toHaveLength(1);
+  });
+
+  it('filters shared DM statistics per viewer even when session scans are reused', async () => {
+    seedMessagingGroup(WEB_MG, 'resend', 'resend:bot@example.com', 'shared');
+    seedThread();
+    getDb().prepare('UPDATE sessions SET thread_id = NULL').run();
+    insertIdentity({ userId: USER_ID, channel: 'resend', handle: 'member@example.com' });
+    const inbound = new Database(inboundDbPath(GROUP_ID, SESSION));
+    try {
+      const insert = inbound.prepare(
+        `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, content)
+         VALUES (?, ?, 'chat', ?, 'resend', ?, '{"text":"DM"}')`,
+      );
+      insert.run('own', 4, NOW, 'member@example.com');
+      insert.run('other', 6, NOW, 'other@example.com');
+    } finally {
+      inbound.close();
+    }
+    expect(await listThreadsForViewer(ADMIN_ID, GROUP_ID)).toMatchObject([{ kind: 'dm', messageCount: 2 }]);
+    expect(await listThreadsForViewer(USER_ID, GROUP_ID)).toMatchObject([
+      {
+        kind: 'dm',
+        platformId: 'member@example.com',
+        messageCount: 1,
+      },
+    ]);
+  });
+
+  it('invalidates cached titles and tasks at their mutation helpers', async () => {
+    seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
+    seedThread();
+    expect((await listThreadsForViewer(USER_ID, GROUP_ID))[0].title).toBe('hello');
+    const inbound = new Database(inboundDbPath(GROUP_ID, SESSION));
+    try {
+      const key = { channelType: 'web', platformId: WEB_PLATFORM_ID, threadId: THREAD };
+      inbound.prepare('UPDATE host_sequence SET last_even = 2 WHERE id = 1').run();
+      stageThreadTitle(inbound, { ...key, title: 'Published title', requestMessageId: 'u1' });
+      publishThreadTitle(inbound, key, 'u1');
+      insertTask(inbound, {
+        id: 'task',
+        processAfter: NOW,
+        recurrence: null,
+        platformId: WEB_PLATFORM_ID,
+        channelType: 'web',
+        threadId: THREAD,
+        content: '{"prompt":"A scheduled task"}',
+      });
+      const [updated] = await listThreadsForViewer(USER_ID, GROUP_ID);
+      expect(updated.title).toBe('Published title');
+      expect(updated.liveTasks).toMatchObject([{ summary: 'A scheduled task', paused: false }]);
+      pauseTask(inbound, 'task');
+      expect((await listThreadsForViewer(USER_ID, GROUP_ID))[0].liveTasks).toMatchObject([{ paused: true }]);
+    } finally {
+      inbound.close();
+    }
+  });
+
+  it('reports scanner failures instead of returning an empty successful thread list', async () => {
+    seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
+    seedThread();
+    vi.spyOn(threadScanner, 'scan').mockRejectedValueOnce(new Error('Scanner unavailable'));
+    const result = await call('GET', `/api/groups/${GROUP_ID}/chat/threads`);
+    expect(result.status).toBe(503);
+    expect(result.json).toHaveProperty('error');
+    expect(result.json).not.toHaveProperty('threads');
+  });
 });
 
 describe('POST chat thread fork', () => {

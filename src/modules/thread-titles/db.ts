@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { invalidateSessionDatabase } from '../../conversation-events.js';
 
 export interface ThreadTitleKey {
   channelType: string;
@@ -37,6 +38,7 @@ export function stageThreadTitle(db: Database.Database, input: StageThreadTitle)
        ON CONFLICT(channel_type, platform_id, thread_id) DO NOTHING`,
     )
     .run({ ...keyParams(input), title, requestMessageId: input.requestMessageId });
+  if (result.changes) invalidateSessionDatabase(db.name);
   return result.changes > 0;
 }
 
@@ -52,6 +54,7 @@ export function publishThreadTitle(db: Database.Database, key: ThreadTitleKey, r
           AND published = 0`,
     )
     .run({ ...keyParams(key), requestMessageId });
+  if (result.changes) invalidateSessionDatabase(db.name);
   return result.changes > 0;
 }
 
