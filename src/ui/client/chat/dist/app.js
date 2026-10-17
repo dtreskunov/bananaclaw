@@ -23790,7 +23790,7 @@ function stepMeta(s5, elapsedMs) {
   if (s5.kind !== "tool") return null;
   const status = TRACE_STATUS_LABELS[traceStatus(s5)];
   const duration = s5.status === "running" ? elapsedMs : s5.durationMs;
-  const formattedDuration = typeof duration !== "number" ? "" : formatStopwatch(duration, s5.status !== "running");
+  const formattedDuration = typeof duration !== "number" || s5.status !== "running" && isZeroTime(duration) ? "" : formatStopwatch(duration, s5.status !== "running");
   return `${status}${formattedDuration ? ` \xB7 ${formattedDuration}` : ""}`;
 }
 function formatElapsedDuration(ms) {
@@ -23798,6 +23798,7 @@ function formatElapsedDuration(ms) {
   const minutes = Math.floor(seconds / 60);
   return `${ms < 0 ? "-" : ""}${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
+var isZeroTime = (ms) => formatStopwatch(ms) === formatStopwatch(0);
 function LiveDuration({ since }) {
   const [now, setNow] = h2(() => Date.now());
   const elapsed = Math.max(0, now - since);
@@ -23813,6 +23814,7 @@ var TIME_KINDS = {
   ai: { label: "AI", hint: "Model time" }
 };
 function TimeChip({ kind, time, status, lead = null }) {
+  if (time && "ms" in time && isZeroTime(time.ms)) time = null;
   const live = !!time && "since" in time;
   const { label, hint } = TIME_KINDS[kind];
   return /* @__PURE__ */ u4("span", { class: `trace-time trace-time-${kind}`, children: [
@@ -23832,8 +23834,8 @@ function TimeChip({ kind, time, status, lead = null }) {
     ) : null
   ] });
 }
-function modelChipTime(modelTime, active) {
-  if (!modelTime) return active ? null : { ms: 0 };
+function modelChipTime(modelTime) {
+  if (!modelTime) return null;
   return modelTime.since !== void 0 ? { since: modelTime.since - modelTime.ms } : { ms: modelTime.ms };
 }
 function isTimedStep(step) {
@@ -23915,7 +23917,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
           TimeChip,
           {
             kind: "ai",
-            time: modelChipTime(line.modelTime, live && (step.status === "running" || step.status === "pending")),
+            time: modelChipTime(line.modelTime),
             status: line.modelTime?.since !== void 0 ? "running" : "completed"
           }
         )
@@ -24097,6 +24099,7 @@ function UsageMeta({ summary, ownerId }) {
 }
 var fmtTokUnit = (n3) => `${fmtTok(n3)} tok`;
 var fmtTime = (ms) => ms === null ? "Unavailable" : formatStopwatch(ms);
+var shownTime = (ms) => ms === null || !isZeroTime(ms);
 function UsageRow({ label, value, title }) {
   return /* @__PURE__ */ u4("span", { class: "usage-row", title, children: [
     /* @__PURE__ */ u4("span", { children: label }),
@@ -24115,16 +24118,16 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
     /* @__PURE__ */ u4("div", { class: "usage-columns", children: [
       /* @__PURE__ */ u4("section", { class: "usage-column", "aria-label": "Timing", children: [
         /* @__PURE__ */ u4(UsageRow, { label: "Total", value: fmtTime(wallElapsedMs) }),
-        /* @__PURE__ */ u4(UsageRow, { label: "Model", value: fmtTime(modelElapsedMs), title: "Sum of reported model-call times" }),
-        /* @__PURE__ */ u4(UsageRow, { label: "Tools", value: fmtTime(toolElapsedMs), title: "Time with at least one tool running" }),
-        /* @__PURE__ */ u4(
+        shownTime(modelElapsedMs) ? /* @__PURE__ */ u4(UsageRow, { label: "Model", value: fmtTime(modelElapsedMs), title: "Sum of reported model-call times" }) : null,
+        shownTime(toolElapsedMs) ? /* @__PURE__ */ u4(UsageRow, { label: "Tools", value: fmtTime(toolElapsedMs), title: "Time with at least one tool running" }) : null,
+        shownTime(otherMs) ? /* @__PURE__ */ u4(
           UsageRow,
           {
             label: "Other",
             value: fmtTime(otherMs),
             title: "Total minus model and tool time: queueing, container startup, prompt assembly, history loading, message delivery, etc."
           }
-        )
+        ) : null
       ] }),
       /* @__PURE__ */ u4("section", { class: "usage-column", "aria-label": "Tokens", children: reports.map((record, index) => /* @__PURE__ */ u4("div", { class: "usage-report", children: [
         heading(index),

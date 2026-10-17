@@ -250,8 +250,9 @@ share one row, so the number of rows with AI time can be lower than **Model
 calls**. After the last call, the time since the latest step or call ends is shown
 live on that step's row until the next step or the reply. Turns recorded
 before model steps existed show no AI time. Runner overhead between calls is not AI time; the usage
-details count it as **Other**. Finished steps with no attributed time show
-**0.0s**. No time is hidden for being short. Times use the
+details count it as **Other**. A finished time that would display as **0.0s**
+(including no attributed time) is left blank; the chip's slot keeps the columns
+aligned, and live stopwatches still count up from zero. Times use the
 trace status colors, blue while live and green once complete; **AI** uses a
 softer shade of the same color. Live times tick themselves and show tenths
 below 10 s, then whole seconds. Chapter headers show the sums of their
@@ -554,7 +555,8 @@ overhead such as container startup, prompt assembly, history loading and
 message delivery (listed in its hover hint). Total uses the authoritative logical turn,
 not the provider attempt's duration. Providers and older records without
 isolated timing explicitly show **unavailable** for model and other time, never
-substituting wall time or zero.
+substituting wall time or zero. Model, Tools and Other rows that would show
+**0.0s** are omitted; Total is always shown.
 The tokens column shows input and output processing (`55.0k tok in · 485 tok out`), then reasoning, cache
 read and cache write when non-zero, then context (`55.4k tok / 1M tok (6%)`).
 The model column shows the model, context size, the model-call count, and cost

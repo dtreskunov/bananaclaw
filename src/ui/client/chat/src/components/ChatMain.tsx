@@ -144,7 +144,8 @@ function stepMeta(s: TraceStep, elapsedMs: number | null): string | null {
   if (s.kind !== 'tool') return null;
   const status = TRACE_STATUS_LABELS[traceStatus(s)];
   const duration = s.status === 'running' ? elapsedMs : s.durationMs;
-  const formattedDuration = typeof duration !== 'number' ? '' : formatStopwatch(duration, s.status !== 'running');
+  const formattedDuration = typeof duration !== 'number' || (s.status !== 'running' && isZeroTime(duration))
+    ? '' : formatStopwatch(duration, s.status !== 'running');
   return `${status}${formattedDuration ? ` · ${formattedDuration}` : ''}`;
 }
 
@@ -153,6 +154,9 @@ function formatElapsedDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   return `${ms < 0 ? '-' : ''}${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
+
+/** A finished duration that would display as zero; live stopwatches still start from zero. */
+const isZeroTime = (ms: number) => formatStopwatch(ms) === formatStopwatch(0);
 
 /** Self-ticking stopwatch: tenths below 10s, then whole seconds. */
 function LiveDuration({ since }: { since: number }) {
@@ -175,6 +179,7 @@ const TIME_KINDS = {
 
 /** Right-aligned slot so each time kind stays vertically aligned across rows; `lead` sits just before the time. */
 function TimeChip({ kind, time, status, lead = null }: { kind: 'cpu' | 'ai'; time: ChipTime | null; status: TraceStatus; lead?: JSX.Element | null }) {
+  if (time && 'ms' in time && isZeroTime(time.ms)) time = null;
   const live = !!time && 'since' in time;
   const { label, hint } = TIME_KINDS[kind];
   return (
@@ -189,9 +194,9 @@ function TimeChip({ kind, time, status, lead = null }: { kind: 'cpu' | 'ai'; tim
   );
 }
 
-/** Finished steps without attributed model time still show zero; a live tail ticks on top of the finished time. */
-function modelChipTime(modelTime: ModelTime | undefined, active: boolean): ChipTime | null {
-  if (!modelTime) return active ? null : { ms: 0 };
+/** A live tail ticks on top of the finished time. */
+function modelChipTime(modelTime: ModelTime | undefined): ChipTime | null {
+  if (!modelTime) return null;
   return modelTime.since !== undefined ? { since: modelTime.since - modelTime.ms } : { ms: modelTime.ms };
 }
 
@@ -268,7 +273,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
         <span class="trace-controls">
           <TimeChip kind="cpu" time={execTime} status={traceStatus(step)}
             lead={stoppableId && turnId ? <ToolStopButton turnId={turnId} toolCallId={stoppableId} /> : null} />
-          <TimeChip kind="ai" time={modelChipTime(line.modelTime, live && (step.status === 'running' || step.status === 'pending'))}
+          <TimeChip kind="ai" time={modelChipTime(line.modelTime)}
             status={line.modelTime?.since !== undefined ? 'running' : 'completed'} />
         </span>
       </div>
@@ -455,6 +460,8 @@ function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>
 
 const fmtTokUnit = (n: number) => `${fmtTok(n)} tok`;
 const fmtTime = (ms: number | null) => (ms === null ? 'Unavailable' : formatStopwatch(ms));
+/** Breakdown rows hide zero but keep Unavailable. */
+const shownTime = (ms: number | null) => ms === null || !isZeroTime(ms);
 
 function UsageRow({ label, value, title }: { label: string; value: string; title?: string }) {
   return <span class="usage-row" title={title}><span>{label}</span><strong>{value}</strong></span>;
@@ -471,10 +478,10 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
       <div class="usage-columns">
         <section class="usage-column" aria-label="Timing">
           <UsageRow label="Total" value={fmtTime(wallElapsedMs)} />
-          <UsageRow label="Model" value={fmtTime(modelElapsedMs)} title="Sum of reported model-call times" />
-          <UsageRow label="Tools" value={fmtTime(toolElapsedMs)} title="Time with at least one tool running" />
-          <UsageRow label="Other" value={fmtTime(otherMs)}
-            title="Total minus model and tool time: queueing, container startup, prompt assembly, history loading, message delivery, etc." />
+          {shownTime(modelElapsedMs) ? <UsageRow label="Model" value={fmtTime(modelElapsedMs)} title="Sum of reported model-call times" /> : null}
+          {shownTime(toolElapsedMs) ? <UsageRow label="Tools" value={fmtTime(toolElapsedMs)} title="Time with at least one tool running" /> : null}
+          {shownTime(otherMs) ? <UsageRow label="Other" value={fmtTime(otherMs)}
+            title="Total minus model and tool time: queueing, container startup, prompt assembly, history loading, message delivery, etc." /> : null}
         </section>
         <section class="usage-column" aria-label="Tokens">
           {reports.map((record, index) => <div class="usage-report" key={record.id}>

@@ -1766,9 +1766,9 @@ describe('main composer pending edits', () => {
 
   it.each([
     { modelMs: 3500, extraMs: 1000, modelText: '4.5s', otherText: '2.0s' },
-    { modelMs: 0, extraMs: 0, modelText: '0.0s', otherText: '6.5s' },
+    { modelMs: 0, extraMs: 0, modelText: undefined, otherText: '6.5s' },
     { modelMs: undefined, extraMs: 1000, modelText: 'Unavailable', otherText: 'Unavailable' },
-    { modelMs: 8500, extraMs: 0, modelText: '8.5s', otherText: '0.0s' },
+    { modelMs: 8500, extraMs: 0, modelText: '8.5s', otherText: undefined },
   ])(
     'keeps total, model and other timing inline but not in the technical line (%s)',
     ({ modelMs, extraMs, modelText, otherText }) => {
@@ -1810,7 +1810,7 @@ describe('main composer pending edits', () => {
       const inline = renderUsageDetails(row);
       expect(usageRow(inline, 'Total')).toBe('6.5s');
       expect(usageRow(inline, 'Model')).toBe(modelText);
-      expect(usageRow(inline, 'Tools')).toBe('0.0s');
+      expect(usageRow(inline, 'Tools')).toBeUndefined();
       expect(usageRow(inline, 'Other')).toBe(otherText);
     },
   );
@@ -2785,7 +2785,7 @@ describe('activity trace chapter following', () => {
     expect(controls.props.children[0].props).toMatchObject({ time: { since: 1000 }, lead: null });
   });
 
-  it('shows every model time, including sub-second and zero gaps on finished steps', () => {
+  it('shows sub-second model times but hides zero on finished steps', () => {
     const row = (modelTime: ActivityLine['modelTime']) => {
       const list = ActivityTraceList({ lines: [{ ...line('one', 'completed'), modelTime }], live: true });
       const found = findComponent(list, 'ActivityTraceRow');
@@ -2797,7 +2797,9 @@ describe('activity trace chapter following', () => {
     expect(liveValue.props.title).toBe('Model time');
     expect(liveValue.props.children[0].props.children).toBe('AI');
     expect(row({ ms: 900 }).props.time).toEqual({ ms: 900 });
-    expect(row(undefined).props.time).toEqual({ ms: 0 });
+    expect(row(undefined).props.time).toBeNull();
+    const zero = row({ ms: 50 });
+    expect(zero.type(zero.props).props.children[1]).toBeNull();
     const done = row({ ms: 12_500 });
     expect(done.props).toMatchObject({ status: 'completed', time: { ms: 12_500 } });
     const doneValue = done.type(done.props).props.children[1];
