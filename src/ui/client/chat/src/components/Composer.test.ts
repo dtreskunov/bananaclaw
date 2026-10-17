@@ -120,6 +120,10 @@ function findComponent(node: any, name: string): any {
     }
   }
 }
+/** The step list inside a rendered `ActivityTraceList` table. */
+function traceList(table: any): any {
+  return [table.props.children].flat().find((child: any) => child?.type === 'ul');
+}
 /** The value of a rendered `UsageRow`, expanding nested usage components. */
 function usageRow(node: any, label: string): string | undefined {
   if (!node || typeof node !== 'object') return undefined;
@@ -1710,6 +1714,11 @@ describe('main composer pending edits', () => {
       const inline = renderUsageDetails(row);
       expect(usageRow(inline, 'Total')).toBe('7.0s');
       expect(usageRow(inline, 'Model')).toBe('2.0s');
+      const timing = find(inline, 'section', 'Timing');
+      const modelRow = [timing.props.children].flat().find((child: any) => child?.props?.label === 'Model');
+      // Shares the trace AI column's color.
+      expect(modelRow.props.kind).toBe('model-time');
+      expect(modelRow.type(modelRow.props).props.class).toBe('usage-row usage-row-model-time');
       expect(find(inline, 'span', 'Usage reported so far; awaiting final totals.')).toBeUndefined();
     },
   );
@@ -2639,9 +2648,9 @@ describe('activity trace completion', () => {
     const panel = findComponent(renderTechnicalDetails(renderResponseStatusRow()), 'ActivityTracePanel');
     const list = findComponent(panel.type(panel.props), 'ActivityTraceList');
     resetMount();
-    const [start, chapter] = ActivityTraceList(list.props).props.children;
+    const [start, chapter] = traceList(ActivityTraceList(list.props)).props.children;
     expect(start.props.line.text).toContain('ui:start:');
-    expect(chapter.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(chapter.props.children[0].props.children.props['aria-expanded']).toBe(true);
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
     ).toBe(true);
@@ -2654,11 +2663,11 @@ describe('activity trace completion', () => {
         ts: '1000',
         text: JSON.stringify({ kind: 'notification', id: 'ui:start:m', text, status, ...extra }),
       };
-      const [row] = [ActivityTraceList({ lines: [line], live: true, now: 5000 }).props.children].flat();
+      const [row] = [traceList(ActivityTraceList({ lines: [line], live: true, now: 5000 })).props.children].flat();
       const collect = (node: any): any[] =>
         !node || typeof node !== 'object'
           ? []
-          : typeof node.type === 'function' && node.type.name === 'TimeChip'
+          : typeof node.type === 'function' && node.type.name === 'TimeCell'
             ? [node]
             : [node.props?.children].flat(Infinity).flatMap(collect);
       return Object.fromEntries(collect(row.type(row.props)).map((chip) => [chip.props.kind, chip.props.time]));
@@ -2721,9 +2730,9 @@ describe('activity trace completion', () => {
     expect(list.key).toBe(liveList.key);
     resetMount();
     hooks.cursor = 0;
-    const [start, chapter] = ActivityTraceList(list.props).props.children;
+    const [start, chapter] = traceList(ActivityTraceList(list.props)).props.children;
     expect(start.props.line.text).toContain('ui:start:');
-    expect(chapter.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(chapter.props.children[0].props.children.props['aria-expanded']).toBe(true);
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
     ).toBe(true);
@@ -2737,7 +2746,7 @@ describe('activity trace chapter following', () => {
   });
   function renderTrace(lines: ActivityLine[]) {
     hooks.cursor = 0;
-    const list = ActivityTraceList({ lines, live: true });
+    const list = traceList(ActivityTraceList({ lines, live: true }));
     hooks.effects.splice(0).forEach((effect) => effect());
     return list;
   }
@@ -2745,66 +2754,73 @@ describe('activity trace chapter following', () => {
     resetMount();
   });
 
-  it('places Stop before the live stopwatch outside the disclosure button, even with details open', () => {
+  /** Header parts of a rendered row: the disclosure button, its time cells, and the Stop slot. */
+  function rowParts(view: any) {
+    const [header] = view.props.children;
+    const [toggle, stop] = header.props.children;
+    const [, cpu, ai] = toggle.props.children;
+    return { toggle, stop, cpu, ai };
+  }
+
+  it('renders Stop as the timeline node, outside the disclosure button', () => {
     const list = ActivityTraceList({ lines: [line('one', 'running')], live: true, now: 65_000, turnId: 'owning-turn' });
     const row = findComponent(list, 'ActivityTraceRow');
     expect(row.props.turnId).toBe('owning-turn');
     for (const open of [false, true]) {
-      const view = row.type({ ...row.props, open });
-      const [header] = view.props.children;
-      const [toggle, controls] = header.props.children;
+      const { toggle, stop, cpu, ai } = rowParts(row.type({ ...row.props, open }));
       expect(toggle.props.class).toBe('trace-row-toggle');
       expect(toggle.props['aria-expanded']).toBe(open);
       expect(findComponent(toggle, 'ToolStopButton')).toBeUndefined();
-      const [exec, model] = controls.props.children;
-      const stop = exec.props.lead;
-      expect(stop.type).toBe(ToolStopButton);
-      expect(stop.props.turnId).toBe('owning-turn');
-      expect(stop.props.toolCallId).toBe('one');
-      expect(exec.props).toMatchObject({ kind: 'cpu', status: 'running', time: { since: 1000 } });
-      const [lead, value] = exec.type(exec.props).props.children;
-      expect(lead).toBe(stop);
-      expect(value.props).toMatchObject({
-        class: 'trace-time-value trace-status-running',
-        role: 'timer',
-        'aria-live': 'off',
-        title: 'Execution time',
-      });
-      const [label, num] = value.props.children;
-      expect(label.props).toMatchObject({ class: 'trace-time-label', children: 'CPU' });
-      expect(num.props.children.props).toEqual({ since: 1000 });
-      expect(model.props.time).toBeNull();
+      expect(stop.props.class).toBe('trace-stop');
+      expect(stop.props.children.type).toBe(ToolStopButton);
+      expect(stop.props.children.props).toMatchObject({ turnId: 'owning-turn', toolCallId: 'one' });
+      expect(cpu.props).toEqual({ kind: 'cpu', time: { since: 1000 } });
+      const cell = cpu.type(cpu.props);
+      expect(cell.props).toMatchObject({ class: 'trace-time trace-time-cpu', title: 'Execution time' });
+      expect(cell.props.children.props).toEqual({ since: 1000 });
+      expect(ai.props.time).toBeNull();
+      expect(ai.type(ai.props).props.children).toBeNull();
     }
+  });
+
+  it('scrolls the whole table without column headers', () => {
+    const table = ActivityTraceList({
+      lines: [{ ...line('one', 'running'), modelTime: { ms: 1200 } }],
+      live: true,
+      now: 65_000,
+    });
+    expect(table.props.class).toBe('trace-table scroll-edge-fade');
+    expect([table.props.children].flat().filter(Boolean)).toHaveLength(1);
+    expect(traceList(table).props).toMatchObject({
+      class: 'activity-trace',
+      tabIndex: 0,
+      'aria-label': 'Activity steps',
+    });
   });
 
   it('shows the live stopwatch at once but hides Stop until a running step passes one second', () => {
     const list = ActivityTraceList({ lines: [line('one', 'running')], live: true, now: 1900, turnId: 'owning-turn' });
     const row = findComponent(list, 'ActivityTraceRow');
-    const controls = row.type(row.props).props.children[0].props.children[1];
-    expect(findComponent(controls, 'ToolStopButton')).toBeUndefined();
-    expect(controls.props.children[0].props).toMatchObject({ time: { since: 1000 }, lead: null });
+    const { stop, cpu } = rowParts(row.type(row.props));
+    expect(stop).toBeNull();
+    expect(cpu.props.time).toEqual({ since: 1000 });
   });
 
   it('shows sub-second model times but hides zero on finished steps', () => {
-    const row = (modelTime: ActivityLine['modelTime']) => {
+    const cell = (modelTime: ActivityLine['modelTime']) => {
+      resetMount();
       const list = ActivityTraceList({ lines: [{ ...line('one', 'completed'), modelTime }], live: true });
       const found = findComponent(list, 'ActivityTraceRow');
-      return found.type(found.props).props.children[0].props.children[1].props.children[1];
+      return rowParts(found.type(found.props)).ai;
     };
-    const live = row({ ms: 2000, since: 5000 });
-    expect(live.props).toMatchObject({ kind: 'ai', status: 'running', time: { since: 3000 } });
-    const liveValue = live.type(live.props).props.children[1];
-    expect(liveValue.props.title).toBe('Model time');
-    expect(liveValue.props.children[0].props.children).toBe('AI');
-    expect(row({ ms: 900 }).props.time).toEqual({ ms: 900 });
-    expect(row(undefined).props.time).toBeNull();
-    const zero = row({ ms: 50 });
-    expect(zero.type(zero.props).props.children[1]).toBeNull();
-    const done = row({ ms: 12_500 });
-    expect(done.props).toMatchObject({ status: 'completed', time: { ms: 12_500 } });
-    const doneValue = done.type(done.props).props.children[1];
-    expect(doneValue.props.title).toBe('Model time');
-    expect(doneValue.props.children[1].props.children).toBe('12s');
+    const live = cell({ ms: 2000, since: 5000 });
+    expect(live.props).toEqual({ kind: 'ai', time: { since: 3000 } });
+    expect(live.type(live.props).props.title).toBe('Model time');
+    expect(cell({ ms: 900 }).props.time).toEqual({ ms: 900 });
+    expect(cell(undefined).props.time).toBeNull();
+    expect(cell({ ms: 50 }).props.time).toBeNull();
+    const done = cell({ ms: 12_500 });
+    expect(done.type(done.props).props.children).toBe('12s');
   });
 
   it('passes the authoritative response ID to every chapter child', () => {
@@ -2814,7 +2830,7 @@ describe('activity trace chapter following', () => {
       now: 65_000,
       turnId: 'owning-turn',
     });
-    const children = list.props.children[0].props.children[1].props.children;
+    const children = traceList(list).props.children[0].props.children[1].props.children;
     expect(children).toHaveLength(2);
     for (const child of children) expect(child.props.turnId).toBe('owning-turn');
   });
@@ -2835,11 +2851,8 @@ describe('activity trace chapter following', () => {
     const row = findComponent(list, 'ActivityTraceRow');
     const view = row.type({ ...row.props, open: true });
     expect(findComponent(view, 'ToolStopButton')).toBeUndefined();
-    const exec = view.props.children[0].props.children[1].props.children[0];
-    const timer = exec.type(exec.props).props.children[1];
-    expect(timer.props.children[1].props.children).toBe('2.2s');
-    expect(timer.props.class).toBe('trace-time-value trace-status-completed');
-    expect(timer.props.role).toBeUndefined();
+    const { cpu } = rowParts(view);
+    expect(cpu.type(cpu.props).props.children).toBe('2.2s');
   });
 
   it('does not invent a live duration or a stoppable turn for legacy unfinished activity', () => {
@@ -2848,15 +2861,16 @@ describe('activity trace chapter following', () => {
     const row = findComponent(list, 'ActivityTraceRow');
     const view = row.type(row.props);
     expect(findComponent(view, 'ToolStopButton')).toBeUndefined();
-    const [exec] = view.props.children[0].props.children[1].props.children;
-    expect(exec.props).toMatchObject({ time: null, lead: null });
+    const { stop, cpu } = rowParts(view);
+    expect(stop).toBeNull();
+    expect(cpu.props.time).toBeNull();
   });
 
   it('follows singleton and chapter headers without automatically expanding step details', () => {
     const singleton = renderTrace([line('one', 'running')]);
     expect(findComponent(singleton, 'ActivityTraceRow').props.open).toBe(false);
     const chapter = renderTrace([line('one', 'completed'), line('two', 'running')]).props.children[0];
-    expect(chapter.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(chapter.props.children[0].props.children.props['aria-expanded']).toBe(true);
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
     ).toBe(true);
@@ -2866,18 +2880,18 @@ describe('activity trace chapter following', () => {
     const initial = renderTrace([line('one', 'completed'), line('two', 'running')]).props.children[0];
     const completed = renderTrace([line('one', 'completed'), line('two', 'completed')]).props.children[0];
     expect(completed.key).toBe(initial.key);
-    expect(completed.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(completed.props.children[0].props.children.props['aria-expanded']).toBe(true);
     const commands = [line('one', 'completed'), line('two', 'completed'), line('three', 'running')];
     const continued = renderTrace(commands).props.children[0];
     expect(continued.key).toBe(initial.key);
-    expect(continued.props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(continued.props.children[0].props.children.props['aria-expanded']).toBe(true);
     expect(continued.props.children[1].props.children).toHaveLength(3);
     const switched = renderTrace([...commands, line('read-one', 'running', 'read')]);
-    expect(switched.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(switched.props.children[0].props.children[0].props.children.props['aria-expanded']).toBe(false);
     expect(findComponent(switched.props.children[1], 'ActivityTraceRow').props.open).toBe(false);
     const next = renderTrace([...commands, line('read-one', 'completed', 'read'), line('read-two', 'running', 'read')]);
-    expect(next.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
-    expect(next.props.children[1].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(next.props.children[0].props.children[0].props.children.props['aria-expanded']).toBe(false);
+    expect(next.props.children[1].props.children[0].props.children.props['aria-expanded']).toBe(true);
   });
 
   it('allows explicitly opening latest details but does not expand the next step automatically', () => {
@@ -2899,30 +2913,30 @@ describe('activity trace chapter following', () => {
   it('respects manual chapter collapse until the next step arrives', () => {
     const commands = [line('one', 'completed'), line('two', 'running')];
     let list = renderTrace(commands);
-    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
-    list.props.children[0].props.children[0].props.children[0].props.onClick();
+    expect(list.props.children[0].props.children[0].props.children.props['aria-expanded']).toBe(true);
+    list.props.children[0].props.children[0].props.children.props.onClick();
     list = renderTrace(commands);
-    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(list.props.children[0].props.children[0].props.children.props['aria-expanded']).toBe(false);
     list = renderTrace([...commands, line('three', 'running')]);
-    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(list.props.children[0].props.children[0].props.children.props['aria-expanded']).toBe(true);
   });
 
   it('respects older chapter and detail selection until a new step advances the latest chapter', () => {
     const commands = [line('one', 'completed'), line('two', 'completed')];
     const lines = [...commands, line('read-one', 'completed', 'read'), line('read-two', 'running', 'read')];
     let list = renderTrace(lines);
-    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
-    expect(list.props.children[1].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
-    list.props.children[0].props.children[0].props.children[0].props.onClick();
+    expect(list.props.children[0].props.children[0].props.children.props['aria-expanded']).toBe(false);
+    expect(list.props.children[1].props.children[0].props.children.props['aria-expanded']).toBe(true);
+    list.props.children[0].props.children[0].props.children.props.onClick();
     list = renderTrace(lines);
-    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
-    expect(list.props.children[1].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
+    expect(list.props.children[0].props.children[0].props.children.props['aria-expanded']).toBe(true);
+    expect(list.props.children[1].props.children[0].props.children.props['aria-expanded']).toBe(false);
     list.props.children[0].props.children[1].props.children[0].props.onToggle();
     list = renderTrace(lines);
     expect(list.props.children[0].props.children[1].props.children[0].props.open).toBe(true);
     list = renderTrace([...lines, line('read-three', 'running', 'read')]);
-    expect(list.props.children[0].props.children[0].props.children[0].props['aria-expanded']).toBe(false);
-    expect(list.props.children[1].props.children[0].props.children[0].props['aria-expanded']).toBe(true);
+    expect(list.props.children[0].props.children[0].props.children.props['aria-expanded']).toBe(false);
+    expect(list.props.children[1].props.children[0].props.children.props['aria-expanded']).toBe(true);
     expect(
       list.props.children[1].props.children[1].props.children.every(
         (entry: { props: { open: boolean } }) => !entry.props.open,

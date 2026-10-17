@@ -172,32 +172,34 @@ function LiveDuration({ since }: { since: number }) {
 
 /** A finished duration, or the start of a live one. */
 type ChipTime = { ms: number } | { since: number };
-const TIME_KINDS = {
-  cpu: { label: 'CPU', hint: 'Execution time' },
-  ai: { label: 'AI', hint: 'Model time' },
-};
+const TIME_HINTS = { cpu: 'Execution time', ai: 'Model time' };
 
-/** Right-aligned slot so each time kind stays vertically aligned across rows; `lead` sits just before the time. */
-function TimeChip({ kind, time, status, lead = null }: { kind: 'cpu' | 'ai'; time: ChipTime | null; status: TraceStatus; lead?: JSX.Element | null }) {
-  if (time && 'ms' in time && isZeroTime(time.ms)) time = null;
-  const live = !!time && 'since' in time;
-  const { label, hint } = TIME_KINDS[kind];
+/** One cell of a trace time column. Always rendered so grid columns stay in place. */
+function TimeCell({ kind, time }: { kind: 'cpu' | 'ai'; time: ChipTime | null }) {
   return (
-    <span class={`trace-time trace-time-${kind}`}>
-      {lead}
-      {time ? <span class={`trace-time-value trace-status-${status}`} role={live ? 'timer' : undefined}
-          aria-live={live ? 'off' : undefined} title={hint}>
-          <span class="trace-time-label">{label}</span>
-          <span class="trace-time-num">{'since' in time ? <LiveDuration since={time.since} /> : formatStopwatch(time.ms)}</span>
-        </span> : null}
+    <span class={`trace-time trace-time-${kind}`} title={time ? TIME_HINTS[kind] : undefined}>
+      {time ? 'since' in time ? <LiveDuration since={time.since} /> : formatStopwatch(time.ms) : null}
     </span>
   );
+}
+
+/** Finished zero durations are hidden; live stopwatches count up from zero. */
+function shownChipTime(time: ChipTime | null): ChipTime | null {
+  return time && 'ms' in time && isZeroTime(time.ms) ? null : time;
 }
 
 /** A live tail ticks on top of the finished time. */
 function modelChipTime(modelTime: ModelTime | undefined): ChipTime | null {
   if (!modelTime) return null;
   return modelTime.since !== undefined ? { since: modelTime.since - modelTime.ms } : { ms: modelTime.ms };
+}
+
+function rowTimes(line: ActivityLine, step: TraceStep, live: boolean): { cpu: ChipTime | null; ai: ChipTime | null } {
+  const startedAt = Number(line.ts);
+  const cpu: ChipTime | null = execRunning(step, live)
+    ? line.ts && Number.isFinite(startedAt) ? { since: startedAt } : null
+    : isTimedStep(step) && typeof step.durationMs === 'number' ? { ms: step.durationMs } : null;
+  return { cpu: shownChipTime(cpu), ai: shownChipTime(modelChipTime(line.modelTime)) };
 }
 
 function isTimedStep(step: TraceStep): boolean {
@@ -229,8 +231,8 @@ function chapterTimes(entries: TraceEntry[], live: boolean) {
     if (line.modelTime.since !== undefined) modelSince = line.modelTime.since;
   }
   return {
-    exec: !timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec },
-    model: modelSince !== null ? { since: modelSince - model } : { ms: model },
+    cpu: shownChipTime(!timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec }),
+    ai: shownChipTime(modelSince !== null ? { since: modelSince - model } : { ms: model }),
   };
 }
 
@@ -248,9 +250,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : '';
   const meta = open ? [timestamp, statusText].filter(Boolean).join(' · ') : '';
-  const execTime: ChipTime | null = execRunning(step, live)
-    ? hasStartedAt ? { since: startedAt } : null
-    : isTimedStep(step) && typeof step.durationMs === 'number' ? { ms: step.durationMs } : null;
+  const times = rowTimes(line, step, live);
   const todos = open ? todoItems(step) : null;
   // Stop appears once a running tool passes the threshold.
   const stoppable = elapsedMs !== null && elapsedMs >= TRACE_STEP_THRESHOLD_MS;
@@ -268,14 +268,12 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
           onClick={onToggle}
         >
           <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
+          <TimeCell kind="cpu" time={times.cpu} />
+          <TimeCell kind="ai" time={times.ai} />
           <span class="trace-text"><StepHeadlineContent headline={headline} /></span>
         </button>
-        <span class="trace-controls">
-          <TimeChip kind="cpu" time={execTime} status={traceStatus(step)}
-            lead={stoppableId && turnId ? <ToolStopButton turnId={turnId} toolCallId={stoppableId} /> : null} />
-          <TimeChip kind="ai" time={modelChipTime(line.modelTime)}
-            status={line.modelTime?.since !== undefined ? 'running' : 'completed'} />
-        </span>
+        {/* Replaces the timeline node; a button cannot nest inside the toggle. */}
+        {stoppableId && turnId ? <span class="trace-stop"><ToolStopButton turnId={turnId} toolCallId={stoppableId} /></span> : null}
       </div>
       {stopError ? <div class="trace-note turn-stop-error" role="alert">{stopError}</div> : null}
       {meta ? <div class="trace-meta">{meta}</div> : null}
@@ -303,10 +301,10 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
 type ActivityTraceTarget = { latest: string | null; chapter: string | null; entry: string | null } | null;
 
 export function ActivityTraceList({ lines, live = false, now = null, turnId = null }: { lines: ActivityLine[]; live?: boolean; now?: number | null; turnId?: string | null }) {
-  const listRef = useRef<HTMLUListElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const [target, setTarget] = useState<ActivityTraceTarget>(null);
   useEffect(() => {
-    if (listRef.current) return attachScrollEdges(listRef.current, { horizontal: false });
+    if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
   const revealed = useRef(false);
   const chapters = activityChapters(lines, live);
@@ -329,41 +327,42 @@ export function ActivityTraceList({ lines, live = false, now = null, turnId = nu
   const toggleChapter = (id: string) => {
     setTarget({ latest: latestEntryId, chapter: openChapter === id ? null : id, entry: null });
   };
+  // The table scrolls both ways so long labels stay readable on narrow screens.
   return (
-    <ul class="activity-trace scroll-edge-fade" tabIndex={0} aria-label="Activity steps" ref={listRef}>
-      {chapters.map(chapter => {
-        if (chapter.entries.length === 1) {
-          const { line, id } = chapter.entries[0];
-          return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} />;
-        }
-        const open = openChapter === chapter.id;
-        const times = chapterTimes(chapter.entries, live);
-        return <li key={chapter.id} class={`trace-chapter trace-status-${chapter.status}${open ? ' open' : ''}`}>
-          <div class="trace-row-header">
-          <button type="button" class="trace-chapter-toggle" aria-expanded={open}
-            aria-label={`${chapter.title} · ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` · ${chapter.failures} failed` : ''}`}
-            onClick={() => toggleChapter(chapter.id)}>
-            <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
-            <span class="trace-chapter-label">
-              <span class="trace-chapter-heading">
-                <span class="trace-chapter-title"><StepHeadlineContent headline={chapter.headline} repetitions={chapter.entries.length} /></span>
-                {chapter.failures ? <span class="trace-chapter-failures">{chapter.failures} failed</span> : null}
-                {chapter.status === 'unknown' || chapter.status === 'interrupted' ? <span class="trace-chapter-notice">{chapter.status === 'unknown' ? 'Outcome unknown' : 'Interrupted'}</span> : null}
-              </span>
-            </span>
-          </button>
-          <span class="trace-controls">
-            <TimeChip kind="cpu" time={times.exec} status={chapter.status} />
-            <TimeChip kind="ai" time={times.model} status={'since' in times.model ? 'running' : 'completed'} />
-          </span>
-          </div>
-          {open ? <ul class="trace-children">
-            {chapter.entries.map(({ line, id }) => <ActivityTraceRow key={id} line={line} open={id === sel}
-              live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} child />)}
-          </ul> : null}
-        </li>;
-      })}
-    </ul>
+    <div class={`trace-table scroll-edge-fade${chapters.some(chapter => chapter.entries.length > 1) ? ' has-chapters' : ''}`} ref={listRef}>
+      <ul class="activity-trace" tabIndex={0} aria-label="Activity steps">
+        {chapters.map((chapter) => {
+          if (chapter.entries.length === 1) {
+            const { line, id } = chapter.entries[0];
+            return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} />;
+          }
+          const open = openChapter === chapter.id;
+          const times = chapterTimes(chapter.entries, live);
+          return <li key={chapter.id} class={`trace-chapter trace-status-${chapter.status}${open ? ' open' : ''}`}>
+            <div class="trace-row-header">
+              <button type="button" class="trace-chapter-toggle" aria-expanded={open}
+                aria-label={`${chapter.title} · ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` · ${chapter.failures} failed` : ''}`}
+                onClick={() => toggleChapter(chapter.id)}>
+                <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
+                <TimeCell kind="cpu" time={times.cpu} />
+                <TimeCell kind="ai" time={times.ai} />
+                <span class="trace-chapter-label">
+                  <span class="trace-chapter-heading">
+                    <span class="trace-chapter-title"><StepHeadlineContent headline={chapter.headline} repetitions={chapter.entries.length} /></span>
+                    {chapter.failures ? <span class="trace-chapter-failures">{chapter.failures} failed</span> : null}
+                    {chapter.status === 'unknown' || chapter.status === 'interrupted' ? <span class="trace-chapter-notice">{chapter.status === 'unknown' ? 'Outcome unknown' : 'Interrupted'}</span> : null}
+                  </span>
+                </span>
+              </button>
+            </div>
+            {open ? <ul class="trace-children">
+              {chapter.entries.map(({ line, id }) => <ActivityTraceRow key={id} line={line} open={id === sel}
+                live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} child />)}
+            </ul> : null}
+          </li>;
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -463,8 +462,8 @@ const fmtTime = (ms: number | null) => (ms === null ? 'Unavailable' : formatStop
 /** Breakdown rows hide zero but keep Unavailable. */
 const shownTime = (ms: number | null) => ms === null || !isZeroTime(ms);
 
-function UsageRow({ label, value, title }: { label: string; value: string; title?: string }) {
-  return <span class="usage-row" title={title}><span>{label}</span><strong>{value}</strong></span>;
+function UsageRow({ label, value, title, kind }: { label: string; value: string; title?: string; kind?: string }) {
+  return <span class={`usage-row${kind ? ` usage-row-${kind}` : ''}`} title={title}><span>{label}</span><strong>{value}</strong></span>;
 }
 
 function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, modelElapsedMs, toolElapsedMs }: Omit<UsageProps, 'summary'>) {
@@ -478,7 +477,7 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
       <div class="usage-columns">
         <section class="usage-column" aria-label="Timing">
           <UsageRow label="Total" value={fmtTime(wallElapsedMs)} />
-          {shownTime(modelElapsedMs) ? <UsageRow label="Model" value={fmtTime(modelElapsedMs)} title="Sum of reported model-call times" /> : null}
+          {shownTime(modelElapsedMs) ? <UsageRow label="Model" value={fmtTime(modelElapsedMs)} title="Sum of reported model-call times" kind="model-time" /> : null}
           {shownTime(toolElapsedMs) ? <UsageRow label="Tools" value={fmtTime(toolElapsedMs)} title="Time with at least one tool running" /> : null}
           {shownTime(otherMs) ? <UsageRow label="Other" value={fmtTime(otherMs)}
             title="Total minus model and tool time: queueing, container startup, prompt assembly, history loading, message delivery, etc." /> : null}

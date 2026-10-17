@@ -23809,34 +23809,21 @@ function LiveDuration({ since }) {
   }, [now, tick]);
   return /* @__PURE__ */ u4(k, { children: formatStopwatch(elapsed) });
 }
-var TIME_KINDS = {
-  cpu: { label: "CPU", hint: "Execution time" },
-  ai: { label: "AI", hint: "Model time" }
-};
-function TimeChip({ kind, time, status, lead = null }) {
-  if (time && "ms" in time && isZeroTime(time.ms)) time = null;
-  const live = !!time && "since" in time;
-  const { label, hint } = TIME_KINDS[kind];
-  return /* @__PURE__ */ u4("span", { class: `trace-time trace-time-${kind}`, children: [
-    lead,
-    time ? /* @__PURE__ */ u4(
-      "span",
-      {
-        class: `trace-time-value trace-status-${status}`,
-        role: live ? "timer" : void 0,
-        "aria-live": live ? "off" : void 0,
-        title: hint,
-        children: [
-          /* @__PURE__ */ u4("span", { class: "trace-time-label", children: label }),
-          /* @__PURE__ */ u4("span", { class: "trace-time-num", children: "since" in time ? /* @__PURE__ */ u4(LiveDuration, { since: time.since }) : formatStopwatch(time.ms) })
-        ]
-      }
-    ) : null
-  ] });
+var TIME_HINTS = { cpu: "Execution time", ai: "Model time" };
+function TimeCell({ kind, time }) {
+  return /* @__PURE__ */ u4("span", { class: `trace-time trace-time-${kind}`, title: time ? TIME_HINTS[kind] : void 0, children: time ? "since" in time ? /* @__PURE__ */ u4(LiveDuration, { since: time.since }) : formatStopwatch(time.ms) : null });
+}
+function shownChipTime(time) {
+  return time && "ms" in time && isZeroTime(time.ms) ? null : time;
 }
 function modelChipTime(modelTime) {
   if (!modelTime) return null;
   return modelTime.since !== void 0 ? { since: modelTime.since - modelTime.ms } : { ms: modelTime.ms };
+}
+function rowTimes(line, step, live) {
+  const startedAt2 = Number(line.ts);
+  const cpu = execRunning(step, live) ? line.ts && Number.isFinite(startedAt2) ? { since: startedAt2 } : null : isTimedStep(step) && typeof step.durationMs === "number" ? { ms: step.durationMs } : null;
+  return { cpu: shownChipTime(cpu), ai: shownChipTime(modelChipTime(line.modelTime)) };
 }
 function isTimedStep(step) {
   return step.kind === "tool" || step.kind === "compaction" || isTurnStartStep(step);
@@ -23863,8 +23850,8 @@ function chapterTimes(entries, live) {
     if (line.modelTime.since !== void 0) modelSince = line.modelTime.since;
   }
   return {
-    exec: !timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec },
-    model: modelSince !== null ? { since: modelSince - model } : { ms: model }
+    cpu: shownChipTime(!timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec }),
+    ai: shownChipTime(modelSince !== null ? { since: modelSince - model } : { ms: model })
   };
 }
 function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turnId = null }) {
@@ -23881,7 +23868,7 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : "";
   const meta = open ? [timestamp, statusText].filter(Boolean).join(" \xB7 ") : "";
-  const execTime = execRunning(step, live) ? hasStartedAt ? { since: startedAt2 } : null : isTimedStep(step) && typeof step.durationMs === "number" ? { ms: step.durationMs } : null;
+  const times = rowTimes(line, step, live);
   const todos = open ? todoItems(step) : null;
   const stoppable = elapsedMs !== null && elapsedMs >= TRACE_STEP_THRESHOLD_MS;
   const stoppableId = stoppable && step.kind === "tool" && step.id ? step.id : null;
@@ -23899,29 +23886,13 @@ function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turn
           onClick: onToggle,
           children: [
             /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
+            /* @__PURE__ */ u4(TimeCell, { kind: "cpu", time: times.cpu }),
+            /* @__PURE__ */ u4(TimeCell, { kind: "ai", time: times.ai }),
             /* @__PURE__ */ u4("span", { class: "trace-text", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) })
           ]
         }
       ),
-      /* @__PURE__ */ u4("span", { class: "trace-controls", children: [
-        /* @__PURE__ */ u4(
-          TimeChip,
-          {
-            kind: "cpu",
-            time: execTime,
-            status: traceStatus(step),
-            lead: stoppableId && turnId ? /* @__PURE__ */ u4(ToolStopButton, { turnId, toolCallId: stoppableId }) : null
-          }
-        ),
-        /* @__PURE__ */ u4(
-          TimeChip,
-          {
-            kind: "ai",
-            time: modelChipTime(line.modelTime),
-            status: line.modelTime?.since !== void 0 ? "running" : "completed"
-          }
-        )
-      ] })
+      stoppableId && turnId ? /* @__PURE__ */ u4("span", { class: "trace-stop", children: /* @__PURE__ */ u4(ToolStopButton, { turnId, toolCallId: stoppableId }) }) : null
     ] }),
     stopError ? /* @__PURE__ */ u4("div", { class: "trace-note turn-stop-error", role: "alert", children: stopError }) : null,
     meta ? /* @__PURE__ */ u4("div", { class: "trace-meta", children: meta }) : null,
@@ -23949,7 +23920,7 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
   const listRef = A2(null);
   const [target, setTarget] = h2(null);
   y2(() => {
-    if (listRef.current) return attachScrollEdges(listRef.current, { horizontal: false });
+    if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
   const revealed = A2(false);
   const chapters = activityChapters(lines, live);
@@ -23971,7 +23942,7 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
   const toggleChapter = (id2) => {
     setTarget({ latest: latestEntryId, chapter: openChapter === id2 ? null : id2, entry: null });
   };
-  return /* @__PURE__ */ u4("ul", { class: "activity-trace scroll-edge-fade", tabIndex: 0, "aria-label": "Activity steps", ref: listRef, children: chapters.map((chapter) => {
+  return /* @__PURE__ */ u4("div", { class: `trace-table scroll-edge-fade${chapters.some((chapter) => chapter.entries.length > 1) ? " has-chapters" : ""}`, ref: listRef, children: /* @__PURE__ */ u4("ul", { class: "activity-trace", tabIndex: 0, "aria-label": "Activity steps", children: chapters.map((chapter) => {
     if (chapter.entries.length === 1) {
       const { line, id: id2 } = chapter.entries[0];
       return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, turnId, onToggle: () => toggle(chapter.id, id2) }, chapter.id);
@@ -23979,33 +23950,29 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
     const open = openChapter === chapter.id;
     const times = chapterTimes(chapter.entries, live);
     return /* @__PURE__ */ u4("li", { class: `trace-chapter trace-status-${chapter.status}${open ? " open" : ""}`, children: [
-      /* @__PURE__ */ u4("div", { class: "trace-row-header", children: [
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "trace-chapter-toggle",
-            "aria-expanded": open,
-            "aria-label": `${chapter.title} \xB7 ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` \xB7 ${chapter.failures} failed` : ""}`,
-            onClick: () => toggleChapter(chapter.id),
-            children: [
-              /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
-              /* @__PURE__ */ u4("span", { class: "trace-chapter-label", children: /* @__PURE__ */ u4("span", { class: "trace-chapter-heading", children: [
-                /* @__PURE__ */ u4("span", { class: "trace-chapter-title", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: chapter.headline, repetitions: chapter.entries.length }) }),
-                chapter.failures ? /* @__PURE__ */ u4("span", { class: "trace-chapter-failures", children: [
-                  chapter.failures,
-                  " failed"
-                ] }) : null,
-                chapter.status === "unknown" || chapter.status === "interrupted" ? /* @__PURE__ */ u4("span", { class: "trace-chapter-notice", children: chapter.status === "unknown" ? "Outcome unknown" : "Interrupted" }) : null
-              ] }) })
-            ]
-          }
-        ),
-        /* @__PURE__ */ u4("span", { class: "trace-controls", children: [
-          /* @__PURE__ */ u4(TimeChip, { kind: "cpu", time: times.exec, status: chapter.status }),
-          /* @__PURE__ */ u4(TimeChip, { kind: "ai", time: times.model, status: "since" in times.model ? "running" : "completed" })
-        ] })
-      ] }),
+      /* @__PURE__ */ u4("div", { class: "trace-row-header", children: /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "trace-chapter-toggle",
+          "aria-expanded": open,
+          "aria-label": `${chapter.title} \xB7 ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` \xB7 ${chapter.failures} failed` : ""}`,
+          onClick: () => toggleChapter(chapter.id),
+          children: [
+            /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
+            /* @__PURE__ */ u4(TimeCell, { kind: "cpu", time: times.cpu }),
+            /* @__PURE__ */ u4(TimeCell, { kind: "ai", time: times.ai }),
+            /* @__PURE__ */ u4("span", { class: "trace-chapter-label", children: /* @__PURE__ */ u4("span", { class: "trace-chapter-heading", children: [
+              /* @__PURE__ */ u4("span", { class: "trace-chapter-title", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: chapter.headline, repetitions: chapter.entries.length }) }),
+              chapter.failures ? /* @__PURE__ */ u4("span", { class: "trace-chapter-failures", children: [
+                chapter.failures,
+                " failed"
+              ] }) : null,
+              chapter.status === "unknown" || chapter.status === "interrupted" ? /* @__PURE__ */ u4("span", { class: "trace-chapter-notice", children: chapter.status === "unknown" ? "Outcome unknown" : "Interrupted" }) : null
+            ] }) })
+          ]
+        }
+      ) }),
       open ? /* @__PURE__ */ u4("ul", { class: "trace-children", children: chapter.entries.map(({ line, id: id2 }) => /* @__PURE__ */ u4(
         ActivityTraceRow,
         {
@@ -24020,7 +23987,7 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
         id2
       )) }) : null
     ] }, chapter.id);
-  }) });
+  }) }) });
 }
 function ActivityTraceToggle({ count, hasOutcome = false, expanded, onToggle }) {
   if (!count && !hasOutcome) return null;
@@ -24100,8 +24067,8 @@ function UsageMeta({ summary, ownerId }) {
 var fmtTokUnit = (n3) => `${fmtTok(n3)} tok`;
 var fmtTime = (ms) => ms === null ? "Unavailable" : formatStopwatch(ms);
 var shownTime = (ms) => ms === null || !isZeroTime(ms);
-function UsageRow({ label, value, title }) {
-  return /* @__PURE__ */ u4("span", { class: "usage-row", title, children: [
+function UsageRow({ label, value, title, kind }) {
+  return /* @__PURE__ */ u4("span", { class: `usage-row${kind ? ` usage-row-${kind}` : ""}`, title, children: [
     /* @__PURE__ */ u4("span", { children: label }),
     /* @__PURE__ */ u4("strong", { children: value })
   ] });
@@ -24118,7 +24085,7 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
     /* @__PURE__ */ u4("div", { class: "usage-columns", children: [
       /* @__PURE__ */ u4("section", { class: "usage-column", "aria-label": "Timing", children: [
         /* @__PURE__ */ u4(UsageRow, { label: "Total", value: fmtTime(wallElapsedMs) }),
-        shownTime(modelElapsedMs) ? /* @__PURE__ */ u4(UsageRow, { label: "Model", value: fmtTime(modelElapsedMs), title: "Sum of reported model-call times" }) : null,
+        shownTime(modelElapsedMs) ? /* @__PURE__ */ u4(UsageRow, { label: "Model", value: fmtTime(modelElapsedMs), title: "Sum of reported model-call times", kind: "model-time" }) : null,
         shownTime(toolElapsedMs) ? /* @__PURE__ */ u4(UsageRow, { label: "Tools", value: fmtTime(toolElapsedMs), title: "Time with at least one tool running" }) : null,
         shownTime(otherMs) ? /* @__PURE__ */ u4(
           UsageRow,

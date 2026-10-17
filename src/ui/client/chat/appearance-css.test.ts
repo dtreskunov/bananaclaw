@@ -271,8 +271,8 @@ describe('theme CSS contract', () => {
 
   it('keeps activity trace typography comparable to the status line', () => {
     const css = read('./components/ChatMain.css');
-    const trace = css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1];
-    expect(trace).toContain('font-size: var(--font-2xs)');
+    const table = css.match(/\.chat-main \.msg-activity \.trace-table \{([^}]+)\}/)?.[1];
+    expect(table).toContain('font-size: var(--font-2xs)');
     const toggle = css.match(
       /\.chat-main \.activity-trace \.trace-row-toggle,\s*\.chat-main \.activity-trace \.trace-chapter-toggle \{([^}]+)\}/,
     )?.[1];
@@ -301,7 +301,7 @@ describe('theme CSS contract', () => {
   it('uses continuous chapter rails, indented hollow child dots and expanded TODO checklists', () => {
     const css = read('./components/ChatMain.css');
     expect(css).toContain('--trace-child-indent: 20px');
-    expect(css).toContain('.trace-child::before { left: calc(4px - var(--trace-child-indent))');
+    expect(css).toContain('.trace-child .trace-marker { margin-left: var(--trace-child-indent); }');
     expect(css).toContain('.trace-child::after');
     expect(css).toMatch(/\.trace-child \.trace-dot \{[^}]*width: 5px;[^}]*border: 1px solid/);
     expect(css).toContain('.trace-chapter::before');
@@ -312,8 +312,8 @@ describe('theme CSS contract', () => {
 
   it('uses one compact row rhythm for standalone steps, chapter headers and child connectors', () => {
     const css = read('./components/ChatMain.css');
-    const trace = css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1];
-    expect(trace).toContain('--trace-row-height: 28px');
+    const table = css.match(/\.chat-main \.msg-activity \.trace-table \{([^}]+)\}/)?.[1];
+    expect(table).toContain('--trace-row-height: 28px');
     const row = css.match(/\.chat-main \.activity-trace \.trace-row-toggle \{([^}]+)\}/)?.[1];
     const chapter = [...css.matchAll(/\.chat-main \.activity-trace \.trace-chapter-toggle \{([^}]+)\}/g)].at(-1)?.[1];
     expect(row).toContain('height: var(--trace-row-height)');
@@ -321,32 +321,46 @@ describe('theme CSS contract', () => {
     expect(css).toContain('top: calc(var(--trace-row-height) / 2)');
   });
 
-  it('fades trace labels before fixed controls and shares vertical table fades', () => {
+  it('scrolls the trace table both ways and renders Stop as the timeline node', () => {
     const css = read('./components/ChatMain.css');
-    const trace = css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1];
-    expect(trace).toContain('overflow-x: hidden');
-    expect(trace).toContain('overflow-y: auto');
+    // Tree, CPU and AI columns fit their widest cell; labels keep their full width and the table scrolls.
+    const table = css.match(/\.chat-main \.msg-activity \.trace-table \{([^}]+)\}/)?.[1];
+    expect(table).toContain(
+      'grid-template-columns: [tree] var(--trace-tree-width) [cpu] auto [ai] auto [label] minmax(max-content, 1fr) [end]',
+    );
+    expect(table).toContain('max-height: 30vh; overflow: auto');
+    expect(css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1]).not.toContain('overflow');
+    expect(css).not.toContain('trace-column');
+    expect(css).toMatch(
+      /\.trace-row-header \{ grid-column: 1 \/ -1; display: grid; grid-template-columns: subgrid; \}/,
+    );
+    // Expanded details wrap within the table instead of widening it.
+    expect(css).toContain('.trace-row > :not(.trace-row-header) { grid-column: cpu / end; contain: inline-size; }');
     expect(css).toMatch(/\.trace-meta \{ white-space: normal; overflow-wrap: anywhere/);
     const toggle = css.match(
       /\.trace-row-toggle,\s*\.chat-main \.activity-trace \.trace-chapter-toggle \{([^}]+)\}/,
     )?.[1];
     expect(toggle).toContain('width: 100%; min-width: 0');
     const text = css.match(/\.trace-chapter-label,\s*\.chat-main \.activity-trace \.trace-text \{([^}]+)\}/)?.[1];
-    expect(text).toContain('overflow: hidden');
-    expect(text).toContain('mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent)');
-    const controls = css.match(/\.trace-controls \{([^}]+)\}/)?.[1];
-    expect(controls).toContain('display: inline-flex');
-    expect(controls).toContain('flex: none');
-    expect(controls).not.toContain('mask');
-    const value = css.match(/\.trace-time-value \{([^}]+)\}/)?.[1];
-    expect(value).toContain('white-space: nowrap');
-    expect(value).not.toContain('background');
-    expect(value).toContain('border-radius: 999px');
-    expect(css.match(/\.trace-time-label \{([^}]+)\}/)?.[1]).toContain('color: var(--muted)');
-    expect(css.match(/\.trace-time-num \{([^}]+)\}/)?.[1]).toContain('font-variant-numeric: tabular-nums');
-    const slot = css.match(/\.trace-time \{([^}]+)\}/)?.[1];
-    expect(slot).toContain('min-width: 76px');
-    expect(slot).toContain('justify-content: flex-end');
+    expect(text).toContain('white-space: nowrap');
+    expect(text).not.toContain('overflow');
+    expect(text).not.toContain('mask-image');
+    expect(css.match(/\.chat-main \.activity-trace \.trace-stop \{([^}]+)\}/)?.[1]).toContain('grid-column: tree');
+    expect(css).toContain('.trace-row-header:has(.trace-stop .tool-stop) .trace-marker { visibility: hidden; }');
+    const stop = css.match(/\.chat-main \.activity-trace \.trace-stop \.tool-stop \{([^}]+)\}/)?.[1];
+    expect(stop).toContain('border: 1px solid var(--trace-status-color, var(--muted))');
+    expect(stop).toContain('color: var(--trace-status-color, var(--muted))');
+    const time = css.match(/\.chat-main \.activity-trace \.trace-time \{([^}]+)\}/)?.[1];
+    expect(time).toContain('justify-self: end');
+    expect(time).toContain('white-space: nowrap');
+    expect(time).toContain('font-variant-numeric: tabular-nums');
+    expect(time).not.toContain('border');
+    expect(css).toContain('.chat-main .activity-trace .trace-time:empty { padding: 0; }');
+    // AI time and the summary's Model time share one theme color.
+    expect(css).toContain('.chat-main .trace-table .trace-time-ai { color: var(--activity-model-time); }');
+    expect(css).toContain('.chat-main .usage-row-model-time > strong { color: var(--activity-model-time); }');
+    for (const theme of ['default', 'autumn'])
+      expect(read(`./styles/themes/${theme}.css`)).toContain('--activity-model-time:');
     const global = read('./styles/global.css');
     expect(global).toContain('mask-composite: intersect');
     for (const edge of ['top', 'right', 'bottom'])

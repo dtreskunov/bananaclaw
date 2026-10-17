@@ -238,9 +238,10 @@ argument is not presented as the whole group's target. Child labels omit the par
 Exact timestamps, status and duration share one line with dot separators when
 a step is expanded; full arguments and errors appear beneath.
 
-Each row ends with two right-aligned plain-text times in fixed columns, so each
-kind lines up across rows and chapter headers. Each time carries a subtle
-label, with the full name as a hover hint. **CPU** (execution time) shows tool
+Two compact right-aligned time columns sit between the timeline and the row
+label, sized to their widest value so each kind lines up across rows and
+chapter headers. The columns have no headers; each value has its full name
+as a hover hint. **CPU** (execution time) shows tool
 and compaction time, live from the moment a step starts, and stays on completed
 rows. **AI** (model time) shows the model calls that the row's step prompted.
 The runner records a hidden `model` activity step for each finished model call
@@ -251,12 +252,11 @@ calls**. After the last call, the time since the latest step or call ends is sho
 live on that step's row until the next step or the reply. Turns recorded
 before model steps existed show no AI time. Runner overhead between calls is not AI time; the usage
 details count it as **Other**. A finished time that would display as **0.0s**
-(including no attributed time) is left blank; the chip's slot keeps the columns
-aligned, and live stopwatches still count up from zero. Each time is an
-outlined pill (`CPU 1.1s`) with its label and value inline in the same font;
-the label is muted, while the value and outline use the trace status colors,
-blue while live and green once complete; **AI** uses a softer shade of the
-same color. Live times tick themselves and show tenths
+(including no attributed time) is left blank; the empty cell keeps the columns
+aligned, and live stopwatches still count up from zero. Times are plain
+tabular numbers without outlines. **CPU** uses a muted warm tint; **AI** uses
+the theme's model-time color (`--activity-model-time`), which the usage
+details' **Model** time shares. Live times tick themselves and show tenths
 below 10 s, then whole seconds. Chapter headers show the sums of their
 children.
 
@@ -274,11 +274,12 @@ theme-aware colors, interrupted states use warning colors, and unknown outcomes
 are muted. Accessible labels and expanded metadata convey status without
 relying on color. Historical unfinished steps become **Outcome unknown**, not
 successful or still-running steps.
-The activity viewport scrolls vertically. Long row and chapter labels fade over
-their final 24 px within the transcript width, before the fixed row controls.
+The activity viewport scrolls vertically, and horizontally when row or chapter
+labels are wider than the transcript, so long labels stay readable on narrow
+screens. Expanded details wrap within the table instead of widening it.
 A running step's **Stop tool** button appears once it has run for one second,
-including while its details are expanded. The plain stop icon sits just before
-the **CPU** time. It cancels only that
+including while its details are expanded. It replaces the step's timeline node:
+a small outlined square with a stop icon in the step's status color. It cancels only that
 tool call; the turn, other tools, queued inputs and response continue normally.
 The separate **Stop response** control in the status row still cancels the
 entire turn. Per-tool Stop currently requires the native provider's live
@@ -544,7 +545,7 @@ seconds and minutes) and remains in the regular footer while the turn is live,
 whether technical information is on or off. While the trace is expanded, the
 footer omits the current activity text that the trace already shows. The technical summary omits inline timing.
 The timing column lists **Total**, **Model**, **Tools** and **Other**, all in
-the trace time format. Tools is the time with at
+the trace time format; **Model** uses the same color as the trace's **AI** column. Tools is the time with at
 least one tool running (overlapping tools count once; live tools count to now).
 Model is the cumulative time requesting and streaming model responses,
 excluding tool execution and waits for user input. Native measures it with the
