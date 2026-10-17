@@ -524,7 +524,7 @@
 .chat-main .pending { display: flex; flex-wrap: wrap; gap: 4px; padding-block: 4px; font-size: var(--font-xs); color: var(--muted); }
 .chat-main .pending .item { display: inline-flex; align-items: center; gap: 4px; background: var(--wash-strong); padding: 2px 6px; border-radius: var(--radius-pill); }
 .chat-main .pending .item button { padding: 0 4px; border: 0; background: transparent; cursor: pointer; color: inherit; font-size: var(--font-lg); line-height: 1; }
-.chat-main form { display: flex; gap: 6px; padding-block: 8px; min-height: var(--bottom-row-h); align-items: flex-end; }
+.chat-main form { display: flex; gap: 6px; padding-block: 8px 16px; min-height: var(--bottom-row-h); align-items: flex-end; }
 .chat-main form > button { height: 32px; flex-shrink: 0; }
 /* Textarea reserves left room for the +-menu trigger and right room for
    the mic + Send buttons that sit inside the wrap as absolute overlays.
@@ -714,7 +714,7 @@
   .chat-main .msg .meta { min-height: 32px; }
   .chat-main form {
     padding-inline: 12px;
-    padding-block: 8px calc(8px + env(safe-area-inset-bottom));
+    padding-block: 8px calc(12px + env(safe-area-inset-bottom));
     gap: 8px;
     align-items: flex-end;
   }

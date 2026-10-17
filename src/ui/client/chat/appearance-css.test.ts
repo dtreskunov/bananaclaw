@@ -96,8 +96,11 @@ describe('theme CSS contract', () => {
     expect(rows?.[2]).toContain('padding-inline: var(--chat-gutter)');
     const bubble = css.match(/\.chat-main \.msg \{([^}]+)\}/)?.[1];
     expect(bubble).toContain('max-width: 90%');
+    const composer = css.match(/^\.chat-main form \{([^\n]+)\}/m)?.[1];
+    expect(composer).toContain('padding-block: 8px 16px');
     const mobileComposer = css.match(/@media \(max-width: 720px\) \{[\s\S]*?\.chat-main form \{([^}]+)\}/)?.[1];
     expect(mobileComposer).toContain('padding-inline: 12px');
+    expect(mobileComposer).toContain('padding-block: 8px calc(12px + env(safe-area-inset-bottom))');
     expect(css.match(/--chat-max:/g)).toHaveLength(1);
     expect(css.match(/max\(16px, calc\(\(100% - var\(--chat-max\)\)/g)).toHaveLength(1);
   });
