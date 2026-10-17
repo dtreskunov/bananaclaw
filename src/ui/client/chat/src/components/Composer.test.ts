@@ -43,7 +43,16 @@ import { DEFAULT_APPEARANCE } from '../appearance';
 import { isSystemNotice } from '../chat-protocol';
 import { voice } from '../voice-audio';
 import * as turnRow from '../turn-row';
-import { activityMetricsExpanded, activityTraceExpanded, resetActivityTraceView } from '../activity-trace-state';
+import {
+  activityMetricsExpanded,
+  activityTraceExpanded,
+  resetActivityTraceView,
+  toggleActivityTrace,
+} from '../activity-trace-state';
+
+const closeTrace = (ownerId: string) => {
+  if (activityTraceExpanded(ownerId)) toggleActivityTrace(ownerId);
+};
 
 // Exercise the real Composer's refs, layout transitions, handlers and rendered
 // controls without adding a browser-DOM dependency to the repository.
@@ -1178,6 +1187,8 @@ describe('main composer pending edits', () => {
         }),
         'thread',
       );
+      // The first live turn opens its trace; close it to see the status-line preview.
+      if (technical) closeTrace(`turn:${testTurn.id}`);
       hooks.slots = [];
       hooks.cursor = 0;
       const log = findComponent(ChatMain(), 'MessageLog');
@@ -1303,6 +1314,7 @@ describe('main composer pending edits', () => {
           }),
           'thread',
         );
+        if (technical) closeTrace(`turn:${testTurn.id}`);
         hooks.slots = [];
         hooks.cursor = 0;
         const log = findComponent(ChatMain(), 'MessageLog');
@@ -2031,6 +2043,7 @@ describe('main composer pending edits', () => {
         }),
         'thread',
       );
+      if (technical) closeTrace(`turn:${testTurn.id}`);
       hooks.slots = [];
       hooks.cursor = 0;
       const log = findComponent(ChatMain(), 'MessageLog');
@@ -2266,7 +2279,7 @@ describe('main composer pending edits', () => {
 });
 
 describe('inline activity metrics', () => {
-  it('keeps previous panels through submission and new data until the user opens replacements', () => {
+  it('keeps previous panels open through submission, new data and new selections', () => {
     appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
     const previous: ConversationTurn = {
       ...testTurn,
@@ -2357,11 +2370,9 @@ describe('inline activity metrics', () => {
     current = findComponent(renderTechnicalDetails(renderResponseStatusRow()), 'ActivityTracePanel');
     expect(current.props.expanded).toBe(true);
     expect(current.props.metrics).toBeNull();
-    expect(previousPanel().props.expanded).toBe(false);
-    expect(previousPanel().props.metrics.props.records[0].id).toBe('previous-usage');
+    expectPreviousContent();
     find(currentUsage.type(currentUsage.props), 'button').props.onClick({ stopPropagation() {} });
-    const oldPanel = previousPanel();
-    expect(oldPanel.type(oldPanel.props)).toBeNull();
+    expectPreviousContent();
     current = findComponent(renderTechnicalDetails(renderResponseStatusRow()), 'ActivityTracePanel');
     expect(current.props.expanded).toBe(true);
     expect(current.props.metrics.props.ownerId).toBe(`turn:${next.id}`);
@@ -2372,76 +2383,80 @@ describe('inline activity metrics', () => {
     (['live', 'settled', 'reply', 'history', 'history-reply'] as const).flatMap((scene) =>
       (['closed', 'steps', 'stats', 'both'] as const).map((panels) => ({ scene, panels })),
     ),
-  )('leaves explicit disclosures on their original turn (scene=$scene, panels=$panels)', ({ scene, panels }) => {
-    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
-    const live = scene === 'live';
-    const historical = scene.startsWith('history');
-    const reply = scene.endsWith('reply');
-    const turn: ConversationTurn = {
-      ...testTurn,
-      phase: live ? ('running' as const) : ('settled' as const),
-      outcome: 'silent',
-      outputIds: reply ? ['reply'] : [],
-      usage: [{ id: 'usage', value: { cost_usd: 0.01 } }],
-    };
-    if (live) turn.outcome = 'pending';
-    else if (reply) turn.outcome = 'replied';
-    const newer = { ...turn, id: 'newer-history', outputIds: [] };
-    const messages: ConversationMessage[] = reply
-      ? [{ id: 'reply', direction: 'out', turnId: turn.id, text: 'Done', timestamp: '2026-09-29T00:00:01Z' }]
-      : [];
-    const turns = historical ? [turn, newer] : [turn];
-    applyConversationFrame(
-      testSnapshot({
-        messages,
-        turns,
-        connection: { connected: true, activeTurnId: live ? turn.id : null },
-      }),
-      'thread',
-    );
-    resetActivityTraceView();
-    let row;
-    if (reply) {
-      resetMount();
-      const log = findComponent(ChatMain(), 'MessageLog');
-      resetMount();
-      const message = findComponent(log.type(log.props), 'Message');
-      resetMount();
-      row = message.type(message.props);
-    } else row = renderResponseStatusRow();
-    const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
-    const controls = info.type(info.props);
-    const steps = panels === 'steps' || panels === 'both';
-    const stats = panels === 'stats' || panels === 'both';
-    if (steps) findComponent(controls, 'ActivityTraceToggle').props.onToggle();
-    if (stats) {
-      const usage = findComponent(controls, 'UsageMeta');
-      find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
-    }
-    expect(activityTraceExpanded(`turn:${turn.id}`)).toBe(steps);
-    expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(stats);
-    const next = { ...testTurn, id: 'turn:next', usage: [{ id: 'new-usage', value: { cost_usd: 0.002 } }] };
-    applyConversationFrame(
-      testSnapshot(
-        {
+  )(
+    'pins settled disclosures and moves live ones to the next turn (scene=$scene, panels=$panels)',
+    ({ scene, panels }) => {
+      appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+      const live = scene === 'live';
+      const historical = scene.startsWith('history');
+      const reply = scene.endsWith('reply');
+      const turn: ConversationTurn = {
+        ...testTurn,
+        phase: live ? ('running' as const) : ('settled' as const),
+        outcome: 'silent',
+        outputIds: reply ? ['reply'] : [],
+        usage: [{ id: 'usage', value: { cost_usd: 0.01 } }],
+      };
+      if (live) turn.outcome = 'pending';
+      else if (reply) turn.outcome = 'replied';
+      const newer = { ...turn, id: 'newer-history', outputIds: [] };
+      const messages: ConversationMessage[] = reply
+        ? [{ id: 'reply', direction: 'out', turnId: turn.id, text: 'Done', timestamp: '2026-09-29T00:00:01Z' }]
+        : [];
+      const turns = historical ? [turn, newer] : [turn];
+      applyConversationFrame(
+        testSnapshot({
           messages,
-          turns: [...turns.map((value) => ({ ...value, phase: 'settled' as const })), next],
-          connection: { connected: true, activeTurnId: next.id },
-        },
-        'next-turn',
-      ),
-      'thread',
-    );
-    expect(activityTraceExpanded(`turn:${turn.id}`)).toBe(steps);
-    expect(activityTraceExpanded(`turn:${next.id}`)).toBe(false);
-    expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(stats);
-    expect(activityMetricsExpanded(`turn:${next.id}`)).toBe(false);
-    applyConversationFrame(testSnapshot(conversationState.peek()!.conversation, 'reconnect'), 'thread');
-    expect(activityTraceExpanded(`turn:${turn.id}`)).toBe(steps);
-    expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(stats);
-    expect(activityTraceExpanded(`turn:${next.id}`)).toBe(false);
-    expect(activityMetricsExpanded(`turn:${next.id}`)).toBe(false);
-  });
+          turns,
+          connection: { connected: true, activeTurnId: live ? turn.id : null },
+        }),
+        'thread',
+      );
+      resetActivityTraceView();
+      let row;
+      if (reply) {
+        resetMount();
+        const log = findComponent(ChatMain(), 'MessageLog');
+        resetMount();
+        const message = findComponent(log.type(log.props), 'Message');
+        resetMount();
+        row = message.type(message.props);
+      } else row = renderResponseStatusRow();
+      const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+      const controls = info.type(info.props);
+      const steps = panels === 'steps' || panels === 'both';
+      const stats = panels === 'stats' || panels === 'both';
+      if (steps) findComponent(controls, 'ActivityTraceToggle').props.onToggle();
+      if (stats) {
+        const usage = findComponent(controls, 'UsageMeta');
+        find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+      }
+      expect(activityTraceExpanded(`turn:${turn.id}`)).toBe(steps);
+      expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(stats);
+      const next = { ...testTurn, id: 'turn:next', usage: [{ id: 'new-usage', value: { cost_usd: 0.002 } }] };
+      applyConversationFrame(
+        testSnapshot(
+          {
+            messages,
+            turns: [...turns.map((value) => ({ ...value, phase: 'settled' as const })), next],
+            connection: { connected: true, activeTurnId: next.id },
+          },
+          'next-turn',
+        ),
+        'thread',
+      );
+      // Panels opened on a live turn follow; untouched Steps open for the first live turn.
+      const expectPanels = () => {
+        expect(activityTraceExpanded(`turn:${turn.id}`)).toBe(steps && !live);
+        expect(activityTraceExpanded(`turn:${next.id}`)).toBe(!steps || live);
+        expect(activityMetricsExpanded(`turn:${turn.id}`)).toBe(stats && !live);
+        expect(activityMetricsExpanded(`turn:${next.id}`)).toBe(stats && live);
+      };
+      expectPanels();
+      applyConversationFrame(testSnapshot(conversationState.peek()!.conversation, 'reconnect'), 'thread');
+      expectPanels();
+    },
+  );
 
   it('groups usage into outlined timing, token and model columns', () => {
     appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
@@ -2709,8 +2724,7 @@ describe('activity trace completion', () => {
       testSnapshot({ turns: [turn], connection: { connected: true, activeTurnId: turn.id } }),
       'thread',
     );
-    const info = findComponent(renderDetails(), 'TurnTechnicalInfo');
-    findComponent(info.type(info.props), 'ActivityTraceToggle').props.onToggle();
+    // The first live turn opens its own trace.
     const live = findComponent(renderDetails(), 'ActivityTracePanel');
     expect(live.props).toMatchObject({ expanded: true, live: true, turnId: turn.id });
     const liveList = findComponent(live.type(live.props), 'ActivityTraceList');

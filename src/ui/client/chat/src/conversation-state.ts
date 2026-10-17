@@ -25,7 +25,7 @@ import { applyToolStopState, resetToolStops } from './stop-tool';
 import { confirmCancelledInput } from './pending-cancel';
 import { playCompletionChime, playProgressTick } from './sound';
 import { maybeNotify } from './notify';
-import { adoptSubmissionTraces, resetActivityTraceView } from './activity-trace-state';
+import { adoptSubmissionTraces, inheritActivityPanels, resetActivityTraceView } from './activity-trace-state';
 import { completedResponseId } from './turn-completion';
 import type { ChatMessage, TranscriptRow } from './types';
 import { reconcileWebSubmissions } from './web-submissions';
@@ -121,6 +121,8 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
     }
     if (changedConversation) resetActivityTraceView();
     else adoptSubmissionTraces(view.turns);
+    if (current && current.phase !== 'settled' && current.id !== previous?.conversation.connection.activeTurnId)
+      inheritActivityPanels(`turn:${current.id}`);
     chatMessages.value = messages;
     chatTranscript.value = transcript;
     if (frame.kind === 'update') {

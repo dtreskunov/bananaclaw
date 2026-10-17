@@ -437,7 +437,7 @@ type UsageProps = {
   live: boolean; partial: boolean; wallElapsedMs: number | null; modelElapsedMs: number | null; toolElapsedMs: number;
 };
 
-function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>) {
+function UsageMeta({ summary, ownerId, live }: Pick<UsageProps, 'summary' | 'ownerId' | 'live'>) {
   const expanded = activityMetricsExpanded(ownerId);
   const short = summary || 'Usage details';
   return (
@@ -448,7 +448,7 @@ function UsageMeta({ summary, ownerId }: Pick<UsageProps, 'summary' | 'ownerId'>
       aria-controls={`turn-usage-${ownerId}`}
       aria-label={`${short}. ${expanded ? 'Hide' : 'Show'} usage details`}
       title={expanded ? 'Hide usage details' : 'Show usage details'}
-      onClick={(e) => { e.stopPropagation(); toggleActivityMetrics(ownerId); }}
+      onClick={(e) => { e.stopPropagation(); toggleActivityMetrics(ownerId, live); }}
       onKeyDown={(e) => { if (e.key === 'Escape' && expanded) toggleActivityMetrics(ownerId); }}
     >
       <span class={`chevron${expanded ? ' open' : ''}`} aria-hidden="true">{'\u203A'}</span>
@@ -1217,7 +1217,7 @@ function TurnTechnicalInfo({
   return (
     <div class="meta turn-tech-info" role="group" aria-label="Technical information">
       <ActivityTraceToggle count={count} hasOutcome={hasOutcome} expanded={expanded} onToggle={onToggle} />
-      {usage ? <UsageMeta summary={usage.summary} ownerId={usage.ownerId} /> : null}
+      {usage ? <UsageMeta summary={usage.summary} ownerId={usage.ownerId} live={usage.live} /> : null}
     </div>
   );
 }
@@ -1241,7 +1241,7 @@ function TurnTechnicalDetails({
   return (
     <div class="turn-technical-details">
       <TurnTechnicalInfo usage={usage} count={count} hasOutcome={hasOutcome}
-        expanded={expanded} onToggle={() => toggleActivityTrace(ownerId)} />
+        expanded={expanded} onToggle={() => toggleActivityTrace(ownerId, live)} />
       <ActivityTracePanel lines={lines} expanded={expanded} live={live} now={now}
         ownerId={ownerId} turnId={live && turn ? turn.id : null}
         metrics={metricsExpanded && usage ? <UsageDetails {...usage} /> : null} />
@@ -1370,7 +1370,7 @@ function ResponseStatusRow({ source }: {
               aria-expanded={expanded}
               aria-label={expanded ? 'Hide activity' : 'Show latest activity'}
               title={expanded ? 'Hide activity' : 'Show latest activity'}
-              onClick={() => toggleActivityTrace(ownerId)}
+              onClick={() => toggleActivityTrace(ownerId, presentation.traceLive)}
             ><StepHeadlineContent headline={headline} repetitions={repetitions} /></button>
           : headline ? <span class="hint"><StepHeadlineContent headline={headline} repetitions={repetitions} /></span> : null}
       </div>

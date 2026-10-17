@@ -433,7 +433,7 @@ describe('authoritative turn presentation', () => {
   });
 
   it.each([false, true].flatMap((technical) => [false, true].map((settled) => ({ technical, settled }))))(
-    'starts both panels closed (technical=$technical, settled=$settled)',
+    'opens only the trace, and only for a live first turn with technical information (technical=$technical, settled=$settled)',
     ({ technical, settled }) => {
       appearance.value = {
         ...appearance.peek(),
@@ -447,13 +447,14 @@ describe('authoritative turn presentation', () => {
           connection: { connected: true, activeTurnId: settled ? null : testTurn.id },
         }),
       );
-      expect(activityTraceExpanded('turn:turn-1')).toBe(false);
+      const opened = technical && !settled;
+      expect(activityTraceExpanded('turn:turn-1')).toBe(opened);
       expect(activityMetricsExpanded('turn:turn-1')).toBe(false);
       appearance.value = {
         ...appearance.peek(),
         preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: !technical },
       };
-      expect(activityTraceExpanded('turn:turn-1')).toBe(false);
+      expect(activityTraceExpanded('turn:turn-1')).toBe(opened);
       expect(activityMetricsExpanded('turn:turn-1')).toBe(false);
     },
   );
@@ -556,19 +557,20 @@ describe('authoritative turn presentation', () => {
       });
       expect(activityTraceExpanded('turn:turn-1')).toBe(trace);
       expect(activityTraceExpanded('turn:turn-2')).toBe(false);
+      // Opening another turn's panels leaves the earlier ones open.
       if (trace) toggleActivityTrace('turn:turn-2');
-      expect(activityTraceExpanded('turn:turn-1')).toBe(false);
+      expect(activityTraceExpanded('turn:turn-1')).toBe(trace);
       expect(activityTraceExpanded('turn:turn-2')).toBe(trace);
-      expect(activityMetricsExpanded('turn:turn-1')).toBe(metrics);
       if (metrics) toggleActivityMetrics('turn:turn-2');
-      expect(activityMetricsExpanded('turn:turn-1')).toBe(false);
+      expect(activityMetricsExpanded('turn:turn-1')).toBe(metrics);
       expect(activityMetricsExpanded('turn:turn-2')).toBe(metrics);
       if (trace) toggleActivityTrace('turn:turn-2');
       if (metrics) toggleActivityMetrics('turn:turn-2');
       receive(testSnapshot(conversationState.peek()!.conversation, 'reconnect-closed'));
       expect(activityTraceExpanded('turn:turn-2')).toBe(false);
       expect(activityMetricsExpanded('turn:turn-2')).toBe(false);
-      expect(activityMetricsExpanded('turn:turn-1')).toBe(false);
+      expect(activityTraceExpanded('turn:turn-1')).toBe(trace);
+      expect(activityMetricsExpanded('turn:turn-1')).toBe(metrics);
     },
   );
 

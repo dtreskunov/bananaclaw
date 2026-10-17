@@ -2,6 +2,7 @@
 import { batch, type Signal } from '@preact/signals';
 import { voice } from './voice-audio';
 import { cancelRecording } from './recorder';
+import { inheritActivityPanels, submissionTraceOwner } from './activity-trace-state';
 import {
   groupId,
   threads,
@@ -967,6 +968,7 @@ async function submitChatPacket(
       .peek()
       .filter((send) => send.groupId !== gid || send.threadId !== tid || send.messageId !== messageId)
       .concat(submission);
+    if (startsResponse) inheritActivityPanels(submissionTraceOwner(messageId));
   }
   try {
     if (isWeb) onSubmitted?.();

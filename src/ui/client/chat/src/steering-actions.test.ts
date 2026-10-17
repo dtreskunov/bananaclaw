@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearChat, respondQuestion, retryChatSend, sendChat, skipQuestion } from './actions';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
@@ -24,6 +24,14 @@ import {
 import { splitPendingInputs } from './queued-followups';
 import { inputStatePresentation } from './input-state';
 import { submissionPresentation } from './web-submissions';
+import {
+  activityTraceExpanded,
+  resetActivityTraceView,
+  submissionTraceOwner,
+  toggleActivityTrace,
+} from './activity-trace-state';
+import { appearance } from './appearance-state';
+import { DEFAULT_APPEARANCE } from './appearance';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 vi.mock('./components/PromptModal', () => ({ requestChoice: vi.fn() }));
@@ -211,6 +219,26 @@ describe('immediate web submission feedback', () => {
     applyConversationFrame(testSnapshot({ messages: [message] }, 'echo-stream'), 'thread');
     return message;
   }
+  it('opens the first trace from the starting row and moves a following trace to each new send', async () => {
+    const preferences = appearance.peek().preferences;
+    onTestFinished(() => {
+      appearance.value = { ...appearance.peek(), preferences };
+    });
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    resetActivityTraceView();
+    expect(await sendChat('First', null)).toBe(true);
+    const first = submissionTraceOwner(pendingWebSends.value[0].messageId);
+    expect(activityTraceExpanded(first)).toBe(true);
+    pendingWebSends.value = [];
+    expect(await sendChat('Second', null)).toBe(true);
+    expect(activityTraceExpanded(first)).toBe(false);
+    const second = submissionTraceOwner(pendingWebSends.value[0].messageId);
+    expect(activityTraceExpanded(second)).toBe(true);
+    toggleActivityTrace(second);
+    pendingWebSends.value = [];
+    expect(await sendChat('Third', null)).toBe(true);
+    expect(activityTraceExpanded(submissionTraceOwner(pendingWebSends.value[0].messageId))).toBe(false);
+  });
   it('renders feedback before HTTP and clears the draft only after a real submission starts', async () => {
     const response = deferResponse();
     const release = vi.fn();

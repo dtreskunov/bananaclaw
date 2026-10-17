@@ -175,15 +175,18 @@ fully, while oversized details align at their beginning so the header remains
 visible. Selecting steps, browsing chapters or collapsing the latest chapter
 is respected until a new step arrives; then its chapter expands automatically,
 with details collapsed. Scrolling does not change expansion.
-Only one Steps section and one Stats section can be expanded across the
-transcript. Each stores just its open owner ID or null; chapter and step
-selection are local to the mounted trace.
-Both sections start closed, even when technical information is enabled or a
-conversation opens with a live turn. Only user toggles change their expansion:
-opening a section on another turn closes its previous instance, independently
-of the other section. New turns, activity, accounting and terminal outcomes do
-not open, close or transfer panels. Open panels remain attached to their original
-turn until explicitly closed or replaced by another user selection.
+Any number of Steps and Stats sections can be expanded at once, independently.
+Each kind stores its open owner IDs with a mode (`follow` or `open`); chapter
+and step selection are local to the mounted trace.
+Opening a section on a live (or starting) response makes it follow: when the
+next response starts, from the moment its message is sent, the section moves
+to it. Opening a section on a settled response pins it there. Opening a section
+never closes another, and closed sections stay closed.
+With technical information on, the first live response in a conversation
+(the starting row of the first send, or a live turn when the conversation
+opens) opens its Steps in follow mode, unless the user already toggled Steps in
+this conversation. Stats never open on their own. Activity, accounting and
+terminal outcomes do not open, close or move panels.
 Completing the turn does not close its panels or its expanded chapter.
 Same-step status/accounting updates and same-turn reconnect snapshots preserve
 local selections; conversation navigation resets both disclosures.
@@ -440,15 +443,14 @@ The summary is a chevron toggle styled like the adjacent **trace** disclosure,
 retaining its duration/cost/context label. It opens detailed metrics inline at
 the top of the activity panel, not in a pop-up. Metrics and trace expand
 independently: either or both can be shown, including metrics on turns without
-recorded activity. Each disclosure expands for at most one owner at a time.
-Selection survives live-to-settled handoff and same-turn reconnects; on a new
-turn, following panels move to that turn and close on their previous owner.
-Opening metrics on a live turn enables following; opening them on a completed
-turn pins them there. Following persists through settlement unless the metrics
-are closed and manually reopened. Manually browsed traces likewise stay open
-where selected. Closed panels stay closed, and conversation navigation resets both. Metrics can inherit
-their open state before accounting arrives, appearing when usage is available. Both
-disclosures are accessible only when technical information is on.
+recorded activity, on any number of turns at once.
+Selection survives live-to-settled handoff and same-turn reconnects. Metrics
+follow and pin exactly like Steps (see the activity trace section above):
+following persists through settlement until the next response starts or the
+metrics are closed and reopened on a settled turn. Metrics can inherit their
+open state before accounting arrives, appearing when usage is available. Closed
+panels stay closed, and conversation navigation resets both. Both disclosures
+are accessible only when technical information is on.
 Expanded metrics use the available bubble width, placing multiple label/value
 pairs side by side when there is room and returning to a single pair per row
 on narrow layouts. All rows and reports share the same responsive column tracks;
