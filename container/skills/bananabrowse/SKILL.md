@@ -1,15 +1,15 @@
 ---
-name: domagent
-description: Work in the user's real browser through DomAgent v6 sessions (approved native tab groups), including background tabs, human help and bulk data extraction through artifacts. Pair by a code the user reads from their DomAgent window.
+name: bananabrowse
+description: Work in the user's real browser through BananaBrowse sessions (approved native tab groups), including background tabs, human help and bulk data extraction through artifacts. Pair by a code the user reads from their BananaBrowse window.
 ---
 
-# DomAgent v6 browser sessions
+# BananaBrowse browser sessions
 
-DomAgent is independent of BananaClaw and OneCLI. Service 6.1.0-beta.5 /
-extension 6.1.3 / wire v6. Artifacts need extension 6.1.0 and closing tabs needs
-6.1.3; an older one answers
+BananaBrowse (formerly DomAgent) is independent of BananaClaw and OneCLI.
+Service and extension 1.0.0-beta.1 (manifest version 0.9.0.1) / wire v6. If the
+extension is too old for a tool it answers
 `CAPABILITY_UNAVAILABLE` with `required_extension_version`: ask the user to
-update the extension. The user runs a small DomAgent window in their
+update the extension. The user runs a small BananaBrowse window in their
 browser; while it is open you can ask to open **sessions**. A session is a
 native tab group the user approves, and every tab in that group is in scope.
 
@@ -17,7 +17,7 @@ native tab group the user approves, and every tab in that group is in scope.
 
 Endpoint: `https://<server>/mcp/<agent-id>` with `Authorization: Bearer <key>`,
 injected by the vault for exactly that host and path. This group's entry is
-`domagent` → `https://domagent.adsoconsulting.org/mcp/bananaclawz`. Keep the
+`bananabrowse` → `https://domagent.adsoconsulting.org/mcp/bananaclawz`. Keep the
 600000 ms MCP timeout: pairing, session approval and help requests wait for a
 person (use `timeout_seconds` ≤ 540). **Never request, echo or store the raw
 key.** The operator generates keys with `admin.js agent-key`; a pairing code is
@@ -26,7 +26,7 @@ not a credential.
 ## Pairing a browser (once per browser)
 
 1. Call `list_browsers()`. If the browser you need is listed, skip pairing.
-2. Otherwise ask the user to click the DomAgent toolbar button, then **Pair an
+2. Otherwise ask the user to click the BananaBrowse toolbar button, then **Pair an
    agent**, and tell you the 8-character code (for example `K7MP-4QTX`). It
    expires in five minutes.
 3. Call `pair_browser({code})`. The user clicks **Approve** in their window; you
@@ -36,7 +36,7 @@ not a credential.
 ## Sessions
 
 - `list_browsers()` shows `online`, `last_seen` and `paired_at`. Offline means
-  the user's DomAgent window is closed: ask them to open it, or use another
+  the user's BananaBrowse window is closed: ask them to open it, or use another
   online browser.
 - Reinstalling the extension creates a new browser; the new one is renamed
   `name (2)` if you already have one with that name. Remove the long-offline
@@ -82,7 +82,7 @@ Start with a focused `get_page_snapshot`. Defaults are 4000 characters, 50
 elements and 16 KiB (hard limit 64 KiB). Interactive elements are kept first
 when truncated and decorative/SVG noise is dropped; still check truncation and
 narrow with `selector`. Input is DOM-based, not native keystrokes. `navigate`
-works from blank or browser pages. Protected origins (the DomAgent server, the
+works from blank or browser pages. Protected origins (the BananaBrowse server, the
 identity provider) are blocked with `HANDOFF_REQUIRED`.
 
 - **Refs belong to one snapshot of one document.** Act with `ref` + `document`
@@ -117,7 +117,7 @@ retry.** `BROWSER_OFFLINE` → the window closed mid-task; tell the user.
 
 Never move more than ~10 KB of page data through the conversation: it's slow,
 costly and silently corrupts. Collect it in one script and store it on the
-DomAgent service instead:
+BananaBrowse service instead:
 
 1. Write one `evaluate_script` that gathers everything (loop the site's paged
    API with `await` inside the script) and ends with the array or object. Pass
@@ -150,7 +150,7 @@ Use `request_handoff({tab_id, instructions})` for logins,
 CAPTCHAs, payments or review. When a page shows a sign-in form or SSO redirect,
 call it right away instead of asking in chat. Never type or read passwords or ask for
 credentials. The user gets a notification, the tab group flashes, and they click
-**Done** or **Cancel** in the DomAgent window. Only that tab waits; others can
+**Done** or **Cancel** in the BananaBrowse window. Only that tab waits; others can
 keep working. `ACTION_DECLINED` means they cancelled.
 
 ## Boundaries
