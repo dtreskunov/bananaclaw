@@ -52,6 +52,23 @@ describe('reduceActivityLines', () => {
     expect(JSON.parse(result.text)).toMatchObject({ status: 'completed', durationMs: 8040 });
   });
 
+  it('retains independent start and finish times when parallel calls complete out of order', () => {
+    const tool = (id: string, status: string) => ({ kind: 'tool', id, tool: 'bash', status });
+    const result = reduceActivityLines([
+      line('1000', tool('a', 'running')),
+      line('1500', tool('b', 'running')),
+      line('2000', tool('b', 'completed')),
+      line('4000', tool('a', 'completed')),
+    ]);
+    expect(result.map(({ ts, text }) => {
+      const step = JSON.parse(text);
+      return { id: step.id, start: Number(ts), end: Number(ts) + step.durationMs, status: step.status };
+    })).toEqual([
+      { id: 'a', start: 1000, end: 4000, status: 'completed' },
+      { id: 'b', start: 1500, end: 2000, status: 'completed' },
+    ]);
+  });
+
   it.each(['interrupted', 'unknown'])('recognizes %s as terminal without claiming success', (status) => {
     const [result] = reduceActivityLines([
       line('1000', { kind: 'tool', id: 'call-1', tool: 'write', status: 'running' }),

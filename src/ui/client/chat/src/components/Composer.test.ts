@@ -2907,6 +2907,63 @@ describe('activity trace chapter following', () => {
     for (const child of children) expect(child.props.turnId).toBe('owning-turn');
   });
 
+  const timed = (id: string, ts: string, status: 'running' | 'completed', durationMs?: number): ActivityLine => ({
+    ts,
+    text: JSON.stringify({ kind: 'tool', id, tool: 'bash', status, durationMs }),
+  });
+  function chapterTimeCells(lines: ActivityLine[], live = true) {
+    resetMount();
+    const group = traceList(ActivityTraceList({ lines, live })).props.children[0];
+    const [, cpu, ai] = group.props.children[0].props.children.props.children;
+    return { cpu: cpu.props.time, ai: ai.props.time };
+  }
+
+  it('counts overlapping completed commands once, including nested and out-of-order intervals', () => {
+    expect(
+      chapterTimeCells([timed('a', '1000', 'completed', 3000), timed('b', '2000', 'completed', 3000)]).cpu,
+    ).toEqual({ ms: 4000 });
+    expect(
+      chapterTimeCells([timed('a', '1000', 'completed', 4000), timed('b', '2000', 'completed', 1000)]).cpu,
+    ).toEqual({ ms: 4000 });
+    expect(
+      chapterTimeCells([timed('b', '2000', 'completed', 3000), timed('a', '1000', 'completed', 3000)]).cpu,
+    ).toEqual({ ms: 4000 });
+  });
+
+  it('keeps live chapter time continuous when a parallel command finishes', () => {
+    expect(chapterTimeCells([timed('a', '1000', 'running'), timed('b', '2000', 'running')]).cpu).toEqual({
+      since: 1000,
+    });
+    expect(chapterTimeCells([timed('a', '1000', 'completed', 3000), timed('b', '2000', 'running')]).cpu).toEqual({
+      since: 1000,
+    });
+    expect(chapterTimeCells([timed('a', '1000', 'running'), timed('b', '2000', 'completed', 3000)]).cpu).toEqual({
+      since: 1000,
+    });
+  });
+
+  it('excludes idle gaps and preserves reported durations without usable timestamps', () => {
+    expect(
+      chapterTimeCells([timed('a', '1000', 'completed', 1000), timed('b', '4000', 'completed', 2000)]).cpu,
+    ).toEqual({ ms: 3000 });
+    expect(chapterTimeCells([timed('a', '1000', 'completed', 1000), timed('b', '4000', 'running')]).cpu).toEqual({
+      since: 3000,
+    });
+    for (const ts of ['', 'unknown']) {
+      expect(chapterTimeCells([timed('a', ts, 'completed', 1000), timed('b', '1000', 'completed', 2000)]).cpu).toEqual({
+        ms: 3000,
+      });
+    }
+    expect(chapterTimeCells([timed('a', '1000', 'running'), timed('b', '2000', 'running')], false).cpu).toBeNull();
+  });
+
+  it('leaves chapter model-time sums and live tails unchanged', () => {
+    const first = { ...timed('a', '1000', 'completed', 3000), modelTime: { ms: 900 } };
+    const second = { ...timed('b', '2000', 'completed', 3000), modelTime: { ms: 1200 } };
+    expect(chapterTimeCells([first, second])).toEqual({ cpu: { ms: 4000 }, ai: { ms: 2100 } });
+    expect(chapterTimeCells([first, { ...second, modelTime: { ms: 1200, since: 5000 } }]).ai).toEqual({ since: 2900 });
+  });
+
   it('keeps recorded durations on expanded completed rows without Stop or a live timer', () => {
     const completed = {
       ts: '1000',

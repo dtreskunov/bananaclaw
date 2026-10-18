@@ -20165,7 +20165,8 @@ function warmChat() {
   const gid = groupId.value;
   const tid = threadId.value;
   const thread = threads.value.find((entry) => entry.threadId === tid);
-  if (!gid || !tid || !canSend.value || !chatReady.value || chatReloadRequired.value || channelType.value && channelType.value !== "web" || thread?.messageCount !== 0) return Promise.resolve();
+  if (!gid || !tid || !canSend.value || !chatReady.value || chatReloadRequired.value || channelType.value && channelType.value !== "web" || thread?.messageCount !== 0)
+    return Promise.resolve();
   const key = `${gid}:${tid}`;
   const existing = chatWarmups.get(key);
   if (existing) return existing;
@@ -24061,6 +24062,7 @@ function execRunning(step, live) {
 function chapterTimes(entries, live) {
   let exec = 0;
   let execSince = null;
+  const spans = [];
   let timed = false;
   let model = 0;
   let modelSince = null;
@@ -24068,13 +24070,25 @@ function chapterTimes(entries, live) {
     if (isTimedStep(step)) {
       timed = true;
       const startedAt2 = Number(line.ts);
-      if (execRunning(step, live) && line.ts && Number.isFinite(startedAt2))
-        execSince = Math.min(execSince ?? startedAt2, startedAt2);
-      else exec += step.durationMs ?? 0;
+      if (line.ts && Number.isFinite(startedAt2)) {
+        if (execRunning(step, live)) spans.push([startedAt2, Infinity]);
+        else if (step.durationMs !== void 0) spans.push([startedAt2, startedAt2 + step.durationMs]);
+      } else exec += step.durationMs ?? 0;
     }
     if (!line.modelTime) continue;
     model += line.modelTime.ms;
     if (line.modelTime.since !== void 0) modelSince = line.modelTime.since;
+  }
+  let covered = -Infinity;
+  for (const [start, end] of spans.sort((a4, b5) => a4[0] - b5[0])) {
+    if (end <= covered) continue;
+    if (end === Infinity) {
+      execSince = start;
+      exec -= Math.max(0, covered - start);
+      break;
+    }
+    exec += end - Math.max(start, covered);
+    covered = end;
   }
   return {
     cpu: shownChipTime(!timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec }),

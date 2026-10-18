@@ -202,10 +202,11 @@ function execRunning(step: TraceStep, live: boolean): boolean {
   return live && isTimedStep(step) && step.status === 'running' && step.durationMs === undefined;
 }
 
-/** Chapter totals; a live part ticks from its start, offset by the finished total. */
+/** Chapter execution time counts overlapping child intervals once. */
 function chapterTimes(entries: TraceEntry[], live: boolean) {
   let exec = 0;
   let execSince: number | null = null;
+  const spans: Array<[number, number]> = [];
   let timed = false;
   let model = 0;
   let modelSince: number | null = null;
@@ -213,13 +214,25 @@ function chapterTimes(entries: TraceEntry[], live: boolean) {
     if (isTimedStep(step)) {
       timed = true;
       const startedAt = Number(line.ts);
-      if (execRunning(step, live) && line.ts && Number.isFinite(startedAt))
-        execSince = Math.min(execSince ?? startedAt, startedAt);
-      else exec += step.durationMs ?? 0;
+      if (line.ts && Number.isFinite(startedAt)) {
+        if (execRunning(step, live)) spans.push([startedAt, Infinity]);
+        else if (step.durationMs !== undefined) spans.push([startedAt, startedAt + step.durationMs]);
+      } else exec += step.durationMs ?? 0;
     }
     if (!line.modelTime) continue;
     model += line.modelTime.ms;
     if (line.modelTime.since !== undefined) modelSince = line.modelTime.since;
+  }
+  let covered = -Infinity;
+  for (const [start, end] of spans.sort((a, b) => a[0] - b[0])) {
+    if (end <= covered) continue;
+    if (end === Infinity) {
+      execSince = start;
+      exec -= Math.max(0, covered - start);
+      break;
+    }
+    exec += end - Math.max(start, covered);
+    covered = end;
   }
   return {
     cpu: shownChipTime(!timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec }),

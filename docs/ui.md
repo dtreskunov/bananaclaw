@@ -328,8 +328,12 @@ aligned, and live stopwatches still count up from zero. Times are plain
 tabular numbers without outlines. **CPU** uses a muted warm tint; **AI** uses
 the theme's model-time color (`--activity-model-time`), which the usage
 details' **Model** time shares. Live times tick themselves and show tenths
-below 10 s, then whole seconds. Chapter headers show the sums of their
-children.
+below 10 s, then whole seconds. Chapter execution time merges the children's
+execution intervals: overlap counts once, gaps count zero, and active calls
+extend to the current time. Two overlapping 3-second commands spanning 4 seconds
+therefore show 4 seconds, not 6. Reported durations without usable timestamps
+remain included, but their overlap cannot be inferred. Chapter AI time remains
+the sum of its children's attributed model time, plus any live tail.
 
 Chapter wording follows its latest step: **Editing files / Edited files**
 and **Running command / Ran command**. Repeated groups append **· N times**;
