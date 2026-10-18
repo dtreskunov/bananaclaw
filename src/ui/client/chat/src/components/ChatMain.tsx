@@ -35,7 +35,7 @@ import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import { isTurnStartStep, QUEUED_TEXT, turnRequestedAt } from '../../../../shared/conversation-activity';
 import {
-  activityChapters, activityStepCount, chapterEntryHeadline, displayStep, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep, stepHeadline, stepBody,
+  activityChapters, activityStepCount, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, TRACE_STEP_THRESHOLD_MS,
   type ModelTime, type StepHeadline, type TraceEntry, type TraceStatus, type TraceStep,
 } from '../../../../shared/activity-presentation';
@@ -240,16 +240,13 @@ function chapterTimes(entries: TraceEntry[], live: boolean) {
   };
 }
 
-function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turnId = null }: { line: ActivityLine; open: boolean; live: boolean; now: number | null; onToggle: () => void; child?: boolean; turnId?: string | null }) {
-  const step = displayStep(line, live);
-  const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
-  const known = !!(described.action || described.subject);
-  const headline = known ? described : { action: line.text };
+function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, turnId = null }: { entry: TraceEntry; open: boolean; live: boolean; now: number | null; onToggle: () => void; child?: boolean; turnId?: string | null }) {
+  const { line, step, headline } = entry;
   const summary = headlineSummary(headline);
   const running = live && isTimedStep(step) && step.status === 'running';
   const startedAt = Number(line.ts);
   const hasStartedAt = !!line.ts && Number.isFinite(startedAt);
-  const code = open ? (known ? stepBody(step) : line.text) : null;
+  const code = open ? entry.body : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : '';
@@ -337,8 +334,8 @@ export function ActivityTraceList({ lines, live = false, now = null, turnId = nu
       <ul class="activity-trace" tabIndex={0} aria-label="Activity steps">
         {chapters.map((chapter) => {
           if (chapter.entries.length === 1) {
-            const { line, id } = chapter.entries[0];
-            return <ActivityTraceRow key={chapter.id} line={line} open={id === sel} live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} />;
+            const entry = chapter.entries[0];
+            return <ActivityTraceRow key={chapter.id} entry={entry} open={entry.id === sel} live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, entry.id)} />;
           }
           const open = openChapter === chapter.id;
           const times = chapterTimes(chapter.entries, live);
@@ -360,8 +357,8 @@ export function ActivityTraceList({ lines, live = false, now = null, turnId = nu
               </button>
             </div>
             {open ? <ul class="trace-children">
-              {chapter.entries.map(({ line, id }) => <ActivityTraceRow key={id} line={line} open={id === sel}
-                live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, id)} child />)}
+              {chapter.entries.map(entry => <ActivityTraceRow key={entry.id} entry={entry} open={entry.id === sel}
+                live={live} now={now} turnId={turnId} onToggle={() => toggle(chapter.id, entry.id)} child />)}
             </ul> : null}
           </li>;
         })}

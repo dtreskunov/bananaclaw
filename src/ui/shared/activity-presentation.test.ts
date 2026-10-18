@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   activityChapters,
@@ -280,6 +280,57 @@ describe('activity presentation', () => {
 });
 
 describe('activity chapters', () => {
+  it('parses each line once and prepares compact children, full singletons and raw-text fallbacks', () => {
+    const values: TraceLine[] = [
+      { ts: '1000', text: JSON.stringify({ ...tool('first', 'bash'), detail: 'echo first\n--flag' }) },
+      { ts: '2000', text: JSON.stringify({ ...tool('second', 'bash', 'running'), detail: 'echo second' }) },
+      { ts: '3000', text: JSON.stringify({ ...tool('file', 'read'), detail: 'file.ts' }) },
+      { ts: '4000', text: 'Legacy activity <literal>' },
+      { ts: '5000', text: '{"detail":123}' },
+    ];
+    const before = JSON.stringify(values);
+    const parse = vi.spyOn(JSON, 'parse');
+    let chapters: ReturnType<typeof activityChapters>;
+    try {
+      chapters = activityChapters(values, true);
+      expect(parse).toHaveBeenCalledTimes(values.length);
+    } finally {
+      parse.mockRestore();
+    }
+    expect(chapters[0].title).toBe('Running command · 2 times');
+    expect(chapters[0].entries[0]).toMatchObject({
+      id: 'tool:first',
+      headline: { action: '', subject: 'echo first --flag', codeSubject: true },
+      body: 'echo first\n--flag',
+    });
+    expect(chapters[1].entries[0]).toMatchObject({
+      headline: { action: 'Read', subject: 'file.ts', codeSubject: true },
+      body: 'file.ts',
+    });
+    expect(chapters[1].headline).toBe(chapters[1].entries[0].headline);
+    for (const [index, chapter] of chapters.slice(2).entries()) {
+      expect(chapter.entries[0]).toMatchObject({
+        headline: { action: values[index + 3].text },
+        body: values[index + 3].text,
+      });
+      expect(chapter.headline).toBe(chapter.entries[0].headline);
+    }
+    expect(JSON.stringify(values)).toBe(before);
+  });
+
+  it('prepares historical unfinished entries as unknown without changing their records', () => {
+    const values = [line(0, { ...tool('call', 'bash', 'running'), detail: 'echo original' })];
+    const before = JSON.stringify(values);
+    const live = activityChapters(values, true)[0].entries[0];
+    const historical = activityChapters(values, false)[0].entries[0];
+    expect(live.step.status).toBe('running');
+    expect(historical.step.status).toBe('unknown');
+    expect(live.headline).toEqual(stepHeadline(live.step));
+    expect(historical.headline).toEqual(stepHeadline(historical.step));
+    expect(historical.body).toBe(live.body);
+    expect(JSON.stringify(values)).toBe(before);
+  });
+
   it('formats repetition counts uniformly and omits them for a singleton', () => {
     const headline = { action: 'Used', subject: 'tavily.tavily_search', codeSubject: true };
     expect(headlineSummary(headline)).toBe('Used tavily.tavily_search');

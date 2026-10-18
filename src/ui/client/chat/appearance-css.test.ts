@@ -373,7 +373,7 @@ describe('theme CSS contract', () => {
   it('keeps chapter headers free of the last step argument preview', () => {
     const component = read('./components/ChatMain.tsx');
     expect(component).not.toContain('trace-chapter-preview');
-    expect(component).toContain('chapterEntryHeadline(step)');
+    expect(component).toContain('const { line, step, headline } = entry');
     expect(component).toContain('trace-chapter-title');
     expect(component).toContain('trace-chapter-failures');
   });

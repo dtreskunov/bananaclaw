@@ -306,6 +306,10 @@ must establish canonical associations before their data is served.
 Headers show the group heading and outcome notices. Recorded file targets and
 arguments shared by every entry can appear in the heading; a differing last
 argument is not presented as the whole group's target. Child labels omit the parent's repeated verb.
+Each grouping pass parses entries once and prepares their displayed headlines
+and expanded bodies. Rows and the latest-activity preview reuse this presentation,
+including raw-text fallbacks. This does not change chapter categories,
+compact child wording, repetition counts, or expansion behavior.
 Exact timestamps, status and duration share one line with dot separators when
 a step is expanded; full arguments and errors appear beneath.
 

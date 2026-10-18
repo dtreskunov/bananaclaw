@@ -3,7 +3,6 @@ import {
   activityChapters,
   isOutcomeTraceStep,
   parseStep,
-  stepHeadline,
   type StepHeadline,
   type TraceLine,
   type TraceStep,
@@ -22,10 +21,7 @@ export function latestTraceHeadline(lines: TraceLine[], live: boolean): TraceHea
     .reverse()
     .find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   if (!chapter) return { headline: { action: THINKING_TEXT }, repetitions: 1 };
-  if (chapter.entries.length > 1) return { headline: chapter.headline, repetitions: chapter.entries.length };
-  const { line, step } = chapter.entries[0];
-  const headline = stepHeadline(step);
-  return { headline: headline.action || headline.subject ? headline : { action: line.text }, repetitions: 1 };
+  return { headline: chapter.headline, repetitions: chapter.entries.length };
 }
 
 export function liveTurnActivity(

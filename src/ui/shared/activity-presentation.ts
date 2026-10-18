@@ -53,6 +53,8 @@ export interface TraceEntry {
   id: string;
   line: TraceLine;
   step: TraceStep;
+  headline: StepHeadline;
+  body: string | null;
 }
 export interface TraceChapter {
   id: string;
@@ -486,9 +488,8 @@ export function traceStatusClass(step: TraceStep): string {
   return `trace-status-${traceStatus(step)}`;
 }
 
-export function activityLineId(line: TraceLine, index: number): string {
+function activityLineId(line: TraceLine, index: number, step: TraceStep): string {
   if (line.ordinal !== undefined) return `activity-${line.ordinal}`;
-  const step = parseStep(line.text);
   return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
 }
 
@@ -511,25 +512,34 @@ function chapterCategory(step: TraceStep, index: number): string {
 }
 
 export function activityChapters(lines: TraceLine[], live = false): TraceChapter[] {
-  const groups: { category: string; entries: TraceEntry[] }[] = [];
+  const groups: { category: string; entries: Pick<TraceEntry, 'id' | 'line' | 'step'>[] }[] = [];
   lines.forEach((line, index) => {
     const step = displayStep(line, live);
-    const entry = { id: activityLineId(line, index), line, step };
+    const entry = { id: activityLineId(line, index, step), line, step };
     const category = chapterCategory(step, index);
     const last = groups.at(-1);
     if (last?.category === category) last.entries.push(entry);
     else groups.push({ category, entries: [entry] });
   });
   return groups.map(({ category, entries }) => {
+    const prepared = entries.map((entry): TraceEntry => {
+      const described = entries.length > 1 ? chapterEntryHeadline(entry.step) : stepHeadline(entry.step);
+      const known = !!(described.action || described.subject);
+      return {
+        ...entry,
+        headline: known ? described : { action: entry.line.text },
+        body: known ? stepBody(entry.step) : entry.line.text,
+      };
+    });
     const statuses = entries.map((entry) => traceStatus(entry.step));
     const status =
       (['running', 'queued', 'failed', 'interrupted', 'unknown', 'completed', 'neutral'] as const).find((candidate) =>
         statuses.includes(candidate),
       ) || 'neutral';
-    const headline = chapterHeadline(category, entries);
+    const headline = prepared.length > 1 ? chapterHeadline(category, prepared) : prepared[0].headline;
     return {
-      id: entries[0].id,
-      entries,
+      id: prepared[0].id,
+      entries: prepared,
       headline,
       title: headlineSummary(headline, entries.length),
       status,

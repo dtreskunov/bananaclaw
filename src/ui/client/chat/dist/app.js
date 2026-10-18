@@ -18385,9 +18385,8 @@ function traceStatus(step) {
 function traceStatusClass(step) {
   return `trace-status-${traceStatus(step)}`;
 }
-function activityLineId(line, index) {
+function activityLineId(line, index, step) {
   if (line.ordinal !== void 0) return `activity-${line.ordinal}`;
-  const step = parseStep(line.text);
   return step.id ? `${step.kind}:${step.id}` : `activity-${index}`;
 }
 function displayStep(line, live) {
@@ -18406,21 +18405,30 @@ function activityChapters(lines, live = false) {
   const groups2 = [];
   lines.forEach((line, index) => {
     const step = displayStep(line, live);
-    const entry = { id: activityLineId(line, index), line, step };
+    const entry = { id: activityLineId(line, index, step), line, step };
     const category = chapterCategory(step, index);
     const last = groups2.at(-1);
     if (last?.category === category) last.entries.push(entry);
     else groups2.push({ category, entries: [entry] });
   });
   return groups2.map(({ category, entries }) => {
+    const prepared = entries.map((entry) => {
+      const described = entries.length > 1 ? chapterEntryHeadline(entry.step) : stepHeadline(entry.step);
+      const known = !!(described.action || described.subject);
+      return {
+        ...entry,
+        headline: known ? described : { action: entry.line.text },
+        body: known ? stepBody(entry.step) : entry.line.text
+      };
+    });
     const statuses = entries.map((entry) => traceStatus(entry.step));
     const status = ["running", "queued", "failed", "interrupted", "unknown", "completed", "neutral"].find(
       (candidate) => statuses.includes(candidate)
     ) || "neutral";
-    const headline = chapterHeadline(category, entries);
+    const headline = prepared.length > 1 ? chapterHeadline(category, prepared) : prepared[0].headline;
     return {
-      id: entries[0].id,
-      entries,
+      id: prepared[0].id,
+      entries: prepared,
       headline,
       title: headlineSummary(headline, entries.length),
       status,
@@ -22713,10 +22721,7 @@ function formatStopwatch(ms, fine = true) {
 function latestTraceHeadline(lines, live) {
   const chapter = activityChapters(lines, live).reverse().find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   if (!chapter) return { headline: { action: THINKING_TEXT }, repetitions: 1 };
-  if (chapter.entries.length > 1) return { headline: chapter.headline, repetitions: chapter.entries.length };
-  const { line, step } = chapter.entries[0];
-  const headline = stepHeadline(step);
-  return { headline: headline.action || headline.subject ? headline : { action: line.text }, repetitions: 1 };
+  return { headline: chapter.headline, repetitions: chapter.entries.length };
 }
 function liveTurnActivity(turn2, lines, connected, stop) {
   if (turn2.phase === "settled") return null;
@@ -24095,16 +24100,13 @@ function chapterTimes(entries, live) {
     ai: shownChipTime(modelSince !== null ? { since: modelSince - model } : { ms: model })
   };
 }
-function ActivityTraceRow({ line, open, live, now, onToggle, child = false, turnId = null }) {
-  const step = displayStep(line, live);
-  const described = child ? chapterEntryHeadline(step) : stepHeadline(step);
-  const known = !!(described.action || described.subject);
-  const headline = known ? described : { action: line.text };
+function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, turnId = null }) {
+  const { line, step, headline } = entry;
   const summary = headlineSummary(headline);
   const running = live && isTimedStep(step) && step.status === "running";
   const startedAt2 = Number(line.ts);
   const hasStartedAt = !!line.ts && Number.isFinite(startedAt2);
-  const code = open ? known ? stepBody(step) : line.text : null;
+  const code = open ? entry.body : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt2) : null;
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : "";
@@ -24185,8 +24187,8 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
   };
   return /* @__PURE__ */ u4("div", { class: `trace-table scroll-edge-fade${chapters.some((chapter) => chapter.entries.length > 1) ? " has-chapters" : ""}`, ref: listRef, children: /* @__PURE__ */ u4("ul", { class: "activity-trace", tabIndex: 0, "aria-label": "Activity steps", children: chapters.map((chapter) => {
     if (chapter.entries.length === 1) {
-      const { line, id: id2 } = chapter.entries[0];
-      return /* @__PURE__ */ u4(ActivityTraceRow, { line, open: id2 === sel, live, now, turnId, onToggle: () => toggle2(chapter.id, id2) }, chapter.id);
+      const entry = chapter.entries[0];
+      return /* @__PURE__ */ u4(ActivityTraceRow, { entry, open: entry.id === sel, live, now, turnId, onToggle: () => toggle2(chapter.id, entry.id) }, chapter.id);
     }
     const open = openChapter === chapter.id;
     const times = chapterTimes(chapter.entries, live);
@@ -24214,18 +24216,18 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
           ]
         }
       ) }),
-      open ? /* @__PURE__ */ u4("ul", { class: "trace-children", children: chapter.entries.map(({ line, id: id2 }) => /* @__PURE__ */ u4(
+      open ? /* @__PURE__ */ u4("ul", { class: "trace-children", children: chapter.entries.map((entry) => /* @__PURE__ */ u4(
         ActivityTraceRow,
         {
-          line,
-          open: id2 === sel,
+          entry,
+          open: entry.id === sel,
           live,
           now,
           turnId,
-          onToggle: () => toggle2(chapter.id, id2),
+          onToggle: () => toggle2(chapter.id, entry.id),
           child: true
         },
-        id2
+        entry.id
       )) }) : null
     ] }, chapter.id);
   }) }) });

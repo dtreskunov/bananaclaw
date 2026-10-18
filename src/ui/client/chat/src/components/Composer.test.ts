@@ -2722,7 +2722,7 @@ describe('activity trace completion', () => {
     const list = findComponent(panel.type(panel.props), 'ActivityTraceList');
     resetMount();
     const [start, chapter] = traceList(ActivityTraceList(list.props)).props.children;
-    expect(start.props.line.text).toContain('ui:start:');
+    expect(start.props.entry.line.text).toContain('ui:start:');
     expect(chapter.props.children[0].props.children.props['aria-expanded']).toBe(true);
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
@@ -2803,7 +2803,7 @@ describe('activity trace completion', () => {
     resetMount();
     hooks.cursor = 0;
     const [start, chapter] = traceList(ActivityTraceList(list.props)).props.children;
-    expect(start.props.line.text).toContain('ui:start:');
+    expect(start.props.entry.line.text).toContain('ui:start:');
     expect(chapter.props.children[0].props.children.props['aria-expanded']).toBe(true);
     expect(
       chapter.props.children[1].props.children.every((entry: { props: { open: boolean } }) => !entry.props.open),
@@ -2905,6 +2905,26 @@ describe('activity trace chapter following', () => {
     const children = traceList(list).props.children[0].props.children[1].props.children;
     expect(children).toHaveLength(2);
     for (const child of children) expect(child.props.turnId).toBe('owning-turn');
+  });
+
+  it('renders prepared singletons, compact chapter children and legacy details without reparsing', () => {
+    for (const lines of [
+      [line('one', 'completed')],
+      [line('one', 'completed'), line('two', 'running')],
+      [{ ts: '1000', text: 'Legacy activity <literal>' }],
+    ]) {
+      resetMount();
+      const row = findComponent(ActivityTraceList({ lines, live: true }), 'ActivityTraceRow');
+      const parse = vi.spyOn(JSON, 'parse');
+      try {
+        const view = row.type({ ...row.props, open: true });
+        expect(parse).not.toHaveBeenCalled();
+        expect(findComponent(view, 'StepHeadlineContent').props.headline).toBe(row.props.entry.headline);
+        expect(find(view, 'pre').props.children.props.children).toBe(row.props.entry.body);
+      } finally {
+        parse.mockRestore();
+      }
+    }
   });
 
   const timed = (id: string, ts: string, status: 'running' | 'completed', durationMs?: number): ActivityLine => ({
