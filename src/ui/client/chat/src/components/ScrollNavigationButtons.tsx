@@ -3,12 +3,13 @@ import type { ScrollDirection } from '../scroll-navigation';
 
 interface Props {
   direction: ScrollDirection | null;
-  newMessageBelow: boolean;
-  onTop: () => void;
-  onBottom: () => void;
+  canPrevious: boolean;
+  canNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
 }
 
-export function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onBottom }: Props) {
+export function ScrollNavigationButtons({ direction, canPrevious, canNext, onPrevious, onNext }: Props) {
   return (
     <>
       <button
@@ -17,10 +18,10 @@ export function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onB
         data-instant-hide={direction === 'down'}
         data-visible={direction === 'up'}
         aria-hidden={direction !== 'up'}
-        disabled={direction !== 'up'}
-        title="Scroll to top"
-        aria-label="Scroll to top"
-        onClick={onTop}
+        disabled={direction !== 'up' || !canPrevious}
+        title="Previous user message"
+        aria-label="Previous user message"
+        onClick={onPrevious}
       >
         <svg class="scroll-jump-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M5 4h14" />
@@ -29,14 +30,14 @@ export function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onB
       </button>
       <button
         type="button"
-        class={'scroll-jump scroll-to-bottom' + (newMessageBelow ? ' new-message' : '')}
+        class="scroll-jump scroll-to-bottom"
         data-instant-hide={direction === 'up'}
         data-visible={direction === 'down'}
         aria-hidden={direction !== 'down'}
-        disabled={direction !== 'down'}
-        title={newMessageBelow ? 'New message below' : 'Scroll to bottom'}
-        aria-label={newMessageBelow ? 'New message below; scroll to bottom' : 'Scroll to bottom'}
-        onClick={onBottom}
+        disabled={direction !== 'down' || !canNext}
+        title="Next user message"
+        aria-label="Next user message"
+        onClick={onNext}
       >
         <svg class="scroll-jump-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M5 20h14" />

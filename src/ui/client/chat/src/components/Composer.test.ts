@@ -2152,21 +2152,25 @@ describe('main composer pending edits', () => {
     },
   );
 
-  it.each(['reaching the top', 'new user scrolling', 'the Down button'])(
-    'protects Up jumps from bottom-follow and resumes normal following after %s',
+  it.each(['reaching the top', 'new user scrolling', 'the Next user-message button'])(
+    'protects user-message jumps from bottom-follow after %s',
     (resume) => {
       const savedGlobals = {
         window,
         requestAnimationFrame: globalThis.requestAnimationFrame,
         cancelAnimationFrame: globalThis.cancelAnimationFrame,
         WheelEvent: globalThis.WheelEvent,
+        getComputedStyle: globalThis.getComputedStyle,
+        Element: globalThis.Element,
       };
       const fakeWindow = Object.assign(new EventTarget(), {
         nanoclawAppearance: { beforeDensityChange: () => () => {} },
+        matchMedia: () => ({ matches: false }),
       });
       class Viewport extends EventTarget {
         scrollHeight = 2000;
         clientHeight = 500;
+        clientTop = 0;
         ownerDocument = new EventTarget();
         top = 1470;
         get scrollTop() {
@@ -2176,8 +2180,13 @@ describe('main composer pending edits', () => {
           this.top = Math.max(0, Math.min(1500, value));
         }
         scrollTo = vi.fn<(options: ScrollToOptions) => void>();
-        querySelectorAll() {
-          return [];
+        getBoundingClientRect() {
+          return { top: 50 };
+        }
+        querySelectorAll(selector: string) {
+          return selector === '.msg.in'
+            ? [0, 1500].map((position) => ({ getBoundingClientRect: () => ({ top: 66 + position - this.scrollTop }) }))
+            : [];
         }
       }
       class Wheel extends Event {
@@ -2194,6 +2203,10 @@ describe('main composer pending edits', () => {
         vi.stubGlobal('requestAnimationFrame', () => 0);
         vi.stubGlobal('cancelAnimationFrame', vi.fn());
         vi.stubGlobal('WheelEvent', Wheel);
+        vi.stubGlobal('Element', Viewport);
+        vi.stubGlobal('getComputedStyle', (_element: unknown, pseudo?: string) =>
+          pseudo ? { height: '10px' } : { rowGap: '6px' },
+        );
         hooks.cursor = 0;
         const chat = ChatMain();
         const log = findComponent(chat, 'MessageLog');
@@ -2211,7 +2224,7 @@ describe('main composer pending edits', () => {
         el.scrollTop = 1470;
         logNode.props.onScroll();
         const controls = findComponent(view, 'ScrollNavigationButtons');
-        controls.props.onTop();
+        controls.props.onPrevious();
         expect(el.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
         el.scrollTop = 1465;
         logNode.props.onScroll();
@@ -2223,12 +2236,12 @@ describe('main composer pending edits', () => {
         } else if (resume === 'new user scrolling') {
           el.dispatchEvent(new Wheel());
         } else {
-          controls.props.onBottom();
+          controls.props.onNext();
         }
         el.scrollTop = 1490;
         logNode.props.onScroll();
         fakeWindow.dispatchEvent(new Event('resize'));
-        expect(el.scrollTop).toBe(1500);
+        expect(el.scrollTop).toBe(resume === 'the Next user-message button' ? 1490 : 1500);
       } finally {
         disposers.forEach((dispose) => dispose());
         hooks.capturePassive = false;

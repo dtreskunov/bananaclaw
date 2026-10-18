@@ -406,22 +406,27 @@ surfaces, text, borders, solid actions and their foregrounds, selection
 washes, focus rings, status colors, shadows and syntax highlighting. Keep
 responsive layout and touch-target sizes shared. Check text contrast at 4.5:1
 and essential control boundaries/focus indicators at 3:1.
-The floating scroll controls are icon-only **Up** / **Down** arrows with an
-end bar marking the top/bottom destination and
-accessible labels. They share a bottom-right anchor, with Up 8 px above Down.
-They appear only after the user scrolls in the corresponding
-direction, and jump to the beginning/end of the conversation. Fade-in and
+The floating scroll controls are icon-only **Previous user message** /
+**Next user message** arrows with accessible labels. They share a bottom-right
+anchor, with Up 8 px above Down. They appear after user scrolling in the matching
+direction, whether scrolling the transcript or inside an oversized bubble.
+Clicks move only the outer transcript to the nearest user message before/after
+its reading-area top, skipping assistant replies and operational entries.
+Answered-question bubbles count as user messages. A direction with no destination
+remains disabled; it never falls back to jumping to the conversation's ends.
+Internal bubble reading positions remain unchanged.
+Fade-in and
 fade-out each take 500 ms (instantly with reduced motion). Reversing direction
-immediately hides the previous arrow and fades in the matching one; reaching
-the destination or 1 second without scrolling starts fade-out.
+immediately hides the previous arrow and fades in the matching one; 1 second
+without scrolling starts fade-out.
 Fading controls immediately stop accepting input and leave the accessibility tree.
 Automatic scrolling, streaming/layout changes,
 search jumps and thread changes do not reveal arrows. The controls support
 touch, mouse wheel, scrollbar dragging and keyboard scrolling.
 Active gestures retain the last observed scroll position so coalesced input
 and scroll events do not mask direction reversals.
-Jumping up pauses bottom-follow, including the first animation frames; new
-user input or returning to the bottom restores normal following. Up and Down
+Message navigation pauses bottom-follow, including the first animation frames;
+user scrolling in the outer transcript can restore normal following. Up and Down
 always use the same surface, border, shadow and icon styling, including when
 new messages arrive.
 

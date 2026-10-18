@@ -23633,7 +23633,7 @@ function CopyTranscriptButton({ getContent }) {
 }
 
 // src/components/ScrollNavigationButtons.tsx
-function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onBottom }) {
+function ScrollNavigationButtons({ direction, canPrevious, canNext, onPrevious, onNext }) {
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(
       "button",
@@ -23643,10 +23643,10 @@ function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onBottom }
         "data-instant-hide": direction === "down",
         "data-visible": direction === "up",
         "aria-hidden": direction !== "up",
-        disabled: direction !== "up",
-        title: "Scroll to top",
-        "aria-label": "Scroll to top",
-        onClick: onTop,
+        disabled: direction !== "up" || !canPrevious,
+        title: "Previous user message",
+        "aria-label": "Previous user message",
+        onClick: onPrevious,
         children: /* @__PURE__ */ u4("svg", { class: "scroll-jump-arrow", viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false", children: [
           /* @__PURE__ */ u4("path", { d: "M5 4h14" }),
           /* @__PURE__ */ u4("path", { d: "M12 20V8m-5 5 5-5 5 5" })
@@ -23657,14 +23657,14 @@ function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onBottom }
       "button",
       {
         type: "button",
-        class: "scroll-jump scroll-to-bottom" + (newMessageBelow ? " new-message" : ""),
+        class: "scroll-jump scroll-to-bottom",
         "data-instant-hide": direction === "up",
         "data-visible": direction === "down",
         "aria-hidden": direction !== "down",
-        disabled: direction !== "down",
-        title: newMessageBelow ? "New message below" : "Scroll to bottom",
-        "aria-label": newMessageBelow ? "New message below; scroll to bottom" : "Scroll to bottom",
-        onClick: onBottom,
+        disabled: direction !== "down" || !canNext,
+        title: "Next user message",
+        "aria-label": "Next user message",
+        onClick: onNext,
         children: /* @__PURE__ */ u4("svg", { class: "scroll-jump-arrow", viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false", children: [
           /* @__PURE__ */ u4("path", { d: "M5 20h14" }),
           /* @__PURE__ */ u4("path", { d: "M12 4v12m-5-5 5 5 5-5" })
@@ -23676,76 +23676,98 @@ function ScrollNavigationButtons({ direction, newMessageBelow, onTop, onBottom }
 
 // src/scroll-navigation.ts
 var SCROLL_NAVIGATION_IDLE_MS = 1e3;
-function attachScrollNavigation(viewport, onDirection, onUserInput, onUserScroll) {
-  let direction = null;
+function transcriptReadingTop(viewport) {
+  const clearance = parseFloat(getComputedStyle(viewport, "::before").height) + parseFloat(getComputedStyle(viewport).rowGap);
+  return viewport.getBoundingClientRect().top + viewport.clientTop + clearance;
+}
+function userMessageScrollTop(positions, current, maximum, direction) {
+  let previous = null;
+  for (const position2 of positions) {
+    const target = Math.max(0, Math.min(maximum, position2));
+    if (direction === "down" && target > current + 1) return target;
+    if (target < current - 1) previous = target;
+  }
+  return direction === "up" ? previous : null;
+}
+function attachScrollNavigation(viewport, onDirection, onUserInput) {
   let timer2 = null;
   let inputUntil = null;
+  let active = viewport;
   const pointers = /* @__PURE__ */ new Set();
-  const snapshot = () => {
-    const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+  const snapshot = (element) => {
+    const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
     return {
-      top: Math.max(0, Math.min(maximum, viewport.scrollTop)),
-      maximum,
-      height: viewport.scrollHeight,
-      viewportHeight: viewport.clientHeight
+      top: Math.max(0, Math.min(maximum, element.scrollTop)),
+      height: element.scrollHeight,
+      viewportHeight: element.clientHeight
     };
   };
-  let previous = snapshot();
-  function publish(next) {
-    if (direction === next) return;
-    direction = next;
-    onDirection(next);
-  }
+  const positions = /* @__PURE__ */ new WeakMap();
+  positions.set(viewport, snapshot(viewport));
   function clearTimer() {
     if (timer2 !== null) clearTimeout(timer2);
     timer2 = null;
   }
   function hide() {
     clearTimer();
-    publish(null);
+    onDirection(null);
   }
-  function arm() {
+  function inputScroller(event) {
+    let element = event.target instanceof Element ? event.target : null;
+    while (element && element !== viewport) {
+      if (element.scrollHeight > element.clientHeight + 1) return element;
+      element = element.parentElement;
+    }
+    return viewport;
+  }
+  function arm(event) {
     const now = Date.now();
-    onUserInput?.();
+    active = inputScroller(event);
+    if (active === viewport) onUserInput?.();
     inputUntil = now + SCROLL_NAVIGATION_IDLE_MS;
     onScroll();
   }
-  function available(next, position2) {
-    return position2.maximum > 1 && (next === "up" ? position2.top > 1 : position2.top < position2.maximum - 1);
+  function rememberScroller(event) {
+    const element = inputScroller(event);
+    if (!positions.has(element)) positions.set(element, snapshot(element));
   }
-  function onScroll() {
-    const position2 = snapshot();
+  function onScroll(event) {
+    const element = event ? event.target instanceof Element ? event.target : viewport : active;
+    const position2 = snapshot(element);
+    const previous = positions.get(element) ?? { ...position2, top: 0 };
     const delta = position2.top - previous.top;
     const resized = position2.height !== previous.height || position2.viewportHeight !== previous.viewportHeight;
-    previous = position2;
-    if (direction && !available(direction, position2)) hide();
+    positions.set(element, position2);
+    if (element !== active && (element !== viewport || active.scrollTop > 1 && active.scrollTop < active.scrollHeight - active.clientHeight - 1))
+      return;
     if (resized || delta === 0 || !pointers.size && (inputUntil === null || Date.now() > inputUntil)) return;
+    if (element === viewport && active !== viewport) {
+      active = viewport;
+      onUserInput?.();
+    }
     inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
     const next = delta < 0 ? "up" : "down";
-    onUserScroll?.(next);
-    if (!available(next, position2)) {
-      hide();
-      return;
-    }
-    publish(next);
+    onDirection(next);
     clearTimer();
     timer2 = setTimeout(() => {
       timer2 = null;
       if (inputUntil !== null && Date.now() >= inputUntil) inputUntil = null;
-      publish(null);
+      onDirection(null);
     }, SCROLL_NAVIGATION_IDLE_MS);
   }
   function onWheel(event) {
-    if (event instanceof WheelEvent && !event.defaultPrevented && !event.ctrlKey && event.deltaY !== 0) arm();
+    if (event instanceof WheelEvent && !event.defaultPrevented && !event.ctrlKey && event.deltaY !== 0) arm(event);
   }
   function onTouchMove(event) {
-    if (!event.defaultPrevented) arm();
+    if (!event.defaultPrevented) arm(event);
   }
   function onPointerDown(event) {
-    if (!(event instanceof PointerEvent) || event.defaultPrevented || event.target !== viewport || event.button !== 0 || !["mouse", "pen"].includes(event.pointerType))
-      return;
+    if (!(event instanceof PointerEvent) || event.defaultPrevented) return;
+    const element = inputScroller(event);
+    positions.set(element, snapshot(element));
+    if (event.target !== element || event.button !== 0 || !["mouse", "pen"].includes(event.pointerType)) return;
     pointers.add(event.pointerId);
-    arm();
+    arm(event);
   }
   function onPointerEnd(event) {
     if (event instanceof PointerEvent) pointers.delete(event.pointerId);
@@ -23754,22 +23776,27 @@ function attachScrollNavigation(viewport, onDirection, onUserInput, onUserScroll
     if (!(event instanceof KeyboardEvent) || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey)
       return;
     if (!["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) return;
-    if (event.target instanceof Element && event.target.closest('input, textarea, select, button, a[href], [contenteditable]:not([contenteditable="false"])'))
-      return;
-    arm();
+    if (event.target instanceof Element) {
+      if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      if (event.key === " " && event.target.closest("button")) return;
+    }
+    arm(event);
   }
-  function onScrollEnd() {
-    inputUntil = null;
+  function onScrollEnd(event) {
+    if (event.target === active) inputUntil = null;
   }
   const listeners = [
-    ["scroll", onScroll],
-    ["scrollend", onScrollEnd],
+    ["scroll", onScroll, true],
+    ["scrollend", onScrollEnd, true],
     ["wheel", onWheel],
     ["touchmove", onTouchMove],
     ["pointerdown", onPointerDown],
-    ["keydown", onKeyDown]
+    ["keydown", onKeyDown],
+    ["pointerover", rememberScroller],
+    ["focusin", rememberScroller]
   ];
-  for (const [name, listener] of listeners) viewport.addEventListener(name, listener, { passive: true });
+  for (const [name, listener, capture = false] of listeners)
+    viewport.addEventListener(name, listener, { passive: true, capture });
   viewport.ownerDocument.addEventListener("pointerup", onPointerEnd);
   viewport.ownerDocument.addEventListener("pointercancel", onPointerEnd);
   onDirection(null);
@@ -23777,12 +23804,14 @@ function attachScrollNavigation(viewport, onDirection, onUserInput, onUserScroll
     reset() {
       inputUntil = null;
       pointers.clear();
-      previous = snapshot();
+      active = viewport;
+      positions.set(viewport, snapshot(viewport));
       hide();
     },
     dispose() {
       clearTimer();
-      for (const [name, listener] of listeners) viewport.removeEventListener(name, listener);
+      for (const [name, listener, capture = false] of listeners)
+        viewport.removeEventListener(name, listener, { capture });
       viewport.ownerDocument.removeEventListener("pointerup", onPointerEnd);
       viewport.ownerDocument.removeEventListener("pointercancel", onPointerEnd);
     }
@@ -25104,8 +25133,7 @@ function MessageLog() {
   const navigationRef = A2(null);
   const pendingScrollFrame = A2(null);
   const revealedResponse = A2(completedResponse.value);
-  const [scrollDirection, setScrollDirection] = h2(null);
-  const [newMessageBelow, setNewMessageBelow] = h2(false);
+  const [scrollControls, setScrollControls] = h2({ direction: null, previous: false, next: false });
   const [, setDensityReflowTick] = h2(0);
   const highlight = highlightMessageId.value;
   const timeline = submissionPresentation(
@@ -25143,28 +25171,41 @@ function MessageLog() {
     if (!nearBottom || el.scrollTop <= 1) leavingBottomRef.current = false;
     const nextAtBottom = nearBottom && !leavingBottomRef.current;
     atBottomRef.current = nextAtBottom;
-    if (nextAtBottom) setNewMessageBelow(false);
     return nextAtBottom;
   };
-  const scrollToBottom = (smooth = false) => {
+  const scrollToBottom = () => {
     const el = ref.current;
     if (!el) return;
     leavingBottomRef.current = false;
     navigationRef.current?.reset();
-    if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    else el.scrollTop = el.scrollHeight;
+    el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
     followingBottomRef.current = true;
-    setNewMessageBelow(false);
   };
-  const scrollToTop = () => {
+  const userMessageTargets = () => {
     const el = ref.current;
-    if (!el) return;
+    if (!el) return { up: null, down: null };
+    const readingTop = transcriptReadingTop(el);
+    const positions = Array.from(
+      el.querySelectorAll(".msg.in"),
+      (message2) => el.scrollTop + message2.getBoundingClientRect().top - readingTop
+    );
+    const maximum = Math.max(0, el.scrollHeight - el.clientHeight);
+    return {
+      up: userMessageScrollTop(positions, el.scrollTop, maximum, "up"),
+      down: userMessageScrollTop(positions, el.scrollTop, maximum, "down")
+    };
+  };
+  const scrollToUserMessage = (direction) => {
+    const el = ref.current;
+    const top = userMessageTargets()[direction];
+    if (!el || top === null) return;
+    cancelScheduledScroll();
     navigationRef.current?.reset();
     leavingBottomRef.current = true;
     atBottomRef.current = false;
     followingBottomRef.current = false;
-    el.scrollTo({ top: 0, behavior: "smooth" });
+    el.scrollTo({ top, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   };
   const cancelScheduledScroll = () => {
     if (pendingScrollFrame.current !== null) cancelAnimationFrame(pendingScrollFrame.current);
@@ -25183,7 +25224,17 @@ function MessageLog() {
   _2(() => {
     const el = ref.current;
     if (!el) return void 0;
-    const navigation = attachScrollNavigation(el, setScrollDirection, () => {
+    const navigation = attachScrollNavigation(el, (direction) => {
+      const targets = direction ? userMessageTargets() : null;
+      setScrollControls((previous) => {
+        const next = {
+          direction,
+          previous: targets ? targets.up !== null : previous.previous,
+          next: targets ? targets.down !== null : previous.next
+        };
+        return previous.direction === next.direction && previous.previous === next.previous && previous.next === next.next ? previous : next;
+      });
+    }, () => {
       leavingBottomRef.current = false;
     });
     navigationRef.current = navigation;
@@ -25199,7 +25250,6 @@ function MessageLog() {
     atBottomRef.current = true;
     followingBottomRef.current = true;
     leavingBottomRef.current = false;
-    setNewMessageBelow(false);
   }, [activeThreadId]);
   _2(() => {
     if (!responseId) {
@@ -25217,15 +25267,13 @@ function MessageLog() {
     atBottomRef.current = false;
     followingBottomRef.current = false;
     response.scrollTop = 0;
-    const topClearance = parseFloat(getComputedStyle(log, "::before").height) + parseFloat(getComputedStyle(log).rowGap);
     log.scrollTop = responseScrollTop(
       log.scrollTop,
       response.getBoundingClientRect().top,
-      log.getBoundingClientRect().top + log.clientTop + topClearance
+      transcriptReadingTop(log)
     );
     prevMsgCountRef.current = msgCount;
     prevLayoutRef.current = layoutKey;
-    setNewMessageBelow(false);
   }, [responseId, activeThreadId, msgCount, layoutKey]);
   _2(() => {
     const el = ref.current;
@@ -25291,11 +25339,10 @@ function MessageLog() {
     } else {
       appliedHighlightRef.current = null;
       const wasAtBottom = atBottomRef.current;
-      const currentlyAtBottom = measureScroll();
+      measureScroll();
       const newMessages = msgCount > prevMsgCountRef.current;
       const repositioned = prevLayoutRef.current !== layoutKey;
       const shouldFollow = wasAtBottom && (newMessages || repositioned);
-      if ((newMessages || repositioned) && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {
         scrollToBottom();
         scheduleScroll(() => scrollToBottom());
@@ -25365,10 +25412,11 @@ function MessageLog() {
     /* @__PURE__ */ u4(
       ScrollNavigationButtons,
       {
-        direction: scrollDirection,
-        newMessageBelow,
-        onTop: scrollToTop,
-        onBottom: () => scrollToBottom(true)
+        direction: scrollControls.direction,
+        canPrevious: scrollControls.previous,
+        canNext: scrollControls.next,
+        onPrevious: () => scrollToUserMessage("up"),
+        onNext: () => scrollToUserMessage("down")
       }
     )
   ] });

@@ -65,7 +65,7 @@ import { ZoomableImage } from './ZoomableImage';
 import { BranchIcon, EditIcon } from './ActionIcons';
 import { CopyTranscriptButton } from './CopyTranscriptButton';
 import { ScrollNavigationButtons } from './ScrollNavigationButtons';
-import { attachScrollNavigation, type ScrollDirection, type ScrollNavigation } from '../scroll-navigation';
+import { attachScrollNavigation, transcriptReadingTop, userMessageScrollTop, type ScrollDirection, type ScrollNavigation } from '../scroll-navigation';
 import { getAppearanceController } from '../appearance';
 import { appearance } from '../appearance-state';
 import { attachDensityReflow } from '../density-reflow';
@@ -1395,8 +1395,9 @@ function MessageLog() {
   const navigationRef = useRef<ScrollNavigation | null>(null);
   const pendingScrollFrame = useRef<number | null>(null);
   const revealedResponse = useRef<string | null>(completedResponse.value);
-  const [scrollDirection, setScrollDirection] = useState<ScrollDirection | null>(null);
-  const [newMessageBelow, setNewMessageBelow] = useState(false);
+  const [scrollControls, setScrollControls] = useState<{
+    direction: ScrollDirection | null; previous: boolean; next: boolean;
+  }>({ direction: null, previous: false, next: false });
   const [, setDensityReflowTick] = useState(0);
   const highlight = highlightMessageId.value;
   const timeline = submissionPresentation(chatTranscript.value, pendingWebSends.value,
@@ -1430,31 +1431,43 @@ function MessageLog() {
     if (!nearBottom || el.scrollTop <= 1) leavingBottomRef.current = false;
     const nextAtBottom = nearBottom && !leavingBottomRef.current;
     atBottomRef.current = nextAtBottom;
-    if (nextAtBottom) setNewMessageBelow(false);
     return nextAtBottom;
   };
 
-  const scrollToBottom = (smooth = false) => {
+  const scrollToBottom = () => {
     const el = ref.current;
     if (!el) return;
     leavingBottomRef.current = false;
     navigationRef.current?.reset();
-    if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    else el.scrollTop = el.scrollHeight;
+    el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
     followingBottomRef.current = true;
-    setNewMessageBelow(false);
   };
 
-  const scrollToTop = () => {
+  const userMessageTargets = () => {
     const el = ref.current;
-    if (!el) return;
+    if (!el) return { up: null, down: null };
+    const readingTop = transcriptReadingTop(el);
+    const positions = Array.from(el.querySelectorAll<HTMLElement>('.msg.in'),
+      (message) => el.scrollTop + message.getBoundingClientRect().top - readingTop);
+    const maximum = Math.max(0, el.scrollHeight - el.clientHeight);
+    return {
+      up: userMessageScrollTop(positions, el.scrollTop, maximum, 'up'),
+      down: userMessageScrollTop(positions, el.scrollTop, maximum, 'down'),
+    };
+  };
+
+  const scrollToUserMessage = (direction: ScrollDirection) => {
+    const el = ref.current;
+    const top = userMessageTargets()[direction];
+    if (!el || top === null) return;
+    cancelScheduledScroll();
     navigationRef.current?.reset();
     // The first smooth-scroll frames are still inside the bottom-follow zone.
     leavingBottomRef.current = true;
     atBottomRef.current = false;
     followingBottomRef.current = false;
-    el.scrollTo({ top: 0, behavior: 'smooth' });
+    el.scrollTo({ top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   };
 
   const cancelScheduledScroll = () => {
@@ -1480,7 +1493,15 @@ function MessageLog() {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return undefined;
-    const navigation = attachScrollNavigation(el, setScrollDirection, () => {
+    const navigation = attachScrollNavigation(el, (direction) => {
+      const targets = direction ? userMessageTargets() : null;
+      setScrollControls((previous) => {
+        const next = { direction, previous: targets ? targets.up !== null : previous.previous,
+          next: targets ? targets.down !== null : previous.next };
+        return previous.direction === next.direction && previous.previous === next.previous && previous.next === next.next
+          ? previous : next;
+      });
+    }, () => {
       leavingBottomRef.current = false;
     });
     navigationRef.current = navigation;
@@ -1497,7 +1518,6 @@ function MessageLog() {
     atBottomRef.current = true;
     followingBottomRef.current = true;
     leavingBottomRef.current = false;
-    setNewMessageBelow(false);
   }, [activeThreadId]);
 
   useLayoutEffect(() => {
@@ -1516,12 +1536,10 @@ function MessageLog() {
     atBottomRef.current = false;
     followingBottomRef.current = false;
     response.scrollTop = 0;
-    const topClearance = parseFloat(getComputedStyle(log, '::before').height) + parseFloat(getComputedStyle(log).rowGap);
     log.scrollTop = responseScrollTop(log.scrollTop, response.getBoundingClientRect().top,
-      log.getBoundingClientRect().top + log.clientTop + topClearance);
+      transcriptReadingTop(log));
     prevMsgCountRef.current = msgCount;
     prevLayoutRef.current = layoutKey;
-    setNewMessageBelow(false);
   }, [responseId, activeThreadId, msgCount, layoutKey]);
 
   useLayoutEffect(() => {
@@ -1597,12 +1615,11 @@ function MessageLog() {
       // Snapshot before measuring: this render may already include a new row,
       // so the updated DOM can look unpinned even though the user was at bottom.
       const wasAtBottom = atBottomRef.current;
-      const currentlyAtBottom = measureScroll();
+      measureScroll();
       const newMessages = msgCount > prevMsgCountRef.current;
       const repositioned = prevLayoutRef.current !== layoutKey;
       // Only follow timeline changes while the viewer is pinned.
       const shouldFollow = wasAtBottom && (newMessages || repositioned);
-      if ((newMessages || repositioned) && !currentlyAtBottom) setNewMessageBelow(true);
       if (shouldFollow) {
         scrollToBottom();
         scheduleScroll(() => scrollToBottom());
@@ -1688,10 +1705,11 @@ function MessageLog() {
         <TaskIndicator />
       </div>
       <ScrollNavigationButtons
-        direction={scrollDirection}
-        newMessageBelow={newMessageBelow}
-        onTop={scrollToTop}
-        onBottom={() => scrollToBottom(true)}
+        direction={scrollControls.direction}
+        canPrevious={scrollControls.previous}
+        canNext={scrollControls.next}
+        onPrevious={() => scrollToUserMessage('up')}
+        onNext={() => scrollToUserMessage('down')}
       />
     </div>
   );

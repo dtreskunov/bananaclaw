@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { attachScrollNavigation, SCROLL_NAVIGATION_IDLE_MS, type ScrollDirection } from './scroll-navigation';
+import {
+  attachScrollNavigation,
+  SCROLL_NAVIGATION_IDLE_MS,
+  userMessageScrollTop,
+  type ScrollDirection,
+} from './scroll-navigation';
 import { ScrollNavigationButtons } from './components/ScrollNavigationButtons';
 
 class TestWheelEvent extends Event {
@@ -40,8 +45,10 @@ class TestViewport extends EventTarget {
   clientHeight = 500;
   ownerDocument = new EventTarget();
   editable = false;
-  closest() {
-    return this.editable ? this : null;
+  button = false;
+  parentElement: TestViewport | null = null;
+  closest(selector = '') {
+    return this.editable || (this.button && selector.includes('button')) ? this : null;
   }
   move(top: number) {
     this.scrollTop = top;
@@ -81,7 +88,9 @@ describe('directional scroll navigation', () => {
   it('reports actual user movement at boundaries, but not automatic scrolling or layout changes', () => {
     const viewport = new TestViewport();
     const moved = vi.fn();
-    const navigation = attachScrollNavigation(viewport, () => {}, undefined, moved);
+    const navigation = attachScrollNavigation(viewport, (direction) => {
+      if (direction) moved(direction);
+    });
     cleanup.push(() => navigation.dispose());
     viewport.move(500);
     expect(moved).not.toHaveBeenCalled();
@@ -123,7 +132,9 @@ describe('directional scroll navigation', () => {
   it('detects a first wheel movement even when the compositor reaches the top before passive input', () => {
     const viewport = new TestViewport();
     const moved = vi.fn();
-    const navigation = attachScrollNavigation(viewport, () => {}, undefined, moved);
+    const navigation = attachScrollNavigation(viewport, (direction) => {
+      if (direction) moved(direction);
+    });
     cleanup.push(() => navigation.dispose());
     viewport.scrollTop = 0;
     viewport.dispatchEvent(new TestWheelEvent(-400));
@@ -212,23 +223,23 @@ describe('directional scroll navigation', () => {
     expect(log.direction()).toBe('up');
   });
 
-  it('hides at the destination and clamps mobile overscroll bounce', () => {
+  it('reports scrolling at either edge without treating mobile overscroll bounce as a reversal', () => {
     const log = mount();
     log.viewport.dispatchEvent(new Event('touchmove'));
     log.viewport.move(200);
     expect(log.direction()).toBe('up');
     log.viewport.move(0);
-    expect(log.direction()).toBeNull();
+    expect(log.direction()).toBe('up');
     log.viewport.move(-60);
     log.viewport.move(0);
-    expect(log.direction()).toBeNull();
+    expect(log.direction()).toBe('up');
     log.viewport.move(200);
     expect(log.direction()).toBe('down');
     log.viewport.move(1500);
-    expect(log.direction()).toBeNull();
+    expect(log.direction()).toBe('down');
     log.viewport.move(1550);
     log.viewport.move(1500);
-    expect(log.direction()).toBeNull();
+    expect(log.direction()).toBe('down');
   });
 
   it('does not show arrows for non-scrollable content', () => {
@@ -359,17 +370,17 @@ describe('icon-only scroll controls', () => {
   it.each([null, 'up', 'down'] as const)(
     'shows only the %s direction with accessible labels and symbols',
     (direction) => {
-      const onTop = vi.fn();
-      const onBottom = vi.fn();
-      const node = ScrollNavigationButtons({ direction, newMessageBelow: false, onTop, onBottom });
+      const onPrevious = vi.fn();
+      const onNext = vi.fn();
+      const node = ScrollNavigationButtons({ direction, canPrevious: true, canNext: true, onPrevious, onNext });
       const [up, down] = node.props.children;
       expect(up.props.hidden).toBeUndefined();
       expect(down.props.hidden).toBeUndefined();
       expect(up.props['data-instant-hide']).toBe(direction === 'down');
       expect(down.props['data-instant-hide']).toBe(direction === 'up');
       for (const [button, label, target, bar] of [
-        [up, 'Scroll to top', 'up', 'M5 4h14'],
-        [down, 'Scroll to bottom', 'down', 'M5 20h14'],
+        [up, 'Previous user message', 'up', 'M5 4h14'],
+        [down, 'Next user message', 'down', 'M5 20h14'],
       ]) {
         expect(button.props['data-visible']).toBe(direction === target);
         expect(button.props['aria-hidden']).toBe(direction !== target);
@@ -383,16 +394,157 @@ describe('icon-only scroll controls', () => {
       }
       up.props.onClick();
       down.props.onClick();
-      expect(onTop).toHaveBeenCalledOnce();
-      expect(onBottom).toHaveBeenCalledOnce();
+      expect(onPrevious).toHaveBeenCalledOnce();
+      expect(onNext).toHaveBeenCalledOnce();
     },
   );
 
-  it('keeps unread-message styling and accessible context on the Down arrow', () => {
-    const node = ScrollNavigationButtons({ direction: 'down', newMessageBelow: true, onTop() {}, onBottom() {} });
+  it('keeps an unavailable direction visible but disabled after internal scrolling', () => {
+    const node = ScrollNavigationButtons({
+      direction: 'down',
+      canPrevious: true,
+      canNext: false,
+      onPrevious() {},
+      onNext() {},
+    });
     const [up, down] = node.props.children;
-    expect(up.props.class).not.toContain('new-message');
-    expect(down.props.class).toContain('new-message');
-    expect(down.props['aria-label']).toBe('New message below; scroll to bottom');
+    expect(up.props.disabled).toBe(true);
+    expect(down.props['data-visible']).toBe(true);
+    expect(down.props.disabled).toBe(true);
+    expect(down.props['aria-label']).toBe('Next user message');
+  });
+});
+
+describe('user message destinations', () => {
+  it('chooses the nearest message before or after the reading-area top', () => {
+    expect(userMessageScrollTop([0, 120, 650, 1420], 500, 1500, 'up')).toBe(120);
+    expect(userMessageScrollTop([0, 120, 650, 1420], 500, 1500, 'down')).toBe(650);
+    expect(userMessageScrollTop([0, 120, 650, 1420], 650, 1500, 'up')).toBe(120);
+    expect(userMessageScrollTop([0, 120, 650, 1420], 650, 1500, 'down')).toBe(1420);
+  });
+
+  it('does not revisit an aligned message or invent a top/bottom fallback', () => {
+    expect(userMessageScrollTop([120, 650], 120.5, 1500, 'up')).toBeNull();
+    expect(userMessageScrollTop([120, 650], 120.5, 1500, 'down')).toBe(650);
+    expect(userMessageScrollTop([], 500, 1500, 'up')).toBeNull();
+    expect(userMessageScrollTop([0, 2000], 1500, 1500, 'down')).toBeNull();
+    expect(userMessageScrollTop([-10, 500], 0, 0, 'down')).toBeNull();
+  });
+});
+
+function dispatchFrom(viewport: TestViewport, target: TestViewport, event: Event): void {
+  Object.defineProperty(event, 'target', { value: target });
+  viewport.dispatchEvent(event);
+}
+
+describe('scrolling inside message bubbles', () => {
+  it('recognizes scrolling keys on message actions without treating Space activation as scrolling', () => {
+    const log = mount();
+    const inner = Object.assign(new TestViewport(), { scrollTop: 0, parentElement: log.viewport });
+    const button = Object.assign(new TestViewport(), {
+      scrollHeight: 24,
+      clientHeight: 24,
+      parentElement: inner,
+      button: true,
+    });
+    dispatchFrom(log.viewport, button, new Event('focusin'));
+    dispatchFrom(log.viewport, button, new TestKeyboardEvent('PageDown'));
+    inner.scrollTop = 100;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBe('down');
+    log.navigation.reset();
+    dispatchFrom(log.viewport, button, new TestKeyboardEvent(' '));
+    inner.scrollTop = 150;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBeNull();
+  });
+
+  it.each(['pointerover', 'focusin'])('seeds a retained inner position on %s without inventing movement', (event) => {
+    const log = mount();
+    const inner = Object.assign(new TestViewport(), { scrollTop: 600, parentElement: log.viewport });
+    dispatchFrom(log.viewport, inner, new Event(event));
+    dispatchFrom(log.viewport, inner, new TestWheelEvent(-100));
+    expect(log.direction()).toBeNull();
+    inner.scrollTop = 550;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBe('up');
+  });
+
+  it('reveals arrows for inner wheel scrolling while leaving the transcript stationary', () => {
+    const log = mount();
+    const inner = Object.assign(new TestViewport(), { scrollTop: 0, parentElement: log.viewport });
+    dispatchFrom(log.viewport, inner, new TestWheelEvent());
+    inner.scrollTop = 100;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBe('down');
+    expect(log.viewport.scrollTop).toBe(400);
+    dispatchFrom(log.viewport, inner, new TestWheelEvent(-100));
+    inner.scrollTop = 50;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBe('up');
+    vi.advanceTimersByTime(1000);
+    expect(log.direction()).toBeNull();
+  });
+
+  it('ignores programmatic inner scrolling and content/viewport resizing', () => {
+    const log = mount();
+    const inner = Object.assign(new TestViewport(), { scrollTop: 0, parentElement: log.viewport });
+    inner.scrollTop = 100;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBeNull();
+    dispatchFrom(log.viewport, inner, new TestWheelEvent());
+    inner.scrollHeight += 100;
+    inner.scrollTop = 150;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBeNull();
+    inner.clientHeight -= 100;
+    inner.scrollTop = 200;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBeNull();
+  });
+
+  it('preserves inner baselines across navigation resets', () => {
+    const log = mount();
+    const inner = Object.assign(new TestViewport(), { scrollTop: 0, parentElement: log.viewport });
+    dispatchFrom(log.viewport, inner, new TestWheelEvent());
+    inner.scrollTop = 200;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    log.navigation.reset();
+    dispatchFrom(log.viewport, inner, new TestWheelEvent(-100));
+    expect(log.direction()).toBeNull();
+    inner.scrollTop = 150;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBe('up');
+  });
+
+  it.each(['touch', 'keyboard', 'scrollbar'])('recognizes inner %s scrolling', (input) => {
+    const log = mount();
+    const inner = Object.assign(new TestViewport(), { scrollTop: 0, parentElement: log.viewport });
+    dispatchFrom(
+      log.viewport,
+      inner,
+      input === 'touch'
+        ? new Event('touchmove')
+        : input === 'keyboard'
+          ? new TestKeyboardEvent('PageDown')
+          : new TestPointerEvent('pointerdown'),
+    );
+    inner.scrollTop = 100;
+    dispatchFrom(log.viewport, inner, new Event('scroll'));
+    expect(log.direction()).toBe('down');
+  });
+
+  it('does not resume transcript following until input actually scrolls the transcript', () => {
+    const viewport = new TestViewport();
+    const onInput = vi.fn();
+    const navigation = attachScrollNavigation(viewport, () => {}, onInput);
+    cleanup.push(() => navigation.dispose());
+    const inner = Object.assign(new TestViewport(), { scrollTop: 0, parentElement: viewport });
+    dispatchFrom(viewport, inner, new TestWheelEvent());
+    inner.scrollTop = 1500;
+    dispatchFrom(viewport, inner, new Event('scroll'));
+    expect(onInput).not.toHaveBeenCalled();
+    viewport.move(500);
+    expect(onInput).toHaveBeenCalledOnce();
   });
 });

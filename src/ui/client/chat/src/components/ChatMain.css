@@ -131,6 +131,7 @@
 }
 .chat-main .scroll-jump[data-instant-hide="true"] { transition: none; }
 .chat-main .scroll-jump:hover { color: var(--surface-fg); }
+.chat-main .scroll-jump:disabled .scroll-jump-arrow { opacity: 0.45; }
 .chat-main .scroll-to-top { transform: translateY(calc(-100% - 8px)); }
 .chat-main .scroll-jump-arrow {
   width: var(--accent-icon-font-size);
