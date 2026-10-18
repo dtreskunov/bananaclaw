@@ -18,6 +18,7 @@ import { applyHash, parseHash } from './hash';
 import { router } from './router';
 import { installLivenessHandlers, startSyncPoll } from './actions';
 import { observeTableScrollEdges } from './table-scroll';
+import { fitVisualViewport } from './viewport-fit';
 import type { Group } from './types';
 
 interface MeResponse { displayName?: string; userId: string; isElevated?: boolean }
@@ -60,10 +61,7 @@ function sortGroups(list: Group[]): Group[] {
 function setupViewportFit(): void {
   const vv = window.visualViewport;
   if (!vv) return;
-  const apply = (): void => { document.documentElement.style.setProperty('--app-height', vv.height + 'px'); };
-  apply();
-  vv.addEventListener('resize', apply);
-  vv.addEventListener('scroll', apply);
+  fitVisualViewport(vv, document.documentElement.style);
   document.addEventListener('focusin', (ev: FocusEvent) => {
     const t = ev.target as HTMLElement | null;
     if (t?.id === 'chat-input') {

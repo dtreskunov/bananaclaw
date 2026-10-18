@@ -1,5 +1,5 @@
 #fixture-root {
-  height: 100dvh;
+  height: var(--app-height, 100dvh);
 }
 .turn-status-fixture {
   height: 100%;

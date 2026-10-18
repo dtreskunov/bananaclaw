@@ -4,6 +4,7 @@ import type { Conversation, ConversationTurn } from '../../../shared/conversatio
 import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared/conversation-protocol';
 import { conversationTimeline } from '../../../server/chat/conversation-timeline';
 import { ChatMain } from '../src/components/ChatMain';
+import { fitVisualViewport } from '../src/viewport-fit';
 import { ChoiceModal } from '../src/components/PromptModal';
 import { publicWebMessageId } from '../src/chat-protocol';
 import type { InputHandling } from '../src/types';
@@ -48,7 +49,7 @@ const scenes = [
   { id: 'disconnected', label: 'Disconnected' },
   { id: 'settling', label: 'Settling' },
   { id: 'reply', label: 'Settled reply' },
-  { id: 'reader', label: 'Long message reader' },
+  { id: 'reader', label: 'Scrollable long message' },
   { id: 'reply-file', label: 'Settled file-only reply' },
   { id: 'warning-reply', label: 'System warning reply' },
   { id: 'stopped-reply', label: 'System stop notice' },
@@ -635,6 +636,7 @@ declare global {
     turnStatusFixture: FixtureApi;
   }
 }
+fitVisualViewport(window.visualViewport, document.documentElement.style);
 window.turnStatusFixture = {
   show,
   publish,

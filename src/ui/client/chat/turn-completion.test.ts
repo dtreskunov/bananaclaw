@@ -41,4 +41,9 @@ describe('completion response scrolling', () => {
     expect(responseScrollTop(800, 50, 50)).toBe(800);
     expect(responseScrollTop(0, 20, 50)).toBe(0);
   });
+
+  it('positions a new response below the transcript fade rather than behind it', () => {
+    expect(responseScrollTop(500, 350, 70)).toBe(780);
+    expect(responseScrollTop(780, 70, 70)).toBe(780);
+  });
 });

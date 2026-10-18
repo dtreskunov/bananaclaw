@@ -851,7 +851,7 @@ describe('main composer pending edits', () => {
           files: null,
         },
       });
-      expect(bubble.props.children[0].props.children.props.dangerouslySetInnerHTML.__html).toBe(
+      expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toBe(
         '<blockquote>\n<p>Choose?</p>\n</blockquote>\n<p>Question skipped</p>\n',
       );
       expect(bubble.props['data-msg-id']).toBe('question-response:q');
@@ -1938,8 +1938,7 @@ describe('main composer pending edits', () => {
       hooks.cursor = 0;
       const cardNode = messageNode.type(messageNode.props);
       const row = cardNode.type(cardNode.props);
-      const [technicalBlock, preview] = row.props.children;
-      const title = preview.props.children[0];
+      const [technicalBlock, title] = row.props.children;
       expect(!!technicalBlock).toBe(technical);
       if (technical) {
         expect(technicalBlock.type.name).toBe('TurnTechnicalDetails');
@@ -2246,6 +2245,7 @@ describe('main composer pending edits', () => {
         requestAnimationFrame: globalThis.requestAnimationFrame,
         cancelAnimationFrame: globalThis.cancelAnimationFrame,
         CSS: globalThis.CSS,
+        getComputedStyle: globalThis.getComputedStyle,
       };
       const frames = new Map<number, FrameRequestCallback>();
       let nextFrame = 0;
@@ -2275,6 +2275,9 @@ describe('main composer pending edits', () => {
       const viewport = new Viewport();
       const disposers: (() => void)[] = [];
       try {
+        vi.stubGlobal('getComputedStyle', (_element: unknown, pseudo?: string) =>
+          pseudo ? { height: '10px' } : { rowGap: '6px' },
+        );
         vi.stubGlobal(
           'window',
           Object.assign(new EventTarget(), {
@@ -2325,8 +2328,8 @@ describe('main composer pending edits', () => {
           frames.delete(id);
           callback(0);
         }
-        expect(viewport.scrollTop).toBe(1400);
-        expect(viewport.querySelector().getBoundingClientRect().top).toBe(50);
+        expect(viewport.scrollTop).toBe(1384);
+        expect(viewport.querySelector().getBoundingClientRect().top).toBe(66);
       } finally {
         disposers.forEach((dispose) => dispose());
         hooks.capturePassive = false;

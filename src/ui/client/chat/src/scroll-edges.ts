@@ -29,12 +29,17 @@ export function scrollEdges(element: ScrollMetrics, { horizontal = true, vertica
   };
 }
 
-export function attachScrollEdges(element: HTMLElement, axes: ScrollAxes = {}): () => void {
+export function attachScrollEdges(
+  element: HTMLElement,
+  axes: ScrollAxes = {},
+  onUpdate?: (edges: ReturnType<typeof scrollEdges>) => void,
+): () => void {
   const update = (): void => {
     const edges = scrollEdges(element, axes);
     for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
       element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
     }
+    onUpdate?.(edges);
   };
   element.addEventListener('scroll', update, { passive: true });
   const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);

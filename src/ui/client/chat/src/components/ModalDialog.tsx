@@ -3,20 +3,13 @@ import { useLayoutEffect, useRef } from 'preact/hooks';
 import { MobileDialog } from './MobileDialog';
 import './ModalDialog.css';
 
-type Props = ComponentProps<typeof MobileDialog> & {
-  initialFocus?: string;
-  returnFocus?: HTMLElement | null;
-  onAfterClose?: () => void;
-};
-
-export function ModalDialog({ initialFocus, returnFocus, onAfterClose, ...props }: Props) {
+export function ModalDialog(props: ComponentProps<typeof MobileDialog>) {
   const ref = useRef<HTMLDialogElement | null>(null);
   useLayoutEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    const previousFocus = returnFocus ?? document.activeElement;
+    const previousFocus = document.activeElement;
     dialog.showModal();
-    if (initialFocus) dialog.querySelector<HTMLElement>(initialFocus)?.focus({ preventScroll: true });
     return () => {
       dialog.close();
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
@@ -25,7 +18,6 @@ export function ModalDialog({ initialFocus, returnFocus, onAfterClose, ...props 
           previousFocus.parentElement?.closest<HTMLElement>('[tabindex]')?.focus({ preventScroll: true });
         }
       }
-      onAfterClose?.();
     };
   }, []);
   return (

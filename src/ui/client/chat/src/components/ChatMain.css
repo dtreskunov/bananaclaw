@@ -75,7 +75,7 @@
 .chat-main form {
   padding-inline: var(--chat-gutter);
 }
-.chat-main .log-viewport { min-width: 0; min-height: 0; position: relative; }
+.chat-main .log-viewport { min-width: 0; min-height: 0; position: relative; container-type: size; }
 .chat-main > .approvals-banner { grid-row: 1; }
 .chat-main > .log-viewport { grid-row: 2; }
 .chat-main > .status { grid-row: 3; }
@@ -151,6 +151,14 @@
 .chat-main .log .task-indicator.msg.event .event-meta { margin-left: 4px; }
 .chat-main .log .task-indicator.paused .event-icon { opacity: 0.55; }
 .chat-main .msg { position: relative; padding: var(--message-padding-top) var(--message-padding-inline) var(--message-padding-block); border-radius: var(--radius-lg); max-width: 90%; white-space: pre-wrap; word-break: break-word; font-size: var(--font-base); }
+.chat-main .log .msg:not(.event) {
+  flex-shrink: 0;
+  /* Fit the entire response between the transcript's edge fades. */
+  max-height: max(0px, calc(100cqh - 2 * var(--transcript-fade-height)));
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.chat-main .log .msg:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .chat-main .transcript-copy-content { min-width: 0; }
 .chat-main .msg.in { align-self: flex-end; background: var(--accent); }
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }

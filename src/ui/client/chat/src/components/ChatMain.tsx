@@ -60,7 +60,7 @@ import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { dockQuestions } from '../question-dock';
 import { RelativeTime } from './RelativeTime';
 import { ModalDialog } from './ModalDialog';
-import { MessagePreview } from './MessagePreview';
+import { MessageBubble } from './MessageBubble';
 import { ZoomableImage } from './ZoomableImage';
 import { BranchIcon, EditIcon } from './ActionIcons';
 import { CopyTranscriptButton } from './CopyTranscriptButton';
@@ -790,10 +790,11 @@ function Message(
     !hasPendingSend &&
     !m.files?.length && action != null;
   return (
-    <div
+    <MessageBubble
       class={cls}
       data-msg-id={m.id}
-      ref={ref}
+      elementRef={ref}
+      reveal={highlightMessageId.value === m.id ? searchQuery.value : undefined}
     >
       {showTechnicalStatus
         ? <TurnTechnicalDetails
@@ -807,7 +808,6 @@ function Message(
       {m.direction === 'in' && m.author && m.author.userId !== currentUserId.value
         ? <div class="message-author">{m.author.displayName}</div>
         : null}
-      <MessagePreview reveal={highlightMessageId.value === m.id && !!searchQuery.value}>
       <MessageText text={m.text} md={md} />
       {singleFile && singleMediaKind
         ? (
@@ -846,7 +846,6 @@ function Message(
           </div>
         )
         : null}
-      </MessagePreview>
       {showContinue
         ? (
           <div class="message-actions">
@@ -905,7 +904,7 @@ function Message(
           <CopyTranscriptButton getContent={() => ref.current?.querySelector<HTMLElement>('.transcript-copy-content') ?? null} />
         </PendingMessageActions>
       </div> : null}
-    </div>
+    </MessageBubble>
   );
 }
 
@@ -914,12 +913,12 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
   const activity = message.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return (
-    <div class="msg out display-card agent-action" data-msg-id={message.id}>
+    <MessageBubble class="msg out display-card agent-action" data-msg-id={message.id}
+      reveal={highlightMessageId.value === message.id ? searchQuery.value : undefined}>
       {showTechnicalStatus
         ? <TurnTechnicalDetails turn={message.statsTurn} lines={activity}
             ownerId={traceOwner} live={message.turnTraceLive} />
         : null}
-      <MessagePreview reveal={highlightMessageId.value === message.id && !!searchQuery.value}>
       {card.title ? <div class="display-card-title">{card.title}</div> : null}
       {card.description ? <div class="display-card-description">{card.description}</div> : null}
       {card.children.length > 0 ? (
@@ -940,7 +939,6 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      </MessagePreview>
       {message.reactions?.length ? (
         <div class="reactions">
           {message.reactions.map((reaction, index) => (
@@ -952,7 +950,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
         {message.ts ? <RelativeTime ts={message.ts} /> : null}
         <AgentActionLabel label="card" title="Sent with send_card" />
       </div> : null}
-    </div>
+    </MessageBubble>
   );
 }
 
@@ -1517,8 +1515,10 @@ function MessageLog() {
     leavingBottomRef.current = true;
     atBottomRef.current = false;
     followingBottomRef.current = false;
+    response.scrollTop = 0;
+    const topClearance = parseFloat(getComputedStyle(log, '::before').height) + parseFloat(getComputedStyle(log).rowGap);
     log.scrollTop = responseScrollTop(log.scrollTop, response.getBoundingClientRect().top,
-      log.getBoundingClientRect().top + log.clientTop);
+      log.getBoundingClientRect().top + log.clientTop + topClearance);
     prevMsgCountRef.current = msgCount;
     prevLayoutRef.current = layoutKey;
     setNewMessageBelow(false);

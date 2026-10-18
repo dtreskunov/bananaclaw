@@ -23315,163 +23315,120 @@ function formatQuestionResponse(question2, response) {
 ${response}`;
 }
 
-// src/density-reflow.ts
-function captureReadingPosition(viewport, followingBottom) {
-  const top = () => viewport.getBoundingClientRect().top + viewport.clientTop;
-  const viewportTop = top();
-  const anchor = Array.from(viewport.children).find((child) => {
-    const rect = child.getBoundingClientRect();
-    return rect.bottom > viewportTop && rect.top < viewportTop + viewport.clientHeight;
-  });
-  const offset = anchor ? anchor.getBoundingClientRect().top - viewportTop : 0;
-  const originalTop = viewport.scrollTop;
-  return () => {
-    const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-    const next = followingBottom ? maximum : anchor && Array.from(viewport.children).includes(anchor) ? viewport.scrollTop + anchor.getBoundingClientRect().top - top() - offset : originalTop;
-    viewport.scrollTop = Math.max(0, Math.min(maximum, next));
+// src/scroll-edges.ts
+var EDGE_EPSILON = 1;
+function axisScrollEdges(offset, clientSize, scrollSize) {
+  const maxOffset = Math.max(0, scrollSize - clientSize);
+  return { start: offset > EDGE_EPSILON, end: offset < maxOffset - EDGE_EPSILON };
+}
+function scrollEdges(element, { horizontal = true, vertical = true } = {}) {
+  const x6 = axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth);
+  const y5 = axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight);
+  return {
+    left: horizontal && x6.start,
+    right: horizontal && x6.end,
+    top: vertical && y5.start,
+    bottom: vertical && y5.end
   };
 }
-function attachDensityReflow(controller, viewport, options) {
-  let frame = null;
-  const finish = () => {
-    if (frame === null) return;
-    cancelAnimationFrame(frame);
-    frame = null;
-    options.afterReflow();
+function attachScrollEdges(element, axes = {}, onUpdate) {
+  const update = () => {
+    const edges = scrollEdges(element, axes);
+    for (const edge of ["left", "right", "top", "bottom"]) {
+      element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+    }
+    onUpdate?.(edges);
   };
-  const unsubscribe = controller.beforeDensityChange(() => {
-    finish();
-    const restore = captureReadingPosition(viewport, options.followingBottom());
-    options.beforeReflow();
-    return () => {
-      restore();
-      frame = requestAnimationFrame(() => {
-        restore();
-        frame = null;
-        options.afterReflow();
-      });
-    };
-  });
-  const inputs = ["wheel", "touchmove", "pointerdown", "keydown"];
-  for (const name of inputs) viewport.addEventListener(name, finish, { passive: true });
+  element.addEventListener("scroll", update, { passive: true });
+  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+  const observeSize = () => {
+    resize?.disconnect();
+    resize?.observe(element);
+    for (const child of element.children) {
+      resize?.observe(child);
+      if (child.firstElementChild) resize?.observe(child.firstElementChild);
+    }
+    update();
+  };
+  const mutations = new MutationObserver(observeSize);
+  mutations.observe(element, { childList: true, subtree: true, characterData: true });
+  observeSize();
   return () => {
-    unsubscribe();
-    finish();
-    for (const name of inputs) viewport.removeEventListener(name, finish);
+    element.removeEventListener("scroll", update);
+    resize?.disconnect();
+    mutations.disconnect();
+    for (const edge of ["left", "right", "top", "bottom"]) element.classList.remove(`scroll-fade-${edge}`);
   };
 }
 
-// src/message-preview.ts
-function messagePreviewLayout(contentHeight, availableHeight, chromeHeight, controlHeight) {
-  const truncated = availableHeight > 0 && contentHeight + chromeHeight > availableHeight + 0.5;
-  return {
-    truncated,
-    height: truncated ? Math.max(0, availableHeight - chromeHeight - controlHeight) : contentHeight
-  };
-}
-function observeMessagePreview(preview, update) {
-  const viewport = preview.closest(".log");
-  const bubble = preview.closest(".msg");
-  const content = preview.querySelector(".message-preview-content");
-  const clip = preview.querySelector(".message-preview-clip");
-  const control = preview.querySelector(".message-preview-control");
-  if (!viewport || !bubble || !content || !clip || !control) {
-    throw new Error("Message preview is missing its transcript, bubble, or content.");
-  }
-  const measure = () => {
-    const style = getComputedStyle(viewport);
-    const edgeSpace = parseFloat(getComputedStyle(viewport, "::before").height) + parseFloat(style.rowGap);
-    const available = viewport.getBoundingClientRect().height - 2 * edgeSpace - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-    const controlHeight = control.getBoundingClientRect().height;
-    const chrome = bubble.getBoundingClientRect().height - clip.getBoundingClientRect().height - controlHeight;
-    update(messagePreviewLayout(content.getBoundingClientRect().height, available, chrome, controlHeight));
-  };
-  const observer = new ResizeObserver(measure);
-  for (const element of [viewport, bubble, content, control]) observer.observe(element);
-  measure();
-  return () => observer.disconnect();
-}
-
-// src/transcript-clipboard.ts
-function transcriptClipboardPayload(element) {
-  return {
-    html: `<div>${element.innerHTML}</div>`,
-    text: element.innerText || element.textContent || ""
-  };
-}
-async function copyTranscriptContent(element) {
-  const payload = transcriptClipboardPayload(element);
-  const clipboard = navigator.clipboard;
-  if (!clipboard) throw new Error("Clipboard access is unavailable in this browser.");
-  if (typeof ClipboardItem !== "undefined" && typeof clipboard.write === "function") {
-    try {
-      await clipboard.write([
-        new ClipboardItem({
-          "text/html": new Blob([payload.html], { type: "text/html" }),
-          "text/plain": new Blob([payload.text], { type: "text/plain" })
-        })
-      ]);
-      return "rich";
-    } catch (richError) {
-      if (typeof clipboard.writeText !== "function") throw richError;
-      try {
-        await clipboard.writeText(payload.text);
-        return "plain";
-      } catch (plainError) {
-        throw new AggregateError([richError, plainError], "Rich and plain-text clipboard writes failed.");
+// src/components/MessageBubble.tsx
+function MessageBubble({ class: className, "data-msg-id": id2, elementRef, reveal, children }) {
+  const ownRef = A2(null);
+  const ref = elementRef ?? ownRef;
+  _2(() => {
+    const bubble = ref.current;
+    if (!bubble) return;
+    return attachScrollEdges(bubble, { horizontal: false }, (edges) => {
+      const scrollable = edges.top || edges.bottom;
+      bubble.tabIndex = scrollable ? 0 : -1;
+      if (scrollable) {
+        bubble.setAttribute("role", "region");
+        bubble.setAttribute("aria-label", "Scrollable message");
+      } else {
+        bubble.removeAttribute("role");
+        bubble.removeAttribute("aria-label");
       }
+    });
+  }, []);
+  _2(() => {
+    const bubble = ref.current;
+    const match2 = reveal ? bubble?.querySelector(".search-hl") : null;
+    if (bubble && match2) {
+      bubble.scrollTop += match2.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
-  }
-  if (typeof clipboard.writeText !== "function") {
-    throw new Error("Clipboard writing is unavailable in this browser.");
-  }
-  await clipboard.writeText(payload.text);
-  return "plain";
+  }, [reveal]);
+  return /* @__PURE__ */ u4("div", { class: `${className} scroll-edge-fade`, "data-msg-id": id2, ref, children });
 }
 
-// src/components/CopyTranscriptButton.tsx
-function CopyTranscriptButton({ getContent, label, onFeedback }) {
-  const feedback = onFeedback ?? showToast;
-  const copy = async () => {
-    const content = getContent();
-    if (!content) {
-      console.error("Failed to copy transcript message: message content is unavailable.");
-      feedback("Could not copy message");
-      return;
-    }
-    try {
-      await copyTranscriptContent(content);
-      feedback("Copied message");
-    } catch (error) {
-      console.error("Failed to copy transcript message:", error);
-      feedback("Could not copy message");
-    }
-  };
+// src/components/QuestionAnswerBubble.tsx
+function QuestionAnswerBubble({ question: question2, answer }) {
+  const response = answer.questionResponseType === "skipped" ? "Question skipped" : question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text;
+  const text2 = formatQuestionResponse(question2.question, response);
+  const md = renderMarkdown(text2, groupId.value);
   return /* @__PURE__ */ u4(
-    "button",
+    MessageBubble,
     {
-      type: "button",
-      class: "msg-action-btn msg-copy-btn",
-      title: label ?? "Copy this message",
-      "aria-label": label ?? "Copy this message",
-      onClick: copy,
+      class: `msg in${md != null ? " markdown" : ""}`,
+      "data-msg-id": answer.id,
+      reveal: highlightMessageId.value === answer.id ? searchQuery.value : void 0,
       children: [
-        /* @__PURE__ */ u4(CopyIcon, {}),
-        label ? /* @__PURE__ */ u4("span", { children: label }) : null
+        md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 }),
+        /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answer.ts }) })
       ]
     }
   );
 }
 
+// src/question-dock.ts
+function dockQuestions(questions, messages, groupId2, threadId2) {
+  const answered = new Set(
+    messages.filter((message2) => message2.direction === "in" && message2.inputState?.status !== "cancelled").map((message2) => message2.questionId)
+  );
+  return questions.filter(
+    (question2) => question2.agentGroupId === groupId2 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.questionId)
+  ).sort(
+    (a4, b5) => timelineSortKey(a4.createdAt, a4.timelinePosition) - timelineSortKey(b5.createdAt, b5.timelinePosition)
+  );
+}
+
 // src/components/ModalDialog.tsx
-function ModalDialog({ initialFocus, returnFocus, onAfterClose, ...props }) {
+function ModalDialog(props) {
   const ref = A2(null);
   _2(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    const previousFocus = returnFocus ?? document.activeElement;
+    const previousFocus = document.activeElement;
     dialog.showModal();
-    if (initialFocus) dialog.querySelector(initialFocus)?.focus({ preventScroll: true });
     return () => {
       dialog.close();
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
@@ -23480,7 +23437,6 @@ function ModalDialog({ initialFocus, returnFocus, onAfterClose, ...props }) {
           previousFocus.parentElement?.closest("[tabindex]")?.focus({ preventScroll: true });
         }
       }
-      onAfterClose?.();
     };
   }, []);
   return /* @__PURE__ */ u4(
@@ -23501,127 +23457,6 @@ function ModalDialog({ initialFocus, returnFocus, onAfterClose, ...props }) {
       },
       children: /* @__PURE__ */ u4(MobileDialog, { ...props, role: "presentation" })
     }
-  );
-}
-
-// src/components/MessagePreview.tsx
-function MessageReader({
-  children,
-  bubbleClass,
-  opener,
-  onClose,
-  onNavigate,
-  onAfterClose
-}) {
-  const bodyRef = A2(null);
-  const [feedback, setFeedback] = h2("");
-  _2(() => {
-    const body = bodyRef.current;
-    const match2 = body?.querySelector(".search-hl");
-    if (body && match2) {
-      body.scrollTop += match2.getBoundingClientRect().top - body.getBoundingClientRect().top - body.clientHeight / 2;
-    }
-  }, []);
-  const onClick = (event) => {
-    if (!(event.target instanceof Element)) return;
-    if (event.defaultPrevented && event.target.closest("a") || event.target.closest("button.file-chip")) onNavigate();
-  };
-  return /* @__PURE__ */ u4(
-    ModalDialog,
-    {
-      title: "Message",
-      ariaLabel: "Full message",
-      className: "message-reader-dialog",
-      backdropClassName: "message-reader-backdrop",
-      maxWidth: "min(960px, 100%)",
-      initialFocus: ".message-reader-body",
-      returnFocus: opener,
-      onClose,
-      onAfterClose,
-      actions: /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("span", { class: "message-reader-feedback", role: "status", children: feedback }),
-        /* @__PURE__ */ u4(
-          CopyTranscriptButton,
-          {
-            label: "Copy message",
-            onFeedback: setFeedback,
-            getContent: () => bodyRef.current?.querySelector(".transcript-copy-content") ?? bodyRef.current
-          }
-        )
-      ] }),
-      children: /* @__PURE__ */ u4("div", { class: "message-reader-body", ref: bodyRef, tabIndex: 0, onClick, children: /* @__PURE__ */ u4("div", { class: `${bubbleClass} message-reader-message`, children }) })
-    }
-  );
-}
-function MessagePreview({ children, reveal = false }) {
-  const ref = A2(null);
-  const buttonRef = A2(null);
-  const restoreRef = A2(() => {
-  });
-  const autoOpenedRef = A2(false);
-  const [layout, setLayout] = h2({ truncated: false, height: 0 });
-  const [open, setOpen] = h2(false);
-  _2(() => {
-    if (!ref.current) return;
-    return observeMessagePreview(ref.current, (next) => {
-      setLayout(
-        (previous) => previous.truncated === next.truncated && Math.abs(previous.height - next.height) < 0.5 ? previous : next
-      );
-    });
-  }, []);
-  const openReader = () => {
-    const viewport = ref.current?.closest(".log");
-    if (viewport) restoreRef.current = captureReadingPosition(viewport, false);
-    setOpen(true);
-  };
-  y2(() => {
-    if (!reveal) autoOpenedRef.current = false;
-    else if (layout.truncated && !autoOpenedRef.current) {
-      autoOpenedRef.current = true;
-      openReader();
-    }
-  }, [reveal, layout.truncated]);
-  return /* @__PURE__ */ u4("div", { class: "message-preview", ref, "data-truncated": layout.truncated, children: [
-    /* @__PURE__ */ u4("div", { class: "message-preview-clip", style: layout.truncated ? { maxHeight: `${layout.height}px` } : void 0, children: /* @__PURE__ */ u4("div", { class: "message-preview-content", inert: layout.truncated, children }) }),
-    /* @__PURE__ */ u4("div", { class: "message-preview-control", hidden: !layout.truncated, children: /* @__PURE__ */ u4("button", { type: "button", ref: buttonRef, class: "message-preview-open", "aria-haspopup": "dialog", onClick: openReader, children: "Read full message" }) }),
-    open ? /* @__PURE__ */ u4(
-      MessageReader,
-      {
-        bubbleClass: ref.current?.closest(".msg")?.className ?? "msg",
-        opener: buttonRef.current,
-        onClose: () => setOpen(false),
-        onNavigate: () => {
-          restoreRef.current = () => {
-          };
-          setOpen(false);
-        },
-        onAfterClose: () => restoreRef.current(),
-        children
-      }
-    ) : null
-  ] });
-}
-
-// src/components/QuestionAnswerBubble.tsx
-function QuestionAnswerBubble({ question: question2, answer }) {
-  const response = answer.questionResponseType === "skipped" ? "Question skipped" : question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text;
-  const text2 = formatQuestionResponse(question2.question, response);
-  const md = renderMarkdown(text2, groupId.value);
-  return /* @__PURE__ */ u4("div", { class: `msg in${md != null ? " markdown" : ""}`, "data-msg-id": answer.id, children: [
-    /* @__PURE__ */ u4(MessagePreview, { reveal: highlightMessageId.value === answer.id && !!searchQuery.value, children: md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 }) }),
-    /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answer.ts }) })
-  ] });
-}
-
-// src/question-dock.ts
-function dockQuestions(questions, messages, groupId2, threadId2) {
-  const answered = new Set(
-    messages.filter((message2) => message2.direction === "in" && message2.inputState?.status !== "cancelled").map((message2) => message2.questionId)
-  );
-  return questions.filter(
-    (question2) => question2.agentGroupId === groupId2 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.questionId)
-  ).sort(
-    (a4, b5) => timelineSortKey(a4.createdAt, a4.timelinePosition) - timelineSortKey(b5.createdAt, b5.timelinePosition)
   );
 }
 
@@ -23726,6 +23561,73 @@ function ZoomableImage({ src, alt, className = "", autoFocus = false }) {
           style: { transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }
         }
       )
+    }
+  );
+}
+
+// src/transcript-clipboard.ts
+function transcriptClipboardPayload(element) {
+  return {
+    html: `<div>${element.innerHTML}</div>`,
+    text: element.innerText || element.textContent || ""
+  };
+}
+async function copyTranscriptContent(element) {
+  const payload = transcriptClipboardPayload(element);
+  const clipboard = navigator.clipboard;
+  if (!clipboard) throw new Error("Clipboard access is unavailable in this browser.");
+  if (typeof ClipboardItem !== "undefined" && typeof clipboard.write === "function") {
+    try {
+      await clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([payload.html], { type: "text/html" }),
+          "text/plain": new Blob([payload.text], { type: "text/plain" })
+        })
+      ]);
+      return "rich";
+    } catch (richError) {
+      if (typeof clipboard.writeText !== "function") throw richError;
+      try {
+        await clipboard.writeText(payload.text);
+        return "plain";
+      } catch (plainError) {
+        throw new AggregateError([richError, plainError], "Rich and plain-text clipboard writes failed.");
+      }
+    }
+  }
+  if (typeof clipboard.writeText !== "function") {
+    throw new Error("Clipboard writing is unavailable in this browser.");
+  }
+  await clipboard.writeText(payload.text);
+  return "plain";
+}
+
+// src/components/CopyTranscriptButton.tsx
+function CopyTranscriptButton({ getContent }) {
+  const copy = async () => {
+    const content = getContent();
+    if (!content) {
+      console.error("Failed to copy transcript message: message content is unavailable.");
+      showToast("Could not copy message");
+      return;
+    }
+    try {
+      await copyTranscriptContent(content);
+      showToast("Copied message");
+    } catch (error) {
+      console.error("Failed to copy transcript message:", error);
+      showToast("Could not copy message");
+    }
+  };
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "msg-action-btn msg-copy-btn",
+      title: "Copy this message",
+      "aria-label": "Copy this message",
+      onClick: copy,
+      children: /* @__PURE__ */ u4(CopyIcon, {})
     }
   );
 }
@@ -23887,48 +23789,49 @@ function attachScrollNavigation(viewport, onDirection, onUserInput, onUserScroll
   };
 }
 
-// src/scroll-edges.ts
-var EDGE_EPSILON = 1;
-function axisScrollEdges(offset, clientSize, scrollSize) {
-  const maxOffset = Math.max(0, scrollSize - clientSize);
-  return { start: offset > EDGE_EPSILON, end: offset < maxOffset - EDGE_EPSILON };
-}
-function scrollEdges(element, { horizontal = true, vertical = true } = {}) {
-  const x6 = axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth);
-  const y5 = axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight);
-  return {
-    left: horizontal && x6.start,
-    right: horizontal && x6.end,
-    top: vertical && y5.start,
-    bottom: vertical && y5.end
-  };
-}
-function attachScrollEdges(element, axes = {}) {
-  const update = () => {
-    const edges = scrollEdges(element, axes);
-    for (const edge of ["left", "right", "top", "bottom"]) {
-      element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
-    }
-  };
-  element.addEventListener("scroll", update, { passive: true });
-  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-  const observeSize = () => {
-    resize?.disconnect();
-    resize?.observe(element);
-    for (const child of element.children) {
-      resize?.observe(child);
-      if (child.firstElementChild) resize?.observe(child.firstElementChild);
-    }
-    update();
-  };
-  const mutations = new MutationObserver(observeSize);
-  mutations.observe(element, { childList: true, subtree: true, characterData: true });
-  observeSize();
+// src/density-reflow.ts
+function captureReadingPosition(viewport, followingBottom) {
+  const top = () => viewport.getBoundingClientRect().top + viewport.clientTop;
+  const viewportTop = top();
+  const anchor = Array.from(viewport.children).find((child) => {
+    const rect = child.getBoundingClientRect();
+    return rect.bottom > viewportTop && rect.top < viewportTop + viewport.clientHeight;
+  });
+  const offset = anchor ? anchor.getBoundingClientRect().top - viewportTop : 0;
+  const originalTop = viewport.scrollTop;
   return () => {
-    element.removeEventListener("scroll", update);
-    resize?.disconnect();
-    mutations.disconnect();
-    for (const edge of ["left", "right", "top", "bottom"]) element.classList.remove(`scroll-fade-${edge}`);
+    const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const next = followingBottom ? maximum : anchor && Array.from(viewport.children).includes(anchor) ? viewport.scrollTop + anchor.getBoundingClientRect().top - top() - offset : originalTop;
+    viewport.scrollTop = Math.max(0, Math.min(maximum, next));
+  };
+}
+function attachDensityReflow(controller, viewport, options) {
+  let frame = null;
+  const finish = () => {
+    if (frame === null) return;
+    cancelAnimationFrame(frame);
+    frame = null;
+    options.afterReflow();
+  };
+  const unsubscribe = controller.beforeDensityChange(() => {
+    finish();
+    const restore = captureReadingPosition(viewport, options.followingBottom());
+    options.beforeReflow();
+    return () => {
+      restore();
+      frame = requestAnimationFrame(() => {
+        restore();
+        frame = null;
+        options.afterReflow();
+      });
+    };
+  });
+  const inputs = ["wheel", "touchmove", "pointerdown", "keydown"];
+  for (const name of inputs) viewport.addEventListener(name, finish, { passive: true });
+  return () => {
+    unsubscribe();
+    finish();
+    for (const name of inputs) viewport.removeEventListener(name, finish);
   };
 }
 
@@ -24628,11 +24531,12 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && action != null;
   return /* @__PURE__ */ u4(
-    "div",
+    MessageBubble,
     {
       class: cls,
       "data-msg-id": m6.id,
-      ref,
+      elementRef: ref,
+      reveal: highlightMessageId.value === m6.id ? searchQuery.value : void 0,
       children: [
         showTechnicalStatus ? /* @__PURE__ */ u4(
           TurnTechnicalDetails,
@@ -24645,45 +24549,43 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
         ) : null,
         m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
         m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
-        /* @__PURE__ */ u4(MessagePreview, { reveal: highlightMessageId.value === m6.id && !!searchQuery.value, children: [
-          /* @__PURE__ */ u4(MessageText, { text: m6.text, md }),
-          singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
-            singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
-            /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
-          ] }) : null,
-          m6.files && m6.files.length && !singleMediaKind ? /* @__PURE__ */ u4("div", { class: "files", children: m6.files.map((f5) => f5.path ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "file-chip",
-              title: displayWorkspacePath(f5.path),
-              onClick: () => navFile({ path: f5.path, name: f5.filename, size: f5.size }).catch(console.error),
-              children: [
-                "\u{1F4CE} ",
-                f5.filename
-              ]
+        /* @__PURE__ */ u4(MessageText, { text: m6.text, md }),
+        singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
+          singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
+          /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
+        ] }) : null,
+        m6.files && m6.files.length && !singleMediaKind ? /* @__PURE__ */ u4("div", { class: "files", children: m6.files.map((f5) => f5.path ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "file-chip",
+            title: displayWorkspacePath(f5.path),
+            onClick: () => navFile({ path: f5.path, name: f5.filename, size: f5.size }).catch(console.error),
+            children: [
+              "\u{1F4CE} ",
+              f5.filename
+            ]
+          },
+          f5.path
+        ) : f5.url ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "file-chip",
+            title: `Preview ${f5.filename}`,
+            onClick: () => {
+              previewAttachment(f5).catch(console.error);
             },
-            f5.path
-          ) : f5.url ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "file-chip",
-              title: `Preview ${f5.filename}`,
-              onClick: () => {
-                previewAttachment(f5).catch(console.error);
-              },
-              children: [
-                "\u{1F4CE} ",
-                f5.filename
-              ]
-            },
-            f5.url
-          ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: [
-            "\u{1F4CE} ",
-            f5.filename
-          ] }, f5.filename)) }) : null
-        ] }),
+            children: [
+              "\u{1F4CE} ",
+              f5.filename
+            ]
+          },
+          f5.url
+        ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: [
+          "\u{1F4CE} ",
+          f5.filename
+        ] }, f5.filename)) }) : null,
         showContinue ? /* @__PURE__ */ u4("div", { class: "message-actions", children: /* @__PURE__ */ u4(
           "button",
           {
@@ -24745,44 +24647,50 @@ function DisplayCardMessage({ message: message2, card }) {
   const traceOwner = activityTraceOwner(message2);
   const activity = message2.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
-  return /* @__PURE__ */ u4("div", { class: "msg out display-card agent-action", "data-msg-id": message2.id, children: [
-    showTechnicalStatus ? /* @__PURE__ */ u4(
-      TurnTechnicalDetails,
-      {
-        turn: message2.statsTurn,
-        lines: activity,
-        ownerId: traceOwner,
-        live: message2.turnTraceLive
-      }
-    ) : null,
-    /* @__PURE__ */ u4(MessagePreview, { reveal: highlightMessageId.value === message2.id && !!searchQuery.value, children: [
-      card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
-      card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
-      card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
-      card.actions.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-actions", children: card.actions.map((action) => /* @__PURE__ */ u4(
-        "a",
-        {
-          class: `display-card-action display-card-action-${action.style || "default"}`,
-          href: action.url,
-          target: "_blank",
-          rel: "noopener noreferrer",
-          children: [
-            action.label,
-            /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: [
-              " ",
-              "\u2197"
-            ] })
-          ]
-        },
-        `${action.label}:${action.url}`
-      )) }) : null
-    ] }),
-    message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
-    message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
-      message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
-      /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" })
-    ] }) : null
-  ] });
+  return /* @__PURE__ */ u4(
+    MessageBubble,
+    {
+      class: "msg out display-card agent-action",
+      "data-msg-id": message2.id,
+      reveal: highlightMessageId.value === message2.id ? searchQuery.value : void 0,
+      children: [
+        showTechnicalStatus ? /* @__PURE__ */ u4(
+          TurnTechnicalDetails,
+          {
+            turn: message2.statsTurn,
+            lines: activity,
+            ownerId: traceOwner,
+            live: message2.turnTraceLive
+          }
+        ) : null,
+        card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
+        card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
+        card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
+        card.actions.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-actions", children: card.actions.map((action) => /* @__PURE__ */ u4(
+          "a",
+          {
+            class: `display-card-action display-card-action-${action.style || "default"}`,
+            href: action.url,
+            target: "_blank",
+            rel: "noopener noreferrer",
+            children: [
+              action.label,
+              /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: [
+                " ",
+                "\u2197"
+              ] })
+            ]
+          },
+          `${action.label}:${action.url}`
+        )) }) : null,
+        message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
+        message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
+          message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
+          /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" })
+        ] }) : null
+      ]
+    }
+  );
 }
 function messageKey(message2) {
   return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
@@ -25308,10 +25216,12 @@ function MessageLog() {
     leavingBottomRef.current = true;
     atBottomRef.current = false;
     followingBottomRef.current = false;
+    response.scrollTop = 0;
+    const topClearance = parseFloat(getComputedStyle(log, "::before").height) + parseFloat(getComputedStyle(log).rowGap);
     log.scrollTop = responseScrollTop(
       log.scrollTop,
       response.getBoundingClientRect().top,
-      log.getBoundingClientRect().top + log.clientTop
+      log.getBoundingClientRect().top + log.clientTop + topClearance
     );
     prevMsgCountRef.current = msgCount;
     prevLayoutRef.current = layoutKey;
@@ -32878,6 +32788,20 @@ function observeTableScrollEdges(root) {
   };
 }
 
+// src/viewport-fit.ts
+function fitVisualViewport(viewport, style) {
+  if (!viewport) return () => {
+  };
+  const apply2 = () => style.setProperty("--app-height", `${viewport.height}px`);
+  apply2();
+  viewport.addEventListener("resize", apply2);
+  viewport.addEventListener("scroll", apply2);
+  return () => {
+    viewport.removeEventListener("resize", apply2);
+    viewport.removeEventListener("scroll", apply2);
+  };
+}
+
 // src/index.tsx
 function StartupScreen({ state }) {
   const title = {
@@ -32910,12 +32834,7 @@ function sortGroups(list) {
 function setupViewportFit() {
   const vv = window.visualViewport;
   if (!vv) return;
-  const apply2 = () => {
-    document.documentElement.style.setProperty("--app-height", vv.height + "px");
-  };
-  apply2();
-  vv.addEventListener("resize", apply2);
-  vv.addEventListener("scroll", apply2);
+  fitVisualViewport(vv, document.documentElement.style);
   document.addEventListener("focusin", (ev) => {
     const t4 = ev.target;
     if (t4?.id === "chat-input") {

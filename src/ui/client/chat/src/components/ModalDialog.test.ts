@@ -5,7 +5,6 @@ import { ModalDialog } from './ModalDialog';
 interface TestDialog {
   showModal(): void;
   close(): void;
-  querySelector(): FocusTarget;
 }
 
 const hooks = vi.hoisted(() => ({
@@ -35,20 +34,17 @@ beforeEach(() => {
   opener = new FocusTarget();
   vi.stubGlobal('HTMLElement', FocusTarget);
   vi.stubGlobal('document', { body: {}, activeElement: opener });
-  hooks.dialog = { showModal, close, querySelector: () => initial };
+  hooks.dialog = { showModal, close };
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe('native modal dialog shell', () => {
-  it('uses the browser modal lifecycle and restores focus before restoring the reading position', () => {
-    const restore = vi.fn(() => expect(opener.focus).toHaveBeenCalledWith({ preventScroll: true }));
+  it('uses the browser modal lifecycle and restores focus without scrolling', () => {
     const node = ModalDialog({
       title: 'Message',
       ariaLabel: 'Full message',
       onClose: vi.fn(),
       children: 'Body',
-      initialFocus: '.message-reader-body',
-      onAfterClose: restore,
     });
     expect(node.type).toBe('dialog');
     expect(node.props['aria-label']).toBe('Full message');
@@ -56,11 +52,10 @@ describe('native modal dialog shell', () => {
     expect(node.props.children.props.role).toBe('presentation');
     const dispose = hooks.effects[0]();
     expect(showModal).toHaveBeenCalledOnce();
-    expect(initial.focus).toHaveBeenCalledWith({ preventScroll: true });
     expect(dispose).toBeTypeOf('function');
     if (typeof dispose === 'function') dispose();
     expect(close).toHaveBeenCalledOnce();
-    expect(restore).toHaveBeenCalledOnce();
+    expect(opener.focus).toHaveBeenCalledWith({ preventScroll: true });
   });
 
   it('routes Escape only to the active modal and respects disabled closing', () => {
@@ -83,7 +78,7 @@ describe('native modal dialog shell', () => {
     expect(opener.focus).not.toHaveBeenCalled();
   });
 
-  it('keeps reader input out of the surrounding transcript navigation', () => {
+  it('keeps modal input out of the surrounding transcript navigation', () => {
     const node = ModalDialog({ title: 'Message', onClose: vi.fn(), children: 'Body' });
     for (const name of ['onClick', 'onKeyDown', 'onWheel', 'onTouchMove', 'onPointerDown'] as const) {
       const event = { stopPropagation: vi.fn() };
@@ -92,7 +87,7 @@ describe('native modal dialog shell', () => {
     }
   });
 
-  it('returns focus to the transcript if resizing removed the need for the reader button', () => {
+  it('returns focus to the transcript if the opener can no longer receive focus', () => {
     const viewport = new FocusTarget();
     opener.parentElement = { closest: () => viewport };
     ModalDialog({ title: 'Message', onClose: vi.fn(), children: 'Body' });
