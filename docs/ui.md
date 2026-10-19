@@ -455,6 +455,21 @@ question-dock and reconnecting prompts retain their specific wording.
 
 #### Access and file browsing
 
+**Full-screen previews.** The file-preview toolbar offers **Full screen preview**
+for documents, source files, images, PDFs, HTML pages and attachments, audio,
+video, and unsupported/error previews. It opens the same dialog chrome as
+**My Profile**: edge-to-edge on mobile and a large centered panel on desktop.
+The toolbar, breadcrumbs, and metadata are hidden in full-screen mode, leaving
+the content and dialog header. Content has no outer pane margin or border;
+embedded previews run flush to the content area's edges. Readable text, source,
+editors, and lyrics retain internal padding and a centered `80ch` maximum width;
+images, embedded pages, PDFs, and media can use the available space.
+The same preview stays mounted while switching modes, preserving unsaved
+edits, media position, embedded-page state, and expanded metadata. The dialog's
+Close button, Escape, or Browser Back returns to the inline preview without
+discarding an edit. Closing the file also exits the
+dialog. Returning inline restores the toolbar, breadcrumbs, and metadata.
+
 **Access model.** A user sees an agent group if either:
 
 - the user has an `owner` or `admin` role for the group (or globally), or

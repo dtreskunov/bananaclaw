@@ -8,7 +8,7 @@ import {
   previewBlock, uploadItems, threadId, pinnedContext, groupId, groups,
   fileSearchOpen, fileSearchRoot, fileSearchQuery, fileSearchResults,
   fileSearchLoading, fileSearchError, fileSearchTruncated, fileSearchSelectedPath,
-  paneOpen,
+  paneOpen, drawerOpen, isMobile,
 } from '../state';
 import {
   navTree, navFile, closePreview, togglePinnedFile, loadTree, selectFile,
@@ -26,6 +26,7 @@ import { MediaPlayer } from './MediaPlayer';
 import { LyricsPanel } from './LyricsPanel';
 import { PrivateWebView } from './PrivateWebView';
 import { ZoomableImage } from './ZoomableImage';
+import { FilePreviewDialog } from './FilePreviewDialog';
 import './ZoomableImage.css';
 import { requestChoice, requestConfirm } from './PromptModal';
 import { showToast } from './Toast';
@@ -232,10 +233,14 @@ function Crumb({
   editor,
   uploadInputRef,
   searchInputRef,
+  previewing,
+  onOpenFullScreen,
 }: {
   editor: PreviewEditorState;
   uploadInputRef: RefObject<HTMLInputElement>;
   searchInputRef: RefObject<HTMLInputElement>;
+  previewing: boolean;
+  onOpenFullScreen: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const fp = editor.creating ? editor.path : filePath.value;
@@ -303,6 +308,20 @@ function Crumb({
     loadTree(treePath.peek()).catch(console.error);
   };
   const refreshLabel = fileSearchOpen.value ? 'Refresh search' : 'Refresh folder';
+  const fullScreenButton = previewing ? (
+    <button
+      type="button"
+      class="rail-control-btn fullscreen-preview-btn"
+      title="Full screen preview"
+      aria-label="Full screen preview"
+      aria-haspopup="dialog"
+      onClick={onOpenFullScreen}
+    >
+      <svg class="preview-fullscreen-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" />
+      </svg>
+    </button>
+  ) : null;
   let acc = '';
   return (
     <>
@@ -325,6 +344,7 @@ function Crumb({
               disabled={editor.saving}
               onClick={() => { editor.cancelEdit().catch(console.error); }}
             >{'\u00D7'}</button>
+            {fullScreenButton}
           </>
         ) : externalPreview ? (
           <>
@@ -345,6 +365,7 @@ function Crumb({
                 aria-label="Open original attachment"
               >{'\u2197'}</a>
             ) : null}
+            {fullScreenButton}
           </>
         ) : previewEntry ? (
           <>
@@ -370,6 +391,7 @@ function Crumb({
               aria-label="Refresh file"
               onClick={() => { selectFile(previewEntry).catch(console.error); }}
             >{'\u21BB'}</button>
+            {fullScreenButton}
             <ActionsMenu
               mode="entry"
               entry={previewEntry}
@@ -722,7 +744,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
 
   const isAudio = p.kind === 'audio';
   const isVideo = p.kind === 'video';
-  const isEmbedded = p.kind === 'image' || p.kind === 'pdf' || p.kind === 'html';
+  const isEmbedded = !editor.editing && (p.kind === 'image' || p.kind === 'pdf' || p.kind === 'html');
   const player = (isAudio || isVideo)
     ? <MediaPlayer kind={p.kind} url={p.url || ''} name={p.name || ''} floating={isAudio} />
     : null;
@@ -781,6 +803,16 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
 export function FilesPane() {
   const editor = usePreviewEditor();
   const previewing = !!previewBlock.value || editor.editing;
+  const [fullscreen, setFullscreen] = useState(false);
+  const expanded = fullscreen && previewing;
+  useEffect(() => {
+    if (!previewing) setFullscreen(false);
+  }, [previewing]);
+  const exitFullScreen = (): void => {
+    setFullscreen(false);
+    if (isMobile.value) drawerOpen.files.value = true;
+    else paneOpen.files.value = true;
+  };
   const toolbarUploadRef = useRef<HTMLInputElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const listingUploadRef = useRef<HTMLInputElement | null>(null);
@@ -877,10 +909,15 @@ export function FilesPane() {
       paneKey="files"
       name="files-pane"
       label="Files"
-      extraClass={previewing ? 'previewing' : ''}
+      extraClass={(previewing ? 'previewing' : '') + (expanded ? ' file-preview-expanded' : '')}
       collapsedActions={collapsedActions}
     >
       <div class="files-body" ref={bodyRef}>
+        <FilePreviewDialog
+          expanded={expanded}
+          title={(editor.creating ? editor.path?.split('/').at(-1) : previewBlock.value?.name || filePath.value?.split('/').at(-1)) || 'File preview'}
+          onClose={exitFullScreen}
+        >
         <input
           type="file"
           id="upload-input"
@@ -904,7 +941,13 @@ export function FilesPane() {
             ev.currentTarget.value = '';
           }}
         />
-        <Crumb editor={editor} uploadInputRef={toolbarUploadRef} searchInputRef={searchInputRef} />
+        <Crumb
+          editor={editor}
+          uploadInputRef={toolbarUploadRef}
+          searchInputRef={searchInputRef}
+          previewing={previewing}
+          onOpenFullScreen={() => setFullscreen(true)}
+        />
         <UploadStrip />
         {fileSearchOpen.value
           ? <SearchListing onEdit={editEntry} onNewFile={beginCreateIn} onUpload={chooseUploadTo} />
@@ -913,6 +956,7 @@ export function FilesPane() {
           Drag &amp; drop files here to upload to <code id="dropzone-path">{displayWorkspacePath(treePath.value)}</code>
         </div>
         <Preview editor={editor} />
+        </FilePreviewDialog>
       </div>
     </Pane>
   );

@@ -14,6 +14,8 @@
 .files-pane .files-actions { flex: 0 0 auto; justify-content: stretch; overflow: visible; }
 .files-pane .files-actions .close-preview { margin-left: auto; }
 .files-pane .files-actions .action-menu { display: flex; }
+.files-pane .preview-fullscreen-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.nc-pane.files-pane.file-preview-expanded > .files-body { display: flex; }
 .files-pane .breadcrumb .crumb {
   cursor: pointer; text-decoration: none;
 }

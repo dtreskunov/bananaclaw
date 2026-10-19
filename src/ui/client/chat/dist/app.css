@@ -4371,6 +4371,18 @@ nav.tab-bar-strip.group-strip {
 .files-pane .files-actions .action-menu {
   display: flex;
 }
+.files-pane .preview-fullscreen-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.nc-pane.files-pane.file-preview-expanded > .files-body {
+  display: flex;
+}
 .files-pane .breadcrumb .crumb {
   cursor: pointer;
   text-decoration: none;
@@ -5208,6 +5220,70 @@ body.private-web-page,
     height: min(68vh, 680px);
     min-height: 320px;
   }
+}
+
+/* src/components/FilePreviewDialog.css */
+.file-preview-host:not(.is-expanded),
+.file-preview-host:not(.is-expanded) .file-preview-backdrop,
+.file-preview-host:not(.is-expanded) .file-preview-panel {
+  display: contents;
+}
+.file-preview-host:not(.is-expanded) .mobile-dialog-head {
+  display: none;
+}
+.file-preview-host.is-expanded {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: var(--app-height, 100dvh);
+  max-width: none;
+  max-height: none;
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: transparent;
+  color: var(--surface-fg);
+}
+.file-preview-host::backdrop {
+  background: transparent;
+}
+.file-preview-host.is-expanded > .file-preview-backdrop {
+  position: absolute;
+  inset: 0;
+}
+.file-preview-host.is-expanded .file-preview-panel {
+  height: 100%;
+  max-height: 100%;
+}
+.file-preview-host.is-expanded :is(.files-actions, .path-breadcrumb, .preview-meta) {
+  display: none;
+}
+.file-preview-host.is-expanded .preview-body {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  overscroll-behavior: contain;
+}
+.file-preview-host.is-expanded .private-web-view {
+  border: 0;
+}
+.file-preview-host.is-expanded .preview-body > :is(.markdown-preview, pre, .file-editor, .empty, .preview-lyrics) {
+  width: 100%;
+  max-width: 80ch;
+  margin-inline: auto;
+  padding: var(--preview-padding);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.file-preview-host.is-expanded .preview-body > .markdown-preview {
+  overflow-wrap: anywhere;
+}
+.file-preview-backdrop {
+  overscroll-behavior: contain;
 }
 
 /* src/components/AppearanceSettings.css */

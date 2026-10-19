@@ -26278,6 +26278,91 @@ function PrivateWebView({ groupId: groupId2, path, title, fragment }) {
   ) });
 }
 
+// src/modalBackButton.ts
+var MARKER = "__modal_back__";
+function useBackButtonCloses(open, onClose) {
+  const pushedRef = A2(false);
+  y2(() => {
+    if (!open) {
+      if (pushedRef.current) {
+        pushedRef.current = false;
+        history.back();
+      }
+      return void 0;
+    }
+    history.pushState({ [MARKER]: true }, "", location.href);
+    pushedRef.current = true;
+    const onPop = () => {
+      pushedRef.current = false;
+      onClose();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [open]);
+}
+
+// src/components/FilePreviewDialog.tsx
+function FilePreviewDialog({ expanded, title, onClose, children }) {
+  const ref = A2(null);
+  const opener = A2(null);
+  useBackButtonCloses(expanded, onClose);
+  _2(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (expanded) {
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      dialog.close();
+      dialog.showModal();
+    } else if (dialog.matches(":modal")) {
+      dialog.close();
+      dialog.show();
+      if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+      opener.current = null;
+    }
+  }, [expanded]);
+  _2(() => {
+    const dialog = ref.current;
+    return () => {
+      dialog?.close();
+    };
+  }, []);
+  const stopModalEvent = (event) => {
+    if (expanded) event.stopPropagation();
+  };
+  return /* @__PURE__ */ u4(
+    "dialog",
+    {
+      ref,
+      open: true,
+      class: `file-preview-host${expanded ? " is-expanded" : ""}`,
+      role: expanded ? "dialog" : "presentation",
+      "aria-modal": expanded ? "true" : void 0,
+      "aria-label": expanded ? `Full screen preview: ${title}` : void 0,
+      onClick: stopModalEvent,
+      onWheel: stopModalEvent,
+      onTouchMove: stopModalEvent,
+      onPointerDown: stopModalEvent,
+      onCancel: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (expanded) onClose();
+      },
+      children: /* @__PURE__ */ u4(
+        MobileDialog,
+        {
+          title,
+          onClose,
+          role: "presentation",
+          className: "file-preview-panel",
+          backdropClassName: "file-preview-backdrop",
+          maxWidth: "1280px",
+          children
+        }
+      )
+    }
+  );
+}
+
 // node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
@@ -26539,7 +26624,9 @@ function FileCreateMenu({ directory, uploadInputRef, onNewFile, triggerClassName
 function Crumb({
   editor,
   uploadInputRef,
-  searchInputRef
+  searchInputRef,
+  previewing,
+  onOpenFullScreen
 }) {
   const ref = A2(null);
   const fp = editor.creating ? editor.path : filePath.value;
@@ -26599,6 +26686,18 @@ function Crumb({
     loadTree(treePath.peek()).catch(console.error);
   };
   const refreshLabel = fileSearchOpen.value ? "Refresh search" : "Refresh folder";
+  const fullScreenButton = previewing ? /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "rail-control-btn fullscreen-preview-btn",
+      title: "Full screen preview",
+      "aria-label": "Full screen preview",
+      "aria-haspopup": "dialog",
+      onClick: onOpenFullScreen,
+      children: /* @__PURE__ */ u4("svg", { class: "preview-fullscreen-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: /* @__PURE__ */ u4("path", { d: "M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" }) })
+    }
+  ) : null;
   let acc = "";
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("div", { class: "files-actions rail-actions-row rail-divider-row" + (fileSearchOpen.value && !fp ? " searching" : ""), children: editor.editing ? /* @__PURE__ */ u4(k, { children: [
@@ -26629,7 +26728,8 @@ function Crumb({
           },
           children: "\xD7"
         }
-      )
+      ),
+      fullScreenButton
     ] }) : externalPreview ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4(
         "button",
@@ -26653,7 +26753,8 @@ function Crumb({
           "aria-label": "Open original attachment",
           children: "\u2197"
         }
-      ) : null
+      ) : null,
+      fullScreenButton
     ] }) : previewEntry ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4(
         "button",
@@ -26691,6 +26792,7 @@ function Crumb({
           children: "\u21BB"
         }
       ),
+      fullScreenButton,
       /* @__PURE__ */ u4(
         ActionsMenu,
         {
@@ -27021,7 +27123,7 @@ function Preview({ editor }) {
   const meta = metaRows.length > 0 ? renderMetaPanel(metaRows) : null;
   const isAudio = p5.kind === "audio";
   const isVideo = p5.kind === "video";
-  const isEmbedded = p5.kind === "image" || p5.kind === "pdf" || p5.kind === "html";
+  const isEmbedded = !editor.editing && (p5.kind === "image" || p5.kind === "pdf" || p5.kind === "html");
   const player = isAudio || isVideo ? /* @__PURE__ */ u4(MediaPlayer, { kind: p5.kind, url: p5.url || "", name: p5.name || "", floating: isAudio }) : null;
   const lyrics = p5.lyrics ? /* @__PURE__ */ u4(LyricsPanel, { text: p5.lyrics }) : null;
   let body = null;
@@ -27077,6 +27179,16 @@ function Preview({ editor }) {
 function FilesPane() {
   const editor = usePreviewEditor();
   const previewing = !!previewBlock.value || editor.editing;
+  const [fullscreen, setFullscreen] = h2(false);
+  const expanded = fullscreen && previewing;
+  y2(() => {
+    if (!previewing) setFullscreen(false);
+  }, [previewing]);
+  const exitFullScreen = () => {
+    setFullscreen(false);
+    if (isMobile.value) drawerOpen.files.value = true;
+    else paneOpen.files.value = true;
+  };
   const toolbarUploadRef = A2(null);
   const searchInputRef = A2(null);
   const listingUploadRef = A2(null);
@@ -27191,47 +27303,64 @@ function FilesPane() {
       paneKey: "files",
       name: "files-pane",
       label: "Files",
-      extraClass: previewing ? "previewing" : "",
+      extraClass: (previewing ? "previewing" : "") + (expanded ? " file-preview-expanded" : ""),
       collapsedActions,
-      children: /* @__PURE__ */ u4("div", { class: "files-body", ref: bodyRef, children: [
-        /* @__PURE__ */ u4(
-          "input",
-          {
-            type: "file",
-            id: "upload-input",
-            multiple: true,
-            hidden: true,
-            ref: toolbarUploadRef,
-            onChange: (ev) => {
-              const files = ev.currentTarget.files;
-              if (files && files.length) uploadFiles(files);
-              ev.currentTarget.value = "";
-            }
-          }
-        ),
-        /* @__PURE__ */ u4(
-          "input",
-          {
-            type: "file",
-            multiple: true,
-            hidden: true,
-            ref: listingUploadRef,
-            onChange: (ev) => {
-              const files = ev.currentTarget.files;
-              if (files && files.length) uploadFiles(files, listingUploadDirectory.current);
-              ev.currentTarget.value = "";
-            }
-          }
-        ),
-        /* @__PURE__ */ u4(Crumb, { editor, uploadInputRef: toolbarUploadRef, searchInputRef }),
-        /* @__PURE__ */ u4(UploadStrip, {}),
-        fileSearchOpen.value ? /* @__PURE__ */ u4(SearchListing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }) : /* @__PURE__ */ u4(Listing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }),
-        /* @__PURE__ */ u4("div", { class: "drop-hint admin-only", id: "dropzone", children: [
-          "Drag & drop files here to upload to ",
-          /* @__PURE__ */ u4("code", { id: "dropzone-path", children: displayWorkspacePath(treePath.value) })
-        ] }),
-        /* @__PURE__ */ u4(Preview, { editor })
-      ] })
+      children: /* @__PURE__ */ u4("div", { class: "files-body", ref: bodyRef, children: /* @__PURE__ */ u4(
+        FilePreviewDialog,
+        {
+          expanded,
+          title: (editor.creating ? editor.path?.split("/").at(-1) : previewBlock.value?.name || filePath.value?.split("/").at(-1)) || "File preview",
+          onClose: exitFullScreen,
+          children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "file",
+                id: "upload-input",
+                multiple: true,
+                hidden: true,
+                ref: toolbarUploadRef,
+                onChange: (ev) => {
+                  const files = ev.currentTarget.files;
+                  if (files && files.length) uploadFiles(files);
+                  ev.currentTarget.value = "";
+                }
+              }
+            ),
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "file",
+                multiple: true,
+                hidden: true,
+                ref: listingUploadRef,
+                onChange: (ev) => {
+                  const files = ev.currentTarget.files;
+                  if (files && files.length) uploadFiles(files, listingUploadDirectory.current);
+                  ev.currentTarget.value = "";
+                }
+              }
+            ),
+            /* @__PURE__ */ u4(
+              Crumb,
+              {
+                editor,
+                uploadInputRef: toolbarUploadRef,
+                searchInputRef,
+                previewing,
+                onOpenFullScreen: () => setFullscreen(true)
+              }
+            ),
+            /* @__PURE__ */ u4(UploadStrip, {}),
+            fileSearchOpen.value ? /* @__PURE__ */ u4(SearchListing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }) : /* @__PURE__ */ u4(Listing, { onEdit: editEntry, onNewFile: beginCreateIn, onUpload: chooseUploadTo }),
+            /* @__PURE__ */ u4("div", { class: "drop-hint admin-only", id: "dropzone", children: [
+              "Drag & drop files here to upload to ",
+              /* @__PURE__ */ u4("code", { id: "dropzone-path", children: displayWorkspacePath(treePath.value) })
+            ] }),
+            /* @__PURE__ */ u4(Preview, { editor })
+          ]
+        }
+      ) })
     }
   );
 }
@@ -27274,29 +27403,6 @@ function isStandalone() {
     return true;
   }
   return navigator.standalone === true;
-}
-
-// src/modalBackButton.ts
-var MARKER = "__modal_back__";
-function useBackButtonCloses(open, onClose) {
-  const pushedRef = A2(false);
-  y2(() => {
-    if (!open) {
-      if (pushedRef.current) {
-        pushedRef.current = false;
-        history.back();
-      }
-      return void 0;
-    }
-    history.pushState({ [MARKER]: true }, "", location.href);
-    pushedRef.current = true;
-    const onPop = () => {
-      pushedRef.current = false;
-      onClose();
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, [open]);
 }
 
 // src/components/AppearanceSettings.tsx
