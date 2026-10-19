@@ -103,6 +103,44 @@ describe('latest trace headline', () => {
 });
 
 describe('model time versus wall time', () => {
+  it.each(['', ' \n', 'unknown', 'Infinity'])('does not invent tool runtime from an invalid timestamp %j', (ts) => {
+    const activity = [
+      {
+        ordinal: 0,
+        ts,
+        timelinePosition: 1,
+        text: JSON.stringify({ kind: 'tool', id: 'legacy', tool: 'bash', status: 'running' }),
+      },
+    ];
+    expect(turnRowView({ ...testTurn, activity }, start + 5000)).toMatchObject({
+      elapsedMs: 5000,
+      toolCallMs: 0,
+    });
+    activity[0].text = JSON.stringify({
+      kind: 'tool',
+      id: 'legacy',
+      tool: 'bash',
+      status: 'completed',
+      durationMs: 1200,
+    });
+    expect(turnRowView({ ...testTurn, activity }, start + 5000).toolCallMs).toBe(1200);
+    expect(turnRowView(settled({ activity }), start + 5000).toolCallMs).toBe(1200);
+  });
+
+  it('keeps epoch zero as a valid tool start and does not count future starts before now', () => {
+    const activity = [
+      {
+        ordinal: 0,
+        ts: '0',
+        timelinePosition: 1,
+        text: JSON.stringify({ kind: 'tool', id: 'call', tool: 'bash', status: 'running' }),
+      },
+    ];
+    expect(turnRowView({ ...testTurn, activity }, 1000).toolCallMs).toBe(1000);
+    activity[0].ts = '2000';
+    expect(turnRowView({ ...testTurn, activity }, 1000).toolCallMs).toBe(0);
+  });
+
   it('sums independently measured call timing, not provider wall duration', () => {
     const turn = settled({
       usage: [

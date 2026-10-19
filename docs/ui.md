@@ -354,6 +354,10 @@ extend to the current time. Two overlapping 3-second commands spanning 4 seconds
 therefore show 4 seconds, not 6. Reported durations without usable timestamps
 remain included, but their overlap cannot be inferred. Chapter AI time remains
 the sum of its children's attributed model time, plus any live tail.
+Blank or malformed activity timestamps never start a live stopwatch or supply
+an inferred epoch-zero interval. Recorded durations remain included in chapter
+and response totals when their position is unknown; a numeric `0` is a valid
+timestamp. Model calls without a usable timestamp do not end preparation.
 
 Chapter wording follows its latest step: **Editing files / Edited files**
 and **Running command / Ran command**. Repeated groups append **· N times**;

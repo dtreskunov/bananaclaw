@@ -1,4 +1,5 @@
 import { parseStep, type ModelTime, type TraceLine, type TraceStep } from './activity-presentation.js';
+import { activityTimestamp } from './activity-timing.js';
 import type { ConversationTurn } from './conversation.js';
 
 export const THINKING_TEXT = 'Thinking\u2026';
@@ -71,7 +72,7 @@ export function turnModelTime(turn: ConversationTurn): Map<number, ModelTime> {
   if (!Number.isFinite(startedAt)) return times;
   const live = turn.phase !== 'settled';
   const entries = turn.activity
-    .map((line) => ({ ordinal: line.ordinal, at: Number(line.ts), step: parseStep(line.text) }))
+    .map((line) => ({ ordinal: line.ordinal, at: activityTimestamp(line.ts), step: parseStep(line.text) }))
     .filter(({ at }) => Number.isFinite(at))
     .sort((a, b) => a.at - b.at);
   const calls = entries.filter(({ step }) => step.kind === 'model');
@@ -132,7 +133,7 @@ export function withModelTime(
   // The readiness marker (or first model call) ends preparation.
   const callStarts = turn.activity.flatMap(({ ts, text }) => {
     const step = parseStep(text);
-    const at = Number(ts);
+    const at = activityTimestamp(ts);
     return step.kind === 'model' && Number.isFinite(at) ? [at - (step.durationMs ?? 0)] : [];
   });
   const prepared = callStarts.length ? { durationMs: Math.max(0, Math.min(...callStarts) - startedAt) } : {};

@@ -204,6 +204,16 @@ describe('model time', () => {
   });
   const settle = (activity: ConversationTurn['activity'], endAt: number) =>
     timed(activity, { phase: 'settled', outcome: 'replied', endedAt: new Date(t0 + endAt).toISOString() });
+  it.each(['', ' \n', 'unknown'])('does not end preparation on an unplaced model call %j', (ts) => {
+    const activity = [{ ...call(0, 1000, 500), ts }];
+    const value = timed(activity);
+    const times = turnModelTime(value);
+    expect(times.size).toBe(0);
+    const [first] = withModelTime(value, activity, times, true);
+    expect(parseStep(first.text)).toMatchObject({ text: 'Preparing…', status: 'running' });
+    expect(parseStep(first.text).durationMs).toBeUndefined();
+  });
+
   it('ticks nothing before the first model call can start', () => {
     expect(Object.fromEntries(turnModelTime(timed([])))).toEqual({});
     expect(Object.fromEntries(turnModelTime(timed([tool(0, 2000, 'completed', 3000)])))).toEqual({});

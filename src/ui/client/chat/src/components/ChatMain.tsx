@@ -34,6 +34,7 @@ import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import { isTurnStartStep, QUEUED_TEXT, turnRequestedAt } from '../../../../shared/conversation-activity';
+import { activityTimestamp } from '../../../../shared/activity-timing';
 import {
   activityChapters, activityStepCount, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, TRACE_STEP_THRESHOLD_MS,
@@ -111,8 +112,7 @@ function fmtTok(n: number): string {
 /** Format an activity line's epoch-ms timestamp as a short wall-clock time.
  *  Empty / non-numeric (legacy lines) render no timestamp. */
 function fmtActivityTs(ts: string): string {
-  if (!ts) return '';
-  const n = Number(ts);
+  const n = activityTimestamp(ts);
   if (!Number.isFinite(n)) return '';
   return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
@@ -184,9 +184,9 @@ function modelChipTime(modelTime: ModelTime | undefined): ChipTime | null {
 }
 
 function rowTimes(line: ActivityLine, step: TraceStep, live: boolean): { cpu: ChipTime | null; ai: ChipTime | null } {
-  const startedAt = Number(line.ts);
+  const startedAt = activityTimestamp(line.ts);
   const cpu: ChipTime | null = execRunning(step, live)
-    ? line.ts && Number.isFinite(startedAt) ? { since: startedAt } : null
+    ? Number.isFinite(startedAt) ? { since: startedAt } : null
     : isTimedStep(step) && typeof step.durationMs === 'number' ? { ms: step.durationMs } : null;
   return { cpu: shownChipTime(cpu), ai: shownChipTime(modelChipTime(line.modelTime)) };
 }
@@ -211,8 +211,8 @@ function chapterTimes(entries: TraceEntry[], live: boolean) {
   for (const { line, step } of entries) {
     if (isTimedStep(step)) {
       timed = true;
-      const startedAt = Number(line.ts);
-      if (line.ts && Number.isFinite(startedAt)) {
+      const startedAt = activityTimestamp(line.ts);
+      if (Number.isFinite(startedAt)) {
         if (execRunning(step, live)) spans.push([startedAt, Infinity]);
         else if (step.durationMs !== undefined) spans.push([startedAt, startedAt + step.durationMs]);
       } else exec += step.durationMs ?? 0;
@@ -242,8 +242,8 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
   const { line, step, headline } = entry;
   const summary = headlineSummary(headline);
   const running = live && isTimedStep(step) && step.status === 'running';
-  const startedAt = Number(line.ts);
-  const hasStartedAt = !!line.ts && Number.isFinite(startedAt);
+  const startedAt = activityTimestamp(line.ts);
+  const hasStartedAt = Number.isFinite(startedAt);
   const code = open ? entry.body : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
   const statusText = stepMeta(step, elapsedMs);

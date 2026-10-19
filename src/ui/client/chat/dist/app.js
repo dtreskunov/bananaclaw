@@ -18437,6 +18437,11 @@ function activityChapters(lines, live = false) {
   });
 }
 
+// ../../shared/activity-timing.ts
+function activityTimestamp(ts) {
+  return ts.trim() ? Number(ts) : NaN;
+}
+
 // ../../shared/conversation-activity.ts
 var THINKING_TEXT = "Thinking\u2026";
 var QUEUED_TEXT = "Queued\u2026";
@@ -18489,7 +18494,7 @@ function turnModelTime(turn2) {
   const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
   if (!Number.isFinite(startedAt2)) return times;
   const live = turn2.phase !== "settled";
-  const entries = turn2.activity.map((line) => ({ ordinal: line.ordinal, at: Number(line.ts), step: parseStep(line.text) })).filter(({ at }) => Number.isFinite(at)).sort((a4, b5) => a4.at - b5.at);
+  const entries = turn2.activity.map((line) => ({ ordinal: line.ordinal, at: activityTimestamp(line.ts), step: parseStep(line.text) })).filter(({ at }) => Number.isFinite(at)).sort((a4, b5) => a4.at - b5.at);
   const calls = entries.filter(({ step }) => step.kind === "model");
   const steps = entries.filter(({ step }) => step.kind !== "model").map(({ ordinal, at, step }) => {
     const open = live && (step.kind === "tool" || step.kind === "compaction") && (step.status === "running" || step.status === "pending");
@@ -18524,7 +18529,7 @@ function withModelTime(turn2, lines, times, hostsStart) {
   const modelTime = times.get(TURN_START);
   const callStarts = turn2.activity.flatMap(({ ts, text: text3 }) => {
     const step2 = parseStep(text3);
-    const at = Number(ts);
+    const at = activityTimestamp(ts);
     return step2.kind === "model" && Number.isFinite(at) ? [at - (step2.durationMs ?? 0)] : [];
   });
   const prepared = callStarts.length ? { durationMs: Math.max(0, Math.min(...callStarts) - startedAt2) } : {};
@@ -22766,14 +22771,19 @@ function hasTurnStats(turn2, view) {
 }
 function toolCallMs(turn2, now) {
   const live = turn2.phase !== "settled";
+  let unplacedMs = 0;
   const spans = turn2.activity.flatMap(({ ts, text: text2 }) => {
     const step = parseStep(text2);
-    const at = Number(ts);
-    if (step.kind !== "tool" || !Number.isFinite(at)) return [];
+    const at = activityTimestamp(ts);
+    if (step.kind !== "tool") return [];
+    if (!Number.isFinite(at)) {
+      unplacedMs += step.durationMs ?? 0;
+      return [];
+    }
     if (step.status === "running") return live ? [[at, Math.max(at, now)]] : [];
     return step.durationMs !== void 0 ? [[at, at + step.durationMs]] : [];
   }).sort((a4, b5) => a4[0] - b5[0]);
-  let total = 0;
+  let total = unplacedMs;
   let covered = -Infinity;
   for (const [from, to] of spans) {
     if (to <= covered) continue;
@@ -23754,8 +23764,7 @@ function fmtTok(n3) {
   return String(n3);
 }
 function fmtActivityTs(ts) {
-  if (!ts) return "";
-  const n3 = Number(ts);
+  const n3 = activityTimestamp(ts);
   if (!Number.isFinite(n3)) return "";
   return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -23804,8 +23813,8 @@ function modelChipTime(modelTime) {
   return modelTime.since !== void 0 ? { since: modelTime.since - modelTime.ms } : { ms: modelTime.ms };
 }
 function rowTimes(line, step, live) {
-  const startedAt2 = Number(line.ts);
-  const cpu = execRunning(step, live) ? line.ts && Number.isFinite(startedAt2) ? { since: startedAt2 } : null : isTimedStep(step) && typeof step.durationMs === "number" ? { ms: step.durationMs } : null;
+  const startedAt2 = activityTimestamp(line.ts);
+  const cpu = execRunning(step, live) ? Number.isFinite(startedAt2) ? { since: startedAt2 } : null : isTimedStep(step) && typeof step.durationMs === "number" ? { ms: step.durationMs } : null;
   return { cpu: shownChipTime(cpu), ai: shownChipTime(modelChipTime(line.modelTime)) };
 }
 function isTimedStep(step) {
@@ -23824,8 +23833,8 @@ function chapterTimes(entries, live) {
   for (const { line, step } of entries) {
     if (isTimedStep(step)) {
       timed = true;
-      const startedAt2 = Number(line.ts);
-      if (line.ts && Number.isFinite(startedAt2)) {
+      const startedAt2 = activityTimestamp(line.ts);
+      if (Number.isFinite(startedAt2)) {
         if (execRunning(step, live)) spans.push([startedAt2, Infinity]);
         else if (step.durationMs !== void 0) spans.push([startedAt2, startedAt2 + step.durationMs]);
       } else exec += step.durationMs ?? 0;
@@ -23854,8 +23863,8 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
   const { line, step, headline } = entry;
   const summary = headlineSummary(headline);
   const running = live && isTimedStep(step) && step.status === "running";
-  const startedAt2 = Number(line.ts);
-  const hasStartedAt = !!line.ts && Number.isFinite(startedAt2);
+  const startedAt2 = activityTimestamp(line.ts);
+  const hasStartedAt = Number.isFinite(startedAt2);
   const code = open ? entry.body : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt2) : null;
   const statusText = stepMeta(step, elapsedMs);

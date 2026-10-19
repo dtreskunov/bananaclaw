@@ -8,6 +8,7 @@ import {
   type TraceStep,
 } from '../../../shared/activity-presentation';
 import { terminalOutcomeStep, THINKING_TEXT, turnRequestedAt } from '../../../shared/conversation-activity';
+import { activityTimestamp } from '../../../shared/activity-timing';
 import type { ActiveTurn } from './types';
 
 export interface TraceHeadline {
@@ -89,16 +90,21 @@ export function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean
 
 function toolCallMs(turn: ConversationTurn, now: number): number {
   const live = turn.phase !== 'settled';
+  let unplacedMs = 0;
   const spans = turn.activity
     .flatMap(({ ts, text }): Array<[number, number]> => {
       const step = parseStep(text);
-      const at = Number(ts);
-      if (step.kind !== 'tool' || !Number.isFinite(at)) return [];
+      const at = activityTimestamp(ts);
+      if (step.kind !== 'tool') return [];
+      if (!Number.isFinite(at)) {
+        unplacedMs += step.durationMs ?? 0;
+        return [];
+      }
       if (step.status === 'running') return live ? [[at, Math.max(at, now)]] : [];
       return step.durationMs !== undefined ? [[at, at + step.durationMs]] : [];
     })
     .sort((a, b) => a[0] - b[0]);
-  let total = 0;
+  let total = unplacedMs;
   let covered = -Infinity;
   for (const [from, to] of spans) {
     if (to <= covered) continue;

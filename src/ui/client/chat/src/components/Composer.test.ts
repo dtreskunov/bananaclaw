@@ -3035,7 +3035,7 @@ describe('activity trace chapter following', () => {
     expect(chapterTimeCells([timed('a', '1000', 'completed', 1000), timed('b', '4000', 'running')]).cpu).toEqual({
       since: 3000,
     });
-    for (const ts of ['', 'unknown']) {
+    for (const ts of ['', ' \n', 'unknown']) {
       expect(chapterTimeCells([timed('a', ts, 'completed', 1000), timed('b', '1000', 'completed', 2000)]).cpu).toEqual({
         ms: 3000,
       });
@@ -3077,6 +3077,15 @@ describe('activity trace chapter following', () => {
     const view = row.type(row.props);
     expect(findComponent(view, 'ToolStopButton')).toBeUndefined();
     const { stop, cpu } = rowParts(view);
+    expect(stop).toBeNull();
+    expect(cpu.props.time).toBeNull();
+  });
+
+  it.each([' ', 'unknown'])('shows no timer or Stop for a running call with timestamp %j', (ts) => {
+    const unfinished = { ...line('one', 'running'), ts };
+    const list = ActivityTraceList({ lines: [unfinished], live: true, now: 65_000, turnId: 'turn' });
+    const row = findComponent(list, 'ActivityTraceRow');
+    const { stop, cpu } = rowParts(row.type({ ...row.props, open: true }));
     expect(stop).toBeNull();
     expect(cpu.props.time).toBeNull();
   });
