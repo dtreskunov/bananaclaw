@@ -134,7 +134,7 @@ async function init(): Promise<void> {
   if (parsed && parsed.groupId) chatLoading.value = true;
   render(<App />, app);
   observeTableScrollEdges(app);
-  await applyHash(router).catch((err) => console.error('initial route failed', err));
+  await applyHash(router, { newConversation: true }).catch((err) => console.error('initial route failed', err));
   startSyncPoll();
   try {
     const sp = new URLSearchParams(window.location.search);
@@ -143,7 +143,7 @@ async function init(): Promise<void> {
       sp.delete('settings');
       const q = sp.toString();
       const url = window.location.pathname + (q ? '?' + q : '') + window.location.hash;
-      window.history.replaceState(null, '', url);
+      window.history.replaceState(window.history.state, '', url);
     }
     handleShareTarget();
   } catch { /* ignore */ }
@@ -161,7 +161,7 @@ function handleShareTarget(): void {
   const url = sp.get('url') || '';
   if (!title && !text && !url) {
     // Even if we landed on /share with no params, normalize back to /.
-    if (onShareRoute) window.history.replaceState(null, '', '/ui/chat/' + window.location.hash);
+    if (onShareRoute) window.history.replaceState(window.history.state, '', '/ui/chat/' + window.location.hash);
     return;
   }
   const combined = [title, text, url].filter(Boolean).join('\n').trim();
@@ -180,7 +180,7 @@ function handleShareTarget(): void {
     }, 100);
   }
   const nextPath = onShareRoute ? '/ui/chat/' : window.location.pathname;
-  window.history.replaceState(null, '', nextPath + window.location.hash);
+  window.history.replaceState(window.history.state, '', nextPath + window.location.hash);
 }
 
 init().catch((err) => {

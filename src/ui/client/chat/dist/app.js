@@ -17987,22 +17987,32 @@ function writeHash(replace = false) {
   if (!h5) return;
   if (location.hash !== h5) {
     if (replace) {
-      history.replaceState(null, "", h5);
+      history.replaceState(history.state, "", h5);
+      rememberBlankConversation(h5);
       return;
     }
     refs.suppressHashCount++;
     location.hash = h5;
   }
+  rememberBlankConversation(h5);
+}
+function rememberBlankConversation(hash) {
+  const thread = threads.value.find(
+    (t4) => t4.threadId === threadId.value && t4.channelType === "web" && t4.title === "(new thread)" && !t4.messageCount
+  );
+  if (thread)
+    history.replaceState({ ...history.state, blankConversation: { groupId: groupId.value, thread } }, "", hash);
 }
 function threadCtx(t4) {
   if (!t4) return null;
   if (!t4.channelType || t4.channelType === "web") return null;
   return { channelType: t4.channelType, messagingGroupId: t4.messagingGroupId ?? null, canSend: !!t4.canSend };
 }
-async function applyHash(router2) {
+async function applyHash(router2, options = {}) {
   const parsed = parseHash();
+  const blank = history.state?.blankConversation;
   if (!parsed) {
-    if (groups.value.length) await router2.selectGroup(groups.value[0].id);
+    if (groups.value.length) await router2.selectGroup(groups.value[0].id, options);
     return;
   }
   if (!groups.value.find((g8) => g8.id === parsed.groupId)) {
@@ -18023,11 +18033,13 @@ async function applyHash(router2) {
   const searchRoot = parsed.fileSearchRoot ?? routedParent;
   const restoredSearch = router2.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
   const threadsFresh = groupChanged ? await router2.loadThreads(parsed.groupId) : true;
+  if (parsed.threadId && blank?.groupId === parsed.groupId && blank.thread?.threadId === parsed.threadId && blank.thread.channelType === "web" && blank.thread.title === "(new thread)" && blank.thread.messageCount === 0 && !threads.value.some((t4) => t4.threadId === parsed.threadId))
+    threads.value = [...threads.value, blank.thread];
   const routedThread = parsed.threadId && (!threadsFresh || threads.value.some((t4) => t4.threadId === parsed.threadId)) ? parsed.threadId : null;
   if (routedThread) {
     router2.openChat(parsed.groupId, routedThread, null).catch((err) => console.error("chat open failed", err));
-  } else if (groupChanged || parsed.threadId) {
-    const latest = threads.value.length > 0 ? threads.value[0] : null;
+  } else if (groupChanged || parsed.threadId || options.newConversation) {
+    const latest = options.newConversation && !parsed.threadId ? null : threads.value[0] ?? null;
     if (latest)
       router2.openChat(parsed.groupId, latest.threadId, threadCtx(latest)).catch((err) => console.error("chat open failed", err));
     else router2.openChat(parsed.groupId, null, null).catch((err) => console.error("auto-start chat failed", err));
@@ -20909,7 +20921,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
     return false;
   }
 }
-async function selectGroup(gid) {
+async function selectGroup(gid, options = {}) {
   clearChat();
   n2(() => {
     groupId.value = gid;
@@ -20920,7 +20932,7 @@ async function selectGroup(gid) {
   clearFileSearch();
   const threadsFresh = await loadThreads(gid);
   await loadTree("");
-  const latest = threadsFresh && threads.value.length > 0 ? threads.value[0] : null;
+  const latest = threadsFresh && !options.newConversation && threads.value.length > 0 ? threads.value[0] : null;
   if (latest) {
     openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error("chat open failed", err));
   } else if (threadsFresh) {
@@ -26301,7 +26313,7 @@ function useBackButtonCloses(open, onClose) {
       }
       return void 0;
     }
-    history.pushState({ [MARKER]: true }, "", location.href);
+    history.pushState({ ...history.state, [MARKER]: true }, "", location.href);
     pushedRef.current = true;
     const onPop = () => {
       pushedRef.current = false;
@@ -32834,7 +32846,7 @@ async function init() {
   if (parsed && parsed.groupId) chatLoading.value = true;
   D(/* @__PURE__ */ u4(App, {}), app);
   observeTableScrollEdges(app);
-  await applyHash(router).catch((err) => console.error("initial route failed", err));
+  await applyHash(router, { newConversation: true }).catch((err) => console.error("initial route failed", err));
   startSyncPoll();
   try {
     const sp = new URLSearchParams(window.location.search);
@@ -32843,7 +32855,7 @@ async function init() {
       sp.delete("settings");
       const q5 = sp.toString();
       const url = window.location.pathname + (q5 ? "?" + q5 : "") + window.location.hash;
-      window.history.replaceState(null, "", url);
+      window.history.replaceState(window.history.state, "", url);
     }
     handleShareTarget();
   } catch {
@@ -32856,7 +32868,7 @@ function handleShareTarget() {
   const text2 = sp.get("text") || "";
   const url = sp.get("url") || "";
   if (!title && !text2 && !url) {
-    if (onShareRoute) window.history.replaceState(null, "", "/ui/chat/" + window.location.hash);
+    if (onShareRoute) window.history.replaceState(window.history.state, "", "/ui/chat/" + window.location.hash);
     return;
   }
   const combined = [title, text2, url].filter(Boolean).join("\n").trim();
@@ -32875,7 +32887,7 @@ function handleShareTarget() {
     }, 100);
   }
   const nextPath = onShareRoute ? "/ui/chat/" : window.location.pathname;
-  window.history.replaceState(null, "", nextPath + window.location.hash);
+  window.history.replaceState(window.history.state, "", nextPath + window.location.hash);
 }
 init().catch((err) => {
   if (err instanceof UnauthorizedError) return;

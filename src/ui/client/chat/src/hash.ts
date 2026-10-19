@@ -104,12 +104,22 @@ export function writeHash(replace = false): void {
   if (!h) return;
   if (location.hash !== h) {
     if (replace) {
-      history.replaceState(null, '', h);
+      history.replaceState(history.state, '', h);
+      rememberBlankConversation(h);
       return;
     }
     refs.suppressHashCount++;
     location.hash = h;
   }
+  rememberBlankConversation(h);
+}
+
+function rememberBlankConversation(hash: string): void {
+  const thread = threads.value.find(
+    (t) => t.threadId === threadId.value && t.channelType === 'web' && t.title === '(new thread)' && !t.messageCount,
+  );
+  if (thread)
+    history.replaceState({ ...history.state, blankConversation: { groupId: groupId.value, thread } }, '', hash);
 }
 
 export function threadCtx(t: Thread | null | undefined): ThreadCtx | null {
@@ -118,10 +128,11 @@ export function threadCtx(t: Thread | null | undefined): ThreadCtx | null {
   return { channelType: t.channelType, messagingGroupId: t.messagingGroupId ?? null, canSend: !!t.canSend };
 }
 
-export async function applyHash(router: RouterApi): Promise<void> {
+export async function applyHash(router: RouterApi, options: { newConversation?: boolean } = {}): Promise<void> {
   const parsed = parseHash();
+  const blank: { groupId: string; thread: Thread } | undefined = history.state?.blankConversation;
   if (!parsed) {
-    if (groups.value.length) await router.selectGroup(groups.value[0]!.id);
+    if (groups.value.length) await router.selectGroup(groups.value[0]!.id, options);
     return;
   }
   if (!groups.value.find((g) => g.id === parsed.groupId)) {
@@ -142,6 +153,18 @@ export async function applyHash(router: RouterApi): Promise<void> {
   const searchRoot = parsed.fileSearchRoot ?? routedParent;
   const restoredSearch = router.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
   const threadsFresh = groupChanged ? await router.loadThreads(parsed.groupId) : true;
+  // A blank conversation has no server session yet. Keep it on refresh without
+  // treating arbitrary missing or foreign thread links as new conversations.
+  if (
+    parsed.threadId &&
+    blank?.groupId === parsed.groupId &&
+    blank.thread?.threadId === parsed.threadId &&
+    blank.thread.channelType === 'web' &&
+    blank.thread.title === '(new thread)' &&
+    blank.thread.messageCount === 0 &&
+    !threads.value.some((t) => t.threadId === parsed.threadId)
+  )
+    threads.value = [...threads.value, blank.thread];
 
   // A thread id that isn't in this group's list (stale link, or a group switch
   // that raced a failed refresh) can't be opened here — its socket is rejected
@@ -153,8 +176,8 @@ export async function applyHash(router: RouterApi): Promise<void> {
 
   if (routedThread) {
     router.openChat(parsed.groupId, routedThread, null).catch((err) => console.error('chat open failed', err));
-  } else if (groupChanged || parsed.threadId) {
-    const latest = threads.value.length > 0 ? threads.value[0]! : null;
+  } else if (groupChanged || parsed.threadId || options.newConversation) {
+    const latest = options.newConversation && !parsed.threadId ? null : (threads.value[0] ?? null);
     if (latest)
       router
         .openChat(parsed.groupId, latest.threadId, threadCtx(latest))

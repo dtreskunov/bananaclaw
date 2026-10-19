@@ -386,7 +386,7 @@ export interface PendingQuestionDto {
 }
 
 export interface RouterApi {
-  selectGroup: (gid: string) => Promise<void>;
+  selectGroup: (gid: string, options?: { newConversation?: boolean }) => Promise<void>;
   loadThreads: (gid: string) => Promise<boolean>;
   openChat: (gid: string, tid: string | null, opts: ThreadCtx | null) => Promise<void>;
   clearChat: () => void;

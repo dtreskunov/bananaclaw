@@ -64,6 +64,20 @@ After redeem the browser lands on `/ui/chat/`. Log out via the button in the hea
 
 In-browser chat + read-only browser for the per-agent-group filesystem at `groups/<folder>/`.
 
+#### Startup conversation
+
+A fresh visit without a thread in the URL opens a blank web conversation instead
+of the most recent thread. A group or file link keeps its group, file, and panel
+state while opening the blank conversation. As with **New thread**, an existing
+empty web thread is reused.
+
+The selected thread is written to the URL, so refreshing stays in that
+conversation and explicit thread links still open the requested conversation.
+Blank conversations are remembered in the tab's browser history until a warmup
+or send creates their server session, so refreshing before typing also keeps
+the same conversation.
+Switching agents after startup continues to open that agent's most recent thread.
+
 #### Intent-triggered thread warmup
 
 Opening a new thread only allocates its ID and messaging-group context. The

@@ -1071,7 +1071,7 @@ async function submitChatPacket(
 }
 
 // ── files ───────────────────────────────────────────────────────────
-export async function selectGroup(gid: string): Promise<void> {
+export async function selectGroup(gid: string, options: { newConversation?: boolean } = {}): Promise<void> {
   // Tear down the previous group's thread/WS state synchronously before we
   // start awaiting the new group's thread list. selectGroup sets groupId
   // immediately but only resolves the new threadId later (inside openChat,
@@ -1099,13 +1099,10 @@ export async function selectGroup(gid: string): Promise<void> {
   // the *previous* group. Opening its newest entry pins a foreign thread onto
   // this group, and the server rejects that socket for good while the client
   // retries forever — so wait for a real list instead.
-  const latest = threadsFresh && threads.value.length > 0 ? threads.value[0]! : null;
+  const latest = threadsFresh && !options.newConversation && threads.value.length > 0 ? threads.value[0]! : null;
   if (latest) {
     openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error('chat open failed', err));
   } else if (threadsFresh) {
-    // Brand-new group with no threads — auto-start one so the user lands
-    // in an immediately usable state instead of staring at a disabled
-    // composer ("Reconnecting…") and wondering what to click.
     openChat(gid, null, null).catch((err) => console.error('auto-start chat failed', err));
   } else {
     showToast('Could not load threads', 'err');

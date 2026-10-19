@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyHash, buildHash, parseHash } from './hash';
 import {
   drawerOpen,
@@ -42,6 +42,7 @@ afterEach(() => {
   drawerOpen.files.value = false;
   isMobile.value = false;
   location.hash = '';
+  Object.defineProperty(history, 'state', { configurable: true, value: null });
   vi.restoreAllMocks();
 });
 
@@ -60,6 +61,113 @@ describe('file search hash state', () => {
       fileSearchOpen: true,
       fileSearchRoot: 'docs',
       fileSearchQuery: 'release notes',
+    });
+  });
+
+  describe('startup conversation routing', () => {
+    let router: RouterApi;
+
+    beforeEach(() => {
+      groups.value = [{ id: 'agent' }] as typeof groups.value;
+      threads.value = [{ threadId: 'latest', channelType: 'web' }] as typeof threads.value;
+      router = {
+        selectGroup: vi.fn().mockResolvedValue(undefined),
+        loadThreads: vi.fn().mockResolvedValue(true),
+        openChat: vi.fn().mockResolvedValue(undefined),
+        clearChat: vi.fn(),
+        loadTree: vi.fn().mockResolvedValue(undefined),
+        selectFile: vi.fn().mockResolvedValue(undefined),
+        restoreFileSearch: vi.fn().mockResolvedValue(undefined),
+        notFound: vi.fn(),
+      };
+    });
+
+    it('starts a new conversation in the default group on a fresh visit', async () => {
+      await applyHash(router, { newConversation: true });
+
+      expect(router.selectGroup).toHaveBeenCalledWith('agent', { newConversation: true });
+    });
+
+    it.each(['#g/agent', '#g/agent/d/docs/?files=open', '#g/agent/f/docs/notes.md?files=open'])(
+      'starts a new conversation when the startup URL has no thread: %s',
+      async (hash) => {
+        location.hash = hash;
+
+        await applyHash(router, { newConversation: true });
+
+        expect(router.openChat).toHaveBeenCalledExactlyOnceWith('agent', null, null);
+        expect(paneOpen.files.value).toBe(hash.includes('files=open'));
+        if (hash.includes('/f/'))
+          expect(router.selectFile).toHaveBeenCalledWith({ path: 'docs/notes.md', name: 'notes.md' });
+        else expect(router.loadTree).toHaveBeenCalledWith(hash.includes('/d/') ? 'docs' : '');
+      },
+    );
+
+    it.each(['web', 'telegram'])('resumes an explicit %s thread on startup or refresh', async (channelType) => {
+      location.hash = '#g/agent/t/linked';
+      threads.value = [
+        ...threads.value,
+        { threadId: 'linked', channelType, messagingGroupId: 'messaging-group', canSend: true },
+      ] as typeof threads.value;
+
+      await applyHash(router, { newConversation: true });
+
+      expect(router.openChat).toHaveBeenCalledExactlyOnceWith('agent', 'linked', null);
+    });
+
+    it('leaves group navigation after startup opening the newest thread', async () => {
+      location.hash = '#g/agent';
+
+      await applyHash(router);
+
+      expect(router.openChat).toHaveBeenCalledExactlyOnceWith('agent', 'latest', null);
+    });
+
+    it('preserves the stale-link fallback when the URL specifies a foreign thread', async () => {
+      location.hash = '#g/agent/t/foreign';
+
+      await applyHash(router, { newConversation: true });
+
+      expect(router.openChat).toHaveBeenCalledExactlyOnceWith('agent', 'latest', null);
+    });
+
+    it.each(['other-group', 'agent'])(
+      'does not restore a saved blank conversation with a different group or thread: %s',
+      async (savedGroup) => {
+        location.hash = '#g/agent/t/missing';
+        Object.defineProperty(history, 'state', {
+          configurable: true,
+          value: {
+            blankConversation: {
+              groupId: savedGroup,
+              thread: { threadId: savedGroup === 'agent' ? 'other-thread' : 'missing' },
+            },
+          },
+        });
+
+        await applyHash(router, { newConversation: true });
+
+        expect(router.openChat).toHaveBeenCalledExactlyOnceWith('agent', 'latest', null);
+      },
+    );
+
+    it('does not replace an explicit thread when its list fails to load', async () => {
+      location.hash = '#g/agent/t/linked';
+      vi.mocked(router.loadThreads).mockResolvedValue(false);
+
+      await applyHash(router, { newConversation: true });
+
+      expect(router.openChat).toHaveBeenCalledExactlyOnceWith('agent', 'linked', null);
+    });
+
+    it('does not open a conversation in an inaccessible group', async () => {
+      location.hash = '#g/unknown';
+
+      await applyHash(router, { newConversation: true });
+
+      expect(router.notFound).toHaveBeenCalledWith('No access to group unknown');
+      expect(router.openChat).not.toHaveBeenCalled();
+      expect(router.selectGroup).not.toHaveBeenCalled();
     });
   });
 

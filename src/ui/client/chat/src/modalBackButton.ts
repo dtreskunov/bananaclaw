@@ -34,7 +34,7 @@ export function useBackButtonCloses(open: boolean, onClose: () => void): void {
 
     // Push an entry so the next back press triggers popstate. Reuse the
     // current URL so we don't disturb the chat app's hash routing.
-    history.pushState({ [MARKER]: true }, '', location.href);
+    history.pushState({ ...history.state, [MARKER]: true }, '', location.href);
     pushedRef.current = true;
 
     const onPop = (): void => {
