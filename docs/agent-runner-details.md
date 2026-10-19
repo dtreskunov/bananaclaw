@@ -563,31 +563,6 @@ External MCP tools are loaded on demand by default (`native/tool-search.ts`):
 - The loaded set is rebuilt from the conversation history on each turn: MCP
   tool calls plus `tool_search` results. It keeps the 30 most recently used
   tools, so it needs no extra state and follows forks and edits.
-
-```bash
-ncl groups config set-param --id <group> --key mcp_tool_search --value always
-```
-
-### Native Provider: Stopping one tool
-
-Native queries advertise `supportsToolCancellation` and implement
-`stopTool(toolCallId)`. The turn journal gives each announced/executing call its
-own abort controller, combined with the query's signal. Stopping one call
-aborts only that controller, including a request arriving just before execution.
-Shell tools terminate their own process group; MCP clients cancel only the
-corresponding request without closing the shared server connection.
-
-An interrupted call is persisted as a valid tool-call/error-result pair and
-reported to the model as an unknown outcome with a warning about possible
-external side effects. The model continues within the same turn; other calls,
-steering and queued inputs are untouched. Calls already completed cannot be
-cancelled. Tools that complete despite cancellation retain their actual result.
-Whole-query `abort('user')` and status-row Stop retain whole-turn cancellation.
-
-### Native Provider: Final Message
-
-Other providers end a turn with final text that must wrap each delivery in
-`<message to="name">` blocks, with runner nudges when the wrapping is missing.
   In `always` mode history restoration never triggers discovery: after a
   query/container restart, the agent searches again before calling an external
   tool. Known history tools become available as their server is discovered.
@@ -597,11 +572,11 @@ preparation, and eager MCP discovery, plus per-server connection and complete
 paginated `tools/list` timings. These diagnostics contain server names, counts,
 and durations, not endpoints, headers, arguments, or tool definitions. They do
 not change the UI's authoritative model-readiness timestamp.
-The native provider declares `structuredReplies` and uses a simpler contract:
-**the final message is the reply.**
 
-- The text of the step that ends the turn (a step with no tool calls) is sent
-  verbatim to the conversation being answered.
+```bash
+ncl groups config set-param --id <group> --key mcp_tool_search --value always
+```
+
 #### Removing the native auto MCP mode
 
 `auto` and the catalog-size heuristic have been removed. Groups with no
@@ -623,6 +598,31 @@ not credentials or tool permissions.
   the old size-dependent behavior itself, restore the earlier runner source and
   explicitly set `auto`; this release no longer implements that behavior.
 
+### Native Provider: Stopping one tool
+
+Native queries advertise `supportsToolCancellation` and implement
+`stopTool(toolCallId)`. The turn journal gives each announced/executing call its
+own abort controller, combined with the query's signal. Stopping one call
+aborts only that controller, including a request arriving just before execution.
+Shell tools terminate their own process group; MCP clients cancel only the
+corresponding request without closing the shared server connection.
+
+An interrupted call is persisted as a valid tool-call/error-result pair and
+reported to the model as an unknown outcome with a warning about possible
+external side effects. The model continues within the same turn; other calls,
+steering and queued inputs are untouched. Calls already completed cannot be
+cancelled. Tools that complete despite cancellation retain their actual result.
+Whole-query `abort('user')` and status-row Stop retain whole-turn cancellation.
+
+### Native Provider: Final Message
+
+Other providers end a turn with final text that must wrap each delivery in
+`<message to="name">` blocks, with runner nudges when the wrapping is missing.
+The native provider declares `structuredReplies` and uses a simpler contract:
+**the final message is the reply.**
+
+- The text of the step that ends the turn (a step with no tool calls) is sent
+  verbatim to the conversation being answered.
 - Text written alongside tool calls is working notes and is never delivered.
 - `send_message` (with `to`) covers other destinations and mid-turn updates.
 - `no_reply({ reason })` (`native/reply.ts`) ends the turn without sending
