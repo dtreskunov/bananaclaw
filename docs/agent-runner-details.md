@@ -510,6 +510,31 @@ repeating completed actions.
 
 ### Native Provider: External MCP Tools
 
+Group MCP entries can be configured through the admin CLI for any provider:
+
+```bash
+# Command-based transport (default)
+ncl groups config add-mcp-server --id <group> --name local --command node --args '["server.js"]'
+
+# Streamable HTTP; --transport http is an alias for --type http
+ncl groups config add-mcp-server --id <group> --name remote --type http --url https://example.net/mcp
+
+# Legacy SSE is also available with --type sse
+```
+
+Remote entries accept `--headers '<json-object>'`; stdio accepts `--env` and
+`--args`. `--instructions` and `--timeout <milliseconds>` apply to both. Timeout
+must be an integer from 1000 to 600000 ms; use a longer timeout for MCP calls
+that wait for human approval, leaving execution headroom in the tool's own wait.
+Use only verified credential-manager
+placeholders, never raw secrets in CLI arguments or agent-visible configuration.
+Changing an existing remote URL clears its old headers unless explicitly supplied;
+re-adding the same URL preserves headers, instructions, and timeout. Other server
+entries remain unchanged. Mixed stdio/remote arguments are rejected.
+
+Agent-initiated changes require the existing administrator approval. Restart the
+group afterward to load its updated MCP configuration; no image rebuild is needed.
+
 The native provider (`providers/native.ts`) runs its built-in tools in-process
 and connects to the group's external MCP servers itself
 (`native/mcp-client.ts`). Each discovered tool is exposed as
