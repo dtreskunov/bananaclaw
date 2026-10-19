@@ -448,6 +448,43 @@ describe('theme CSS contract', () => {
     },
   );
 
+  it('uses solid surface text for questions and choices, including hover and keyboard focus', () => {
+    const css = read('./components/ChatMain.css');
+    const dock = css.match(/\.chat-main \.question-dock \{([^}]+)\}/)?.[1];
+    expect(dock).toContain('background: var(--surface-raised)');
+    expect(dock).toContain('color: var(--surface-fg)');
+    const question = css.match(/\.chat-main \.question-prompt-text \{([^}]+)\}/)?.[1];
+    expect(question).toContain('color: var(--surface-fg)');
+    const choice = css.match(/\.chat-main \.question-card-btn \{([^}]+)\}/)?.[1];
+    expect(choice).toContain('color: var(--surface-fg)');
+    expect(choice).toContain('background: var(--surface)');
+    expect(choice).toContain('border: 1px solid currentColor');
+    const hover = css.match(/\.chat-main \.question-card-btn:hover:not\(:disabled\) \{([^}]+)\}/)?.[1];
+    expect(hover).toContain('background: var(--wash-strong)');
+    expect(hover).toContain('color: var(--surface-fg)');
+    const focus = css.match(/\.chat-main \.question-card-btn:focus-visible \{([^}]+)\}/)?.[1];
+    expect(focus).toContain('outline: 2px solid currentColor');
+    expect(focus).toContain('outline-offset: 2px');
+    const disabled = css.match(/\.chat-main \.question-card-btn:disabled \{([^}]+)\}/)?.[1];
+    expect(disabled).toContain('opacity: 0.7');
+  });
+
+  it.each(THEMES.flatMap((theme) => ['light', 'dark'].map((mode) => [theme.id, mode])))(
+    '%s / %s questions and choices meet 4.5:1 in normal, hover and disabled states',
+    (theme, mode) => {
+      const tokens = literals(theme, mode);
+      const surface = theme === 'default' ? (mode === 'light' ? '#ffffff' : '#000000') : tokens['autumn-surface'];
+      const raised = theme === 'default' ? surface : tokens['autumn-raised'];
+      const text = theme === 'default' ? (mode === 'light' ? '#000000' : '#ffffff') : tokens['autumn-text'];
+      const hover = theme === 'default' ? mix('#7f7f7f', raised, 0.18) : mix(text, surface, 0.12);
+      const disabledSurface = mix(surface, raised, 0.7);
+      for (const background of [surface, raised, hover]) {
+        expect(contrast(text, background), `question/choice on ${background}`).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(contrast(mix(text, raised, 0.7), disabledSurface), 'disabled choice').toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
   it('imports every registered theme and keeps OS queries out of components', () => {
     const global = read('./styles/global.css');
     for (const theme of THEMES) {

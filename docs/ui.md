@@ -843,6 +843,10 @@ never render transcript cards. Outstanding questions replace the ordinary
 composer in a bounded, scrollable input dock below the transcript, with choice,
 text and dictation controls, plus an explicit **Skip** button beside the question
 text, without a separate title. Multiple questions keep their recorded order.
+Question text and answer choices use solid theme foreground/surface pairs rather
+than translucent accent text. Choice labels retain at least 4.5:1 contrast in both
+themes and color modes, including hover and disabled states; outlined choices
+also keep a visible keyboard-focus ring.
 Freeform answers use the same textarea, dictation and send controls as ordinary
 composition, including density/width-aware autosizing. Question textareas grow
 to fit the entire answer; only the outer question dock scrolls. The ordinary
