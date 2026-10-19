@@ -1851,13 +1851,14 @@ describe('NativeProvider', () => {
     ]);
   });
 
-  it('discovers and executes a configured external MCP tool', async () => {
+  it.each(['never', false] as const)('discovers and executes a configured external MCP tool with %s', async (mode) => {
     externalMcpToolMode = true;
     const fixture = path.join(import.meta.dir, 'native', 'test-fixtures', 'stdio-mcp.ts');
     const bun = Bun.which('bun');
     if (!bun) throw new Error('bun executable not found');
     const provider = new NativeProvider({
       model: 'local/test-model',
+      modelParams: { mcp_tool_search: mode },
       mcpServers: { Fixture: { command: bun, args: ['run', fixture] } },
     });
     const events = await collect(provider);
@@ -1881,12 +1882,11 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests[1]?.messages)).toContain('echo:from-model');
   });
 
-  function fixtureProvider(mode: 'always' | 'auto' = 'always'): NativeProvider {
+  function fixtureProvider(): NativeProvider {
     const bun = Bun.which('bun');
     if (!bun) throw new Error('bun executable not found');
     return new NativeProvider({
       model: 'local/test-model',
-      modelParams: { mcp_tool_search: mode },
       mcpServers: {
         Fixture: { command: bun, args: ['run', path.join(import.meta.dir, 'native', 'test-fixtures', 'stdio-mcp.ts')] },
       },
@@ -1909,7 +1909,7 @@ describe('NativeProvider', () => {
     expect(requestToolNames(0)).toContain('tool_search');
     expect(requestToolNames(0)).not.toContain('mcp__Fixture__echo_value');
     expect(JSON.stringify(requests[0]?.messages)).toContain(
-      '**Fixture** (3 tools, prefix `mcp__Fixture__`): echo_value, wait, image',
+      '**Fixture** (discover on demand, prefix `mcp__Fixture__`)',
     );
     expect(requestToolNames(1)).toContain('mcp__Fixture__echo_value');
     expect(requestToolNames(1)).not.toContain('mcp__Fixture__wait');
@@ -1921,12 +1921,99 @@ describe('NativeProvider', () => {
       }),
     );
 
-    // The loaded set is rebuilt from history on the next turn.
+    // A resumed query does not reconnect just to restore tools from history.
     const continuation = events.find((event) => event.type === 'init')!.continuation;
     await collect(provider, continuation);
     expect(requests).toHaveLength(4);
-    expect(requestToolNames(3)).toContain('mcp__Fixture__echo_value');
+    expect(requestToolNames(3)).toContain('tool_search');
+    expect(requestToolNames(3)).not.toContain('mcp__Fixture__echo_value');
     expect(requestToolNames(3)).not.toContain('mcp__Fixture__wait');
+  });
+
+  it.each([undefined, 'always', true] as const)(
+    'starts the first model request without MCP discovery with mode %s', async (mode) => {
+    let discoveryRequests = 0;
+    const hanging = Bun.serve({
+      port: 0,
+      async fetch() {
+        discoveryRequests++;
+        return new Promise<Response>(() => {});
+      },
+    });
+    try {
+      const provider = new NativeProvider({
+        model: 'local/test-model', modelParams: { mcp_tool_search: mode },
+        mcpServers: { Hanging: { type: 'http', url: `http://127.0.0.1:${hanging.port}/mcp` } },
+      });
+      const events = await collect(provider);
+      expect(requests).toHaveLength(1);
+      expect(events.some((event) => event.type === 'model_request')).toBe(true);
+      expect(replyTexts(events)).toEqual([['hello from stub']]);
+      expect(discoveryRequests).toBe(0);
+      const continuation = events.find((event) => event.type === 'init')!.continuation;
+      await collect(provider, continuation);
+      expect(discoveryRequests).toBe(0);
+    } finally {
+      hanging.stop(true);
+    }
+  });
+
+  it('keeps discovered and loaded tools available on warm follow-ups without another search', async () => {
+    scriptedToolCalls = [
+      ['tool_search', '{"query":"echo value","server":"Fixture"}'],
+      ['mcp__Fixture__echo_value', '{"value":"initial"}'],
+    ];
+    const query = fixtureProvider().query({ prompt: 'hello', cwd: root });
+    let turns = 0;
+    try {
+      for await (const event of query.events) {
+        if (event.type !== 'result') continue;
+        turns++;
+        if (turns === 1) {
+          scriptedToolCalls = [['mcp__Fixture__echo_value', '{"value":"followup"}']];
+          query.push('again');
+          query.end();
+        }
+      }
+      expect(turns).toBe(2);
+      expect(requests).toHaveLength(5);
+      expect(requestToolNames(3)).toContain('mcp__Fixture__echo_value');
+      expect(JSON.stringify(requests[4]?.messages)).toContain('echo:followup');
+    } finally {
+      query.abort();
+    }
+  });
+
+  it('scopes tool_search to one server without touching an unrelated hanging server', async () => {
+    let discoveryRequests = 0;
+    const hanging = Bun.serve({
+      port: 0,
+      async fetch() {
+        discoveryRequests++;
+        return new Promise<Response>(() => {});
+      },
+    });
+    const bun = Bun.which('bun');
+    if (!bun) throw new Error('bun executable not found');
+    try {
+      scriptedToolCalls = [
+        ['tool_search', '{"query":"echo value","server":"Fixture"}'],
+        ['mcp__Fixture__echo_value', '{"value":"scoped"}'],
+      ];
+      const events = await collect(new NativeProvider({
+        model: 'local/test-model', modelParams: { mcp_tool_search: 'always' },
+        mcpServers: {
+          Fixture: { command: bun, args: ['run', path.join(import.meta.dir, 'native', 'test-fixtures', 'stdio-mcp.ts')] },
+          Hanging: { type: 'http', url: `http://127.0.0.1:${hanging.port}/mcp` },
+        },
+      }));
+      expect(discoveryRequests).toBe(0);
+      expect(requests).toHaveLength(3);
+      expect(JSON.stringify(requests[2]?.messages)).toContain('echo:scoped');
+      expect(events.some((event) => event.type === 'model_request')).toBe(true);
+    } finally {
+      hanging.stop(true);
+    }
   });
 
   it('turns a direct call to an unloaded MCP tool into a tool_search load', async () => {

@@ -1,12 +1,9 @@
 /**
  * On-demand loading of external MCP tools for the native provider.
  *
- * Large MCP servers can contribute hundreds of tool schemas, which would be
- * resent on every model step. In deferred mode the model sees only a compact
- * catalog of tool names plus `tool_search`; searching loads matching tools,
- * which become callable from the next step. The loaded set is rebuilt from the
- * conversation history on each turn, so it survives restarts and forks
- * without extra state.
+ * The model sees configured server names plus `tool_search`, without waiting
+ * for discovery. Searching loads matching tools for the next model step.
+ * History restores known tools only after their server is discovered.
  */
 import {
   jsonSchema,
@@ -23,35 +20,21 @@ import type { McpToolEntry } from './mcp-client.js';
 import { mcpToolPrefix } from './mcp-names.js';
 
 export const TOOL_SEARCH = 'tool_search';
-export type McpToolSearchMode = 'auto' | 'always' | 'never';
+export type McpToolSearchMode = 'always' | 'never';
 
-/** `auto` defers once the external schemas exceed roughly this many tokens. */
-export const AUTO_DEFER_TOKENS = 8_000;
 const MAX_LOADED = 30;
 const DEFAULT_RESULTS = 5;
 const MAX_RESULTS = 10;
 const MAX_RESULT_DESCRIPTION = 300;
 
 export function mcpToolSearchMode(value: unknown): McpToolSearchMode {
-  if (value === undefined || value === 'auto') return 'auto';
-  if (value === true || value === 'always') return 'always';
+  if (value === undefined || value === true || value === 'always') return 'always';
   if (value === false || value === 'never') return 'never';
-  console.error(`[native-provider] Ignoring invalid model_params.mcp_tool_search: ${JSON.stringify(value)}`);
-  return 'auto';
-}
-
-export function estimateMcpToolTokens(entries: readonly McpToolEntry[]): number {
-  const chars = entries.reduce(
-    (total, entry) =>
-      total + entry.name.length + entry.description.length + JSON.stringify(entry.inputSchema ?? {}).length,
-    0,
+  console.error(
+    `[native-provider] Unsupported model_params.mcp_tool_search: ${JSON.stringify(value)}; ` +
+      'using always. Supported modes: always, never. Replace retired auto settings with always.',
   );
-  return Math.ceil(chars / 4);
-}
-
-export function shouldDeferMcpTools(entries: readonly McpToolEntry[], mode: McpToolSearchMode): boolean {
-  if (entries.length === 0 || mode === 'never') return false;
-  return mode === 'always' || estimateMcpToolTokens(entries) > AUTO_DEFER_TOKENS;
+  return 'always';
 }
 
 function stem(word: string): string {
@@ -79,6 +62,11 @@ interface SearchOutput {
   note: string;
 }
 
+export interface DeferredMcpSource {
+  servers: string[];
+  load: (servers: string[], signal?: AbortSignal) => Promise<McpToolEntry[]>;
+}
+
 /**
  * Completed segments store results as `json`; the turn journal stores
  * interrupted ones as JSON `text`.
@@ -98,7 +86,7 @@ function loadedFromResult(output: ToolResultPart['output']): string[] {
 }
 
 export class DeferredMcpTools {
-  private readonly index: IndexedEntry[];
+  private readonly index: IndexedEntry[] = [];
   private readonly byName = new Map<string, McpToolEntry>();
   /** Catalog tools whose execution marks them recently used, as restore() does. */
   private readonly trackedTools = new Map<string, Tool>();
@@ -106,13 +94,46 @@ export class DeferredMcpTools {
   private readonly loaded = new Set<string>();
   private readonly searchTool;
 
-  constructor(entries: readonly McpToolEntry[], history: readonly ModelMessage[] = []) {
-    this.index = entries.map((entry) => ({
-      entry,
-      nameWords: new Set(words(`${entry.server} ${entry.toolName}`)),
-      descriptionWords: new Set(words(entry.description)),
-    }));
+  constructor(
+    private readonly source: DeferredMcpSource,
+    private readonly history: readonly ModelMessage[] = [],
+  ) {
+    const prefixes = source.servers.map(mcpToolPrefix);
+    if (new Set(prefixes).size !== prefixes.length) throw new Error('MCP server name collision');
+    this.searchTool = tool({
+      description:
+        'Discover and load external MCP tools. Pass keywords describing the task ' +
+        '(e.g. "calendar events"), or "select:<name>[,<name>...]" for exact tool names. ' +
+        'Optionally specify a configured server to avoid waiting for unrelated servers. ' +
+        'Loaded tools become callable on your next step.',
+      inputSchema: jsonSchema<{ query: string; max_results?: number; server?: string }>({
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Keywords, or select:<name>[,<name>...]' },
+          max_results: { type: 'number', description: `Maximum tools to load (default ${DEFAULT_RESULTS})` },
+          server: { type: 'string', description: 'Exact configured MCP server name; omit to search all servers.' },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      }),
+      execute: async ({ query, max_results, server }, { abortSignal }) => {
+        const servers = this.searchServers(query, server);
+        this.addEntries(await this.source.load(servers, abortSignal));
+        return this.runSearch(query, max_results, server);
+      },
+    });
+  }
+
+  private addEntries(entries: readonly McpToolEntry[]): void {
+    const added = new Set<string>();
     for (const entry of entries) {
+      if (this.byName.has(entry.name)) continue;
+      added.add(entry.name);
+      this.index.push({
+        entry,
+        nameWords: new Set(words(`${entry.server} ${entry.toolName}`)),
+        descriptionWords: new Set(words(entry.description)),
+      });
       this.byName.set(entry.name, entry);
       const execute = entry.tool.execute;
       this.trackedTools.set(
@@ -128,23 +149,26 @@ export class DeferredMcpTools {
           : entry.tool,
       );
     }
-    this.restore(history);
-    this.searchTool = tool({
-      description:
-        'Load external MCP tools listed in the external tools catalog. Pass keywords describing the task ' +
-        '(e.g. "calendar events"), or "select:<name>[,<name>...]" for exact tool names. Loaded tools become ' +
-        'callable on your next step.',
-      inputSchema: jsonSchema<{ query: string; max_results?: number }>({
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Keywords, or select:<name>[,<name>...]' },
-          max_results: { type: 'number', description: `Maximum tools to load (default ${DEFAULT_RESULTS})` },
-        },
-        required: ['query'],
-        additionalProperties: false,
-      }),
-      execute: async ({ query, max_results }) => this.runSearch(query, max_results),
-    });
+    this.restore(this.history, added);
+  }
+
+  private searchServers(query: string, server?: string): string[] {
+    const servers = this.source.servers;
+    if (server !== undefined) {
+      if (!servers.includes(server)) throw new Error(`Unknown MCP server: ${server}`);
+      return [server];
+    }
+    if (!/^select:/i.test(query.trim())) return servers;
+    const selected = query
+      .trim()
+      .slice('select:'.length)
+      .split(',')
+      .map((name) =>
+        [...servers]
+          .sort((a, b) => b.length - a.length)
+          .find((configured) => name.trim().startsWith(mcpToolPrefix(configured))),
+      );
+    return selected.length && selected.every((name) => name !== undefined) ? [...new Set(selected)] : servers;
   }
 
   loadedNames(): string[] {
@@ -162,12 +186,6 @@ export class DeferredMcpTools {
   }
 
   instructions(): string {
-    const servers = new Map<string, McpToolEntry[]>();
-    for (const entry of this.byName.values()) {
-      const list = servers.get(entry.server) ?? [];
-      list.push(entry);
-      servers.set(entry.server, list);
-    }
     return [
       '## External tools (load on demand)',
       '',
@@ -175,15 +193,17 @@ export class DeferredMcpTools {
       'with keywords for the task or `select:<name>` for exact names from this catalog; matching',
       'tools become callable on your next step. Never claim to have used a tool you did not call.',
       '',
-      ...[...servers].map(([server, list]) => {
-        const prefix = mcpToolPrefix(server);
-        const names = list.map((entry) => entry.name.slice(prefix.length)).join(', ');
-        return `- **${server}** (${list.length} tools, prefix \`${prefix}\`): ${names}`;
-      }),
+      'Servers below are configured but discovered only when searched; undiscovered does not mean unavailable.',
+      'Use the optional server argument for a targeted search. Discovery failures are tool errors, not empty catalogs.',
+      'After a restart, search again before calling an external tool from history.',
+      '',
+      ...this.source.servers.map(
+        (server) => `- **${server}** (discover on demand, prefix \`${mcpToolPrefix(server)}\`)`,
+      ),
     ].join('\n');
   }
 
-  search(query: string, limit = DEFAULT_RESULTS): McpToolEntry[] {
+  search(query: string, limit = DEFAULT_RESULTS, server?: string): McpToolEntry[] {
     const max = Math.max(1, Math.min(MAX_RESULTS, Math.floor(Number.isFinite(limit) ? limit : DEFAULT_RESULTS)));
     const trimmed = query.trim();
     if (/^select:/i.test(trimmed)) {
@@ -191,12 +211,13 @@ export class DeferredMcpTools {
         .slice('select:'.length)
         .split(',')
         .map((name) => this.resolve(name.trim()))
-        .filter((entry): entry is McpToolEntry => !!entry);
+        .filter((entry): entry is McpToolEntry => !!entry && (!server || entry.server === server));
       return [...new Set(selected)].slice(0, MAX_LOADED);
     }
     const terms = words(trimmed);
     if (terms.length === 0) return [];
     return this.index
+      .filter((item) => !server || item.entry.server === server)
       .map((item) => ({ item, score: terms.reduce((total, term) => total + this.score(item, term), 0) }))
       .filter(({ score }) => score > 0)
       .sort((a, b) => b.score - a.score || a.item.entry.name.length - b.item.entry.name.length)
@@ -212,12 +233,17 @@ export class DeferredMcpTools {
   readonly repairToolCall: ToolCallRepairFunction<ToolSet> = async ({ toolCall, error }) => {
     if (!NoSuchToolError.isInstance(error)) return null;
     const entry = this.resolve(toolCall.toolName);
-    if (!entry) return null;
-    return { ...toolCall, toolName: TOOL_SEARCH, input: JSON.stringify({ query: `select:${entry.name}` }) };
+    const name =
+      entry?.name ??
+      (this.source.servers.some((server) => toolCall.toolName.startsWith(mcpToolPrefix(server)))
+        ? toolCall.toolName
+        : undefined);
+    if (!name) return null;
+    return { ...toolCall, toolName: TOOL_SEARCH, input: JSON.stringify({ query: `select:${name}` }) };
   };
 
-  private runSearch(query: string, limit: number | undefined): SearchOutput {
-    const matches = this.search(query, limit);
+  private runSearch(query: string, limit: number | undefined, server?: string): SearchOutput {
+    const matches = this.search(query, limit, server);
     for (const entry of matches) this.touch(entry.name);
     return {
       loaded: matches.map((entry) => entry.name),
@@ -245,6 +271,7 @@ export class DeferredMcpTools {
   private resolve(name: string): McpToolEntry | undefined {
     const exact = this.byName.get(name);
     if (exact) return exact;
+    if (name.startsWith('mcp__')) return undefined;
     const bare = name.split('__').at(-1)!;
     const matches = [...this.byName.values()].filter(
       (entry) => entry.toolName === bare || entry.name.endsWith(`__${bare}`),
@@ -258,13 +285,13 @@ export class DeferredMcpTools {
     while (this.loaded.size > MAX_LOADED) this.loaded.delete(this.loaded.values().next().value!);
   }
 
-  private restore(history: readonly ModelMessage[]): void {
+  private restore(history: readonly ModelMessage[], added: Set<string>): void {
     for (const message of history) {
       if (!Array.isArray(message.content)) continue;
       for (const part of message.content) {
-        if (part.type === 'tool-call' && this.byName.has(part.toolName)) this.touch(part.toolName);
+        if (part.type === 'tool-call' && added.has(part.toolName)) this.touch(part.toolName);
         if (part.type === 'tool-result' && part.toolName === TOOL_SEARCH) {
-          for (const name of loadedFromResult(part.output)) if (this.byName.has(name)) this.touch(name);
+          for (const name of loadedFromResult(part.output)) if (added.has(name)) this.touch(name);
         }
       }
     }

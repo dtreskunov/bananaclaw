@@ -40,12 +40,7 @@ import {
   STEP_LIMIT_PROMPT,
   stepBudgetInstructions,
 } from './native/reply.js';
-import {
-  DeferredMcpTools,
-  estimateMcpToolTokens,
-  mcpToolSearchMode,
-  shouldDeferMcpTools,
-} from './native/tool-search.js';
+import { DeferredMcpTools, mcpToolSearchMode } from './native/tool-search.js';
 
 export const MAX_STEPS = 100;
 
@@ -187,18 +182,21 @@ async function languageModel(model: NativeModel) {
  */
 function lazyMcpManager(servers: Record<string, McpServerConfig> | undefined, cwd: string) {
   const configured = servers && Object.keys(servers).length > 0 ? servers : null;
-  let instance: import('./native/mcp-client.js').NativeMcpManager | null = null;
+  let instance: Promise<import('./native/mcp-client.js').NativeMcpManager> | null = null;
+  let closed = false;
   return {
-    async entries(signal: AbortSignal): Promise<import('./native/mcp-client.js').McpToolEntry[]> {
+    async entries(
+      signal?: AbortSignal, serverNames?: string[], strict = false,
+    ): Promise<import('./native/mcp-client.js').McpToolEntry[]> {
       if (!configured) return [];
-      if (!instance) {
-        const { NativeMcpManager } = await import('./native/mcp-client.js');
-        instance = new NativeMcpManager(configured, cwd);
-      }
-      return instance.entries(signal);
+      if (closed) throw new Error('MCP manager is closed');
+      instance ??= import('./native/mcp-client.js').then(({ NativeMcpManager }) =>
+        new NativeMcpManager(configured, cwd));
+      return (await instance).entries(signal, serverNames, strict);
     },
     async close(): Promise<void> {
-      await instance?.close();
+      closed = true;
+      await (await instance)?.close();
     },
   };
 }
@@ -291,6 +289,7 @@ export class NativeProvider implements AgentProvider {
     const mcpManager = lazyMcpManager(options.mcpServers, input.cwd);
     const toolSearchMode = mcpToolSearchMode(options.modelParams?.mcp_tool_search);
     let loggedDeferral = false;
+    let lazyMcpTools: DeferredMcpTools | null = null;
     const skills = new NativeSkillRegistry(undefined, undefined, undefined, loadConfig().disabledSkills);
 
     const events: AsyncIterable<ProviderEvent> = {
@@ -351,6 +350,7 @@ export class NativeProvider implements AgentProvider {
                   ? Math.floor(options.modelParams.max_tokens)
                   : resolved.maxOutputTokens;
               const adapter = await languageModel(resolved);
+              const modelSetupMs = Date.now() - startedAt;
               const model = resolved.protocol === 'openai-chat'
                 ? wrapLanguageModel({ model: adapter, middleware: openAiToolMedia })
                 : adapter;
@@ -466,20 +466,26 @@ export class NativeProvider implements AgentProvider {
                   yield* compactContext(compactionPolicy.recover('media'));
                 }
               }
+              const inputStarted = Date.now();
               const incoming = yield* prepareInput(turn.text, turn.files);
               journal.updateInput(incoming);
               messages.splice(0, messages.length, ...portableHistory(store.contextMessages(continuation)));
-              const mcpEntries = turn.toolsDisabled ? [] : await mcpManager.entries(abortController.signal);
-              // Large external tool sets are loaded on demand via tool_search;
-              // the loaded set can grow between steps, so rebuild per step.
-              const deferredMcp = shouldDeferMcpTools(mcpEntries, toolSearchMode)
-                ? new DeferredMcpTools(mcpEntries, prior)
+              const inputPreparationMs = Date.now() - inputStarted;
+              const discoveryStarted = Date.now();
+              const lazyServers = !turn.toolsDisabled && toolSearchMode === 'always'
+                ? Object.keys(options.mcpServers ?? {}) : [];
+              const mcpEntries = turn.toolsDisabled || lazyServers.length ? [] :
+                await mcpManager.entries(abortController.signal);
+              // Loaded tool sets can grow between steps; rebuild per step.
+              const deferredMcp = lazyServers.length
+                ? (lazyMcpTools ??= new DeferredMcpTools({
+                    servers: lazyServers,
+                    load: (servers, signal) => mcpManager.entries(signal, servers, true),
+                  }, prior))
                 : null;
               if (deferredMcp && !loggedDeferral) {
                 loggedDeferral = true;
-                console.error(
-                  `[native-provider] Deferring ${mcpEntries.length} MCP tools (~${estimateMcpToolTokens(mcpEntries)} tokens) behind tool_search`,
-                );
+                log(`Lazy MCP discovery enabled for ${lazyServers.length} servers`);
               }
               const mcpTools: ToolSet = deferredMcp
                 ? {}
@@ -487,6 +493,10 @@ export class NativeProvider implements AgentProvider {
               const stepTools = (): ToolSet => ({ ...nativeTools(), ...(deferredMcp?.toolSet() ?? mcpTools) });
               const mcpCatalog = deferredMcp?.instructions() ?? null;
               abortController.signal.throwIfAborted();
+              log(`Preparation ${JSON.stringify({
+                modelSetupMs, inputPreparationMs, mcpDiscoveryMs: Date.now() - discoveryStarted,
+                totalMs: Date.now() - startedAt, mcpMode: toolSearchMode,
+              })}`);
               while (true) {
                 abortController.signal.throwIfAborted();
                 while (inlineHistoryBytes(messages) > MAX_INLINE_BYTES)

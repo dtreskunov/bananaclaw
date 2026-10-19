@@ -515,16 +515,24 @@ and connects to the group's external MCP servers itself
 (`native/mcp-client.ts`). Each discovered tool is exposed as
 `mcp__<server>__<tool>`.
 
-Because every tool schema is resent on every model step, large MCP servers
-are loaded on demand (`native/tool-search.ts`):
+External MCP tools are loaded on demand by default (`native/tool-search.ts`):
 
-- `model_params.mcp_tool_search` selects the mode: `auto` (default) defers
-  when the external schemas exceed about 8k tokens, `always` always defers,
-  and `never` sends every tool on every step.
-- When deferring, the system prompt carries a compact catalog (server, tool
-  count, and tool names only), and the model gets a `tool_search` tool. It
-  takes keywords, or `select:<name>[,<name>...]` for exact names, and loads
-  the matching tools for the next step.
+- `model_params.mcp_tool_search` accepts `always` (default, also `true`) or
+  `never` (also `false`). `never` discovers all external tools eagerly and
+  sends every tool definition on every model step.
+- In `always` mode discovery itself is lazy: the first model request sees
+  built-ins, `tool_search`, and configured server names/prefixes without
+  connecting to external servers. An ordinary conversational turn never pays
+  MCP startup cost. `tool_search` takes keywords, or
+  `select:<name>[,<name>...]` for exact names, and loads matching tools for
+  the next step.
+- `tool_search` also accepts an optional exact `server` name. A targeted
+  search or fully qualified `select:mcp__<server>__<tool>` discovers only
+  that server; unscoped keywords and bare selections search all configured
+  servers. Concurrent discovery shares a per-server promise. Successful
+  catalogs/connections are reused within the query, not persisted across
+  containers. Lazy discovery failures are explicit tool errors, not empty
+  search results; a subsequent search can retry.
 - A direct call to a catalog tool that is not loaded yet is rewritten into a
   `tool_search` select, so the model sees it loaded instead of an error.
 - The loaded set is rebuilt from the conversation history on each turn: MCP
@@ -555,11 +563,41 @@ Whole-query `abort('user')` and status-row Stop retain whole-turn cancellation.
 
 Other providers end a turn with final text that must wrap each delivery in
 `<message to="name">` blocks, with runner nudges when the wrapping is missing.
+  In `always` mode history restoration never triggers discovery: after a
+  query/container restart, the agent searches again before calling an external
+  tool. Known history tools become available as their server is discovered.
+
+Runner logs report native preparation time split into model setup, input
+preparation, and eager MCP discovery, plus per-server connection and complete
+paginated `tools/list` timings. These diagnostics contain server names, counts,
+and durations, not endpoints, headers, arguments, or tool definitions. They do
+not change the UI's authoritative model-readiness timestamp.
 The native provider declares `structuredReplies` and uses a simpler contract:
 **the final message is the reply.**
 
 - The text of the step that ends the turn (a step with no tool calls) is sent
   verbatim to the conversation being answered.
+#### Removing the native auto MCP mode
+
+`auto` and the catalog-size heuristic have been removed. Groups with no
+`mcp_tool_search` setting now use lazy `always` mode; explicit `never`/`false`
+continues to expose tools directly. This changes startup/tool-search behavior,
+not credentials or tool permissions.
+
+- **Detect:** inspect `ncl groups config get --id <group>` for an explicit
+  `model_params.mcp_tool_search: "auto"`. Unset values also change default.
+- **Fix:** replace explicit `auto` with `ncl groups config set-param --id <group>
+  --key mcp_tool_search --value always`, or choose `never` if that group requires
+  eager direct tools. No database/schema migration is needed, and the runner
+  does not rewrite stored settings. Retired/invalid values emit a warning and
+  use `always`, rather than silently selecting a heuristic.
+- **Verify:** restart the affected group with `ncl groups restart --id <group>`,
+  send a new message, and check runner logs for `mcpMode:"always"` plus lazy
+  discovery. Check that explicit `never` exposes external tools directly.
+- **Rollback:** set `never` and restart to restore eager direct tools. To restore
+  the old size-dependent behavior itself, restore the earlier runner source and
+  explicitly set `auto`; this release no longer implements that behavior.
+
 - Text written alongside tool calls is working notes and is never delivered.
 - `send_message` (with `to`) covers other destinations and mid-turn updates.
 - `no_reply({ reason })` (`native/reply.ts`) ends the turn without sending

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { createServer, type Server as HttpServer } from 'node:http';
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -48,6 +48,108 @@ async function execute(
 }
 
 describe('NativeMcpManager', () => {
+  it('coalesces concurrent discovery per server and leaves unrelated servers untouched', async () => {
+    let initializations = 0;
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const message = request.method === 'POST' ? await request.clone().json() as { method?: string } : undefined;
+        if (message?.method === 'initialize') initializations++;
+        const transport = new WebStandardStreamableHTTPServerTransport();
+        await server().connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager({
+      Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` },
+      Unrelated: { command: '/definitely/missing/unrelated-mcp' },
+    });
+    managers.push(manager);
+    const [first, second] = await Promise.all([
+      manager.entries(undefined, ['Remote'], true), manager.entries(undefined, ['Remote'], true),
+    ]);
+    expect(initializations).toBe(1);
+    expect(first.map((entry) => entry.name)).toEqual(['mcp__Remote__remote_echo']);
+    expect(second).toEqual(first);
+    await manager.entries(undefined, ['Remote'], true);
+    expect(initializations).toBe(1);
+    await expect(manager.entries(undefined, ['Unrelated'], true)).rejects.toThrow('MCP discovery incomplete');
+    expect(await manager.entries(undefined, ['Remote'], true)).toEqual(first);
+  });
+
+  it('does not cache failed discovery and reports complete paginated list timing without URLs or headers', async () => {
+    let reject = true;
+    let pages = 0;
+    const logs: string[] = [];
+    const logger = spyOn(console, 'error').mockImplementation((message) => { logs.push(String(message)); });
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        if (reject) return new Response('unavailable', { status: 503 });
+        const instance = server();
+        instance.setRequestHandler(ListToolsRequestSchema, async (request) => {
+          pages++;
+          const last = !!request.params?.cursor;
+          return {
+            tools: [{
+              name: last ? 'last' : 'first', inputSchema: { type: 'object', properties: {} },
+            }],
+            ...(last ? {} : { nextCursor: 'next' }),
+          };
+        });
+        const transport = new WebStandardStreamableHTTPServerTransport();
+        await instance.connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager({
+      Remote: {
+        type: 'http', url: `http://127.0.0.1:${web.port}/mcp?token=secret-value`,
+        headers: { Authorization: 'Bearer credential-value' },
+      },
+    });
+    managers.push(manager);
+    try {
+      await expect(manager.entries(undefined, ['Remote'], true)).rejects.toThrow('MCP discovery incomplete');
+      reject = false;
+      const entries = await manager.entries(undefined, ['Remote'], true);
+      expect(entries).toHaveLength(2);
+      expect(pages).toBe(2);
+      const joined = logs.join('\n');
+      expect(joined).toContain('"phase":"connect"');
+      expect(joined).toContain('"phase":"tools/list"');
+      expect(joined).toContain('"tools":2');
+      expect(joined).not.toContain('secret-value');
+      expect(joined).not.toContain('credential-value');
+    } finally {
+      logger.mockRestore();
+    }
+  });
+
+  it('closing the manager aborts pending discovery even without a caller abort signal', async () => {
+    let started!: () => void;
+    const requested = new Promise<void>((resolve) => { started = resolve; });
+    const web = Bun.serve({
+      port: 0,
+      async fetch() {
+        started();
+        return new Promise<Response>(() => {});
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager({
+      Hanging: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp`, timeout: 5000 },
+    });
+    managers.push(manager);
+    const pending = manager.entries(undefined, ['Hanging'], true).catch((error: unknown) => error);
+    await requested;
+    await manager.close();
+    expect(await pending).toMatchObject({ message: expect.stringContaining('MCP discovery incomplete') });
+    await expect(manager.entries()).rejects.toThrow('MCP manager is closed');
+  });
+
   it('discovers and invokes a stdio MCP tool', async () => {
     const fixture = path.join(import.meta.dir, 'test-fixtures', 'stdio-mcp.ts');
     const bun = Bun.which('bun');
