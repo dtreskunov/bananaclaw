@@ -1,15 +1,16 @@
 ---
 name: bananabrowse
-description: Work in the user's real browser through BananaBrowse sessions (approved native tab groups), including background tabs, human help and bulk data extraction through artifacts. Pair by a code the user reads from their BananaBrowse window.
+description: Work in the user's real browser through BananaBrowse sessions (approved native tab groups). Use for pairing, background-tab browsing, read-only selector probes, structured DOM extraction with query_all, human help and bulk artifact downloads.
 ---
 
 # BananaBrowse browser sessions
 
 BananaBrowse (formerly DomAgent) is independent of BananaClaw and OneCLI.
-Service and extension 1.0.0-beta.1 (manifest version 0.9.0.1) / wire v6. If the
-extension is too old for a tool it answers
-`CAPABILITY_UNAVAILABLE` with `required_extension_version`: ask the user to
-update the extension. The user runs a small BananaBrowse window in their
+Use the live MCP instructions, tool schemas and tab capabilities as the
+authority for available features. `CAPABILITY_UNAVAILABLE` can mean a missing
+browser capability or an extension update requirement; check the error details,
+including `required_extension_version`, before asking the user to update.
+The user runs a small BananaBrowse window in their
 browser; while it is open you can ask to open **sessions**. A session is a
 native tab group the user approves, and every tab in that group is in scope.
 
@@ -35,20 +36,25 @@ not a credential.
 
 ## Sessions
 
-- `list_browsers()` shows `online`, `last_seen` and `paired_at`. Offline means
-  the user's BananaBrowse window is closed: ask them to open it, or use another
-  online browser.
+- First check `list_sessions()` and reuse an appropriate attached session for
+  the task. `request_session` always requests a new group; it does not reuse one.
+- `list_browsers()` shows `online`, `last_seen` and `paired_at`. Online is a
+  point-in-time connection check, not a reservation. Offline can mean a closed
+  window, a reconnect or a network problem; do not assume the user closed it.
 - Reinstalling the extension creates a new browser; the new one is renamed
   `name (2)` if you already have one with that name. Remove the long-offline
   duplicate with `unpair_browser({browser_id})` (only your own pairing; ends
   your sessions there). Browsers offline for 30 days are removed automatically.
 - `request_session({browser_id, purpose, urls?, title?})`: plain-language
-  purpose, up to 8 starting URLs. Fails immediately with `BROWSER_OFFLINE` when
-  offline. The user approves or declines in their window and gets a system
+  purpose, up to 8 starting URLs. `BROWSER_OFFLINE` means no live connection is
+  available. Check `list_sessions` before retrying a failed request: an approved
+  session may already exist. The user approves or declines in their window and gets a system
   notification. On approval you receive `session_id` and `tabs` with `tab_id`s.
   Tabs open in the background; never ask the user to switch tabs for you.
-- `list_sessions()` → `attached` or `detached`. Detached means the window is
-  closed, or after a Chrome restart the user still has to confirm the reattach.
+- `list_sessions()` → `attached` or `detached`. Detached can mean the connection
+  is unavailable, reattachment is pending, or the user must confirm a Chrome
+  group after a restart. An approved request can return a detached session
+  before tabs are published: keep its ID and recheck rather than create another.
   Sessions come back by themselves when the window reopens. Reuse an existing
   attached session for the same task instead of requesting a new one.
 - A session ends when the user closes or ungroups its tab group
@@ -92,6 +98,67 @@ identity provider) are blocked with `HANDOFF_REQUIRED`.
 - **"loaded" is not success.** `wait_for_page` "loaded" only means the document
   is ready; a 404 or sign-in page loads too. Pass `content_selector` for the
   content you expect and check the snapshot title/URL before going on.
+- **Probe selectors without side effects.** `inspect_element({selector})`
+  does not focus, scroll or mutate. It reports zero matches as missing, one
+  with readiness details, and multiple as ambiguous. It has no `timeout_ms`.
+- **Action receipts are not application success.** `clicked: true` confirms
+  dispatch, not checkout completion or a successful navigation. Inspect the
+  resulting page; selector readiness does not prove the intended outcome.
+- **Check capabilities.** `list_tabs` reports each tab's capabilities.
+  `get_screenshot` depends on native support; Firefox environments without
+  `tabs.captureTab` cannot capture it. Use a DOM snapshot, not a fabricated
+  screenshot fallback.
+- **Output limits are tool-specific.** `max_output_bytes` bounds serialized
+  output, including the MCP wrapper. `max_text_chars` is for text-extraction
+  tools, not arbitrary `evaluate_script` results; for `query_all` it is per
+  text field. Inspect the schema instead of copying parameters between tools.
+
+## Structured DOM data: query_all
+
+Prefer `query_all` when row and field selectors are known; use a snapshot or
+read-only inspection to discover them. It avoids bespoke scripts and large
+page-text dumps, but does not make site-specific selectors immune to changes.
+
+```json
+{
+  "tab_id": "t12",
+  "description": "Read listing titles, prices, and links to compare the available items.",
+  "selector": ".listing",
+  "fields": {
+    "title": { "selector": ".title" },
+    "price": { "selector": ".price" },
+    "href": { "selector": "a", "attribute": "href" }
+  },
+  "limit": 50,
+  "timeout_ms": 0
+}
+```
+
+These are illustrative selectors, not a site's guaranteed DOM contract.
+Field selectors are relative to each rendered row, including open shadow roots;
+`:scope` selects the row itself. Iframes and closed roots are not traversed.
+Omit `attribute` for rendered text. Allowed attributes are `href`, `src`,
+`title`, `alt`, `datetime` and `aria-label`; links are resolved to HTTP(S) URLs.
+Form values and editable content are redacted.
+
+- Check `matched_count`, `returned_count`, `rows_truncated`, `field_issues`
+  and `truncated`. Counts describe currently rendered rows, not a site's total
+  dataset. Missing/redacted fields are `null` with an explicit issue.
+- A field matching multiple rendered elements fails with `ELEMENT_AMBIGUOUS`
+  and `query_field`/`row_index`. Narrow it; do not select an arbitrary match.
+- Use standard CSS, not Playwright-only selectors such as `:has-text()`.
+  Invalid syntax yields `INVALID_SELECTOR`, with field location when applicable.
+- No matching rows yields `ELEMENT_NOT_FOUND`; a positive `timeout_ms` waits
+  for rows and can return `WAIT_TIMEOUT` with `last_error`. Zero is immediate
+  for row readiness; document-readiness checks still apply.
+- Limit is 50 rows by default, maximum 100, with up to 20 fields. Text defaults
+  to 4000 characters per field. Inline output drops complete rows to meet the
+  byte budget; a single row too large produces `RESULT_TOO_LARGE`.
+- For bulk data pass `return_as: "artifact"` and an optional `artifact_name`.
+  Artifacts bypass inline row trimming, not the requested row/text limits.
+  This tool does not scroll, paginate, navigate, focus or mutate.
+
+## Scripts and recovery
 
 `evaluate_script` takes a script whose final expression is the result.
 Top-level `await` and `return` work, so no IIFE is needed. Each call must
@@ -111,20 +178,23 @@ gives `actual_bytes`/`limit_bytes`: switch to an artifact (below).
 lazily: `navigate` it. `TARGET_STALE`/`ELEMENT_STALE` carry a `stale_reason`
 (`document_changed`, `ref_superseded`, `element_detached`): take a new snapshot.
 **`OUTCOME_UNKNOWN` → a mutation may have happened: inspect, never blindly
-retry.** `BROWSER_OFFLINE` → the window closed mid-task; tell the user.
+retry.** `BROWSER_OFFLINE` → check any observed `offline_reason` and existing
+sessions. The window may be closed or reconnecting; if the problem persists,
+ask the user to check the window and connection or choose another browser.
 
 ## Bulk data: artifacts
 
 Never move more than ~10 KB of page data through the conversation: it's slow,
-costly and silently corrupts. Collect it in one script and store it on the
-BananaBrowse service instead:
+costly and can corrupt data. Store bulk results on the BananaBrowse service:
 
-1. Write one `evaluate_script` that gathers everything (loop the site's paged
-   API with `await` inside the script) and ends with the array or object. Pass
+1. Use `query_all` for structured DOM rows, or `evaluate_script` for data absent
+   from the DOM (for example the site's paged API). A script's final expression
+   returns the array or object; keep the whole call within its execution limit. Pass
    `return_as: "artifact"` and `artifact_name: "activities.json"`.
 2. The result is a handle: `artifact` (`artifact_id`, `bytes`, `sha256`, `mime`,
    `download_url`), a `shape` summary (type, length, item keys) and a short
-   `preview`. Check `shape` before going on.
+   `preview`. Check the shape and, for `query_all`, the returned counts and
+   truncation flag. Downloaded extraction JSON also contains `field_issues`.
 3. Download it to a file, with **no** Authorization header (the vault adds it,
    just as for MCP), and verify the checksum:
 
