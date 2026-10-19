@@ -54,7 +54,7 @@ export interface TraceEntry {
   line: TraceLine;
   step: TraceStep;
   headline: StepHeadline;
-  body: string | null;
+  raw: boolean;
 }
 export interface TraceChapter {
   id: string;
@@ -528,7 +528,7 @@ export function activityChapters(lines: TraceLine[], live = false): TraceChapter
       return {
         ...entry,
         headline: known ? described : { action: entry.line.text },
-        body: known ? stepBody(entry.step) : entry.line.text,
+        raw: !known,
       };
     });
     const statuses = entries.map((entry) => traceStatus(entry.step));

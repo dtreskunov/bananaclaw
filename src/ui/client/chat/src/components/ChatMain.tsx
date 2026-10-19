@@ -36,7 +36,7 @@ import type { ConversationTurn } from '../../../../shared/conversation';
 import { isTurnStartStep, QUEUED_TEXT, turnRequestedAt } from '../../../../shared/conversation-activity';
 import { activityTimestamp } from '../../../../shared/activity-timing';
 import {
-  activityChapters, activityStepCount, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep,
+  activityChapters, activityStepCount, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep, stepBody,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, TRACE_STEP_THRESHOLD_MS,
   type ModelTime, type StepHeadline, type TraceEntry, type TraceStatus, type TraceStep,
 } from '../../../../shared/activity-presentation';
@@ -244,7 +244,7 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
   const running = live && isTimedStep(step) && step.status === 'running';
   const startedAt = activityTimestamp(line.ts);
   const hasStartedAt = Number.isFinite(startedAt);
-  const code = open ? entry.body : null;
+  const code = open ? entry.raw ? line.text : stepBody(step) : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt) : null;
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : '';

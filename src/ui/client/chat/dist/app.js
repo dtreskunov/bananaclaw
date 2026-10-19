@@ -18418,7 +18418,7 @@ function activityChapters(lines, live = false) {
       return {
         ...entry,
         headline: known ? described : { action: entry.line.text },
-        body: known ? stepBody(entry.step) : entry.line.text
+        raw: !known
       };
     });
     const statuses = entries.map((entry) => traceStatus(entry.step));
@@ -23865,7 +23865,7 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
   const running = live && isTimedStep(step) && step.status === "running";
   const startedAt2 = activityTimestamp(line.ts);
   const hasStartedAt = Number.isFinite(startedAt2);
-  const code = open ? entry.body : null;
+  const code = open ? entry.raw ? line.text : stepBody(step) : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt2) : null;
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : "";

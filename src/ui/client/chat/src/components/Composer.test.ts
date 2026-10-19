@@ -58,6 +58,7 @@ import {
   resetActivityTraceView,
   toggleActivityTrace,
 } from '../activity-trace-state';
+import { stepBody } from '../../../../shared/activity-presentation';
 
 const closeTrace = (ownerId: string) => {
   if (activityTraceExpanded(ownerId)) toggleActivityTrace(ownerId);
@@ -2986,11 +2987,31 @@ describe('activity trace chapter following', () => {
         const view = row.type({ ...row.props, open: true });
         expect(parse).not.toHaveBeenCalled();
         expect(findComponent(view, 'StepHeadlineContent').props.headline).toBe(row.props.entry.headline);
-        expect(find(view, 'pre').props.children.props.children).toBe(row.props.entry.body);
+        expect(find(view, 'pre').props.children.props.children).toBe(
+          row.props.entry.raw ? row.props.entry.line.text : stepBody(row.props.entry.step),
+        );
       } finally {
         parse.mockRestore();
       }
     }
+  });
+
+  it('formats expanded bodies only when their own row is opened', () => {
+    const list = ActivityTraceList({ lines: [line('one', 'completed'), line('two', 'completed')], live: true });
+    const children = traceList(list).props.children[0].props.children[1].props.children;
+    const descriptions = children.map((row: { props: { entry: { step: object } } }) => {
+      const read = vi.fn(() => 'Expanded description');
+      Object.defineProperty(row.props.entry.step, 'description', { get: read });
+      return read;
+    });
+    for (const row of children) row.type({ ...row.props, open: false });
+    for (const read of descriptions) expect(read).not.toHaveBeenCalled();
+    const first = children[0];
+    expect(find(first.type({ ...first.props, open: true }), 'pre').props.children.props.children).toContain(
+      'Expanded description',
+    );
+    expect(descriptions[0]).toHaveBeenCalledOnce();
+    expect(descriptions[1]).not.toHaveBeenCalled();
   });
 
   const timed = (id: string, ts: string, status: 'running' | 'completed', durationMs?: number): ActivityLine => ({

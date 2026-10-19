@@ -301,17 +301,17 @@ describe('activity chapters', () => {
     expect(chapters[0].entries[0]).toMatchObject({
       id: 'tool:first',
       headline: { action: '', subject: 'echo first --flag', codeSubject: true },
-      body: 'echo first\n--flag',
+      raw: false,
     });
     expect(chapters[1].entries[0]).toMatchObject({
       headline: { action: 'Read', subject: 'file.ts', codeSubject: true },
-      body: 'file.ts',
+      raw: false,
     });
     expect(chapters[1].headline).toBe(chapters[1].entries[0].headline);
     for (const [index, chapter] of chapters.slice(2).entries()) {
       expect(chapter.entries[0]).toMatchObject({
         headline: { action: values[index + 3].text },
-        body: values[index + 3].text,
+        raw: true,
       });
       expect(chapter.headline).toBe(chapter.entries[0].headline);
     }
@@ -327,8 +327,25 @@ describe('activity chapters', () => {
     expect(historical.step.status).toBe('unknown');
     expect(live.headline).toEqual(stepHeadline(live.step));
     expect(historical.headline).toEqual(stepHeadline(historical.step));
-    expect(historical.body).toBe(live.body);
+    expect(stepBody(historical.step)).toBe(stepBody(live.step));
     expect(JSON.stringify(values)).toBe(before);
+  });
+
+  it('does not format expanded descriptions while preparing collapsed chapters', () => {
+    const description = vi.fn(() => 'Expanded description');
+    const originalParse = JSON.parse;
+    const parse = vi.spyOn(JSON, 'parse').mockImplementation((text: string) => {
+      const step: TraceStep = originalParse(text);
+      Object.defineProperty(step, 'description', { get: description });
+      return step;
+    });
+    try {
+      activityChapters([line(0, tool('first', 'bash')), line(1, tool('second', 'bash'))]);
+      // Validation reads the field, but body formatting must not read it again.
+      expect(description).toHaveBeenCalledTimes(4);
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it('formats repetition counts uniformly and omits them for a singleton', () => {
