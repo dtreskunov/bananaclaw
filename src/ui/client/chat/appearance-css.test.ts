@@ -10,13 +10,37 @@ function read(relative: string): string {
 function literals(theme: string, mode: string): Record<string, string> {
   const css = read(`./styles/themes/${theme}.css`);
   const common = css.match(/\{([^}]+)\}/)?.[1] ?? '';
-  const branch = css.match(new RegExp(`\\[data-theme="${theme}"\\]\\[data-mode="${mode}"\\] \\{([^}]+)\\}`))?.[1];
+  const automaticLight =
+    mode === 'system-dark'
+      ? (css.match(/:root:not\(\[data-mode\]\),\s*\[data-theme="default"\]\[data-mode="light"\] \{([^}]+)\}/)?.[1] ??
+        '')
+      : '';
+  const branch = css.match(
+    mode === 'system-dark'
+      ? /@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-mode\]\) \{([^}]+)\}/
+      : new RegExp(`\\[data-theme="${theme}"\\]\\[data-mode="${mode}"\\] \\{([^}]+)\\}`),
+  )?.[1];
   if (!branch) throw new Error(`Missing ${theme}/${mode} branch`);
-  return Object.fromEntries(
-    [...`${common}\n${branch}`.matchAll(/--([\w-]+):\s*(#[\da-f]{3}(?:[\da-f]{3})?);/g)].map((match) => [
+  const declarations = Object.fromEntries(
+    [...`${common}\n${automaticLight}\n${branch}`.matchAll(/--([\w-]+):\s*([^;]+);/g)].map((match) => [
       match[1],
-      match[2].length === 4 ? '#' + [...match[2].slice(1)].map((char) => char + char).join('') : match[2],
+      match[2],
     ]),
+  );
+  function resolve(name: string, seen = new Set<string>()): string | undefined {
+    const value = declarations[name];
+    if (/^#[\da-f]{6}$/.test(value)) return value;
+    if (/^#[\da-f]{3}$/.test(value)) return '#' + [...value.slice(1)].map((char) => char + char).join('');
+    const alias = value?.match(/^var\(--([\w-]+)\)$/)?.[1];
+    if (!alias || seen.has(name)) return undefined;
+    seen.add(name);
+    return resolve(alias, seen);
+  }
+  return Object.fromEntries(
+    Object.keys(declarations).flatMap((name) => {
+      const value = resolve(name);
+      return value ? [[name, value]] : [];
+    }),
   );
 }
 
@@ -514,6 +538,77 @@ describe('theme CSS contract', () => {
     const metadata = mix('#000000', '#ffffff', 0.6);
     const outgoingBubble = mix('#7f7f7f', '#ffffff', 0.18);
     expect(contrast(metadata, outgoingBubble)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('keeps Default/Light secondary, action and status text legible on shared tinted surfaces', () => {
+    const tokens = literals('default', 'light');
+    const surface = '#ffffff';
+    const outgoing = mix('#7f7f7f', surface, 0.18);
+    const incoming = mix('#6496ff', surface, 0.18);
+    const tableHeader = mix('#000000', outgoing, 0.16);
+    for (const background of [surface, outgoing, incoming, tableHeader]) {
+      for (const name of [
+        'muted',
+        'primary',
+        'accent-text',
+        'message-action-text',
+        'danger',
+        'error',
+        'error-soft',
+        'warning',
+        'warn',
+        'success',
+        'ok',
+        'recording-fg',
+      ]) {
+        expect(contrast(tokens[name], background), `${name} on ${background}`).toBeGreaterThanOrEqual(4.5);
+      }
+      for (const name of ['border-control', 'focus-ring']) {
+        expect(contrast(tokens[name], background), `${name} on ${background}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+    expect(read('./styles/themes/default.css')).toMatch(/--muted: #414b59;\s*--placeholder-opacity: 1;/);
+    for (const name of [
+      'activity-status-queued',
+      'activity-status-running',
+      'activity-status-completed',
+      'activity-status-failed',
+      'activity-model-time',
+    ]) {
+      expect(contrast(mix(tokens[name], outgoing, 0.85), outgoing), name).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('keeps Default/Light filled actions, status washes and nested syntax highlighting above AA contrast', () => {
+    const tokens = literals('default', 'light');
+    for (const [foreground, background] of [
+      ['accent-fg', 'accent-strong-opaque'],
+      ['action-fg', 'action-fill'],
+      ['action-fg', 'dialog-action-fill'],
+      ['primary-fg', 'primary'],
+      ['danger-on-fill', 'danger-fill'],
+      ['warning-on-fill', 'warning'],
+      ['approve-fg', 'approve'],
+      ['reject-fg', 'reject'],
+    ]) {
+      expect(contrast(tokens[foreground], tokens[background]), background).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const [foreground, wash, alpha] of [
+      ['error', '#e44444', 0.15],
+      ['warning', '#b7791f', 0.1],
+      ['success', '#6cc66c', 0.15],
+    ] as const) {
+      expect(contrast(tokens[foreground], mix(wash, '#ffffff', alpha)), foreground).toBeGreaterThanOrEqual(4.5);
+    }
+    const outgoing = mix('#7f7f7f', '#ffffff', 0.18);
+    const nestedCode = mix('#7f7f7f', outgoing, 0.18);
+    for (const name of ['syntax-keyword', 'syntax-string', 'syntax-number', 'syntax-title', 'syntax-type', 'muted']) {
+      expect(contrast(tokens[name], nestedCode), `${name} on nested code`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('preserves the Default dark palette when appearance bootstrap is unavailable', () => {
+    expect(literals('default', 'system-dark')).toEqual(literals('default', 'dark'));
   });
 
   it('keeps relative timestamps intact when metadata runs out of space', () => {

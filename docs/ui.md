@@ -125,9 +125,13 @@ URL, including the selected thread, preserved.
 
 In **My Profile / Settings → Appearance**, choose **Default** or **Autumn**,
 and independently select **System**, **Light**, or **Dark** mode. Default /
-System preserves the original appearance, including the black dark-mode
-background. Autumn uses parchment and copper in light mode, and walnut and
-amber in dark mode.
+System follows the OS color mode, including the black dark-mode background.
+Default light mode uses opaque secondary text, solid blue action fills with
+white labels, and darker status and syntax colors so they remain readable on
+white surfaces and tinted message, code, and table backgrounds. Essential
+control borders and focus rings use stronger colors rather than decorative
+separator tints. Autumn uses parchment and copper in light mode, and walnut
+and amber in dark mode.
 
 The message composer and question-answer input share a rounded, theme-colored
 outline: subtle at rest, stronger on hover with a mouse, and full-strength while
