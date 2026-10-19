@@ -73,6 +73,30 @@ function mix(fg: string, bg: string, fraction: number): string {
 }
 
 describe('theme CSS contract', () => {
+  it('uses the same side and bottom inset for composer controls at both viewport sizes', () => {
+    const css = read('./components/ChatMain.css');
+    const wrapper = css.match(/\.chat-main \.composer-input-wrap \{([^}]+)\}/)?.[1];
+    expect(wrapper).toContain('--composer-control-inset: 3px');
+    const send = css.match(/\.chat-main \.question-response-send \{([^}]+)\}/)?.[1];
+    expect(send).toContain('right: var(--composer-control-inset)');
+    expect(send).toContain('bottom: var(--composer-control-inset)');
+    const add = css.match(/\.chat-main \.composer-plus \{([^}]+)\}/)?.[1];
+    expect(add).toContain('left: var(--composer-control-inset)');
+    expect(add).toContain('bottom: var(--composer-control-inset)');
+    const mic = css.match(/\.chat-main \.question-response-mic \{([^}]+)\}/)?.[1];
+    expect(mic).toContain('right: calc(var(--control-action-size) + 4px + var(--composer-control-inset))');
+    expect(mic).toContain('bottom: var(--composer-control-inset)');
+    const textarea = css.match(/\.chat-main textarea \{([^}]+)\}/)?.[1];
+    expect(textarea).toContain('min-height: calc(var(--control-action-size) + 2 * var(--composer-control-inset))');
+    expect(textarea).toContain('calc(66px + var(--composer-control-inset))');
+    expect(textarea).toContain('calc(34px + var(--composer-control-inset))');
+    const mobile = css.slice(css.indexOf('@media (max-width: 720px)'));
+    expect(mobile).toContain('.composer-input-wrap { --composer-control-inset: 2px; }');
+    expect(mobile).toContain('calc(92px + var(--composer-control-inset))');
+    expect(mobile).toContain('calc(44px + var(--composer-control-inset))');
+    expect(css).toContain('calc(var(--control-action-size) + 76px + var(--composer-control-inset))');
+  });
+
   it('uses header and composer shadows without transcript navigation buttons', () => {
     const css = read('./components/ChatMain.css');
     expect(css).not.toContain('.scroll-jump');

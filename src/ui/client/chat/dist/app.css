@@ -3591,11 +3591,11 @@ nav.tab-bar-strip.group-strip {
   width: 100%;
   box-sizing: border-box;
   min-width: 0;
-  min-height: 32px;
+  min-height: calc(var(--control-action-size) + 2 * var(--composer-control-inset));
   max-height: 200px;
   resize: none;
   overflow-y: auto;
-  padding: 5px 66px 5px 34px;
+  padding: 5px calc(66px + var(--composer-control-inset)) 5px calc(34px + var(--composer-control-inset));
   font: inherit;
   font-size: var(--message-input-font-size);
   border: 0;
@@ -3608,6 +3608,7 @@ nav.tab-bar-strip.group-strip {
   padding: 5px 8px 36px 8px;
 }
 .chat-main .composer-input-wrap {
+  --composer-control-inset: 3px;
   flex: 1;
   min-width: 0;
   position: relative;
@@ -3639,16 +3640,16 @@ nav.tab-bar-strip.group-strip {
 .chat-main #chat-send,
 .chat-main .question-response-send {
   position: absolute;
-  right: 0;
-  bottom: 3px;
+  right: var(--composer-control-inset);
+  bottom: var(--composer-control-inset);
   width: var(--control-action-size);
   height: var(--control-action-size);
 }
 .chat-main #chat-mic,
 .chat-main .question-response-mic {
   position: absolute;
-  right: calc(var(--control-action-size) + 4px);
-  bottom: 3px;
+  right: calc(var(--control-action-size) + 4px + var(--composer-control-inset));
+  bottom: var(--composer-control-inset);
   width: var(--control-action-size);
   height: var(--control-action-size);
   display: flex;
@@ -3691,7 +3692,7 @@ nav.tab-bar-strip.group-strip {
   opacity: 1;
 }
 .chat-main .composer-input-wrap.voice-listening:not(.multi-line) textarea {
-  padding-right: calc(var(--control-action-size) + 76px);
+  padding-right: calc(var(--control-action-size) + 76px + var(--composer-control-inset));
 }
 .voice-recording-dot {
   width: 7px;
@@ -3738,8 +3739,8 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .composer-plus {
   position: absolute;
-  left: 0;
-  bottom: 3px;
+  left: var(--composer-control-inset);
+  bottom: var(--composer-control-inset);
   z-index: 2;
 }
 .chat-main .composer-plus-trigger {
@@ -3850,19 +3851,14 @@ nav.tab-bar-strip.group-strip {
     gap: 8px;
     align-items: flex-end;
   }
-  .chat-main .composer-plus {
-    bottom: 2px;
-  }
-  .chat-main #chat-send {
-    bottom: 2px;
+  .chat-main .composer-input-wrap {
+    --composer-control-inset: 2px;
   }
   .chat-main #chat-mic {
-    bottom: 2px;
     font-size: 22px;
   }
   .chat-main textarea {
-    min-height: 44px;
-    padding: 10px 92px 10px 44px;
+    padding: 10px calc(92px + var(--composer-control-inset)) 10px calc(44px + var(--composer-control-inset));
   }
   .chat-main .composer-input-wrap.multi-line textarea {
     padding: 10px 10px 48px 10px;

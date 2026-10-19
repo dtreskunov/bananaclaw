@@ -157,6 +157,9 @@ itself does not create a stacking context, so account menus and dialogs remain
 above the side panes. Outline changes do not shift the layout. Keyboard-focused buttons
 retain their individual focus indicators, and reduced-motion preferences disable
 the outline transition.
+Composer controls use matching side and bottom insets (3 px on desktop, 2 px on
+mobile); single-line inputs keep the same clearance above the buttons in both
+text densities.
 
 **Text density**, below Mode, offers **Comfortable** (larger text and more
 breathing room) and **Compact** (smaller text and tighter spacing). Both use
