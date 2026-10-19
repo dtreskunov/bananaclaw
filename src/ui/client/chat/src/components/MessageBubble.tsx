@@ -13,8 +13,9 @@ interface Props {
 export function MessageBubble({ class: className, 'data-msg-id': id, elementRef, reveal, children }: Props) {
   const ownRef = useRef<HTMLDivElement | null>(null);
   const ref = elementRef ?? ownRef;
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
-    const bubble = ref.current;
+    const bubble = scrollRef.current;
     if (!bubble) return;
     return attachScrollEdges(bubble, { horizontal: false }, (edges) => {
       const scrollable = edges.top || edges.bottom;
@@ -29,7 +30,7 @@ export function MessageBubble({ class: className, 'data-msg-id': id, elementRef,
     });
   }, []);
   useLayoutEffect(() => {
-    const bubble = ref.current;
+    const bubble = scrollRef.current;
     const match = reveal ? bubble?.querySelector<HTMLElement>('.search-hl') : null;
     if (bubble && match) {
       bubble.scrollTop +=
@@ -37,8 +38,10 @@ export function MessageBubble({ class: className, 'data-msg-id': id, elementRef,
     }
   }, [reveal]);
   return (
-    <div class={`${className} scroll-edge-fade`} data-msg-id={id} ref={ref}>
-      {children}
+    <div class={className} data-msg-id={id} ref={ref}>
+      <div class="message-scroll scroll-edge-fade" ref={scrollRef}>
+        {children}
+      </div>
     </div>
   );
 }

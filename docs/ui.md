@@ -131,9 +131,12 @@ amber in dark mode.
 
 The message composer and question-answer input share a rounded, theme-colored
 outline: subtle at rest, stronger on hover with a mouse, and full-strength while
-the text input or any control inside has focus. Outline changes do not shift
-the layout. Keyboard-focused buttons retain their individual focus indicators,
-and reduced-motion preferences disable the outline transition.
+the text input or any control inside has focus. A solid theme-colored backplate
+fills the outline and its gap, preventing the transcript pattern from showing
+through. The composer and agent-selector header cast theme-aware shadows over
+the transcript. Outline changes do not shift the layout. Keyboard-focused buttons
+retain their individual focus indicators, and reduced-motion preferences disable
+the outline transition.
 
 **Text density**, below Mode, offers **Comfortable** (larger text and more
 breathing room) and **Compact** (smaller text and tighter spacing). Both use
@@ -166,20 +169,37 @@ Themes affect application chrome, not embedded or user-authored websites.
 Density changes preserve drafts and expanded panels. A conversation already
 following the bottom stays there; otherwise the first visible message retains
 its viewport offset through reflow (clamped if the content no longer overflows).
-The change does not reveal scroll arrows or mark existing messages as new.
+The change does not mark existing messages as new.
 The appearance controller captures reading position before changing CSS and
 restores it immediately and after composer autosizing; new scrolling cancels
 the deferred restore. Density changes do not animate text or spacing.
 Shared density tokens live in `global.css`, separately from theme colors.
 
 Oversized message bubbles scroll internally. Their total height, including traces,
-metadata, attachments, and actions, is capped at the transcript viewport minus its
-top and bottom fade clearance. New responses start below the top fade so the
-entire bubble fits above the composer. Small messages and task/branch event pills
-keep their natural size.
+metadata, attachments, and actions, is capped at the transcript viewport minus
+its floating dock and one line of edge spacing at the top and bottom. New
+responses start below the header so the entire bubble fits above the composer.
+Small messages and task/branch event pills keep their natural size.
 
-Subtle edge fades indicate content above or below the bubble's current reading
-position. Overflowing bubbles support keyboard focus and scrolling; search
+The transcript is one full-height native scroller, with a faint, theme-aware
+diagonal cross-hatch background attached to its scrolling content. Its scrollbar
+spans the same area, including behind and below the floating composer.
+There are no fades or navigation arrows on the transcript itself; header and
+composer shadows separate the fixed controls from the scrolling content.
+There is no JavaScript background-scroll synchronization.
+The composer, status, and question prompts overlay the bottom of the scroller;
+their measured height reserves scroll space and limits oversized bubbles so the
+latest response stays readable above them. The overlay leaves the native
+scrollbar accessible. User and agent reply bubbles and the composer input keep
+solid, unpatterned backgrounds, so scrolling inside a long message is visually
+distinct from scrolling the transcript.
+
+Only the inset content scrolls and receives edge fades; the bubble's padding,
+solid background, and rounded corners stay unchanged when scrolling starts.
+Edge fades span up to three text lines, capped at 30% of the content viewport
+per edge. This keeps truncation visible across blank-line and paragraph gaps
+while leaving a clear reading area in small bubbles. Overflowing content
+supports keyboard focus and scrolling; search
 navigation reveals matching text inside them. Copy still includes the complete
 message, not just its visible portion. There is no separate full-message reader.
 
@@ -406,30 +426,6 @@ surfaces, text, borders, solid actions and their foregrounds, selection
 washes, focus rings, status colors, shadows and syntax highlighting. Keep
 responsive layout and touch-target sizes shared. Check text contrast at 4.5:1
 and essential control boundaries/focus indicators at 3:1.
-The floating scroll controls are icon-only **Previous user message** /
-**Next user message** arrows with accessible labels. They share a bottom-right
-anchor, with Up 8 px above Down. They appear after user scrolling in the matching
-direction, whether scrolling the transcript or inside an oversized bubble.
-Clicks move only the outer transcript to the nearest user message before/after
-its reading-area top, skipping assistant replies and operational entries.
-Answered-question bubbles count as user messages. A direction with no destination
-remains disabled; it never falls back to jumping to the conversation's ends.
-Internal bubble reading positions remain unchanged.
-Fade-in and
-fade-out each take 500 ms (instantly with reduced motion). Reversing direction
-immediately hides the previous arrow and fades in the matching one; 1 second
-without scrolling starts fade-out.
-Fading controls immediately stop accepting input and leave the accessibility tree.
-Automatic scrolling, streaming/layout changes,
-search jumps and thread changes do not reveal arrows. The controls support
-touch, mouse wheel, scrollbar dragging and keyboard scrolling.
-Active gestures retain the last observed scroll position so coalesced input
-and scroll events do not mask direction reversals.
-Message navigation pauses bottom-follow, including the first animation frames;
-user scrolling in the outer transcript can restore normal following. Up and Down
-always use the same surface, border, shadow and icon styling, including when
-new messages arrive.
-
 The blocking `dist/appearance.js` script runs before the stylesheet in the
 chat shell to prevent wrong-theme and wrong-density flashes. The main bundle reuses its
 controller, and the service worker caches the bootstrap for offline loads.
@@ -483,10 +479,13 @@ left while actions occupy the right side of the row.
 
 **Appearance → Transcript details → Show technical information** controls technical
 details on all bubbles: activity trace, elapsed time, recorded activity count,
-cost, and context use. Technical information occupies a separate line at the top of live, reply and display-card
-bubbles, including system-generated warning/error notices and attachment-only
-replies, and is absent when the toggle is off. A settled turn's final response
-owns its trace and usage inside that bubble, regardless of who generated it.
+cost, and context use. Expanded trace and usage panels have a solid theme-colored
+background in both live and completed turns, so the transcript pattern does not
+show through. Technical information occupies a separate line at the top of live,
+reply and display-card bubbles, including system-generated warning/error notices
+and attachment-only replies, and is absent when the toggle is off. A settled
+turn's final response owns its trace and usage inside that bubble, regardless of
+who generated it.
 Live turns, questions, and turns with only intermediate tool deliveries or no
 final response keep their separate turn row. The regular information line
 remains at the bottom and retains relative timestamps and message provenance.

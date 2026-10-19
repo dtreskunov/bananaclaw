@@ -486,7 +486,7 @@ describe('main composer pending edits', () => {
       hooks.cursor = 0;
       const component = findComponent(ChatMain(), 'MessageLog');
       const log = component.type(component.props);
-      const content = [log.props.children].flat(Infinity).find((node) => node?.props?.id === 'chat-log');
+      const content = find(log, 'div');
       return [content.props.children]
         .flat(Infinity)
         .filter(
@@ -610,11 +610,117 @@ describe('main composer pending edits', () => {
     const chat = ChatMain();
     expect(findComponent(chat, 'ReadonlyBanner').type().props.hidden).toBe(true);
     expect(findComponent(chat, 'InputDock')).toBeDefined();
-    expect(find(chat, 'div').props.id).toBe('chat-status');
-    expect(find(chat, 'div').props.hidden).toBe(true);
+    const overlay = find(chat, 'div');
+    expect(overlay.props.class).toBe('chat-bottom-dock');
+    expect(overlay.props.children[0].props.id).toBe('chat-status');
+    expect(overlay.props.children[0].props.hidden).toBe(true);
     chatReloadRequired.value = false;
     channelType.value = 'slack';
     expect(banner().props.children).toEqual(['Read-only view — reply on ', 'Slack', ' to continue this thread.']);
+  });
+
+  it('shares the floating dock with the native scroller without a background scroll handler', () => {
+    const chat = ChatMain();
+    const log = findComponent(chat, 'MessageLog');
+    const dock = find(chat, 'div');
+    expect(dock.props.class).toBe('chat-bottom-dock');
+    expect(log.props.dockRef).toBe(dock.ref);
+    expect(chat.props.onScrollCapture).toBeUndefined();
+  });
+
+  it('measures dock clearance and scrollbar access before paint, following only a pinned transcript on resize', () => {
+    const saved = {
+      window,
+      ResizeObserver: globalThis.ResizeObserver,
+      requestAnimationFrame: globalThis.requestAnimationFrame,
+      cancelAnimationFrame: globalThis.cancelAnimationFrame,
+    };
+    let dockHeight = 56;
+    let resize = () => {};
+    const observed: unknown[] = [];
+    const disconnect = vi.fn();
+    const properties = new Map<string, string>();
+    const dock = { getBoundingClientRect: () => ({ height: dockHeight }) };
+    class Observer {
+      constructor(callback: () => void) {
+        resize = callback;
+      }
+      observe(element: unknown) {
+        observed.push(element);
+      }
+      disconnect = disconnect;
+    }
+    class Viewport extends EventTarget {
+      clientHeight = 500;
+      clientWidth = 785;
+      offsetWidth = 800;
+      clientTop = 0;
+      ownerDocument = new EventTarget();
+      parentElement = { style: { setProperty: (key: string, value: string) => properties.set(key, value) } };
+      top = 0;
+      get scrollHeight() {
+        return 2000 + dockHeight;
+      }
+      get scrollTop() {
+        return this.top;
+      }
+      set scrollTop(value: number) {
+        this.top = Math.max(0, Math.min(this.scrollHeight - this.clientHeight, value));
+      }
+      getBoundingClientRect() {
+        return { top: 0 };
+      }
+      querySelectorAll() {
+        return [];
+      }
+      querySelector() {
+        return null;
+      }
+    }
+    const viewport = new Viewport();
+    const disposers: (() => void)[] = [];
+    try {
+      vi.stubGlobal(
+        'window',
+        Object.assign(new EventTarget(), {
+          nanoclawAppearance: { beforeDensityChange: () => () => {} },
+        }),
+      );
+      vi.stubGlobal('ResizeObserver', Observer);
+      vi.stubGlobal('requestAnimationFrame', () => 0);
+      vi.stubGlobal('cancelAnimationFrame', vi.fn());
+      resetMount();
+      const component = findComponent(ChatMain(), 'MessageLog');
+      component.props.dockRef.current = dock;
+      resetMount();
+      const view = component.type(component.props);
+      const log = find(view, 'div');
+      log.ref.current = viewport;
+      for (const effect of hooks.effects.splice(0)) {
+        const dispose = effect();
+        if (dispose) disposers.push(dispose);
+      }
+      expect(observed).toEqual([viewport, dock]);
+      expect(properties.get('--chat-dock-height')).toBe('56px');
+      expect(properties.get('--chat-scrollbar-width')).toBe('15px');
+      expect(viewport.scrollTop).toBe(1556);
+      dockHeight = 144;
+      resize();
+      expect(properties.get('--chat-dock-height')).toBe('144px');
+      expect(viewport.scrollTop).toBe(1644);
+      viewport.scrollTop = 250;
+      log.props.onScroll();
+      dockHeight = 220;
+      viewport.clientWidth = 780;
+      resize();
+      expect(properties.get('--chat-dock-height')).toBe('220px');
+      expect(properties.get('--chat-scrollbar-width')).toBe('20px');
+      expect(viewport.scrollTop).toBe(250);
+    } finally {
+      disposers.forEach((dispose) => dispose());
+      for (const [key, value] of Object.entries(saved)) vi.stubGlobal(key, value);
+    }
+    expect(disconnect).toHaveBeenCalledOnce();
   });
 
   it('offers reload rather than reconnecting in a retained composer draft', () => {
@@ -1185,7 +1291,7 @@ describe('main composer pending edits', () => {
     expect(find(view, 'section', 'Queued follow-ups')).toBeUndefined();
     const logNode = find(view, 'div');
     expect(logNode).toBeTruthy();
-    const logContents = [logNode.props.children[0].props.children].flat(Infinity);
+    const logContents = [logNode.props.children].flat(Infinity);
     const pendingBubble = logContents.find((node: any) => node?.props?.m?.id === message.id);
     expect(pendingBubble?.type.name).toBe('Message');
     expect(find(view, 'h3')).toBeUndefined();
@@ -1212,9 +1318,7 @@ describe('main composer pending edits', () => {
     hooks.cursor = 0;
     const view = log.type(log.props);
     const logNode = find(view, 'div');
-    const messages = [logNode.props.children[0].props.children]
-      .flat(Infinity)
-      .filter((node: any) => node?.type?.name === 'Message');
+    const messages = [logNode.props.children].flat(Infinity).filter((node: any) => node?.type?.name === 'Message');
 
     const forkButtons = messages.map((messageNode: any) => {
       hooks.slots = [];
@@ -2152,104 +2256,6 @@ describe('main composer pending edits', () => {
     },
   );
 
-  it.each(['reaching the top', 'new user scrolling', 'the Next user-message button'])(
-    'protects user-message jumps from bottom-follow after %s',
-    (resume) => {
-      const savedGlobals = {
-        window,
-        requestAnimationFrame: globalThis.requestAnimationFrame,
-        cancelAnimationFrame: globalThis.cancelAnimationFrame,
-        WheelEvent: globalThis.WheelEvent,
-        getComputedStyle: globalThis.getComputedStyle,
-        Element: globalThis.Element,
-      };
-      const fakeWindow = Object.assign(new EventTarget(), {
-        nanoclawAppearance: { beforeDensityChange: () => () => {} },
-        matchMedia: () => ({ matches: false }),
-      });
-      class Viewport extends EventTarget {
-        scrollHeight = 2000;
-        clientHeight = 500;
-        clientTop = 0;
-        ownerDocument = new EventTarget();
-        top = 1470;
-        get scrollTop() {
-          return this.top;
-        }
-        set scrollTop(value: number) {
-          this.top = Math.max(0, Math.min(1500, value));
-        }
-        scrollTo = vi.fn<(options: ScrollToOptions) => void>();
-        getBoundingClientRect() {
-          return { top: 50 };
-        }
-        querySelectorAll(selector: string) {
-          return selector === '.msg.in'
-            ? [0, 1500].map((position) => ({ getBoundingClientRect: () => ({ top: 66 + position - this.scrollTop }) }))
-            : [];
-        }
-      }
-      class Wheel extends Event {
-        deltaY = 100;
-        ctrlKey = false;
-        constructor() {
-          super('wheel');
-        }
-      }
-      const el = new Viewport();
-      const disposers: (() => void)[] = [];
-      try {
-        vi.stubGlobal('window', fakeWindow);
-        vi.stubGlobal('requestAnimationFrame', () => 0);
-        vi.stubGlobal('cancelAnimationFrame', vi.fn());
-        vi.stubGlobal('WheelEvent', Wheel);
-        vi.stubGlobal('Element', Viewport);
-        vi.stubGlobal('getComputedStyle', (_element: unknown, pseudo?: string) =>
-          pseudo ? { height: '10px' } : { rowGap: '6px' },
-        );
-        hooks.cursor = 0;
-        const chat = ChatMain();
-        const log = findComponent(chat, 'MessageLog');
-        hooks.slots = [];
-        hooks.effects = [];
-        hooks.cursor = 0;
-        hooks.capturePassive = true;
-        const view = log.type(log.props);
-        const logNode = view.props.children[0];
-        logNode.ref.current = el;
-        for (const effect of [...hooks.effects.splice(0), ...hooks.passiveEffects.splice(0)]) {
-          const dispose = effect();
-          if (dispose) disposers.push(dispose);
-        }
-        el.scrollTop = 1470;
-        logNode.props.onScroll();
-        const controls = findComponent(view, 'ScrollNavigationButtons');
-        controls.props.onPrevious();
-        expect(el.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
-        el.scrollTop = 1465;
-        logNode.props.onScroll();
-        fakeWindow.dispatchEvent(new Event('resize'));
-        expect(el.scrollTop).toBe(1465);
-        if (resume === 'reaching the top') {
-          el.scrollTop = 0;
-          logNode.props.onScroll();
-        } else if (resume === 'new user scrolling') {
-          el.dispatchEvent(new Wheel());
-        } else {
-          controls.props.onNext();
-        }
-        el.scrollTop = 1490;
-        logNode.props.onScroll();
-        fakeWindow.dispatchEvent(new Event('resize'));
-        expect(el.scrollTop).toBe(resume === 'the Next user-message button' ? 1490 : 1500);
-      } finally {
-        disposers.forEach((dispose) => dispose());
-        hooks.capturePassive = false;
-        for (const [key, value] of Object.entries(savedGlobals)) vi.stubGlobal(key, value);
-      }
-    },
-  );
-
   it.each(['submission', 'following', 'completion'] as const)(
     'positions %s rows before paint without stale bottom-follow',
     (phase) => {
@@ -2263,6 +2269,7 @@ describe('main composer pending edits', () => {
       const frames = new Map<number, FrameRequestCallback>();
       let nextFrame = 0;
       const cancel = vi.fn((id: number) => frames.delete(id));
+      const responseContent = { scrollTop: 240 };
       class Viewport extends EventTarget {
         top = 1470;
         scrollHeight = 2000;
@@ -2282,15 +2289,16 @@ describe('main composer pending edits', () => {
           return [];
         }
         querySelector() {
-          return { getBoundingClientRect: () => ({ top: 50 + 1400 - this.scrollTop }) };
+          return {
+            querySelector: () => responseContent,
+            getBoundingClientRect: () => ({ top: 50 + 1400 - this.scrollTop }),
+          };
         }
       }
       const viewport = new Viewport();
       const disposers: (() => void)[] = [];
       try {
-        vi.stubGlobal('getComputedStyle', (_element: unknown, pseudo?: string) =>
-          pseudo ? { height: '10px' } : { rowGap: '6px' },
-        );
+        vi.stubGlobal('getComputedStyle', () => ({ scrollPaddingTop: '16px' }));
         vi.stubGlobal(
           'window',
           Object.assign(new EventTarget(), {
@@ -2310,7 +2318,7 @@ describe('main composer pending edits', () => {
         hooks.cursor = 0;
         hooks.capturePassive = true;
         const view = log.type(log.props);
-        view.props.children[0].ref.current = viewport;
+        find(view, 'div').ref.current = viewport;
         for (const effect of hooks.effects.splice(0)) {
           const dispose = effect();
           if (dispose) disposers.push(dispose);
@@ -2342,7 +2350,16 @@ describe('main composer pending edits', () => {
           callback(0);
         }
         expect(viewport.scrollTop).toBe(1384);
+        expect(responseContent.scrollTop).toBe(0);
         expect(viewport.querySelector().getBoundingClientRect().top).toBe(66);
+        viewport.scrollHeight = viewport.clientHeight + viewport.scrollTop + 30;
+        find(view, 'div').props.onScroll();
+        window.dispatchEvent(new Event('resize'));
+        expect(viewport.scrollTop).toBe(1384);
+        viewport.scrollTop += 1;
+        find(view, 'div').props.onScroll();
+        window.dispatchEvent(new Event('resize'));
+        expect(viewport.scrollTop).toBe(viewport.scrollHeight - viewport.clientHeight);
       } finally {
         disposers.forEach((dispose) => dispose());
         hooks.capturePassive = false;

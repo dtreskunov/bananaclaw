@@ -19674,6 +19674,9 @@ function completedResponseId(previous, messages) {
 function responseScrollTop(scrollTop, responseTop, viewportTop) {
   return Math.max(0, scrollTop + responseTop - viewportTop);
 }
+function transcriptReadingTop(viewport) {
+  return viewport.getBoundingClientRect().top + viewport.clientTop + parseFloat(getComputedStyle(viewport).scrollPaddingTop);
+}
 
 // src/web-submissions.ts
 function withWebSendState(submission, state) {
@@ -21857,7 +21860,7 @@ function UserMenu() {
 
 // src/components/Header.tsx
 function Header() {
-  return /* @__PURE__ */ u4("header", { children: [
+  return /* @__PURE__ */ u4("header", { class: "app-header", children: [
     /* @__PURE__ */ u4(
       "button",
       {
@@ -23365,8 +23368,9 @@ function attachScrollEdges(element, axes = {}, onUpdate) {
 function MessageBubble({ class: className, "data-msg-id": id2, elementRef, reveal, children }) {
   const ownRef = A2(null);
   const ref = elementRef ?? ownRef;
+  const scrollRef = A2(null);
   _2(() => {
-    const bubble = ref.current;
+    const bubble = scrollRef.current;
     if (!bubble) return;
     return attachScrollEdges(bubble, { horizontal: false }, (edges) => {
       const scrollable = edges.top || edges.bottom;
@@ -23381,13 +23385,13 @@ function MessageBubble({ class: className, "data-msg-id": id2, elementRef, revea
     });
   }, []);
   _2(() => {
-    const bubble = ref.current;
+    const bubble = scrollRef.current;
     const match2 = reveal ? bubble?.querySelector(".search-hl") : null;
     if (bubble && match2) {
       bubble.scrollTop += match2.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  return /* @__PURE__ */ u4("div", { class: `${className} scroll-edge-fade`, "data-msg-id": id2, ref, children });
+  return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll scroll-edge-fade", ref: scrollRef, children }) });
 }
 
 // src/components/QuestionAnswerBubble.tsx
@@ -23630,192 +23634,6 @@ function CopyTranscriptButton({ getContent }) {
       children: /* @__PURE__ */ u4(CopyIcon, {})
     }
   );
-}
-
-// src/components/ScrollNavigationButtons.tsx
-function ScrollNavigationButtons({ direction, canPrevious, canNext, onPrevious, onNext }) {
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "scroll-jump scroll-to-top",
-        "data-instant-hide": direction === "down",
-        "data-visible": direction === "up",
-        "aria-hidden": direction !== "up",
-        disabled: direction !== "up" || !canPrevious,
-        title: "Previous user message",
-        "aria-label": "Previous user message",
-        onClick: onPrevious,
-        children: /* @__PURE__ */ u4("svg", { class: "scroll-jump-arrow", viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false", children: [
-          /* @__PURE__ */ u4("path", { d: "M5 4h14" }),
-          /* @__PURE__ */ u4("path", { d: "M12 20V8m-5 5 5-5 5 5" })
-        ] })
-      }
-    ),
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "scroll-jump scroll-to-bottom",
-        "data-instant-hide": direction === "up",
-        "data-visible": direction === "down",
-        "aria-hidden": direction !== "down",
-        disabled: direction !== "down" || !canNext,
-        title: "Next user message",
-        "aria-label": "Next user message",
-        onClick: onNext,
-        children: /* @__PURE__ */ u4("svg", { class: "scroll-jump-arrow", viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false", children: [
-          /* @__PURE__ */ u4("path", { d: "M5 20h14" }),
-          /* @__PURE__ */ u4("path", { d: "M12 4v12m-5-5 5 5 5-5" })
-        ] })
-      }
-    )
-  ] });
-}
-
-// src/scroll-navigation.ts
-var SCROLL_NAVIGATION_IDLE_MS = 1e3;
-function transcriptReadingTop(viewport) {
-  const clearance = parseFloat(getComputedStyle(viewport, "::before").height) + parseFloat(getComputedStyle(viewport).rowGap);
-  return viewport.getBoundingClientRect().top + viewport.clientTop + clearance;
-}
-function userMessageScrollTop(positions, current, maximum, direction) {
-  let previous = null;
-  for (const position2 of positions) {
-    const target = Math.max(0, Math.min(maximum, position2));
-    if (direction === "down" && target > current + 1) return target;
-    if (target < current - 1) previous = target;
-  }
-  return direction === "up" ? previous : null;
-}
-function attachScrollNavigation(viewport, onDirection, onUserInput) {
-  let timer2 = null;
-  let inputUntil = null;
-  let active = viewport;
-  const pointers = /* @__PURE__ */ new Set();
-  const snapshot = (element) => {
-    const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
-    return {
-      top: Math.max(0, Math.min(maximum, element.scrollTop)),
-      height: element.scrollHeight,
-      viewportHeight: element.clientHeight
-    };
-  };
-  const positions = /* @__PURE__ */ new WeakMap();
-  positions.set(viewport, snapshot(viewport));
-  function clearTimer() {
-    if (timer2 !== null) clearTimeout(timer2);
-    timer2 = null;
-  }
-  function hide() {
-    clearTimer();
-    onDirection(null);
-  }
-  function inputScroller(event) {
-    let element = event.target instanceof Element ? event.target : null;
-    while (element && element !== viewport) {
-      if (element.scrollHeight > element.clientHeight + 1) return element;
-      element = element.parentElement;
-    }
-    return viewport;
-  }
-  function arm(event) {
-    const now = Date.now();
-    active = inputScroller(event);
-    if (active === viewport) onUserInput?.();
-    inputUntil = now + SCROLL_NAVIGATION_IDLE_MS;
-    onScroll();
-  }
-  function rememberScroller(event) {
-    const element = inputScroller(event);
-    if (!positions.has(element)) positions.set(element, snapshot(element));
-  }
-  function onScroll(event) {
-    const element = event ? event.target instanceof Element ? event.target : viewport : active;
-    const position2 = snapshot(element);
-    const previous = positions.get(element) ?? { ...position2, top: 0 };
-    const delta = position2.top - previous.top;
-    const resized = position2.height !== previous.height || position2.viewportHeight !== previous.viewportHeight;
-    positions.set(element, position2);
-    if (element !== active && (element !== viewport || active.scrollTop > 1 && active.scrollTop < active.scrollHeight - active.clientHeight - 1))
-      return;
-    if (resized || delta === 0 || !pointers.size && (inputUntil === null || Date.now() > inputUntil)) return;
-    if (element === viewport && active !== viewport) {
-      active = viewport;
-      onUserInput?.();
-    }
-    inputUntil = Date.now() + SCROLL_NAVIGATION_IDLE_MS;
-    const next = delta < 0 ? "up" : "down";
-    onDirection(next);
-    clearTimer();
-    timer2 = setTimeout(() => {
-      timer2 = null;
-      if (inputUntil !== null && Date.now() >= inputUntil) inputUntil = null;
-      onDirection(null);
-    }, SCROLL_NAVIGATION_IDLE_MS);
-  }
-  function onWheel(event) {
-    if (event instanceof WheelEvent && !event.defaultPrevented && !event.ctrlKey && event.deltaY !== 0) arm(event);
-  }
-  function onTouchMove(event) {
-    if (!event.defaultPrevented) arm(event);
-  }
-  function onPointerDown(event) {
-    if (!(event instanceof PointerEvent) || event.defaultPrevented) return;
-    const element = inputScroller(event);
-    positions.set(element, snapshot(element));
-    if (event.target !== element || event.button !== 0 || !["mouse", "pen"].includes(event.pointerType)) return;
-    pointers.add(event.pointerId);
-    arm(event);
-  }
-  function onPointerEnd(event) {
-    if (event instanceof PointerEvent) pointers.delete(event.pointerId);
-  }
-  function onKeyDown(event) {
-    if (!(event instanceof KeyboardEvent) || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey)
-      return;
-    if (!["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) return;
-    if (event.target instanceof Element) {
-      if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
-      if (event.key === " " && event.target.closest("button")) return;
-    }
-    arm(event);
-  }
-  function onScrollEnd(event) {
-    if (event.target === active) inputUntil = null;
-  }
-  const listeners = [
-    ["scroll", onScroll, true],
-    ["scrollend", onScrollEnd, true],
-    ["wheel", onWheel],
-    ["touchmove", onTouchMove],
-    ["pointerdown", onPointerDown],
-    ["keydown", onKeyDown],
-    ["pointerover", rememberScroller],
-    ["focusin", rememberScroller]
-  ];
-  for (const [name, listener, capture = false] of listeners)
-    viewport.addEventListener(name, listener, { passive: true, capture });
-  viewport.ownerDocument.addEventListener("pointerup", onPointerEnd);
-  viewport.ownerDocument.addEventListener("pointercancel", onPointerEnd);
-  onDirection(null);
-  return {
-    reset() {
-      inputUntil = null;
-      pointers.clear();
-      active = viewport;
-      positions.set(viewport, snapshot(viewport));
-      hide();
-    },
-    dispose() {
-      clearTimer();
-      for (const [name, listener, capture = false] of listeners)
-        viewport.removeEventListener(name, listener, { capture });
-      viewport.ownerDocument.removeEventListener("pointerup", onPointerEnd);
-      viewport.ownerDocument.removeEventListener("pointercancel", onPointerEnd);
-    }
-  };
 }
 
 // src/density-reflow.ts
@@ -25124,16 +24942,14 @@ function ResponseStatusRow({ source }) {
     }
   );
 }
-function MessageLog() {
+function MessageLog({ dockRef }) {
   const ref = A2(null);
   const appliedHighlightRef = A2(null);
   const prevMsgCountRef = A2(0);
   const prevLayoutRef = A2("");
   const prevScrollTickRef = A2(scrollToBottomTick.value);
-  const navigationRef = A2(null);
   const pendingScrollFrame = A2(null);
   const revealedResponse = A2(completedResponse.value);
-  const [scrollControls, setScrollControls] = h2({ direction: null, previous: false, next: false });
   const [, setDensityReflowTick] = h2(0);
   const highlight = highlightMessageId.value;
   const timeline = submissionPresentation(
@@ -25157,7 +24973,7 @@ function MessageLog() {
   const responseId = completedResponse.value;
   const atBottomRef = A2(true);
   const followingBottomRef = A2(true);
-  const leavingBottomRef = A2(false);
+  const responseReadingTopRef = A2(null);
   const densityReflowRef = A2(false);
   const onLogClick = (event) => {
     if (!isMobile.value || !(event.target instanceof Element)) return;
@@ -25168,44 +24984,18 @@ function MessageLog() {
     const el = ref.current;
     if (!el) return true;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    if (!nearBottom || el.scrollTop <= 1) leavingBottomRef.current = false;
-    const nextAtBottom = nearBottom && !leavingBottomRef.current;
+    if (el.scrollTop !== responseReadingTopRef.current || el.scrollTop <= 1) responseReadingTopRef.current = null;
+    const nextAtBottom = nearBottom && responseReadingTopRef.current === null;
     atBottomRef.current = nextAtBottom;
     return nextAtBottom;
   };
   const scrollToBottom = () => {
     const el = ref.current;
     if (!el) return;
-    leavingBottomRef.current = false;
-    navigationRef.current?.reset();
+    responseReadingTopRef.current = null;
     el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
     followingBottomRef.current = true;
-  };
-  const userMessageTargets = () => {
-    const el = ref.current;
-    if (!el) return { up: null, down: null };
-    const readingTop = transcriptReadingTop(el);
-    const positions = Array.from(
-      el.querySelectorAll(".msg.in"),
-      (message2) => el.scrollTop + message2.getBoundingClientRect().top - readingTop
-    );
-    const maximum = Math.max(0, el.scrollHeight - el.clientHeight);
-    return {
-      up: userMessageScrollTop(positions, el.scrollTop, maximum, "up"),
-      down: userMessageScrollTop(positions, el.scrollTop, maximum, "down")
-    };
-  };
-  const scrollToUserMessage = (direction) => {
-    const el = ref.current;
-    const top = userMessageTargets()[direction];
-    if (!el || top === null) return;
-    cancelScheduledScroll();
-    navigationRef.current?.reset();
-    leavingBottomRef.current = true;
-    atBottomRef.current = false;
-    followingBottomRef.current = false;
-    el.scrollTo({ top, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   };
   const cancelScheduledScroll = () => {
     if (pendingScrollFrame.current !== null) cancelAnimationFrame(pendingScrollFrame.current);
@@ -25222,35 +25012,37 @@ function MessageLog() {
     if (!densityReflowRef.current) followingBottomRef.current = measureScroll();
   };
   _2(() => {
-    const el = ref.current;
-    if (!el) return void 0;
-    const navigation = attachScrollNavigation(el, (direction) => {
-      const targets = direction ? userMessageTargets() : null;
-      setScrollControls((previous) => {
-        const next = {
-          direction,
-          previous: targets ? targets.up !== null : previous.previous,
-          next: targets ? targets.down !== null : previous.next
-        };
-        return previous.direction === next.direction && previous.previous === next.previous && previous.next === next.next ? previous : next;
-      });
-    }, () => {
-      leavingBottomRef.current = false;
-    });
-    navigationRef.current = navigation;
-    return () => {
-      cancelScheduledScroll();
-      navigation.dispose();
-      navigationRef.current = null;
-    };
-  }, [activeThreadId]);
-  _2(() => {
     prevMsgCountRef.current = 0;
     prevLayoutRef.current = "";
     atBottomRef.current = true;
     followingBottomRef.current = true;
-    leavingBottomRef.current = false;
+    responseReadingTopRef.current = null;
+    return cancelScheduledScroll;
   }, [activeThreadId]);
+  _2(() => {
+    const el = ref.current;
+    if (!el) return void 0;
+    const dock = dockRef.current;
+    const onResize = () => {
+      if (dock && el.parentElement) {
+        el.parentElement.style.setProperty("--chat-dock-height", `${dock.getBoundingClientRect().height}px`);
+        el.parentElement.style.setProperty("--chat-scrollbar-width", `${el.offsetWidth - el.clientWidth}px`);
+      }
+      if (responseReadingTopRef.current !== null) responseReadingTopRef.current = el.scrollTop;
+      if (densityReflowRef.current) return;
+      if (atBottomRef.current) scrollToBottom();
+      else measureScroll();
+    };
+    window.addEventListener("resize", onResize);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+    observer?.observe(el);
+    if (dock) observer?.observe(dock);
+    onResize();
+    return () => {
+      window.removeEventListener("resize", onResize);
+      observer?.disconnect();
+    };
+  }, []);
   _2(() => {
     if (!responseId) {
       revealedResponse.current = null;
@@ -25262,16 +25054,16 @@ function MessageLog() {
     if (!log || !response) return;
     revealedResponse.current = responseId;
     cancelScheduledScroll();
-    navigationRef.current?.reset();
-    leavingBottomRef.current = true;
     atBottomRef.current = false;
     followingBottomRef.current = false;
-    response.scrollTop = 0;
+    const responseContent = response.querySelector(".message-scroll");
+    if (responseContent) responseContent.scrollTop = 0;
     log.scrollTop = responseScrollTop(
       log.scrollTop,
       response.getBoundingClientRect().top,
       transcriptReadingTop(log)
     );
+    responseReadingTopRef.current = log.scrollTop;
     prevMsgCountRef.current = msgCount;
     prevLayoutRef.current = layoutKey;
   }, [responseId, activeThreadId, msgCount, layoutKey]);
@@ -25282,30 +25074,14 @@ function MessageLog() {
       followingBottom: () => followingBottomRef.current,
       beforeReflow: () => {
         densityReflowRef.current = true;
-        navigationRef.current?.reset();
       },
       afterReflow: () => {
         densityReflowRef.current = false;
-        navigationRef.current?.reset();
+        if (responseReadingTopRef.current !== null && ref.current) responseReadingTopRef.current = ref.current.scrollTop;
         setDensityReflowTick((tick) => tick + 1);
       }
     });
   }, [activeThreadId]);
-  y2(() => {
-    const el = ref.current;
-    const onResize = () => {
-      if (densityReflowRef.current) return;
-      if (atBottomRef.current) scrollToBottom();
-      else measureScroll();
-    };
-    window.addEventListener("resize", onResize);
-    const observer = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
-    if (el && observer) observer.observe(el);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      observer?.disconnect();
-    };
-  }, []);
   y2(() => {
     const bubble = Array.from(ref.current?.querySelectorAll("[data-turn-id]") ?? []).find((element) => element.getAttribute("data-turn-id") === activeTurnId);
     if (!bubble || typeof ResizeObserver === "undefined") return;
@@ -25331,7 +25107,6 @@ function MessageLog() {
       const el = ref.current.querySelector(`[data-msg-id="${CSS.escape(highlight)}"]`);
       if (el && (appliedHighlightRef.current !== highlight || prevLayoutRef.current !== layoutKey)) {
         appliedHighlightRef.current = highlight;
-        navigationRef.current?.reset();
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         el.classList.add("highlight-pulse");
         setTimeout(() => el.classList.remove("highlight-pulse"), 2e3);
@@ -25375,50 +25150,38 @@ function MessageLog() {
       break;
     }
   }
-  return /* @__PURE__ */ u4("div", { class: "log-viewport", children: [
-    /* @__PURE__ */ u4("div", { class: "log scroll-edge-fade", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
-      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
-        const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
-        const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswerBubble, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
-          ThoughtGroup,
-          {
-            thoughts: g8.thoughts,
-            answer: g8.answer,
-            allowContinue: g8.answer === latestConversationalMessage,
-            isLatest: g8.answer === latestConversationalMessage
-          },
-          key
-        ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
-          Message,
-          {
-            m: g8.m,
-            allowContinue: g8.m === latestConversationalMessage,
-            isLatest: g8.m === latestConversationalMessage
-          },
-          key
-        );
-        const inherited = inheritedUntil !== null && groupContains(g8, inheritedUntil);
-        const branches = [...branchesAt].filter(([id2]) => groupContains(g8, id2)).flatMap(([, c4]) => c4);
-        if (!inherited && branches.length === 0) return body;
-        return /* @__PURE__ */ u4(k, { children: [
-          body,
-          inherited ? /* @__PURE__ */ u4(InheritedDivider, { origin: forkOrigin }, `${key}:fork`) : null,
-          branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
-        ] });
-      }),
-      !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(Message, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
-      /* @__PURE__ */ u4(TaskIndicator, {})
-    ] }),
-    /* @__PURE__ */ u4(
-      ScrollNavigationButtons,
-      {
-        direction: scrollControls.direction,
-        canPrevious: scrollControls.previous,
-        canNext: scrollControls.next,
-        onPrevious: () => scrollToUserMessage("up"),
-        onNext: () => scrollToUserMessage("down")
-      }
-    )
+  return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
+    chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
+      const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
+      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswerBubble, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
+        ThoughtGroup,
+        {
+          thoughts: g8.thoughts,
+          answer: g8.answer,
+          allowContinue: g8.answer === latestConversationalMessage,
+          isLatest: g8.answer === latestConversationalMessage
+        },
+        key
+      ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
+        Message,
+        {
+          m: g8.m,
+          allowContinue: g8.m === latestConversationalMessage,
+          isLatest: g8.m === latestConversationalMessage
+        },
+        key
+      );
+      const inherited = inheritedUntil !== null && groupContains(g8, inheritedUntil);
+      const branches = [...branchesAt].filter(([id2]) => groupContains(g8, id2)).flatMap(([, c4]) => c4);
+      if (!inherited && branches.length === 0) return body;
+      return /* @__PURE__ */ u4(k, { children: [
+        body,
+        inherited ? /* @__PURE__ */ u4(InheritedDivider, { origin: forkOrigin }, `${key}:fork`) : null,
+        branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
+      ] });
+    }),
+    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(Message, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
+    /* @__PURE__ */ u4(TaskIndicator, {})
   ] });
 }
 function ContextChip() {
@@ -25717,6 +25480,7 @@ function Subnotice() {
 }
 function ChatMain() {
   const ref = A2(null);
+  const dockRef = A2(null);
   y2(() => {
     const el = ref.current;
     if (!el) return void 0;
@@ -25760,11 +25524,13 @@ function ChatMain() {
   const reconnectPending = chatStatus.value.startsWith("disconnected \xB7 reconnecting in ");
   return /* @__PURE__ */ u4("section", { class: "chat-main", id: "chat-main", ref, children: [
     /* @__PURE__ */ u4(ApprovalsBanner, {}),
-    /* @__PURE__ */ u4(MessageLog, {}),
+    /* @__PURE__ */ u4(MessageLog, { dockRef }),
     /* @__PURE__ */ u4(ImageViewer, {}),
-    reconnectPending ? /* @__PURE__ */ u4("button", { class: "status reconnect-status", id: "chat-status", type: "button", onClick: reconnectChatNow, children: chatStatus.value }) : /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatReloadRequired.value || chatStatus.value === "connected", children: chatStatus.value }),
-    /* @__PURE__ */ u4(ReadonlyBanner, {}),
-    /* @__PURE__ */ u4(InputDock, {})
+    /* @__PURE__ */ u4("div", { class: "chat-bottom-dock", ref: dockRef, children: [
+      reconnectPending ? /* @__PURE__ */ u4("button", { class: "status reconnect-status", id: "chat-status", type: "button", onClick: reconnectChatNow, children: chatStatus.value }) : /* @__PURE__ */ u4("div", { class: "status", id: "chat-status", hidden: chatReloadRequired.value || chatStatus.value === "connected", children: chatStatus.value }),
+      /* @__PURE__ */ u4(ReadonlyBanner, {}),
+      /* @__PURE__ */ u4(InputDock, {})
+    ] })
   ] });
 }
 function InputDock() {

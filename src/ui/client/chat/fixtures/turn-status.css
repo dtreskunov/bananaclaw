@@ -4,6 +4,7 @@
 .turn-status-fixture {
   height: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
 }
 .turn-status-fixture-controls {
@@ -19,12 +20,15 @@
 }
 .turn-status-fixture-controls label {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 6px;
 }
 .turn-status-fixture-controls select,
 .turn-status-fixture-controls button {
   min-height: 32px;
+  min-width: 0;
   max-width: 100%;
   padding: 4px 8px;
   border: 1px solid var(--border);

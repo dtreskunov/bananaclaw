@@ -42,7 +42,7 @@ describe('completion response scrolling', () => {
     expect(responseScrollTop(0, 20, 50)).toBe(0);
   });
 
-  it('positions a new response below the transcript fade rather than behind it', () => {
+  it('positions a new response inside the transcript edge spacing', () => {
     expect(responseScrollTop(500, 350, 70)).toBe(780);
     expect(responseScrollTop(780, 70, 70)).toBe(780);
   });

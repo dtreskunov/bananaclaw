@@ -16,3 +16,9 @@ export function completedResponseId(previous: Conversation | null, messages: Cha
 export function responseScrollTop(scrollTop: number, responseTop: number, viewportTop: number): number {
   return Math.max(0, scrollTop + responseTop - viewportTop);
 }
+
+export function transcriptReadingTop(viewport: HTMLElement): number {
+  return (
+    viewport.getBoundingClientRect().top + viewport.clientTop + parseFloat(getComputedStyle(viewport).scrollPaddingTop)
+  );
+}

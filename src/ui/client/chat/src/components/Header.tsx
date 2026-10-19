@@ -7,7 +7,7 @@ import { UserMenu } from './UserMenu';
 
 export function Header() {
   return (
-    <header>
+    <header class="app-header">
       <button
         type="button"
         class="icon-btn mobile-only"

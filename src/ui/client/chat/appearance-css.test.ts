@@ -49,41 +49,15 @@ function mix(fg: string, bg: string, fraction: number): string {
 }
 
 describe('theme CSS contract', () => {
-  it('uses the same surface styling for both scroll buttons in every state', () => {
+  it('uses header and composer shadows without transcript navigation buttons', () => {
     const css = read('./components/ChatMain.css');
-    const normal = css.match(/\.chat-main \.scroll-jump \{([^}]+)\}/)?.[1];
-    expect(normal).toContain('background: var(--surface)');
-    expect(normal).toContain('color: var(--surface-fg)');
-    expect(css).not.toContain('.scroll-to-bottom.new-message');
-  });
-
-  it('fades scroll controls in and out over 500 ms while preserving reversal and reduced-motion hiding', () => {
-    const css = read('./components/ChatMain.css');
-    const resting = css.match(/\.chat-main \.scroll-jump \{([^}]+)\}/)?.[1];
-    expect(resting).toContain('opacity: 0');
-    expect(resting).toContain('visibility: hidden');
-    expect(resting).toContain('pointer-events: none');
-    expect(resting).toContain('opacity 0.5s, visibility 0s linear 0.5s');
-    const active = css.match(/\.chat-main \.scroll-jump\[data-visible="true"\] \{([^}]+)\}/)?.[1];
-    expect(active).toContain('opacity: 1');
-    expect(active).toContain('visibility: visible');
-    expect(active).toContain('pointer-events: auto');
-    expect(active).toContain('transition: opacity 0.5s');
-    expect(active).not.toContain('visibility 0s linear 0.5s');
-    const reversed = css.match(/\.chat-main \.scroll-jump\[data-instant-hide="true"\] \{([^}]+)\}/)?.[1];
-    expect(reversed).toContain('transition: none');
-    expect(css).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{\s*\.chat-main \.scroll-jump,\s*\.chat-main \.scroll-jump\[data-visible="true"\] \{ transition: none; \}/,
-    );
-  });
-
-  it('stacks Up above Down with an 8 px gap and a shared bottom anchor', () => {
-    const css = read('./components/ChatMain.css');
-    const shared = css.match(/\.chat-main \.scroll-jump \{([^}]+)\}/)?.[1];
-    expect(shared).toContain('bottom: 10px');
-    const up = css.match(/\.chat-main \.scroll-to-top \{([^}]+)\}/)?.[1];
-    expect(up).toContain('transform: translateY(calc(-100% - 8px))');
-    expect(up).not.toContain('top:');
+    expect(css).not.toContain('.scroll-jump');
+    expect(read('./components/ChatMain.tsx')).not.toContain('ScrollNavigation');
+    const header = read('./components/Header.css').match(/\.app-header \{([^}]+)\}/)?.[1];
+    expect(header).toContain('position: relative');
+    expect(header).toContain('z-index: 3');
+    expect(header).toContain('box-shadow: 0 2px 10px var(--shadow-color)');
+    expect(read('./components/Header.tsx')).toContain('<header class="app-header">');
   });
 
   it('shares a 760 px column and desktop gutters between messages and composer, with 90% bubbles', () => {
@@ -105,26 +79,102 @@ describe('theme CSS contract', () => {
     expect(css.match(/max\(16px, calc\(\(100% - var\(--chat-max\)\)/g)).toHaveLength(1);
   });
 
-  it('uses always-on CSS transcript fades with one line of matching space at both ends', () => {
+  it('uses one full-height native scroller for both the transcript and its background', () => {
     const css = read('./components/ChatMain.css');
     const column = css.match(/\.chat-main \{([^}]+)\}/)?.[1];
-    expect(column).toContain('--transcript-fade-height: calc(var(--font-base) * var(--line-height-ui))');
-    const mobileColumn = css.match(/@media \(max-width: 720px\) \{\s*\.chat-main \{([^}]+)\}/)?.[1];
-    expect(mobileColumn).toContain('--transcript-fade-height: calc(var(--font-lg) * var(--line-height-ui))');
+    expect(column).toContain('grid-template-rows: auto minmax(0, 1fr)');
+    expect(css).not.toContain('.chat-main::before');
     const log = css.match(/\.chat-main \.log \{([^}]+)\}/)?.[1];
-    expect(log).toContain('--fade-top: var(--transcript-fade-height)');
-    expect(log).toContain('--fade-bottom: var(--transcript-fade-height)');
+    expect(log).toContain('container-type: size');
+    expect(log).toContain('--transcript-hatch: color-mix(in srgb, var(--surface-fg) 6%, transparent)');
+    expect(log).toContain('repeating-linear-gradient(45deg, var(--transcript-hatch) 0 1px, transparent 1px 16px)');
+    expect(log).toContain('repeating-linear-gradient(-45deg, var(--transcript-hatch) 0 1px, transparent 1px 16px)');
+    expect(log).toContain('background-attachment: local');
+    expect(log).toContain('background-color: var(--surface)');
+    expect(log).toContain(
+      'scroll-padding-block: var(--transcript-edge-space) calc(var(--chat-dock-height, 0px) + var(--transcript-edge-space))',
+    );
+    const dock = css.match(/\.chat-main \.chat-bottom-dock \{([^}]+)\}/)?.[1];
+    expect(dock).toContain('align-self: end');
+    expect(dock).toContain('margin-inline-end: var(--chat-scrollbar-width, 0px)');
+    expect(dock).toContain('z-index: 1');
+    expect(dock).not.toContain('overflow');
+    expect(css).toContain('.chat-main > .chat-bottom-dock { grid-area: 2 / 1; }');
+    const component = read('./components/ChatMain.tsx');
+    expect(component).not.toContain('transcript-scroll-offset');
+    expect(component).not.toContain('onScrollCapture');
+    expect(component).not.toContain('log-viewport');
+    for (const [direction, tint] of [
+      ['in', 'accent'],
+      ['out', 'wash-strong'],
+    ]) {
+      const bubble = css.match(new RegExp(`\\.chat-main \\.msg\\.${direction} \\{([^}]+)\\}`))?.[1];
+      expect(bubble).toContain(`background: linear-gradient(var(--${tint}), var(--${tint})) var(--surface)`);
+    }
+  });
+
+  it('keeps one line of edge space and floating-dock clearance without transcript fades', () => {
+    const css = read('./components/ChatMain.css');
+    const column = css.match(/\.chat-main \{([^}]+)\}/)?.[1];
+    expect(column).toContain('--transcript-edge-space: calc(var(--font-base) * var(--line-height-ui))');
+    const mobileColumn = css.match(/@media \(max-width: 720px\) \{\s*\.chat-main \{([^}]+)\}/)?.[1];
+    expect(mobileColumn).toContain('--transcript-edge-space: calc(var(--font-lg) * var(--line-height-ui))');
+    const log = css.match(/\.chat-main \.log \{([^}]+)\}/)?.[1];
+    expect(log).not.toContain('--fade-');
     expect(log).toContain('padding-block: 0');
     expect(css).not.toContain('.log.scroll-fade-');
     const edgeSpace = css.match(/\.chat-main \.log::before,\s*\.chat-main \.log::after \{([^}]+)\}/)?.[1];
     expect(edgeSpace).toContain("content: ''");
-    expect(edgeSpace).toContain('flex: 0 0 calc(var(--transcript-fade-height) - var(--message-gap))');
+    expect(edgeSpace).toContain('flex: 0 0 calc(var(--transcript-edge-space) - var(--message-gap))');
+    expect(css).toContain(
+      '.chat-main .log::after { flex-basis: calc(var(--chat-dock-height, 0px) + var(--transcript-edge-space) - var(--message-gap)); }',
+    );
     expect(css).not.toContain('.log-viewport::after');
     const component = read('./components/ChatMain.tsx');
-    expect(component).toContain('class="log scroll-edge-fade"');
+    expect(component).toContain('class="log"');
+    expect(component).not.toContain('class="log scroll-edge-fade"');
     expect(component).not.toContain('attachScrollEdges(ref.current');
     const composer = css.match(/\.chat-main form \{([^}]+)\}/)?.[1];
     expect(composer).not.toContain('border-top');
+  });
+
+  it('keeps rounded bubble frames solid while only their inset content scrolls and fades', () => {
+    const css = read('./components/ChatMain.css');
+    const frame = css.match(/\.chat-main \.log \.msg:not\(\.event\) \{([^}]+)\}/)?.[1];
+    expect(frame).toContain('display: flex');
+    expect(frame).toContain('flex-direction: column');
+    expect(frame).toContain(
+      'max-height: max(0px, calc(100cqh - var(--chat-dock-height, 0px) - 2 * var(--transcript-edge-space)))',
+    );
+    expect(frame).not.toContain('overflow');
+    const content = css.match(/\.chat-main \.message-scroll \{([^}]+)\}/)?.[1];
+    expect(content).toContain('min-height: 0');
+    expect(content).toContain('min-width: 0');
+    expect(content).toContain('overflow: auto');
+    const bubble = read('./components/MessageBubble.tsx');
+    expect(bubble).toContain('class={className}');
+    expect(bubble).toContain('class="message-scroll scroll-edge-fade"');
+    expect(css).toContain('.msg:has(> .message-scroll:focus-visible)');
+    expect(css).toContain('.msg:not(.display-card) > .message-scroll > .turn-technical-details');
+    expect(css).toContain('.msg.markdown > .message-scroll > :first-child');
+    expect(css).toContain('.msg.markdown > .message-scroll > :last-child');
+    const card = css.match(/\.chat-main \.display-card > \.message-scroll \{([^}]+)\}/)?.[1];
+    expect(card).toContain('display: flex');
+    expect(card).toContain('flex-direction: column');
+    expect(card).toContain('gap: 8px');
+  });
+
+  it('sizes bubble fades to three text lines while preserving a readable center in small viewports', () => {
+    const css = read('./components/ChatMain.css');
+    const content = css.match(/\.chat-main \.message-scroll \{([^}]+)\}/)?.[1];
+    expect(content).toContain('--message-edge-fade: min(3lh, 30%)');
+    for (const edge of ['top', 'bottom']) {
+      const state = css.match(new RegExp(`\\.chat-main \\.message-scroll\\.scroll-fade-${edge} \\{([^}]+)\\}`))?.[1];
+      expect(state).toContain(`--fade-${edge}: var(--message-edge-fade)`);
+    }
+    const global = read('./styles/global.css');
+    expect(global).toContain('.scroll-edge-fade.scroll-fade-top { --fade-top: 12px; }');
+    expect(global).toContain('.scroll-edge-fade.scroll-fade-bottom { --fade-bottom: 12px; }');
   });
 
   it('keeps pending controls visible and status captions consistent with delivery labels', () => {
@@ -140,10 +190,12 @@ describe('theme CSS contract', () => {
     expect(labels).not.toMatch(/color:|opacity:/);
   });
 
-  it('frames shared composers with stable idle, hover and whole-composer focus outlines', () => {
+  it('frames shared composers with opaque backplates and stable idle, hover and focus outlines', () => {
     const css = read('./components/ChatMain.css');
     const wrapper = css.match(/\.chat-main \.composer-input-wrap \{([^}]+)\}/)?.[1];
     expect(wrapper).toContain('border-radius: var(--radius-md)');
+    expect(wrapper).toContain('background: var(--surface)');
+    expect(wrapper).toContain('box-shadow: 0 0 0 4px var(--surface), 0 2px 10px 4px var(--shadow-color)');
     expect(wrapper).toContain('outline: 2px solid color-mix(in srgb, var(--focus-ring) 30%, transparent)');
     expect(wrapper).toContain('outline-offset: 2px');
     expect(wrapper).toContain('transition: outline-color 0.15s');
@@ -234,7 +286,7 @@ describe('theme CSS contract', () => {
     const css = read('./components/ChatMain.css');
     expect(css).not.toContain('.msg.input-queued');
     const input = css.match(/\.chat-main \.msg\.in \{([^}]+)\}/)?.[1];
-    expect(input).toContain('background: var(--accent)');
+    expect(input).toContain('background: linear-gradient(var(--accent), var(--accent)) var(--surface)');
     expect(input).not.toMatch(/border(?:-left|-inline-start)?|box-shadow/);
     expect(css).toContain('.chat-main .input-state-caption');
   });
@@ -270,6 +322,17 @@ describe('theme CSS contract', () => {
     const timing = css.match(/\.chat-main \.turn-elapsed \{([^}]+)\}/)?.[1];
     expect(timing).toContain('flex: none');
     expect(timing).toContain('white-space: nowrap');
+  });
+
+  it('gives shared technical-detail panels a solid theme surface without filling the status row', () => {
+    const css = read('./components/ChatMain.css');
+    const panel = css.match(/\.chat-main \.msg-activity\.expanded \{([^}]+)\}/)?.[1];
+    expect(panel).toContain('background: var(--surface)');
+    expect(panel).toContain('border: 1px solid var(--border)');
+    expect(panel).toContain('border-radius: 6px');
+    const status = css.match(/\.chat-main \.typing\.turn-system \{([^}]+)\}/)?.[1];
+    expect(status).toContain('background: transparent');
+    expect(read('./components/ChatMain.tsx')).toContain('class="msg-activity expanded"');
   });
 
   it('keeps activity trace typography comparable to the status line', () => {

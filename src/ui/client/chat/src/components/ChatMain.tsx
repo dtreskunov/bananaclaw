@@ -2,7 +2,7 @@
 // banner, composer.
 import './ChatMain.css';
 import { signal } from '@preact/signals';
-import type { JSX } from 'preact';
+import type { JSX, RefObject } from 'preact';
 import { useRef, useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import {
   chatMessages, chatStatus, chatLoading, chatReady, chatReloadRequired, threadId, channelType, canSend, pending,
@@ -46,7 +46,7 @@ import {
   activityTraceOwner, activityTraceExpanded, toggleActivityTrace, submissionTraceOwner,
   activityMetricsExpanded, toggleActivityMetrics,
 } from '../activity-trace-state';
-import { responseScrollTop } from '../turn-completion';
+import { responseScrollTop, transcriptReadingTop } from '../turn-completion';
 import { activeTurnNotices, hasTurnStats, liveTurnActivity, turnRowView } from '../turn-row';
 import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, latestContextUsage, technicalSummary, type KnownContext } from '../technical-summary';
 import { inputStatePresentation } from '../input-state';
@@ -64,8 +64,6 @@ import { MessageBubble } from './MessageBubble';
 import { ZoomableImage } from './ZoomableImage';
 import { BranchIcon, EditIcon } from './ActionIcons';
 import { CopyTranscriptButton } from './CopyTranscriptButton';
-import { ScrollNavigationButtons } from './ScrollNavigationButtons';
-import { attachScrollNavigation, transcriptReadingTop, userMessageScrollTop, type ScrollDirection, type ScrollNavigation } from '../scroll-navigation';
 import { getAppearanceController } from '../appearance';
 import { appearance } from '../appearance-state';
 import { attachDensityReflow } from '../density-reflow';
@@ -1386,18 +1384,14 @@ function ResponseStatusRow({ source }: {
   );
 }
 
-function MessageLog() {
+function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const appliedHighlightRef = useRef<string | null>(null);
   const prevMsgCountRef = useRef<number>(0);
   const prevLayoutRef = useRef('');
   const prevScrollTickRef = useRef<number>(scrollToBottomTick.value);
-  const navigationRef = useRef<ScrollNavigation | null>(null);
   const pendingScrollFrame = useRef<number | null>(null);
   const revealedResponse = useRef<string | null>(completedResponse.value);
-  const [scrollControls, setScrollControls] = useState<{
-    direction: ScrollDirection | null; previous: boolean; next: boolean;
-  }>({ direction: null, previous: false, next: false });
   const [, setDensityReflowTick] = useState(0);
   const highlight = highlightMessageId.value;
   const timeline = submissionPresentation(chatTranscript.value, pendingWebSends.value,
@@ -1416,7 +1410,7 @@ function MessageLog() {
   const responseId = completedResponse.value;
   const atBottomRef = useRef<boolean>(true);
   const followingBottomRef = useRef<boolean>(true);
-  const leavingBottomRef = useRef(false);
+  const responseReadingTopRef = useRef<number | null>(null);
   const densityReflowRef = useRef(false);
   const onLogClick = (event: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
     if (!isMobile.value || !(event.target instanceof Element)) return;
@@ -1428,8 +1422,8 @@ function MessageLog() {
     const el = ref.current;
     if (!el) return true;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    if (!nearBottom || el.scrollTop <= 1) leavingBottomRef.current = false;
-    const nextAtBottom = nearBottom && !leavingBottomRef.current;
+    if (el.scrollTop !== responseReadingTopRef.current || el.scrollTop <= 1) responseReadingTopRef.current = null;
+    const nextAtBottom = nearBottom && responseReadingTopRef.current === null;
     atBottomRef.current = nextAtBottom;
     return nextAtBottom;
   };
@@ -1437,37 +1431,10 @@ function MessageLog() {
   const scrollToBottom = () => {
     const el = ref.current;
     if (!el) return;
-    leavingBottomRef.current = false;
-    navigationRef.current?.reset();
+    responseReadingTopRef.current = null;
     el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
     followingBottomRef.current = true;
-  };
-
-  const userMessageTargets = () => {
-    const el = ref.current;
-    if (!el) return { up: null, down: null };
-    const readingTop = transcriptReadingTop(el);
-    const positions = Array.from(el.querySelectorAll<HTMLElement>('.msg.in'),
-      (message) => el.scrollTop + message.getBoundingClientRect().top - readingTop);
-    const maximum = Math.max(0, el.scrollHeight - el.clientHeight);
-    return {
-      up: userMessageScrollTop(positions, el.scrollTop, maximum, 'up'),
-      down: userMessageScrollTop(positions, el.scrollTop, maximum, 'down'),
-    };
-  };
-
-  const scrollToUserMessage = (direction: ScrollDirection) => {
-    const el = ref.current;
-    const top = userMessageTargets()[direction];
-    if (!el || top === null) return;
-    cancelScheduledScroll();
-    navigationRef.current?.reset();
-    // The first smooth-scroll frames are still inside the bottom-follow zone.
-    leavingBottomRef.current = true;
-    atBottomRef.current = false;
-    followingBottomRef.current = false;
-    el.scrollTo({ top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   };
 
   const cancelScheduledScroll = () => {
@@ -1491,34 +1458,38 @@ function MessageLog() {
   };
 
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    const navigation = attachScrollNavigation(el, (direction) => {
-      const targets = direction ? userMessageTargets() : null;
-      setScrollControls((previous) => {
-        const next = { direction, previous: targets ? targets.up !== null : previous.previous,
-          next: targets ? targets.down !== null : previous.next };
-        return previous.direction === next.direction && previous.previous === next.previous && previous.next === next.next
-          ? previous : next;
-      });
-    }, () => {
-      leavingBottomRef.current = false;
-    });
-    navigationRef.current = navigation;
-    return () => {
-      cancelScheduledScroll();
-      navigation.dispose();
-      navigationRef.current = null;
-    };
-  }, [activeThreadId]);
-
-  useLayoutEffect(() => {
     prevMsgCountRef.current = 0;
     prevLayoutRef.current = '';
     atBottomRef.current = true;
     followingBottomRef.current = true;
-    leavingBottomRef.current = false;
+    responseReadingTopRef.current = null;
+    return cancelScheduledScroll;
   }, [activeThreadId]);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const dock = dockRef.current;
+    const onResize = (): void => {
+      if (dock && el.parentElement) {
+        el.parentElement.style.setProperty('--chat-dock-height', `${dock.getBoundingClientRect().height}px`);
+        el.parentElement.style.setProperty('--chat-scrollbar-width', `${el.offsetWidth - el.clientWidth}px`);
+      }
+      if (responseReadingTopRef.current !== null) responseReadingTopRef.current = el.scrollTop;
+      if (densityReflowRef.current) return;
+      if (atBottomRef.current) scrollToBottom();
+      else measureScroll();
+    };
+    window.addEventListener('resize', onResize);
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
+    observer?.observe(el);
+    if (dock) observer?.observe(dock);
+    onResize();
+    return () => {
+      window.removeEventListener('resize', onResize);
+      observer?.disconnect();
+    };
+  }, []);
 
   useLayoutEffect(() => {
     if (!responseId) {
@@ -1531,13 +1502,13 @@ function MessageLog() {
     if (!log || !response) return;
     revealedResponse.current = responseId;
     cancelScheduledScroll();
-    navigationRef.current?.reset();
-    leavingBottomRef.current = true;
     atBottomRef.current = false;
     followingBottomRef.current = false;
-    response.scrollTop = 0;
+    const responseContent = response.querySelector<HTMLElement>('.message-scroll');
+    if (responseContent) responseContent.scrollTop = 0;
     log.scrollTop = responseScrollTop(log.scrollTop, response.getBoundingClientRect().top,
       transcriptReadingTop(log));
+    responseReadingTopRef.current = log.scrollTop;
     prevMsgCountRef.current = msgCount;
     prevLayoutRef.current = layoutKey;
   }, [responseId, activeThreadId, msgCount, layoutKey]);
@@ -1549,31 +1520,14 @@ function MessageLog() {
       followingBottom: () => followingBottomRef.current,
       beforeReflow: () => {
         densityReflowRef.current = true;
-        navigationRef.current?.reset();
       },
       afterReflow: () => {
         densityReflowRef.current = false;
-        navigationRef.current?.reset();
+        if (responseReadingTopRef.current !== null && ref.current) responseReadingTopRef.current = ref.current.scrollTop;
         setDensityReflowTick((tick) => tick + 1);
       },
     });
   }, [activeThreadId]);
-
-  useEffect(() => {
-    const el = ref.current;
-    const onResize = (): void => {
-      if (densityReflowRef.current) return;
-      if (atBottomRef.current) scrollToBottom();
-      else measureScroll();
-    };
-    window.addEventListener('resize', onResize);
-    const observer = el && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
-    if (el && observer) observer.observe(el);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      observer?.disconnect();
-    };
-  }, []);
 
   useEffect(() => {
     const bubble = Array.from(ref.current?.querySelectorAll('[data-turn-id]') ?? [])
@@ -1604,7 +1558,6 @@ function MessageLog() {
       const el = ref.current.querySelector(`[data-msg-id="${CSS.escape(highlight)}"]`);
       if (el && (appliedHighlightRef.current !== highlight || prevLayoutRef.current !== layoutKey)) {
         appliedHighlightRef.current = highlight;
-        navigationRef.current?.reset();
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('highlight-pulse');
         setTimeout(() => el.classList.remove('highlight-pulse'), 2000);
@@ -1660,8 +1613,7 @@ function MessageLog() {
     }
   }
   return (
-    <div class="log-viewport">
-      <div class="log scroll-edge-fade" id="chat-log" ref={ref} tabIndex={-1} onClick={onLogClick} onScroll={onLogScroll} onLoadCapture={measureScroll}>
+    <div class="log" id="chat-log" ref={ref} tabIndex={-1} onClick={onLogClick} onScroll={onLogScroll} onLoadCapture={measureScroll}>
         {chatLoading.value
           ? null
           : !threadId.value
@@ -1703,14 +1655,6 @@ function MessageLog() {
                 })}
         {!chatLoading.value && queued.map((message) => <Message key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
         <TaskIndicator />
-      </div>
-      <ScrollNavigationButtons
-        direction={scrollControls.direction}
-        canPrevious={scrollControls.previous}
-        canNext={scrollControls.next}
-        onPrevious={() => scrollToUserMessage('up')}
-        onNext={() => scrollToUserMessage('down')}
-      />
     </div>
   );
 }
@@ -2003,6 +1947,7 @@ function Subnotice() {
 
 export function ChatMain() {
   const ref = useRef<HTMLElement | null>(null);
+  const dockRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return undefined;
@@ -2035,13 +1980,15 @@ export function ChatMain() {
   return (
     <section class="chat-main" id="chat-main" ref={ref}>
       <ApprovalsBanner />
-      <MessageLog />
+      <MessageLog dockRef={dockRef} />
       <ImageViewer />
-      {reconnectPending
-        ? <button class="status reconnect-status" id="chat-status" type="button" onClick={reconnectChatNow}>{chatStatus.value}</button>
-        : <div class="status" id="chat-status" hidden={chatReloadRequired.value || chatStatus.value === 'connected'}>{chatStatus.value}</div>}
-      <ReadonlyBanner />
-      <InputDock />
+      <div class="chat-bottom-dock" ref={dockRef}>
+        {reconnectPending
+          ? <button class="status reconnect-status" id="chat-status" type="button" onClick={reconnectChatNow}>{chatStatus.value}</button>
+          : <div class="status" id="chat-status" hidden={chatReloadRequired.value || chatStatus.value === 'connected'}>{chatStatus.value}</div>}
+        <ReadonlyBanner />
+        <InputDock />
+      </div>
     </section>
   );
 }
