@@ -363,6 +363,9 @@ Blank or malformed activity timestamps never start a live stopwatch or supply
 an inferred epoch-zero interval. Recorded durations remain included in chapter
 and response totals when their position is unknown; a numeric `0` is a valid
 timestamp. Model calls without a usable timestamp do not end preparation.
+Chapter and response execution totals use the same interval-union calculation;
+the chapter adds a live tail, while the response total clips running calls to
+its current clock. Model-time attribution remains separate and unchanged.
 
 Chapter wording follows its latest step: **Editing files / Edited files**
 and **Running command / Ran command**. Repeated groups append **· N times**;

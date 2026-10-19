@@ -34,9 +34,9 @@ import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
 import type { ConversationTurn } from '../../../../shared/conversation';
 import { isTurnStartStep, QUEUED_TEXT, turnRequestedAt } from '../../../../shared/conversation-activity';
-import { activityTimestamp } from '../../../../shared/activity-timing';
+import { activityTimestamp, executionTime } from '../../../../shared/activity-timing';
 import {
-  activityChapters, headlineSummary, isOutcomeTraceStep, isSyntheticTraceStep, isTitleStep, isTodoStep, parseStep, stepBody,
+  activityChapters, headlineSummary, isOutcomeTraceStep, isSyntheticTraceStep, isTitleStep, isTodoStep, stepBody,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, TRACE_STEP_THRESHOLD_MS,
   type ModelTime, type StepHeadline, type TraceChapter, type TraceEntry, type TraceStatus, type TraceStep,
 } from '../../../../shared/activity-presentation';
@@ -203,7 +203,6 @@ function execRunning(step: TraceStep, live: boolean): boolean {
 /** Chapter execution time counts overlapping child intervals once. */
 function chapterTimes(entries: TraceEntry[], live: boolean) {
   let exec = 0;
-  let execSince: number | null = null;
   const spans: Array<[number, number]> = [];
   let timed = false;
   let model = 0;
@@ -221,19 +220,10 @@ function chapterTimes(entries: TraceEntry[], live: boolean) {
     model += line.modelTime.ms;
     if (line.modelTime.since !== undefined) modelSince = line.modelTime.since;
   }
-  let covered = -Infinity;
-  for (const [start, end] of spans.sort((a, b) => a[0] - b[0])) {
-    if (end <= covered) continue;
-    if (end === Infinity) {
-      execSince = start;
-      exec -= Math.max(0, covered - start);
-      break;
-    }
-    exec += end - Math.max(start, covered);
-    covered = end;
-  }
+  const merged = executionTime(spans);
+  exec += merged.ms;
   return {
-    cpu: shownChipTime(!timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec }),
+    cpu: shownChipTime(!timed ? null : merged.since !== undefined ? { since: merged.since - exec } : { ms: exec }),
     ai: shownChipTime(modelSince !== null ? { since: modelSince - model } : { ms: model }),
   };
 }

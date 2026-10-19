@@ -10,7 +10,7 @@ describe('technical status UI', () => {
     expect(source.match(/\{showTechnicalStatus\s*\?\s*<TurnTechnicalDetails/g)).toHaveLength(3);
     // Live status, Stop and elapsed time stay visible without technical information.
     expect(source).toContain('if (!status && !showTechnicalStatus) return null;');
-    expect(source).toMatch(/\{presentation\.stopControl\}\s*\{presentation\.elapsedControl\}/);
+    expect(source).toMatch(/\{presentation\.stopControl\}\s*\{busy && elapsedMs !== null \? <TurnElapsed/);
     expect(source).toContain('headline && showTechnicalStatus\n          ? <button');
     expect(source).toContain('headline ? <span class="hint">');
   });

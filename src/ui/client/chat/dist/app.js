@@ -18438,6 +18438,17 @@ function activityChapters(lines, live = false) {
 function activityTimestamp(ts) {
   return ts.trim() ? Number(ts) : NaN;
 }
+function executionTime(spans) {
+  let ms = 0;
+  let covered = -Infinity;
+  for (const [start, end] of [...spans].sort((a4, b5) => a4[0] - b5[0])) {
+    if (end <= covered) continue;
+    if (end === Infinity) return { ms: ms - Math.max(0, covered - start), since: start };
+    ms += end - Math.max(start, covered);
+    covered = end;
+  }
+  return { ms };
+}
 
 // ../../shared/conversation-activity.ts
 var THINKING_TEXT = "Thinking\u2026";
@@ -22781,15 +22792,8 @@ function toolCallMs(turn2, now) {
     }
     if (step.status === "running") return live ? [[at, Math.max(at, now)]] : [];
     return step.durationMs !== void 0 ? [[at, at + step.durationMs]] : [];
-  }).sort((a4, b5) => a4[0] - b5[0]);
-  let total = unplacedMs;
-  let covered = -Infinity;
-  for (const [from, to] of spans) {
-    if (to <= covered) continue;
-    total += to - Math.max(from, covered);
-    covered = to;
-  }
-  return total;
+  });
+  return unplacedMs + executionTime(spans).ms;
 }
 function turnRowView(turn2, now) {
   const settled = turn2.phase === "settled";
@@ -23824,7 +23828,6 @@ function execRunning(step, live) {
 }
 function chapterTimes(entries, live) {
   let exec = 0;
-  let execSince = null;
   const spans = [];
   let timed = false;
   let model = 0;
@@ -23842,19 +23845,10 @@ function chapterTimes(entries, live) {
     model += line.modelTime.ms;
     if (line.modelTime.since !== void 0) modelSince = line.modelTime.since;
   }
-  let covered = -Infinity;
-  for (const [start, end] of spans.sort((a4, b5) => a4[0] - b5[0])) {
-    if (end <= covered) continue;
-    if (end === Infinity) {
-      execSince = start;
-      exec -= Math.max(0, covered - start);
-      break;
-    }
-    exec += end - Math.max(start, covered);
-    covered = end;
-  }
+  const merged = executionTime(spans);
+  exec += merged.ms;
   return {
-    cpu: shownChipTime(!timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec }),
+    cpu: shownChipTime(!timed ? null : merged.since !== void 0 ? { since: merged.since - exec } : { ms: exec }),
     ai: shownChipTime(modelSince !== null ? { since: modelSince - model } : { ms: model })
   };
 }
