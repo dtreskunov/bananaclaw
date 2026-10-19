@@ -3,7 +3,7 @@
 import './ChatMain.css';
 import { signal } from '@preact/signals';
 import type { JSX, RefObject } from 'preact';
-import { useRef, useEffect, useLayoutEffect, useState } from 'preact/hooks';
+import { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
 import {
   chatMessages, chatStatus, chatLoading, chatReady, chatReloadRequired, threadId, channelType, canSend, pending,
   threads, groups, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
@@ -36,9 +36,9 @@ import type { ConversationTurn } from '../../../../shared/conversation';
 import { isTurnStartStep, QUEUED_TEXT, turnRequestedAt } from '../../../../shared/conversation-activity';
 import { activityTimestamp } from '../../../../shared/activity-timing';
 import {
-  activityChapters, activityStepCount, headlineSummary, isOutcomeTraceStep, isTitleStep, isTodoStep, parseStep, stepBody,
+  activityChapters, headlineSummary, isOutcomeTraceStep, isSyntheticTraceStep, isTitleStep, isTodoStep, parseStep, stepBody,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, TRACE_STEP_THRESHOLD_MS,
-  type ModelTime, type StepHeadline, type TraceEntry, type TraceStatus, type TraceStep,
+  type ModelTime, type StepHeadline, type TraceChapter, type TraceEntry, type TraceStatus, type TraceStep,
 } from '../../../../shared/activity-presentation';
 import { formatStopwatch } from '../duration-format';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
@@ -299,14 +299,13 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
 
 type ActivityTraceTarget = { latest: string | null; chapter: string | null; entry: string | null } | null;
 
-export function ActivityTraceList({ lines, live = false, now = null, turnId = null }: { lines: ActivityLine[]; live?: boolean; now?: number | null; turnId?: string | null }) {
+export function ActivityTraceList({ chapters, live = false, now = null, turnId = null }: { chapters: TraceChapter[]; live?: boolean; now?: number | null; turnId?: string | null }) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [target, setTarget] = useState<ActivityTraceTarget>(null);
   useEffect(() => {
     if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
   const revealed = useRef(false);
-  const chapters = activityChapters(lines, live);
   // Outcome summaries do not advance chapter following.
   const latestChapter = [...chapters].reverse().find(chapter => chapter.entries.some(entry => !isOutcomeTraceStep(entry.step)));
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
@@ -315,10 +314,10 @@ export function ActivityTraceList({ lines, live = false, now = null, turnId = nu
   const openChapter = selection ? selection.chapter : latestChapter?.id ?? null;
   const following = !selection || sel === latestEntryId;
   useLayoutEffect(() => {
-    if (!listRef.current || !lines.length) return;
+    if (!listRef.current || !chapters.length) return;
     if (!revealed.current || (live && following)) revealLatestActivity(listRef.current, live && following && sel === latestEntryId);
     revealed.current = true;
-  }, [lines, live, following, sel, openChapter]);
+  }, [chapters, live, following, sel, openChapter]);
   const toggle = (chapterId: string, id: string) => {
     const opening = sel !== id;
     setTarget({ latest: latestEntryId, chapter: chapterId, entry: opening ? id : null });
@@ -390,6 +389,7 @@ function ActivityTraceToggle({ count, hasOutcome = false, expanded, onToggle }: 
 /** Inline metrics and step list, shared by live and completed traces. */
 function ActivityTracePanel({
   lines,
+  chapters,
   expanded,
   live = false,
   now = null,
@@ -398,6 +398,7 @@ function ActivityTracePanel({
   metrics = null,
 }: {
   lines: ActivityLine[];
+  chapters: TraceChapter[];
   expanded: boolean;
   live?: boolean;
   now?: number | null;
@@ -410,7 +411,7 @@ function ActivityTracePanel({
   return (
     <div class="msg-activity expanded">
       {metrics}
-      {showTrace ? <ActivityTraceList key={ownerId} lines={lines} live={live} now={now} turnId={turnId} /> : null}
+      {showTrace ? <ActivityTraceList key={ownerId} chapters={chapters} live={live} now={now} turnId={turnId} /> : null}
     </div>
   );
 }
@@ -1233,10 +1234,11 @@ function TurnTechnicalInfo({
 }
 
 function TurnTechnicalDetails({
-  turn, lines, ownerId, live = false, now = null,
+  turn, lines, chapters: prepared, ownerId, live = false, now = null,
 }: {
   turn?: ConversationTurn;
   lines: ActivityLine[];
+  chapters?: TraceChapter[];
   ownerId: string;
   live?: boolean;
   now?: number | null;
@@ -1244,15 +1246,22 @@ function TurnTechnicalDetails({
   const expanded = activityTraceExpanded(ownerId);
   const metricsExpanded = activityMetricsExpanded(ownerId);
   const usage = turn ? turnUsage(turn, ownerId, now ?? Date.now()) : null;
-  const count = activityStepCount(lines);
-  const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
+  const { chapters, count, hasOutcome } = useMemo(() => {
+    const chapters = prepared ?? activityChapters(lines, live);
+    const entries = chapters.flatMap(chapter => chapter.entries);
+    return {
+      chapters,
+      count: entries.filter(entry => !isSyntheticTraceStep(entry.step)).length,
+      hasOutcome: entries.some(entry => isOutcomeTraceStep(entry.step)),
+    };
+  }, [prepared, lines, live]);
   if (!lines.length && !usage) return null;
   if (!turn && !count && !hasOutcome && !expanded) return null;
   return (
     <div class="turn-technical-details">
       <TurnTechnicalInfo usage={usage} count={count} hasOutcome={hasOutcome}
         expanded={expanded} onToggle={() => toggleActivityTrace(ownerId, live)} />
-      <ActivityTracePanel lines={lines} expanded={expanded} live={live} now={now}
+      <ActivityTracePanel lines={lines} chapters={chapters} expanded={expanded} live={live} now={now}
         ownerId={ownerId} turnId={live && turn ? turn.id : null}
         metrics={metricsExpanded && usage ? <UsageDetails {...usage} /> : null} />
     </div>
@@ -1271,35 +1280,33 @@ function TurnElapsed({ ms, live }: { ms: number; live: boolean }) {
   );
 }
 
-function startingResponsePresentation(submission: PendingWebSend, now: number) {
+function startingResponsePresentation(submission: PendingWebSend) {
   const ownerId = submissionTraceOwner(submission.messageId);
   const submittedAt = Date.parse(submission.timestamp);
+  // Queueing counts as a trace entry, but has no execution stopwatch.
+  const lines = [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : '', text: JSON.stringify({
+    kind: 'notification', id: `ui:start:${submission.messageId}`,
+    text: QUEUED_TEXT, status: 'pending',
+  }) }];
   return {
-    ownerId, status: true, busy: true, traceLive: true, traceNow: null,
+    ownerId, status: true, busy: true, traceLive: true,
     attributes: { 'data-response-start': ownerId },
     technicalTurn: undefined,
     stopControl: <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton turnId={null} /></span>,
-    elapsedControl: <TurnElapsed ms={Number.isFinite(submittedAt) ? Math.max(0, now - submittedAt) : 0} live />,
     tone: '',
     activity: { headline: { action: QUEUED_TEXT }, repetitions: 1, notice: false, error: false },
-    // A real (counted) entry, so the trace exists from the moment of sending.
-    // Pending: queueing has no CPU chip; the turn total covers it.
-    lines: [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : '', text: JSON.stringify({
-      kind: 'notification', id: `ui:start:${submission.messageId}`,
-      text: QUEUED_TEXT, status: 'pending',
-    }) }],
+    lines, chapters: activityChapters(lines, true),
   };
 }
 
 function turnResponsePresentation(
   { turn, activity: lines, status, traceOwner: ownerId }: Extract<TranscriptRow, { kind: 'turn' }>,
-  now: number,
+  chapters: TraceChapter[],
 ) {
   const stop = stopRequest.value?.turnId === turn.id ? stopRequest.value : null;
   const settled = turn.phase === 'settled';
   const live = status && !settled;
-  const activity = live ? liveTurnActivity(turn, lines, turnConnected.value, stop) : null;
-  const elapsedMs = live ? turnRowView(turn, now).elapsedMs : null;
+  const activity = live ? liveTurnActivity(turn, lines, chapters, turnConnected.value, stop) : null;
   const tone = stop?.error || (settled && turn.outcome === 'failed')
     ? ' provenance-error'
     : (settled && ['warning', 'stopped', 'interrupted'].includes(turn.outcome)) || (live && !turnConnected.value)
@@ -1307,13 +1314,11 @@ function turnResponsePresentation(
       : '';
   return {
     ownerId, status, busy: live, traceLive: !settled,
-    traceNow: turn.endedAt ? Date.parse(turn.endedAt) : now,
     attributes: { 'data-turn-id': status ? turn.id : undefined },
     technicalTurn: status ? turn : undefined,
     stopControl: live
       ? <span class="msg-inline-actions turn-stop-inline"><ActiveTurnStopButton turnId={turn.id} /></span> : null,
-    elapsedControl: elapsedMs !== null ? <TurnElapsed ms={elapsedMs} live /> : null,
-    tone, activity, lines: activity?.lines ?? lines,
+    tone, activity, lines: activity?.lines ?? lines, chapters: activity?.chapters ?? chapters,
   };
 }
 
@@ -1335,10 +1340,14 @@ function ResponseStatusRow({ source }: {
     return () => window.clearTimeout(timer);
   }, [now, tick, clock.live]);
   useEffect(() => setNow(Date.now()), [clock.startedAt, clock.live]);
-  const presentation = source.kind === 'starting'
-    ? startingResponsePresentation(source.submission, now)
-    : turnResponsePresentation(source, now);
+  const chapters = useMemo(() => source.kind === 'turn'
+    ? activityChapters(source.activity, source.turn.phase !== 'settled') : [], [source]);
+  const presentation = useMemo(() => source.kind === 'starting'
+    ? startingResponsePresentation(source.submission)
+    : turnResponsePresentation(source, chapters), [source, chapters, stopRequest.value, turnConnected.value]);
   const { ownerId, status, busy, lines, activity } = presentation;
+  const elapsedMs = Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : source.kind === 'starting' ? 0 : null;
+  const traceNow = source.kind === 'turn' ? source.turn.endedAt ? Date.parse(source.turn.endedAt) : now : null;
   const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;
@@ -1358,15 +1367,16 @@ function ResponseStatusRow({ source }: {
         ? <TurnTechnicalDetails
             turn={presentation.technicalTurn}
             lines={lines}
+            chapters={presentation.chapters}
             live={presentation.traceLive}
-            now={presentation.traceNow}
+            now={traceNow}
             ownerId={ownerId}
           />
         : null}
       <div class="typing-summary turn-info">
         {busy ? <div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div> : null}
         {presentation.stopControl}
-        {presentation.elapsedControl}
+        {busy && elapsedMs !== null ? <TurnElapsed ms={elapsedMs} live /> : null}
         {headline && activity?.notice
           ? <span class={`hint${activity.error ? ' turn-stop-error' : ''}`}
               role={activity.error ? 'alert' : 'status'} title={headlineSummary(headline, repetitions)}

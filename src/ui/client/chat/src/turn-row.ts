@@ -3,6 +3,7 @@ import {
   activityChapters,
   isOutcomeTraceStep,
   parseStep,
+  type TraceChapter,
   type StepHeadline,
   type TraceLine,
   type TraceStep,
@@ -17,8 +18,8 @@ export interface TraceHeadline {
 }
 
 /** The trace's latest row as the trace list shows it (grouped chapter or single step); outcome rows never lead. */
-export function latestTraceHeadline(lines: TraceLine[], live: boolean): TraceHeadline {
-  const chapter = activityChapters(lines, live)
+export function latestTraceHeadline(chapters: readonly TraceChapter[]): TraceHeadline {
+  const chapter = [...chapters]
     .reverse()
     .find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   if (!chapter) return { headline: { action: THINKING_TEXT }, repetitions: 1 };
@@ -28,9 +29,17 @@ export function latestTraceHeadline(lines: TraceLine[], live: boolean): TraceHea
 export function liveTurnActivity(
   turn: Pick<ConversationTurn, 'id' | 'phase'>,
   lines: TraceLine[],
+  chapters: TraceChapter[],
   connected: boolean,
   stop: { turnId: string; error: string } | null,
-): { lines: TraceLine[]; headline: StepHeadline; repetitions: number; notice: boolean; error: boolean } | null {
+): {
+  lines: TraceLine[];
+  chapters: TraceChapter[];
+  headline: StepHeadline;
+  repetitions: number;
+  notice: boolean;
+  error: boolean;
+} | null {
   if (turn.phase === 'settled') return null;
   const notices = activeTurnNotices(
     {
@@ -41,7 +50,7 @@ export function liveTurnActivity(
     stop,
   );
   const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
-  if (!notices.length) return { lines, ...latestTraceHeadline(lines, true), ...presentation };
+  if (!notices.length) return { lines, chapters, ...latestTraceHeadline(chapters), ...presentation };
   const current = { action: notices.map((notice) => notice.text).join(' \u00b7 ') };
   const marker: TraceStep = {
     kind: 'notification',
@@ -49,9 +58,11 @@ export function liveTurnActivity(
     text: current.action,
     status: presentation.error ? 'error' : !connected ? 'interrupted' : 'running',
   };
+  const line = { ts: '', text: JSON.stringify(marker) };
   return {
     ...presentation,
-    lines: [...lines, { ts: '', text: JSON.stringify(marker) }],
+    lines: [...lines, line],
+    chapters: [...chapters, ...activityChapters([line], true)],
     headline: current,
     repetitions: 1,
   };

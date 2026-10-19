@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { isValidElement } from 'preact';
-import { ActivityTraceList, Composer, ChatMain, InputDock } from './ChatMain';
+import { ActivityTraceList as PreparedActivityTraceList, Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
 import { formatStopwatch } from '../duration-format';
 import { ComposerInput } from './ComposerInput';
@@ -58,7 +58,18 @@ import {
   resetActivityTraceView,
   toggleActivityTrace,
 } from '../activity-trace-state';
-import { stepBody } from '../../../../shared/activity-presentation';
+import { activityChapters, stepBody, type TraceChapter } from '../../../../shared/activity-presentation';
+
+function ActivityTraceList({
+  lines = [],
+  chapters,
+  ...props
+}: Omit<Parameters<typeof PreparedActivityTraceList>[0], 'chapters'> & {
+  lines?: ActivityLine[];
+  chapters?: TraceChapter[];
+}) {
+  return PreparedActivityTraceList({ ...props, chapters: chapters ?? activityChapters(lines, props.live) });
+}
 
 const closeTrace = (ownerId: string) => {
   if (activityTraceExpanded(ownerId)) toggleActivityTrace(ownerId);
@@ -77,6 +88,14 @@ const hooks = vi.hoisted(() => {
   };
 });
 vi.mock('preact/hooks', () => ({
+  useMemo: (calculate: () => unknown, deps: unknown[]) => {
+    const index = hooks.cursor++;
+    const prior = hooks.slots[index];
+    if (!prior || deps.some((value, i) => value !== prior.deps[i])) {
+      hooks.slots[index] = { deps, value: calculate() };
+    }
+    return hooks.slots[index].value;
+  },
   useRef: (initial: unknown) => {
     const index = hooks.cursor++;
     return (hooks.slots[index] ??= { current: initial });
@@ -2722,6 +2741,70 @@ describe('inline activity metrics', () => {
 });
 
 describe('activity trace completion', () => {
+  it('shares prepared chapters with the panel and keeps them stable across clock-only renders', () => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    const turn = {
+      ...testTurn,
+      activity: [0, 1].map((ordinal) => ({
+        ordinal,
+        ts: '1000',
+        timelinePosition: 100 + ordinal,
+        text: JSON.stringify({ kind: 'tool', id: `command-${ordinal}`, tool: 'bash', status: 'running' }),
+      })),
+    };
+    applyConversationFrame(
+      testSnapshot({ turns: [turn], connection: { connected: true, activeTurnId: turn.id } }),
+      'thread',
+    );
+    resetMount();
+    const log = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    const status = findComponent(log.type(log.props), 'ResponseStatusRow');
+    resetMount();
+    hooks.cursor = 0;
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const first = status.type(status.props);
+      const details = findComponent(first, 'TurnTechnicalDetails');
+      const chapters = details.props.chapters;
+      expect(parse).toHaveBeenCalledTimes(status.props.source.activity.length);
+      parse.mockClear();
+      const responseSlots = hooks.slots;
+      responseSlots[0].value += 1000;
+      hooks.cursor = 0;
+      const next = status.type(status.props);
+      expect(findComponent(next, 'TurnTechnicalDetails').props.chapters).toBe(chapters);
+      expect(parse).not.toHaveBeenCalled();
+      resetMount();
+      hooks.cursor = 0;
+      const panel = findComponent(details.type(details.props), 'ActivityTracePanel');
+      const list = findComponent(panel.type(panel.props), 'ActivityTraceList');
+      expect(list.props.chapters).toBe(chapters);
+      // Usage accounting reads the full turn, independently of the prepared trace.
+      expect(parse).toHaveBeenCalledTimes(turn.activity.length);
+      parse.mockClear();
+      resetMount();
+      hooks.cursor = 0;
+      list.type(list.props);
+      expect(parse).not.toHaveBeenCalled();
+      hooks.slots = responseSlots;
+      hooks.cursor = 0;
+      const settled = status.type({
+        source: { ...status.props.source, turn: { ...turn, phase: 'settled', outcome: 'silent' } },
+      });
+      const historical = findComponent(settled, 'TurnTechnicalDetails').props.chapters;
+      expect(historical).not.toBe(chapters);
+      expect(
+        historical
+          .flatMap((chapter: TraceChapter) => chapter.entries)
+          .filter((entry: TraceChapter['entries'][number]) => entry.step.kind === 'tool')
+          .every((entry: TraceChapter['entries'][number]) => entry.step.status === 'unknown'),
+      ).toBe(true);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it.each(['count', 'summary'] as const)('opens the newest chapter through the %s toggle', (control) => {
     const turn = {
       ...testTurn,

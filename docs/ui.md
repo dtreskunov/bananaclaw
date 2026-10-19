@@ -327,6 +327,10 @@ Expanded bodies are formatted only when the individual row opens, not for
 collapsed chapters or headline previews. Rows and the latest-activity preview reuse this presentation,
 including raw-text fallbacks. This does not change chapter categories,
 compact child wording, repetition counts, or expansion behavior.
+The response row prepares its chapters once per activity snapshot and shares
+them with the preview and trace list. Stopwatch ticks do not regroup unchanged
+activity. Connection/Stop notices append only their own standalone chapter;
+they do not reparse the recorded entries.
 Exact timestamps, status and duration share one line with dot separators when
 a step is expanded; full arguments and errors appear beneath.
 

@@ -18100,9 +18100,6 @@ function isSyntheticTraceStep(step) {
 function isOutcomeTraceStep(step) {
   return step.kind === "notification" && (step.id ?? "").startsWith("ui:outcome:");
 }
-function activityStepCount(lines) {
-  return lines.reduce((count, line) => count + (isSyntheticTraceStep(parseStep(line.text)) ? 0 : 1), 0);
-}
 function cleanToolName(tool) {
   if (tool.toLowerCase().startsWith("nanoclaw_"))
     return `nanoclaw.${tool.slice("nanoclaw_".length).replace(/^_/, "")}`.toLowerCase();
@@ -22726,12 +22723,12 @@ function formatStopwatch(ms, fine = true) {
 }
 
 // src/turn-row.ts
-function latestTraceHeadline(lines, live) {
-  const chapter = activityChapters(lines, live).reverse().find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
+function latestTraceHeadline(chapters) {
+  const chapter = [...chapters].reverse().find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   if (!chapter) return { headline: { action: THINKING_TEXT }, repetitions: 1 };
   return { headline: chapter.headline, repetitions: chapter.entries.length };
 }
-function liveTurnActivity(turn2, lines, connected, stop) {
+function liveTurnActivity(turn2, lines, chapters, connected, stop) {
   if (turn2.phase === "settled") return null;
   const notices = activeTurnNotices(
     {
@@ -22742,7 +22739,7 @@ function liveTurnActivity(turn2, lines, connected, stop) {
     stop
   );
   const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
-  if (!notices.length) return { lines, ...latestTraceHeadline(lines, true), ...presentation };
+  if (!notices.length) return { lines, chapters, ...latestTraceHeadline(chapters), ...presentation };
   const current = { action: notices.map((notice) => notice.text).join(" \xB7 ") };
   const marker = {
     kind: "notification",
@@ -22750,9 +22747,11 @@ function liveTurnActivity(turn2, lines, connected, stop) {
     text: current.action,
     status: presentation.error ? "error" : !connected ? "interrupted" : "running"
   };
+  const line = { ts: "", text: JSON.stringify(marker) };
   return {
     ...presentation,
-    lines: [...lines, { ts: "", text: JSON.stringify(marker) }],
+    lines: [...lines, line],
+    chapters: [...chapters, ...activityChapters([line], true)],
     headline: current,
     repetitions: 1
   };
@@ -23918,14 +23917,13 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
     open && todos && step.error ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: step.error }) }) : null
   ] });
 }
-function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
+function ActivityTraceList({ chapters, live = false, now = null, turnId = null }) {
   const listRef = A2(null);
   const [target, setTarget] = h2(null);
   y2(() => {
     if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
   const revealed = A2(false);
-  const chapters = activityChapters(lines, live);
   const latestChapter = [...chapters].reverse().find((chapter) => chapter.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
   const selection = target?.latest === latestEntryId ? target : null;
@@ -23933,10 +23931,10 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
   const openChapter = selection ? selection.chapter : latestChapter?.id ?? null;
   const following = !selection || sel === latestEntryId;
   _2(() => {
-    if (!listRef.current || !lines.length) return;
+    if (!listRef.current || !chapters.length) return;
     if (!revealed.current || live && following) revealLatestActivity(listRef.current, live && following && sel === latestEntryId);
     revealed.current = true;
-  }, [lines, live, following, sel, openChapter]);
+  }, [chapters, live, following, sel, openChapter]);
   const toggle2 = (chapterId, id2) => {
     const opening = sel !== id2;
     setTarget({ latest: latestEntryId, chapter: chapterId, entry: opening ? id2 : null });
@@ -24011,6 +24009,7 @@ function ActivityTraceToggle({ count, hasOutcome = false, expanded, onToggle }) 
 }
 function ActivityTracePanel({
   lines,
+  chapters,
   expanded,
   live = false,
   now = null,
@@ -24022,7 +24021,7 @@ function ActivityTracePanel({
   if (!showTrace && !metrics) return null;
   return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: [
     metrics,
-    showTrace ? /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now, turnId }, ownerId) : null
+    showTrace ? /* @__PURE__ */ u4(ActivityTraceList, { chapters, live, now, turnId }, ownerId) : null
   ] });
 }
 function shortModel(model) {
@@ -24784,6 +24783,7 @@ function TurnTechnicalInfo({
 function TurnTechnicalDetails({
   turn: turn2,
   lines,
+  chapters: prepared,
   ownerId,
   live = false,
   now = null
@@ -24791,8 +24791,15 @@ function TurnTechnicalDetails({
   const expanded = activityTraceExpanded(ownerId);
   const metricsExpanded = activityMetricsExpanded(ownerId);
   const usage = turn2 ? turnUsage(turn2, ownerId, now ?? Date.now()) : null;
-  const count = activityStepCount(lines);
-  const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
+  const { chapters, count, hasOutcome } = T2(() => {
+    const chapters2 = prepared ?? activityChapters(lines, live);
+    const entries = chapters2.flatMap((chapter) => chapter.entries);
+    return {
+      chapters: chapters2,
+      count: entries.filter((entry) => !isSyntheticTraceStep(entry.step)).length,
+      hasOutcome: entries.some((entry) => isOutcomeTraceStep(entry.step))
+    };
+  }, [prepared, lines, live]);
   if (!lines.length && !usage) return null;
   if (!turn2 && !count && !hasOutcome && !expanded) return null;
   return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
@@ -24810,6 +24817,7 @@ function TurnTechnicalDetails({
       ActivityTracePanel,
       {
         lines,
+        chapters,
         expanded,
         live,
         now,
@@ -24833,51 +24841,47 @@ function TurnElapsed({ ms, live }) {
     }
   );
 }
-function startingResponsePresentation(submission, now) {
+function startingResponsePresentation(submission) {
   const ownerId = submissionTraceOwner(submission.messageId);
   const submittedAt = Date.parse(submission.timestamp);
+  const lines = [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : "", text: JSON.stringify({
+    kind: "notification",
+    id: `ui:start:${submission.messageId}`,
+    text: QUEUED_TEXT,
+    status: "pending"
+  }) }];
   return {
     ownerId,
     status: true,
     busy: true,
     traceLive: true,
-    traceNow: null,
     attributes: { "data-response-start": ownerId },
     technicalTurn: void 0,
     stopControl: /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, { turnId: null }) }),
-    elapsedControl: /* @__PURE__ */ u4(TurnElapsed, { ms: Number.isFinite(submittedAt) ? Math.max(0, now - submittedAt) : 0, live: true }),
     tone: "",
     activity: { headline: { action: QUEUED_TEXT }, repetitions: 1, notice: false, error: false },
-    // A real (counted) entry, so the trace exists from the moment of sending.
-    // Pending: queueing has no CPU chip; the turn total covers it.
-    lines: [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : "", text: JSON.stringify({
-      kind: "notification",
-      id: `ui:start:${submission.messageId}`,
-      text: QUEUED_TEXT,
-      status: "pending"
-    }) }]
+    lines,
+    chapters: activityChapters(lines, true)
   };
 }
-function turnResponsePresentation({ turn: turn2, activity: lines, status, traceOwner: ownerId }, now) {
+function turnResponsePresentation({ turn: turn2, activity: lines, status, traceOwner: ownerId }, chapters) {
   const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
   const settled = turn2.phase === "settled";
   const live = status && !settled;
-  const activity = live ? liveTurnActivity(turn2, lines, turnConnected.value, stop) : null;
-  const elapsedMs = live ? turnRowView(turn2, now).elapsedMs : null;
+  const activity = live ? liveTurnActivity(turn2, lines, chapters, turnConnected.value, stop) : null;
   const tone2 = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
   return {
     ownerId,
     status,
     busy: live,
     traceLive: !settled,
-    traceNow: turn2.endedAt ? Date.parse(turn2.endedAt) : now,
     attributes: { "data-turn-id": status ? turn2.id : void 0 },
     technicalTurn: status ? turn2 : void 0,
     stopControl: live ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, { turnId: turn2.id }) }) : null,
-    elapsedControl: elapsedMs !== null ? /* @__PURE__ */ u4(TurnElapsed, { ms: elapsedMs, live: true }) : null,
     tone: tone2,
     activity,
-    lines: activity?.lines ?? lines
+    lines: activity?.lines ?? lines,
+    chapters: activity?.chapters ?? chapters
   };
 }
 function ResponseStatusRow({ source }) {
@@ -24891,8 +24895,11 @@ function ResponseStatusRow({ source }) {
     return () => window.clearTimeout(timer2);
   }, [now, tick, clock.live]);
   y2(() => setNow(Date.now()), [clock.startedAt, clock.live]);
-  const presentation = source.kind === "starting" ? startingResponsePresentation(source.submission, now) : turnResponsePresentation(source, now);
+  const chapters = T2(() => source.kind === "turn" ? activityChapters(source.activity, source.turn.phase !== "settled") : [], [source]);
+  const presentation = T2(() => source.kind === "starting" ? startingResponsePresentation(source.submission) : turnResponsePresentation(source, chapters), [source, chapters, stopRequest.value, turnConnected.value]);
   const { ownerId, status, busy, lines, activity } = presentation;
+  const elapsedMs = Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : source.kind === "starting" ? 0 : null;
+  const traceNow = source.kind === "turn" ? source.turn.endedAt ? Date.parse(source.turn.endedAt) : now : null;
   const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;
@@ -24913,8 +24920,9 @@ function ResponseStatusRow({ source }) {
           {
             turn: presentation.technicalTurn,
             lines,
+            chapters: presentation.chapters,
             live: presentation.traceLive,
-            now: presentation.traceNow,
+            now: traceNow,
             ownerId
           }
         ) : null,
@@ -24925,7 +24933,7 @@ function ResponseStatusRow({ source }) {
             /* @__PURE__ */ u4("span", {})
           ] }) : null,
           presentation.stopControl,
-          presentation.elapsedControl,
+          busy && elapsedMs !== null ? /* @__PURE__ */ u4(TurnElapsed, { ms: elapsedMs, live: true }) : null,
           headline && activity?.notice ? /* @__PURE__ */ u4(
             "span",
             {

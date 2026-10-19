@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage, ConversationTurn } from '../../../shared/conversation';
 import { testSnapshot, testTurn } from './conversation-test-fixtures';
-import { activeTurnNotices, hasTurnStats, latestTraceHeadline, liveTurnActivity, turnRowView } from './turn-row';
+import {
+  activeTurnNotices,
+  hasTurnStats,
+  latestTraceHeadline as preparedTraceHeadline,
+  liveTurnActivity as preparedTurnActivity,
+  turnRowView,
+} from './turn-row';
 import {
   activityChapters,
   displayStep,
@@ -12,6 +18,14 @@ import {
   type TraceStep,
 } from '../../../shared/activity-presentation';
 import { conversationActivity } from '../../../shared/conversation-activity';
+
+const latestTraceHeadline = (lines: TraceLine[], live: boolean) => preparedTraceHeadline(activityChapters(lines, live));
+const liveTurnActivity = (
+  turn: Pick<ConversationTurn, 'id' | 'phase'>,
+  lines: TraceLine[],
+  connected: boolean,
+  stop: { turnId: string; error: string } | null,
+) => preparedTurnActivity(turn, lines, activityChapters(lines, turn.phase !== 'settled'), connected, stop);
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 const { conversationPresentation } = await import('./conversation-state');
@@ -60,6 +74,28 @@ describe('latest trace headline', () => {
 
   it('falls back to Thinking only before any activity', () => {
     expect(latestTraceHeadline([], true)).toEqual({ headline: { action: 'Thinking…' }, repetitions: 1 });
+  });
+
+  it('reuses prepared chapters for previews and appends only a standalone notice', () => {
+    const lines = [line({ ...tool, status: 'running' })];
+    const chapters = activityChapters(lines, true);
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const current = preparedTurnActivity(testTurn, lines, chapters, true, null)!;
+      expect(current.chapters).toBe(chapters);
+      expect(current.lines).toBe(lines);
+      expect(current.headline).toBe(chapters[0].headline);
+      expect(preparedTraceHeadline(chapters).headline).toBe(chapters[0].headline);
+      expect(parse).not.toHaveBeenCalled();
+      const disconnected = preparedTurnActivity(testTurn, lines, chapters, false, null)!;
+      expect(parse).toHaveBeenCalledOnce();
+      expect(disconnected.chapters[0]).toBe(chapters[0]);
+      expect(disconnected.chapters.at(-1)?.headline.action).toBe('Runner disconnected');
+      expect(chapters).toHaveLength(1);
+      expect(lines).toHaveLength(1);
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it.each(['running', 'pending', 'completed', 'error', 'interrupted'] as const)(
