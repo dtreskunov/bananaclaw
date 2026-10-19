@@ -2863,9 +2863,42 @@ describe('activity trace chapter following', () => {
   function rowParts(view: any) {
     const [header] = view.props.children;
     const [toggle, stop] = header.props.children;
-    const [, cpu, ai] = toggle.props.children;
-    return { toggle, stop, cpu, ai };
+    const [cpu, ai, marker, label] = toggle.props.children;
+    return { toggle, stop, cpu, ai, marker, label };
   }
+
+  it('puts both stopwatches before distinct chapter markers and keeps singleton dots', () => {
+    const lines = [line('one', 'completed'), line('two', 'running')];
+    let list = renderTrace(lines);
+    let chapter = list.props.children[0];
+    let toggle = chapter.props.children[0].props.children;
+    const [cpu, ai, marker, label] = toggle.props.children;
+    expect(cpu.props.kind).toBe('cpu');
+    expect(ai.props.kind).toBe('ai');
+    expect(marker.props.class).toBe('trace-marker');
+    expect(marker.props['aria-hidden']).toBe('true');
+    expect(marker.props.children.type).toBe('svg');
+    expect(marker.props.children.props.class).toBe('trace-chapter-marker');
+    expect(label.props.class).toBe('trace-chapter-label');
+    expect(toggle.props['aria-expanded']).toBe(true);
+    expect(chapter.props.class).toContain(' open');
+    toggle.props.onClick();
+    list = renderTrace(lines);
+    chapter = list.props.children[0];
+    toggle = chapter.props.children[0].props.children;
+    expect(toggle.props['aria-expanded']).toBe(false);
+    expect(chapter.props.class).not.toContain(' open');
+    expect(toggle.props.children[2].props.children.props.class).toBe('trace-chapter-marker');
+
+    list = renderTrace([line('single', 'completed')]);
+    const entry = findComponent(list, 'ActivityTraceRow');
+    const row = rowParts(entry.type(entry.props));
+    expect(row.cpu.props.kind).toBe('cpu');
+    expect(row.ai.props.kind).toBe('ai');
+    expect(row.marker.props.children.type).toBe('span');
+    expect(row.marker.props.children.props.class).toBe('trace-dot');
+    expect(row.label.props.class).toBe('trace-text');
+  });
 
   it('renders Stop as the timeline node, outside the disclosure button', () => {
     const list = ActivityTraceList({ lines: [line('one', 'running')], live: true, now: 65_000, turnId: 'owning-turn' });
@@ -2967,7 +3000,7 @@ describe('activity trace chapter following', () => {
   function chapterTimeCells(lines: ActivityLine[], live = true) {
     resetMount();
     const group = traceList(ActivityTraceList({ lines, live })).props.children[0];
-    const [, cpu, ai] = group.props.children[0].props.children.props.children;
+    const [cpu, ai] = group.props.children[0].props.children.props.children;
     return { cpu: cpu.props.time, ai: ai.props.time };
   }
 

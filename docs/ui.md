@@ -134,7 +134,9 @@ outline: subtle at rest, stronger on hover with a mouse, and full-strength while
 the text input or any control inside has focus. A solid theme-colored backplate
 fills the outline and its gap, preventing the transcript pattern from showing
 through. The composer and agent-selector header cast theme-aware shadows over
-the transcript. Outline changes do not shift the layout. Keyboard-focused buttons
+the transcript. Only the header's decorative shadow is layered; the header
+itself does not create a stacking context, so account menus and dialogs remain
+above the side panes. Outline changes do not shift the layout. Keyboard-focused buttons
 retain their individual focus indicators, and reduced-motion preferences disable
 the outline transition.
 
@@ -318,7 +320,8 @@ errors; reads never infer ownership or synthesize historical turns. Legacy impor
 must establish canonical associations before their data is served.
 Headers show the group heading and outcome notices. Recorded file targets and
 arguments shared by every entry can appear in the heading; a differing last
-argument is not presented as the whole group's target. Child labels omit the parent's repeated verb.
+argument is not presented as the whole group's target. Child labels omit the
+parent's repeated verb and are indented 20 px beneath the chapter label.
 Each grouping pass parses entries once and prepares their displayed headlines
 and expanded bodies. Rows and the latest-activity preview reuse this presentation,
 including raw-text fallbacks. This does not change chapter categories,
@@ -326,10 +329,10 @@ compact child wording, repetition counts, or expansion behavior.
 Exact timestamps, status and duration share one line with dot separators when
 a step is expanded; full arguments and errors appear beneath.
 
-Two compact right-aligned time columns sit between the timeline and the row
-label, sized to their widest value so each kind lines up across rows and
-chapter headers. The columns have no headers; each value has its full name
-as a hover hint. **CPU** (execution time) shows tool
+Each row shows execution time, model time, its timeline marker, then its label.
+The two compact right-aligned time columns are sized to their widest value so
+each kind lines up across rows and chapter headers. The columns have no headers;
+each value has its full name as a hover hint. **CPU** (execution time) shows tool
 and compaction time, live from the moment a step starts, and stays on completed
 rows. **AI** (model time) shows the model calls that the row's step prompted.
 The runner records a hidden `model` activity step for each finished model call
@@ -366,6 +369,11 @@ theme-aware colors, interrupted states use warning colors, and unknown outcomes
 are muted. Accessible labels and expanded metadata convey status without
 relying on color. Historical unfinished steps become **Outcome unknown**, not
 successful or still-running steps.
+Standalone entries use filled timeline dots; child entries use smaller hollow
+dots and branch connectors. Chapters use a right-pointing chevron when collapsed
+and a downward chevron when expanded. Rails and per-tool Stop controls stay in
+the timeline column immediately after the two stopwatches. Expanded child
+details align with their indented labels.
 The activity viewport scrolls vertically, and horizontally when row or chapter
 labels are wider than the transcript, so long labels stay readable on narrow
 screens. Expanded details wrap within the table instead of widening it.

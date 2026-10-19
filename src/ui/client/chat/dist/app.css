@@ -849,7 +849,13 @@ header {
 }
 .app-header {
   position: relative;
-  z-index: 3;
+}
+.app-header::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
   box-shadow: 0 2px 10px var(--shadow-color);
 }
 header .brand {
@@ -3009,9 +3015,9 @@ nav.tab-bar-strip.group-strip {
   --trace-child-indent: 20px;
   --trace-row-height: 28px;
   --trace-col-gap: 8px;
-  --trace-tree-width: 9px;
+  --trace-tree-width: calc(var(--trace-col-gap) + 9px);
   display: grid;
-  grid-template-columns: [tree] var(--trace-tree-width) [cpu] auto [ai] auto [label] minmax(max-content, 1fr) [end];
+  grid-template-columns: [cpu] auto [ai] auto [tree] var(--trace-tree-width) [label] minmax(max-content, 1fr) [end];
   align-content: start;
   width: 100%;
   min-width: 0;
@@ -3021,7 +3027,7 @@ nav.tab-bar-strip.group-strip {
   font-size: var(--font-2xs);
 }
 .chat-main .msg-activity .trace-table.has-chapters {
-  --trace-tree-width: calc(var(--trace-child-indent) + 9px);
+  --trace-tree-width: calc(var(--trace-col-gap) + var(--trace-child-indent) + 9px);
 }
 .chat-main .trace-table .activity-trace,
 .chat-main .activity-trace > li,
@@ -3033,8 +3039,11 @@ nav.tab-bar-strip.group-strip {
   grid-template-columns: subgrid;
 }
 .chat-main .activity-trace .trace-row > :not(.trace-row-header) {
-  grid-column: cpu / end;
+  grid-column: label / end;
   contain: inline-size;
+}
+.chat-main .activity-trace .trace-child > :not(.trace-row-header) {
+  margin-left: calc(var(--trace-col-gap) + var(--trace-child-indent));
 }
 .chat-main .msg-activity .activity-trace {
   list-style: none;
@@ -3059,7 +3068,8 @@ nav.tab-bar-strip.group-strip {
 .chat-main .activity-trace .trace-row::before {
   content: "";
   position: absolute;
-  left: 4px;
+  grid-column: tree / label;
+  left: calc(var(--trace-col-gap) + 4px);
   top: 0;
   bottom: 0;
   border-left: 1px solid var(--border-strong);
@@ -3117,14 +3127,14 @@ nav.tab-bar-strip.group-strip {
   position: relative;
   width: 13px;
   height: 13px;
-  margin-left: -2px;
+  margin-left: calc(var(--trace-col-gap) - 2px);
   border: 1px solid var(--trace-status-color, var(--muted));
   border-radius: 3px;
   background: var(--surface);
   color: var(--trace-status-color, var(--muted));
 }
 .chat-main .activity-trace .trace-child .trace-stop .tool-stop {
-  margin-left: calc(var(--trace-child-indent) - 2px);
+  margin-left: calc(var(--trace-col-gap) + var(--trace-child-indent) - 2px);
 }
 .chat-main .activity-trace .trace-stop .tool-stop::before {
   content: "";
@@ -3149,6 +3159,7 @@ nav.tab-bar-strip.group-strip {
   flex: none;
   width: 9px;
   height: 9px;
+  margin-left: var(--trace-col-gap);
 }
 .chat-main .activity-trace .trace-dot {
   width: 7px;
@@ -3156,13 +3167,28 @@ nav.tab-bar-strip.group-strip {
   border-radius: 50%;
   background: var(--trace-status-color, var(--muted));
 }
+.chat-main .activity-trace .trace-chapter-marker {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  background: var(--surface);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.chat-main .activity-trace .trace-chapter.open > .trace-row-header .trace-chapter-marker {
+  transform: rotate(90deg);
+}
 .chat-main .activity-trace .trace-child .trace-marker {
-  margin-left: var(--trace-child-indent);
+  margin-left: calc(var(--trace-col-gap) + var(--trace-child-indent));
 }
 .chat-main .activity-trace .trace-child::after {
   content: "";
   position: absolute;
-  left: 4px;
+  grid-column: tree / label;
+  left: calc(var(--trace-col-gap) + 4px);
   top: calc(var(--trace-row-height) / 2);
   width: calc(var(--trace-child-indent) - 2px);
   border-top: 1px solid var(--border-strong);
@@ -3209,7 +3235,8 @@ nav.tab-bar-strip.group-strip {
 .chat-main .activity-trace .trace-chapter::before {
   content: "";
   position: absolute;
-  left: 4px;
+  grid-column: tree / label;
+  left: calc(var(--trace-col-gap) + 4px);
   top: var(--chapter-rail-start, 0px);
   height: calc(var(--chapter-rail-end, var(--trace-row-height)) - var(--chapter-rail-start, 0px));
   border-left: 1px solid var(--border-strong);
@@ -3229,6 +3256,9 @@ nav.tab-bar-strip.group-strip {
   grid-column: label;
   padding-left: var(--trace-col-gap);
   white-space: nowrap;
+}
+.chat-main .activity-trace .trace-child .trace-text {
+  padding-left: calc(var(--trace-col-gap) + var(--trace-child-indent));
 }
 .chat-main .activity-trace .trace-chapter-heading {
   display: flex;

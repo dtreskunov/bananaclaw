@@ -53,10 +53,15 @@ describe('theme CSS contract', () => {
     const css = read('./components/ChatMain.css');
     expect(css).not.toContain('.scroll-jump');
     expect(read('./components/ChatMain.tsx')).not.toContain('ScrollNavigation');
-    const header = read('./components/Header.css').match(/\.app-header \{([^}]+)\}/)?.[1];
+    const headerCss = read('./components/Header.css');
+    const header = headerCss.match(/\.app-header \{([^}]+)\}/)?.[1];
     expect(header).toContain('position: relative');
-    expect(header).toContain('z-index: 3');
-    expect(header).toContain('box-shadow: 0 2px 10px var(--shadow-color)');
+    expect(header).not.toContain('z-index');
+    expect(header).not.toContain('box-shadow');
+    const shadow = headerCss.match(/\.app-header::after \{([^}]+)\}/)?.[1];
+    expect(shadow).toContain('box-shadow: 0 2px 10px var(--shadow-color)');
+    expect(shadow).toContain('z-index: 5');
+    expect(shadow).toContain('pointer-events: none');
     expect(read('./components/Header.tsx')).toContain('<header class="app-header">');
   });
 
@@ -364,10 +369,26 @@ describe('theme CSS contract', () => {
     expect(preview).toContain('font-family: var(--font-ui)');
   });
 
-  it('uses continuous chapter rails, indented hollow child dots and expanded TODO checklists', () => {
+  it('uses distinct chapter chevrons, continuous rails, indented child labels and hollow child dots', () => {
     const css = read('./components/ChatMain.css');
     expect(css).toContain('--trace-child-indent: 20px');
-    expect(css).toContain('.trace-child .trace-marker { margin-left: var(--trace-child-indent); }');
+    expect(css).toContain(
+      '.trace-child .trace-marker { margin-left: calc(var(--trace-col-gap) + var(--trace-child-indent)); }',
+    );
+    expect(css).toContain(
+      '.trace-child .trace-text { padding-left: calc(var(--trace-col-gap) + var(--trace-child-indent)); }',
+    );
+    const marker = css.match(/\.chat-main \.activity-trace \.trace-chapter-marker \{([^}]+)\}/)?.[1];
+    expect(marker).toContain('stroke: currentColor');
+    expect(marker).toContain('background: var(--surface)');
+    expect(css).toContain(
+      '.trace-chapter.open > .trace-row-header .trace-chapter-marker { transform: rotate(90deg); }',
+    );
+    for (const selector of ['trace-row::before', 'trace-child::after', 'trace-chapter::before']) {
+      const rail = css.match(new RegExp(`\\.chat-main \\.activity-trace \\.${selector} \\{([^}]+)\\}`))?.[1];
+      expect(rail).toContain('grid-column: tree / label');
+      expect(rail).toContain('left: calc(var(--trace-col-gap) + 4px)');
+    }
     expect(css).toContain('.trace-child::after');
     expect(css).toMatch(/\.trace-child \.trace-dot \{[^}]*width: 5px;[^}]*border: 1px solid/);
     expect(css).toContain('.trace-chapter::before');
@@ -392,7 +413,7 @@ describe('theme CSS contract', () => {
     // Tree, CPU and AI columns fit their widest cell; labels keep their full width and the table scrolls.
     const table = css.match(/\.chat-main \.msg-activity \.trace-table \{([^}]+)\}/)?.[1];
     expect(table).toContain(
-      'grid-template-columns: [tree] var(--trace-tree-width) [cpu] auto [ai] auto [label] minmax(max-content, 1fr) [end]',
+      'grid-template-columns: [cpu] auto [ai] auto [tree] var(--trace-tree-width) [label] minmax(max-content, 1fr) [end]',
     );
     expect(table).toContain('max-height: 30vh; overflow: auto');
     expect(css.match(/\.chat-main \.msg-activity \.activity-trace \{([^}]+)\}/)?.[1]).not.toContain('overflow');
@@ -401,7 +422,10 @@ describe('theme CSS contract', () => {
       /\.trace-row-header \{ grid-column: 1 \/ -1; display: grid; grid-template-columns: subgrid; \}/,
     );
     // Expanded details wrap within the table instead of widening it.
-    expect(css).toContain('.trace-row > :not(.trace-row-header) { grid-column: cpu / end; contain: inline-size; }');
+    expect(css).toContain('.trace-row > :not(.trace-row-header) { grid-column: label / end; contain: inline-size; }');
+    expect(css).toContain(
+      '.trace-child > :not(.trace-row-header) { margin-left: calc(var(--trace-col-gap) + var(--trace-child-indent)); }',
+    );
     expect(css).toMatch(/\.trace-meta \{ white-space: normal; overflow-wrap: anywhere/);
     const toggle = css.match(
       /\.trace-row-toggle,\s*\.chat-main \.activity-trace \.trace-chapter-toggle \{([^}]+)\}/,

@@ -391,22 +391,23 @@
 .chat-main .meta .trace-count { white-space: nowrap; }
 /* Rows share the table's columns through subgrid, so each column fits its widest value.
    Labels keep their full width; the table scrolls horizontally when they overflow. */
-.chat-main .msg-activity .trace-table { --trace-child-indent: 20px; --trace-row-height: 28px; --trace-col-gap: 8px; --trace-tree-width: 9px; display: grid; grid-template-columns: [tree] var(--trace-tree-width) [cpu] auto [ai] auto [label] minmax(max-content, 1fr) [end]; align-content: start; width: 100%; min-width: 0; max-height: 30vh; overflow: auto; scrollbar-width: thin; font-size: var(--font-2xs); }
-.chat-main .msg-activity .trace-table.has-chapters { --trace-tree-width: calc(var(--trace-child-indent) + 9px); }
+.chat-main .msg-activity .trace-table { --trace-child-indent: 20px; --trace-row-height: 28px; --trace-col-gap: 8px; --trace-tree-width: calc(var(--trace-col-gap) + 9px); display: grid; grid-template-columns: [cpu] auto [ai] auto [tree] var(--trace-tree-width) [label] minmax(max-content, 1fr) [end]; align-content: start; width: 100%; min-width: 0; max-height: 30vh; overflow: auto; scrollbar-width: thin; font-size: var(--font-2xs); }
+.chat-main .msg-activity .trace-table.has-chapters { --trace-tree-width: calc(var(--trace-col-gap) + var(--trace-child-indent) + 9px); }
 .chat-main .trace-table .activity-trace,
 .chat-main .activity-trace > li,
 .chat-main .activity-trace ul.trace-children,
 .chat-main .activity-trace ul.trace-children > li,
 .chat-main .activity-trace .trace-row-header { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
-/* Expanded details start after the tree and wrap within the table instead of widening it. */
-.chat-main .activity-trace .trace-row > :not(.trace-row-header) { grid-column: cpu / end; contain: inline-size; }
+/* Expanded details align with their labels and do not widen the table. */
+.chat-main .activity-trace .trace-row > :not(.trace-row-header) { grid-column: label / end; contain: inline-size; }
+.chat-main .activity-trace .trace-child > :not(.trace-row-header) { margin-left: calc(var(--trace-col-gap) + var(--trace-child-indent)); }
 .chat-main .msg-activity .activity-trace { list-style: none; margin: 0; padding: 0; gap: 0; }
 .chat-main .msg.markdown .msg-activity .activity-trace { padding-left: 0; }
 .chat-main .msg-activity .activity-trace li { min-width: 0; }
 .chat-main .activity-trace:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; border-radius: var(--radius-sm); }
 
 .chat-main .activity-trace .trace-row { position: relative; }
-.chat-main .activity-trace .trace-row::before { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; border-left: 1px solid var(--border-strong); pointer-events: none; }
+.chat-main .activity-trace .trace-row::before { content: ''; position: absolute; grid-column: tree / label; left: calc(var(--trace-col-gap) + 4px); top: 0; bottom: 0; border-left: 1px solid var(--border-strong); pointer-events: none; }
 .chat-main .activity-trace > .trace-row:first-child::before { top: calc(var(--trace-row-height) / 2); }
 .chat-main .activity-trace > .trace-row:last-child::before,
 .chat-main .activity-trace > .trace-chapter:last-child .trace-children > .trace-row:last-child::before { bottom: calc(100% - var(--trace-row-height) / 2); }
@@ -418,16 +419,18 @@
 .chat-main .activity-trace .trace-stop:empty { display: none; }
 /* A stoppable step's timeline node is its Stop button. */
 .chat-main .activity-trace .trace-row-header:has(.trace-stop .tool-stop) .trace-marker { visibility: hidden; }
-.chat-main .activity-trace .trace-stop .tool-stop { position: relative; width: 13px; height: 13px; margin-left: -2px; border: 1px solid var(--trace-status-color, var(--muted)); border-radius: 3px; background: var(--surface); color: var(--trace-status-color, var(--muted)); }
-.chat-main .activity-trace .trace-child .trace-stop .tool-stop { margin-left: calc(var(--trace-child-indent) - 2px); }
+.chat-main .activity-trace .trace-stop .tool-stop { position: relative; width: 13px; height: 13px; margin-left: calc(var(--trace-col-gap) - 2px); border: 1px solid var(--trace-status-color, var(--muted)); border-radius: 3px; background: var(--surface); color: var(--trace-status-color, var(--muted)); }
+.chat-main .activity-trace .trace-child .trace-stop .tool-stop { margin-left: calc(var(--trace-col-gap) + var(--trace-child-indent) - 2px); }
 .chat-main .activity-trace .trace-stop .tool-stop::before { content: ''; position: absolute; inset: -6px; }
 .chat-main .activity-trace .trace-stop .tool-stop .msg-action-icon { width: 100%; height: 100%; }
 .chat-main .activity-trace .trace-stop .tool-stop:hover:not([disabled]),
 .chat-main .activity-trace .trace-stop .tool-stop:focus-visible { background: color-mix(in srgb, var(--trace-status-color, var(--muted)) 20%, var(--surface)); color: var(--trace-status-color, var(--muted)); }
-.chat-main .activity-trace .trace-marker { grid-column: tree; position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 9px; height: 9px; }
+.chat-main .activity-trace .trace-marker { grid-column: tree; position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 9px; height: 9px; margin-left: var(--trace-col-gap); }
 .chat-main .activity-trace .trace-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--trace-status-color, var(--muted)); }
-.chat-main .activity-trace .trace-child .trace-marker { margin-left: var(--trace-child-indent); }
-.chat-main .activity-trace .trace-child::after { content: ''; position: absolute; left: 4px; top: calc(var(--trace-row-height) / 2); width: calc(var(--trace-child-indent) - 2px); border-top: 1px solid var(--border-strong); pointer-events: none; }
+.chat-main .activity-trace .trace-chapter-marker { width: 11px; height: 11px; flex: none; background: var(--surface); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.chat-main .activity-trace .trace-chapter.open > .trace-row-header .trace-chapter-marker { transform: rotate(90deg); }
+.chat-main .activity-trace .trace-child .trace-marker { margin-left: calc(var(--trace-col-gap) + var(--trace-child-indent)); }
+.chat-main .activity-trace .trace-child::after { content: ''; position: absolute; grid-column: tree / label; left: calc(var(--trace-col-gap) + 4px); top: calc(var(--trace-row-height) / 2); width: calc(var(--trace-child-indent) - 2px); border-top: 1px solid var(--border-strong); pointer-events: none; }
 .chat-main .activity-trace .trace-child .trace-dot { width: 5px; height: 5px; border: 1px solid var(--trace-status-color, var(--muted)); background: var(--surface); }
 .chat-main .activity-trace .trace-status-queued { --trace-status-color: var(--activity-status-queued); }
 .chat-main .activity-trace .trace-status-running { --trace-status-color: var(--activity-status-running); }
@@ -441,12 +444,13 @@
 .chat-main .activity-trace .trace-row-toggle:focus-visible,
 .chat-main .activity-trace .trace-chapter-toggle:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; border-radius: var(--radius-sm); }
 .chat-main .activity-trace .trace-chapter { position: relative; }
-.chat-main .activity-trace .trace-chapter::before { content: ''; position: absolute; left: 4px; top: var(--chapter-rail-start, 0px); height: calc(var(--chapter-rail-end, var(--trace-row-height)) - var(--chapter-rail-start, 0px)); border-left: 1px solid var(--border-strong); pointer-events: none; }
+.chat-main .activity-trace .trace-chapter::before { content: ''; position: absolute; grid-column: tree / label; left: calc(var(--trace-col-gap) + 4px); top: var(--chapter-rail-start, 0px); height: calc(var(--chapter-rail-end, var(--trace-row-height)) - var(--chapter-rail-start, 0px)); border-left: 1px solid var(--border-strong); pointer-events: none; }
 .chat-main .activity-trace > .trace-chapter:first-child { --chapter-rail-start: calc(var(--trace-row-height) / 2); }
 .chat-main .activity-trace > .trace-chapter:last-child:not(.open) { --chapter-rail-end: calc(var(--trace-row-height) / 2); }
 .chat-main .activity-trace .trace-chapter-toggle { height: var(--trace-row-height); }
 .chat-main .activity-trace .trace-chapter-label,
 .chat-main .activity-trace .trace-text { grid-column: label; padding-left: var(--trace-col-gap); white-space: nowrap; }
+.chat-main .activity-trace .trace-child .trace-text { padding-left: calc(var(--trace-col-gap) + var(--trace-child-indent)); }
 .chat-main .activity-trace .trace-chapter-heading { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
 .chat-main .activity-trace .trace-chapter-title { display: block; white-space: nowrap; }
 .chat-main .activity-trace .trace-chapter-notice { color: var(--muted); }

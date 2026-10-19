@@ -23878,9 +23878,9 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
           "aria-label": `${summary}${statusText ? ` \xB7 ${statusText}` : ""}`,
           onClick: onToggle,
           children: [
-            /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
             /* @__PURE__ */ u4(TimeCell, { kind: "cpu", time: times.cpu }),
             /* @__PURE__ */ u4(TimeCell, { kind: "ai", time: times.ai }),
+            /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
             /* @__PURE__ */ u4("span", { class: "trace-text", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline }) })
           ]
         }
@@ -23952,9 +23952,9 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
           "aria-label": `${chapter.title} \xB7 ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` \xB7 ${chapter.failures} failed` : ""}`,
           onClick: () => toggleChapter(chapter.id),
           children: [
-            /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("span", { class: "trace-dot" }) }),
             /* @__PURE__ */ u4(TimeCell, { kind: "cpu", time: times.cpu }),
             /* @__PURE__ */ u4(TimeCell, { kind: "ai", time: times.ai }),
+            /* @__PURE__ */ u4("span", { class: "trace-marker", "aria-hidden": "true", children: /* @__PURE__ */ u4("svg", { class: "trace-chapter-marker", viewBox: "0 0 12 12", focusable: "false", children: /* @__PURE__ */ u4("path", { d: "M3 2l5 4-5 4" }) }) }),
             /* @__PURE__ */ u4("span", { class: "trace-chapter-label", children: /* @__PURE__ */ u4("span", { class: "trace-chapter-heading", children: [
               /* @__PURE__ */ u4("span", { class: "trace-chapter-title", children: /* @__PURE__ */ u4(StepHeadlineContent, { headline: chapter.headline, repetitions: chapter.entries.length }) }),
               chapter.failures ? /* @__PURE__ */ u4("span", { class: "trace-chapter-failures", children: [

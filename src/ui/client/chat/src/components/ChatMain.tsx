@@ -266,9 +266,9 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
           aria-label={`${summary}${statusText ? ` · ${statusText}` : ''}`}
           onClick={onToggle}
         >
-          <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
           <TimeCell kind="cpu" time={times.cpu} />
           <TimeCell kind="ai" time={times.ai} />
+          <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
           <span class="trace-text"><StepHeadlineContent headline={headline} /></span>
         </button>
         {/* Replaces the timeline node; a button cannot nest inside the toggle. */}
@@ -342,9 +342,13 @@ export function ActivityTraceList({ lines, live = false, now = null, turnId = nu
               <button type="button" class="trace-chapter-toggle" aria-expanded={open}
                 aria-label={`${chapter.title} · ${TRACE_STATUS_LABELS[chapter.status]}${chapter.failures ? ` · ${chapter.failures} failed` : ''}`}
                 onClick={() => toggleChapter(chapter.id)}>
-                <span class="trace-marker" aria-hidden="true"><span class="trace-dot" /></span>
                 <TimeCell kind="cpu" time={times.cpu} />
                 <TimeCell kind="ai" time={times.ai} />
+                <span class="trace-marker" aria-hidden="true">
+                  <svg class="trace-chapter-marker" viewBox="0 0 12 12" focusable="false">
+                    <path d="M3 2l5 4-5 4" />
+                  </svg>
+                </span>
                 <span class="trace-chapter-label">
                   <span class="trace-chapter-heading">
                     <span class="trace-chapter-title"><StepHeadlineContent headline={chapter.headline} repetitions={chapter.entries.length} /></span>
