@@ -173,6 +173,7 @@ async function runRecoveryContainer(session: Session): Promise<boolean> {
   const config: import('./container-config.js').ContainerConfig = {
     mcpServers: {}, packages: { apt: [], npm: [], pip: [] },
     additionalMounts: [], skills: [], disabledSkills: [],
+    imageTag: getContainerConfig(agentGroup.id)?.image_tag ?? undefined,
   };
   const args = await buildContainerArgs(
     mounts, containerName, agentGroup, config, 'native', {}, undefined, session.id, 'recovery',
@@ -970,6 +971,9 @@ export async function buildContainerArgs(
     args.push('-e', 'HOME=/home/node');
   }
 
+  // Use per-agent-group image if one has been built, otherwise base image
+  const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
+
   if (launchMode === 'recovery') {
     args.push('--network=none', '--label', 'nanoclaw-recovery=true');
     args.push('-e', `NANOCLAW_MAX_OUTPUT_BYTES=${CONTAINER_MAX_OUTPUT_SIZE}`);
@@ -977,7 +981,7 @@ export async function buildContainerArgs(
       if (mount.readonly) args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
       else args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
     }
-    args.push('--entrypoint', 'bash', CONTAINER_IMAGE, '-c', 'exec bun run /app/src/recover-main.ts');
+    args.push('--entrypoint', 'bash', imageTag, '-c', 'exec bun run /app/src/recover-main.ts');
     return args;
   }
 
@@ -1060,9 +1064,6 @@ export async function buildContainerArgs(
 
   // Override entrypoint: run v2 entry point directly via Bun (no tsc, no stdin).
   args.push('--entrypoint', 'bash');
-
-  // Use per-agent-group image if one has been built, otherwise base image
-  const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
   args.push(imageTag);
 
   args.push('-c', launchMode === 'agent' ? 'exec bun run /app/src/index.ts' : 'exec bun run /app/src/mcp-probe.ts');

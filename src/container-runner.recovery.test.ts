@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChildProcess, spawn } from 'child_process';
 
-const { applyContainerConfig, getAgentGroup, materializeContainerJson, admission } = vi.hoisted(() => ({
+const { applyContainerConfig, getAgentGroup, getContainerConfig, materializeContainerJson, admission } = vi.hoisted(() => ({
   applyContainerConfig: vi.fn(),
   getAgentGroup: vi.fn(),
+  getContainerConfig: vi.fn(),
   materializeContainerJson: vi.fn(),
   admission: {
     memoryBudgetMb: vi.fn(),
@@ -36,6 +37,10 @@ vi.mock('./container-config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./container-config.js')>()),
   materializeContainerJson,
 }));
+vi.mock('./db/container-configs.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./db/container-configs.js')>()),
+  getContainerConfig,
+}));
 vi.mock('./container-admission.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./container-admission.js')>()),
   ...admission,
@@ -52,6 +57,7 @@ vi.mock('./session-manager.js', async (importOriginal) => ({
 }));
 
 import { buildContainerArgs, recoverStoppedSession, wakeContainer } from './container-runner.js';
+import { CONTAINER_IMAGE } from './config.js';
 import type { ContainerConfig } from './container-config.js';
 import type { AgentGroup, Session } from './types.js';
 
@@ -121,8 +127,62 @@ it('runs recovery with only the provided mounts, no networking, and no gateway c
   expect(args).toContain('nanoclaw-session=session-test');
   expect(args).toContain('/runner-state:/workspace/runner-state');
   expect(args.at(-1)).toBe('exec bun run /app/src/recover-main.ts');
+  expect(args.at(-3)).toBe(CONTAINER_IMAGE);
   expect(args).not.toContain('-d');
   expect(applyContainerConfig).not.toHaveBeenCalled();
+});
+
+it('runs recovery in the agent group image, like agent containers', async () => {
+  const group: AgentGroup = {
+    id: 'recovery-group',
+    name: 'Recovery',
+    folder: 'recovery',
+    agent_provider: null,
+    created_at: '2026-10-04T20:22:46.000Z',
+  };
+  const config: ContainerConfig = {
+    mcpServers: {},
+    packages: { apt: [], npm: [], pip: [] },
+    additionalMounts: [],
+    skills: [],
+    disabledSkills: [],
+    imageTag: 'nanoclaw-agent:recovery-group',
+  };
+  const args = await buildContainerArgs([], 'recovery-test', group, config, 'native', {}, undefined, 'session-test', 'recovery');
+  expect(args.slice(-4)).toEqual(['bash', 'nanoclaw-agent:recovery-group', '-c', 'exec bun run /app/src/recover-main.ts']);
+  expect(args).not.toContain(CONTAINER_IMAGE);
+});
+
+it('recovers a stopped session in its agent group image without materializing container.json', async () => {
+  const session: Session = {
+    id: 'recovery-image',
+    agent_group_id: 'recovery-group',
+    messaging_group_id: null,
+    thread_id: null,
+    agent_provider: null,
+    status: 'active',
+    container_status: 'stopped',
+    last_active: null,
+    created_at: '2026-10-04T20:22:46.000Z',
+  };
+  getAgentGroup.mockReturnValue({
+    id: session.agent_group_id,
+    name: 'Recovery',
+    folder: 'recovery',
+    agent_provider: null,
+    created_at: session.created_at,
+  } satisfies AgentGroup);
+  getContainerConfig.mockReturnValue({ agent_group_id: session.agent_group_id, image_tag: 'nanoclaw-agent:recovery-group' });
+  const child = new ChildProcess();
+  vi.mocked(spawn).mockReturnValue(child);
+  const recovery = recoverStoppedSession(session);
+  await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+  const args = vi.mocked(spawn).mock.calls[0]![1] as string[];
+  expect(args.slice(-4)).toEqual(['bash', 'nanoclaw-agent:recovery-group', '-c', 'exec bun run /app/src/recover-main.ts']);
+  expect(getContainerConfig).toHaveBeenCalledWith(session.agent_group_id);
+  expect(materializeContainerJson).not.toHaveBeenCalled();
+  child.emit('close', 1);
+  expect(await recovery).toBe(false);
 });
 
 it('deduplicates recovery and does not start a provider wake after a failed recovery', async () => {
