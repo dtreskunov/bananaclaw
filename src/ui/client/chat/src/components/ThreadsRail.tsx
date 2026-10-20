@@ -9,6 +9,7 @@ import {
 } from '../state';
 import {
   openChat,
+  startNewThread,
   deleteThread,
   loadThreads,
   searchThreads,
@@ -305,15 +306,6 @@ export function ThreadsRail() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const isSearching = searchOpen.value;
 
-  const onNewChat = (): void => {
-    if (!groupId.value) return;
-    // openChat handles composer focus once the WS is connected.
-    openChat(groupId.value, null, null).then(() => {
-      drawerOpen.threads.value = false;
-      drawerOpen.files.value = false;
-    }).catch(console.error);
-  };
-
   const buckets = new Map<string, Thread[]>();
   for (const t of list) {
     const ct = t.channelType || 'web';
@@ -369,7 +361,7 @@ export function ThreadsRail() {
 
   const collapsedActions = (
     <>
-      <button type="button" class="icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn" title="New thread" aria-label="New thread" onClick={onNewChat}>+</button>
+      <button type="button" class="icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn" title="New thread" aria-label="New thread" onClick={startNewThread}>+</button>
       <button type="button" class="icon-btn rail-icon-btn collapsed-action-btn" title="Search threads" aria-label="Search threads" onClick={onOpenSearch}>{'\uD83D\uDD0D'}</button>
     </>
   );
@@ -387,7 +379,7 @@ export function ThreadsRail() {
           class="thread-action-btn accent-icon-btn rail-primary-action-btn new-thread-action-btn"
           title="New thread"
           aria-label="New thread"
-          onClick={onNewChat}
+          onClick={startNewThread}
         ><span class="plus-glyph" aria-hidden="true">+</span></button>
         <input
           ref={searchInputRef}

@@ -758,6 +758,17 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
   refs.newChatInFlight = false;
 }
 
+export function startNewThread(): void {
+  const gid = groupId.value;
+  if (!gid) return;
+  openChat(gid, null, null)
+    .then(() => {
+      drawerOpen.threads.value = false;
+      drawerOpen.files.value = false;
+    })
+    .catch(console.error);
+}
+
 interface ChatSocketContext {
   gid: string;
   tid: string;

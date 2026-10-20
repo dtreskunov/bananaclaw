@@ -70,6 +70,10 @@ A fresh visit without a thread in the URL opens a blank web conversation instead
 of the most recent thread. A group or file link keeps its group, file, and panel
 state while opening the blank conversation. As with **New thread**, an existing
 empty web thread is reused.
+On mobile, the header includes a **+** (**New thread**) button immediately left
+of the agent-group dropdown, so opening a blank conversation does not require
+opening the thread drawer. It uses the same action as the thread rail and is
+disabled until an agent group is selected.
 
 The selected thread is written to the URL, so refreshing stays in that
 conversation and explicit thread links still open the requested conversation.

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearChat, selectGroup } from './actions';
+import { clearChat, selectGroup, startNewThread } from './actions';
 import { applyHash, parseHash } from './hash';
 import { router } from './router';
-import { groupId, groups, refs, threadId, threads, toastMessage } from './state';
+import { drawerOpen, groupId, groups, refs, threadId, threads, toastMessage } from './state';
 import { dismissToast } from './components/Toast';
 import type { Thread } from './types';
 
@@ -63,6 +63,8 @@ afterEach(() => {
   groups.value = [];
   threads.value = [];
   refs.suppressHashCount = 0;
+  drawerOpen.threads.value = false;
+  drawerOpen.files.value = false;
   while (toastMessage.value) dismissToast();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -76,6 +78,52 @@ describe('new conversation on startup', () => {
     expect(parseHash()).toMatchObject({ groupId: 'agent', threadId: 'created' });
     expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/start', expect.objectContaining({ method: 'POST' }));
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/warmup'), expect.anything());
+  });
+
+  describe('shared new-thread shortcut', () => {
+    it('opens a blank thread in the selected group and closes both drawers', async () => {
+      groupId.value = 'agent';
+      threads.value = [latest];
+      drawerOpen.threads.value = true;
+      drawerOpen.files.value = true;
+
+      startNewThread();
+
+      await vi.waitFor(() => expect(drawerOpen.threads.value).toBe(false));
+      expect(drawerOpen.files.value).toBe(false);
+      expect(threadId.value).toBe('created');
+      expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/start', expect.objectContaining({ method: 'POST' }));
+      expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/warmup'), expect.anything());
+    });
+
+    it('reuses an existing empty web thread', async () => {
+      groupId.value = 'agent';
+      serverThreads = [latest, blank];
+      threads.value = serverThreads;
+      drawerOpen.threads.value = true;
+
+      startNewThread();
+
+      await vi.waitFor(() => expect(drawerOpen.threads.value).toBe(false));
+      expect(threadId.value).toBe('blank');
+      expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/chat/start'), expect.anything());
+    });
+
+    it('does not allocate duplicate threads on rapid clicks', async () => {
+      groupId.value = 'agent';
+      threads.value = [latest];
+
+      startNewThread();
+      startNewThread();
+
+      await vi.waitFor(() => expect(threadId.value).toBe('created'));
+      expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/chat/start'))).toHaveLength(1);
+    });
+
+    it('does nothing until an agent group is selected', () => {
+      startNewThread();
+      expect(fetch).not.toHaveBeenCalled();
+    });
   });
 
   it('reuses an existing empty web thread without allocating another one', async () => {

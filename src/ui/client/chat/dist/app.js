@@ -20671,6 +20671,14 @@ async function openChat(gid, resumeTid, opts) {
   focusComposerSoon({ mobile: true });
   refs.newChatInFlight = false;
 }
+function startNewThread() {
+  const gid = groupId.value;
+  if (!gid) return;
+  openChat(gid, null, null).then(() => {
+    drawerOpen.threads.value = false;
+    drawerOpen.files.value = false;
+  }).catch(console.error);
+}
 var WS_CONNECT_TIMEOUT_MS = 1e4;
 function handleProtocolMismatch(error) {
   if (!(error instanceof ConversationProtocolError) || error.code !== "protocol_mismatch") return false;
@@ -21900,6 +21908,18 @@ function Header() {
       }
     ),
     /* @__PURE__ */ u4("span", { class: "brand", children: BRAND.name }),
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "icon-btn mobile-only",
+        title: "New thread",
+        "aria-label": "New thread",
+        disabled: !groupId.value,
+        onClick: startNewThread,
+        children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
+      }
+    ),
     /* @__PURE__ */ u4(GroupStrip, {}),
     /* @__PURE__ */ u4(UserMenu, {}),
     /* @__PURE__ */ u4(
@@ -22265,13 +22285,6 @@ function ThreadsRail() {
   const list = threads.value;
   const searchInputRef = A2(null);
   const isSearching = searchOpen.value;
-  const onNewChat = () => {
-    if (!groupId.value) return;
-    openChat(groupId.value, null, null).then(() => {
-      drawerOpen.threads.value = false;
-      drawerOpen.files.value = false;
-    }).catch(console.error);
-  };
   const buckets = /* @__PURE__ */ new Map();
   for (const t4 of list) {
     const ct = t4.channelType || "web";
@@ -22319,7 +22332,7 @@ function ThreadsRail() {
     loadThreads(gid).catch(console.error);
   };
   const collapsedActions = /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn", title: "New thread", "aria-label": "New thread", onClick: onNewChat, children: "+" }),
+    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn", title: "New thread", "aria-label": "New thread", onClick: startNewThread, children: "+" }),
     /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn", title: "Search threads", "aria-label": "Search threads", onClick: onOpenSearch, children: "\u{1F50D}" })
   ] });
   return /* @__PURE__ */ u4(
@@ -22338,7 +22351,7 @@ function ThreadsRail() {
               class: "thread-action-btn accent-icon-btn rail-primary-action-btn new-thread-action-btn",
               title: "New thread",
               "aria-label": "New thread",
-              onClick: onNewChat,
+              onClick: startNewThread,
               children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
             }
           ),
