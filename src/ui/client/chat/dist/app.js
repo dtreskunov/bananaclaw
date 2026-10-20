@@ -14611,24 +14611,24 @@ function O(n3) {
   };
 }
 function j(n3, u5, t4, i5, r4, o4, e4, f5, c4, s5) {
-  var a4, h5, p5, v5, y5, g8, m6, b5, C3, S3, M3, P5, I3, A6, H4, L3, T5, F5 = u5.type;
+  var a4, h5, p5, v5, y5, g8, m6, b5, C3, S3, M4, P5, I3, A6, H4, L3, T5, F5 = u5.type;
   if (void 0 !== u5.constructor) return null;
   128 & t4.__u && (c4 = !!(32 & t4.__u), o4 = [f5 = u5.__e = t4.__e]), (a4 = l.__b) && a4(u5);
   n: if ("function" == typeof F5) try {
-    if (b5 = u5.props, C3 = "prototype" in F5 && F5.prototype.render, S3 = (a4 = F5.contextType) && i5[a4.__c], M3 = a4 ? S3 ? S3.props.value : a4.__ : i5, t4.__c ? m6 = (h5 = u5.__c = t4.__c).__ = h5.__E : (C3 ? u5.__c = h5 = new F5(b5, M3) : (u5.__c = h5 = new x(b5, M3), h5.constructor = F5, h5.render = B), S3 && S3.sub(h5), h5.props = b5, h5.state || (h5.state = {}), h5.context = M3, h5.__n = i5, p5 = h5.__d = true, h5.__h = [], h5._sb = []), C3 && null == h5.__s && (h5.__s = h5.state), C3 && null != F5.getDerivedStateFromProps && (h5.__s == h5.state && (h5.__s = w({}, h5.__s)), w(h5.__s, F5.getDerivedStateFromProps(b5, h5.__s))), v5 = h5.props, y5 = h5.state, h5.__v = u5, p5) C3 && null == F5.getDerivedStateFromProps && null != h5.componentWillMount && h5.componentWillMount(), C3 && null != h5.componentDidMount && h5.__h.push(h5.componentDidMount);
+    if (b5 = u5.props, C3 = "prototype" in F5 && F5.prototype.render, S3 = (a4 = F5.contextType) && i5[a4.__c], M4 = a4 ? S3 ? S3.props.value : a4.__ : i5, t4.__c ? m6 = (h5 = u5.__c = t4.__c).__ = h5.__E : (C3 ? u5.__c = h5 = new F5(b5, M4) : (u5.__c = h5 = new x(b5, M4), h5.constructor = F5, h5.render = B), S3 && S3.sub(h5), h5.props = b5, h5.state || (h5.state = {}), h5.context = M4, h5.__n = i5, p5 = h5.__d = true, h5.__h = [], h5._sb = []), C3 && null == h5.__s && (h5.__s = h5.state), C3 && null != F5.getDerivedStateFromProps && (h5.__s == h5.state && (h5.__s = w({}, h5.__s)), w(h5.__s, F5.getDerivedStateFromProps(b5, h5.__s))), v5 = h5.props, y5 = h5.state, h5.__v = u5, p5) C3 && null == F5.getDerivedStateFromProps && null != h5.componentWillMount && h5.componentWillMount(), C3 && null != h5.componentDidMount && h5.__h.push(h5.componentDidMount);
     else {
-      if (C3 && null == F5.getDerivedStateFromProps && b5 !== v5 && null != h5.componentWillReceiveProps && h5.componentWillReceiveProps(b5, M3), !h5.__e && (null != h5.shouldComponentUpdate && false === h5.shouldComponentUpdate(b5, h5.__s, M3) || u5.__v == t4.__v)) {
+      if (C3 && null == F5.getDerivedStateFromProps && b5 !== v5 && null != h5.componentWillReceiveProps && h5.componentWillReceiveProps(b5, M4), !h5.__e && (null != h5.shouldComponentUpdate && false === h5.shouldComponentUpdate(b5, h5.__s, M4) || u5.__v == t4.__v)) {
         for (u5.__v != t4.__v && (h5.props = b5, h5.state = h5.__s, h5.__d = false), u5.__e = t4.__e, u5.__k = t4.__k, u5.__k.some(function(n4) {
           n4 && (n4.__ = u5);
         }), P5 = 0; P5 < h5._sb.length; P5++) h5.__h.push(h5._sb[P5]);
         h5._sb = [], h5.__h.length && e4.push(h5);
         break n;
       }
-      null != h5.componentWillUpdate && h5.componentWillUpdate(b5, h5.__s, M3), C3 && null != h5.componentDidUpdate && h5.__h.push(function() {
+      null != h5.componentWillUpdate && h5.componentWillUpdate(b5, h5.__s, M4), C3 && null != h5.componentDidUpdate && h5.__h.push(function() {
         h5.componentDidUpdate(v5, y5, g8);
       });
     }
-    if (h5.context = M3, h5.props = b5, h5.__P = n3, h5.__e = false, I3 = l.__r, A6 = 0, C3) {
+    if (h5.context = M4, h5.props = b5, h5.__P = n3, h5.__e = false, I3 = l.__r, A6 = 0, C3) {
       for (h5.state = h5.__s, h5.__d = false, I3 && I3(u5), a4 = h5.render(h5.props, h5.state, h5.context), H4 = 0; H4 < h5._sb.length; H4++) h5.__h.push(h5._sb[H4]);
       h5._sb = [];
     } else do {
@@ -15763,6 +15763,13 @@ function channelMeta(ct) {
   return ct && CHANNEL_META[ct] || { label: ct || "Channel", icon: "\u2022" };
 }
 
+// ../../shared/voice.ts
+var VOICE_SAMPLE_RATE = 16e3;
+var VOICE_BYTES_PER_SECOND = VOICE_SAMPLE_RATE * 2;
+var VOICE_MAX_FRAME_BYTES = 32768;
+var VOICE_MAX_BUFFER_BYTES = VOICE_BYTES_PER_SECOND * 4;
+var VOICE_UPLOAD_BURST_BYTES = VOICE_MAX_BUFFER_BYTES - VOICE_MAX_FRAME_BYTES;
+
 // src/voice.ts
 function replaceSegment(segments, next) {
   const index = segments.findIndex((segment) => segment.id === next.id);
@@ -15773,14 +15780,17 @@ function replaceSegment(segments, next) {
 }
 function insertVoiceText(prefix, text2, suffix) {
   if (!text2) return prefix + suffix;
-  return prefix + (prefix && !/\s$/.test(prefix) ? " " : "") + text2 + (suffix && !/^\s/.test(suffix) ? " " : "") + suffix;
+  const before = prefix && !/[\s([{]$/.test(prefix) && !/^[,.;:!?%)\]}]/.test(text2) ? " " : "";
+  const after = suffix && !/^[\s,.;:!?%)\]}]/.test(suffix) && !/[([{]$/.test(text2) ? " " : "";
+  return prefix + before + text2 + after + suffix;
 }
 var initialState = () => ({
   phase: "idle",
   target: null,
   elapsedMs: 0,
   error: "",
-  sending: false
+  sending: false,
+  connected: false
 });
 var VoiceController = class {
   constructor(deps) {
@@ -15794,9 +15804,17 @@ var VoiceController = class {
   captureAbort = null;
   timeout = null;
   timer = null;
+  drainTimer = null;
+  audioQueue = [];
+  queuedBytes = 0;
+  uploadAllowance = VOICE_UPLOAD_BURST_BYTES;
+  allowanceAt = 0;
+  captureFlushed = false;
+  startedAt = 0;
+  diagnostics = null;
   segments = [];
-  prefix = "";
-  suffix = "";
+  draft = "";
+  selection = { start: 0, end: 0 };
   intent = "stop";
   finishSent = false;
   update(patch) {
@@ -15805,123 +15823,196 @@ var VoiceController = class {
   current(generation2) {
     return this.generation === generation2 && !!this.target?.isCurrent();
   }
-  start(target, caret = target.getText().length) {
+  start(target, start = target.getText().length, end = start) {
     if (this.state.value.sending || !["idle", "error"].includes(this.state.value.phase)) return;
     this.detach();
     this.target = target;
     this.update({ target: target.key });
-    this.connect(caret);
+    this.connect(start, end);
   }
-  connect(caret) {
+  connect(start, end) {
     const target = this.target;
     const draft = target.getText();
-    this.prefix = draft.slice(0, caret);
-    this.suffix = draft.slice(caret);
+    this.draft = draft;
+    start = Math.max(0, Math.min(start, draft.length));
+    end = Math.max(start, Math.min(end, draft.length));
+    this.selection = { start, end };
     this.segments = [];
     this.intent = "stop";
     this.finishSent = false;
+    this.startedAt = Date.now();
+    this.diagnostics = { attemptId: this.deps.attemptId(), peakQueuedBytes: 0 };
+    this.captureFlushed = false;
+    this.uploadAllowance = VOICE_UPLOAD_BURST_BYTES;
     const generation2 = ++this.generation;
     this.update({ phase: "connecting", error: "" });
+    void this.acquireCapture(generation2);
+    if (!this.current(generation2)) return;
     const base = this.deps.origin().replace(/^http/, "ws");
     const params = new URLSearchParams();
+    params.set("attempt", this.diagnostics.attemptId);
     if (target.channelType && target.channelType !== "web") {
       params.set("channel", target.channelType);
       if (target.messagingGroupId) params.set("mg", target.messagingGroupId);
     }
-    const query = params.size ? `?${params.toString()}` : "";
     let socket;
     try {
       socket = this.deps.socket(
-        `${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream${query}`
+        `${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream?${params}`
       );
     } catch (error) {
-      this.fail(error instanceof Error ? error.message : "Could not connect to voice input.");
+      this.fail(error instanceof Error ? error.message : "Could not connect to voice input.", "connection");
       return;
     }
     this.socket = socket;
     this.timeout = setTimeout(() => {
-      if (this.current(generation2)) this.fail("Voice input did not become ready. Try again.");
+      if (this.current(generation2)) this.fail("Voice input did not become ready. Try again.", "connection");
     }, 15e3);
-    socket.onmessage = (event) => {
-      if (!this.current(generation2)) return;
-      let message2;
-      try {
-        message2 = JSON.parse(event.data);
-      } catch {
-        this.fail("Invalid voice server response.");
-        return;
-      }
-      if (!message2 || typeof message2 !== "object") {
-        this.fail("Invalid voice server response.");
-        return;
-      }
-      if (message2.type === "ready" && this.state.value.phase === "connecting") {
-        if (this.timeout) clearTimeout(this.timeout);
-        this.timeout = null;
-        this.update({ phase: "listening" });
-        const captureAbort = new AbortController();
-        this.captureAbort = captureAbort;
-        void this.deps.capture(
-          (chunk) => {
-            if (!this.current(generation2) || this.finishSent || socket.readyState !== 1) return;
-            if (socket.bufferedAmount > 1024 * 1024) {
-              this.fail("Voice connection is too slow. Current text has been kept.");
-              return;
-            }
-            try {
-              for (let offset = 0; offset < chunk.byteLength; offset += 32768) {
-                socket.send(chunk.slice(offset, offset + 32768));
-              }
-            } catch {
-              this.fail("Voice connection was interrupted. Current text has been kept.");
-            }
-          },
-          (message3) => {
-            if (this.current(generation2)) this.fail(message3);
-          },
-          captureAbort.signal
-        ).then((capture) => {
-          if (!this.current(generation2) || this.state.value.phase !== "listening") {
-            capture.cancel();
-            return;
-          }
-          this.capture = capture;
-          const started = Date.now();
-          const elapsed = this.state.value.elapsedMs;
-          this.timer = setInterval(() => this.update({ elapsedMs: elapsed + Date.now() - started }), 250);
-        }).catch((error) => {
-          if (this.current(generation2)) this.fail(error instanceof Error ? error.message : "Microphone unavailable.");
-        });
-      } else if (message2.type === "transcript" && (this.state.value.phase === "listening" || this.state.value.phase === "finalizing")) {
-        if (typeof message2.id !== "string" || typeof message2.sequence !== "number" || !Number.isSafeInteger(message2.sequence) || typeof message2.text !== "string" || typeof message2.final !== "boolean") {
-          this.fail("Invalid transcript response. Current text has been kept.");
-          return;
-        }
-        this.segments = replaceSegment(this.segments, message2);
-        const text2 = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
-        target.setText(insertVoiceText(this.prefix, text2, this.suffix));
-      } else if (message2.type === "finished" && this.state.value.phase === "finalizing" && this.finishSent) {
-        if (this.intent === "send" && !this.segments.some((segment) => segment.text.trim()) || this.segments.some((segment) => segment.text.trim() && !segment.final)) {
-          this.fail("No complete transcript was received. Review current text before using it.");
-          return;
-        }
-        const intent = this.intent;
-        this.release();
-        if (intent === "send") void this.sendDraft();
-        else this.detach();
-      } else if (message2.type === "error") {
-        this.fail(
-          typeof message2.message === "string" ? message2.message : "Voice input failed. Current text has been kept."
-        );
-      }
-    };
+    socket.onmessage = (event) => this.handleMessage(event.data, generation2);
     socket.onerror = () => {
-      if (this.current(generation2)) this.fail("Voice connection failed. Current text has been kept.");
+      if (this.current(generation2)) this.fail("Voice connection failed. Current text has been kept.", "connection");
     };
     socket.onclose = () => {
       if (this.current(generation2))
-        this.fail("Voice connection closed before finalization. Current text has been kept.");
+        this.fail("Voice connection closed before finalization. Current text has been kept.", "connection");
     };
+  }
+  async acquireCapture(generation2) {
+    const abort = new AbortController();
+    this.captureAbort = abort;
+    try {
+      const capture = await this.deps.capture(
+        (chunk) => this.enqueueAudio(chunk, generation2),
+        (message2) => {
+          if (this.current(generation2)) this.fail(message2, "capture");
+        },
+        abort.signal
+      );
+      if (!this.current(generation2)) {
+        capture.cancel();
+        return;
+      }
+      this.capture = capture;
+      if (this.diagnostics) this.diagnostics.captureReadyMs = this.elapsed();
+      this.update({ phase: "listening" });
+      const started = Date.now();
+      this.timer = setInterval(() => this.update({ elapsedMs: Date.now() - started }), 250);
+    } catch (error) {
+      if (this.current(generation2))
+        this.fail(
+          error instanceof Error ? error.message : "Microphone unavailable.",
+          error instanceof Error && error.name === "NotAllowedError" ? "permission" : "capture"
+        );
+    }
+  }
+  handleMessage(data, generation2) {
+    if (!this.current(generation2)) return;
+    const target = this.target;
+    let message2;
+    try {
+      message2 = JSON.parse(data);
+    } catch {
+      this.fail("Invalid voice server response.", "protocol");
+      return;
+    }
+    if (!message2 || typeof message2 !== "object") {
+      this.fail("Invalid voice server response.", "protocol");
+      return;
+    }
+    if (message2.type === "ready" && !this.state.value.connected) {
+      if (this.state.value.phase !== "finalizing") {
+        if (this.timeout) clearTimeout(this.timeout);
+        this.timeout = null;
+      }
+      this.update({ connected: true });
+      if (this.diagnostics) this.diagnostics.socketReadyMs = this.elapsed();
+      this.allowanceAt = Date.now();
+      this.drainAudio(generation2);
+    } else if (message2.type === "transcript" && (this.state.value.phase === "listening" || this.state.value.phase === "finalizing")) {
+      if (typeof message2.id !== "string" || typeof message2.sequence !== "number" || !Number.isSafeInteger(message2.sequence) || typeof message2.text !== "string" || typeof message2.final !== "boolean") {
+        this.fail("Invalid transcript response. Current text has been kept.", "protocol");
+        return;
+      }
+      if (this.diagnostics && this.diagnostics.firstTranscriptMs === void 0 && message2.text.trim()) {
+        this.diagnostics.firstTranscriptMs = this.elapsed();
+      }
+      this.segments = replaceSegment(this.segments, {
+        id: message2.id,
+        sequence: message2.sequence,
+        text: message2.text,
+        final: message2.final
+      });
+      const text2 = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
+      if (text2) {
+        const prefix = this.draft.slice(0, this.selection.start);
+        const suffix = this.draft.slice(this.selection.end);
+        const caret = insertVoiceText(prefix, text2, "").length;
+        target.setText(insertVoiceText(prefix, text2, suffix), { start: caret, end: caret });
+      } else {
+        target.setText(this.draft, this.selection);
+      }
+    } else if (message2.type === "finished" && this.state.value.phase === "finalizing" && this.finishSent) {
+      if (this.intent === "send" && !this.segments.some((segment) => segment.text.trim()) || this.segments.some((segment) => segment.text.trim() && !segment.final)) {
+        this.fail("No complete transcript was received. Review current text before using it.", "protocol");
+        return;
+      }
+      const intent = this.intent;
+      this.report("finished");
+      this.release();
+      if (intent === "send") void this.sendDraft();
+      else this.detach();
+    } else if (message2.type === "error") {
+      this.fail(
+        typeof message2.message === "string" ? message2.message : "Voice input failed. Current text has been kept."
+      );
+    }
+  }
+  enqueueAudio(chunk, generation2) {
+    if (!this.current(generation2) || this.finishSent) return;
+    if (this.diagnostics && this.diagnostics.firstAudioMs === void 0) this.diagnostics.firstAudioMs = this.elapsed();
+    if (this.queuedBytes + chunk.byteLength + (this.socket?.bufferedAmount ?? 0) > VOICE_MAX_BUFFER_BYTES) {
+      this.fail("Voice connection is too slow. Current text has been kept; please try again.", "buffer");
+      return;
+    }
+    for (let offset = 0; offset < chunk.byteLength; offset += VOICE_MAX_FRAME_BYTES) {
+      const frame = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
+      this.audioQueue.push(frame);
+      this.queuedBytes += frame.byteLength;
+    }
+    if (this.diagnostics)
+      this.diagnostics.peakQueuedBytes = Math.max(this.diagnostics.peakQueuedBytes, this.queuedBytes);
+    this.drainAudio(generation2);
+  }
+  drainAudio(generation2) {
+    const socket = this.socket;
+    if (!this.current(generation2) || !this.state.value.connected || socket?.readyState !== 1 || this.finishSent) return;
+    if (this.drainTimer) clearTimeout(this.drainTimer);
+    this.drainTimer = null;
+    const now = Date.now();
+    this.uploadAllowance = Math.min(
+      VOICE_UPLOAD_BURST_BYTES,
+      this.uploadAllowance + (now - this.allowanceAt) * VOICE_BYTES_PER_SECOND / 1e3
+    );
+    this.allowanceAt = now;
+    try {
+      while (this.audioQueue.length) {
+        const frame = this.audioQueue[0];
+        if (frame.byteLength > this.uploadAllowance || socket.bufferedAmount + frame.byteLength > VOICE_MAX_BUFFER_BYTES) {
+          this.drainTimer = setTimeout(() => this.drainAudio(generation2), 25);
+          return;
+        }
+        socket.send(frame);
+        this.uploadAllowance -= frame.byteLength;
+        this.audioQueue.shift();
+        this.queuedBytes -= frame.byteLength;
+      }
+      if (this.captureFlushed) {
+        socket.send(JSON.stringify({ type: "finish" }));
+        this.finishSent = true;
+      }
+    } catch {
+      this.fail("Voice connection was interrupted. Current text has been kept.", "connection");
+    }
   }
   stop() {
     if (this.state.value.sending) return;
@@ -15954,33 +16045,51 @@ var VoiceController = class {
     this.update({ phase: "finalizing" });
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.timeout) clearTimeout(this.timeout);
     const generation2 = this.generation;
     this.timeout = setTimeout(() => {
       if (this.current(generation2))
-        this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.");
+        this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.", "finalize");
     }, 2e4);
     const capture = this.capture;
     void (capture?.stop() ?? Promise.resolve()).then(() => {
       if (!this.current(generation2)) return;
       this.capture = null;
-      this.finishSent = true;
-      this.socket?.send(JSON.stringify({ type: "finish" }));
+      this.captureFlushed = true;
+      this.drainAudio(generation2);
     }).catch(() => {
-      if (this.current(generation2)) this.fail("Could not finalize voice input. Current text has been kept.");
+      if (this.current(generation2))
+        this.fail("Could not finalize voice input. Current text has been kept.", "finalize");
     });
   }
   /** Navigation/unmount invalidates callbacks before stopping hardware. No automatic resume. */
   detach() {
+    this.report("cancelled");
     this.release(true);
     this.target = null;
     this.state.value = initialState();
   }
   interrupt(reason = "Microphone stopped because this page is no longer active. Review current text before sending or dictating again.") {
     if (["connecting", "listening", "finalizing"].includes(this.state.value.phase)) {
-      this.fail(reason);
+      this.fail(reason, "interrupted");
     }
   }
-  fail(error) {
+  elapsed() {
+    return Math.max(0, Date.now() - this.startedAt);
+  }
+  report(outcome, failure) {
+    const diagnostic = this.diagnostics;
+    if (!diagnostic || !this.target) return;
+    this.diagnostics = null;
+    this.deps.report(this.target.groupId, {
+      ...diagnostic,
+      outcome,
+      elapsedMs: this.elapsed(),
+      ...failure ? { failure } : {}
+    });
+  }
+  fail(error, failure = "provider") {
+    this.report("failed", failure);
     this.release(true);
     this.intent = "stop";
     this.update({ phase: "error", error, sending: false });
@@ -15989,7 +16098,11 @@ var VoiceController = class {
     ++this.generation;
     if (this.timeout) clearTimeout(this.timeout);
     if (this.timer) clearInterval(this.timer);
+    if (this.drainTimer) clearTimeout(this.drainTimer);
     this.timeout = this.timer = null;
+    this.drainTimer = null;
+    this.audioQueue = [];
+    this.queuedBytes = 0;
     this.captureAbort?.abort();
     this.captureAbort = null;
     this.capture?.cancel();
@@ -16060,23 +16173,29 @@ async function captureVoice(onChunk, onError, signal) {
   };
   try {
     checkCancelled();
-    await context.resume();
-    checkCancelled();
-    await context.audioWorklet.addModule("/ui/chat/voice-worklet.js");
-    checkCancelled();
-    stream2 = await navigator.mediaDevices.getUserMedia({
+    const resumed = context.resume();
+    const worklet = context.audioWorklet.addModule("/ui/chat/voice-worklet.js");
+    const microphone = navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+    }).then((value) => {
+      stream2 = value;
+      if (closed) {
+        stopTracks();
+        stream2 = null;
+      }
+      return value;
     });
+    const [, , readyStream] = await Promise.all([resumed, worklet, microphone]);
     checkCancelled();
     node = new AudioWorkletNode(context, "voice-pcm");
-    source = context.createMediaStreamSource(stream2);
+    source = context.createMediaStreamSource(readyStream);
     source.connect(node);
     node.connect(context.destination);
     node.port.onmessage = ({ data }) => {
       if (!closed && data instanceof ArrayBuffer) onChunk(data);
     };
     node.onprocessorerror = () => onError("Audio capture failed. Current text has been kept.");
-    for (const track of stream2.getTracks())
+    for (const track of readyStream.getTracks())
       track.onended = () => onError("Microphone disconnected. Current text has been kept.");
     return {
       cancel,
@@ -16111,10 +16230,27 @@ async function captureVoice(onChunk, onError, signal) {
     throw error;
   }
 }
+async function reportVoiceDiagnostic(groupId2, diagnostic) {
+  try {
+    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/voice/diagnostics`, {
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(diagnostic)
+    });
+    if (!response.ok)
+      console.warn("Voice diagnostics delivery failed", { attemptId: diagnostic.attemptId, status: response.status });
+  } catch {
+    console.warn("Voice diagnostics delivery failed", { attemptId: diagnostic.attemptId });
+  }
+}
 var voice = new VoiceController({
   socket: (url) => new WebSocket(url),
   capture: captureVoice,
-  origin: () => location.origin
+  origin: () => location.origin,
+  attemptId: () => crypto.randomUUID(),
+  report: reportVoiceDiagnostic
 });
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
@@ -17989,22 +18125,32 @@ function writeHash(replace = false) {
   if (!h5) return;
   if (location.hash !== h5) {
     if (replace) {
-      history.replaceState(null, "", h5);
+      history.replaceState(history.state, "", h5);
+      rememberBlankConversation(h5);
       return;
     }
     refs.suppressHashCount++;
     location.hash = h5;
   }
+  rememberBlankConversation(h5);
+}
+function rememberBlankConversation(hash) {
+  const thread = threads.value.find(
+    (t4) => t4.threadId === threadId.value && t4.channelType === "web" && t4.title === "(new thread)" && !t4.messageCount
+  );
+  if (thread)
+    history.replaceState({ ...history.state, blankConversation: { groupId: groupId.value, thread } }, "", hash);
 }
 function threadCtx(t4) {
   if (!t4) return null;
   if (!t4.channelType || t4.channelType === "web") return null;
   return { channelType: t4.channelType, messagingGroupId: t4.messagingGroupId ?? null, canSend: !!t4.canSend };
 }
-async function applyHash(router2) {
+async function applyHash(router2, options = {}) {
   const parsed = parseHash();
+  const blank = history.state?.blankConversation;
   if (!parsed) {
-    if (groups.value.length) await router2.selectGroup(groups.value[0].id);
+    if (groups.value.length) await router2.selectGroup(groups.value[0].id, options);
     return;
   }
   if (!groups.value.find((g8) => g8.id === parsed.groupId)) {
@@ -18025,11 +18171,13 @@ async function applyHash(router2) {
   const searchRoot = parsed.fileSearchRoot ?? routedParent;
   const restoredSearch = router2.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
   const threadsFresh = groupChanged ? await router2.loadThreads(parsed.groupId) : true;
+  if (parsed.threadId && blank?.groupId === parsed.groupId && blank.thread?.threadId === parsed.threadId && blank.thread.channelType === "web" && blank.thread.title === "(new thread)" && blank.thread.messageCount === 0 && !threads.value.some((t4) => t4.threadId === parsed.threadId))
+    threads.value = [...threads.value, blank.thread];
   const routedThread = parsed.threadId && (!threadsFresh || threads.value.some((t4) => t4.threadId === parsed.threadId)) ? parsed.threadId : null;
   if (routedThread) {
     router2.openChat(parsed.groupId, routedThread, null).catch((err) => console.error("chat open failed", err));
-  } else if (groupChanged || parsed.threadId) {
-    const latest = threads.value.length > 0 ? threads.value[0] : null;
+  } else if (groupChanged || parsed.threadId || options.newConversation) {
+    const latest = options.newConversation && !parsed.threadId ? null : threads.value[0] ?? null;
     if (latest)
       router2.openChat(parsed.groupId, latest.threadId, threadCtx(latest)).catch((err) => console.error("chat open failed", err));
     else router2.openChat(parsed.groupId, null, null).catch((err) => console.error("auto-start chat failed", err));
@@ -18101,9 +18249,6 @@ function isSyntheticTraceStep(step) {
 }
 function isOutcomeTraceStep(step) {
   return step.kind === "notification" && (step.id ?? "").startsWith("ui:outcome:");
-}
-function activityStepCount(lines) {
-  return lines.reduce((count, line) => count + (isSyntheticTraceStep(parseStep(line.text)) ? 0 : 1), 0);
 }
 function cleanToolName(tool) {
   if (tool.toLowerCase().startsWith("nanoclaw_"))
@@ -18420,7 +18565,7 @@ function activityChapters(lines, live = false) {
       return {
         ...entry,
         headline: known ? described : { action: entry.line.text },
-        body: known ? stepBody(entry.step) : entry.line.text
+        raw: !known
       };
     });
     const statuses = entries.map((entry) => traceStatus(entry.step));
@@ -18437,6 +18582,22 @@ function activityChapters(lines, live = false) {
       failures: statuses.filter((item) => item === "failed").length
     };
   });
+}
+
+// ../../shared/activity-timing.ts
+function activityTimestamp(ts) {
+  return ts.trim() ? Number(ts) : NaN;
+}
+function executionTime(spans) {
+  let ms = 0;
+  let covered = -Infinity;
+  for (const [start, end] of [...spans].sort((a4, b5) => a4[0] - b5[0])) {
+    if (end <= covered) continue;
+    if (end === Infinity) return { ms: ms - Math.max(0, covered - start), since: start };
+    ms += end - Math.max(start, covered);
+    covered = end;
+  }
+  return { ms };
 }
 
 // ../../shared/conversation-activity.ts
@@ -18491,7 +18652,7 @@ function turnModelTime(turn2) {
   const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
   if (!Number.isFinite(startedAt2)) return times;
   const live = turn2.phase !== "settled";
-  const entries = turn2.activity.map((line) => ({ ordinal: line.ordinal, at: Number(line.ts), step: parseStep(line.text) })).filter(({ at }) => Number.isFinite(at)).sort((a4, b5) => a4.at - b5.at);
+  const entries = turn2.activity.map((line) => ({ ordinal: line.ordinal, at: activityTimestamp(line.ts), step: parseStep(line.text) })).filter(({ at }) => Number.isFinite(at)).sort((a4, b5) => a4.at - b5.at);
   const calls = entries.filter(({ step }) => step.kind === "model");
   const steps = entries.filter(({ step }) => step.kind !== "model").map(({ ordinal, at, step }) => {
     const open = live && (step.kind === "tool" || step.kind === "compaction") && (step.status === "running" || step.status === "pending");
@@ -18526,7 +18687,7 @@ function withModelTime(turn2, lines, times, hostsStart) {
   const modelTime = times.get(TURN_START);
   const callStarts = turn2.activity.flatMap(({ ts, text: text3 }) => {
     const step2 = parseStep(text3);
-    const at = Number(ts);
+    const at = activityTimestamp(ts);
     return step2.kind === "model" && Number.isFinite(at) ? [at - (step2.durationMs ?? 0)] : [];
   });
   const prepared = callStarts.length ? { durationMs: Math.max(0, Math.min(...callStarts) - startedAt2) } : {};
@@ -18589,7 +18750,7 @@ var reportedUsage = shape(
 );
 var message = shape({
   id,
-  direction: oneOf("in", "out", "internal", "event"),
+  direction: oneOf("in", "out", "event"),
   timestamp: text,
   text,
   questionId: optional(id),
@@ -19755,6 +19916,7 @@ function submissionPresentation(transcript, submissions, view, groupId2, threadI
 var conversationState = y3(null);
 var completedResponse = y3(null);
 var chatTranscript = y3([]);
+var presentedMessages = /* @__PURE__ */ new WeakMap();
 function resetConversation() {
   resetToolStops();
   chatReloadRequired.value = false;
@@ -19766,9 +19928,15 @@ function resetConversation() {
 function conversationPresentation(view) {
   const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
   const questions = new Map(view.questions.map((question2) => [question2.questionId, question2]));
-  const messages = view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map(({ timestamp, ...message2 }) => ({ ...message2, files: message2.files ?? null, ts: timestamp }));
-  const byId = new Map(messages.map((message2) => [message2.id, message2]));
-  const modelTimes = new Map(view.turns.map((turn2) => [turn2.id, turnModelTime(turn2)]));
+  const byId = new Map(
+    view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map((message2) => [message2.id, message2])
+  );
+  const modelTimes = /* @__PURE__ */ new Map();
+  const modelTime = (turn2) => {
+    let times = modelTimes.get(turn2.id);
+    if (!times) modelTimes.set(turn2.id, times = turnModelTime(turn2));
+    return times;
+  };
   const traceLines = (trace2) => {
     const turn2 = turns.get(trace2.turnId);
     if (!turn2) throw new ConversationProtocolError("invalid_frame");
@@ -19780,20 +19948,34 @@ function conversationPresentation(view) {
     );
     const hostsStart = first ? ordinals.has(first.ordinal) : trace2.ownsTurn && turn2.phase !== "settled";
     const lines = trace2.ownsTurn ? conversationActivity(turn2, activity) : activity;
-    return withModelTime(turn2, lines, modelTimes.get(turn2.id), hostsStart);
+    return withModelTime(turn2, lines, modelTime(turn2), hostsStart);
+  };
+  const presentMessage = (source, row) => {
+    const statsTurn = row.statsTurnId ? turns.get(row.statsTurnId) : void 0;
+    const traceTurn = row.trace ? turns.get(row.trace.turnId) : void 0;
+    if (row.trace && !traceTurn) throw new ConversationProtocolError("invalid_frame");
+    const traceKey = row.trace ? `${row.trace.ownsTurn}:${row.trace.ordinals}` : "";
+    const cached = presentedMessages.get(source);
+    if (cached && cached.statsTurn === statsTurn && cached.traceTurn === traceTurn && cached.traceKey === traceKey)
+      return cached.message;
+    const { timestamp, ...fields } = source;
+    const message2 = { ...fields, files: fields.files ?? null, ts: timestamp };
+    if (row.statsTurnId) message2.statsTurn = statsTurn;
+    if (row.trace) {
+      message2.turnId = row.trace.turnId;
+      message2.activity = traceLines(row.trace);
+      message2.turnTraceOwner = row.trace.ownsTurn;
+      message2.turnTraceLive = row.trace.ownsTurn && traceTurn?.phase !== "settled";
+    }
+    presentedMessages.set(source, { statsTurn, traceTurn, traceKey, message: message2 });
+    return message2;
   };
   const transcript = view.timeline.flatMap((row) => {
     const turn2 = row.trace ? turns.get(row.trace.turnId) : void 0;
     if (row.kind === "message") {
-      const message2 = byId.get(row.messageId);
-      if (!message2) throw new ConversationProtocolError("invalid_frame");
-      if (row.statsTurnId) message2.statsTurn = turns.get(row.statsTurnId);
-      if (row.trace) {
-        message2.turnId = row.trace.turnId;
-        message2.activity = traceLines(row.trace);
-        message2.turnTraceOwner = row.trace.ownsTurn;
-        message2.turnTraceLive = row.trace.ownsTurn && turn2?.phase !== "settled";
-      }
+      const source = byId.get(row.messageId);
+      if (!source) throw new ConversationProtocolError("invalid_frame");
+      const message2 = presentMessage(source, row);
       if (message2.questionId) {
         const question2 = questions.get(message2.questionId);
         if (!question2 || message2.direction !== "in") throw new ConversationProtocolError("invalid_frame");
@@ -20648,6 +20830,14 @@ async function openChat(gid, resumeTid, opts) {
   focusComposerSoon({ mobile: true });
   refs.newChatInFlight = false;
 }
+function startNewThread() {
+  const gid = groupId.value;
+  if (!gid) return;
+  openChat(gid, null, null).then(() => {
+    drawerOpen.threads.value = false;
+    drawerOpen.files.value = false;
+  }).catch(console.error);
+}
 var WS_CONNECT_TIMEOUT_MS = 1e4;
 function handleProtocolMismatch(error) {
   if (!(error instanceof ConversationProtocolError) || error.code !== "protocol_mismatch") return false;
@@ -20898,7 +21088,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
     return false;
   }
 }
-async function selectGroup(gid) {
+async function selectGroup(gid, options = {}) {
   clearChat();
   n2(() => {
     groupId.value = gid;
@@ -20909,7 +21099,7 @@ async function selectGroup(gid) {
   clearFileSearch();
   const threadsFresh = await loadThreads(gid);
   await loadTree("");
-  const latest = threadsFresh && threads.value.length > 0 ? threads.value[0] : null;
+  const latest = threadsFresh && !options.newConversation && threads.value.length > 0 ? threads.value[0] : null;
   if (latest) {
     openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error("chat open failed", err));
   } else if (threadsFresh) {
@@ -21877,6 +22067,18 @@ function Header() {
       }
     ),
     /* @__PURE__ */ u4("span", { class: "brand", children: BRAND.name }),
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "icon-btn mobile-only",
+        title: "New thread",
+        "aria-label": "New thread",
+        disabled: !groupId.value,
+        onClick: startNewThread,
+        children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
+      }
+    ),
     /* @__PURE__ */ u4(GroupStrip, {}),
     /* @__PURE__ */ u4(UserMenu, {}),
     /* @__PURE__ */ u4(
@@ -22242,13 +22444,6 @@ function ThreadsRail() {
   const list = threads.value;
   const searchInputRef = A2(null);
   const isSearching = searchOpen.value;
-  const onNewChat = () => {
-    if (!groupId.value) return;
-    openChat(groupId.value, null, null).then(() => {
-      drawerOpen.threads.value = false;
-      drawerOpen.files.value = false;
-    }).catch(console.error);
-  };
   const buckets = /* @__PURE__ */ new Map();
   for (const t4 of list) {
     const ct = t4.channelType || "web";
@@ -22296,7 +22491,7 @@ function ThreadsRail() {
     loadThreads(gid).catch(console.error);
   };
   const collapsedActions = /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn", title: "New thread", "aria-label": "New thread", onClick: onNewChat, children: "+" }),
+    /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn collapsed-primary-action-btn", title: "New thread", "aria-label": "New thread", onClick: startNewThread, children: "+" }),
     /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn rail-icon-btn collapsed-action-btn", title: "Search threads", "aria-label": "Search threads", onClick: onOpenSearch, children: "\u{1F50D}" })
   ] });
   return /* @__PURE__ */ u4(
@@ -22315,7 +22510,7 @@ function ThreadsRail() {
               class: "thread-action-btn accent-icon-btn rail-primary-action-btn new-thread-action-btn",
               title: "New thread",
               "aria-label": "New thread",
-              onClick: onNewChat,
+              onClick: startNewThread,
               children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
             }
           ),
@@ -22363,6 +22558,211 @@ function ThreadsRail() {
   );
 }
 
+// node_modules/preact/compat/dist/compat.module.js
+function g7(n3, t4) {
+  for (var e4 in t4) n3[e4] = t4[e4];
+  return n3;
+}
+function E4(n3, t4) {
+  for (var e4 in n3) if ("__source" !== e4 && !(e4 in t4)) return true;
+  for (var r4 in t4) if ("__source" !== r4 && n3[r4] !== t4[r4]) return true;
+  return false;
+}
+function N3(n3, t4) {
+  this.props = n3, this.context = t4;
+}
+function M3(n3, e4) {
+  function r4(n4) {
+    var t4 = this.props.ref, r5 = t4 == n4.ref;
+    return !r5 && t4 && (t4.call ? t4(null) : t4.current = null), e4 ? !e4(this.props, n4) || !r5 : E4(this.props, n4);
+  }
+  function u5(e5) {
+    return this.shouldComponentUpdate = r4, g(n3, e5);
+  }
+  return u5.displayName = "Memo(" + (n3.displayName || n3.name) + ")", u5.prototype.isReactComponent = true, u5.__f = true, u5;
+}
+(N3.prototype = new x()).isPureReactComponent = true, N3.prototype.shouldComponentUpdate = function(n3, t4) {
+  return E4(this.props, n3) || E4(this.state, t4);
+};
+var T4 = l.__b;
+l.__b = function(n3) {
+  n3.type && n3.type.__f && n3.ref && (n3.props.ref = n3.ref, n3.ref = null), T4 && T4(n3);
+};
+var A5 = "undefined" != typeof Symbol && Symbol.for && Symbol.for("react.forward_ref") || 3911;
+var F4 = l.__e;
+l.__e = function(n3, t4, e4, r4) {
+  if (n3.then) {
+    for (var u5, o4 = t4; o4 = o4.__; ) if ((u5 = o4.__c) && u5.__c) return null == t4.__e && (t4.__e = e4.__e, t4.__k = e4.__k), u5.__c(n3, t4);
+  }
+  F4(n3, t4, e4, r4);
+};
+var U2 = l.unmount;
+function V3(n3, t4, e4) {
+  return n3 && (n3.__c && n3.__c.__H && (n3.__c.__H.__.forEach(function(n4) {
+    "function" == typeof n4.__c && n4.__c();
+  }), n3.__c.__H = null), null != (n3 = g7({}, n3)).__c && (n3.__c.__P === e4 && (n3.__c.__P = t4), n3.__c = null), n3.__k = n3.__k && n3.__k.map(function(n4) {
+    return V3(n4, t4, e4);
+  })), n3;
+}
+function W2(n3, t4, e4) {
+  return n3 && e4 && (n3.__v = null, n3.__k = n3.__k && n3.__k.map(function(n4) {
+    return W2(n4, t4, e4);
+  }), n3.__c && n3.__c.__P === t4 && (n3.__e && e4.appendChild(n3.__e), n3.__c.__e = true, n3.__c.__P = e4)), n3;
+}
+function P4() {
+  this.__u = 0, this.o = null, this.__b = null;
+}
+function j5(n3) {
+  var t4 = n3.__.__c;
+  return t4 && t4.__a && t4.__a(n3);
+}
+function B4() {
+  this.i = null, this.l = null;
+}
+l.unmount = function(n3) {
+  var t4 = n3.__c;
+  t4 && t4.__R && t4.__R(), t4 && 32 & n3.__u && (n3.type = null), U2 && U2(n3);
+}, (P4.prototype = new x()).__c = function(n3, t4) {
+  var e4 = t4.__c, r4 = this;
+  null == r4.o && (r4.o = []), r4.o.push(e4);
+  var u5 = j5(r4.__v), o4 = false, i5 = function() {
+    o4 || (o4 = true, e4.__R = null, u5 ? u5(c4) : c4());
+  };
+  e4.__R = i5;
+  var c4 = function() {
+    if (!--r4.__u) {
+      if (r4.state.__a) {
+        var n4 = r4.state.__a;
+        r4.__v.__k[0] = W2(n4, n4.__c.__P, n4.__c.__O);
+      }
+      var t5;
+      for (r4.setState({ __a: r4.__b = null }); t5 = r4.o.pop(); ) t5.forceUpdate();
+    }
+  };
+  r4.__u++ || 32 & t4.__u || r4.setState({ __a: r4.__b = r4.__v.__k[0] }), n3.then(i5, i5);
+}, P4.prototype.componentWillUnmount = function() {
+  this.o = [];
+}, P4.prototype.render = function(n3, e4) {
+  if (this.__b) {
+    if (this.__v.__k) {
+      var r4 = document.createElement("div"), o4 = this.__v.__k[0].__c;
+      this.__v.__k[0] = V3(this.__b, r4, o4.__O = o4.__P);
+    }
+    this.__b = null;
+  }
+  var i5 = e4.__a && g(k, null, n3.fallback);
+  return i5 && (i5.__u &= -33), [g(k, null, e4.__a ? null : n3.children), i5];
+};
+var H3 = function(n3, t4, e4) {
+  if (++e4[1] === e4[0] && n3.l.delete(t4), n3.props.revealOrder && ("t" !== n3.props.revealOrder[0] || !n3.l.size)) for (e4 = n3.i; e4; ) {
+    for (; e4.length > 3; ) e4.pop()();
+    if (e4[1] < e4[0]) break;
+    n3.i = e4 = e4[2];
+  }
+};
+function Z2(n3) {
+  return this.getChildContext = function() {
+    return n3.context;
+  }, n3.children;
+}
+function Y2(n3) {
+  var e4 = this, r4 = n3.h;
+  e4.componentWillUnmount = function() {
+    D(null, e4.v), e4.v = null, e4.h = null;
+  }, e4.h && e4.h !== r4 && e4.componentWillUnmount(), e4.v || (e4.h = r4, e4.v = { nodeType: 1, parentNode: r4, childNodes: [], contains: function() {
+    return true;
+  }, appendChild: function(n4) {
+    this.childNodes.push(n4), e4.h.appendChild(n4);
+  }, insertBefore: function(n4, t4) {
+    this.childNodes.push(n4), e4.h.insertBefore(n4, t4);
+  }, removeChild: function(n4) {
+    this.childNodes.splice(this.childNodes.indexOf(n4) >>> 1, 1), e4.h.removeChild(n4);
+  } }), D(g(Z2, { context: e4.context }, n3.__v), e4.v);
+}
+function $3(n3, e4) {
+  var r4 = g(Y2, { __v: n3, h: e4 });
+  return r4.containerInfo = e4, r4;
+}
+(B4.prototype = new x()).__a = function(n3) {
+  var t4 = this, e4 = j5(t4.__v), r4 = t4.l.get(n3);
+  return r4[0]++, function(u5) {
+    var o4 = function() {
+      t4.props.revealOrder ? (r4.push(u5), H3(t4, n3, r4)) : u5();
+    };
+    e4 ? e4(o4) : o4();
+  };
+}, B4.prototype.render = function(n3) {
+  this.i = null, this.l = /* @__PURE__ */ new Map();
+  var t4 = H(n3.children);
+  n3.revealOrder && "b" === n3.revealOrder[0] && t4.reverse();
+  for (var e4 = t4.length; e4--; ) this.l.set(t4[e4], this.i = [1, 0, this.i]);
+  return n3.children;
+}, B4.prototype.componentDidUpdate = B4.prototype.componentDidMount = function() {
+  var n3 = this;
+  this.l.forEach(function(t4, e4) {
+    H3(n3, e4, t4);
+  });
+};
+var q4 = "undefined" != typeof Symbol && Symbol.for && Symbol.for("react.element") || 60103;
+var G2 = /^(?:accent|alignment|arabic|baseline|cap|clip(?!PathU)|color|dominant|fill|flood|font|glyph(?!R)|horiz|image(!S)|letter|lighting|marker(?!H|W|U)|overline|paint|pointer|shape|stop|strikethrough|stroke|text(?!L)|transform|underline|unicode|units|v|vector|vert|word|writing|x(?!C))[A-Z]/;
+var J3 = /^on(Ani|Tra|Tou|BeforeInp|Compo)/;
+var K2 = /[A-Z0-9]/g;
+var Q2 = "undefined" != typeof document;
+var X2 = function(n3) {
+  return ("undefined" != typeof Symbol && "symbol" == typeof Symbol() ? /fil|che|rad/ : /fil|che|ra/).test(n3);
+};
+x.prototype.isReactComponent = {}, ["componentWillMount", "componentWillReceiveProps", "componentWillUpdate"].forEach(function(t4) {
+  Object.defineProperty(x.prototype, t4, { configurable: true, get: function() {
+    return this["UNSAFE_" + t4];
+  }, set: function(n3) {
+    Object.defineProperty(this, t4, { configurable: true, writable: true, value: n3 });
+  } });
+});
+var en = l.event;
+function rn() {
+}
+function un() {
+  return this.cancelBubble;
+}
+function on() {
+  return this.defaultPrevented;
+}
+l.event = function(n3) {
+  return en && (n3 = en(n3)), n3.persist = rn, n3.isPropagationStopped = un, n3.isDefaultPrevented = on, n3.nativeEvent = n3;
+};
+var cn;
+var ln = { enumerable: false, configurable: true, get: function() {
+  return this.class;
+} };
+var fn = l.vnode;
+l.vnode = function(n3) {
+  "string" == typeof n3.type && function(n4) {
+    var t4 = n4.props, e4 = n4.type, u5 = {}, o4 = -1 === e4.indexOf("-");
+    for (var i5 in t4) {
+      var c4 = t4[i5];
+      if (!("value" === i5 && "defaultValue" in t4 && null == c4 || Q2 && "children" === i5 && "noscript" === e4 || "class" === i5 || "className" === i5)) {
+        var l7 = i5.toLowerCase();
+        "defaultValue" === i5 && "value" in t4 && null == t4.value ? i5 = "value" : "download" === i5 && true === c4 ? c4 = "" : "translate" === l7 && "no" === c4 ? c4 = false : "o" === l7[0] && "n" === l7[1] ? "ondoubleclick" === l7 ? i5 = "ondblclick" : "onchange" !== l7 || "input" !== e4 && "textarea" !== e4 || X2(t4.type) ? "onfocus" === l7 ? i5 = "onfocusin" : "onblur" === l7 ? i5 = "onfocusout" : J3.test(i5) && (i5 = l7) : l7 = i5 = "oninput" : o4 && G2.test(i5) ? i5 = i5.replace(K2, "-$&").toLowerCase() : null === c4 && (c4 = void 0), "oninput" === l7 && u5[i5 = l7] && (i5 = "oninputCapture"), u5[i5] = c4;
+      }
+    }
+    "select" == e4 && u5.multiple && Array.isArray(u5.value) && (u5.value = H(t4.children).forEach(function(n5) {
+      n5.props.selected = -1 != u5.value.indexOf(n5.props.value);
+    })), "select" == e4 && null != u5.defaultValue && (u5.value = H(t4.children).forEach(function(n5) {
+      n5.props.selected = u5.multiple ? -1 != u5.defaultValue.indexOf(n5.props.value) : u5.defaultValue == n5.props.value;
+    })), t4.class && !t4.className ? (u5.class = t4.class, Object.defineProperty(u5, "className", ln)) : (t4.className && !t4.class || t4.class && t4.className) && (u5.class = u5.className = t4.className), n4.props = u5;
+  }(n3), n3.$$typeof = q4, fn && fn(n3);
+};
+var an = l.__r;
+l.__r = function(n3) {
+  an && an(n3), cn = n3.__c;
+};
+var sn = l.diffed;
+l.diffed = function(n3) {
+  sn && sn(n3);
+  var t4 = n3.props, e4 = n3.__e;
+  null != e4 && "textarea" === n3.type && "value" in t4 && t4.value !== e4.value && (e4.value = null == t4.value ? "" : t4.value), cn = null;
+};
+
 // src/components/VoiceButton.tsx
 function VoiceButton({ target, controller, onStart, configured, unavailable, disabled, id: id2, className = "" }) {
   const state = controller.state.value;
@@ -22379,8 +22779,9 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
       type: "button",
       id: id2,
       class: `mic-overlay ${className}${listening ? " voice-stopwatch" : ""}`,
-      title: connecting || listening || finalizing ? label : !configured ? "Live voice input is not configured" : unavailable || label,
+      title: listening && !state.connected ? "Recording - connecting to speech service. Press to stop." : connecting || listening || finalizing ? label : !configured ? "Live voice input is not configured" : unavailable || label,
       "aria-label": label,
+      "aria-description": listening && !state.connected ? "Recording; connecting to speech service" : void 0,
       "aria-busy": connecting || finalizing,
       disabled: blocked,
       onMouseDown: (event) => event.preventDefault(),
@@ -22389,7 +22790,7 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
         else onStart();
       },
       children: listening ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("span", { class: "voice-recording-dot", "aria-hidden": "true" }),
+        /* @__PURE__ */ u4("span", { class: state.connected ? "voice-recording-dot" : "voice-spinner", "aria-hidden": "true" }),
         /* @__PURE__ */ u4("time", { "aria-hidden": "true", children: [
           Math.floor(seconds / 60),
           ":",
@@ -22401,6 +22802,11 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
 }
 
 // src/components/ComposerInput.tsx
+function setVoiceTextareaText(input, text2, selection) {
+  if (!input) return;
+  input.value = text2;
+  if (selection) input.setSelectionRange(selection.start, selection.end);
+}
 function useComposerTextarea(inputRef, value, maxHeight = 200) {
   const [multiLine, setMultiLine] = h2(false);
   const density = appearance.value.preferences.density;
@@ -22723,12 +23129,12 @@ function formatStopwatch(ms, fine = true) {
 }
 
 // src/turn-row.ts
-function latestTraceHeadline(lines, live) {
-  const chapter = activityChapters(lines, live).reverse().find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
+function latestTraceHeadline(chapters) {
+  const chapter = [...chapters].reverse().find((candidate) => candidate.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   if (!chapter) return { headline: { action: THINKING_TEXT }, repetitions: 1 };
   return { headline: chapter.headline, repetitions: chapter.entries.length };
 }
-function liveTurnActivity(turn2, lines, connected, stop) {
+function liveTurnActivity(turn2, lines, chapters, connected, stop) {
   if (turn2.phase === "settled") return null;
   const notices = activeTurnNotices(
     {
@@ -22739,7 +23145,7 @@ function liveTurnActivity(turn2, lines, connected, stop) {
     stop
   );
   const presentation = { notice: notices.length > 0, error: notices.some((notice) => notice.error) };
-  if (!notices.length) return { lines, ...latestTraceHeadline(lines, true), ...presentation };
+  if (!notices.length) return { lines, chapters, ...latestTraceHeadline(chapters), ...presentation };
   const current = { action: notices.map((notice) => notice.text).join(" \xB7 ") };
   const marker = {
     kind: "notification",
@@ -22747,9 +23153,11 @@ function liveTurnActivity(turn2, lines, connected, stop) {
     text: current.action,
     status: presentation.error ? "error" : !connected ? "interrupted" : "running"
   };
+  const line = { ts: "", text: JSON.stringify(marker) };
   return {
     ...presentation,
-    lines: [...lines, { ts: "", text: JSON.stringify(marker) }],
+    lines: [...lines, line],
+    chapters: [...chapters, ...activityChapters([line], true)],
     headline: current,
     repetitions: 1
   };
@@ -22768,21 +23176,19 @@ function hasTurnStats(turn2, view) {
 }
 function toolCallMs(turn2, now) {
   const live = turn2.phase !== "settled";
+  let unplacedMs = 0;
   const spans = turn2.activity.flatMap(({ ts, text: text2 }) => {
     const step = parseStep(text2);
-    const at = Number(ts);
-    if (step.kind !== "tool" || !Number.isFinite(at)) return [];
+    const at = activityTimestamp(ts);
+    if (step.kind !== "tool") return [];
+    if (!Number.isFinite(at)) {
+      unplacedMs += step.durationMs ?? 0;
+      return [];
+    }
     if (step.status === "running") return live ? [[at, Math.max(at, now)]] : [];
     return step.durationMs !== void 0 ? [[at, at + step.durationMs]] : [];
-  }).sort((a4, b5) => a4[0] - b5[0]);
-  let total = 0;
-  let covered = -Infinity;
-  for (const [from, to] of spans) {
-    if (to <= covered) continue;
-    total += to - Math.max(from, covered);
-    covered = to;
-  }
-  return total;
+  });
+  return unplacedMs + executionTime(spans).ms;
 }
 function turnRowView(turn2, now) {
   const settled = turn2.phase === "settled";
@@ -23195,14 +23601,16 @@ function QuestionPrompt({ question: q5 }) {
         channelType: channel,
         messagingGroupId: mg,
         getText: () => answerRef.current,
-        setText: (text2) => {
+        setText: (text2, selection) => {
+          setVoiceTextareaText(textareaRef.current, text2, selection);
           answerRef.current = text2;
           setAnswer(text2);
         },
         isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && current.current,
         send: submit
       },
-      textareaRef.current?.selectionStart ?? answerRef.current.length
+      textareaRef.current?.selectionStart ?? answerRef.current.length,
+      textareaRef.current?.selectionEnd ?? answerRef.current.length
     );
   };
   y2(() => {
@@ -23326,23 +23734,25 @@ function axisScrollEdges(offset, clientSize, scrollSize) {
   const maxOffset = Math.max(0, scrollSize - clientSize);
   return { start: offset > EDGE_EPSILON, end: offset < maxOffset - EDGE_EPSILON };
 }
+var NO_EDGES = { start: false, end: false };
 function scrollEdges(element, { horizontal = true, vertical = true } = {}) {
-  const x6 = axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth);
-  const y5 = axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight);
-  return {
-    left: horizontal && x6.start,
-    right: horizontal && x6.end,
-    top: vertical && y5.start,
-    bottom: vertical && y5.end
-  };
+  const x6 = horizontal ? axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth) : NO_EDGES;
+  const y5 = vertical ? axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight) : NO_EDGES;
+  return { left: x6.start, right: x6.end, top: y5.start, bottom: y5.end };
 }
 function attachScrollEdges(element, axes = {}, onUpdate) {
+  let previous = null;
   const update = () => {
     const edges = scrollEdges(element, axes);
+    let changed = false;
     for (const edge of ["left", "right", "top", "bottom"]) {
-      element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+      if (previous?.[edge] !== edges[edge]) {
+        element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+        changed = true;
+      }
     }
-    onUpdate?.(edges);
+    previous = edges;
+    if (changed) onUpdate?.(edges);
   };
   element.addEventListener("scroll", update, { passive: true });
   const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
@@ -23374,8 +23784,11 @@ function MessageBubble({ class: className, "data-msg-id": id2, elementRef, revea
   _2(() => {
     const bubble = scrollRef.current;
     if (!bubble) return;
+    let wasScrollable;
     return attachScrollEdges(bubble, { horizontal: false }, (edges) => {
       const scrollable = edges.top || edges.bottom;
+      if (scrollable === wasScrollable) return;
+      wasScrollable = scrollable;
       bubble.tabIndex = scrollable ? 0 : -1;
       if (scrollable) {
         bubble.setAttribute("role", "region");
@@ -23393,7 +23806,7 @@ function MessageBubble({ class: className, "data-msg-id": id2, elementRef, revea
       bubble.scrollTop += match2.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll scroll-edge-fade", ref: scrollRef, children }) });
+  return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children }) });
 }
 
 // src/components/QuestionAnswerBubble.tsx
@@ -23756,8 +24169,7 @@ function fmtTok(n3) {
   return String(n3);
 }
 function fmtActivityTs(ts) {
-  if (!ts) return "";
-  const n3 = Number(ts);
+  const n3 = activityTimestamp(ts);
   if (!Number.isFinite(n3)) return "";
   return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -23806,8 +24218,8 @@ function modelChipTime(modelTime) {
   return modelTime.since !== void 0 ? { since: modelTime.since - modelTime.ms } : { ms: modelTime.ms };
 }
 function rowTimes(line, step, live) {
-  const startedAt2 = Number(line.ts);
-  const cpu = execRunning(step, live) ? line.ts && Number.isFinite(startedAt2) ? { since: startedAt2 } : null : isTimedStep(step) && typeof step.durationMs === "number" ? { ms: step.durationMs } : null;
+  const startedAt2 = activityTimestamp(line.ts);
+  const cpu = execRunning(step, live) ? Number.isFinite(startedAt2) ? { since: startedAt2 } : null : isTimedStep(step) && typeof step.durationMs === "number" ? { ms: step.durationMs } : null;
   return { cpu: shownChipTime(cpu), ai: shownChipTime(modelChipTime(line.modelTime)) };
 }
 function isTimedStep(step) {
@@ -23818,7 +24230,6 @@ function execRunning(step, live) {
 }
 function chapterTimes(entries, live) {
   let exec = 0;
-  let execSince = null;
   const spans = [];
   let timed = false;
   let model = 0;
@@ -23826,8 +24237,8 @@ function chapterTimes(entries, live) {
   for (const { line, step } of entries) {
     if (isTimedStep(step)) {
       timed = true;
-      const startedAt2 = Number(line.ts);
-      if (line.ts && Number.isFinite(startedAt2)) {
+      const startedAt2 = activityTimestamp(line.ts);
+      if (Number.isFinite(startedAt2)) {
         if (execRunning(step, live)) spans.push([startedAt2, Infinity]);
         else if (step.durationMs !== void 0) spans.push([startedAt2, startedAt2 + step.durationMs]);
       } else exec += step.durationMs ?? 0;
@@ -23836,19 +24247,10 @@ function chapterTimes(entries, live) {
     model += line.modelTime.ms;
     if (line.modelTime.since !== void 0) modelSince = line.modelTime.since;
   }
-  let covered = -Infinity;
-  for (const [start, end] of spans.sort((a4, b5) => a4[0] - b5[0])) {
-    if (end <= covered) continue;
-    if (end === Infinity) {
-      execSince = start;
-      exec -= Math.max(0, covered - start);
-      break;
-    }
-    exec += end - Math.max(start, covered);
-    covered = end;
-  }
+  const merged = executionTime(spans);
+  exec += merged.ms;
   return {
-    cpu: shownChipTime(!timed ? null : execSince !== null ? { since: execSince - exec } : { ms: exec }),
+    cpu: shownChipTime(!timed ? null : merged.since !== void 0 ? { since: merged.since - exec } : { ms: exec }),
     ai: shownChipTime(modelSince !== null ? { since: modelSince - model } : { ms: model })
   };
 }
@@ -23856,9 +24258,9 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
   const { line, step, headline } = entry;
   const summary = headlineSummary(headline);
   const running = live && isTimedStep(step) && step.status === "running";
-  const startedAt2 = Number(line.ts);
-  const hasStartedAt = !!line.ts && Number.isFinite(startedAt2);
-  const code = open ? entry.body : null;
+  const startedAt2 = activityTimestamp(line.ts);
+  const hasStartedAt = Number.isFinite(startedAt2);
+  const code = open ? entry.raw ? line.text : stepBody(step) : null;
   const elapsedMs = running && hasStartedAt && now !== null ? Math.max(0, now - startedAt2) : null;
   const statusText = stepMeta(step, elapsedMs);
   const timestamp = open ? fmtActivityTs(line.ts) : "";
@@ -23911,14 +24313,13 @@ function ActivityTraceRow({ entry, open, live, now, onToggle, child = false, tur
     open && todos && step.error ? /* @__PURE__ */ u4("pre", { class: "trace-code", children: /* @__PURE__ */ u4("code", { children: step.error }) }) : null
   ] });
 }
-function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
+function ActivityTraceList({ chapters, live = false, now = null, turnId = null }) {
   const listRef = A2(null);
   const [target, setTarget] = h2(null);
   y2(() => {
     if (listRef.current) return attachScrollEdges(listRef.current);
   }, []);
   const revealed = A2(false);
-  const chapters = activityChapters(lines, live);
   const latestChapter = [...chapters].reverse().find((chapter) => chapter.entries.some((entry) => !isOutcomeTraceStep(entry.step)));
   const latestEntryId = latestChapter?.entries.at(-1)?.id ?? null;
   const selection = target?.latest === latestEntryId ? target : null;
@@ -23926,10 +24327,10 @@ function ActivityTraceList({ lines, live = false, now = null, turnId = null }) {
   const openChapter = selection ? selection.chapter : latestChapter?.id ?? null;
   const following = !selection || sel === latestEntryId;
   _2(() => {
-    if (!listRef.current || !lines.length) return;
+    if (!listRef.current || !chapters.length) return;
     if (!revealed.current || live && following) revealLatestActivity(listRef.current, live && following && sel === latestEntryId);
     revealed.current = true;
-  }, [lines, live, following, sel, openChapter]);
+  }, [chapters, live, following, sel, openChapter]);
   const toggle2 = (chapterId, id2) => {
     const opening = sel !== id2;
     setTarget({ latest: latestEntryId, chapter: chapterId, entry: opening ? id2 : null });
@@ -24004,6 +24405,7 @@ function ActivityTraceToggle({ count, hasOutcome = false, expanded, onToggle }) 
 }
 function ActivityTracePanel({
   lines,
+  chapters,
   expanded,
   live = false,
   now = null,
@@ -24015,7 +24417,7 @@ function ActivityTracePanel({
   if (!showTrace && !metrics) return null;
   return /* @__PURE__ */ u4("div", { class: "msg-activity expanded", children: [
     metrics,
-    showTrace ? /* @__PURE__ */ u4(ActivityTraceList, { lines, live, now, turnId }, ownerId) : null
+    showTrace ? /* @__PURE__ */ u4(ActivityTraceList, { chapters, live, now, turnId }, ownerId) : null
   ] });
 }
 function shortModel(model) {
@@ -24375,10 +24777,10 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === "web";
-  const hasPendingSend = pendingWebSends.value.some((send2) => send2.groupId === groupId.value && send2.threadId === threadId.value && send2.status !== "failed");
   const suggestedAction = m6.suggestedAction ?? (isFutureWorkMessage(m6.text) ? "continue" : void 0);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
-  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && action != null;
+  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send2) => send2.groupId === groupId.value && send2.threadId === threadId.value && send2.status !== "failed");
+  const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
@@ -24396,7 +24798,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             live: m6.turnTraceLive
           }
         ) : null,
-        m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
         m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
         /* @__PURE__ */ u4(MessageText, { text: m6.text, md }),
         singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
@@ -24478,10 +24879,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             "Sending",
             "\u2026"
           ] }) : null,
-          showsMidTurnLabel(
-            m6.deliveryOrigin,
-            !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
-          ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
+          showsMidTurnLabel(m6.deliveryOrigin, midTurnUpdate) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: m6.submission ? null : groupId.value, children: [
             !m6.submission ? /* @__PURE__ */ u4(EditMessageButton, { m: m6 }) : null,
             !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
@@ -24492,6 +24890,8 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
     }
   );
 }
+var MessageRow = M3(Message);
+var QuestionAnswer = M3(QuestionAnswerBubble);
 function DisplayCardMessage({ message: message2, card }) {
   const traceOwner = activityTraceOwner(message2);
   const activity = message2.activity ?? [];
@@ -24549,22 +24949,17 @@ function groupKey(group, responseTurnId) {
     return "response:active";
   if (group.kind === "turn") return `turn:${group.row.turn.id}`;
   if (group.kind === "question-answer") return `question-answer:${group.row.answer.id}`;
-  if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
   return `single:${messageKey(group.m)}`;
 }
 function groupContains(group, messageId) {
   if (group.kind === "turn" || group.kind === "starting") return false;
   if (group.kind === "question-answer") return group.row.answer.id === messageId;
-  if (group.kind === "thoughts") {
-    return group.answer.id === messageId || group.thoughts.some((t4) => t4.id === messageId);
-  }
   if (group.kind === "events") return group.events.some((e4) => e4.id === messageId);
   return group.m.id === messageId;
 }
 function groupMessages(list) {
   const out = [];
-  let pendingMsgs = [];
   let events = [];
   const flushEvents = () => {
     if (events.length === 0) return;
@@ -24575,8 +24970,6 @@ function groupMessages(list) {
   for (const row of list) {
     if (row.kind !== "message") {
       flushEvents();
-      for (const message2 of pendingMsgs) out.push({ kind: "single", m: message2 });
-      pendingMsgs = [];
       if (row.kind === "starting") out.push({ kind: "starting", row });
       else if (row.kind === "turn") out.push({ kind: "turn", row });
       else out.push({ kind: "question-answer", row });
@@ -24584,23 +24977,13 @@ function groupMessages(list) {
     }
     const m6 = row.message;
     if (m6.direction === "event") {
-      for (const t4 of pendingMsgs) out.push({ kind: "single", m: t4 });
-      pendingMsgs = [];
       events.push(m6);
       continue;
     }
     flushEvents();
-    if (m6.direction === "internal") {
-      pendingMsgs.push(m6);
-    } else if (m6.direction === "out" && pendingMsgs.length > 0) {
-      out.push({ kind: "thoughts", thoughts: pendingMsgs, answer: m6 });
-      pendingMsgs = [];
-    } else {
-      out.push({ kind: "single", m: m6 });
-    }
+    out.push({ kind: "single", m: m6 });
   }
   flushEvents();
-  for (const t4 of pendingMsgs) out.push({ kind: "single", m: t4 });
   return out;
 }
 function EventsGroup({ events }) {
@@ -24624,7 +25007,7 @@ function EventsGroup({ events }) {
           " \xB7 hide"
         ] })
       ] }),
-      events.map((e4) => /* @__PURE__ */ u4(Message, { m: e4 }, e4.id))
+      events.map((e4) => /* @__PURE__ */ u4(MessageRow, { m: e4 }, e4.id))
     ] });
   }
   return /* @__PURE__ */ u4("button", { type: "button", class: "msg event events-summary", onClick: () => setOpen(true), title: "Show individual runs", children: [
@@ -24634,30 +25017,6 @@ function EventsGroup({ events }) {
       "last\xA0",
       /* @__PURE__ */ u4(RelativeTime, { ts: last.ts })
     ] })
-  ] });
-}
-function ThoughtGroup({
-  thoughts,
-  answer,
-  allowContinue,
-  isLatest
-}) {
-  const [showThoughts, setShowThoughts] = h2(false);
-  const n3 = thoughts.length;
-  const label = showThoughts ? "answer" : n3 > 1 ? `thoughts (${n3})` : "thoughts";
-  const title = showThoughts ? "Show final answer" : "Show agent thoughts leading to this answer";
-  return /* @__PURE__ */ u4("div", { class: "thought-group" + (showThoughts ? " showing-thoughts" : " showing-answer"), children: [
-    showThoughts ? thoughts.map((t4) => /* @__PURE__ */ u4(Message, { m: t4 }, messageKey(t4))) : /* @__PURE__ */ u4(Message, { m: answer, allowContinue, isLatest }),
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "thoughts-toggle",
-        title,
-        onClick: () => setShowThoughts((v5) => !v5),
-        children: label
-      }
-    )
   ] });
 }
 function ApprovalsBanner() {
@@ -24777,6 +25136,7 @@ function TurnTechnicalInfo({
 function TurnTechnicalDetails({
   turn: turn2,
   lines,
+  chapters: prepared,
   ownerId,
   live = false,
   now = null
@@ -24784,8 +25144,15 @@ function TurnTechnicalDetails({
   const expanded = activityTraceExpanded(ownerId);
   const metricsExpanded = activityMetricsExpanded(ownerId);
   const usage = turn2 ? turnUsage(turn2, ownerId, now ?? Date.now()) : null;
-  const count = activityStepCount(lines);
-  const hasOutcome = lines.some((line) => isOutcomeTraceStep(parseStep(line.text)));
+  const { chapters, count, hasOutcome } = T2(() => {
+    const chapters2 = prepared ?? activityChapters(lines, live);
+    const entries = chapters2.flatMap((chapter) => chapter.entries);
+    return {
+      chapters: chapters2,
+      count: entries.filter((entry) => !isSyntheticTraceStep(entry.step)).length,
+      hasOutcome: entries.some((entry) => isOutcomeTraceStep(entry.step))
+    };
+  }, [prepared, lines, live]);
   if (!lines.length && !usage) return null;
   if (!turn2 && !count && !hasOutcome && !expanded) return null;
   return /* @__PURE__ */ u4("div", { class: "turn-technical-details", children: [
@@ -24803,6 +25170,7 @@ function TurnTechnicalDetails({
       ActivityTracePanel,
       {
         lines,
+        chapters,
         expanded,
         live,
         now,
@@ -24826,51 +25194,47 @@ function TurnElapsed({ ms, live }) {
     }
   );
 }
-function startingResponsePresentation(submission, now) {
+function startingResponsePresentation(submission) {
   const ownerId = submissionTraceOwner(submission.messageId);
   const submittedAt = Date.parse(submission.timestamp);
+  const lines = [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : "", text: JSON.stringify({
+    kind: "notification",
+    id: `ui:start:${submission.messageId}`,
+    text: QUEUED_TEXT,
+    status: "pending"
+  }) }];
   return {
     ownerId,
     status: true,
     busy: true,
     traceLive: true,
-    traceNow: null,
     attributes: { "data-response-start": ownerId },
     technicalTurn: void 0,
     stopControl: /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, { turnId: null }) }),
-    elapsedControl: /* @__PURE__ */ u4(TurnElapsed, { ms: Number.isFinite(submittedAt) ? Math.max(0, now - submittedAt) : 0, live: true }),
     tone: "",
     activity: { headline: { action: QUEUED_TEXT }, repetitions: 1, notice: false, error: false },
-    // A real (counted) entry, so the trace exists from the moment of sending.
-    // Pending: queueing has no CPU chip; the turn total covers it.
-    lines: [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : "", text: JSON.stringify({
-      kind: "notification",
-      id: `ui:start:${submission.messageId}`,
-      text: QUEUED_TEXT,
-      status: "pending"
-    }) }]
+    lines,
+    chapters: activityChapters(lines, true)
   };
 }
-function turnResponsePresentation({ turn: turn2, activity: lines, status, traceOwner: ownerId }, now) {
+function turnResponsePresentation({ turn: turn2, activity: lines, status, traceOwner: ownerId }, chapters) {
   const stop = stopRequest.value?.turnId === turn2.id ? stopRequest.value : null;
   const settled = turn2.phase === "settled";
   const live = status && !settled;
-  const activity = live ? liveTurnActivity(turn2, lines, turnConnected.value, stop) : null;
-  const elapsedMs = live ? turnRowView(turn2, now).elapsedMs : null;
+  const activity = live ? liveTurnActivity(turn2, lines, chapters, turnConnected.value, stop) : null;
   const tone2 = stop?.error || settled && turn2.outcome === "failed" ? " provenance-error" : settled && ["warning", "stopped", "interrupted"].includes(turn2.outcome) || live && !turnConnected.value ? " provenance-warning" : "";
   return {
     ownerId,
     status,
     busy: live,
     traceLive: !settled,
-    traceNow: turn2.endedAt ? Date.parse(turn2.endedAt) : now,
     attributes: { "data-turn-id": status ? turn2.id : void 0 },
     technicalTurn: status ? turn2 : void 0,
     stopControl: live ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions turn-stop-inline", children: /* @__PURE__ */ u4(ActiveTurnStopButton, { turnId: turn2.id }) }) : null,
-    elapsedControl: elapsedMs !== null ? /* @__PURE__ */ u4(TurnElapsed, { ms: elapsedMs, live: true }) : null,
     tone: tone2,
     activity,
-    lines: activity?.lines ?? lines
+    lines: activity?.lines ?? lines,
+    chapters: activity?.chapters ?? chapters
   };
 }
 function ResponseStatusRow({ source }) {
@@ -24884,8 +25248,11 @@ function ResponseStatusRow({ source }) {
     return () => window.clearTimeout(timer2);
   }, [now, tick, clock.live]);
   y2(() => setNow(Date.now()), [clock.startedAt, clock.live]);
-  const presentation = source.kind === "starting" ? startingResponsePresentation(source.submission, now) : turnResponsePresentation(source, now);
+  const chapters = T2(() => source.kind === "turn" ? activityChapters(source.activity, source.turn.phase !== "settled") : [], [source]);
+  const presentation = T2(() => source.kind === "starting" ? startingResponsePresentation(source.submission) : turnResponsePresentation(source, chapters), [source, chapters, stopRequest.value, turnConnected.value]);
   const { ownerId, status, busy, lines, activity } = presentation;
+  const elapsedMs = Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : source.kind === "starting" ? 0 : null;
+  const traceNow = source.kind === "turn" ? source.turn.endedAt ? Date.parse(source.turn.endedAt) : now : null;
   const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;
@@ -24906,8 +25273,9 @@ function ResponseStatusRow({ source }) {
           {
             turn: presentation.technicalTurn,
             lines,
+            chapters: presentation.chapters,
             live: presentation.traceLive,
-            now: presentation.traceNow,
+            now: traceNow,
             ownerId
           }
         ) : null,
@@ -24918,7 +25286,7 @@ function ResponseStatusRow({ source }) {
             /* @__PURE__ */ u4("span", {})
           ] }) : null,
           presentation.stopControl,
-          presentation.elapsedControl,
+          busy && elapsedMs !== null ? /* @__PURE__ */ u4(TurnElapsed, { ms: elapsedMs, live: true }) : null,
           headline && activity?.notice ? /* @__PURE__ */ u4(
             "span",
             {
@@ -25147,7 +25515,7 @@ function MessageLog({ dockRef }) {
     const row = list[index];
     if (row.kind !== "message") continue;
     const message2 = row.message;
-    if (message2.direction !== "internal" && message2.direction !== "event") {
+    if (message2.direction !== "event") {
       latestConversationalMessage = message2;
       break;
     }
@@ -25155,17 +25523,8 @@ function MessageLog({ dockRef }) {
   return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
     chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
       const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
-      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswerBubble, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
-        ThoughtGroup,
-        {
-          thoughts: g8.thoughts,
-          answer: g8.answer,
-          allowContinue: g8.answer === latestConversationalMessage,
-          isLatest: g8.answer === latestConversationalMessage
-        },
-        key
-      ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
-        Message,
+      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
+        MessageRow,
         {
           m: g8.m,
           allowContinue: g8.m === latestConversationalMessage,
@@ -25182,7 +25541,7 @@ function MessageLog({ dockRef }) {
         branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
       ] });
     }),
-    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(Message, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
+    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
     /* @__PURE__ */ u4(TaskIndicator, {})
   ] });
 }
@@ -25307,13 +25666,13 @@ function Composer() {
       channelType: channel,
       messagingGroupId: mg,
       getText: () => inputRef.current?.value || "",
-      setText: (text2) => {
-        if (inputRef.current) inputRef.current.value = text2;
+      setText: (text2, selection) => {
+        setVoiceTextareaText(inputRef.current, text2, selection);
         autosize();
       },
       isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg,
       send: doSubmit
-    }, el?.selectionStart ?? el?.value.length);
+    }, el?.selectionStart ?? el?.value.length, el?.selectionEnd ?? el?.value.length);
   };
   const startAudioAttachRecording = async () => {
     if (currentPendingEditor()) return;
@@ -26292,7 +26651,7 @@ function useBackButtonCloses(open, onClose) {
       }
       return void 0;
     }
-    history.pushState({ [MARKER]: true }, "", location.href);
+    history.pushState({ ...history.state, [MARKER]: true }, "", location.href);
     pushedRef.current = true;
     const onPop = () => {
       pushedRef.current = false;
@@ -28533,201 +28892,6 @@ function TaskPanel() {
     /* @__PURE__ */ u4("div", { class: "settings-row", style: "padding:10px 16px;border-top:1px solid var(--border);justify-content:flex-end", children: /* @__PURE__ */ u4("button", { type: "button", onClick: close, children: "Done" }) })
   ] });
 }
-
-// node_modules/preact/compat/dist/compat.module.js
-function g7(n3, t4) {
-  for (var e4 in t4) n3[e4] = t4[e4];
-  return n3;
-}
-function E4(n3, t4) {
-  for (var e4 in n3) if ("__source" !== e4 && !(e4 in t4)) return true;
-  for (var r4 in t4) if ("__source" !== r4 && n3[r4] !== t4[r4]) return true;
-  return false;
-}
-function N3(n3, t4) {
-  this.props = n3, this.context = t4;
-}
-(N3.prototype = new x()).isPureReactComponent = true, N3.prototype.shouldComponentUpdate = function(n3, t4) {
-  return E4(this.props, n3) || E4(this.state, t4);
-};
-var T4 = l.__b;
-l.__b = function(n3) {
-  n3.type && n3.type.__f && n3.ref && (n3.props.ref = n3.ref, n3.ref = null), T4 && T4(n3);
-};
-var A5 = "undefined" != typeof Symbol && Symbol.for && Symbol.for("react.forward_ref") || 3911;
-var F4 = l.__e;
-l.__e = function(n3, t4, e4, r4) {
-  if (n3.then) {
-    for (var u5, o4 = t4; o4 = o4.__; ) if ((u5 = o4.__c) && u5.__c) return null == t4.__e && (t4.__e = e4.__e, t4.__k = e4.__k), u5.__c(n3, t4);
-  }
-  F4(n3, t4, e4, r4);
-};
-var U2 = l.unmount;
-function V3(n3, t4, e4) {
-  return n3 && (n3.__c && n3.__c.__H && (n3.__c.__H.__.forEach(function(n4) {
-    "function" == typeof n4.__c && n4.__c();
-  }), n3.__c.__H = null), null != (n3 = g7({}, n3)).__c && (n3.__c.__P === e4 && (n3.__c.__P = t4), n3.__c = null), n3.__k = n3.__k && n3.__k.map(function(n4) {
-    return V3(n4, t4, e4);
-  })), n3;
-}
-function W2(n3, t4, e4) {
-  return n3 && e4 && (n3.__v = null, n3.__k = n3.__k && n3.__k.map(function(n4) {
-    return W2(n4, t4, e4);
-  }), n3.__c && n3.__c.__P === t4 && (n3.__e && e4.appendChild(n3.__e), n3.__c.__e = true, n3.__c.__P = e4)), n3;
-}
-function P4() {
-  this.__u = 0, this.o = null, this.__b = null;
-}
-function j5(n3) {
-  var t4 = n3.__.__c;
-  return t4 && t4.__a && t4.__a(n3);
-}
-function B4() {
-  this.i = null, this.l = null;
-}
-l.unmount = function(n3) {
-  var t4 = n3.__c;
-  t4 && t4.__R && t4.__R(), t4 && 32 & n3.__u && (n3.type = null), U2 && U2(n3);
-}, (P4.prototype = new x()).__c = function(n3, t4) {
-  var e4 = t4.__c, r4 = this;
-  null == r4.o && (r4.o = []), r4.o.push(e4);
-  var u5 = j5(r4.__v), o4 = false, i5 = function() {
-    o4 || (o4 = true, e4.__R = null, u5 ? u5(c4) : c4());
-  };
-  e4.__R = i5;
-  var c4 = function() {
-    if (!--r4.__u) {
-      if (r4.state.__a) {
-        var n4 = r4.state.__a;
-        r4.__v.__k[0] = W2(n4, n4.__c.__P, n4.__c.__O);
-      }
-      var t5;
-      for (r4.setState({ __a: r4.__b = null }); t5 = r4.o.pop(); ) t5.forceUpdate();
-    }
-  };
-  r4.__u++ || 32 & t4.__u || r4.setState({ __a: r4.__b = r4.__v.__k[0] }), n3.then(i5, i5);
-}, P4.prototype.componentWillUnmount = function() {
-  this.o = [];
-}, P4.prototype.render = function(n3, e4) {
-  if (this.__b) {
-    if (this.__v.__k) {
-      var r4 = document.createElement("div"), o4 = this.__v.__k[0].__c;
-      this.__v.__k[0] = V3(this.__b, r4, o4.__O = o4.__P);
-    }
-    this.__b = null;
-  }
-  var i5 = e4.__a && g(k, null, n3.fallback);
-  return i5 && (i5.__u &= -33), [g(k, null, e4.__a ? null : n3.children), i5];
-};
-var H3 = function(n3, t4, e4) {
-  if (++e4[1] === e4[0] && n3.l.delete(t4), n3.props.revealOrder && ("t" !== n3.props.revealOrder[0] || !n3.l.size)) for (e4 = n3.i; e4; ) {
-    for (; e4.length > 3; ) e4.pop()();
-    if (e4[1] < e4[0]) break;
-    n3.i = e4 = e4[2];
-  }
-};
-function Z2(n3) {
-  return this.getChildContext = function() {
-    return n3.context;
-  }, n3.children;
-}
-function Y2(n3) {
-  var e4 = this, r4 = n3.h;
-  e4.componentWillUnmount = function() {
-    D(null, e4.v), e4.v = null, e4.h = null;
-  }, e4.h && e4.h !== r4 && e4.componentWillUnmount(), e4.v || (e4.h = r4, e4.v = { nodeType: 1, parentNode: r4, childNodes: [], contains: function() {
-    return true;
-  }, appendChild: function(n4) {
-    this.childNodes.push(n4), e4.h.appendChild(n4);
-  }, insertBefore: function(n4, t4) {
-    this.childNodes.push(n4), e4.h.insertBefore(n4, t4);
-  }, removeChild: function(n4) {
-    this.childNodes.splice(this.childNodes.indexOf(n4) >>> 1, 1), e4.h.removeChild(n4);
-  } }), D(g(Z2, { context: e4.context }, n3.__v), e4.v);
-}
-function $3(n3, e4) {
-  var r4 = g(Y2, { __v: n3, h: e4 });
-  return r4.containerInfo = e4, r4;
-}
-(B4.prototype = new x()).__a = function(n3) {
-  var t4 = this, e4 = j5(t4.__v), r4 = t4.l.get(n3);
-  return r4[0]++, function(u5) {
-    var o4 = function() {
-      t4.props.revealOrder ? (r4.push(u5), H3(t4, n3, r4)) : u5();
-    };
-    e4 ? e4(o4) : o4();
-  };
-}, B4.prototype.render = function(n3) {
-  this.i = null, this.l = /* @__PURE__ */ new Map();
-  var t4 = H(n3.children);
-  n3.revealOrder && "b" === n3.revealOrder[0] && t4.reverse();
-  for (var e4 = t4.length; e4--; ) this.l.set(t4[e4], this.i = [1, 0, this.i]);
-  return n3.children;
-}, B4.prototype.componentDidUpdate = B4.prototype.componentDidMount = function() {
-  var n3 = this;
-  this.l.forEach(function(t4, e4) {
-    H3(n3, e4, t4);
-  });
-};
-var q4 = "undefined" != typeof Symbol && Symbol.for && Symbol.for("react.element") || 60103;
-var G2 = /^(?:accent|alignment|arabic|baseline|cap|clip(?!PathU)|color|dominant|fill|flood|font|glyph(?!R)|horiz|image(!S)|letter|lighting|marker(?!H|W|U)|overline|paint|pointer|shape|stop|strikethrough|stroke|text(?!L)|transform|underline|unicode|units|v|vector|vert|word|writing|x(?!C))[A-Z]/;
-var J3 = /^on(Ani|Tra|Tou|BeforeInp|Compo)/;
-var K2 = /[A-Z0-9]/g;
-var Q2 = "undefined" != typeof document;
-var X2 = function(n3) {
-  return ("undefined" != typeof Symbol && "symbol" == typeof Symbol() ? /fil|che|rad/ : /fil|che|ra/).test(n3);
-};
-x.prototype.isReactComponent = {}, ["componentWillMount", "componentWillReceiveProps", "componentWillUpdate"].forEach(function(t4) {
-  Object.defineProperty(x.prototype, t4, { configurable: true, get: function() {
-    return this["UNSAFE_" + t4];
-  }, set: function(n3) {
-    Object.defineProperty(this, t4, { configurable: true, writable: true, value: n3 });
-  } });
-});
-var en = l.event;
-function rn() {
-}
-function un() {
-  return this.cancelBubble;
-}
-function on() {
-  return this.defaultPrevented;
-}
-l.event = function(n3) {
-  return en && (n3 = en(n3)), n3.persist = rn, n3.isPropagationStopped = un, n3.isDefaultPrevented = on, n3.nativeEvent = n3;
-};
-var cn;
-var ln = { enumerable: false, configurable: true, get: function() {
-  return this.class;
-} };
-var fn = l.vnode;
-l.vnode = function(n3) {
-  "string" == typeof n3.type && function(n4) {
-    var t4 = n4.props, e4 = n4.type, u5 = {}, o4 = -1 === e4.indexOf("-");
-    for (var i5 in t4) {
-      var c4 = t4[i5];
-      if (!("value" === i5 && "defaultValue" in t4 && null == c4 || Q2 && "children" === i5 && "noscript" === e4 || "class" === i5 || "className" === i5)) {
-        var l7 = i5.toLowerCase();
-        "defaultValue" === i5 && "value" in t4 && null == t4.value ? i5 = "value" : "download" === i5 && true === c4 ? c4 = "" : "translate" === l7 && "no" === c4 ? c4 = false : "o" === l7[0] && "n" === l7[1] ? "ondoubleclick" === l7 ? i5 = "ondblclick" : "onchange" !== l7 || "input" !== e4 && "textarea" !== e4 || X2(t4.type) ? "onfocus" === l7 ? i5 = "onfocusin" : "onblur" === l7 ? i5 = "onfocusout" : J3.test(i5) && (i5 = l7) : l7 = i5 = "oninput" : o4 && G2.test(i5) ? i5 = i5.replace(K2, "-$&").toLowerCase() : null === c4 && (c4 = void 0), "oninput" === l7 && u5[i5 = l7] && (i5 = "oninputCapture"), u5[i5] = c4;
-      }
-    }
-    "select" == e4 && u5.multiple && Array.isArray(u5.value) && (u5.value = H(t4.children).forEach(function(n5) {
-      n5.props.selected = -1 != u5.value.indexOf(n5.props.value);
-    })), "select" == e4 && null != u5.defaultValue && (u5.value = H(t4.children).forEach(function(n5) {
-      n5.props.selected = u5.multiple ? -1 != u5.defaultValue.indexOf(n5.props.value) : u5.defaultValue == n5.props.value;
-    })), t4.class && !t4.className ? (u5.class = t4.class, Object.defineProperty(u5, "className", ln)) : (t4.className && !t4.class || t4.class && t4.className) && (u5.class = u5.className = t4.className), n4.props = u5;
-  }(n3), n3.$$typeof = q4, fn && fn(n3);
-};
-var an = l.__r;
-l.__r = function(n3) {
-  an && an(n3), cn = n3.__c;
-};
-var sn = l.diffed;
-l.diffed = function(n3) {
-  sn && sn(n3);
-  var t4 = n3.props, e4 = n3.__e;
-  null != e4 && "textarea" === n3.type && "value" in t4 && t4.value !== e4.value && (e4.value = null == t4.value ? "" : t4.value), cn = null;
-};
 
 // src/components/Tooltip.tsx
 var BUBBLE_MARGIN = 6;
@@ -34407,7 +34571,7 @@ async function init() {
   if (parsed && parsed.groupId) chatLoading.value = true;
   D(/* @__PURE__ */ u4(App, {}), app);
   observeTableScrollEdges(app);
-  await applyHash(router).catch((err) => console.error("initial route failed", err));
+  await applyHash(router, { newConversation: true }).catch((err) => console.error("initial route failed", err));
   startSyncPoll();
   try {
     const sp = new URLSearchParams(window.location.search);
@@ -34416,7 +34580,7 @@ async function init() {
       sp.delete("settings");
       const q5 = sp.toString();
       const url = window.location.pathname + (q5 ? "?" + q5 : "") + window.location.hash;
-      window.history.replaceState(null, "", url);
+      window.history.replaceState(window.history.state, "", url);
     }
     handleShareTarget();
   } catch {
@@ -34429,7 +34593,7 @@ function handleShareTarget() {
   const text2 = sp.get("text") || "";
   const url = sp.get("url") || "";
   if (!title && !text2 && !url) {
-    if (onShareRoute) window.history.replaceState(null, "", "/ui/chat/" + window.location.hash);
+    if (onShareRoute) window.history.replaceState(window.history.state, "", "/ui/chat/" + window.location.hash);
     return;
   }
   const combined = [title, text2, url].filter(Boolean).join("\n").trim();
@@ -34448,7 +34612,7 @@ function handleShareTarget() {
     }, 100);
   }
   const nextPath = onShareRoute ? "/ui/chat/" : window.location.pathname;
-  window.history.replaceState(null, "", nextPath + window.location.hash);
+  window.history.replaceState(window.history.state, "", nextPath + window.location.hash);
 }
 init().catch((err) => {
   if (err instanceof UnauthorizedError) return;
