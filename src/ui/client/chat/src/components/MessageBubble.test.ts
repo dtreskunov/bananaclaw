@@ -72,6 +72,33 @@ describe('scrollable message bubble', () => {
     expect(hooks.bubble?.scrollTop).toBe(100);
   });
 
+  it('writes accessibility attributes only when scrollability changes', () => {
+    const content = hooks.content!;
+    const setAttribute = vi.spyOn(content, 'setAttribute');
+    const removeAttribute = vi.spyOn(content, 'removeAttribute');
+    const setTabIndex = vi.fn();
+    Object.defineProperty(content, 'tabIndex', { set: setTabIndex });
+    MessageBubble({ class: 'msg out', children: 'Complete response' });
+    hooks.effects[0]();
+    const update = hooks.attach.mock.calls[0][2];
+    update({ top: false, bottom: true });
+    update({ top: true, bottom: true });
+    update({ top: true, bottom: false });
+    expect(setTabIndex).toHaveBeenCalledExactlyOnceWith(0);
+    expect(setAttribute.mock.calls).toEqual([
+      ['role', 'region'],
+      ['aria-label', 'Scrollable message'],
+    ]);
+    expect(removeAttribute).not.toHaveBeenCalled();
+    update({ top: false, bottom: false });
+    update({ top: false, bottom: false });
+    expect(setTabIndex.mock.calls).toEqual([[0], [-1]]);
+    expect(removeAttribute.mock.calls).toEqual([['role'], ['aria-label']]);
+    update({ top: false, bottom: true });
+    expect(setTabIndex.mock.calls).toEqual([[0], [-1], [0]]);
+    expect(setAttribute).toHaveBeenCalledTimes(4);
+  });
+
   it('preserves internal reading position when no search reveal was requested', () => {
     MessageBubble({ class: 'msg out', 'data-msg-id': 'reply', children: 'Complete response' });
     hooks.effects[1]();

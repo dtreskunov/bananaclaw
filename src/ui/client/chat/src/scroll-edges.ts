@@ -18,15 +18,12 @@ interface ScrollAxes {
   vertical?: boolean;
 }
 
+const NO_EDGES = { start: false, end: false };
+
 export function scrollEdges(element: ScrollMetrics, { horizontal = true, vertical = true }: ScrollAxes = {}) {
-  const x = axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth);
-  const y = axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight);
-  return {
-    left: horizontal && x.start,
-    right: horizontal && x.end,
-    top: vertical && y.start,
-    bottom: vertical && y.end,
-  };
+  const x = horizontal ? axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth) : NO_EDGES;
+  const y = vertical ? axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight) : NO_EDGES;
+  return { left: x.start, right: x.end, top: y.start, bottom: y.end };
 }
 
 export function attachScrollEdges(
@@ -34,12 +31,18 @@ export function attachScrollEdges(
   axes: ScrollAxes = {},
   onUpdate?: (edges: ReturnType<typeof scrollEdges>) => void,
 ): () => void {
+  let previous: ReturnType<typeof scrollEdges> | null = null;
   const update = (): void => {
     const edges = scrollEdges(element, axes);
+    let changed = false;
     for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
-      element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+      if (previous?.[edge] !== edges[edge]) {
+        element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+        changed = true;
+      }
     }
-    onUpdate?.(edges);
+    previous = edges;
+    if (changed) onUpdate?.(edges);
   };
   element.addEventListener('scroll', update, { passive: true });
   const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);

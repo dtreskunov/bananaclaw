@@ -17,8 +17,11 @@ export function MessageBubble({ class: className, 'data-msg-id': id, elementRef,
   useLayoutEffect(() => {
     const bubble = scrollRef.current;
     if (!bubble) return;
+    let wasScrollable: boolean | undefined;
     return attachScrollEdges(bubble, { horizontal: false }, (edges) => {
       const scrollable = edges.top || edges.bottom;
+      if (scrollable === wasScrollable) return;
+      wasScrollable = scrollable;
       bubble.tabIndex = scrollable ? 0 : -1;
       if (scrollable) {
         bubble.setAttribute('role', 'region');

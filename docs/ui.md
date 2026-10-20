@@ -229,6 +229,9 @@ while leaving a clear reading area in small bubbles. Overflowing content
 supports keyboard focus and scrolling; search
 navigation reveals matching text inside them. Copy still includes the complete
 message, not just its visible portion. There is no separate full-message reader.
+Edge tracking reads only enabled scroll axes and updates fade classes only when
+an edge changes. Focusability and accessibility attributes update only when
+content starts or stops overflowing, not on each scroll event.
 
 The cap follows window, composer, question-dock, and text-density changes. On
 mobile, the existing VisualViewport sizing shrinks the transcript when the

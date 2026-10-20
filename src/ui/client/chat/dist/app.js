@@ -23506,23 +23506,25 @@ function axisScrollEdges(offset, clientSize, scrollSize) {
   const maxOffset = Math.max(0, scrollSize - clientSize);
   return { start: offset > EDGE_EPSILON, end: offset < maxOffset - EDGE_EPSILON };
 }
+var NO_EDGES = { start: false, end: false };
 function scrollEdges(element, { horizontal = true, vertical = true } = {}) {
-  const x6 = axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth);
-  const y5 = axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight);
-  return {
-    left: horizontal && x6.start,
-    right: horizontal && x6.end,
-    top: vertical && y5.start,
-    bottom: vertical && y5.end
-  };
+  const x6 = horizontal ? axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth) : NO_EDGES;
+  const y5 = vertical ? axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight) : NO_EDGES;
+  return { left: x6.start, right: x6.end, top: y5.start, bottom: y5.end };
 }
 function attachScrollEdges(element, axes = {}, onUpdate) {
+  let previous = null;
   const update = () => {
     const edges = scrollEdges(element, axes);
+    let changed = false;
     for (const edge of ["left", "right", "top", "bottom"]) {
-      element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+      if (previous?.[edge] !== edges[edge]) {
+        element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+        changed = true;
+      }
     }
-    onUpdate?.(edges);
+    previous = edges;
+    if (changed) onUpdate?.(edges);
   };
   element.addEventListener("scroll", update, { passive: true });
   const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
@@ -23554,8 +23556,11 @@ function MessageBubble({ class: className, "data-msg-id": id2, elementRef, revea
   _2(() => {
     const bubble = scrollRef.current;
     if (!bubble) return;
+    let wasScrollable;
     return attachScrollEdges(bubble, { horizontal: false }, (edges) => {
       const scrollable = edges.top || edges.bottom;
+      if (scrollable === wasScrollable) return;
+      wasScrollable = scrollable;
       bubble.tabIndex = scrollable ? 0 : -1;
       if (scrollable) {
         bubble.setAttribute("role", "region");
